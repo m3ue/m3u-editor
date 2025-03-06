@@ -17,8 +17,10 @@ use Hydrat\TableLayoutToggle\Concerns\HasToggleableTable;
 class ChannelsRelationManager extends RelationManager
 {
     // use HasToggleableTable;
-    
+
     protected static string $relationship = 'channels';
+
+    protected $listeners = ['refreshRelation' => '$refresh'];
 
     public function form(Form $form): Form
     {

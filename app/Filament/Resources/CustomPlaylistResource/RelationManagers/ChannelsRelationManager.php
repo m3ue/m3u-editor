@@ -143,7 +143,7 @@ class ChannelsRelationManager extends RelationManager
                         ->requiresConfirmation()
                         ->icon('heroicon-o-check-circle')
                         ->modalIcon('heroicon-o-check-circle')
-                        ->modalDescription('Enable the selected channels(s) now?')
+                        ->modalDescription('Enable the selected channel(s) now?')
                         ->modalSubmitActionLabel('Yes, enable now'),
                     Tables\Actions\BulkAction::make('disable')
                         ->label('Disable selected')
@@ -165,7 +165,7 @@ class ChannelsRelationManager extends RelationManager
                         ->requiresConfirmation()
                         ->icon('heroicon-o-x-circle')
                         ->modalIcon('heroicon-o-x-circle')
-                        ->modalDescription('Disable the selected channels(s) now?')
+                        ->modalDescription('Disable the selected channel(s) now?')
                         ->modalSubmitActionLabel('Yes, disable now'),
                 ]),
             ]);
