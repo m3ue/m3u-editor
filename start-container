@@ -30,6 +30,7 @@ log_dir="${config_dir}/logs"
 queue_log_file="${log_dir}/queue.log"
 websockets_log_file="${log_dir}/websocket.log"
 swoole_log_file="${log_dir}/swoole_http.log"
+laravel_log_file="${log_dir}/laravel.log"
 
 # Not using these log files any longer
 reverb_log_file="${log_dir}/reverb.log"
@@ -98,6 +99,11 @@ if [ -f "${reverb_log_file}" ]; then
 fi
 if [ -f "${horizon_log_file}" ]; then
     rm -f "${horizon_log_file}"
+fi
+
+# Using daily log file, base file will not be created
+if [ -f "${laravel_log_file}" ]; then
+    rm -f "${laravel_log_file}"
 fi
 
 # Link the environment file to the laravel project root
