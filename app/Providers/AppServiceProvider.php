@@ -20,6 +20,9 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Storage;
 use Opcodes\LogViewer\Facades\LogViewer;
 use Spatie\LaravelSettings\Events\SettingsSaved;
+use Filament\Support\Facades\FilamentView;
+use Filament\View\PanelsRenderHook;
+use Illuminate\Support\HtmlString;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -39,6 +42,21 @@ class AppServiceProvider extends ServiceProvider
         // Disable mass assignment protection (security handled by Filament)
         Model::unguard();
 
+        // Setup the gates
+        $this->setupGates();
+
+        // Register the model event listeners
+        $this->registerModelEventListeners();
+
+        // Register the Filament hooks
+        $this->registerFilamentHooks();
+    }
+
+    /**
+     * Setup the gates.
+     */
+    private function setupGates(): void
+    {
         // Allow only the admin to download and delete backups
         Gate::define('download-backup', function (User $user) {
             return in_array($user->email, config('dev.admin_emails'), true);
@@ -58,7 +76,13 @@ class AppServiceProvider extends ServiceProvider
             Gate::define('viewLogViewer', fn() => false);
         }
         LogViewer::auth(fn($request) => $showLogs);
+    }
 
+    /**
+     * Register the model event listeners.
+     */
+    private function registerModelEventListeners(): void
+    {
         // Listen for settings update
         Event::listen(SettingsSaved::class, function ($event) {
             if ($event->settings::class === GeneralSettings::class) {
@@ -147,5 +171,18 @@ class AppServiceProvider extends ServiceProvider
             // Log the error
             report($e);
         }
+    }
+
+    /**
+     * Register the Filament hooks.
+     */
+    private function registerFilamentHooks(): void
+    {
+        FilamentView::registerRenderHook(
+            PanelsRenderHook::SCRIPTS_AFTER,
+            fn (): string => new HtmlString('
+        <script>document.addEventListener("scroll-to-top", () => window.scrollTo({top: 0, left: 0, behavior: "smooth"}))</script>
+            '),
+        );
     }
 }
