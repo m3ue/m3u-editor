@@ -23,6 +23,9 @@ use Spatie\LaravelSettings\Events\SettingsSaved;
 use Filament\Support\Facades\FilamentView;
 use Filament\View\PanelsRenderHook;
 use Illuminate\Support\HtmlString;
+use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\RateLimiter;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -42,6 +45,9 @@ class AppServiceProvider extends ServiceProvider
         // Disable mass assignment protection (security handled by Filament)
         Model::unguard();
 
+        // Setup the middleware
+        $this->setupMiddleware();
+
         // Setup the gates
         $this->setupGates();
 
@@ -50,6 +56,16 @@ class AppServiceProvider extends ServiceProvider
 
         // Register the Filament hooks
         $this->registerFilamentHooks();
+    }
+
+    /**
+     * Setup the middleware.
+     */
+    private function setupMiddleware(): void
+    {
+        RateLimiter::for('api', function (Request $request) {
+            return Limit::perMinute(60)->by(optional($request->user())->id ?: $request->ip());
+        });
     }
 
     /**
@@ -186,7 +202,7 @@ class AppServiceProvider extends ServiceProvider
         // Add scroll to top event listener
         FilamentView::registerRenderHook(
             PanelsRenderHook::SCRIPTS_AFTER,
-            fn (): string => new HtmlString('<script>document.addEventListener("scroll-to-top", () => window.scrollTo({top: 0, left: 0, behavior: "smooth"}))</script>'),
+            fn(): string => new HtmlString('<script>document.addEventListener("scroll-to-top", () => window.scrollTo({top: 0, left: 0, behavior: "smooth"}))</script>'),
         );
 
         // Add footer view
