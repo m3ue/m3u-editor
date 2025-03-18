@@ -64,7 +64,7 @@ class ChannelResource extends Resource
                 return $action->button()->label('Filters');
             })
             ->modifyQueryUsing(function (Builder $query) {
-                $query->with('epgChannel', 'playlist');
+                $query->with(['epgChannel', 'playlist']);
             })
             ->deferLoading()
 //            ->contentGrid(fn() => $livewire->isListLayout()
