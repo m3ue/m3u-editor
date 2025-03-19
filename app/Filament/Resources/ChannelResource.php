@@ -506,7 +506,7 @@ class ChannelResource extends Resource
                 ->columnSpan(1)
                 ->prefixIcon('heroicon-m-globe-alt')
                 ->placeholder(fn($record) => route('stream', base64_encode((string)$record->id)))
-                ->helperText("Use to test the proxy functionality of m3u editor.")
+                ->helperText("Use to play stream via the proxy functionality of m3u editor.")
                 ->disabled()
                 ->suffixAction(
                     Forms\Components\Actions\Action::make('copy')

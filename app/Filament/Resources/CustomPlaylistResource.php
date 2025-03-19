@@ -49,6 +49,10 @@ class CustomPlaylistResource extends Resource
                 $query->withCount('enabled_channels');
             })
             ->columns([
+                Tables\Columns\TextColumn::make('id')
+                    ->searchable()
+                    ->toggleable()
+                    ->sortable(),
                 Tables\Columns\TextColumn::make('name')
                     ->searchable()
                     ->sortable(),

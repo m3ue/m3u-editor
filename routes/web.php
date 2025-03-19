@@ -9,6 +9,15 @@ use Illuminate\Support\Facades\Route;
 Route::get('/{uuid}/playlist.m3u', PlaylistGenerateController::class)
     ->name('playlist.generate');
 
+Route::get('/{uuid}/hdhr/device.xml', [\App\Http\Controllers\PlaylistGenerateController::class, 'hdhr'])
+    ->name('playlist.hdhr');
+Route::get('/{uuid}/hdhr/discover.json', [\App\Http\Controllers\PlaylistGenerateController::class, 'hdhrDiscover'])
+    ->name('playlist.hdhr.discover');
+Route::get('/{uuid}/hdhr/lineup.json', [\App\Http\Controllers\PlaylistGenerateController::class, 'hdhrLineup'])
+    ->name('playlist.hdhr.lineup');
+Route::get('/{uuid}/hdhr/lineup_status.json', [\App\Http\Controllers\PlaylistGenerateController::class, 'hdhrLineupStatus'])
+    ->name('playlist.hdhr.lineup_status');
+
 // Generate EPG playlist from the playlist configuration
 Route::get('/{uuid}/epg.xml', EpgGenerateController::class)
     ->name('epg.generate');
