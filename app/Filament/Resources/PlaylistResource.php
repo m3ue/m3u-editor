@@ -58,7 +58,9 @@ class PlaylistResource extends Resource
     public static function table(Table $table): Table
     {
         return $table
-            ->poll()
+            ->modifyQueryUsing(function (Builder $query) {
+                $query->withCount('enabled_channels');
+            })
             ->columns([
                 Tables\Columns\TextColumn::make('id')
                     ->searchable()
@@ -80,13 +82,18 @@ class PlaylistResource extends Resource
                 Tables\Columns\TextColumn::make('channels_count')
                     ->label('Channels')
                     ->counts('channels')
+                    ->description(fn(Playlist $record): string => "Enabled: {$record->enabled_channels_count}")
                     ->toggleable()
                     ->sortable(),
-                Tables\Columns\TextColumn::make('enabled_channels_count')
-                    ->label('Enabled Channels')
-                    ->counts('enabled_channels')
-                    ->toggleable()
-                    ->sortable(),
+                Tables\Columns\IconColumn::make('enable_proxy')
+                    ->label('Proxy')
+                    ->icon(fn(string $state): string => match ($state) {
+                        '1' => 'heroicon-o-shield-check',
+                        '0' => 'heroicon-o-shield-exclamation',
+                    })->color(fn(string $state): string => match ($state) {
+                        '1' => 'success',
+                        '0' => 'gray',
+                    })->toggleable()->sortable(),
                 Tables\Columns\TextColumn::make('status')
                     ->sortable()
                     ->badge()

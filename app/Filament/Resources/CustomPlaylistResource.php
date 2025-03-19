@@ -45,24 +45,33 @@ class CustomPlaylistResource extends Resource
     public static function table(Table $table): Table
     {
         return $table
+            ->modifyQueryUsing(function (Builder $query) {
+                $query->withCount('enabled_channels');
+            })
             ->columns([
                 Tables\Columns\TextColumn::make('name')
                     ->searchable()
                     ->sortable(),
-                // Tables\Columns\TextColumn::make('playlists_count')
-                //     ->label('Playlists')
-                //     ->counts('playlists')
-                //     ->sortable(),
                 Tables\Columns\TextColumn::make('channels_count')
                     ->label('Channels')
                     ->counts('channels')
                     ->toggleable()
                     ->sortable(),
-                Tables\Columns\TextColumn::make('enabled_channels_count')
-                    ->label('Enabled Channels')
-                    ->counts('enabled_channels')
+                Tables\Columns\TextColumn::make('channels_count')
+                    ->label('Channels')
+                    ->counts('channels')
+                    ->description(fn(CustomPlaylist $record): string => "Enabled: {$record->enabled_channels_count}")
                     ->toggleable()
                     ->sortable(),
+                Tables\Columns\IconColumn::make('enable_proxy')
+                    ->label('Proxy')
+                    ->icon(fn(string $state): string => match ($state) {
+                        '1' => 'heroicon-o-shield-check',
+                        '0' => 'heroicon-o-shield-exclamation',
+                    })->color(fn(string $state): string => match ($state) {
+                        '1' => 'success',
+                        '0' => 'gray',
+                    })->toggleable()->sortable(),
                 Tables\Columns\TextColumn::make('created_at')
                     ->dateTime()
                     ->sortable()
