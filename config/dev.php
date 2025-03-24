@@ -11,5 +11,9 @@ return [
     'admin_emails' => [
         // Default admin email
         'admin@test.com'
+    ],
+    'ffmpeg' => [
+        'debug' => env('FFMPEG_DEBUG', false),
+        'file' => env('FFMPEG_DEBUG_FILE', 'ffmpeg.log'),
     ]
 ];

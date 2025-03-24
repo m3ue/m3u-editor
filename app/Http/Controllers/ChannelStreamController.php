@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Channel;
 use App\Settings\GeneralSettings;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 use Mockery\Exception;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -21,6 +22,11 @@ class ChannelStreamController extends Controller
      */
     public function __invoke(Request $request, $id)
     {
+        // Prevent timeouts
+        ini_set('max_execution_time', 0);
+        ini_set('output_buffering', 'off');
+        ini_set('implicit_flush', 1);
+
         // Find the channel by ID, else throw a 404
         $channel = Channel::findOrFail(base64_decode($id));
 
@@ -38,10 +44,17 @@ class ChannelStreamController extends Controller
 
         // Stream the content directly from FFmpeg
         return new StreamedResponse(function () use ($streamUrls, $enabledDebug) {
+            if (ob_get_level() > 0) {
+                ob_end_clean();
+                while (@ob_end_flush());
+            }
+            ini_set('zlib.output_compression', 0);
+
             foreach ($streamUrls as $streamUrl) {
-                // Try streaming from this URL
-                $cmd = "ffmpeg -re -i \"$streamUrl\" -c copy -f mpegts pipe:1";
-                if (!$enabledDebug) {
+                $cmd = "ffmpeg -re -i \"$streamUrl\" -c copy -f mpegts pipe:1 -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -timeout 100000000 -http_persistent 1";
+                if (config('dev.ffmpeg.debug')) {
+                    $cmd .= " 2> " . storage_path('logs/' . config('dev.ffmpeg.file'));
+                } else if (!$enabledDebug) {
                     $cmd .= " -hide_banner -nostats -loglevel quiet 2>/dev/null";
                 }
                 $process = popen($cmd, 'r');
@@ -49,29 +62,26 @@ class ChannelStreamController extends Controller
                 if ($process) {
                     while (!feof($process)) {
                         if (connection_aborted()) {
-                            pclose($process); // Attempt to close FFmpeg connection immediately
+                            pclose($process);
                             return;
                         }
-                        $data = fread($process, 4096);
+                        $data = fread($process, 8192); // Increased from 4096 to 8192
                         if ($data === false) {
-                            break; // Stop if no data
+                            break;
                         }
                         echo $data;
                         flush();
                     }
-
                     pclose($process);
-                    return; // Exit if stream works
+                    return;
                 }
             }
-
-            // If all streams fail
             echo "Error: No available streams.";
         }, 200, [
             'Content-Type' => 'video/mp2t',
-            'Cache-Control' => 'no-cache, must-revalidate',
-            'Pragma' => 'no-cache',
-            'Expires' => '0',
+            'Connection' => 'keep-alive',
+            'Cache-Control' => 'no-store, no-transform',
+            'X-Accel-Buffering' => 'no', // Prevents Nginx from buffering
         ]);
     }
 
