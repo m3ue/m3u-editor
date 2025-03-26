@@ -10,9 +10,9 @@ use Illuminate\Support\Facades\Log;
 class SimilaritySearchService
 {
     // Configurable parameters
-    private $matchThreshold = 40;
-    private $matchBorderLine = 70;
-    private $cosineCutoff = 0.65;
+    private $bestFuzzyThreshold = 40;
+    private $upperFuzzyThreshold = 70;
+    private $embedSimThreshold = 0.65;
 
     // Words to ignore
     private $stopWords = [
@@ -79,6 +79,10 @@ class SimilaritySearchService
             }
             return null;
         }
+
+        /**
+         * Levenshtein Distance for Fuzzy Matching
+         */
         foreach ($epgChannels->cursor() as $epgChannel) {
             $normalizedEpg = empty($epgChannel->name)
                 ? $this->normalizeChannelName($epgChannel->channel_id)
@@ -90,8 +94,7 @@ class SimilaritySearchService
 
             // Apply region-based bonus (convert to penalty for Levenshtein)
             if ($regionCode && stripos(strtolower($epgChannel->channel_id . ' ' . $epgChannel->name), $regionCode) !== false) {
-                $regionPenalty = strlen($regionCode) * 1.5; // Dynamic scaling
-                $score = max(0, $score - $regionPenalty);
+                $score = max(0, $score - 15); // Subtract to improve the match
             }
 
             if ($score < $bestScore) {
@@ -100,18 +103,54 @@ class SimilaritySearchService
             }
 
             // Store candidate for embedding similarity if in borderline range
-            if ($score >= $this->matchThreshold && $score < $this->matchBorderLine) {
+            if ($score >= $this->bestFuzzyThreshold && $score < $this->upperFuzzyThreshold) {
                 $bestEpgForEmbedding = $epgChannel;
             }
         }
 
-        // If we have a best match with Levenshtein < matchThreshold, return it
-        if ($bestMatch && $bestScore < $this->matchThreshold) {
+        // If we have a best match with Levenshtein < bestFuzzyThreshold, return it
+        if ($bestMatch && $bestScore < $this->bestFuzzyThreshold) {
             if ($debug) {
                 Log::info("Channel {$channel->id} '{$fallbackName}' matched with EPG channel_id={$bestMatch->channel_id} (score={$bestScore})");
             }
             return $bestMatch;
         }
+
+        /**
+         * similar_text() for Fuzzy Matching
+         */
+        // foreach ($epgChannels->cursor() as $epgChannel) {
+        //     $normalizedEpg = empty($epgChannel->name)
+        //         ? $this->normalizeChannelName($epgChannel->channel_id)
+        //         : $this->normalizeChannelName($epgChannel->name);
+        //     if (!$normalizedEpg) continue;
+
+        //     // Calculate similarity (higher is better)
+        //     similar_text($normalizedChan, $normalizedEpg, $similarityScore);
+
+        //     // Apply region-based bonus
+        //     if ($regionCode && stripos(strtolower($epgChannel->channel_id . ' ' . $epgChannel->name), $regionCode) !== false) {
+        //         $similarityScore += 15; // Add bonus instead of subtracting
+        //     }
+
+        //     if ($similarityScore > $bestScore) { // Higher is better
+        //         $bestScore = $similarityScore;
+        //         $bestMatch = $epgChannel;
+        //     }
+
+        //     // Store candidate for embedding similarity if in borderline range
+        //     if ($similarityScore >= $this->bestFuzzyThreshold && $similarityScore < $this->upperFuzzyThreshold) {
+        //         $bestEpgForEmbedding = $epgChannel;
+        //     }
+        // }
+
+        // // If we have a best match with similarity > bestFuzzyThreshold, return it
+        // if ($bestMatch && $bestScore >= $this->bestFuzzyThreshold) {
+        //     if ($debug) {
+        //         Log::info("Channel {$channel->id} '{$fallbackName}' matched with EPG channel_id={$bestMatch->channel_id} (score={$bestScore})");
+        //     }
+        //     return $bestMatch;
+        // }
 
         // **Cosine Similarity for Borderline Cases**
         if ($bestEpgForEmbedding) {
@@ -121,7 +160,7 @@ class SimilaritySearchService
                 return null;
             }
             $similarity = $this->cosineSimilarity($chanVector, $epgVector);
-            if ($similarity >= $this->cosineCutoff) {
+            if ($similarity >= $this->embedSimThreshold) {
                 if ($debug) {
                     Log::info("Channel {$channel->id} '{$fallbackName}' matched via cosine similarity with channel_id={$bestEpgForEmbedding->channel_id} (cos-sim={$similarity})");
                 }
