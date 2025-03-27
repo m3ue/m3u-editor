@@ -1,5 +1,5 @@
 # Laravel (Alpine Edge build)
-FROM alpine:edge
+FROM alpine:3.21.3
 
 # Set environment variables
 ENV WWWGROUP="sail"
