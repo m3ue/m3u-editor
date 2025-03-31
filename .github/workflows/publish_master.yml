@@ -1,10 +1,10 @@
 name: Release
 on:
-  push:
-    branches: [master]
+  release:
+    types: [published]
 
 jobs:
-  push:
+  release:
     name: Publish m3u-editor Docker image
     runs-on: ubuntu-latest
     steps:
@@ -21,7 +21,13 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Extract release version
-        run: echo "RELEASE_VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            echo "RELEASE_VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+          else
+            echo "This workflow only runs on releases, but was triggered on: ${GITHUB_REF}"
+            exit 1
+          fi
 
       - name: Build and push
         uses: docker/build-push-action@v5
