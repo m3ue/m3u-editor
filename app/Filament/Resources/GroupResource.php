@@ -107,9 +107,7 @@ class GroupResource extends Resource
             ])
             ->actions([
                 Tables\Actions\ActionGroup::make([
-//                    Tables\Actions\EditAction::make(),
                     Tables\Actions\ViewAction::make(),
-
                     Tables\Actions\Action::make('add')
                         ->label('Add to custom playlist')
                         ->form([
@@ -210,7 +208,78 @@ class GroupResource extends Resource
             ], position: Tables\Enums\ActionsPosition::BeforeCells)
             ->bulkActions([
                 Tables\Actions\BulkActionGroup::make([
-//                     Tables\Actions\DeleteBulkAction::make(),
+                    Tables\Actions\BulkAction::make('add')
+                        ->label('Add to custom playlist')
+                        ->form([
+                            Forms\Components\Select::make('playlist')
+                                ->required()
+                                ->label('Custom Playlist')
+                                ->helperText('Select the custom playlist you would like to add the selected channel(s) to.')
+                                ->options(CustomPlaylist::where(['user_id' => auth()->id()])->get(['name', 'id'])->pluck('name', 'id'))
+                                ->searchable(),
+                        ])
+                        ->action(function (Collection $records, array $data): void {
+                            $playlist = CustomPlaylist::findOrFail($data['playlist']);
+                            foreach ($records as $record) {
+                                // Sync the channels to the custom playlist
+                                // This will add the channels to the playlist without detaching existing ones
+                                // Prevents duplicates in the playlist
+                                $playlist->channels()->syncWithoutDetaching($record->channels()->pluck('id'));
+                            }
+                        })->after(function () {
+                            Notification::make()
+                                ->success()
+                                ->title('Group channels added to custom playlist')
+                                ->body('The groups channels have been added to the chosen custom playlist.')
+                                ->send();
+                        })
+                        ->requiresConfirmation()
+                        ->icon('heroicon-o-play')
+                        ->modalIcon('heroicon-o-play')
+                        ->modalDescription('Add the group channels to the chosen custom playlist.')
+                        ->modalSubmitActionLabel('Add now'),
+                    Tables\Actions\BulkAction::make('move')
+                        ->label('Move channels to group')
+                        ->form([
+                            Forms\Components\Select::make('group')
+                                ->required()
+                                ->live()
+                                ->label('Group')
+                                ->helperText('Select the group you would like to move the channels to.')
+                                ->options(fn(Get $get, $record) => Group::where(['user_id' => auth()->id(), 'playlist_id' => $record->playlist_id])->get(['name', 'id'])->pluck('name', 'id'))
+                                ->searchable(),
+                        ])
+                        ->action(function (Collection $records, array $data): void {
+                            $group = Group::findOrFail($data['group']);
+                            foreach ($records as $record) {
+                                // Update the channels to the new group
+                                // This will change the group and group_id for the channels in the database
+                                // to reflect the new group
+                                if ($group->playlist_id !== $record->playlist_id) {
+                                    Notification::make()
+                                        ->error()
+                                        ->title('Error')
+                                        ->body("Cannot move \"{$record->playlist->name}\" channels to \"{$group->name}\" as they belong to different playlists.")
+                                        ->send();
+                                    continue;
+                                }
+                                $record->channels()->update([
+                                    'group' => $group->name,
+                                    'group_id' => $group->id,
+                                ]);
+                            }
+                        })->after(function () {
+                            Notification::make()
+                                ->success()
+                                ->title('Channels moved to group')
+                                ->body('The group channels have been moved to the chosen group.')
+                                ->send();
+                        })
+                        ->requiresConfirmation()
+                        ->icon('heroicon-o-arrows-right-left')
+                        ->modalIcon('heroicon-o-arrows-right-left')
+                        ->modalDescription('Move the group channels to the another group.')
+                        ->modalSubmitActionLabel('Move now'),
                     Tables\Actions\BulkAction::make('enable')
                         ->label('Enable group channels')
                         ->action(function (Collection $records): void {
@@ -248,7 +317,7 @@ class GroupResource extends Resource
                                 ->body('The selected groups channels have been disabled.')
                                 ->send();
                         })
-                        ->color('danger')
+                        ->color('warning')
                         ->deselectRecordsAfterCompletion()
                         ->requiresConfirmation()
                         ->icon('heroicon-o-x-circle')
