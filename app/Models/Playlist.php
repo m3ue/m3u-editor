@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\MorphToMany;
 
 class Playlist extends Model
 {
@@ -73,5 +74,10 @@ class Playlist extends Model
     public function epgMaps(): HasMany
     {
         return $this->hasMany(EpgMap::class);
+    }
+
+    public function playlistAuths(): MorphToMany
+    {
+        return $this->morphToMany(PlaylistAuth::class, 'authenticatable');
     }
 }

@@ -57,6 +57,11 @@ class PlaylistResource extends Resource
 
     public static function table(Table $table): Table
     {
+        return self::setupTable($table);
+    }
+
+    public static function setupTable(Table $table, $relationId = null): Table
+    {
         return $table
             ->modifyQueryUsing(function (Builder $query) {
                 $query->withCount('enabled_channels');

@@ -1,0 +1,10 @@
+models:
+  PlaylistAuth:
+    name: string
+    enabled: boolean default:true
+    user_id: id foreign:users
+    username: string
+    password: string
+    relationships:
+      belongsTo: User
+      morphTo: Authenticatable
