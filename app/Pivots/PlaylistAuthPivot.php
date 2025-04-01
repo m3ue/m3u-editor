@@ -18,6 +18,18 @@ class PlaylistAuthPivot extends Pivot
         return $this->belongsTo(PlaylistAuth::class);
     }
 
+    public function type(): string
+    {
+        switch ($this->authenticatable_type) {
+            case CustomPlaylist::class:
+                return 'Custom Playlist';
+            case MergedPlaylist::class:
+                return 'Merged Playlist';
+            default:
+                return 'Playlist';
+        }
+    }
+
     public function model(): BelongsTo
     {
         switch ($this->authenticatable_type) {

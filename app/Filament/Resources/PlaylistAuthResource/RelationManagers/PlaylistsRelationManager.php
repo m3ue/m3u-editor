@@ -71,7 +71,7 @@ class PlaylistsRelationManager extends RelationManager
             ->recordTitleAttribute('name')
             ->columns([
                 PlaylistAuthNameColumn::make('playlist_name')
-                    ->label('Playlist Name'),
+                    ->label('Playlist'),
                 PlaylistAuthUrlColumn::make('playlist_url')
                     ->label('Playlist URL')
                     ->toggleable(isToggledHiddenByDefault: true),
