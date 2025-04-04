@@ -27,7 +27,8 @@ class ProcessM3uImport implements ShouldQueue
     // To prevent errors when processing large files, limit imported channels to 50,000
     // NOTE: this only applies to M3U+ files
     //       Xtream API files are not limited
-    public $maxItems = 50000;
+    public $maxItems = PHP_INT_MAX; // Default to no limit
+    public $maxItemsHit = false;
 
     // Default user agent to use for HTTP requests
     // Used when user agent is not set in the playlist
@@ -62,8 +63,8 @@ class ProcessM3uImport implements ShouldQueue
     public function __construct(
         public Playlist $playlist,
         public ?bool    $force = false,
-    )
-    {
+    ) {
+        $this->maxItems = config('dev.max_channels') + 1; // Maximum number of channels allowed for m3u import   
         $this->preprocess = $playlist->import_prefs['preprocess'] ?? false;
         $this->useRegex = $playlist->import_prefs['use_regex'] ?? false;
         $this->selectedGroups = $playlist->import_prefs['selected_groups'] ?? [];
@@ -481,7 +482,7 @@ class ProcessM3uImport implements ShouldQueue
                     $filePath,
                     $channelFields,
                     $excludeFileTypes,
-                    $autoSort
+                    $autoSort,
                 ) {
                     // Keep track of channel number
                     $channelNo = 0;
@@ -577,6 +578,7 @@ class ProcessM3uImport implements ShouldQueue
 
                                 // Check if max channels reached
                                 if ($count++ >= $this->maxItems) {
+                                    $this->maxItemsHit = true;
                                     continue;
                                 }
 
@@ -603,6 +605,7 @@ class ProcessM3uImport implements ShouldQueue
 
                             // Check if max channels reached
                             if ($count++ >= $this->maxItems) {
+                                $this->maxItemsHit = true;
                                 continue;
                             }
 
@@ -611,7 +614,7 @@ class ProcessM3uImport implements ShouldQueue
                                 $channel['sort'] = $channelNo;
                             }
 
-                            // Return the channel
+                            // Return the channel   
                             yield $channel;
                         }
                     }
@@ -682,8 +685,7 @@ class ProcessM3uImport implements ShouldQueue
         string         $batchNo,
         int            $userId,
         Carbon         $start
-    )
-    {
+    ) {
         // Get the playlist ID
         $playlistId = $playlist->id;
 
@@ -771,7 +773,8 @@ class ProcessM3uImport implements ShouldQueue
             });
 
             // Last job in the batch
-            $jobs[] = new ProcessM3uImportComplete($userId, $playlistId, $groups, $batchNo, $start);
+            dump('Chunking complete, max hit:' . $this->maxItemsHit);
+            $jobs[] = new ProcessM3uImportComplete($userId, $playlistId, $groups, $batchNo, $start, $this->maxItemsHit);
             Bus::chain($jobs)
                 ->onConnection('redis') // force to use redis connection
                 ->onQueue('import')

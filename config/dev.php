@@ -19,5 +19,6 @@ return [
     ],
     'tvgid' => [
         'regex' => env('TVGID_REGEX', '/[^a-zA-Z0-9_\-\.]/'),
-    ]
+    ],
+    'max_channels' => env('MAX_CHANNELS', 50000), // Maximum number of channels allowed for m3u import
 ];

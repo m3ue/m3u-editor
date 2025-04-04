@@ -27,6 +27,7 @@ class ProcessM3uImportComplete implements ShouldQueue
         public array $groups,
         public string $batchNo,
         public Carbon $start,
+        public bool $maxHit = false
     ) {
         //
     }
@@ -44,16 +45,32 @@ class ProcessM3uImportComplete implements ShouldQueue
         $playlist = $user->playlists()->find($this->playlistId);
 
         // Send notification
-        Notification::make()
-            ->success()
-            ->title('Playlist Synced')
-            ->body("\"{$playlist->name}\" has been synced successfully.")
-            ->broadcast($playlist->user);
-        Notification::make()
-            ->success()
-            ->title('Playlist Synced')
-            ->body("\"{$playlist->name}\" has been synced successfully. Import completed in {$completedInRounded} seconds.")
-            ->sendToDatabase($playlist->user);
+        dump('Finished, max hit:' . $this->maxHit);
+
+        if ($this->maxHit) {
+            $limit = config('dev.max_channels');
+            Notification::make()
+                ->warning()
+                ->title('Playlist Synced with Limit Reached')
+                ->body("\"{$playlist->name}\" has been synced successfully, but the maximum import limit of {$limit} channels was reached.")
+                ->broadcast($playlist->user);
+            Notification::make()
+                ->warning()
+                ->title('Playlist Synced with Limit Reached')
+                ->body("\"{$playlist->name}\" has been synced successfully, but the maximum import limit of {$limit} channels was reached. Some channels may not have been imported. Import completed in {$completedInRounded} seconds.")
+                ->sendToDatabase($playlist->user);
+        } else {
+            Notification::make()
+                ->success()
+                ->title('Playlist Synced')
+                ->body("\"{$playlist->name}\" has been synced successfully.")
+                ->broadcast($playlist->user);
+            Notification::make()
+                ->success()
+                ->title('Playlist Synced')
+                ->body("\"{$playlist->name}\" has been synced successfully. Import completed in {$completedInRounded} seconds.")
+                ->sendToDatabase($playlist->user);
+        }
 
         // Clear out invalid groups (if any)
         Group::where([
