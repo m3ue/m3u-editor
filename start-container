@@ -1,15 +1,26 @@
 #!/usr/bin/env bash
 
 # Set runtime environment variables
-export APP_PORT="${APP_PORT:-36400}"
+export APP_PORT="${APP_PORT:-36400}" # default 36400
 export REVERB_PORT="${REVERB_PORT:-36800}"
 export SUPERVISOR_PHP_USER="${SUPERVISOR_PHP_USER:-root}"
 export TZ="${TZ:-UTC}"  # Set timezone, default to UTC
 
-# Set Supervisor commands dynamically
-export SUPERVISOR_PHP_COMMAND="${SUPERVISOR_PHP_COMMAND:-/usr/bin/php -d variables_order=EGPCS /var/www/html/artisan octane:start --server=swoole --host=0.0.0.0 --port=$APP_PORT}"
+# If you want to pass app URL:
+export APP_URL="${APP_URL:-http://localhost}"
+
+# Instead of Octane, we now define the php-fpm command
+export SUPERVISOR_PHP_COMMAND="${SUPERVISOR_PHP_COMMAND:-/usr/sbin/php-fpm84 -F}"
+
+# The queue and websockets remain the same.
 export QUEUE_PHP_COMMAND="${QUEUE_PHP_COMMAND:-/usr/bin/php /var/www/html/artisan horizon}"
 export WEBSOCKET_PHP_COMMAND="${WEBSOCKET_PHP_COMMAND:-/usr/bin/php /var/www/html/artisan reverb:start --host=0.0.0.0 --port=$REVERB_PORT --no-interaction --no-ansi}"
+
+# Update port in nginx config
+if [ -f /etc/nginx/conf.d/laravel.tmpl ]; then
+    echo "⚡️ Running app on port: $APP_PORT"
+    envsubst '${APP_PORT}' < /etc/nginx/conf.d/laravel.tmpl > /etc/nginx/conf.d/laravel.conf
+fi
 
 # Make sure correct user is set
 if [ "$SUPERVISOR_PHP_USER" != "root" ] && [ "$SUPERVISOR_PHP_USER" != "sail" ]; then
@@ -23,7 +34,7 @@ if [ ! -f "/var/www/html/artisan" ]; then
     exit 1
 fi
 
-# Git pull the latest changes
+# Git pull the latest changes (optional)
 # echo "Pulling latest changes..."
 # git config --global --add safe.directory /var/www/html
 # git pull
@@ -40,170 +51,102 @@ backup_dir="${config_dir}/m3u-editor-backups"
 log_dir="${config_dir}/logs"
 queue_log_file="${log_dir}/queue.log"
 websockets_log_file="${log_dir}/websocket.log"
-swoole_log_file="${log_dir}/swoole_http.log"
 laravel_log_file="${log_dir}/laravel.log"
+nginx_log_file="${log_dir}/nginx.log"
 
-# Not using these log files any longer
+swoole_log_file="${log_dir}/swoole_http.log"
 reverb_log_file="${log_dir}/reverb.log"
 horizon_log_file="${log_dir}/horizon.log"
 
 # Setup timezone
-echo "⏰ Setting TZ..."
 if [ -f "/etc/localtime" ]; then
     rm /etc/localtime
 fi
-cp /usr/share/zoneinfo/$TZ /etc/localtime
-echo $TZ > /etc/timezone
-if [ $? -ne 0 ]; then
-    echo "Failed to set timezone. Please check your TZ variable."
-    exit 1
-else
-    echo "📅 Timezone set to $TZ; current date and time: $(date)"
-fi
+cp "/usr/share/zoneinfo/$TZ" /etc/localtime
+echo "$TZ" > /etc/timezone
+echo "📅 Timezone set to $TZ. Current date/time: $(date)"
 echo ""
 
-# Create config directories
+# Create config directories if needed
 if [ ! -d "${config_dir}" ]; then
-    echo "Missing config directory, please make sure you've linked it in volumes to continue. It should link to '/var/www/config' in the container."
+    echo "Missing config directory, please mount it to /var/www/config"
     exit 0
 fi
-if [ ! -d "${db_dir}" ]; then
-    echo "Creating database directory..."
-    mkdir "${db_dir}"
-fi
-if [ ! -d "${log_dir}" ]; then
-    echo "Creating log directory..."
-    mkdir "${log_dir}"
-fi
-if [ ! -d "${epg_dir}" ]; then
-    echo "Creating EPG directory..."
-    mkdir "${epg_dir}"
-fi
-if [ ! -d "${playlist_dir}" ]; then
-    echo "Creating Playlist directory..."
-    mkdir "${playlist_dir}"
-fi
-if [ ! -d "${backup_dir}" ]; then
-    echo "Creating Backup directory..."
-    mkdir "${backup_dir}"
-fi
+[ ! -d "${db_dir}" ] && mkdir -p "${db_dir}"
+[ ! -d "${epg_dir}" ] && mkdir -p "${epg_dir}"
+[ ! -d "${playlist_dir}" ] && mkdir -p "${playlist_dir}"
+[ ! -d "${backup_dir}" ] && mkdir -p "${backup_dir}"
+[ ! -d "${log_dir}" ] && mkdir -p "${log_dir}"
 
-# Create environment file
+# Create environment file if missing
 if [ ! -f "${env_file}" ]; then
     echo "Missing environment file, creating now..."
-    touch "${env_file}"
-    cat /var/www/html/.env.example >> "${env_file}"
+    cp /var/www/html/.env.example "${env_file}"
 fi
 
-# Create database file
-if [ ! -f "${db_file}" ]; then
-    echo "Missing database file, creating now..."
-    touch "${db_file}"
-fi
-if [ ! -f "${db_file_jobs}" ]; then
-    echo "Missing jobs database file, creating now..."
-    touch "${db_file_jobs}"
-fi
+# Create database files if missing
+[ ! -f "${db_file}" ] && touch "${db_file}"
+[ ! -f "${db_file_jobs}" ] && touch "${db_file_jobs}"
 
 # Create log files
-if [ ! -f "${queue_log_file}" ]; then
-    echo "Missing queue log file, creating now..."
-    touch "${queue_log_file}"
-fi
-if [ ! -f "${websockets_log_file}" ]; then
-    echo "Missing websockets log file, creating now..."
-    touch "${websockets_log_file}"
-fi
-if [ ! -f "${swoole_log_file}" ]; then
-    echo "Missing swoole log file, creating now..."
-    touch "${swoole_log_file}"
-fi
+[ ! -f "${queue_log_file}" ] && touch "${queue_log_file}"
+[ ! -f "${websockets_log_file}" ] && touch "${websockets_log_file}"
+[ ! -f "${nginx_log_file}" ] && touch "${nginx_log_file}"
 
-# Clean up old log files
-if [ -f "${reverb_log_file}" ]; then
-    rm -f "${reverb_log_file}"
-fi
-if [ -f "${horizon_log_file}" ]; then
-    rm -f "${horizon_log_file}"
-fi
+# Cleanup
+[ -f "${swoole_log_file}" ] && rm -f "${swoole_log_file}"
+[ -f "${reverb_log_file}" ] && rm -f "${reverb_log_file}"
+[ -f "${horizon_log_file}" ] && rm -f "${horizon_log_file}"
+[ -f "${laravel_log_file}" ] && rm -f "${laravel_log_file}"
 
-# Using daily log file, base file will not be created
-if [ -f "${laravel_log_file}" ]; then
-    rm -f "${laravel_log_file}"
-fi
-
-# Link the environment file to the laravel project root
+# Link environment file
 ln -sf "${env_file}" .env
 
-# Link the database file to the laravel `database` directory
+# Link db files
 ln -sf "${db_file}" "database/database.sqlite"
 ln -sf "${db_file_jobs}" "database/jobs.sqlite"
 
-# Clean up recursion EPG directory from previous push
-if [ -d "storage/epgs" ]; then
-    rm -rf storage/epgs
-fi
-if [ -d "/var/www/config/epgs" ]; then
-    rm -rf /var/www/config/epgs
-fi
-
-# Link the log files to the laravel `storage/logs` directory
+# Link logs
 rm -rf storage/logs
 ln -sf "${log_dir}" storage/
 
-# Link EPG and Playlist directories
-echo "🔗 Linking directories"
-echo ""
-if [ ! -d "storage/app/private/epg" ]; then
-    echo "Linking EPG directory..."
-    ln -sf "${epg_dir}" storage/app/private/epg
-fi
-if [ ! -d "storage/app/private/playlist" ]; then
-    echo "Linking Playlist directory..."
-    ln -sf "${playlist_dir}" storage/app/private/playlist
-fi
+# Link EPG, Playlist, Backups
+[ ! -d "storage/app/private/epg" ] && ln -sf "${epg_dir}" storage/app/private/epg
+[ ! -d "storage/app/private/playlist" ] && ln -sf "${playlist_dir}" storage/app/private/playlist
+[ ! -d "storage/app/private/m3u-editor-backups" ] && ln -sf "${backup_dir}" storage/app/private/m3u-editor-backups
 
-# Link Backup directory
-if [ ! -d "storage/app/private/m3u-editor-backups" ]; then
-    echo "Linking Backup directory..."
-    ln -sf "${backup_dir}" storage/app/private/m3u-editor-backups
-fi
-
-# Link storage
+# Link Laravel storage
 if [ ! -d "public/storage" ]; then
-    echo "Linking storage directory..."
     php artisan storage:link
 fi
 
-# Set app key, if not previously set
+# Set app key if not set
 php artisan app:generate-key
 
 # Check for updates
 php artisan app:update-check
 
-# Optimizing configuration
-echo "⚙️  Optimizing configuration..."
+# Optimize Laravel
 php artisan optimize
 
 # Set Sqlite WAL mode
-echo "🗂️  Setting SQLite WAL mode..."
+echo "🗂️  Enabling SQLite WAL mode..."
 php artisan sqlite:wal-enable sqlite
 echo ""
 
-# Run any pending migrations
+# Run migrations
 echo "💾 Running migrations..."
 php artisan migrate --force
 
-# Install npm dependencies
+# Build assets
 echo "🛠️  Building assets..."
 npm install && npm run build
 
-if [ ! -d /.composer ]; then
-    mkdir /.composer
-fi
-
+# Ensure composer dir is writable
+[ ! -d /.composer ] && mkdir /.composer
 chmod -R ugo+rw /.composer
 
+# If passed custom commands, execute them, else run supervisord
 if [ $# -gt 0 ]; then
     if [ "$SUPERVISOR_PHP_USER" = "root" ]; then
         exec "$@"
@@ -211,5 +154,8 @@ if [ $# -gt 0 ]; then
         exec gosu $WWWUSER "$@"
     fi
 else
+    echo ""
+    echo "🚀 Starting services..."
+    echo ""
     exec /usr/bin/supervisord -c /etc/supervisor/conf.d/supervisord.conf
 fi

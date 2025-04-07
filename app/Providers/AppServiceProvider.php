@@ -5,7 +5,6 @@ namespace App\Providers;
 use Exception;
 use App\Events\EpgCreated;
 use App\Events\PlaylistCreated;
-use App\Jobs\ReloadApp;
 use App\Models\CustomPlaylist;
 use App\Models\MergedPlaylist;
 use App\Models\Epg;
@@ -19,11 +18,9 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Routing\Route;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
-use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Opcodes\LogViewer\Facades\LogViewer;
-use Spatie\LaravelSettings\Events\SettingsSaved;
 use Filament\Support\Facades\FilamentView;
 use Filament\View\PanelsRenderHook;
 use Illuminate\Support\HtmlString;
@@ -122,15 +119,6 @@ class AppServiceProvider extends ServiceProvider
      */
     private function registerModelEventListeners(): void
     {
-        // Listen for settings update
-        Event::listen(SettingsSaved::class, function ($event) {
-            if ($event->settings::class === GeneralSettings::class) {
-                // Reload the app so the new settings are applied
-                app('Illuminate\Contracts\Bus\Dispatcher')
-                    ->dispatch(new ReloadApp());
-            }
-        });
-
         // Register the event listener
         try {
             // Process playlist on creation

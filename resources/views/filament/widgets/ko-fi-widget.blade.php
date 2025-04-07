@@ -3,7 +3,7 @@
         <div class="flex items-center gap-x-3">
             <div>
                 <a href="{{ config('dev.kofi') }}" rel="noopener noreferrer" target="_blank">
-                    <svg height="2.7rem" width="auto" viewBox="0 0 241 194" fill="none"
+                    <svg height="2.7rem" width="3.35rem" viewBox="0 0 241 194" fill="none"
                         xmlns="http://www.w3.org/2000/svg">
                         <mask id="mask0_1_219" style="mask-type:luminance" maskUnits="userSpaceOnUse" x="-1" y="0"
                             width="242" height="194">

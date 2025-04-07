@@ -3,7 +3,7 @@
         <div class="flex items-center gap-x-3">
             <div>
                 <a href="https://github.com/{{ $versionData['repo'] }}" rel="noopener noreferrer" target="_blank">
-                    <svg height="2.7rem" width="auto" xmlns="http://www.w3.org/2000/svg"
+                    <svg height="2.7rem" width="2.7rem" xmlns="http://www.w3.org/2000/svg"
                          xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 221.19 221.19">
                         <defs>
                             <linearGradient id="linear-gradient-widge" x1="16.04" y1="162.24" x2="189.09" y2="67.7"
