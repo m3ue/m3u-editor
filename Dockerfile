@@ -85,6 +85,9 @@ COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 COPY ./docker/8.4/nginx/nginx.conf /etc/nginx/nginx.tmpl
 COPY ./docker/8.4/nginx/laravel.conf /etc/nginx/conf.d/laravel.tmpl
 
+# Configure PHP-FPM
+COPY ./docker/8.4/www.conf /etc/php84/php-fpm.d/www.tmpl
+
 # Configure container startup script
 COPY start-container /usr/local/bin/start-container
 RUN chmod +x /usr/local/bin/start-container
@@ -98,15 +101,6 @@ RUN git clone https://github.com/sparkison/m3u-editor.git /tmp/m3u-editor \
 
 # Install composer dependencies
 RUN composer install --no-dev --no-interaction --no-progress
-
-# Nginx & php-fpm config tweaking
-# Make sure php-fpm runs in foreground mode (daemonize = no)
-RUN sed -i 's/;daemonize\s*=\s*yes/daemonize = no/' /etc/php84/php-fpm.conf \
-    && sed -i 's/127.0.0.1:9000/0.0.0.0:9000/' /etc/php84/php-fpm.d/www.conf
-
-# Also ensure Nginx not in daemon mode (we'll use supervisord)
-RUN sed -i 's/daemon\s*off;/daemon off;/' /etc/nginx/nginx.conf || true
-# The default /etc/nginx/nginx.conf on Alpine may have "daemon off;" already.
 
 # Final entrypoint
 ENTRYPOINT ["start-container"]

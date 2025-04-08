@@ -1,17 +1,16 @@
 #!/usr/bin/env bash
 
-# Set runtime environment variables
-export WWWUSER="${WWWUSER:-sail}"
-export WWWGROUP="${WWWGROUP:-sail}"
+# Get/set runtime environment variables
 export PUID="${PUID:-1000}"
 export PGID="${PGID:-1000}"
-export APP_PORT="${APP_PORT:-36400}" # default 36400
-export REVERB_PORT="${REVERB_PORT:-36800}"
+export WWWUSER="${WWWUSER:-sail}"
+export WWWGROUP="${WWWGROUP:-sail}"
 export SUPERVISOR_PHP_USER="${SUPERVISOR_PHP_USER:-root}"
-export TZ="${TZ:-UTC}"  # Set timezone, default to UTC
-
-# App URL:
+export NGINX_USER="${NGINX_USER:-root}"
 export APP_URL="${APP_URL:-http://localhost}"
+export APP_PORT="${APP_PORT:-36400}" # default 36400
+export REVERB_PORT="${REVERB_PORT:-36800}" # default 36800
+export TZ="${TZ:-UTC}"  # Set timezone, default to UTC
 
 # Define the php-fpm command
 export SUPERVISOR_PHP_COMMAND="${SUPERVISOR_PHP_COMMAND:-/usr/sbin/php-fpm84 -F}"
@@ -20,9 +19,12 @@ export SUPERVISOR_PHP_COMMAND="${SUPERVISOR_PHP_COMMAND:-/usr/sbin/php-fpm84 -F}
 export QUEUE_PHP_COMMAND="${QUEUE_PHP_COMMAND:-/usr/bin/php /var/www/html/artisan horizon}"
 export WEBSOCKET_PHP_COMMAND="${WEBSOCKET_PHP_COMMAND:-/usr/bin/php /var/www/html/artisan reverb:start --host=0.0.0.0 --port=$REVERB_PORT --no-interaction --no-ansi}"
 
-# Update port in nginx config
+# Update template files with variable values
+if [ -f /etc/php84/php-fpm.d/www.tmpl ]; then
+    envsubst '${PUID} ${PGID}' < /etc/php84/php-fpm.d/www.tmpl > /etc/php84/php-fpm.d/www.conf
+fi
 if [ -f /etc/nginx/nginx.tmpl ]; then
-    envsubst '${WWWUSER}' < /etc/nginx/nginx.tmpl > /etc/nginx/nginx.conf
+    envsubst '${NGINX_USER}' < /etc/nginx/nginx.tmpl > /etc/nginx/nginx.conf
 fi
 if [ -f /etc/nginx/conf.d/laravel.tmpl ]; then
     echo "⚡️ Running app at: $APP_URL:$APP_PORT"
@@ -99,6 +101,11 @@ fi
 [ ! -f "${queue_log_file}" ] && touch "${queue_log_file}"
 [ ! -f "${websockets_log_file}" ] && touch "${websockets_log_file}"
 [ ! -f "${nginx_log_file}" ] && touch "${nginx_log_file}"
+
+# Clear out the log content (could build up over time, clean on container reboot)
+echo "" > "${queue_log_file}"
+echo "" > "${websockets_log_file}"
+echo "" > "${nginx_log_file}"
 
 # Cleanup
 [ -f "${swoole_log_file}" ] && rm -f "${swoole_log_file}"
