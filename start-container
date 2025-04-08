@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 
 # Get/set runtime environment variables
+export NGINX_USER=$WWWUSER # Set nginx user to www user
 export UID="${PUID:-1000}"
 export GID="${PGID:-1000}"
 export SUPERVISOR_PHP_USER="${SUPERVISOR_PHP_USER:-root}"
-export NGINX_USER="${WWWUSER:-m3ue}"
 export APP_URL="${APP_URL:-http://localhost}"
 export APP_PORT="${APP_PORT:-36400}" # default 36400
 export REVERB_PORT="${REVERB_PORT:-36800}" # default 36800
