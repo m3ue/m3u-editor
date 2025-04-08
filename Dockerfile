@@ -99,15 +99,10 @@ RUN git clone https://github.com/sparkison/m3u-editor.git /tmp/m3u-editor \
 # Install composer dependencies
 RUN composer install --no-dev --no-interaction --no-progress
 
-# Expose the default port (we'll use 80 or if you prefer 36400)
-EXPOSE 80
-
 # Nginx & php-fpm config tweaking
 # Make sure php-fpm runs in foreground mode (daemonize = no)
 RUN sed -i 's/;daemonize\s*=\s*yes/daemonize = no/' /etc/php84/php-fpm.conf \
-    && sed -i 's/127.0.0.1:9000/0.0.0.0:9000/' /etc/php84/php-fpm.d/www.conf \
-    && sed -i 's/user = nobody/user = root/' /etc/php84/php-fpm.d/www.conf \
-    && sed -i 's/group = nobody/group = sail/' /etc/php84/php-fpm.d/www.conf
+    && sed -i 's/127.0.0.1:9000/0.0.0.0:9000/' /etc/php84/php-fpm.d/www.conf
 
 # Also ensure Nginx not in daemon mode (we'll use supervisord)
 RUN sed -i 's/daemon\s*off;/daemon off;/' /etc/nginx/nginx.conf || true

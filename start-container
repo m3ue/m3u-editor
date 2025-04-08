@@ -155,17 +155,17 @@ chmod -R ugo+rw /.composer
 
 
 # Setup user, group and permissions
-addgroup $WWWGROUP \
-    && adduser -h /var/www/html -s /bin/bash -G $WWWGROUP -D $WWWUSER
+addgroup $PGID \
+    && adduser -h /var/www/html -s /bin/bash -G $PGID -D $PUID
 
-chown -R $WWWUSER:$WWWGROUP /var/www/html
+chown -R $PUID:$PGID /var/www/html
 
 # If passed custom commands, execute them, else run supervisord
 if [ $# -gt 0 ]; then
     if [ "$SUPERVISOR_PHP_USER" = "root" ]; then
         exec "$@"
     else
-        exec gosu $WWWUSER "$@"
+        exec gosu $PUID "$@"
     fi
 else
     echo ""
