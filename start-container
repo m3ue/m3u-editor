@@ -60,6 +60,7 @@ log_dir="${config_dir}/logs"
 queue_log_file="${log_dir}/queue.log"
 websockets_log_file="${log_dir}/websocket.log"
 laravel_log_file="${log_dir}/laravel.log"
+ffmpeg_log_file="${log_dir}/ffmpeg.log"
 nginx_log_file="${log_dir}/nginx.log"
 
 swoole_log_file="${log_dir}/swoole_http.log"
@@ -99,11 +100,13 @@ fi
 # Create log files
 [ ! -f "${queue_log_file}" ] && touch "${queue_log_file}"
 [ ! -f "${websockets_log_file}" ] && touch "${websockets_log_file}"
+[ ! -f "${ffmpeg_log_file}" ] && touch "${ffmpeg_log_file}"
 [ ! -f "${nginx_log_file}" ] && touch "${nginx_log_file}"
 
 # Clear out the log content (could build up over time, clean on container reboot)
 echo "" > "${queue_log_file}"
 echo "" > "${websockets_log_file}"
+echo "" > "${ffmpeg_log_file}"
 echo "" > "${nginx_log_file}"
 
 # Cleanup
