@@ -79,7 +79,7 @@ echo ""
 
 # Create config directories if needed
 if [ ! -d "${config_dir}" ]; then
-    echo "-- Missing config directory, please mount it to /var/www/config"
+    echo "-- Missing config directory - please link a director to '/var/www/config' in the container for data persitence"
     exit 0
 fi
 [ ! -d "${db_dir}" ] && mkdir -p "${db_dir}"
