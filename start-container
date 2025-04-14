@@ -16,6 +16,13 @@ export APP_PORT="${APP_PORT:-36400}" # Default 36400
 export REVERB_PORT="${REVERB_PORT:-36800}" # Default 36800
 export TZ="${TZ:-UTC}" # Set timezone, default to UTC
 
+# If app URL contains "https", set `VITE_REVERB_PORT` to 443
+if [[ "$APP_URL" == *"https"* ]]; then
+    export VITE_REVERB_PORT="443"
+else
+    export VITE_REVERB_PORT="$REVERB_PORT"
+fi
+
 # Define the php-fpm command (add "-R" flag to allow php-fpm to run as root)
 export SUPERVISOR_PHP_COMMAND="/usr/sbin/php-fpm84 -F -R"
 
