@@ -545,97 +545,107 @@ class ChannelResource extends Resource
                 ->helperText('Toggle channel status')
                 ->inline(false)
                 ->required(),
-            Forms\Components\TextInput::make('logo')
-                ->label('Icon')
-                ->columnSpan(1)
-                ->prefixIcon('heroicon-m-globe-alt')
-                ->url(),
-            Forms\Components\TextInput::make('stream_id_custom')
-                ->label('ID')
-                ->columnSpan(1)
-                ->placeholder(fn(Get $get) => $get('stream_id'))
-                ->helperText("Leave empty to use playlist default value.")
-                ->rules(['min:1', 'max:255']),
-            Forms\Components\TextInput::make('title_custom')
-                ->label('Title')
-                ->placeholder(fn(Get $get) => $get('title'))
-                ->helperText("Leave empty to use playlist default value.")
-                ->columnSpan(1)
-                ->rules(['min:1', 'max:255']),
-            Forms\Components\TextInput::make('name_custom')
-                ->label('Name')
-                ->placeholder(fn(Get $get) => $get('name'))
-                ->helperText("Leave empty to use playlist default value.")
-                ->columnSpan(1)
-                ->rules(['min:1', 'max:255']),
-            Forms\Components\TextInput::make('channel')
-                ->columnSpan(1)
-                ->rules(['numeric', 'min:0']),
-            Forms\Components\TextInput::make('shift')
-                ->columnSpan(1)
-                ->rules(['numeric', 'min:0']),
-            Forms\Components\TextInput::make('url_custom')
-                ->label('URL')
-                ->columnSpan(1)
-                ->prefixIcon('heroicon-m-globe-alt')
-                ->placeholder(fn(Get $get) => $get('url'))
-                ->helperText("Leave empty to use playlist default value.")
-                ->rules(['min:1'])
-                ->suffixAction(
-                    Forms\Components\Actions\Action::make('copy')
-                        ->icon('heroicon-s-clipboard-document-check')
-                        ->action(function (Get $get, $record, $state) {
-                            $url = $state ?? $get('url');
-                            $title = $record->title_custom ?? $record->title;
-                            Notification::make()
+            Forms\Components\Fieldset::make('General Settings')
+                ->schema([
+                    Forms\Components\TextInput::make('title_custom')
+                        ->label('Title')
+                        ->placeholder(fn(Get $get) => $get('title'))
+                        ->helperText("Leave empty to use playlist default value.")
+                        ->columnSpan(1)
+                        ->rules(['min:1', 'max:255']),
+                    Forms\Components\TextInput::make('name_custom')
+                        ->label('Name')
+                        ->placeholder(fn(Get $get) => $get('name'))
+                        ->helperText("Leave empty to use playlist default value.")
+                        ->columnSpan(1)
+                        ->rules(['min:1', 'max:255']),
+                    Forms\Components\TextInput::make('stream_id_custom')
+                        ->label('ID')
+                        ->columnSpan(1)
+                        ->placeholder(fn(Get $get) => $get('stream_id'))
+                        ->helperText("Leave empty to use playlist default value.")
+                        ->rules(['min:1', 'max:255']),
+                    Forms\Components\TextInput::make('channel')
+                        ->label('Channel No.')
+                        ->columnSpan(1)
+                        ->rules(['numeric', 'min:0']),
+                    Forms\Components\TextInput::make('shift')
+                        ->columnSpan(1)
+                        ->rules(['numeric', 'min:0']),
+                ]),
+            Forms\Components\Fieldset::make('URL Settings')
+                ->schema([
+                    Forms\Components\TextInput::make('url_custom')
+                        ->label('URL')
+                        ->columnSpan(1)
+                        ->prefixIcon('heroicon-m-globe-alt')
+                        ->placeholder(fn(Get $get) => $get('url'))
+                        ->helperText("Leave empty to use playlist default value.")
+                        ->rules(['min:1'])
+                        ->suffixAction(
+                            Forms\Components\Actions\Action::make('copy')
                                 ->icon('heroicon-s-clipboard-document-check')
-                                ->title("$title - URL")
-                                ->success()
-                                ->body($url)
-                                ->persistent()
-                                ->send();
-                        })
-                )
-                ->type('url'),
-            Forms\Components\TextInput::make('url_proxy')
-                ->label('Proxy URL')
-                ->columnSpan(1)
-                ->prefixIcon('heroicon-m-globe-alt')
-                ->placeholder(fn($record) => ProxyFacade::getProxyUrlForChannel($record->id))
-                ->helperText("Use to play stream via the proxy functionality of m3u editor.")
-                ->disabled()
-                ->suffixAction(
-                    Forms\Components\Actions\Action::make('copy')
-                        ->icon('heroicon-s-clipboard-document-check')
-                        ->action(function ($record, $state) {
-                            $url = ProxyFacade::getProxyUrlForChannel($record->id);
-                            $title = $record->title_custom ?? $record->title;
-                            Notification::make()
+                                ->action(function (Get $get, $record, $state) {
+                                    $url = $state ?? $get('url');
+                                    $title = $record->title_custom ?? $record->title;
+                                    Notification::make()
+                                        ->icon('heroicon-s-clipboard-document-check')
+                                        ->title("$title - URL")
+                                        ->success()
+                                        ->body($url)
+                                        ->persistent()
+                                        ->send();
+                                })
+                        )
+                        ->type('url'),
+                    Forms\Components\TextInput::make('url_proxy')
+                        ->label('Proxy URL')
+                        ->columnSpan(1)
+                        ->prefixIcon('heroicon-m-globe-alt')
+                        ->placeholder(fn($record) => ProxyFacade::getProxyUrlForChannel($record->id))
+                        ->helperText("m3u editor proxy url.")
+                        ->disabled()
+                        ->suffixAction(
+                            Forms\Components\Actions\Action::make('copy')
                                 ->icon('heroicon-s-clipboard-document-check')
-                                ->title("$title - Proxy URL")
-                                ->success()
-                                ->body($url)
-                                ->persistent()
-                                ->send();
-                        })
-                )
-                ->dehydrated(false) // don't save the value in the database
-                ->type('url'),
-            Forms\Components\Select::make('epg_channel_id')
-                ->label('EPG Channel')
-                ->helperText('Select an associated EPG channel for this channel.')
-                ->relationship('epgChannel', 'name')
-                ->getOptionLabelFromRecordUsing(fn($record) => "$record->name [{$record->epg->name}]")
-                ->searchable()
-                ->columnSpan(1),
-            Forms\Components\Select::make('logo_type')
-                ->label('Preferred Icon')
-                ->helperText('Prefer icon from channel or EPG.')
-                ->options([
-                    'channel' => 'Channel',
-                    'epg' => 'EPG',
+                                ->action(function ($record, $state) {
+                                    $url = ProxyFacade::getProxyUrlForChannel($record->id);
+                                    $title = $record->title_custom ?? $record->title;
+                                    Notification::make()
+                                        ->icon('heroicon-s-clipboard-document-check')
+                                        ->title("$title - Proxy URL")
+                                        ->success()
+                                        ->body($url)
+                                        ->persistent()
+                                        ->send();
+                                })
+                        )
+                        ->dehydrated(false) // don't save the value in the database
+                        ->type('url'),
+                    Forms\Components\TextInput::make('logo')
+                        ->label('Icon')
+                        ->columnSpan(1)
+                        ->prefixIcon('heroicon-m-globe-alt')
+                        ->url(),
+                ]),
+            Forms\Components\Fieldset::make('EPG Settings')
+                ->schema([
+                    Forms\Components\Select::make('epg_channel_id')
+                        ->label('EPG Channel')
+                        ->helperText('Select an associated EPG channel for this channel.')
+                        ->relationship('epgChannel', 'name')
+                        ->getOptionLabelFromRecordUsing(fn($record) => "$record->name [{$record->epg->name}]")
+                        ->searchable()
+                        ->columnSpan(1),
+                    Forms\Components\Select::make('logo_type')
+                        ->label('Preferred Icon')
+                        ->helperText('Prefer icon from channel or EPG.')
+                        ->options([
+                            'channel' => 'Channel',
+                            'epg' => 'EPG',
+                        ])
+                        ->columnSpan(1),
                 ])
-                ->columnSpan(1),
         ];
     }
 }
