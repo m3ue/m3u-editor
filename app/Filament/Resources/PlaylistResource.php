@@ -481,6 +481,7 @@ class PlaylistResource extends Resource
                         ->label('Disable SSL verification')
                         ->helperText('Only disable this if you are having issues.')
                         ->columnSpan(1)
+                        ->onColor('danger')
                         ->inline(false)
                         ->default(false),
                 ])

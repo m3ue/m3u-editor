@@ -17,7 +17,7 @@ class EpgChannelResource extends Resource
 {
     protected static ?string $model = EpgChannel::class;
 
-//    protected static ?string $recordTitleAttribute = 'name';
+    //    protected static ?string $recordTitleAttribute = 'name';
 
     public static function getGloballySearchableAttributes(): array
     {
@@ -113,6 +113,7 @@ class EpgChannelResource extends Resource
             ])
             ->actions([
                 Tables\Actions\EditAction::make()
+                    ->slideOver()
                     ->button()
                     ->hiddenLabel(),
             ], position: Tables\Enums\ActionsPosition::BeforeCells)
