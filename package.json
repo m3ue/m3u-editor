@@ -21,6 +21,7 @@
         "vite": "^6.0"
     },
     "dependencies": {
-        "easyqrcodejs": "^4.6.2"
+        "easyqrcodejs": "^4.6.2",
+        "video.js": "^8.22.0"
     }
 }
