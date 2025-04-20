@@ -17,11 +17,14 @@ class PlaylistGenerateController extends Controller
     public function __invoke(Request $request, string $uuid)
     {
         // Fetch the playlist
+        $type = 'standard';
         $playlist = Playlist::where('uuid', $uuid)->first();
         if (!$playlist) {
+            $type = 'merged';
             $playlist = MergedPlaylist::where('uuid', $uuid)->first();
         }
         if (!$playlist) {
+            $type = 'custom';
             $playlist = CustomPlaylist::where('uuid', $uuid)->firstOrFail();
         }
 
@@ -48,11 +51,11 @@ class PlaylistGenerateController extends Controller
 
         // Get ll active channels
         return response()->stream(
-            function () use ($playlist, $proxyEnabled) {
+            function () use ($playlist, $proxyEnabled, $type) {
                 // Get all active channels
                 $channels = $playlist->channels()
                     ->where('enabled', true)
-                    ->with('epgChannel')
+                    ->with(['epgChannel', 'tags'])
                     ->orderBy('sort')
                     ->orderBy('channel')
                     ->orderBy('title')
@@ -70,11 +73,20 @@ class PlaylistGenerateController extends Controller
                     $epgData = $channel->epgChannel ?? null;
                     $channelNo = $channel->channel;
                     $timeshift = $channel->shift ?? 0;
+                    $group = $channel->group ?? '';
                     if (!$channelNo && $playlist->auto_channel_increment) {
                         $channelNo = ++$channelNumber;
                     }
                     if ($proxyEnabled) {
                         $url = ProxyFacade::getProxyUrlForChannel($channel->id);
+                    }
+                    if ($type === 'custom') {
+                        $customGroup = $channel->tags
+                            ->where('type', $playlist->uuid)
+                            ->first();
+                        if ($customGroup) {
+                            $group = $customGroup->getAttributeValue('name');
+                        }
                     }
                     $tvgId = $idChannelBy === PlaylistChannelId::TvgId
                         ? $channel->stream_id_custom ?? $channel->stream_id
@@ -92,7 +104,7 @@ class PlaylistGenerateController extends Controller
                     $tvgId = preg_replace(config('dev.tvgid.regex'), '', $tvgId);
 
                     // Output the channel
-                    echo "#EXTINF:-1 tvg-chno=\"$channelNo\" tvg-id=\"$tvgId\" timeshift=\"$timeshift\" tvg-name=\"$name\" tvg-logo=\"$icon\" group-title=\"$channel->group\"," . $title . "\n";
+                    echo "#EXTINF:-1 tvg-chno=\"$channelNo\" tvg-id=\"$tvgId\" timeshift=\"$timeshift\" tvg-name=\"$name\" tvg-logo=\"$icon\" group-title=\"$group\"," . $title . "\n";
                     if ($channel->extvlcopt) {
                         foreach ($channel->extvlcopt as $extvlcopt) {
                             echo "#EXTVLCOPT:{$extvlcopt['key']}={$extvlcopt['value']}\n";
