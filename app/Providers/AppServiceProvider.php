@@ -65,6 +65,7 @@ class AppServiceProvider extends ServiceProvider
         // Check if app url contains https, and if so, force https
         if (Str::contains(config('app.url'), 'https')) {
             URL::forceScheme('https');
+            request()->server->set('HTTPS', request()->header('X-Forwarded-Proto', 'https') == 'https' ? 'on' : 'off');
         }
 
         // Setup the middleware
