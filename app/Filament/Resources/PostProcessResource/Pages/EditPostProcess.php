@@ -19,6 +19,6 @@ class EditPostProcess extends EditRecord
 
     protected function afterSave()
     {
-        $this->dispatch('refreshRelation');
+        // $this->dispatch('refreshRelation');
     }
 }

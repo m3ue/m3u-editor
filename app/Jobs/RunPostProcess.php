@@ -16,6 +16,9 @@ class RunPostProcess implements ShouldQueue
 {
     use Queueable;
 
+    // Make sure the process logs are cleaned up
+    public int $maxLogs = 50;
+
     /**
      * Create a new job instance.
      * 
@@ -105,13 +108,13 @@ class RunPostProcess implements ShouldQueue
                 $hasErrors = false;
                 $process->run(
                     function ($type, $buffer) use (&$output, &$hasErrors, &$errors) {
-                        if (SymphonyProcess::ERR === $type) {
-                            $hasErrors = true;
-                            $errors .= $buffer;
-                        } else {
+                        if ($type === SymphonyProcess::OUT) {
                             $output .= $buffer;
                         }
-                        $output .= (SymphonyProcess::ERR === $type) ? 'ERR:' . $buffer : $buffer;
+                        if ($type === SymphonyProcess::ERR) {
+                            $hasErrors = true;
+                            $errors .= $buffer;
+                        }
                     }
                 );
 
@@ -122,23 +125,23 @@ class RunPostProcess implements ShouldQueue
                     $body = 'Results: ' . $output;
                     PostProcessLog::create([
                         'post_process_id' => $postProcess->id,
-                        'status' => 'error',
+                        'status' => 'success',
                         'message' => $title . '. ' . $body,
                     ]);
                     Notification::make()
-                        ->danger()
+                        ->success()
                         ->title($title)
                         ->body($body)
                         ->broadcast($user);
                     Notification::make()
-                        ->danger()
+                        ->success()
                         ->title($title)
                         ->body($body)
                         ->sendToDatabase($user);
                 } else {
                     // Error running the script
                     $title = "Error running post processing for \"$name\"";
-                    $body = 'Results: ' . $output;
+                    $body = 'Results: ' . $errors;
                     PostProcessLog::create([
                         'post_process_id' => $postProcess->id,
                         'status' => 'error',
@@ -175,6 +178,15 @@ class RunPostProcess implements ShouldQueue
                 ->title("Error running post processing for \"$name\"")
                 ->body($error)
                 ->sendToDatabase($user);
+        } finally {
+            // Clean up logs to make sure we don't have too many...
+            $logsQuery = $postProcess->logs();
+            if ($logsQuery->count() > $this->maxLogs) {
+                $logsQuery
+                    ->orderBy('created_at', 'asc')
+                    ->limit($logsQuery->count() - $this->maxLogs)
+                    ->delete();
+            }
         }
     }
 }

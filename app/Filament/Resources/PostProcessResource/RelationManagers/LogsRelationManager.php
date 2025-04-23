@@ -24,6 +24,7 @@ class LogsRelationManager extends RelationManager
     {
         return $table
             ->recordTitleAttribute('name')
+            ->defaultSort('created_at', 'desc')
             ->columns([
                 Tables\Columns\TextColumn::make('status')
                     ->sortable()
@@ -33,6 +34,7 @@ class LogsRelationManager extends RelationManager
                 Tables\Columns\TextColumn::make('message')
                     ->wrap(),
                 Tables\Columns\TextColumn::make('created_at')
+                    ->label('Ran at')
                     ->dateTime()
                     ->sortable()
                     ->toggleable(),

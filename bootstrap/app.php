@@ -14,7 +14,10 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware) {
         $middleware
             ->redirectGuestsTo('login')
-            ->trustProxies(at: ['*']);
+            ->trustProxies(at: ['*'])
+            ->validateCsrfTokens(except: [
+                'webhook/test',
+            ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {
         //
