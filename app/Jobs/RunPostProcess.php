@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Enums\Status;
 use App\Facades\PlaylistUrlFacade;
 use App\Models\Epg;
 use App\Models\PostProcess;
@@ -39,30 +40,38 @@ class RunPostProcess implements ShouldQueue
      */
     public function handle(): void
     {
+        $modelType = get_class($this->model);
         $name = $this->model->name;
         $user = $this->model->user;
+        $status = $this->model->status;
         $postProcess = $this->postProcess;
-        $modelType = get_class($this->model);
+        $metadata = $postProcess->metadata;
+        $sendFailed = ((bool)$metadata['send_failed']) ?? false;
+        if ($status === Status::Failed && !$sendFailed) {
+            // If the model status is failed and we don't want to execute the post process, then just return
+            return;
+        }
         try {
-            $metadata = $postProcess->metadata;
             // See if calling webhook, or running a script
             // If the metadata is a URL, then we're calling a webhook
             if (str_starts_with($metadata['path'], 'http')) {
-                // Using true/false, false = GET, true = POST
-                $method = (bool)$metadata['get'] ? 'post' : 'get';
+                // Using `post` as true/false; true = POST, false = GET
+                $post = ((bool)$metadata['post']) ?? false;
+                $method = $post ? 'post' : 'get';
                 $url = $metadata['path'];
                 $queryVars = [];
-                $attributes = $metadata['post_attributes'] ?? [];
-                foreach ($attributes as $key) {
-                    if ($key === 'url') {
+                $vars = $metadata['post_vars'] ?? [];
+                foreach ($vars as $var) {
+                    if ($var['value'] === 'url') {
                         if ($modelType === Epg::class) {
-                            $queryVars[$key] = route('epg.file', ['uuid' => $this->model->uuid]);
+                            $value = route('epg.file', ['uuid' => $this->model->uuid]);
                         } else {
-                            $queryVars[$key] = PlaylistUrlFacade::getUrls($this->model)['m3u'];
+                            $value = PlaylistUrlFacade::getUrls($this->model)['m3u'];
                         }
                     } else {
-                        $queryVars[$key] = $this->model->{$key};
+                        $value = $this->model->{$var['value']};
                     }
+                    $queryVars[$var['variable_name']] = $value;
                 }
 
                 // Make the request

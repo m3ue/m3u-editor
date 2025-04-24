@@ -5,6 +5,7 @@ namespace App\Jobs;
 use Throwable;
 use Exception;
 use App\Enums\Status;
+use App\Events\SyncCompleted;
 use App\Models\Group;
 use App\Models\Job;
 use App\Models\Playlist;
@@ -134,6 +135,9 @@ class ProcessM3uImport implements ShouldQueue
             'progress' => 100,
             'processing' => false,
         ]);
+
+        // Fire the playlist synced event
+        event(new SyncCompleted($this->playlist));
     }
 
     /**
@@ -386,6 +390,9 @@ class ProcessM3uImport implements ShouldQueue
                 'progress' => 100,
                 'processing' => false,
             ]);
+
+            // Fire the playlist synced event
+            event(new SyncCompleted($this->playlist));
         }
         return;
     }
@@ -647,6 +654,9 @@ class ProcessM3uImport implements ShouldQueue
                     'progress' => 100,
                     'processing' => false,
                 ]);
+
+                // Fire the playlist synced event
+                event(new SyncCompleted($this->playlist));
                 return;
             }
         } catch (\Exception $e) {
@@ -673,6 +683,9 @@ class ProcessM3uImport implements ShouldQueue
                 'progress' => 100,
                 'processing' => false,
             ]);
+
+            // Fire the playlist synced event
+            event(new SyncCompleted($this->playlist));
         }
         return;
     }
@@ -799,6 +812,7 @@ class ProcessM3uImport implements ShouldQueue
                         'progress' => 100,
                         'processing' => false,
                     ]);
+                    event(new SyncCompleted($playlist));
                 })->dispatch();
         }
     }

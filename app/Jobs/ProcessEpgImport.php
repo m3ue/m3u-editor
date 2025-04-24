@@ -6,6 +6,7 @@ use Exception;
 use XMLReader;
 use Throwable;
 use App\Enums\Status;
+use App\Events\SyncCompleted;
 use App\Models\Epg;
 use App\Models\Job;
 use Filament\Notifications\Notification;
@@ -151,6 +152,9 @@ class ProcessEpgImport implements ShouldQueue
                     'progress' => 100,
                     'processing' => false,
                 ]);
+
+                // Fire the epg synced event
+                event(new SyncCompleted($this->epg));
                 return;
             }
 
@@ -278,6 +282,7 @@ class ProcessEpgImport implements ShouldQueue
                             'progress' => 100,
                             'processing' => false,
                         ]);
+                        event(new SyncCompleted($epg));
                     })->dispatch();
             } else {
                 // Log the exception
@@ -304,6 +309,9 @@ class ProcessEpgImport implements ShouldQueue
                     'progress' => 100,
                     'processing' => false,
                 ]);
+
+                // Fire the epg synced event
+                event(new SyncCompleted($this->epg));
             }
         } catch (Exception $e) {
             // Log the exception
@@ -329,6 +337,9 @@ class ProcessEpgImport implements ShouldQueue
                 'progress' => 100,
                 'processing' => false,
             ]);
+
+            // Fire the epg synced event
+            event(new SyncCompleted($this->epg));
         }
         return;
     }

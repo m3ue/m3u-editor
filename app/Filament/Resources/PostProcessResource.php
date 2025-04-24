@@ -121,8 +121,9 @@ class PostProcessResource extends Resource
     {
         $schema = [
             Forms\Components\Toggle::make('enabled')
-                ->default(true)
-                ->columnSpanFull(),
+                ->default(true)->helperText('Enable this post process'),
+            Forms\Components\Toggle::make('metadata.send_failed')
+                ->default(false)->helperText('Send failed syncs too. Default is only successful syncs.'),
             Forms\Components\TextInput::make('name')
                 ->required()
                 ->maxLength(255),
@@ -164,7 +165,7 @@ class PostProcessResource extends Resource
                 ->maxLength(255),
             Forms\Components\Fieldset::make('Request Options')
                 ->schema([
-                    Forms\Components\ToggleButtons::make('metadata.get')
+                    Forms\Components\ToggleButtons::make('metadata.post')
                         ->label('Request type')
                         ->grouped()
                         ->required()
@@ -174,45 +175,69 @@ class PostProcessResource extends Resource
                         ])
                         ->default(false)
                         ->helperText('Send as GET or POST request.'),
-                    Forms\Components\CheckboxList::make('metadata.post_attributes')
-                        ->label('Request variables')
-                        ->options([
-                            'name' => 'Name',
-                            'uuid' => 'UUID',
-                            'url' => 'URL',
-                        ])->helperText('Attributes can be (optionally) sent as GET or POST data.')
-                ])->hidden(fn(Get $get) => !! $get('metadata.local')),
-            Forms\Components\Repeater::make('metadata.script_vars')
-                ->label('Export variables')
-                ->schema([
-                    Forms\Components\TextInput::make('export_name')
-                        ->label('Export name')
-                        ->placeholder('VARIABLE_NAME')
-                        ->helperText('Name of the variable to export. Example: VARIABLE_NAME can be used as $VARIABLE_NAME in your script.')
-                        ->datalist([
-                            'NAME',
-                            'UUID',
-                            'URL',
-                            'M3U_NAME',
-                            'M3U_UUID',
-                            'M3U_URL',
+                    Forms\Components\Repeater::make('metadata.post_vars')
+                        ->label('GET/POST variables')
+                        ->schema([
+                            Forms\Components\TextInput::make('variable_name')
+                                ->label('Variable name')
+                                ->placeholder('variable_name')
+                                ->helperText('Name of the variable to send as GET/POST variable to your webhook URL.')
+                                ->datalist([
+                                    'name',
+                                    'uuid',
+                                    'url',
+                                ])
+                                ->alphaDash()
+                                ->ascii()
+                                ->required(),
+                            Forms\Components\Select::make('value')
+                                ->label('Value')
+                                ->required()
+                                ->options([
+                                    'name' => 'Name',
+                                    'uuid' => 'UUID',
+                                    'url' => 'URL',
+                                    'status' => 'Status',
+                                ])->helperText('Value to use for this variable.'),
                         ])
-                        ->alphaDash()
-                        ->ascii()
-                        ->required(),
-                    Forms\Components\Select::make('value')
-                        ->label('Value')
-                        ->required()
-                        ->options([
-                            'name' => 'Name',
-                            'uuid' => 'UUID',
-                            'url' => 'URL',
-                        ])->helperText('Value to use for this variable.'),
-                ])
-                ->columns(2)
-                ->columnSpanFull()
-                ->addActionLabel('Add named export')
-                ->hidden(fn(Get $get) => ! $get('metadata.local')),
+                        ->columns(2)
+                        ->columnSpanFull()
+                        ->addActionLabel('Add GET/POST variable'),
+                ])->hidden(fn(Get $get) => !! $get('metadata.local')),
+            Forms\Components\Fieldset::make('Script Options')
+                ->schema([
+                    Forms\Components\Repeater::make('metadata.script_vars')
+                        ->label('Export variables')
+                        ->schema([
+                            Forms\Components\TextInput::make('export_name')
+                                ->label('Export name')
+                                ->placeholder('VARIABLE_NAME')
+                                ->helperText('Name of the variable to export. Example: VARIABLE_NAME can be used as $VARIABLE_NAME in your script.')
+                                ->datalist([
+                                    'NAME',
+                                    'UUID',
+                                    'URL',
+                                    'M3U_NAME',
+                                    'M3U_UUID',
+                                    'M3U_URL',
+                                ])
+                                ->alphaDash()
+                                ->ascii()
+                                ->required(),
+                            Forms\Components\Select::make('value')
+                                ->label('Value')
+                                ->required()
+                                ->options([
+                                    'name' => 'Name',
+                                    'uuid' => 'UUID',
+                                    'url' => 'URL',
+                                    'status' => 'Status',
+                                ])->helperText('Value to use for this variable.'),
+                        ])
+                        ->columns(2)
+                        ->columnSpanFull()
+                        ->addActionLabel('Add named export'),
+                ])->hidden(fn(Get $get) => ! $get('metadata.local')),
         ];
         return [
             Forms\Components\Grid::make()
