@@ -91,4 +91,9 @@ class Playlist extends Model
     {
         return $this->morphToMany(PostProcess::class, 'processable');
     }
+
+    public function syncStatuses(): HasMany
+    {
+        return $this->hasMany(PlaylistSyncStatus::class);
+    }
 }

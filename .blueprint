@@ -1,7 +1,7 @@
 created:
-    - database/factories/PostProcessFactory.php
-    - database/migrations/2025_04_21_203422_create_post_processes_table.php
-    - app/Models/PostProcess.php
+    - database/factories/PlaylistSyncStatusFactory.php
+    - database/migrations/2025_04_24_212113_create_playlist_sync_statuses_table.php
+    - app/Models/PlaylistSyncStatus.php
 models:
     User: { name: string, email: string, email_verified_at: 'datetime nullable', password: string, remember_token: 'string nullable' }
     Playlist: { name: string, uuid: uuid, url: string, status: 'enum:pending,processing,completed,failed default:pending', prefix: 'string nullable', channels: 'unsignedInteger default:0', synced: 'datetime nullable', errors: 'longText nullable', user_id: 'id foreign:users', relationships: { belongsTo: User, hasMany: 'Channel, Group' } }
@@ -15,3 +15,4 @@ models:
     EpgMap: { name: string, uuid: uuid, errors: 'longText nullable', status: 'enum:pending,processing,completed,failed default:pending', processing: 'boolean default:false', progress: 'float default:0', sync_time: 'datetime nullable', user_id: 'id foreign:users', epg_id: 'id foreign:epgs', relationships: { belongsTo: 'User, Epg' } }
     PlaylistAuth: { name: string, enabled: 'boolean default:true', user_id: 'id foreign:users', username: string, password: string, relationships: { belongsTo: User, morphTo: Authenticatable } }
     PostProcess: { name: string, enabled: 'boolean default:true', user_id: 'id foreign:users', event: string, metadata: json, relationships: { belongsTo: User, morphTo: processable } }
+    PlaylistSyncStatus: { name: string, user_id: 'id foreign:users', playlist_id: 'id foreign:playlists', deleted_groups: longtext, added_groups: longtext, deleted_channels: longtext, added_channels: longtext, relationships: { belongsTo: 'User, Playlist' } }

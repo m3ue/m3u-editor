@@ -7,6 +7,7 @@ use App\Events\SyncCompleted;
 use App\Models\Channel;
 use App\Models\Group;
 use App\Models\Job;
+use App\Models\PlaylistSyncStatus;
 use App\Models\User;
 use Carbon\Carbon;
 use Filament\Notifications\Notification;
@@ -16,6 +17,9 @@ use Illuminate\Foundation\Queue\Queueable;
 class ProcessM3uImportComplete implements ShouldQueue
 {
     use Queueable;
+
+    // Make sure the process logs are cleaned up
+    public int $maxLogs = 50;
 
     public $deleteWhenMissingModels = true;
 
@@ -96,12 +100,20 @@ class ProcessM3uImportComplete implements ShouldQueue
             ['new', true],
         ]);
 
-        // dump([
-        //     'deleted_groups' => $removedGroups->get(['id', 'name'])->toArray(),
-        //     'new_groups' => $newGroups->get(['id', 'name'])->toArray(),
-        //     'deleted_channels' => $removedChannels->get(['id', 'name', 'title'])->toArray(),
-        //     'new_channels' => $newChannels->get(['id', 'name', 'title'])->toArray(),
-        // ]);
+        // Log it to the playlst sync statuses!
+        PlaylistSyncStatus::create([
+            'name' => $playlist->name,
+            'user_id' => $user->id,
+            'playlist_id' => $playlist->id,
+            'sync_stats' => [
+                'time' => $completedIn,
+                'time_rounded' => $completedInRounded,
+            ],
+            'deleted_groups' => $removedGroups->get(['id', 'name'])->toArray(),
+            'added_groups' => $newGroups->get(['id', 'name'])->toArray(),
+            'deleted_channels' => $removedChannels->get(['id', 'name', 'title'])->toArray(),
+            'added_channels' => $newChannels->get(['id', 'name', 'title'])->toArray(),
+        ]);
 
         // Clear out invalid groups/channels (if any)
         $removedGroups->delete();
@@ -188,6 +200,15 @@ class ProcessM3uImportComplete implements ShouldQueue
             'import_prefs' => $importPrefs,
             'groups' => $this->groups,
         ]);
+
+        // Clean up sync logs
+        $syncStatusQuery = $playlist->syncStatuses();
+        if ($syncStatusQuery->count() > $this->maxLogs) {
+            $syncStatusQuery
+                ->orderBy('created_at', 'asc')
+                ->limit($syncStatusQuery->count() - $this->maxLogs)
+                ->delete();
+        }
 
         // Fire the playlist synced event
         event(new SyncCompleted($playlist));

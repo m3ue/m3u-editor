@@ -1,0 +1,11 @@
+models:
+  PlaylistSyncStatus:
+    name: string
+    user_id: id foreign:users
+    playlist_id: id foreign:playlists
+    deleted_groups: longtext
+    added_groups: longtext
+    deleted_channels: longtext
+    added_channels: longtext
+    relationships:
+      belongsTo: User, Playlist
