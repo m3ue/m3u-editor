@@ -27,6 +27,8 @@ Route::get('/{uuid}/hdhr/lineup_status.json', [\App\Http\Controllers\PlaylistGen
 // Generate EPG playlist from the playlist configuration
 Route::get('/{uuid}/epg.xml', EpgGenerateController::class)
     ->name('epg.generate');
+Route::get('/{uuid}/epg.xml.gz', [EpgGenerateController::class, 'compressed'])
+    ->name('epg.generate.compressed');
 
 // Serve the EPG file
 Route::get('epgs/{uuid}/epg.xml', EpgFileController::class)

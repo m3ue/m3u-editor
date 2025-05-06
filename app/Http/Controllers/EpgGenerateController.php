@@ -50,6 +50,46 @@ class EpgGenerateController extends Controller
     }
 
     /**
+     * Generate the EPG XML file and compress it
+     *
+     * @param string $uuid
+     * @return \Illuminate\Http\Response
+     */
+    public function compressed(string $uuid)
+    {
+        // Fetch the playlist
+        $playlist = Playlist::where('uuid', $uuid)->first();
+        if (!$playlist) {
+            $playlist = MergedPlaylist::where('uuid', $uuid)->first();
+        }
+        if (!$playlist) {
+            $playlist = CustomPlaylist::where('uuid', $uuid)->firstOrFail();
+        }
+
+        // Generate a filename
+        $filename = Str::slug($playlist->name) . '.xml.gz';
+
+        // Start output buffering
+        ob_start();
+
+        // Generate the EPG content
+        $this->generate($playlist);
+
+        // Get the contents of the output buffer
+        $content = ob_get_clean();
+
+        // Compress the content
+        $compressedContent = gzencode($content, 9);
+
+        // Return the compressed content as a response
+        return response($compressedContent, 200, [
+            'Content-Type' => 'application/gzip',
+            'Content-Disposition' => "attachment; filename=\"$filename\"",
+            'Access-Control-Allow-Origin' => '*',
+        ]);
+    }
+
+    /**
      * Generate the EPG XML file contents
      *
      * @param Playlist|MergedPlaylist|CustomPlaylist $playlist
