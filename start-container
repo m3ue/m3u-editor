@@ -68,6 +68,7 @@ websockets_log_file="${log_dir}/websocket.log"
 laravel_log_file="${log_dir}/laravel.log"
 ffmpeg_log_file="${log_dir}/ffmpeg.log"
 nginx_log_file="${log_dir}/nginx.log"
+mysql_log_file="${log_dir}/mysqld_err.log"
 
 # Invalid log files, or files that will be created by the app
 swoole_log_file="${log_dir}/swoole_http.log"
@@ -115,6 +116,15 @@ echo "" > "${queue_log_file}"
 echo "" > "${websockets_log_file}"
 echo "" > "${ffmpeg_log_file}"
 echo "" > "${nginx_log_file}"
+
+# Create mysqld error log file if missing
+if [ "${ENABLE_MYSQL}" = "true" ]; then
+    [ ! -f "${mysql_log_file}" ] && touch "${mysql_log_file}"
+    echo "" > "${mysql_log_file}"
+else
+    # If mysql not enabled and mysql log file exists, remove it
+    [ -f "${mysql_log_file}" ] && rm -f "${mysql_log_file}"
+fi
 
 # Cleanup
 [ -f "${swoole_log_file}" ] && rm -f "${swoole_log_file}"
