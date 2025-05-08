@@ -23,7 +23,7 @@ class PlaylistSyncStatusResource extends Resource
     protected static ?string $navigationIcon = 'heroicon-o-rectangle-stack';
 
     public static ?string $parentResource = PlaylistResource::class;
-    
+
 
     public static function getRecordTitle(?Model $record): string|null|Htmlable
     {
@@ -84,16 +84,17 @@ class PlaylistSyncStatusResource extends Resource
             ])
             ->headerActions([])
             ->actions([
-                Tables\Actions\ActionGroup::make([
-                    Tables\Actions\ViewAction::make()
-                        ->url(
-                            fn(Pages\ListPlaylistSyncStatuses $livewire, Model $record): string => static::$parentResource::getUrl('playlist-sync-statuses.view', [
-                                'record' => $record,
-                                'parent' => $livewire->parent,
-                            ])
-                        ),
-                    Tables\Actions\DeleteAction::make(),
-                ])->button()->hiddenLabel()
+                Tables\Actions\DeleteAction::make()
+                    ->modalDescription('Delete this sync log?')
+                    ->modalSubmitActionLabel('Delete now')
+                    ->button()->hiddenLabel(),
+                Tables\Actions\ViewAction::make()
+                    ->url(
+                        fn(Pages\ListPlaylistSyncStatuses $livewire, Model $record): string => static::$parentResource::getUrl('playlist-sync-statuses.view', [
+                            'record' => $record,
+                            'parent' => $livewire->parent,
+                        ])
+                    )->button()->hiddenLabel(),
             ], position: Tables\Enums\ActionsPosition::BeforeCells)
             ->bulkActions([
                 Tables\Actions\BulkActionGroup::make([
