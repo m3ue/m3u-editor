@@ -12,6 +12,10 @@ return new class extends Migration
      */
     public function up(): void
     {
+        // Only run migration if using pgsql
+        if (config('database.default') !== 'pgsql') {
+            return;
+        }
         DB::statement(
             <<<SQL
 ALTER TABLE notifications
@@ -27,6 +31,10 @@ SQL
      */
     public function down(): void
     {
+        // Only run migration if using pgsql
+        if (config('database.default') !== 'pgsql') {
+            return;
+        }
         DB::statement(
             <<<SQL
 ALTER TABLE notifications
