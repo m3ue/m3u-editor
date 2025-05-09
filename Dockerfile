@@ -120,8 +120,8 @@ RUN echo -e '#!/bin/bash\n php artisan app:"$@"' > /usr/bin/m3ue && \
 RUN chown -R $WWWUSER:$WWWGROUP /var/www/html
 RUN chown -R $WWWUSER:$WWWGROUP /var/lib/nginx
 
-RUN mkdir -p /var/lib/postgresql && chown -R postgres:postgres /var/lib/postgresql
-RUN mkdir -p /run/postgresql && chown -R postgres:postgres /run/postgresql
+RUN mkdir -p /var/lib/postgresql && chown -R $WWWUSER:$WWWGROUP /var/lib/postgresql
+RUN mkdir -p /run/postgresql && chown -R $WWWUSER:$WWWGROUP /run/postgresql
 
 # Final entrypoint
 ENTRYPOINT ["start-container"]

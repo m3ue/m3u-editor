@@ -169,23 +169,23 @@ if [ "${ENABLE_POSTGRES}" = "true" ]; then
   if [ ! -f "$PGDATA/PG_VERSION" ]; then
     pwfile="/tmp/.pg_pwfile"
     echo "$PG_PASSWORD" > "$pwfile"
-    chown postgres:postgres "$pwfile" && chmod 600 "$pwfile"
-    su-exec postgres initdb --username=postgres --pwfile="$pwfile" -D "$PGDATA"
+    chown $WWWUSER:$WWWGROUP "$pwfile" && chmod 600 "$pwfile"
+    su-exec $WWWUSER initdb --username=postgres --pwfile="$pwfile" -D "$PGDATA"
     rm -f "$pwfile"
   fi
 
   # Create socket dir and start Postgres
-  mkdir -p /run/postgresql && chown postgres:postgres /run/postgresql
-  su-exec postgres postgres -D "$PGDATA" -h 0.0.0.0 -p "$PG_PORT" &
+  mkdir -p /run/postgresql && chown $WWWUSER:$WWWGROUP /run/postgresql
+  su-exec $WWWUSER postgres -D "$PGDATA" -h 0.0.0.0 -p "$PG_PORT" &
   
   # Wait until it's ready
-  until su-exec postgres pg_isready -h localhost -p "$PG_PORT"; do
+  until su-exec $WWWUSER pg_isready -h localhost -p "$PG_PORT"; do
     echo "⏳ Waiting for PostgreSQL..."
     sleep 1
   done
 
   # Idempotent role + database creation
-  su-exec postgres psql -U postgres <<-EOSQL
+  su-exec $WWWUSER psql -U postgres <<-EOSQL
 DO \$\$
 BEGIN
   -- ensure your app user exists and has the right password
@@ -204,8 +204,8 @@ END
 EOSQL
 
   # If the database exists but is owned by someone else, reassign it
-  if su-exec postgres psql -U postgres -tAc "SELECT 1 FROM pg_database WHERE datname='${PG_DATABASE}'" | grep -q 1; then
-    su-exec postgres psql -U postgres <<-EOSQL
+  if su-exec $WWWUSER psql -U postgres -tAc "SELECT 1 FROM pg_database WHERE datname='${PG_DATABASE}'" | grep -q 1; then
+    su-exec $WWWUSER psql -U postgres <<-EOSQL
 -- change the database owner
 ALTER DATABASE "${PG_DATABASE}" OWNER TO "${PG_USER}";
 
@@ -232,7 +232,7 @@ END
 \$\$;
 EOSQL
   else
-    su-exec postgres psql -U postgres -v ON_ERROR_STOP=1 <<-EOSQL
+    su-exec $WWWUSER psql -U postgres -v ON_ERROR_STOP=1 <<-EOSQL
 CREATE DATABASE "${PG_DATABASE}"
   OWNER = "${PG_USER}"
   ENCODING = 'UTF8'
@@ -260,7 +260,7 @@ if [ $# -gt 0 ]; then
     if [ "$SUPERVISOR_PHP_USER" = "root" ]; then
         exec "$@"
     else
-        exec su-exec $WWWUSER "$@"
+        su-exec $WWWUSER "$@"
     fi
 else
     echo ""
