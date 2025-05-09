@@ -165,6 +165,10 @@ php artisan sqlite:wal-enable jobs
 echo ""
 
 if [ "${ENABLE_POSTGRES}" = "true" ]; then
+  # Make sure permissions are correct
+  chown -R $WWWUSER:$WWWGROUP "$PGDATA"
+  chmod -R 700 "$PGDATA"
+
   # Ensure data & run initdb on first-run
   if [ ! -f "$PGDATA/PG_VERSION" ]; then
     pwfile="/tmp/.pg_pwfile"
