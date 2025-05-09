@@ -71,6 +71,7 @@ websockets_log_file="${log_dir}/websocket.log"
 laravel_log_file="${log_dir}/laravel.log"
 ffmpeg_log_file="${log_dir}/ffmpeg.log"
 nginx_log_file="${log_dir}/nginx.log"
+postgres_log_file="${log_dir}/postgress.log"
 
 # Invalid log files, or files that will be created by the app
 swoole_log_file="${log_dir}/swoole_http.log"
@@ -165,6 +166,11 @@ php artisan sqlite:wal-enable jobs
 echo ""
 
 if [ "${ENABLE_POSTGRES}" = "true" ]; then
+  # Create log file
+  [ ! -f "${postgres_log_file}" ] && touch "${postgres_log_file}"
+  echo "" > "${postgres_log_file}"
+  chown -R $WWWUSER:$WWWGROUP "${postgres_log_file}"
+
   # Make sure permissions are correct
   chown -R $WWWUSER:$WWWGROUP "$PGDATA"
   chmod -R 700 "$PGDATA"
@@ -180,7 +186,7 @@ if [ "${ENABLE_POSTGRES}" = "true" ]; then
 
   # Create socket dir and start Postgres
   mkdir -p /run/postgresql && chown $WWWUSER:$WWWGROUP /run/postgresql
-  su-exec $WWWUSER postgres -D "$PGDATA" -h 0.0.0.0 -p "$PG_PORT" &
+  su-exec $WWWUSER postgres -D "$PGDATA" -h 0.0.0.0 -p "$PG_PORT" >> "${postgres_log_file}" 2>&1 &
   
   # Wait until it's ready
   until su-exec $WWWUSER pg_isready -h localhost -p "$PG_PORT"; do
