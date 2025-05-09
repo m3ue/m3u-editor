@@ -210,7 +210,7 @@ class ProcessEpgImport implements ShouldQueue
                                         case 'display-name':
                                             if (!$elementData['display_name']) {
                                                 // Only use the first display-name element (could be multiple)
-                                                $elementData['name'] = trim($innerReader->readString());
+                                                $elementData['name'] = Str::limit(trim($innerReader->readString()), 255);
                                                 $elementData['display_name'] = trim($innerReader->readString());
                                                 $elementData['lang'] = trim($innerReader->getAttribute('lang'));
                                             }
