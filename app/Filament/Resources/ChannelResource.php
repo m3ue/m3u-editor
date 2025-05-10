@@ -162,7 +162,9 @@ class ChannelResource extends Resource
                 Tables\Columns\TextColumn::make('group')
                     ->hidden(fn() => $relationId)
                     ->toggleable()
-                    ->searchable()
+                    ->searchable(query: function ($query, string $search): Builder {
+                        return $query->orWhereRaw('LOWER("group"::text) LIKE ?', ["%{$search}%"]);
+                    })
                     ->sortable(),
                 Tables\Columns\TextColumn::make('epgChannel.name')
                     ->label('EPG Channel')
