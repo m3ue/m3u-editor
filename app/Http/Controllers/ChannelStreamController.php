@@ -304,6 +304,12 @@ class ChannelStreamController extends Controller
             // Cache the actual FFmpeg PID
             $status = proc_get_status($process);
             Cache::forever("hls:pid:{$channel->id}", $status['pid']);
+
+            // Record timestamp in Redis (never expires until we prune)
+            Redis::set("hls:last_seen:{$channel->id}", now()->timestamp);
+
+            // Add to active IDs set
+            Redis::sadd('hls:active_ids', $channel->id);
         }
 
         // Redirect the client to the playlist URL
