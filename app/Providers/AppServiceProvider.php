@@ -15,6 +15,7 @@ use App\Models\Epg;
 use App\Models\Group;
 use App\Models\Playlist;
 use App\Models\User;
+use App\Services\FfmpegCodecService;
 use App\Services\HlsStreamService;
 use App\Services\PlaylistUrlService;
 use App\Services\ProxyService;
@@ -320,5 +321,8 @@ class AppServiceProvider extends ServiceProvider
 
         // Register the HLS stream service
         $this->app->singleton(HlsStreamService::class);
+
+        // Register the FFMpeg codec service
+        $this->app->singleton(FfmpegCodecService::class);
     }
 }
