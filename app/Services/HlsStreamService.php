@@ -33,8 +33,8 @@ class HlsStreamService
                 'ffmpeg_debug' => false,
                 'ffmpeg_max_tries' => 3,
                 'ffmpeg_user_agent' => 'VLC/3.0.21 LibVLC/3.0.21',
-                'ffmpeg_codec_video' => 'copy',
-                'ffmpeg_codec_audio' => 'copy',
+                'ffmpeg_codec_video' => 'libx264',
+                'ffmpeg_codec_audio' => 'aac',
                 'ffmpeg_codec_subtitles' => 'copy',
             ];
             try {
@@ -57,7 +57,7 @@ class HlsStreamService
             $videoCodec = config('proxy.ffmpeg_codec_video') ?: $settings['ffmpeg_codec_video'];
             $audioCodec = config('proxy.ffmpeg_codec_audio') ?: $settings['ffmpeg_codec_audio'];
             $subtitleCodec = config('proxy.ffmpeg_codec_subtitles') ?: $settings['ffmpeg_codec_subtitles'];
-            $outputFormat = "-c:v $videoCodec -c:a $audioCodec -bsf:a aac_adtstoasc -c:s $subtitleCodec";
+            $outputFormat = "-c:v $videoCodec -c:a $audioCodec -c:s $subtitleCodec";
 
             // Get user defined options
             $userArgs = config('proxy.ffmpeg_additional_args', '');

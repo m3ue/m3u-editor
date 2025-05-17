@@ -14,6 +14,6 @@ Route::group(['prefix' => 'stream'], function () {
 
     // Serve segments (catch-all for any .ts file)
     Route::get('{channelId}/{segment}', [\App\Http\Controllers\ChannelHlsStreamController::class, 'serveSegment'])
-        ->where('segment', '/^segment_\d{3}\.ts$/')
+        ->where('segment', 'segment_[0-9]{3}\.ts')
         ->name('stream.hls.segment');
 });
