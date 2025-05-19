@@ -110,6 +110,9 @@ RUN git config --global --add safe.directory /var/www/html
 # Install composer dependencies
 RUN composer install --no-dev --no-interaction --no-progress -o
 
+# Symlink jellyfin-ffmpeg to usr/bin
+RUN ln -s /usr/lib/jellyfin-ffmpeg/ffmpeg /usr/bin/jellyfin-ffmpeg
+
 # Setup user, group and permissions
 RUN addgroup $WWWGROUP \
     && adduser -h /var/www/html -s /bin/bash -G $WWWGROUP -D $WWWUSER

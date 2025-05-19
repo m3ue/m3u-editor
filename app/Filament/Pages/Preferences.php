@@ -41,6 +41,7 @@ class Preferences extends SettingsPage
 
     public function form(Form $form): Form
     {
+        $ffmpegPath = config('proxy.ffmpeg_path');
         return $form
             ->schema([
                 Forms\Components\Tabs::make()
@@ -77,17 +78,22 @@ class Preferences extends SettingsPage
                                     ->schema([
                                         Forms\Components\Toggle::make('ffmpeg_debug')
                                             ->label('Debug')
-                                            ->columnSpanFull()
+                                            ->columnSpan(1)
                                             ->helperText('When enabled FFmpeg will output verbose logging to the log file (/var/www/logs/ffmpeg-YYYY-MM-DD.log). When disabled, FFmpeg will only log errors.'),
                                         Forms\Components\Select::make('ffmpeg_path')
                                             ->label('FFmpeg')
-                                            ->columnSpanFull()
+                                            ->columnSpan(2)
                                             ->helperText('Which ffmpeg variant would you like to use.')
                                             ->options([
                                                 'jellyfin-ffmpeg' => 'jellyfin-ffmpeg (default)',
                                                 'ffmpeg' => 'ffmpeg (v6)',
                                             ])
-                                            ->placeholder('FFmpeg variant...'),
+                                            ->searchable()
+                                            ->suffixIcon(fn() => !empty($ffmpegPath) ? 'heroicon-m-lock-closed' : null)
+                                            ->disabled(fn() => !empty($ffmpegPath))
+                                            ->hint(fn() => !empty($ffmpegPath) ? 'Already set by environment variable!' : null)
+                                            ->dehydrated(fn() => empty($ffmpegPath))
+                                            ->placeholder(fn() => empty($ffmpegPath) ? 'jellyfin-ffmpeg' : $ffmpegPath),
                                         Forms\Components\TextInput::make('ffmpeg_max_tries')
                                             ->label('Max tries')
                                             ->columnSpan(1)
