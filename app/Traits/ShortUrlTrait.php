@@ -4,7 +4,6 @@ namespace App\Traits;
 
 use Illuminate\Database\Eloquent\Model;
 use AshAllenDesign\ShortURL\Classes\Builder;
-use AshAllenDesign\ShortURL\Models\ShortURL;
 use Illuminate\Support\Facades\DB;
 
 trait ShortUrlTrait
@@ -21,6 +20,7 @@ trait ShortUrlTrait
                 'm3u' => route('playlist.generate', ['uuid' => $this->uuid]),
                 'hdhr' => route('playlist.hdhr.overview', ['uuid' => $this->uuid]),
                 'epg' => route('epg.generate', ['uuid' => $this->uuid]),
+                'epg_zip' => route('epg.generate.compressed', ['uuid' => $this->uuid]),
             ];
             $short_urls = [];
             foreach ($urls as $type => $url) {
@@ -37,6 +37,7 @@ trait ShortUrlTrait
             DB::table('short_urls')
                 ->where('destination_url', 'LIKE', "%{$this->uuid}%")
                 ->delete();
+
             // Set the short URLs to null
             $this->short_urls = null;
         }
@@ -55,6 +56,7 @@ trait ShortUrlTrait
         DB::table('short_urls')
             ->where('destination_url', 'LIKE', "%{$this->uuid}%")
             ->delete();
+
         // Set the short URLs to null
         $this->short_urls = null;
 

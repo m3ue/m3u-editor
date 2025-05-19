@@ -200,14 +200,8 @@ class PlaylistResource extends Resource
                         ->icon('heroicon-o-arrow-down-tray')
                         ->url(fn($record) => PlaylistUrlFacade::getUrls($record)['m3u'])
                         ->openUrlInNewTab(),
-                    // Tables\Actions\Action::make('Download EPG')
-                    //     ->label('Download EPG')
-                    //     ->icon('heroicon-o-arrow-down-tray')
-                    //     ->url(fn($record) => PlaylistUrlFacade::getUrls($record)['epg'])
-                    //     ->openUrlInNewTab(),
                     Tables\Actions\Action::make('Download EPG')
                         ->label('Download EPG')
-                        ->action(fn($record) => redirect(PlaylistUrlFacade::getUrls($record)['epg']))
                         ->icon('heroicon-o-arrow-down-tray')
                         ->modalHeading('Download EPG')
                         ->modalIcon('heroicon-o-arrow-down-tray')
@@ -221,7 +215,7 @@ class PlaylistResource extends Resource
                             Tables\Actions\Action::make('compressed')
                                 ->requiresConfirmation()
                                 ->label('Download gzip EPG')
-                                ->action(fn($record) => redirect(PlaylistUrlFacade::getUrls($record)['epg'] . '.gz'))
+                                ->action(fn($record) => redirect(PlaylistUrlFacade::getUrls($record)['epg_zip']))
                         ])
                         ->modalSubmitActionLabel('Download EPG'),
                     Tables\Actions\Action::make('HDHomeRun URL')

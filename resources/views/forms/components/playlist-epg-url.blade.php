@@ -2,7 +2,7 @@
     @php($record = $getRecord())
     @php($urls = \App\Facades\PlaylistUrlFacade::getUrls($record))
     @php($epgUrl = $urls['epg'])
-    @php($epgZippedUrl = $urls['epg'] . '.gz')
+    @php($epgZippedUrl = $urls['epg_zip'])
     <div x-data="{ state: $wire.$entangle('{{ $getStatePath() }}') }">
         <div class="flex gap-2 items-center justify-start mb-4">
             <x-filament::input.wrapper>

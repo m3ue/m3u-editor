@@ -30,11 +30,13 @@ class PlaylistUrlService
             $shortUrls = collect($playlist->short_urls)->keyBy('type');
             $m3uUrl = url('/s/' . $shortUrls->get('m3u')['key']);
             $hdhrUrl = url('/s/' . $shortUrls->get('hdhr')['key']);
-            $epgUrl = url('/s/' . $shortUrls->get('epg')['key']);;
+            $epgUrl = url('/s/' . $shortUrls->get('epg')['key']);
+            $epgZipUrl = url('/s/' . $shortUrls->get('epg_zip')['key']);
         } else {
             $m3uUrl = route('playlist.generate', ['uuid' => $playlist->uuid]);
             $hdhrUrl = route('playlist.hdhr.overview', ['uuid' => $playlist->uuid]);
             $epgUrl = route('epg.generate', ['uuid' => $playlist->uuid]);
+            $epgZipUrl = route('epg.generate.compressed', ['uuid' => $playlist->uuid]);
         }
 
         // If auth set, append auth parameters to the URLs
@@ -48,6 +50,7 @@ class PlaylistUrlService
             'm3u' => $m3uUrl,
             'hdhr' => $hdhrUrl,
             'epg' => $epgUrl,
+            'epg_zip' => $epgZipUrl,
             'authEnabled' => $playlistAuth ? true : false,
         ];
     }
