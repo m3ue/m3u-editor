@@ -4,6 +4,9 @@ namespace App\Http\Controllers;
 
 use Exception;
 use App\Models\Channel;
+use App\Models\CustomPlaylist;
+use App\Models\MergedPlaylist;
+use App\Models\Playlist;
 use App\Settings\GeneralSettings;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -16,13 +19,18 @@ class ChannelStreamController extends Controller
      * Stream an IPTV channel.
      *
      * @param Request $request
-     * @param int|string $id
+     * @param int|string $encodedId
+     * @param string|null $playlist
      * @param string $format
      *
      * @return StreamedResponse
      */
-    public function __invoke(Request $request, $id, $format = 'mp2t')
-    {
+    public function __invoke(
+        Request $request,
+        $encodedId,
+        $format = 'mp2t',
+        $playlist = null
+    ) {
         // Validate the format
         if (!in_array($format, ['mp2t', 'mp4'])) {
             abort(400, 'Invalid format specified.');
@@ -34,12 +42,27 @@ class ChannelStreamController extends Controller
         ini_set('implicit_flush', 1);
 
         // Find the channel by ID
-        if (strpos($id, '==') === false) {
-            $id .= '=='; // right pad to ensure proper decoding
+        if (strpos($encodedId, '==') === false) {
+            $encodedId .= '=='; // right pad to ensure proper decoding
         }
-        $channel = Channel::findOrFail(base64_decode($id));
+        $channel = Channel::findOrFail(base64_decode($encodedId));
         $title = $channel->title_custom ?? $channel->title;
         $title = strip_tags($title);
+
+        // Check if playlist is specified
+        $playlistType = null;
+        if ($playlist) {
+            $playlistType = 'playlist';
+            $playlist = Playlist::find($playlist);
+            if (!$playlist) {
+                $playlistType = 'merged';
+                $playlist = MergedPlaylist::find($playlist);
+            }
+            if (!$playlist) {
+                $playlistType = 'custom';
+                $playlist = CustomPlaylist::findOrFail($playlist);
+            }
+        }
 
         // Setup streams array
         $streamUrls = [
@@ -76,7 +99,7 @@ class ChannelStreamController extends Controller
         $extension = $format === 'mp2t'
             ? 'ts'
             : $format;
-        return new StreamedResponse(function () use ($streamUrls, $title, $settings, $format) {
+        return new StreamedResponse(function () use ($streamUrls, $title, $settings, $format, $playlist) {
             while (ob_get_level()) {
                 ob_end_flush();
             }
@@ -87,6 +110,9 @@ class ChannelStreamController extends Controller
 
             // Get user agent
             $userAgent = escapeshellarg($settings['ffmpeg_user_agent']);
+            if ($playlist) {
+                $userAgent = escapeshellarg($playlist->user_agent ?? $userAgent);
+            }
             $maxRetries = $settings['ffmpeg_max_tries'];
 
             // Get user defined options

@@ -8,7 +8,7 @@ use Illuminate\Support\Facades\Route;
 
 // Stream an IPTV channel (HLS)
 Route::group(['prefix' => 'stream'], function () {
-    Route::get('{encodedId}.m3u8', \App\Http\Controllers\ChannelHlsStreamController::class)
+    Route::get('{encodedId}/{playlist?}/playlist.m3u8', \App\Http\Controllers\ChannelHlsStreamController::class)
         ->where('id', '[A-Za-z0-9]+')
         ->name('stream.hls.playlist');
 

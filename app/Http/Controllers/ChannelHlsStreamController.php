@@ -29,7 +29,7 @@ class ChannelHlsStreamController extends Controller
      * 
      * @return \Illuminate\Http\Response
      */
-    public function __invoke(Request $request, $encodedId)
+    public function __invoke(Request $request, $encodedId, $playlist = null)
     {
         // Find the channel by ID
         if (strpos($encodedId, '==') === false) {
@@ -44,7 +44,7 @@ class ChannelHlsStreamController extends Controller
         // Start stream, if not already running
         if (!$this->hlsService->isRunning($channelId)) {
             try {
-                $this->hlsService->startStream($channelId, $streamUrl);
+                $this->hlsService->startStream($channelId, $streamUrl, $playlist);
                 Log::channel('ffmpeg')->info("Started HLS stream for channel {$channelId} ({$title})");
             } catch (Exception $e) {
                 Log::channel('ffmpeg')->error("Failed to start HLS stream for channel {$channelId} ({$title}): {$e->getMessage()}");

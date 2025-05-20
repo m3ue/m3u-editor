@@ -8,16 +8,26 @@ class ProxyService
      * Get the proxy URL for a channel
      *
      * @param string|int $id
+     * @param string|null $format
+     * @param string|null $proxyUrlOverride
      * @return string
      */
-    public function getProxyUrlForChannel($id)
+    public function getProxyUrlForChannel($id, $format = 'mpts', $playlist = null)
     {
         $proxyUrlOverride = config('proxy.url_override');
         $id = rtrim(base64_encode($id), '=');
         if ($proxyUrlOverride) {
             $proxyUrlOverride = rtrim($proxyUrlOverride, '/');
-            return "$proxyUrlOverride/stream/$id";
+            $proxyUrlOverride = "$proxyUrlOverride/stream/$id/$format";
+            if ($playlist) {
+                $proxyUrlOverride .= "/$playlist";
+            }
+            return $proxyUrlOverride;
         }
-        return route('stream', ['id' => $id]);
+        return route('stream', [
+            'encodedId' => $id,
+            'format' => $format,
+            'playlist' => $playlist
+        ]);
     }
 }

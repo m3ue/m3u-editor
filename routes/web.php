@@ -59,8 +59,8 @@ Route::get('/phpinfo', function () {
  * Proxy routes
  */
 
-// Stream an IPTV channel (MPEGTS)
-Route::get('/stream/{id}/{format?}', \App\Http\Controllers\ChannelStreamController::class)
+// Stream an IPTV channel (MPEGTS/MP4)
+Route::get('/stream/{encodedId}/{format?}/{playlist?}', \App\Http\Controllers\ChannelStreamController::class)
     ->name('stream');
 
 
