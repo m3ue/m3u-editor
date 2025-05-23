@@ -49,6 +49,8 @@ class EpisodesRelationManager extends RelationManager
                     ->searchable(),
                 Tables\Columns\TextColumn::make('url')
                     ->label('URL')
+                    ->url(fn($record) => $record->url)
+                    ->openUrlInNewTab()
                     ->toggleable(),
             ])
             ->filters([

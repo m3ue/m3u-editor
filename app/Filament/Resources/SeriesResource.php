@@ -11,8 +11,9 @@ use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Table;
+use Illuminate\Support\Str;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Database\Eloquent\SoftDeletingScope;
+use Illuminate\Database\Eloquent\Collection;
 
 class SeriesResource extends Resource
 {
@@ -56,10 +57,13 @@ class SeriesResource extends Resource
             ->defaultPaginationPageOption(25)
             ->columns([
                 Tables\Columns\ImageColumn::make('cover')
-                    ->square()
+                    ->width(80)
+                    ->height(120)
                     ->searchable(),
                 Tables\Columns\TextColumn::make('name')
-                    //->description((fn($record) => $record->plot))
+                    ->description((fn($record) => Str::limit($record->plot, 200)))
+                    ->wrap()
+                    ->extraAttributes(['style' => 'min-width: 400px;'])
                     ->searchable(),
                 Tables\Columns\ToggleColumn::make('enabled')
                     ->toggleable()
@@ -163,6 +167,50 @@ class SeriesResource extends Resource
                         ->modalIcon('heroicon-o-arrow-path')
                         ->modalDescription('Process selected series now? This will fetch all episodes and seasons for this series. This may take a while depending on the number of series selected.')
                         ->modalSubmitActionLabel('Yes, process now'),
+                    Tables\Actions\BulkAction::make('enable')
+                        ->label('Enable selected')
+                        ->action(function (Collection $records): void {
+                            foreach ($records as $record) {
+                                $record->update([
+                                    'enabled' => true,
+                                ]);
+                            }
+                        })->after(function () {
+                            Notification::make()
+                                ->success()
+                                ->title('Selected series enabled')
+                                ->body('The selected series have been enabled.')
+                                ->send();
+                        })
+                        ->color('success')
+                        ->deselectRecordsAfterCompletion()
+                        ->requiresConfirmation()
+                        ->icon('heroicon-o-check-circle')
+                        ->modalIcon('heroicon-o-check-circle')
+                        ->modalDescription('Enable the selected channel(s) now?')
+                        ->modalSubmitActionLabel('Yes, enable now'),
+                    Tables\Actions\BulkAction::make('disable')
+                        ->label('Disable selected')
+                        ->action(function (Collection $records): void {
+                            foreach ($records as $record) {
+                                $record->update([
+                                    'enabled' => false,
+                                ]);
+                            }
+                        })->after(function () {
+                            Notification::make()
+                                ->success()
+                                ->title('Selected series disabled')
+                                ->body('The selected series have been disabled.')
+                                ->send();
+                        })
+                        ->color('warning')
+                        ->deselectRecordsAfterCompletion()
+                        ->requiresConfirmation()
+                        ->icon('heroicon-o-x-circle')
+                        ->modalIcon('heroicon-o-x-circle')
+                        ->modalDescription('Disable the selected channel(s) now?')
+                        ->modalSubmitActionLabel('Yes, disable now'),
                     Tables\Actions\DeleteBulkAction::make(),
                 ]),
             ]);
