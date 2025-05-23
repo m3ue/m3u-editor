@@ -59,6 +59,7 @@ class SeriesResource extends Resource
                     ->square()
                     ->searchable(),
                 Tables\Columns\TextColumn::make('name')
+                    //->description((fn($record) => $record->plot))
                     ->searchable(),
                 Tables\Columns\ToggleColumn::make('enabled')
                     ->toggleable()
@@ -81,6 +82,7 @@ class SeriesResource extends Resource
                     ->searchable(),
                 Tables\Columns\TextColumn::make('youtube_trailer')
                     ->label('YouTube Trailer')
+                    ->placeholder('No trailer ID set.')
                     ->url(fn($record): string => 'https://www.youtube.com/watch?v=' . $record->youtube_trailer)
                     ->openUrlInNewTab()
                     ->icon('heroicon-s-play'),
@@ -130,6 +132,10 @@ class SeriesResource extends Resource
                         ->modalIcon('heroicon-o-arrow-path')
                         ->modalDescription('Process series now? This will fetch all episodes and seasons for this series.')
                         ->modalSubmitActionLabel('Yes, process now'),
+                    Tables\Actions\DeleteAction::make()
+                        ->modalIcon('heroicon-o-trash')
+                        ->modalDescription('Are you sure you want to delete this series? This will delete all episodes and seasons for this series. This action cannot be undone.')
+                        ->modalSubmitActionLabel('Yes, delete series'),
                 ])->button()->hiddenLabel()->size('sm'),
             ], position: Tables\Enums\ActionsPosition::BeforeCells)
             ->bulkActions([
@@ -155,7 +161,7 @@ class SeriesResource extends Resource
                         ->requiresConfirmation()
                         ->icon('heroicon-o-arrow-path')
                         ->modalIcon('heroicon-o-arrow-path')
-                        ->modalDescription('Process selected series now? This will fetch all episodes and seasons for this series.')
+                        ->modalDescription('Process selected series now? This will fetch all episodes and seasons for this series. This may take a while depending on the number of series selected.')
                         ->modalSubmitActionLabel('Yes, process now'),
                     Tables\Actions\DeleteBulkAction::make(),
                 ]),
