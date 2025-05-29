@@ -610,7 +610,8 @@ class PlaylistResource extends Resource
                         ->searchable()
                         ->multiple()
                         ->helperText('NOTE: If the list is empty, sync the playlist and check again once complete.')
-                        ->options(fn ($record): array => 
+                        ->options(
+                            fn($record): array =>
                             SourceGroup::where('playlist_id', $record->id)
                                 ->get()->pluck('name', 'name')->toArray()
                         )
@@ -733,7 +734,8 @@ class PlaylistResource extends Resource
                         ->rules(['min:1'])
                         ->type('number')
                         ->default(1) // Default to 1 stream
-                        ->required(),
+                        ->required()
+                        ->hidden(fn(Get $get): bool => !$get('enable_proxy')),
                     Forms\Components\Select::make('proxy_options.output')
                         ->label('Proxy Output Format')
                         ->required()
@@ -741,7 +743,9 @@ class PlaylistResource extends Resource
                         ->options([
                             'ts' => 'MPEG-TS (.ts)',
                             'hls' => 'HLS (.m3u8)',
-                        ])->default('ts')->helperText('NOTE: Only HLS streaming supports multiple clients per stream.'),
+                        ])
+                        ->default('ts')->helperText('NOTE: Only HLS streaming supports multiple clients per stream.')
+                        ->hidden(fn(Get $get): bool => !$get('enable_proxy')),
                 ]),
         ];
 
