@@ -351,16 +351,20 @@ class StreamController extends Controller
                 }
             } else if ($settings['ffmpeg_qsv_enabled'] ?? false) {
                 $videoCodec = 'h264_qsv'; // Default QSV H.264 encoder
-                if (!empty($settings['ffmpeg_qsv_video_filter'])) {
-                    $hwaccelInitArgs .= "-init_hw_device qsv=qsv_device ";
-                    $hwaccelArgs .= "-hwaccel qsv -hwaccel_device qsv_device -hwaccel_output_format qsv -filter_hw_device qsv_device ";                }
+                
+                // Simplify QSV initialization - don't specify device path directly
+                $hwaccelInitArgs = "-init_hw_device qsv=qsv_device ";
+                $hwaccelArgs = "-hwaccel qsv -hwaccel_device qsv_device -hwaccel_output_format qsv -filter_hw_device qsv_device ";
+                
                 if (!empty($settings['ffmpeg_qsv_video_filter'])) {
                     $videoFilterArgs = "-vf " . escapeshellarg(trim($settings['ffmpeg_qsv_video_filter'], "'\",")) . " ";
                 } else {
-                    $videoFilterArgs = "-vf 'scale_qsv=out_color_matrix=bt709' ";
+                    // Simplified filter chain for QSV
+                    $videoFilterArgs = "-vf 'format=nv12,hwupload=extra_hw_frames=64' ";
                 }
+                
                 // Additional QSV specific options
-                $codecSpecificArgs = $settings['ffmpeg_qsv_encoder_options'] ? escapeshellarg($settings['ffmpeg_qsv_encoder_options']) : '';
+                $codecSpecificArgs = $settings['ffmpeg_qsv_encoder_options'] ? escapeshellarg($settings['ffmpeg_qsv_encoder_options']) : '-preset medium -global_quality 23';
                 if (!empty($settings['ffmpeg_qsv_additional_args'])) {
                     $userArgs = trim($settings['ffmpeg_qsv_additional_args']) . ($userArgs ? " " . $userArgs : "");
                 }

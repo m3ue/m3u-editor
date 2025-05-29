@@ -411,7 +411,7 @@ class Preferences extends SettingsPage
             'ffmpeg_qsv_video_filter',
             'ffmpeg_qsv_encoder_options',
             'ffmpeg_qsv_additional_args',
-            'ffmpeg_custom_command_template', // Added this line
+            'ffmpeg_custom_command_template',
             // mediaflow fields were removed, but if others exist that are text & nullable, add here
             // 'mediaflow_proxy_url', 'mediaflow_proxy_port', 'mediaflow_proxy_password',
             // 'mediaflow_proxy_user_agent', 
