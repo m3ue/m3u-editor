@@ -47,8 +47,9 @@ class CustomPlaylistResource extends Resource
 
     public static function form(Form $form): Form
     {
+        $isCreating = $form->getOperation() === 'create';
         return $form
-            ->schema(self::getForm());
+            ->schema(self::getForm($isCreating));
     }
 
     public static function table(Table $table): Table
@@ -151,7 +152,7 @@ class CustomPlaylistResource extends Resource
         ];
     }
 
-    public static function getForm(): array
+    public static function getForm($creating = false): array
     {
         $schema = [
             Forms\Components\TextInput::make('name')
@@ -166,7 +167,7 @@ class CustomPlaylistResource extends Resource
             $schema[] = Forms\Components\Section::make('MediaFlow Proxy')
                 ->description('Your MediaFlow Proxy generated links – to disable clear the MediaFlow Proxy values from the app Settings page.')
                 ->collapsible()
-                ->collapsed(true)
+                ->collapsed($creating)
                 ->headerActions([
                     Forms\Components\Actions\Action::make('mfproxy_git')
                         ->label('GitHub')
@@ -196,7 +197,7 @@ class CustomPlaylistResource extends Resource
                 ->description('Determines how the playlist is output')
                 ->columnSpanFull()
                 ->collapsible()
-                ->collapsed(true)
+                ->collapsed($creating)
                 ->columns(2)
                 ->schema([
                     Forms\Components\Toggle::make('auto_channel_increment')
@@ -218,7 +219,7 @@ class CustomPlaylistResource extends Resource
                 ->description('EPG output options')
                 ->columnSpanFull()
                 ->collapsible()
-                ->collapsed(true)
+                ->collapsed($creating)
                 ->columns(2)
                 ->schema([
                     Forms\Components\Toggle::make('dummy_epg')
@@ -253,7 +254,7 @@ class CustomPlaylistResource extends Resource
                 ->description('Output processing options')
                 ->columnSpanFull()
                 ->collapsible()
-                ->collapsed(true)
+                ->collapsed($creating)
                 ->columns(2)
                 ->schema([
                     Forms\Components\Toggle::make('enable_proxy')
@@ -266,12 +267,14 @@ class CustomPlaylistResource extends Resource
                         ->default(false)
                         ->helperText('When enabled, channel urls will be proxied through m3u editor and streamed via ffmpeg (m3u editor will act as your client, playing the channels directly and sending the content to your client).'),
                     Forms\Components\TextInput::make('streams')
-                        ->helperText('Number of streams available (currently used for HDHR service).')
+                        ->label('HDHR Streams')
+                        ->helperText('Number of streams available for HDHR service (if using).')
                         ->columnSpan(1)
-                        ->rules(['min:1'])
+                        ->rules(['min:0'])
                         ->type('number')
                         ->default(1) // Default to 1 stream
-                        ->required(),
+                        ->required()
+                        ->hidden(fn(Get $get): bool => !$get('enable_proxy')),
                     Forms\Components\Select::make('proxy_options.output')
                         ->label('Proxy Output Format')
                         ->required()
@@ -279,7 +282,9 @@ class CustomPlaylistResource extends Resource
                         ->options([
                             'ts' => 'MPEG-TS (.ts)',
                             'hls' => 'HLS (.m3u8)',
-                        ])->default('ts')->helperText('NOTE: Only HLS streaming supports multiple clients per stream.'),
+                        ])
+                        ->default('ts')->helperText('NOTE: Only HLS streaming supports multiple connections per stream. MPEG-TS creates a new stream for each connection.')
+                        ->hidden(fn(Get $get): bool => !$get('enable_proxy')),
                 ])
         ];
         return [
@@ -296,6 +301,7 @@ class CustomPlaylistResource extends Resource
                 ->schema([
                     Forms\Components\Tabs::make('tabs')
                         ->columnSpan(3)
+                        ->persistTabInQueryString()
                         ->tabs([
                             Forms\Components\Tabs\Tab::make('General')
                                 ->columns(2)

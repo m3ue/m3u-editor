@@ -101,6 +101,11 @@ class PlaylistResource extends Resource
                     ->wrap()
                     ->toggleable(isToggledHiddenByDefault: true)
                     ->searchable(),
+                Tables\Columns\TextColumn::make('available_streams')
+                    ->label('Streams')
+                    ->toggleable()
+                    ->tooltip('Total streams available for this playlist (0 indicates no limit)')
+                    ->sortable(),
                 Tables\Columns\TextColumn::make('groups_count')
                     ->label('Groups')
                     ->counts('groups')
@@ -377,7 +382,7 @@ class PlaylistResource extends Resource
         ];
     }
 
-    public static function getFormSections(): array
+    public static function getFormSections($creating = false): array
     {
         // Define the form fields for each section
         $nameFields = [
@@ -391,7 +396,7 @@ class PlaylistResource extends Resource
             $nameFields[] = Forms\Components\Section::make('MediaFlow Proxy')
                 ->description('Your MediaFlow Proxy generated links – to disable clear the MediaFlow Proxy values from the app Settings page.')
                 ->collapsible()
-                ->collapsed(true)
+                ->collapsed($creating)
                 ->headerActions([
                     Forms\Components\Actions\Action::make('mfproxy_git')
                         ->label('GitHub')
@@ -647,7 +652,7 @@ class PlaylistResource extends Resource
                 ->description('Determines how the playlist is output')
                 ->columnSpanFull()
                 ->collapsible()
-                ->collapsed(true)
+                ->collapsed($creating)
                 ->columns(2)
                 ->schema([
                     Forms\Components\Toggle::make('auto_sort')
@@ -671,11 +676,57 @@ class PlaylistResource extends Resource
                         ->hidden(fn(Get $get): bool => !$get('auto_channel_increment'))
                         ->required(),
                 ]),
+            Forms\Components\Section::make('Streaming Output')
+                ->description('Output processing options')
+                ->columnSpanFull()
+                ->collapsible()
+                ->collapsed($creating)
+                ->columns(2)
+                ->schema([
+                    Forms\Components\Toggle::make('enable_proxy')
+                        ->label('Enable Proxy')
+                        ->hint(fn(Get $get): string => $get('enable_proxy') ? 'Proxied' : 'Not proxied')
+                        ->hintIcon(fn(Get $get): string => !$get('enable_proxy') ? 'heroicon-m-lock-open' : 'heroicon-m-lock-closed')
+                        ->columnSpanFull()
+                        ->live()
+                        ->inline(false)
+                        ->default(false)
+                        ->helperText('When enabled, channel urls will be proxied through m3u editor and streamed via ffmpeg (m3u editor will act as your client, playing the channels directly and sending the content to your client).'),
+                    Forms\Components\TextInput::make('available_streams')
+                        ->label('Available Streams')
+                        ->hint('Set to 0 for unlimited streams.')
+                        ->helperText('Number of streams available for this provider. If set to a value other than 0, will prevent any streams from starting if the number of active streams exceeds this value.')
+                        ->columnSpan(1)
+                        ->rules(['min:1'])
+                        ->type('number')
+                        ->default(0) // Default to 0 streams (for unlimted)
+                        ->required()
+                        ->hidden(fn(Get $get): bool => !$get('enable_proxy')),
+                    Forms\Components\TextInput::make('streams')
+                        ->label('HDHR Streams')
+                        ->helperText('Number of streams available for HDHR service (if using).')
+                        ->columnSpan(1)
+                        ->rules(['min:0'])
+                        ->type('number')
+                        ->default(1) // Default to 1 stream
+                        ->required()
+                        ->hidden(fn(Get $get): bool => !$get('enable_proxy')),
+                    Forms\Components\Select::make('proxy_options.output')
+                        ->label('Proxy Output Format')
+                        ->required()
+                        ->columnSpanFull()
+                        ->options([
+                            'ts' => 'MPEG-TS (.ts)',
+                            'hls' => 'HLS (.m3u8)',
+                        ])
+                        ->default('ts')->helperText('NOTE: Only HLS streaming supports multiple connections per stream. MPEG-TS creates a new stream for each connection.')
+                        ->hidden(fn(Get $get): bool => !$get('enable_proxy')),
+                ]),
             Forms\Components\Section::make('EPG Output')
                 ->description('EPG output options')
                 ->columnSpanFull()
                 ->collapsible()
-                ->collapsed(true)
+                ->collapsed($creating)
                 ->columns(2)
                 ->schema([
                     Forms\Components\Toggle::make('dummy_epg')
@@ -712,41 +763,6 @@ class PlaylistResource extends Resource
                         ->default(120)
                         ->hidden(fn(Get $get): bool => !$get('dummy_epg')),
                 ]),
-            Forms\Components\Section::make('Streaming Output')
-                ->description('Output processing options')
-                ->columnSpanFull()
-                ->collapsible()
-                ->collapsed(true)
-                ->columns(2)
-                ->schema([
-                    Forms\Components\Toggle::make('enable_proxy')
-                        ->label('Enable Proxy')
-                        ->hint(fn(Get $get): string => $get('enable_proxy') ? 'Proxied' : 'Not proxied')
-                        ->hintIcon(fn(Get $get): string => !$get('enable_proxy') ? 'heroicon-m-lock-open' : 'heroicon-m-lock-closed')
-                        ->columnSpanFull()
-                        ->live()
-                        ->inline(false)
-                        ->default(false)
-                        ->helperText('When enabled, channel urls will be proxied through m3u editor and streamed via ffmpeg (m3u editor will act as your client, playing the channels directly and sending the content to your client).'),
-                    Forms\Components\TextInput::make('streams')
-                        ->helperText('Number of streams available (currently used for HDHR service).')
-                        ->columnSpan(1)
-                        ->rules(['min:1'])
-                        ->type('number')
-                        ->default(1) // Default to 1 stream
-                        ->required()
-                        ->hidden(fn(Get $get): bool => !$get('enable_proxy')),
-                    Forms\Components\Select::make('proxy_options.output')
-                        ->label('Proxy Output Format')
-                        ->required()
-                        ->columnSpan(1)
-                        ->options([
-                            'ts' => 'MPEG-TS (.ts)',
-                            'hls' => 'HLS (.m3u8)',
-                        ])
-                        ->default('ts')->helperText('NOTE: Only HLS streaming supports multiple connections per stream. MPEG-TS creates a new stream for each connection.')
-                        ->hidden(fn(Get $get): bool => !$get('enable_proxy')),
-                ]),
         ];
 
         // Return sections and fields
@@ -762,7 +778,7 @@ class PlaylistResource extends Resource
     public static function getForm(): array
     {
         $tabs = [];
-        foreach (self::getFormSections() as $section => $fields) {
+        foreach (self::getFormSections(creating: false) as $section => $fields) {
             if ($section === 'Name') {
                 $section = 'General';
             }
@@ -826,7 +842,7 @@ class PlaylistResource extends Resource
     public static function getFormSteps(): array
     {
         $wizard = [];
-        foreach (self::getFormSections() as $step => $fields) {
+        foreach (self::getFormSections(creating: true) as $step => $fields) {
             $wizard[] = Forms\Components\Wizard\Step::make($step)
                 ->schema($fields);
         }

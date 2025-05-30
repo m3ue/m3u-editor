@@ -738,12 +738,10 @@ class ChannelResource extends Resource
                                     $channels = \App\Models\Channel::query()
                                         ->withoutEagerLoads()
                                         ->with('playlist')
-                                        ->when($channelId, function ($query) use ($channelId) {
-                                            return $query->where('id', '!=', $channelId);
-                                        })
+                                        ->where('id', '!=', $channelId)
                                         ->when($state, function ($query) use ($state) {
                                             return $query->where('id', '=', $state);
-                                        })->limit(50)->get();
+                                        })->limit(100)->get();
 
                                     // Create options array
                                     $options = [];
@@ -754,7 +752,37 @@ class ChannelResource extends Resource
                                     }
 
                                     return $options;
-                                })->searchable()->required(),
+                                })
+                                ->searchable()
+                                ->getSearchResultsUsing(function (string $search, $record) {
+                                    // Get the current channel ID to exclude it from options
+                                    $channelId = $record?->channel_id ?? null;
+
+                                    // Always include the selected value if it exists
+                                    $channels = \App\Models\Channel::query()
+                                        ->withoutEagerLoads()
+                                        ->with('playlist')
+                                        ->where('id', '!=', $channelId) // Exclude current channel
+                                        ->where(function ($query) use ($search) {
+                                            $query->where('title', 'like', "%{$search}%")
+                                                ->orWhere('title_custom', 'like', "%{$search}%")
+                                                ->orWhere('name', 'like', "%{$search}%")
+                                                ->orWhere('name_custom', 'like', "%{$search}%");
+                                        })
+                                        ->limit(50) // Reasonable limit for search results
+                                        ->get();
+
+                                    // Create options array
+                                    $options = [];
+                                    foreach ($channels as $channel) {
+                                        $displayTitle = $channel->title_custom ?: $channel->title;
+                                        $playlistName = $channel->playlist->name ?? 'Unknown';
+                                        $options[$channel->id] = "{$displayTitle} [{$playlistName}]";
+                                    }
+
+                                    return $options;
+                                })
+                                ->required(),
                         ])
                         ->columns(1)
                         ->columnSpanFull()
