@@ -10,7 +10,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 use Illuminate\Support\Facades\Log;
-use Symfony\Component\Process\Process as SymphonyProcess;
+use Symfony\Component\Process\Process as SymfonyProcess;
 use Spatie\Tags\HasTags;
 
 class Channel extends Model
@@ -98,7 +98,7 @@ class Channel extends Model
     {
         try {
             $url = $this->url_custom ?? $this->url;
-            $process = SymphonyProcess::fromShellCommandline(
+            $process = SymfonyProcess::fromShellCommandline(
                 "ffprobe -v quiet -print_format json -show_streams {$url}"
             );
             $process->setTimeout(10);
@@ -107,10 +107,10 @@ class Channel extends Model
             $hasErrors = false;
             $process->run(
                 function ($type, $buffer) use (&$output, &$hasErrors, &$errors) {
-                    if ($type === SymphonyProcess::OUT) {
+                    if ($type === SymfonyProcess::OUT) {
                         $output .= $buffer;
                     }
-                    if ($type === SymphonyProcess::ERR) {
+                    if ($type === SymfonyProcess::ERR) {
                         $hasErrors = true;
                         $errors .= $buffer;
                     }

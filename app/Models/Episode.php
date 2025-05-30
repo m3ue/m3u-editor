@@ -6,7 +6,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Facades\Log;
-use Symfony\Component\Process\Process as SymphonyProcess;
+use Symfony\Component\Process\Process as SymfonyProcess;
 
 class Episode extends Model
 {
@@ -59,7 +59,7 @@ class Episode extends Model
     {
         try {
             $url = $this->url;
-            $process = SymphonyProcess::fromShellCommandline(
+            $process = SymfonyProcess::fromShellCommandline(
                 "ffprobe -v quiet -print_format json -show_streams {$url}"
             );
             $process->setTimeout(10);
@@ -68,10 +68,10 @@ class Episode extends Model
             $hasErrors = false;
             $process->run(
                 function ($type, $buffer) use (&$output, &$hasErrors, &$errors) {
-                    if ($type === SymphonyProcess::OUT) {
+                    if ($type === SymfonyProcess::OUT) {
                         $output .= $buffer;
                     }
-                    if ($type === SymphonyProcess::ERR) {
+                    if ($type === SymfonyProcess::ERR) {
                         $hasErrors = true;
                         $errors .= $buffer;
                     }

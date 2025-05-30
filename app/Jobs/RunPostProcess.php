@@ -13,7 +13,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
-use Symfony\Component\Process\Process as SymphonyProcess;
+use Symfony\Component\Process\Process as SymfonyProcess;
 
 class RunPostProcess implements ShouldQueue
 {
@@ -124,7 +124,7 @@ class RunPostProcess implements ShouldQueue
             } else {
                 // If the metadata is not a URL, then we're running a script
                 $cmd = $metadata['path'];
-                $process = SymphonyProcess::fromShellCommandline($cmd);
+                $process = SymfonyProcess::fromShellCommandline($cmd);
                 $process->setTimeout(60);
                 $exportVars = [];
                 $vars = $metadata['script_vars'] ?? [];
@@ -148,10 +148,10 @@ class RunPostProcess implements ShouldQueue
                 $hasErrors = false;
                 $process->run(
                     function ($type, $buffer) use (&$output, &$hasErrors, &$errors) {
-                        if ($type === SymphonyProcess::OUT) {
+                        if ($type === SymfonyProcess::OUT) {
                             $output .= $buffer;
                         }
-                        if ($type === SymphonyProcess::ERR) {
+                        if ($type === SymfonyProcess::ERR) {
                             $hasErrors = true;
                             $errors .= $buffer;
                         }
