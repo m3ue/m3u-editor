@@ -104,7 +104,8 @@ class PlaylistResource extends Resource
                 Tables\Columns\TextColumn::make('available_streams')
                     ->label('Streams')
                     ->toggleable()
-                    ->tooltip('Total streams available for this playlist (0 indicates no limit)')
+                    ->formatStateUsing(fn(int $state): string => $state === 0 ? '∞' : (string)$state)
+                    ->tooltip('Total streams available for this playlist (∞ indicates no limit)')
                     ->sortable(),
                 Tables\Columns\TextColumn::make('groups_count')
                     ->label('Groups')
