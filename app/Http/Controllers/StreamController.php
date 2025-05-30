@@ -75,7 +75,7 @@ class StreamController extends Controller
 
             // First increment the counter
             $activeStreams = Redis::incr($activeStreamsKey);
-            
+
             // Make sure we haven't gone negative for any reason, this should never be 0 or less
             if ($activeStreams <= 0) {
                 Redis::set($activeStreamsKey, 1);
@@ -131,10 +131,15 @@ class StreamController extends Controller
                 continue;
             } catch (Exception $e) {
                 // Log the error and abort
+                Redis::decr($activeStreamsKey);
                 Log::channel('ffmpeg')->error("Error streaming channel {$title}: " . $e->getMessage());
-                abort(500, 'Failed to start stream.');
+                abort(503, 'Failed to start stream.');
             }
         }
+
+        // Out of streams to try
+        Log::channel('ffmpeg')->error("No available streams for channel {$channel->id} ({$channel->title}).");
+        abort(503, 'No valid streams found for this channel.');
     }
 
     /**
@@ -166,6 +171,27 @@ class StreamController extends Controller
 
         // Check if playlist is specified
         $playlist = $episode->playlist;
+
+        // Keep track of the active streams for this playlist using optimistic locking pattern
+        $activeStreamsKey = "mpts:active_streams:{$playlist->id}";
+
+        // First increment the counter
+        $activeStreams = Redis::incr($activeStreamsKey);
+
+        // Make sure we haven't gone negative for any reason, this should never be 0 or less
+        if ($activeStreams <= 0) {
+            Redis::set($activeStreamsKey, 1);
+            $activeStreams = 1;
+        }
+        Log::channel('ffmpeg')->info("Active streams for playlist {$playlist->id}: {$activeStreams} (after increment)");
+
+        // Then check if we're over limit
+        if ($playlist->available_streams > 0 && $activeStreams > $playlist->available_streams) {
+            // We're over limit, so decrement and skip
+            Redis::decr($activeStreamsKey);
+            Log::channel('ffmpeg')->info("Max streams reached for playlist {$playlist->name} ({$playlist->id}). Aborting episode {$title}.");
+            abort(503, 'Max streams reached for this playlist.');
+        }
 
         // Setup streams array
         $streamUrl = $episode->url;
@@ -376,6 +402,22 @@ class StreamController extends Controller
                             // split out each line
                             $lines = preg_split('/\r?\n/', trim($buffer));
                             foreach ($lines as $line) {
+                                if (preg_match('/speed=\s*([0-9\.]+x)/', $line, $matches)) {
+                                    $speed = $matches[1];
+                                    Log::channel('ffmpeg')->info("FFmpeg speed: {$speed}");
+                                    if ((float)$speed < (float)$lowSpeedThreshold && (float)$speed > 0.0) {
+                                        $lowSpeedCount++;
+                                        Log::channel('ffmpeg')->warning("Low speed count for [{$title}]: {$lowSpeedCount}");
+                                        if ($lowSpeedCount >= 3) {
+                                            throw new SourceSpeedBelowThreshold("Low speed threshold reached for {$title}. Speed: {$speed}");
+                                        }
+                                    }
+                                } elseif (!empty(trim($line))) {
+                                    // It's not a speed update, log as original error/info based on context
+                                    // For now, continue logging as error if it's not an empty line from stderr
+                                    Log::channel('ffmpeg')->error($line);
+                                }
+
                                 // Use below, along with `-progress pipe:2`, to enable stream progress tracking...
                                 /*
                                     // "progress" lines are always KEY=VALUE
@@ -399,22 +441,6 @@ class StreamController extends Controller
                                         Log::channel('ffmpeg')->error($line);
                                     }
                                 */
-
-                                if (preg_match('/speed=\s*([0-9\.]+x)/', $line, $matches)) {
-                                    $speed = $matches[1];
-                                    Log::channel('ffmpeg')->info("FFmpeg speed: {$speed}");
-                                    if ((float)$speed < (float)$lowSpeedThreshold && (float)$speed > 0.0) {
-                                        $lowSpeedCount++;
-                                        Log::channel('ffmpeg')->warning("Low speed count for [{$title}]: {$lowSpeedCount}");
-                                        if ($lowSpeedCount >= 3) {
-                                            throw new SourceSpeedBelowThreshold("Low speed threshold reached for {$title}. Speed: {$speed}");
-                                        }
-                                    }
-                                } elseif (!empty(trim($line))) { // Avoid logging empty lines
-                                    // It's not a speed update, log as original error/info based on context
-                                    // For now, continue logging as error if it's not an empty line from stderr
-                                    Log::channel('ffmpeg')->error($line);
-                                }
                             }
                         }
                     });
