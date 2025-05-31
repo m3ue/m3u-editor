@@ -179,7 +179,6 @@ class HlsStreamService
                 $this->startStreamWithSpeedCheck(
                     type: $type, // 'channel' or 'episode'
                     model: $model, // Peg to the base model
-                    streamId: $stream->id, // Use the failover channel ID
                     streamUrl: $streamUrl, // Could be different based on the failover status
                     title: $title, // Peg to the base model
                     userAgent: $userAgent, // Dynamic, pulled from the source playlist user agent settings
@@ -208,7 +207,6 @@ class HlsStreamService
      *
      * @param string $type
      * @param Channel|Episode $model
-     * @param int $streamId
      * @param string $streamUrl
      * @param string $title
      * @param int $playlistId
@@ -220,7 +218,6 @@ class HlsStreamService
     private function startStreamWithSpeedCheck(
         string $type,
         Channel|Episode $model,
-        int $streamId,
         string $streamUrl,
         string $title,
         int $playlistId,
