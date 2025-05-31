@@ -496,8 +496,8 @@ class StreamController extends Controller
             $codecSpecificArgs = ''; // For QSV or other codec-specific args not part of -vf
 
             // Get base ffmpeg output codec formats (these are defaults or from non-QSV/VA-API settings)
-            $audioCodec = config('proxy.ffmpeg_codec_audio') ?: $settings['ffmpeg_codec_audio'];
-            $subtitleCodec = config('proxy.ffmpeg_codec_subtitles') ?: $settings['ffmpeg_codec_subtitles'];
+            $audioCodec = (config('proxy.ffmpeg_codec_audio') ?: ($settings['ffmpeg_codec_audio'] ?? null)) ?: 'copy';
+            $subtitleCodec = (config('proxy.ffmpeg_codec_subtitles') ?: ($settings['ffmpeg_codec_subtitles'] ?? null)) ?: 'copy';
 
             // Hardware Acceleration Logic
             if ($settings['ffmpeg_vaapi_enabled'] ?? false) {
@@ -621,8 +621,8 @@ class StreamController extends Controller
             }
 
             $videoCodecForTemplate = $settings['ffmpeg_codec_video'] ?: 'copy';
-            $audioCodecForTemplate = $settings['ffmpeg_codec_audio'] ?: 'copy';
-            $subtitleCodecForTemplate = $settings['ffmpeg_codec_subtitles'] ?: 'copy';
+            $audioCodecForTemplate = (config('proxy.ffmpeg_codec_audio') ?: ($settings['ffmpeg_codec_audio'] ?? null)) ?: 'copy';
+            $subtitleCodecForTemplate = (config('proxy.ffmpeg_codec_subtitles') ?: ($settings['ffmpeg_codec_subtitles'] ?? null)) ?: 'copy';
 
             $outputCommandSegment = $format === 'ts'
                 ? "-c:v {$videoCodecForTemplate} -c:a {$audioCodecForTemplate} -c:s {$subtitleCodecForTemplate} -f mpegts pipe:1"
