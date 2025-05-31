@@ -317,15 +317,38 @@ class HlsStreamService
         $ffprobePath = config('proxy.ffprobe_path', 'ffprobe');
         $cmd = "$ffprobePath -v quiet -print_format json -show_streams -select_streams v:0 -user_agent " . escapeshellarg($userAgent) . " " . escapeshellarg($streamUrl);
         Log::channel('ffmpeg')->info("[PRE-CHECK] Executing ffprobe command for [{$title}]: {$cmd}");
+        $precheckProcess = SymfonyProcess::fromShellCommandline($cmd);
+        $precheckProcess->setTimeout(5);
+        try {
+            $precheckProcess->run();
+            if (!$precheckProcess->isSuccessful()) {
+                Log::channel('ffmpeg')->error("[PRE-CHECK] ffprobe failed for source [{$title}]. Exit Code: " . $precheckProcess->getExitCode() . ". Error Output: " . $precheckProcess->getErrorOutput());
+                throw new SourceNotResponding("failed_ffprobe (Exit: " . $precheckProcess->getExitCode() . ")");
+            }
+            Log::channel('ffmpeg')->info("[PRE-CHECK] ffprobe successful for source [{$title}].");
 
-        $process = SymfonyProcess::fromShellCommandline($cmd);
-        $process->setTimeout(5);
-        $process->run();
-        if (!$process->isSuccessful()) {
-            throw new SourceNotResponding("ffprobe failed for {$title}: " . $process->getErrorOutput());
+            // Check channel health
+            $ffprobeOutput = $precheckProcess->getOutput();
+            $streamInfo = json_decode($ffprobeOutput, true);
+            if (json_last_error() === JSON_ERROR_NONE && isset($streamInfo['streams'])) {
+                foreach ($streamInfo['streams'] as $stream) {
+                    if (isset($stream['codec_type']) && $stream['codec_type'] === 'video') {
+                        $codecName = $stream['codec_name'] ?? 'N/A';
+                        $pixFmt = $stream['pix_fmt'] ?? 'N/A';
+                        $width = $stream['width'] ?? 'N/A';
+                        $height = $stream['height'] ?? 'N/A';
+                        $profile = $stream['profile'] ?? 'N/A';
+                        $level = $stream['level'] ?? 'N/A';
+                        Log::channel('ffmpeg')->info("[PRE-CHECK] Source [{$title}] video stream: Codec: {$codecName}, Format: {$pixFmt}, Resolution: {$width}x{$height}, Profile: {$profile}, Level: {$level}");
+                        break;
+                    }
+                }
+            } else {
+                Log::channel('ffmpeg')->warning("[PRE-CHECK] Could not decode ffprobe JSON output or no streams found for [{$title}]. Output: " . $ffprobeOutput);
+            }
+        } catch (Exception $e) {
+            throw new SourceNotResponding("failed_ffprobe_exception (" . $e->getMessage() . ")");
         }
-
-        Log::channel('ffmpeg')->info("[PRE-CHECK] ffprobe successful for [{$title}].");
     }
 
     /**
