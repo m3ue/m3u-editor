@@ -139,7 +139,7 @@ class ChannelsRelationManager extends RelationManager
                             case 'mysql':
                                 return $query->orWhereRaw('LOWER(`group`) LIKE ?', ["%{$search}%"]);
                             case 'sqlite':
-                                return $query->orWhereRaw('LOWER(group) LIKE ?', ["%{$search}%"]);
+                                return $query->orWhereRaw('LOWER("group") LIKE ?', ["%{$search}%"]);
                             default:
                                 // Fallback using Laravel's database abstraction
                                 return $query->orWhere(DB::raw('LOWER(group)'), 'LIKE', "%{$search}%");
