@@ -4,9 +4,9 @@ namespace App\Services;
 
 use Exception;
 use App\Models\Channel;
+use App\Models\Episode;
 use App\Exceptions\SourceNotResponding;
 use App\Exceptions\SourceSpeedBelowThreshold;
-use App\Models\Episode;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;

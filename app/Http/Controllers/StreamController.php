@@ -132,12 +132,11 @@ class StreamController extends Controller
 
                 // Try the next failover channel
                 continue;
-            } finally {
-                Redis::decr($activeStreamsKey);
             }
         }
 
         // Out of streams to try
+        Redis::decr($activeStreamsKey);
         Log::channel('ffmpeg')->error("No available streams for channel {$channel->id} ({$channel->title}).");
         abort(503, 'No valid streams found for this channel.');
     }
