@@ -641,7 +641,6 @@ class HlsStreamService
         // ... rest of the options and command suffix ...
         $cmd .= ' -f hls -hls_time 4 -hls_list_size 15 ' .
             '-hls_flags delete_segments+append_list+independent_segments ' .
-            '-start_at_zero 1 -hls_playlist_type event ' .
             '-use_wallclock_as_timestamps 1 ' .
             '-hls_segment_filename ' . escapeshellarg($segment) . ' ' .
             '-hls_base_url ' . escapeshellarg($segmentBaseUrl) . ' ' .
