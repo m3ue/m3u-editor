@@ -110,101 +110,94 @@ class HlsStreamService
      */
     public function startStreamWithFailover(
         string $type,
-        Channel|Episode $model,
-        string $streamUrl,
-        string $title
+        Channel|Episode $model, // This $model is the *original* requested channel/episode
+        string $streamUrl,    // This $streamUrl is the URL of the *original* model
+        string $title         // This $title is the title of the *original* model
     ): void {
         // Get the failover channels (if any)
         $streams = collect([$model]);
-        if ($type === 'channel') {
-            $streams->concat($model->failoverChannels);
+        if ($type === 'channel' && $model instanceof Channel) { // Ensure $model is a Channel for failoverChannels
+            $streams = $streams->concat($model->failoverChannels);
         }
 
-        // Record timestamp in Redis (never expires until we prune)
+        // Record timestamp in Redis for the original model (never expires until we prune)
         Redis::set("hls:{$type}_last_seen:{$model->id}", now()->timestamp);
 
-        // Add to active IDs set
+        // Add to active IDs set for the original model
         Redis::sadd("hls:active_{$type}_ids", $model->id);
 
-        // Get the title for the channel
-        $title = $type === 'channel'
-            ? $model->title_custom ?? $model->title
-            : $model->title;
-        $title = strip_tags($title);
-
         // Loop over the failover channels and grab the first one that works.
-        foreach ($streams as $stream) {
-            // Make sure we have a valid source channel
-            $badSourceCacheKey = ProxyService::BAD_SOURCE_CACHE_PREFIX . $stream->id;
+        foreach ($streams as $stream) { // $stream is the current primary or failover channel being attempted
+            // Get the title for the current stream in the loop
+            $currentStreamTitle = $type === 'channel'
+                ? ($stream->title_custom ?? $stream->title)
+                : $stream->title;
+            $currentStreamTitle = strip_tags($currentStreamTitle);
+
+            // Check if playlist is specified for the current stream
+            $playlist = $stream->playlist;
+
+            // Make sure we have a valid source channel (using current stream's ID and its playlist ID)
+            $badSourceCacheKey = ProxyService::BAD_SOURCE_CACHE_PREFIX . $stream->id . ':' . $playlist->id;
             if (Redis::exists($badSourceCacheKey)) {
                 if ($model->id === $stream->id) {
-                    Log::channel('ffmpeg')->info("Skipping source ID {$title} ({$model->id}) for as it was recently marked as bad. Reason: " . (Redis::get($badSourceCacheKey) ?: 'N/A'));
+                    Log::channel('ffmpeg')->info("Skipping source ID {$currentStreamTitle} ({$stream->id}) for as it was recently marked as bad for playlist {$playlist->id}. Reason: " . (Redis::get($badSourceCacheKey) ?: 'N/A'));
                 } else {
-                    Log::channel('ffmpeg')->info("Skipping Failover {$type} {$stream->name} for source {$title} ({$model->id}) as it was recently marked as bad. Reason: " . (Redis::get($badSourceCacheKey) ?: 'N/A'));
+                    Log::channel('ffmpeg')->info("Skipping Failover {$type} {$stream->name} for source {$model->title} ({$model->id}) as it (stream ID {$stream->id}) was recently marked as bad for playlist {$playlist->id}. Reason: " . (Redis::get($badSourceCacheKey) ?: 'N/A'));
                 }
                 continue;
             }
 
-            // Check if playlist is specified
-            $playlist = $stream->playlist;
-
             // Keep track of the active streams for this playlist using optimistic locking pattern
             $activeStreamsKey = "active_streams:{$playlist->id}";
-
-            // First increment the counter
             $activeStreams = Redis::incr($activeStreamsKey);
 
-            // Make sure we haven't gone negative for any reason, this should never be 0 or less
             if ($activeStreams <= 0) {
                 Redis::set($activeStreamsKey, 1);
                 $activeStreams = 1;
             }
             Log::channel('ffmpeg')->info("Active streams for playlist {$playlist->id}: {$activeStreams} (after increment)");
 
-            // Then check if we're over limit
             if ($playlist->available_streams > 0 && $activeStreams > $playlist->available_streams) {
-                // We're over limit, so decrement and skip
                 Redis::decr($activeStreamsKey);
-                Log::channel('ffmpeg')->info("Max streams reached for playlist {$playlist->name} ({$playlist->id}). Skipping channel {$title}.");
+                Log::channel('ffmpeg')->info("Max streams reached for playlist {$playlist->name} ({$playlist->id}). Skipping channel {$currentStreamTitle}.");
                 continue;
             }
 
-            // Setup streams array
-            $streamUrl = $type === 'channel'
-                ? $model->url_custom ?? $model->url
-                : $model->url;
+            // URL for the current stream being attempted
+            $currentAttemptStreamUrl = $type === 'channel'
+                ? ($stream->url_custom ?? $stream->url) // Use current $stream's URL
+                : $stream->url;
 
-            // Determine the output format
             $userAgent = $playlist->user_agent ?? null;
             try {
-                // Run pre-check with ffprobe
-                $this->runPreCheck($streamUrl, $userAgent, $title);
+                $this->runPreCheck($currentAttemptStreamUrl, $userAgent, $currentStreamTitle);
 
-                // Attempt to start the stream
                 $this->startStreamWithSpeedCheck(
-                    type: $type, // 'channel' or 'episode'
-                    model: $model, // Peg to the base model
-                    streamUrl: $streamUrl, // Could be different based on the failover status
-                    title: $title, // Peg to the base model
-                    userAgent: $userAgent, // Dynamic, pulled from the source playlist user agent settings
-                    playlistId: $playlist->id, // Use the playlist ID for tracking
+                    type: $type,
+                    model: $stream, // Pass the current $stream object
+                    streamUrl: $currentAttemptStreamUrl, // Pass the URL of the current $stream
+                    title: $currentStreamTitle, // Pass the title of the current $stream
+                    userAgent: $userAgent,
+                    playlistId: $playlist->id
                 );
-            } catch (SourceNotResponding $e) {
-                // Log the error and cache the bad source
-                Log::channel('ffmpeg')->error("Source not responding for channel {$title}: " . $e->getMessage());
-                Redis::setex($badSourceCacheKey, ProxyService::BAD_SOURCE_CACHE_SECONDS, $e->getMessage());
+                Log::channel('ffmpeg')->info("Successfully started HLS stream for {$type} {$currentStreamTitle} (ID: {$stream->id}) on playlist {$playlist->id}.");
+                return; // Exit after successfully starting a stream
 
-                // Try the next failover channel
+            } catch (SourceNotResponding $e) {
+                Log::channel('ffmpeg')->error("Source not responding for {$type} {$currentStreamTitle} (ID: {$stream->id}) on playlist {$playlist->id}: " . $e->getMessage());
+                Redis::setex($badSourceCacheKey, ProxyService::BAD_SOURCE_CACHE_SECONDS, $e->getMessage());
+                Redis::decr($activeStreamsKey); // Decrement active streams since this one failed
                 continue;
             } catch (Exception $e) {
-                // Log the error and abort
-                Log::channel('ffmpeg')->error("Error streaming channel {$title}: " . $e->getMessage());
+                Log::channel('ffmpeg')->error("Error streaming {$type} {$currentStreamTitle} (ID: {$stream->id}) on playlist {$playlist->id}: " . $e->getMessage());
                 Redis::setex($badSourceCacheKey, ProxyService::BAD_SOURCE_CACHE_SECONDS, $e->getMessage());
-
-                // Try the next failover channel
+                Redis::decr($activeStreamsKey); // Decrement active streams since this one failed
                 continue;
             }
         }
+        // If loop finishes, no stream was successfully started
+        Log::channel('ffmpeg')->error("No available (HLS) streams for {$type} {$title} (Original Model ID: {$model->id}) after trying all sources.");
     }
 
     /**
@@ -550,9 +543,15 @@ class HlsStreamService
                 if (!empty($qsvFilterFromSettings)) {
                     // This filter is applied to frames already in QSV format
                     $videoFilterArgs = "-vf '" . trim($qsvFilterFromSettings, "'") . "' ";
+                } else {
+                    // Add default QSV video filter for HLS if not set by user
+                    $videoFilterArgs = "-vf 'hwupload=extra_hw_frames=64,scale_qsv=format=nv12' ";
                 }
-                if (!empty($qsvEncoderOptions)) {
+                if (!empty($qsvEncoderOptions)) { // $qsvEncoderOptions = $settings['ffmpeg_qsv_encoder_options']
                     $codecSpecificArgs = trim($qsvEncoderOptions) . " ";
+                } else {
+                    // Default QSV encoder options for HLS if not set by user
+                    $codecSpecificArgs = "-preset medium -global_quality 23 "; // Ensure trailing space
                 }
                 if (!empty($qsvAdditionalArgs)) {
                     $userArgs = trim($qsvAdditionalArgs) . ($userArgs ? " " . $userArgs : "");

@@ -52,7 +52,7 @@ class StreamController extends Controller
             $title = strip_tags($title);
 
             // Make sure we have a valid source channel
-            $badSourceCacheKey = ProxyService::BAD_SOURCE_CACHE_PREFIX . $stream->id;
+            $badSourceCacheKey = ProxyService::BAD_SOURCE_CACHE_PREFIX . $stream->id . ':' . $stream->playlist->id;
             if (Redis::exists($badSourceCacheKey)) {
                 if ($sourceChannel->id === $stream->id) {
                     Log::channel('ffmpeg')->info("Skipping source ID {$title} ({$sourceChannel->id}) for as it was recently marked as bad. Reason: " . (Redis::get($badSourceCacheKey) ?: 'N/A'));
@@ -89,7 +89,7 @@ class StreamController extends Controller
             }
 
             // Setup streams array
-            $streamUrl = $stream->url_custom ?? $channel->url;
+            $streamUrl = $stream->url_custom ?? $stream->url;
 
             // Determine the output format
             $ip = $request->ip();
@@ -522,8 +522,8 @@ class StreamController extends Controller
                 if (!empty($settings['ffmpeg_qsv_video_filter'])) {
                     $videoFilterArgs = "-vf " . escapeshellarg(trim($settings['ffmpeg_qsv_video_filter'], "'\",")) . " ";
                 } else {
-                    // Simplified filter chain for QSV
-                    $videoFilterArgs = "-vf 'format=nv12,hwupload=extra_hw_frames=64' ";
+                    // Default QSV video filter, matches user's working example
+                    $videoFilterArgs = "-vf 'hwupload=extra_hw_frames=64,scale_qsv=format=nv12' ";
                 }
 
                 // Additional QSV specific options
@@ -559,9 +559,6 @@ class StreamController extends Controller
 
             // User defined general options:
             $cmd .= $userArgs;
-
-            // Codec specific additional arguments (e.g. QSV specific):
-            $cmd .= $codecSpecificArgs;
 
             // Input:
             if ($format === 'ts') {
