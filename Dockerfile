@@ -110,7 +110,11 @@ COPY start-container /usr/local/bin/start-container
 RUN chmod +x /usr/local/bin/start-container
 
 # Pull app code
-COPY . /var/www/html
+RUN git clone https://github.com/sparkison/m3u-editor.git /tmp/m3u-editor \
+    && mv /tmp/m3u-editor/* /var/www/html \
+    && mv /tmp/m3u-editor/.git /var/www/html/.git \
+    && mv /tmp/m3u-editor/.env.example /var/www/html/.env.example \
+    && rm -rf /tmp/m3u-editor
 
 # Configure git
 RUN git config --global --add safe.directory /var/www/html
