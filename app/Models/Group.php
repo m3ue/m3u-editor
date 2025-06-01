@@ -20,6 +20,19 @@ class Group extends Model
         'id' => 'integer',
         'user_id' => 'integer',
         'playlist_id' => 'integer',
+        'sort_order' => 'integer',
+    ];
+
+    /**
+     * The attributes that are mass assignable.
+     *
+     * @var array
+     */
+    protected $fillable = [
+        'name',
+        'user_id',
+        'playlist_id',
+        'sort_order',
     ];
 
     public function user(): BelongsTo

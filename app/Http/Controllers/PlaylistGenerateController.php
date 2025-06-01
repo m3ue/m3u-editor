@@ -57,11 +57,14 @@ class PlaylistGenerateController extends Controller
             function () use ($playlist, $proxyEnabled, $type, $format) {
                 // Get all active channels
                 $channels = $playlist->channels()
-                    ->where('enabled', true)
-                    ->with(['epgChannel', 'tags'])
-                    ->orderBy('sort')
-                    ->orderBy('channel')
-                    ->orderBy('title')
+                    ->join('groups', 'channels.group_id', '=', 'groups.id')
+                    ->where('channels.enabled', true)
+                    ->with(['epgChannel', 'tags', 'group']) // Added 'group'
+                    ->orderBy('groups.sort_order')      // New primary sort
+                    ->orderBy('channels.sort')          // Was primary, now secondary
+                    ->orderBy('channels.channel')
+                    ->orderBy('channels.title')
+                    ->select('channels.*')              // Added select
                     ->get();
 
                 // Output the enabled channels

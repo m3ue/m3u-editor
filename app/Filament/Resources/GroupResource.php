@@ -68,6 +68,14 @@ class GroupResource extends Resource
                     ->placeholder(fn($record) => $record->name_internal)
                     ->searchable()
                     ->toggleable(),
+                Tables\Columns\TextInputColumn::make('sort_order')
+                    ->label('Sort Order')
+                    ->numeric()
+                    ->rules(['integer', 'min:0'])
+                    ->default(9999)
+                    ->placeholder('9999')
+                    ->sortable()
+                    ->toggleable(),
                 Tables\Columns\TextColumn::make('name_internal')
                     ->label('Default name')
                     ->searchable()
@@ -394,6 +402,12 @@ class GroupResource extends Resource
                 ->preload()
                 ->hiddenOn(['edit'])
                 ->searchable(),
+            Forms\Components\TextInput::make('sort_order')
+                ->label('Sort Order')
+                ->numeric()
+                ->default(9999)
+                ->helperText('Enter a number to define the sort order (e.g., 1, 2, 3). Lower numbers appear first.')
+                ->rules(['integer', 'min:0']),
         ];
     }
 }
