@@ -59,12 +59,12 @@ class PlaylistGenerateController extends Controller
                 $channels = $playlist->channels()
                     ->join('groups', 'channels.group_id', '=', 'groups.id')
                     ->where('channels.enabled', true)
-                    ->with(['epgChannel', 'tags', 'group']) // Added 'group'
-                    ->orderBy('groups.sort_order')      // New primary sort
-                    ->orderBy('channels.sort')          // Was primary, now secondary
+                    ->with(['epgChannel', 'tags', 'group'])
+                    ->orderBy('groups.sort_order') // Primary sort
+                    ->orderBy('channels.sort') // Secondary sort
                     ->orderBy('channels.channel')
                     ->orderBy('channels.title')
-                    ->select('channels.*')              // Added select
+                    ->select('channels.*')
                     ->get();
 
                 // Output the enabled channels
@@ -247,10 +247,14 @@ class PlaylistGenerateController extends Controller
 
         // Get all active channels
         $channels = $playlist->channels()
-            ->where('enabled', true)
-            ->orderBy('sort')
-            ->orderBy('channel')
-            ->orderBy('title')
+            ->join('groups', 'channels.group_id', '=', 'groups.id')
+            ->where('channels.enabled', true)
+            ->with(['epgChannel', 'tags', 'group'])
+            ->orderBy('groups.sort_order') // Primary sort
+            ->orderBy('channels.sort') // Secondary sort
+            ->orderBy('channels.channel')
+            ->orderBy('channels.title')
+            ->select('channels.*')
             ->get();
 
         // Check if proxy enabled
