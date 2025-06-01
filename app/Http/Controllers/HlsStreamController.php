@@ -144,60 +144,77 @@ class HlsStreamController extends Controller
         $streamUrl,
         $title
     ) {
-        // Start stream, if not already running
+        $actualStreamingModel = $model; // Initialize with the original model
+
         if (!$this->hlsService->isRunning(type: $type, id: $model->id)) {
-            $title = strip_tags($title);
+            $logTitle = strip_tags($title); // Use original title for initial logging
             try {
-                $this->hlsService->startStreamWithFailover(
+                // Attempt to start the stream, potentially with failover
+                $returnedModel = $this->hlsService->startStreamWithFailover(
                     type: $type,
-                    model: $model,
+                    model: $model, // Pass original model to startStreamWithFailover
                     streamUrl: $streamUrl,
-                    title: $title
+                    title: $logTitle
                 );
-                Log::channel('ffmpeg')->info("Started HLS stream for $type {$model->id} ({$title})");
+
+                if ($returnedModel) {
+                    $actualStreamingModel = $returnedModel; // This is the model that is actually streaming
+                    Log::channel('ffmpeg')->info("HLS Stream: Original request for $type ID {$model->id} ({$logTitle}). Actual streaming $type ID {$actualStreamingModel->id} (" . ($actualStreamingModel->title_custom ?? $actualStreamingModel->title) . ").");
+                } else {
+                    // No stream (primary or failover) could be started
+                    Log::channel('ffmpeg')->error("HLS Stream: No stream could be started for $type ID {$model->id} ({$logTitle}) after trying all sources.");
+                    abort(503, 'Service unavailable. Failed to start the stream or any failovers.');
+                }
             } catch (Exception $e) {
-                Log::channel('ffmpeg')->error("Failed to start HLS stream for $type {$model->id} ({$title}): {$e->getMessage()}");
-                abort(500, 'Failed to start the stream.');
+                Log::channel('ffmpeg')->error("HLS Stream: Exception while trying to start stream for $type ID {$model->id} ({$logTitle}): {$e->getMessage()}");
+                abort(503, 'Service unavailable. Error during stream startup.');
             }
         } else {
-            // Stream is already running, no need to start it again
-            // Log::channel('ffmpeg')->info("HLS stream already running for $type {$model->id} ({$title})");
+            // Stream was already running for the original $model->id, so $actualStreamingModel remains $model
+            // Log explicitly that we are using an existing stream for the (potentially original) model ID.
+            Log::channel('ffmpeg')->info("HLS Stream: Found existing stream for $type ID {$actualStreamingModel->id} (" . strip_tags($title) . ").");
         }
 
-        // Return the Playlist
-        $pid = Cache::get("hls:pid:{$type}:{$model->id}");
+        // Use $actualStreamingModel->id for PID and path
+        $pidCacheKey = "hls:pid:{$type}:{$actualStreamingModel->id}";
+        $pid = Cache::get($pidCacheKey);
+
         $pathPrefix = $type === 'channel' ? '' : 'e/';
-        $path = Storage::disk('app')->path("hls/$pathPrefix{$model->id}/stream.m3u8");
+        $m3u8Path = Storage::disk('app')->path("hls/$pathPrefix{$actualStreamingModel->id}/stream.m3u8");
+
+        Log::channel('ffmpeg')->info("HLS Stream: Checking for playlist for $type ID {$actualStreamingModel->id}. Path: {$m3u8Path}. PID found from cache key '{$pidCacheKey}': " . ($pid ?: 'None'));
+
         $maxAttempts = 10;
         for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
-            // If the playlist is ready, serve it immediately
-            if (file_exists($path)) {
+            if (file_exists($m3u8Path)) {
+                Log::channel('ffmpeg')->info("HLS Stream: Playlist found for $type ID {$actualStreamingModel->id} on attempt {$attempt}. Path: {$m3u8Path}");
                 return response('', 200, [
                     'Content-Type'      => 'application/vnd.apple.mpegurl',
-                    'X-Accel-Redirect'  => "/internal/hls/$pathPrefix{$model->id}/stream.m3u8",
+                    'X-Accel-Redirect'  => "/internal/hls/$pathPrefix{$actualStreamingModel->id}/stream.m3u8",
                     'Cache-Control'     => 'no-cache, no-transform',
                     'Connection'        => 'keep-alive',
                 ]);
             }
 
-            // On the last try, give up if FFmpeg isn’t running
             if ($attempt === $maxAttempts) {
-                if (!$pid || !posix_kill($pid, 0)) {
-                    Log::channel('ffmpeg')
-                        ->error("FFmpeg process {$pid} is not running (or died) for $type {$model->id}");
-                    abort(404, 'Playlist not found.');
+                // Check if the specific ffmpeg process for $actualStreamingModel->id is running
+                $isActualPidRunning = $this->hlsService->isRunning($type, $actualStreamingModel->id); // Checks PID from cache AND process signal
+
+                if (!$isActualPidRunning) {
+                    // Use $pid obtained from $actualStreamingModel->id cache for logging, if available
+                    Log::channel('ffmpeg')->error("HLS Stream: FFmpeg process for $type ID {$actualStreamingModel->id} (Cached PID: {$pid}) is not running or died. Aborting with 404 for M3U8: {$m3u8Path}");
+                    abort(404, 'Playlist not found. Stream process ended.');
                 }
 
-                // If it *is* running but playlist never appeared, tell the client to retry
+                Log::channel('ffmpeg')->warning("HLS Stream: Playlist for $type ID {$actualStreamingModel->id} not ready after {$maxAttempts} attempts, but process (Cached PID: {$pid}) is running. Redirecting. M3U8: {$m3u8Path}");
                 $route = $type === 'channel'
                     ? 'stream.hls.playlist'
                     : 'stream.hls.episode';
+                // The redirect should still use the original encodedId as that's what the client initially requested.
                 return redirect()
                     ->route($route, ['encodedId' => $encodedId])
                     ->with('error', 'Playlist not ready yet. Please try again.');
             }
-
-            // Otherwise, wait and retry
             sleep(1);
         }
     }
