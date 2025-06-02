@@ -210,6 +210,7 @@ class HlsStreamController extends Controller
                 $route = $type === 'channel'
                     ? 'stream.hls.playlist'
                     : 'stream.hls.episode';
+
                 // The redirect should still use the original encodedId as that's what the client initially requested.
                 return redirect()
                     ->route($route, ['encodedId' => $encodedId])

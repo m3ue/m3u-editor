@@ -113,10 +113,12 @@ class HlsStreamService
         Channel|Episode $model, // This $model is the *original* requested channel/episode
         string $streamUrl,      // This $streamUrl is the URL of the *original* model
         string $title           // This $title is the title of the *original* model
-    ): ?object { // Changed return type
+    ): ?object {
         // Get the failover channels (if any)
         $streams = collect([$model]);
-        if ($type === 'channel' && $model instanceof Channel) { // Ensure $model is a Channel for failoverChannels
+
+        // If type is channel, include failover channels
+        if ($type === 'channel' && $model instanceof Channel) {
             $streams = $streams->concat($model->failoverChannels);
         }
 
@@ -182,7 +184,7 @@ class HlsStreamService
                     playlistId: $playlist->id
                 );
                 Log::channel('ffmpeg')->info("Successfully started HLS stream for {$type} {$currentStreamTitle} (ID: {$stream->id}) on playlist {$playlist->id}.");
-                return $stream; // MODIFICATION: Return the successful stream object
+                return $stream; // Return the successful stream object
 
             } catch (SourceNotResponding $e) {
                 // Log the error and cache the bad source
@@ -204,7 +206,7 @@ class HlsStreamService
         }
         // If loop finishes, no stream was successfully started
         Log::channel('ffmpeg')->error("No available (HLS) streams for {$type} {$title} (Original Model ID: {$model->id}) after trying all sources.");
-        return null; // MODIFICATION: Return null if no stream started
+        return null; // Return null if no stream started
     }
 
     /**

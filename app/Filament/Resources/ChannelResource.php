@@ -450,13 +450,14 @@ class ChannelResource extends Resource
                                     ->searchable()
                                     ->getSearchResultsUsing(function (string $search) use ($selectedRecordIds) {
                                         $searchedChannels = \App\Models\Channel::query()
-                                            ->with('playlist') // Ensure playlist is loaded for the label
+                                            ->withoutEagerLoads()
+                                            ->with('playlist')
                                             ->where(function ($query) use ($search) {
                                                 $query->where('title', 'like', "%{$search}%")
                                                     ->orWhere('title_custom', 'like', "%{$search}%")
                                                     ->orWhere('name', 'like', "%{$search}%")
                                                     ->orWhere('name_custom', 'like', "%{$search}%")
-                                                    ->orWhere('stream_id', 'like', "%{$search}%"); // Added stream_id
+                                                    ->orWhere('stream_id', 'like', "%{$search}%");
                                             })
                                             ->limit(50) // Keep a reasonable limit
                                             ->get();
@@ -873,9 +874,10 @@ class ChannelResource extends Resource
                                             $query->where('title', 'like', "%{$search}%")
                                                 ->orWhere('title_custom', 'like', "%{$search}%")
                                                 ->orWhere('name', 'like', "%{$search}%")
-                                                ->orWhere('name_custom', 'like', "%{$search}%");
+                                                ->orWhere('name_custom', 'like', "%{$search}%")
+                                                ->orWhere('stream_id', 'like', "%{$search}%");
                                         })
-                                        ->limit(50) // Reasonable limit for search results
+                                        ->limit(50) // Keep a reasonable limit
                                         ->get();
 
                                     // Create options array
