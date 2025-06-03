@@ -448,10 +448,7 @@ class ChannelResource extends Resource
                                         $playlistName = $channel->playlist->name ?? 'Unknown';
                                         $label = "{$displayTitle} [{$playlistName}]";
                                         
-                                        $isBold = \App\Models\ChannelFailover::query()
-                                            ->where('channel_id', $channel->id)
-                                            ->whereIn('channel_failover_id', $selectedRecordIds)
-                                            ->exists();
+                                        $isBold = in_array($channel->id, $selectedRecordIds);
                                         
                                         $structuredOptions[] = ['id' => $channel->id, 'label' => $label, 'is_bold' => $isBold, 'is_state' => ($state == $channel->id)];
                                     }
@@ -467,7 +464,7 @@ class ChannelResource extends Resource
 
                                     $finalOptions = [];
                                     foreach ($structuredOptions as $opt) {
-                                        $finalOptions[$opt['id']] = $opt['is_bold'] ? "<strong>{$opt['label']}</strong>" : $opt['label'];
+                                        $finalOptions[$opt['id']] = ($opt['is_bold'] ? 'BOLD::' : '') . $opt['label'];
                                     }
                                     return $finalOptions;
                                 })
@@ -503,10 +500,7 @@ class ChannelResource extends Resource
                                         $playlistName = $channel->playlist->name ?? 'Unknown';
                                         $label = "{$displayTitle} [{$playlistName}]";
 
-                                        $isBold = \App\Models\ChannelFailover::query()
-                                            ->where('channel_id', $channel->id)
-                                            ->whereIn('channel_failover_id', $selectedRecordIds)
-                                            ->exists();
+                                        $isBold = in_array($channel->id, $selectedRecordIds);
                                         
                                         $structuredSearchResults[] = ['id' => $channel->id, 'label' => $label, 'is_bold' => $isBold];
                                     }
@@ -520,23 +514,16 @@ class ChannelResource extends Resource
 
                                     $finalResults = [];
                                     foreach ($structuredSearchResults as $item) {
-                                        $finalResults[$item['id']] = $item['is_bold'] ? "<strong>{$item['label']}</strong>" : $item['label'];
+                                        $finalResults[$item['id']] = ($item['is_bold'] ? 'BOLD::' : '') . $item['label'];
                                     }
                                     return $finalResults;
                                 })
-                               // The Select component below uses ->allowHtml() to render <strong> tags
-                               // directly within option labels. This approach is used to achieve bolded text
-                               // for certain options while avoiding a previous error:
-                               // "Typed property Filament\Forms\Components\Component::$container must not be accessed before initialization".
-                               // This error was triggered when a custom getOptionLabel closure was used in this bulk action context.
-                               // The options() and getSearchResultsUsing() closures now generate the necessary HTML.
-                               // ->getOptionLabel(function ($value, $label) { // Temporarily removed to test container initialization error
-                               //     if (str()->startsWith($label, 'BOLD::')) {
-                               //         return new \Illuminate\Support\HtmlString('<strong>' . str_replace('BOLD::', '', $label) . '</strong>');
-                               //     }
-                               //     return $label;
-                               // })
-                                 ->allowHtml()
+                                ->getOptionLabel(function ($value, $label) {
+                                    if (str()->startsWith($label, 'BOLD::')) {
+                                        return new \Illuminate\Support\HtmlString('<strong>' . str_replace('BOLD::', '', $label) . '</strong>');
+                                    }
+                                    return $label;
+                                })
                                 ->required(),
                             ];
                         })
