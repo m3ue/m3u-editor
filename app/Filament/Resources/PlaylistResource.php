@@ -37,8 +37,10 @@ use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Facades\Route;
 use Illuminate\View\View;
+use PDO;
 
 class PlaylistResource extends Resource
 {
@@ -106,6 +108,7 @@ class PlaylistResource extends Resource
                     ->toggleable()
                     ->formatStateUsing(fn(int $state): string => $state === 0 ? '∞' : (string)$state)
                     ->tooltip('Total streams available for this playlist (∞ indicates no limit)')
+                    ->description(fn(Playlist $record): string => "Active: " . (int) Redis::get("active_streams:{$record->id}") ?? 0)
                     ->sortable(),
                 Tables\Columns\TextColumn::make('groups_count')
                     ->label('Groups')
@@ -322,6 +325,23 @@ class PlaylistResource extends Resource
                         ->modalIcon('heroicon-o-arrow-uturn-left')
                         ->modalDescription('Reset playlist status so it can be processed again. Only perform this action if you are having problems with the playlist syncing.')
                         ->modalSubmitActionLabel('Yes, reset now'),
+                    Tables\Actions\Action::make('reset_active_count')
+                        ->label('Reset active count')
+                        ->icon('heroicon-o-numbered-list')
+                        ->color('warning')
+                        ->action(fn($record) => Redis::set("active_streams:{$record->id}", 0))->after(function () {
+                            Notification::make()
+                                ->success()
+                                ->title('Active stream count reset')
+                                ->body('Playlist active stream count has been reset.')
+                                ->duration(3000)
+                                ->send();
+                        })
+                        ->requiresConfirmation()
+                        ->icon('heroicon-o-arrow-uturn-left')
+                        ->modalIcon('heroicon-o-numbered-list')
+                        ->modalDescription('Reset playlist active streams count. Proceed with caution as this could lead to an incorrect count if there are streams currently running.')
+                        ->modalSubmitActionLabel('Yes, reset now'),
                     Tables\Actions\DeleteAction::make(),
                 ])->button()->hiddenLabel()->size('sm'),
             ], position: Tables\Enums\ActionsPosition::BeforeCells)
@@ -352,7 +372,56 @@ class PlaylistResource extends Resource
                         ->modalIcon('heroicon-o-arrow-path')
                         ->modalDescription('Process the selected playlist(s) now?')
                         ->modalSubmitActionLabel('Yes, process now'),
-
+                    Tables\Actions\BulkAction::make('reset')
+                        ->label('Reset status')
+                        ->icon('heroicon-o-arrow-uturn-left')
+                        ->color('warning')
+                        ->action(function ($records) {
+                            foreach ($records as $record) {
+                                $record->update([
+                                    'status' => Status::Pending,
+                                    'processing' => false,
+                                    'progress' => 0,
+                                    'series_progress' => 0,
+                                    'channels' => 0,
+                                    'synced' => null,
+                                    'errors' => null,
+                                ]);
+                            }
+                        })->after(function () {
+                            Notification::make()
+                                ->success()
+                                ->title('Playlist status reset')
+                                ->body('Status has been reset for the selected Playlists.')
+                                ->duration(3000)
+                                ->send();
+                        })
+                        ->requiresConfirmation()
+                        ->icon('heroicon-o-arrow-uturn-left')
+                        ->modalIcon('heroicon-o-arrow-uturn-left')
+                        ->modalDescription('Reset status for the selected Playlists so they can be processed again. Only perform this action if you are having problems with the playlist syncing.')
+                        ->modalSubmitActionLabel('Yes, reset now'),
+                    Tables\Actions\BulkAction::make('reset_active_count')
+                        ->label('Reset active count')
+                        ->icon('heroicon-o-numbered-list')
+                        ->color('warning')
+                        ->action(function ($records) {
+                            foreach ($records as $record) {
+                                Redis::set("active_streams:{$record->id}", 0);
+                            }
+                        })->after(function () {
+                            Notification::make()
+                                ->success()
+                                ->title('Active stream count reset')
+                                ->body('Active stream count has been reset for the selected Playlists.')
+                                ->duration(3000)
+                                ->send();
+                        })
+                        ->requiresConfirmation()
+                        ->icon('heroicon-o-arrow-uturn-left')
+                        ->modalIcon('heroicon-o-numbered-list')
+                        ->modalDescription('Reset active streams count for the selected Playlists. Proceed with caution as this could lead to an incorrect count if there are streams currently running.')
+                        ->modalSubmitActionLabel('Yes, reset now'),
                     Tables\Actions\DeleteBulkAction::make(),
                 ]),
             ])->checkIfRecordIsSelectableUsing(
