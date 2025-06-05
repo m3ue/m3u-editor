@@ -100,13 +100,26 @@ class StreamingChannelStats extends Page
 
             $codecDisplay = ($outputVideoCodec !== 'copy') ? $outputVideoCodec : 'copy (source)';
 
+            $hwAccelDisplayForStat = ucfirst($hwAccelMethod ?? 'none'); // Default display
+
+            // Check if codec name already indicates HW acceleration
+            if (str_contains($codecDisplay, '_qsv') || str_contains($codecDisplay, '_vaapi')) {
+                $normalizedCodecDisplay = strtolower($codecDisplay);
+                $normalizedHwAccelMethod = strtolower($hwAccelMethod ?? 'none');
+
+                if ( (str_contains($normalizedCodecDisplay, 'qsv') && $normalizedHwAccelMethod === 'qsv') ||
+                     (str_contains($normalizedCodecDisplay, 'vaapi') && $normalizedHwAccelMethod === 'vaapi') ) {
+                    $hwAccelDisplayForStat = 'In Codec';
+                }
+            }
+
             $stats[] = [
                 'channelName' => $channel->title_custom ?? $channel->title,
                 'playlistName' => $playlist->name,
                 'activeStreams' => $activeStreamsOnPlaylist,
                 'maxStreams' => $maxStreamsDisplay, // Use the formatted value
                 'codec' => $codecDisplay,
-                'hwAccel' => ucfirst($hwAccelMethod ?? 'none'),
+                'hwAccel' => $hwAccelDisplayForStat, // Use the new conditional value
                 'resolution' => 'N/A', // Still deferred
                 'lastSeen' => $lastSeenDisplay, // Updated
                 'isBadSource' => $isBadSource, // Updated
