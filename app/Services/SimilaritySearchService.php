@@ -70,9 +70,9 @@ class SimilaritySearchService
         // so let's just grab the first few relevent matches
         $epgChannels = $epg->channels()
             ->where(function ($query) use ($normalizedChan) {
-                $query->whereRaw('LOWER(`channel_id`) like ?', ["%$normalizedChan%"])
-                    ->orWhereRaw('LOWER(`name`) like ?', ["%$normalizedChan%"])
-                    ->orWhereRaw('LOWER(`display_name`) like ?', ["%$normalizedChan%"]);
+                $query->whereRaw('LOWER(channel_id) like ?', ["%$normalizedChan%"])
+                    ->orWhereRaw('LOWER(name) like ?', ["%$normalizedChan%"])
+                    ->orWhereRaw('LOWER(display_name) like ?', ["%$normalizedChan%"]);
             });
 
         // Setup variables
