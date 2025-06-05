@@ -76,6 +76,12 @@ class StreamingChannelStats extends Page
             $activeStreamsOnPlaylist = Redis::get("active_streams:{$playlist->id}") ?? 0;
             $maxStreamsOnPlaylist = $playlist->available_streams ?? 'N/A';
 
+            // Format maxStreams
+            $maxStreamsDisplay = ($maxStreamsOnPlaylist == 0 && is_numeric($maxStreamsOnPlaylist)) ? '∞' : $maxStreamsOnPlaylist;
+            if ($maxStreamsOnPlaylist === 'N/A') {
+                $maxStreamsDisplay = 'N/A';
+            }
+
             $settings = ProxyService::getStreamSettings();
             $hwAccelMethod = $settings['hardware_acceleration_method'] ?? 'none';
             $finalVideoCodec = ProxyService::determineVideoCodec(
@@ -98,7 +104,7 @@ class StreamingChannelStats extends Page
                 'channelName' => $channel->title_custom ?? $channel->title,
                 'playlistName' => $playlist->name,
                 'activeStreams' => $activeStreamsOnPlaylist,
-                'maxStreams' => $maxStreamsOnPlaylist,
+                'maxStreams' => $maxStreamsDisplay, // Use the formatted value
                 'codec' => $codecDisplay,
                 'hwAccel' => ucfirst($hwAccelMethod ?? 'none'),
                 'resolution' => 'N/A', // Still deferred
