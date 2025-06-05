@@ -585,10 +585,10 @@ class HlsStreamService
             $cmd .= $hwaccelInputArgs; // e.g., -hwaccel vaapi (these must go BEFORE the -i input)
 
             // Low-latency flags for better HLS performance
-            $cmd .= '-fflags nobuffer -flags low_delay -avoid_negative_ts disabled ';
+            $cmd .= '-fflags nobuffer+igndts -flags low_delay -avoid_negative_ts disabled ';
 
             // Input analysis optimization for faster stream start
-            $cmd .= '-analyzeduration 1M -probesize 1M -max_delay 500000 ';
+            $cmd .= '-analyzeduration 1M -probesize 1M -max_delay 500000 -fpsprobesize 0 ';
             
             // Better error handling
             $cmd .= '-err_detect ignore_err -ignore_unknown ';
@@ -605,6 +605,7 @@ class HlsStreamService
             $cmd .= $videoFilterArgs; // e.g., -vf 'scale_vaapi=format=nv12' or -vf 'vpp_qsv=format=nv12'
 
             $cmd .= $outputFormat . ' ';
+            $cmd .= '-vsync cfr '; // Add the vsync flag here
         } else {
             // Custom command template is provided
             $cmd = $customCommandTemplate;
