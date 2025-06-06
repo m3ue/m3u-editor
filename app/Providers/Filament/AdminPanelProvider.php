@@ -10,6 +10,7 @@ use App\Filament\Auth\EditProfile;
 use App\Filament\Pages\CustomDashboard;
 use App\Filament\Widgets\DiscordWidget;
 use App\Filament\Widgets\DocumentsWidget;
+use App\Filament\Widgets\DonateCrypto;
 use App\Filament\Widgets\KoFiWidget;
 
 //use App\Filament\Widgets\PayPalDonateWidget;
@@ -94,6 +95,7 @@ class AdminPanelProvider extends PanelProvider
                 DiscordWidget::class,
                 // PayPalDonateWidget::class,
                 KoFiWidget::class,
+                // DonateCrypto::class,
                 StatsOverview::class,
             ])
             ->plugins([

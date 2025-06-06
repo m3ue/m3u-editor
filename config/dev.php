@@ -17,4 +17,42 @@ return [
         'regex' => env('TVGID_REGEX', '/[^a-zA-Z0-9_\-\.]/'),
     ],
     'max_channels' => env('MAX_CHANNELS', 50000), // Maximum number of channels allowed for m3u import
+    'crypto_addresses' => [
+        [
+            'name' => 'Bitcoin',
+            'symbol' => 'BTC',
+            'address' => '',
+            'icon' => '/images/crypto-icons/bitcoin.svg',
+        ],
+        [
+            'name' => 'Ethereum',
+            'symbol' => 'ETH',
+            'address' => '',
+            'icon' => '/images/crypto-icons/ethereum.svg',
+        ],
+        [
+            'name' => 'Solana',
+            'symbol' => 'SOL',
+            'address' => '',
+            'icon' => '/images/crypto-icons/solana.svg',
+        ],
+        [
+            'name' => 'Tether',
+            'symbol' => 'USDT',
+            'address' => '',
+            'icon' => '/images/crypto-icons/tether.svg',
+        ],
+        [
+            'name' => 'Litecoin',
+            'symbol' => 'LTC',
+            'address' => '',
+            'icon' => '/images/crypto-icons/litecoin.svg',
+        ],
+        [
+            'name' => 'Ripple',
+            'symbol' => 'XRP',
+            'address' => '',
+            'icon' => '/images/crypto-icons/ripple.svg',
+        ]
+    ]
 ];
