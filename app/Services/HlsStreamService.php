@@ -259,6 +259,7 @@ class HlsStreamService
     private function runPreCheck(string $modelType, $modelId, $streamUrl, $userAgent, $title, int $ffprobeTimeout)
     {
         $ffprobePath = config('proxy.ffprobe_path', 'ffprobe');
+        
         // Updated command to include -show_format and remove -select_streams to get all streams for detailed info
         $cmd = "$ffprobePath -v quiet -print_format json -show_streams -show_format -user_agent " . escapeshellarg($userAgent) . " " . escapeshellarg($streamUrl);
 
