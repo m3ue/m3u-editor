@@ -30,6 +30,20 @@ View our [getting started](https://sparkison.github.io/m3u-editor-docs/docs/abou
 
 ---
 
+## 🤝 Want to Contribute?
+
+> Whether it’s writing docs, squashing bugs, or building new features, your contribution matters! ❤️
+
+We welcome **PRs, issues, ideas, and suggestions**!\
+Here’s how you can join the party:
+
+- Follow our coding style and best practices.
+- Be respectful, helpful, and open-minded.
+- Respect the **CC BY-NC-SA license**.
+
+
+---
+
 ## ⚖️ License  
 
 > m3u editor is licensed under **CC BY-NC-SA 4.0**:  
