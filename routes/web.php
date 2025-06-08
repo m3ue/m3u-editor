@@ -3,6 +3,7 @@
 use App\Http\Controllers\EpgFileController;
 use App\Http\Controllers\EpgGenerateController;
 use App\Http\Controllers\PlaylistGenerateController;
+use App\Http\Controllers\XtreamApiController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -23,6 +24,9 @@ Route::get('/{uuid}/hdhr/lineup.json', [\App\Http\Controllers\PlaylistGenerateCo
     ->name('playlist.hdhr.lineup');
 Route::get('/{uuid}/hdhr/lineup_status.json', [\App\Http\Controllers\PlaylistGenerateController::class, 'hdhrLineupStatus'])
     ->name('playlist.hdhr.lineup_status');
+
+// Xtream API route
+Route::get('/{uuid}/xtream', [XtreamApiController::class, 'handle'])->name('playlist.xtream.api');
 
 // Generate EPG playlist from the playlist configuration
 Route::get('/{uuid}/epg.xml', EpgGenerateController::class)
