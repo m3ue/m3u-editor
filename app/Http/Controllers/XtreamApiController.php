@@ -231,6 +231,206 @@ class XtreamApiController extends Controller
                 'series' => $vodSeries, // Populate this
                 'categories' => $responseCategories,
             ]);
+        } else if ($action === 'get_live_streams') {
+            $enabledChannels = $playlist->channels ?? new Collection();
+            $liveStreams = [];
+            foreach ($enabledChannels as $index => $channel) {
+                $streamIcon = URL::asset('/placeholder.png');
+                if ($channel->logo_type === ChannelLogoType::Epg && $channel->epgChannel && $channel->epgChannel->icon) {
+                    $streamIcon = $channel->epgChannel->icon;
+                } elseif ($channel->logo_type === ChannelLogoType::Channel && $channel->logo) {
+                    $streamIcon = $channel->logo;
+                }
+
+                $channelCategoryId = 'all';
+                if ($channel->group_id) {
+                    $channelCategoryId = (string)$channel->group_id;
+                } elseif ($channel->group && $channel->group->id) {
+                    $channelCategoryId = (string)$channel->group->id;
+                }
+                // It's better to ensure category_id exists in a predefined list of categories if strict adherence is needed.
+                // For now, defaulting to 'all' if not found or being more robust based on actual category data available.
+
+                $liveStreams[] = [
+                    'num' => $index + 1,
+                    'name' => $channel->title_custom ?? $channel->title,
+                    'stream_type' => 'live',
+                    'stream_id' => (int)$channel->id,
+                    'stream_icon' => $streamIcon,
+                    'epg_channel_id' => $channel->epgChannel->epg_channel_id ?? $channel->stream_id_custom ?? $channel->stream_id ?? (string)$channel->id,
+                    'added' => (string)$channel->created_at->timestamp,
+                    'category_id' => $channelCategoryId, // Ensure this category_id is valid based on your categories logic
+                    'tv_archive' => $channel->tv_archive_enabled ?? 0, // Assuming a model attribute or default
+                    'direct_source' => $channel->direct_source_url ?? '', // Assuming a model attribute or default
+                    'tv_archive_duration' => $channel->tv_archive_duration ?? 0, // Assuming a model attribute or default
+                ];
+            }
+            return response()->json($liveStreams);
+        } else if ($action === 'get_vod_streams') {
+            $enabledSeriesCollection = $playlist->series ?? new Collection();
+            $vodSeries = [];
+            $now = Carbon::now(); // Ensure $now is available
+
+            foreach ($enabledSeriesCollection as $index => $seriesItem) {
+                $seriesCategoryId = 'all'; // Default category_id
+                if ($seriesItem->category_id) {
+                    $seriesCategoryId = (string)$seriesItem->category_id;
+                } elseif ($seriesItem->category && $seriesItem->category->id) {
+                    $seriesCategoryId = (string)$seriesItem->category->id;
+                }
+                // Consider validating $seriesCategoryId against available categories if strictness is required.
+
+                $vodSeries[] = [
+                    'num' => $index + 1,
+                    'name' => $seriesItem->name,
+                    'series_id' => (int)$seriesItem->id,
+                    'cover' => $seriesItem->cover_image ?? URL::asset('/placeholder.png'),
+                    'plot' => $seriesItem->plot_summary ?? '',
+                    'cast' => $seriesItem->cast ?? '',
+                    'director' => $seriesItem->director ?? '',
+                    'genre' => $seriesItem->genre ?? '',
+                    'releaseDate' => $seriesItem->release_date ? Carbon::parse($seriesItem->release_date)->format('Y-m-d') : '',
+                    'last_modified' => (string)($seriesItem->updated_at ? $seriesItem->updated_at->timestamp : $now->timestamp),
+                    'rating' => (string)($seriesItem->rating ?? 0),
+                    'rating_5based' => round(($seriesItem->rating ?? 0) / 2, 1),
+                    'backdrop_path' => $seriesItem->backdrop_path ?? [], // Assuming backdrop_path is an array or can be defaulted to []
+                    'youtube_trailer' => $seriesItem->youtube_trailer ?? '',
+                    'episode_run_time' => (string)($seriesItem->episode_run_time ?? 0),
+                    'category_id' => $seriesCategoryId,
+                ];
+            }
+            return response()->json($vodSeries);
+        } else if ($action === 'get_vod_info') {
+            $vodId = $request->input('vod_id');
+            if (!$vodId) {
+                return response()->json(['error' => 'Missing vod_id parameter'], 400);
+            }
+
+            $seriesItem = null;
+            if ($playlist->series && $playlist->series->isNotEmpty()) {
+                $seriesItem = $playlist->series->firstWhere('id', $vodId);
+            }
+
+            if (!$seriesItem) {
+                return response()->json(['error' => 'VOD not found or not enabled'], 404);
+            }
+
+            $now = Carbon::now();
+            $seriesInfo = [
+                'name' => $seriesItem->name,
+                'cover' => $seriesItem->cover_image ?? URL::asset('/placeholder.png'),
+                'plot' => $seriesItem->plot_summary ?? '',
+                'cast' => $seriesItem->cast ?? '',
+                'director' => $seriesItem->director ?? '',
+                'genre' => $seriesItem->genre ?? '',
+                'releaseDate' => $seriesItem->release_date ? Carbon::parse($seriesItem->release_date)->format('Y-m-d') : '',
+                'last_modified' => (string)($seriesItem->updated_at ? $seriesItem->updated_at->timestamp : $now->timestamp),
+                'rating' => (string)($seriesItem->rating ?? 0),
+                'rating_5based' => round(($seriesItem->rating ?? 0) / 2, 1),
+                'backdrop_path' => $seriesItem->backdrop_path ?? [],
+                'youtube_trailer' => $seriesItem->youtube_trailer ?? '',
+                'episode_run_time' => (string)($seriesItem->episode_run_time ?? '0'), // Ensure string for consistency
+                'category_id' => (string)($seriesItem->category_id ?? ($seriesItem->category ? $seriesItem->category->id : 'all')),
+            ];
+
+            $episodesBySeason = [];
+            if ($seriesItem->seasons && $seriesItem->seasons->isNotEmpty()) {
+                foreach ($seriesItem->seasons as $season) {
+                    $seasonNumber = $season->season_number;
+                    $seasonEpisodes = [];
+                    if ($season->episodes && $season->episodes->isNotEmpty()) {
+                        foreach ($season->episodes as $episode) {
+                            // Construct stream URL - ensure username/password are available from the main handle method scope
+                            $containerExtension = $episode->container_extension ?? 'mp4'; // Default or from model
+                            $streamUrlPath = "/series/{$uuid}/{$username}/{$password}/{$seriesItem->id}-{$episode->id}.{$containerExtension}";
+
+                            $seasonEpisodes[] = [
+                                'id' => (string)$episode->id,
+                                'episode_num' => $episode->episode_number,
+                                'title' => $episode->title ?? "Episode {$episode->episode_number}",
+                                'container_extension' => $containerExtension,
+                                'info' => [ // Basic info, can be expanded
+                                    'movie_image' => $episode->thumbnail_url ?? $seriesItem->cover_image ?? URL::asset('/placeholder.png'),
+                                    'plot' => $episode->plot_summary ?? '',
+                                    'duration_secs' => $episode->duration_seconds ?? 0,
+                                    'duration' => gmdate("H:i:s", $episode->duration_seconds ?? 0),
+                                    'video' => [], // Placeholder for video details if any
+                                    'audio' => [], // Placeholder for audio details if any
+                                    'bitrate' => $episode->bitrate ?? 0,
+                                    'rating' => (string)($episode->rating ?? 0),
+                                ],
+                                'added' => (string)($episode->created_at ? $episode->created_at->timestamp : $now->timestamp),
+                                'season' => $seasonNumber,
+                                // The key for the stream URL is usually the series_id for older API, but episode ID is more specific
+                                // Xtream Codes typically uses the episode ID as the stream ID in this context.
+                                'stream_id' => (int)$episode->id, // Or series_id if that's the convention followed
+                                'direct_source' => url($streamUrlPath) // Generate full URL
+                            ];
+                        }
+                    }
+                    if (!empty($seasonEpisodes)) {
+                        $episodesBySeason[$seasonNumber] = $seasonEpisodes;
+                    }
+                }
+            }
+
+            // If no seasons/episodes, or to handle series that are like single movies (no seasons)
+            // This part might need adjustment based on how single VOD items (non-series) are structured
+            if (empty($episodesBySeason) && $seriesItem->is_movie) { // Assuming an is_movie flag or similar logic
+                 $containerExtension = $seriesItem->container_extension ?? 'mp4';
+                 $streamUrlPath = "/series/{$uuid}/{$username}/{$password}/{$seriesItem->id}.{$containerExtension}";
+                 $episodesBySeason[1] = [ // Default to season 1 for movies
+                    [
+                        'id' => (string)$seriesItem->id, // Use series ID as episode ID for movie
+                        'episode_num' => 1,
+                        'title' => $seriesItem->name,
+                        'container_extension' => $containerExtension,
+                        'info' => [
+                            'movie_image' => $seriesItem->cover_image ?? URL::asset('/placeholder.png'),
+                            'plot' => $seriesItem->plot_summary ?? '',
+                            'duration_secs' => $seriesItem->duration_seconds ?? 0, // Assuming duration on series for movies
+                            'duration' => gmdate("H:i:s", $seriesItem->duration_seconds ?? 0),
+                            'video' => [],
+                            'audio' => [],
+                            'bitrate' => $seriesItem->bitrate ?? 0, // Assuming bitrate on series for movies
+                            'rating' => (string)($seriesItem->rating ?? 0),
+                        ],
+                        'added' => (string)($seriesItem->created_at ? $seriesItem->created_at->timestamp : $now->timestamp),
+                        'season' => 1,
+                        'stream_id' => (int)$seriesItem->id,
+                        'direct_source' => url($streamUrlPath)
+                    ]
+                 ];
+            }
+
+
+            return response()->json([
+                'info' => $seriesInfo,
+                'episodes' => $episodesBySeason,
+                // The 'movie_data' structure is often used for VOD info in Xtream Codes for player compatibility.
+                // Replicating a common structure:
+                'movie_data' => [
+                    'stream_id' => (int)$seriesItem->id,
+                    'name' => $seriesItem->name,
+                    'title' => $seriesItem->name, // Often duplicated
+                    'year' => $seriesItem->release_date ? Carbon::parse($seriesItem->release_date)->format('Y') : '',
+                    'episode_run_time' => (string)($seriesItem->episode_run_time ?? '0'),
+                    'plot' => $seriesItem->plot_summary ?? '',
+                    'cast' => $seriesItem->cast ?? '',
+                    'director' => $seriesItem->director ?? '',
+                    'genre' => $seriesItem->genre ?? '',
+                    'releaseDate' => $seriesItem->release_date ? Carbon::parse($seriesItem->release_date)->format('Y-m-d') : '',
+                    'last_modified' => (string)($seriesItem->updated_at ? $seriesItem->updated_at->timestamp : $now->timestamp),
+                    'rating' => (string)($seriesItem->rating ?? 0),
+                    'rating_5based' => round(($seriesItem->rating ?? 0) / 2, 1),
+                    'cover_big' => $seriesItem->cover_image ?? URL::asset('/placeholder.png'), // Often 'cover_big' is used
+                    'youtube_trailer' => $seriesItem->youtube_trailer ?? '',
+                    'backdrop_path' => $seriesItem->backdrop_path ?? [],
+                    // For movies without explicit episodes, direct source might be here
+                    // This example assumes episodes are always structured, even for movies (as season 1, episode 1)
+                ]
+            ]);
+
         } else {
             return response()->json(['error' => "Action '{$action}' not implemented"]);
         }
