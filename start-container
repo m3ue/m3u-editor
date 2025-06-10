@@ -223,7 +223,7 @@ if [ "${ENABLE_POSTGRES}" = "true" ]; then
   dots=""
   until su-exec $WWWUSER pg_isready -h localhost -p "$PG_PORT" --quiet; do
     dots+="."
-    echo "⏳ Waiting for Postgre${dots}"
+    echo "⏳ Waiting for Postgres${dots}"
     sleep 1
   done
   echo ""

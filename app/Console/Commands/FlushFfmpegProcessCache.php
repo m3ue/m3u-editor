@@ -27,7 +27,7 @@ class FlushFfmpegProcessCache extends Command
      */
     public function handle()
     {
-        $this->info('🧹 Cleaning up FFmpeg process cache.');
+        $this->info('🧹 Cleaning up FFmpeg process cache...');
 
         // Flush the Redis store (FFmpeg processes mgmt., cache, etc.)
         Redis::flushdb();
