@@ -235,6 +235,47 @@ class ChannelsRelationManager extends RelationManager
             ])
             ->headerActions([
                 Tables\Actions\AttachAction::make()
+                    ->recordSelectSearchColumns([
+                        'title',
+                        'title_custom',
+                        'name',
+                        'name_custom',
+                        'stream_id'
+                    ])->form(fn(Tables\Actions\AttachAction $action): array => [
+                        $action
+                            ->getRecordSelect()
+                            ->getSearchResultsUsing(function (string $search) {
+                                $searchLower = strtolower($search);
+                                $channels = Auth::user()->channels()
+                                    ->withoutEagerLoads()
+                                    ->with('playlist')
+                                    ->where(function ($query) use ($searchLower) {
+                                        $query->whereRaw('LOWER(title) LIKE ?', ["%{$searchLower}%"])
+                                            ->orWhereRaw('LOWER(title_custom) LIKE ?', ["%{$searchLower}%"])
+                                            ->orWhereRaw('LOWER(name) LIKE ?', ["%{$searchLower}%"])
+                                            ->orWhereRaw('LOWER(name_custom) LIKE ?', ["%{$searchLower}%"])
+                                            ->orWhereRaw('LOWER(stream_id) LIKE ?', ["%{$searchLower}%"]);
+                                    })
+                                    ->limit(50)
+                                    ->get();
+
+                                // Create options array
+                                $options = [];
+                                foreach ($channels as $channel) {
+                                    $displayTitle = $channel->title_custom ?: $channel->title;
+                                    $playlistName = $channel->playlist->name ?? 'Unknown';
+                                    $options[$channel->id] = "{$displayTitle} [{$playlistName}]";
+                                }
+
+                                return $options;
+                            })
+                            ->getOptionLabelFromRecordUsing(function ($record) {
+                                $displayTitle = $record->title_custom ?: $record->title;
+                                $playlistName = $record->playlist->name ?? 'Unknown';
+                                $options[$record->id] = "{$displayTitle} [{$playlistName}]";
+                                return "{$displayTitle} [{$playlistName}]";
+                            })
+                    ])
 
                 // Advanced attach when adding pivot values:
                 // Tables\Actions\AttachAction::make()->form(fn(Tables\Actions\AttachAction $action): array => [
