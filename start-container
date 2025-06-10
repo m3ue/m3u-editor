@@ -189,7 +189,14 @@ php artisan sqlite:wal-enable sqlite
 php artisan sqlite:wal-enable jobs
 echo ""
 
+# Start Redis server
+echo "📡 Starting Redis server..."
+redis-server /etc/redis/redis.conf --daemonize yes
+
+# If postgres is enabled, start it
 if [ "${ENABLE_POSTGRES}" = "true" ]; then
+  echo "📡 Starting Postgres..."
+
   # Create log file
   [ ! -f "${postgres_log_file}" ] && touch "${postgres_log_file}"
   echo "" > "${postgres_log_file}"
@@ -216,9 +223,10 @@ if [ "${ENABLE_POSTGRES}" = "true" ]; then
   dots=""
   until su-exec $WWWUSER pg_isready -h localhost -p "$PG_PORT" --quiet; do
     dots+="."
-    echo "⏳ Waiting for PostgreSQL${dots}"
+    echo "⏳ Waiting for Postgre${dots}"
     sleep 1
   done
+  echo ""
 
   # Idempotent role + database creation
   su-exec $WWWUSER psql \
@@ -283,6 +291,20 @@ CREATE DATABASE "${PG_DATABASE}"
 EOSQL
   fi
 fi
+
+# Wait until Redis is ready
+dots=""
+until redis-cli -p "$REDIS_SERVER_PORT" ping | grep -q PONG; do
+  dots+="."
+  echo "⏳ Waiting for Redis${dots}"
+  sleep 1
+done
+echo ""
+
+# Flush FFmpeg process cache and prune HLS
+php artisan app:flush-ffmpeg-process-cache
+php artisan app:hls-prune
+echo ""
 
 # Run migrations
 echo "💾 Running migrations..."
