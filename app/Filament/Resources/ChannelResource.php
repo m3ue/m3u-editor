@@ -695,7 +695,7 @@ class ChannelResource extends Resource
             ]);
     }
 
-    public static function getForm(): array
+    public static function getForm($customPlaylist = null): array
     {
         return [
             // Customizable channel fields
@@ -721,6 +721,7 @@ class ChannelResource extends Resource
                             }
                         })
                         ->requiredWithout('custom_playlist_id')
+                        ->hidden($customPlaylist !== null)
                         ->validationMessages([
                             'required_without' => 'Playlist is required if not using a custom playlist.',
                         ])
@@ -729,6 +730,8 @@ class ChannelResource extends Resource
                         ->label('Custom Playlist')
                         ->options(fn() => CustomPlaylist::where(['user_id' => auth()->id()])->get(['name', 'id'])->pluck('name', 'id'))
                         ->searchable()
+                        ->disabled($customPlaylist !== null)
+                        ->default($customPlaylist ? $customPlaylist->id : null)
                         ->live()
                         ->afterStateUpdated(function (Forms\Set $set, $state) {
                             if ($state) {

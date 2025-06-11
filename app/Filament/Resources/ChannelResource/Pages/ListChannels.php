@@ -42,26 +42,10 @@ class ListChannels extends ListRecords
                 ->label('Create Custom Channel')
                 ->modalHeading('New Custom Channel')
                 ->modalDescription('NOTE: Custom channels need to be associated with a Playlist or Custom Playlist.')
-                ->using(function (array $data, string $model): Model {
-                    $data['user_id'] = auth()->id();
-                    $data['is_custom'] = true;
-                    if (!$data['shift']) {
-                        $data['shift'] = 0; // Default shift to 0 if not provided
-                    }
-                    if (!$data['logo_type']) {
-                        $data['logo_type'] = 'channel'; // Default to channel if not provided
-                    }
-                    $channel = $model::create($data);
-
-                    // If the channel is created for a Custom Playlist, we need to associate it with the Custom Playlist
-                    if (isset($data['custom_playlist_id']) && $data['custom_playlist_id']) {
-                        $channel->customPlaylists()
-                            ->syncWithoutDetaching([$data['custom_playlist_id']]);
-
-                        $channel->save();
-                    }
-                    return $channel;
-                })
+                ->using(fn (array $data, string $model): Model => ChannelResource::createCustomChannel(
+                    data: $data,
+                    model: $model,
+                ))
                 ->slideOver(),
             Actions\ActionGroup::make([
                 Actions\Action::make('map')
