@@ -43,6 +43,7 @@ class MapPlaylistChannelsToEpg implements ShouldQueue
         public ?bool  $force = false,
         public ?bool  $recurring = false,
         public ?int   $epgMapId = null,
+        public ?array $settings = null,
     ) {
         $this->similaritySearch = new SimilaritySearchService();
     }
@@ -87,10 +88,13 @@ class MapPlaylistChannelsToEpg implements ShouldQueue
                 'processing' => true,
                 'override' => $this->force,
                 'recurring' => $this->recurring,
+                'settings' => $this->settings,
                 'mapped_at' => now(),
             ]);
         }
 
+        $settings = $map->settings ?? [];
+        dump($settings);
         try {
             // Fetch the playlist (if set)
             $channels = [];
@@ -113,20 +117,77 @@ class MapPlaylistChannelsToEpg implements ShouldQueue
             // Map the channels
             $channelCount = 0;
             $mappedCount = 0;
-            LazyCollection::make(function () use ($channels, $epg, &$channelCount, &$mappedCount) {
+            LazyCollection::make(function () use ($channels, $epg, $settings, &$channelCount, &$mappedCount) {
+                $patterns = $settings['exclude_prefixes'] ?? [];
+                $useRegex = $settings['use_regex'] ?? false;
                 foreach ($channels as $channel) {
                     // Increment counter
                     $channelCount++;
 
+                    // Get the title and stream id
+                    $streamId = trim($channel->stream_id);
+                    $name = trim($channel->name);
+                    $title = trim($channel->title ?? $channel->title);
+
+                    dump([
+                        'stream_id' => $streamId,
+                        'name' => $name,
+                        'title' => $title,
+                        'patterns' => $patterns,
+                        'useRegex' => $useRegex,
+                    ]);
+
+                    // Get cleaned title and stream id
+                    if (!empty($patterns)) {
+                        foreach ($patterns as $pattern) {
+                            if ($useRegex) {
+                                // Escape existing delimiters in user input
+                                $delimiter = '/';
+                                $escapedPattern = str_replace($delimiter, '\\' . $delimiter, $pattern);
+                                $finalPattern = $delimiter . $escapedPattern . $delimiter . 'u';
+
+                                // Use regex to remove the prefix
+                                if (preg_match($finalPattern, $streamId, $matches)) {
+                                    $streamId = preg_replace($finalPattern, '', $streamId);
+                                }
+                                if (preg_match($finalPattern, $name, $matches)) {
+                                    $name = preg_replace($finalPattern, '', $name);
+                                }
+                                if (preg_match($finalPattern, $title, $matches)) {
+                                    $title = preg_replace($finalPattern, '', $title);
+                                }
+                            } else {
+                                // Use simple string prefix matching
+                                if (str_starts_with($streamId, $pattern)) {
+                                    $streamId = substr($streamId, strlen($pattern));
+                                }
+                                if (str_starts_with($name, $pattern)) {
+                                    $name = substr($name, strlen($pattern));
+                                }
+                                if (str_starts_with($title, $pattern)) {
+                                    $title = substr($title, strlen($pattern));
+                                }
+                            }
+                        }
+                    }
+
+                    dump([
+                        'cleaned_stream_id' => $streamId,
+                        'cleaned_name' => $name,
+                        'cleaned_title' => $title,
+                    ]);
+
                     // Get the EPG channel (check for direct match first)
                     $epgChannel = $epg->channels()
                         ->where('channel_id', '!=', '')
-                        ->where(function ($sub) use ($channel) {
-                            $search1 = strtolower(trim($channel->stream_id));
-                            $search2 = strtolower(trim($channel->name));
+                        ->where(function ($sub) use ($streamId, $name, $title) {
+                            $search1 = strtolower($streamId);
+                            $search2 = strtolower($name);
+                            $search3 = strtolower($title);
                             return $sub
                                 ->whereRaw('LOWER(channel_id) = ?', [$search1])
-                                ->orWhereRaw('LOWER(channel_id) = ?', [$search2]);
+                                ->orWhereRaw('LOWER(channel_id) = ?', [$search2])
+                                ->orWhereRaw('LOWER(channel_id) = ?', [$search3]);
                         })
                         ->select('id', 'channel_id')
                         ->first();

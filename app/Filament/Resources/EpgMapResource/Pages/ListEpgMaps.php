@@ -29,8 +29,9 @@ class ListEpgMaps extends ListRecords
                         ->dispatch(new \App\Jobs\MapPlaylistChannelsToEpg(
                             epg: (int)$data['epg_id'],
                             playlist: $data['playlist_id'],
-                            force: $data['overwrite'],
+                            force: $data['override'],
                             recurring: $data['recurring'],
+                            settings: $data['settings'] ?? [],
                         ));
                 })->after(function () {
                     Notification::make()

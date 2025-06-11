@@ -356,7 +356,8 @@ class ChannelResource extends Resource
                                 ->dispatch(new \App\Jobs\MapPlaylistChannelsToEpg(
                                     epg: (int)$data['epg_id'],
                                     channels: $records->pluck('id')->toArray(),
-                                    force: $data['overwrite'],
+                                    force: $data['override'],
+                                    settings: $data['settings'] ?? [],
                                 ));
                         })->after(function () {
                             Notification::make()

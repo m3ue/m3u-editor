@@ -10,6 +10,7 @@ use App\Models\EpgMap;
 use App\Models\Playlist;
 use Filament\Forms;
 use Filament\Forms\Form;
+use Filament\Forms\Get;
 use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Table;
@@ -138,12 +139,41 @@ class EpgMapResource extends Resource
                 ->searchable(),
             Forms\Components\Toggle::make('override')
                 ->label('Overwrite')
-                ->helperText('Overwrite channels with existing mappings?')
+                ->disabled((fn($record) => $record && $record->playlist_id === null))
+                ->helperText((fn($record): string => $record && $record->playlist_id === null ? 'Not available for custom channel mappings' : 'Overwrite channels with existing mappings?'))
+                ->hintIcon((fn($record) => $record && $record->playlist_id === null ? 'heroicon-o-lock-closed' : ''))
                 ->default(false),
             Forms\Components\Toggle::make('recurring')
                 ->label('Recurring')
-                ->helperText('Re-run this mapping everytime the EPG is synced?')
+                ->disabled((fn($record) => $record && $record->playlist_id === null))
+                ->helperText((fn($record): string => $record && $record->playlist_id === null ? 'Not available for custom channel mappings' : 'Re-run this mapping everytime the EPG is synced?'))
+                ->hintIcon((fn($record) => $record && $record->playlist_id === null ? 'heroicon-o-lock-closed' : ''))
                 ->default(false),
+            Forms\Components\Fieldset::make('Advanced Settings')
+                ->columns(2)
+                ->columnSpanFull()
+                ->schema([
+                    Forms\Components\Toggle::make('settings.use_regex')
+                        ->label('Use regex for filtering')
+                        ->columnSpanFull()
+                        ->inline(true)
+                        ->live()
+                        ->default(false)
+                        ->helperText('When enabled, channel titles will be matched based on regex pattern instead of prefix.'),
+                    Forms\Components\TagsInput::make('settings.exclude_prefixes')
+                        ->label(fn(Get $get) => !$get('settings.use_regex') ? 'Channel prefixes to exclude' : 'Regex patterns to exclude')
+                        ->helperText('Press [tab] or [return] to add item. Leave empty to disable.')
+                        ->columnSpanFull()
+                        ->suggestions([
+                            'US: ',
+                            'UK: ',
+                            'CA: ',
+                            '^(US|UK|CA)',
+                            '*HD$',
+                            '\[*\]'
+                        ])
+                        ->splitKeys(['Tab', 'Return', ',']),
+                ]),
         ];
     }
 }
