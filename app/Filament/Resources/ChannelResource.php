@@ -823,7 +823,7 @@ class ChannelResource extends Resource
                         ->hint('timeshift')
                         ->hintIcon(
                             'heroicon-m-question-mark-circle',
-                            tooltip: 'Time-shift is features that enable you to access content that has already been broadcasted or is currently being broadcasted, but at a different time than the original schedule. Time-shift allows you to pause, rewind, or fast-forward live TV, giving you more control over your viewing experience. Your provider must support this feature for it to work.'
+                            tooltip: 'Time-shift is features that enable you to access content that has already been broadcast or is currently being broadcast, but at a different time than the original schedule. Time-shift allows you to pause, rewind, or fast-forward live TV, giving you more control over your viewing experience. Your provider must support this feature for it to work.'
                         )
                         ->placeholder(0)
                         ->columnSpan(1)
