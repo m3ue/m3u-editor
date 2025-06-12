@@ -340,7 +340,8 @@ class ProcessM3uImport implements ShouldQueue
                             'stream_id' => $item['epg_channel_id'] ?? $item['stream_id'], // prefer EPG id for mapping, if set
                             'channel' => $item['num'] ?? null,
                             'catchup' => $item['tv_archive'] ?? null,
-                            'shift' => $item['tv_archive_duration'] ?? 0
+                            'shift' => $item['tv_archive_duration'] ?? 0,
+                            // 'tvg_shift' => $item['tvg_shift'] ?? null, // @TODO: check if this is on Xtream API, not seeing it as a deffinition in the API docs
                         ];
                         if ($autoSort) {
                             $channel['sort'] = $channelNo;
