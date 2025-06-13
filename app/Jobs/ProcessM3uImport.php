@@ -285,7 +285,8 @@ class ProcessM3uImport implements ShouldQueue
                 'catchup' => null,
                 'catchup_source' => null,
                 'shift' => 0,
-                'tvg_shift' => null
+                'tvg_shift' => null,
+                'is_vod' => false, // default false
             ];
 
             // Update progress
@@ -373,6 +374,7 @@ class ProcessM3uImport implements ShouldQueue
                             'group_internal' => $category['category_name'] ?? '',
                             'stream_id' => $item['stream_id'],
                             'channel' => $item['num'] ?? null,
+                            'is_vod' => true, // mark as VOD
                         ];
                         if ($autoSort) {
                             $channel['sort'] = $channelNo;
