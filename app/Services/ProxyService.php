@@ -18,12 +18,12 @@ class ProxyService
      * @param string $format
      * @return string
      */
-    public function getProxyUrlForChannel($id, $format = 'ts')
+    public function getProxyUrlForChannel($id, $format = 'ts', $preview = false)
     {
         $proxyUrlOverride = config('proxy.url_override');
         $proxyFormat = $format ?? config('proxy.proxy_format', 'ts');
         $id = rtrim(base64_encode($id), '=');
-        if ($proxyUrlOverride) {
+        if ($proxyUrlOverride && !$preview) {
             $proxyUrlOverride = rtrim($proxyUrlOverride, '/');
             if ($proxyFormat === 'hls') {
                 return "$proxyUrlOverride/api/stream/$id/playlist.m3u8";
@@ -49,12 +49,12 @@ class ProxyService
      * @param string $format
      * @return string
      */
-    public function getProxyUrlForEpisode($id, $format = 'ts')
+    public function getProxyUrlForEpisode($id, $format = 'ts', $preview = false)
     {
         $proxyUrlOverride = config('proxy.url_override');
         $proxyFormat = $format ?? config('proxy.proxy_format', 'ts');
         $id = rtrim(base64_encode($id), '=');
-        if ($proxyUrlOverride) {
+        if ($proxyUrlOverride && !$preview) {
             $proxyUrlOverride = rtrim($proxyUrlOverride, '/');
             if ($proxyFormat === 'hls') {
                 return "$proxyUrlOverride/api/stream/e/$id/playlist.m3u8";

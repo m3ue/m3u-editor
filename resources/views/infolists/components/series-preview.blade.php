@@ -1,7 +1,7 @@
 <x-dynamic-component :component="$getEntryWrapperView()" :entry="$entry">
     @php($record = $getRecord())
     @php($url = $record->url)
-    @php($proxyUrl = App\Facades\ProxyFacade::getProxyUrlForEpisode($record->id, 'mp4'))
+    @php($proxyUrl = App\Facades\ProxyFacade::getProxyUrlForEpisode(id: $record->id, format: 'mp4', preview: true))
     @php($playerId = "episode_{$record->id}_preview")
     <div x-data="{ state: {}, player: null }">
         <div x-data x-init="

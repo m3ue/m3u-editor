@@ -19,8 +19,7 @@ class StreamingStopped
      * 
      * @param int $playlistId The ID of the playlist for which streaming has stopped
      */
-    public function __construct(int $playlistId)
-    {
-        // Any action needed when streaming starts can be added here
-    }
+    public function __construct(
+        public int $playlistId
+    ) {}
 }
