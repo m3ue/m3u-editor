@@ -825,6 +825,7 @@ class ChannelResource extends Resource
                             'heroicon-m-question-mark-circle',
                             tooltip: 'Time-shift is features that enable you to access content that has already been broadcast or is currently being broadcast, but at a different time than the original schedule. Time-shift allows you to pause, rewind, or fast-forward live TV, giving you more control over your viewing experience. Your provider must support this feature for it to work.'
                         )
+                        ->type('number')
                         ->placeholder(0)
                         ->columnSpan(1)
                         ->rules(['numeric', 'min:0']),
@@ -960,10 +961,10 @@ class ChannelResource extends Resource
                             tooltip: 'The "tvg-shift" attribute is used in your generated M3U playlist to shift the EPG (Electronic Program Guide) time for specific channels by a certain number of hours. This allows for adjusting the EPG data for individual channels rather than applying a global shift.'
                         )
                         ->columnSpan(1)
-                        ->rules(['numeric', 'integer'])
                         ->placeholder('0')
+                        ->type('number')
                         ->helperText('Indicates the shift of the program schedule, use the values -2,-1,0,1,2,.. and so on.')
-                        ->rules(['nullable', 'numeric', 'min:0']),
+                        ->rules(['nullable', 'numeric']),
                 ]),
             Forms\Components\Fieldset::make('Failover Channels')
                 ->schema([
