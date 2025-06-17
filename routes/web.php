@@ -41,9 +41,9 @@ Route::get('epgs/{uuid}/epg.xml', EpgFileController::class)
 
 // Test webhook endpoint
 Route::post('/webhook/test', \App\Http\Controllers\WebhookTestController::class)
-    ->name('webhook.test.get');
-Route::get('/webhook/test', \App\Http\Controllers\WebhookTestController::class)
     ->name('webhook.test.post');
+Route::get('/webhook/test', \App\Http\Controllers\WebhookTestController::class)
+    ->name('webhook.test.get');
 
 // If local env, show PHP info screen
 Route::get('/phpinfo', function () {
