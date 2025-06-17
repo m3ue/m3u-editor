@@ -223,7 +223,7 @@ class StreamingDashboard extends Page
     {
         // Historical performance data for charts
         $hourlyStats = SharedStreamStat::selectRaw('
-                DATE_TRUNC(\'hour\', recorded_at) as hour,
+                DATE_FORMAT(recorded_at, \'%Y-%m-%d %H:00:00\') as hour,
                 AVG(client_count) as avg_clients,
                 AVG(bandwidth_kbps) as avg_bandwidth,
                 COUNT(DISTINCT stream_id) as active_streams
@@ -269,7 +269,7 @@ class StreamingDashboard extends Page
 
     protected function getPeakBandwidthHourToday(): ?string
     {
-        $peak = SharedStreamStat::selectRaw('DATE_TRUNC(\'hour\', recorded_at) as hour, SUM(bandwidth_kbps) as total')
+        $peak = SharedStreamStat::selectRaw('DATE_FORMAT(recorded_at, \'%Y-%m-%d %H:00:00\') as hour, SUM(bandwidth_kbps) as total')
             ->whereDate('recorded_at', today())
             ->groupBy('hour')
             ->orderByDesc('total')

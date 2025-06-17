@@ -16,7 +16,7 @@ class BandwidthUsageChart extends ChartWidget
     {
         // Get hourly bandwidth stats for the last 24 hours
         $stats = SharedStreamStat::selectRaw('
-                DATE_TRUNC(\'hour\', recorded_at) as hour,
+                DATE_FORMAT(recorded_at, \'%Y-%m-%d %H:00:00\') as hour,
                 SUM(bandwidth_kbps) as total_bandwidth,
                 AVG(bandwidth_kbps) as avg_bandwidth,
                 MAX(bandwidth_kbps) as peak_bandwidth

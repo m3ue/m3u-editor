@@ -83,7 +83,7 @@ class SharedStreamStat extends Model
         $startTime = now()->subHours($hours);
         
         return self::selectRaw('
-                DATE_TRUNC(\'hour\', recorded_at) as hour,
+                DATE_FORMAT(recorded_at, \'%Y-%m-%d %H:00:00\') as hour,
                 AVG(client_count) as avg_clients,
                 MAX(client_count) as max_clients,
                 AVG(bandwidth_kbps) as avg_bandwidth,

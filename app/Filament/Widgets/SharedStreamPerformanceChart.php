@@ -15,7 +15,7 @@ class SharedStreamPerformanceChart extends ChartWidget
     protected function getData(): array
     {
         $stats = SharedStreamStat::selectRaw('
-                DATE_TRUNC(\'hour\', recorded_at) as hour,
+                DATE_FORMAT(recorded_at, \'%Y-%m-%d %H:00:00\') as hour,
                 AVG(client_count) as avg_clients,
                 AVG(bandwidth_kbps) as avg_bandwidth
             ')
