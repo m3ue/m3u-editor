@@ -196,12 +196,12 @@ class StreamingDashboard extends Page
         $topStreamsByClients = SharedStream::active()
             ->orderByDesc('client_count')
             ->limit(5)
-            ->get(['stream_id', 'title', 'client_count', 'bandwidth_kbps']);
+            ->get(['stream_id', 'client_count', 'bandwidth_kbps']);
 
         $topStreamsByBandwidth = SharedStream::active()
             ->orderByDesc('bandwidth_kbps')
             ->limit(5)
-            ->get(['stream_id', 'title', 'client_count', 'bandwidth_kbps']);
+            ->get(['stream_id', 'client_count', 'bandwidth_kbps']);
 
         // Stream health analysis
         $healthStats = SharedStream::active()
@@ -310,7 +310,7 @@ class StreamingDashboard extends Page
 
         return [
             'stream_id' => $stream->stream_id,
-            'title' => $stream->title,
+            'title' => "Stream {$stream->stream_id}",
             'uptime' => $stream->started_at->diffForHumans(null, true),
             'uptime_seconds' => $stream->started_at->diffInSeconds(now()),
         ];
