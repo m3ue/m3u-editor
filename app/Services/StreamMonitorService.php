@@ -232,6 +232,12 @@ class StreamMonitorService
         $memoryUsage = memory_get_usage(true);
         $memoryPeak = memory_get_peak_usage(true);
         
+        // Get system memory info
+        $memoryInfo = $this->getSystemMemoryInfo();
+        
+        // Get disk space info
+        $diskInfo = $this->getDiskSpaceInfo();
+        
         // Redis info
         $redisInfo = Redis::info('memory');
         $redisMemory = $redisInfo['used_memory_human'] ?? 'N/A';
@@ -245,6 +251,9 @@ class StreamMonitorService
                 '5min' => $loadAvg[1],
                 '15min' => $loadAvg[2]
             ],
+            'memory_usage' => $memoryInfo,
+            'disk_space' => $diskInfo,
+            'redis_connected' => $this->checkRedisConnection(),
             'memory' => [
                 'current_usage' => $this->formatBytes($memoryUsage),
                 'peak_usage' => $this->formatBytes($memoryPeak),
@@ -664,6 +673,67 @@ class StreamMonitorService
         }
         
         return (int)$startTime;
+    }
+
+    /**
+     * Get system memory information
+     */
+    private function getSystemMemoryInfo(): array
+    {
+        $meminfo = @file_get_contents('/proc/meminfo');
+        if (!$meminfo) {
+            return ['total' => 'N/A', 'free' => 'N/A', 'used' => 'N/A', 'percentage' => 0];
+        }
+
+        preg_match('/MemTotal:\s+(\d+)/', $meminfo, $total);
+        preg_match('/MemAvailable:\s+(\d+)/', $meminfo, $available);
+        
+        $totalMem = isset($total[1]) ? (int)$total[1] * 1024 : 0;
+        $availableMem = isset($available[1]) ? (int)$available[1] * 1024 : 0;
+        $usedMem = $totalMem - $availableMem;
+        
+        return [
+            'total' => $this->formatBytes($totalMem),
+            'free' => $this->formatBytes($availableMem),
+            'used' => $this->formatBytes($usedMem),
+            'percentage' => $totalMem > 0 ? round(($usedMem / $totalMem) * 100, 1) : 0,
+        ];
+    }
+
+    /**
+     * Get disk space information
+     */
+    private function getDiskSpaceInfo(): array
+    {
+        $path = config('proxy.shared_streaming.buffer_path', '/tmp');
+        $total = disk_total_space($path);
+        $free = disk_free_space($path);
+        
+        if ($total === false || $free === false) {
+            return ['total' => 'N/A', 'free' => 'N/A', 'used' => 'N/A', 'percentage' => 0];
+        }
+        
+        $used = $total - $free;
+        
+        return [
+            'total' => $this->formatBytes($total),
+            'free' => $this->formatBytes($free),
+            'used' => $this->formatBytes($used),
+            'percentage' => $total > 0 ? round(($used / $total) * 100, 1) : 0,
+        ];
+    }
+
+    /**
+     * Check Redis connection
+     */
+    private function checkRedisConnection(): bool
+    {
+        try {
+            Redis::ping();
+            return true;
+        } catch (\Exception $e) {
+            return false;
+        }
     }
 
 }
