@@ -1254,4 +1254,62 @@ class SharedStreamService
         }
     }
 
+    /**
+     * Clean up inactive streams (streams with no clients or that are stale)
+     */
+    public function cleanupInactiveStreams(): array
+    {
+        $cleanedStreams = 0;
+        $cleanedClients = 0;
+        
+        try {
+            $activeStreams = $this->getAllActiveStreams();
+            
+            foreach ($activeStreams as $streamKey => $streamData) {
+                $streamInfo = $streamData['stream_info'];
+                $clientCount = $streamData['client_count'];
+                $lastActivity = $streamData['last_activity'] ?? time();
+                
+                // Count existing clients before cleanup
+                $cleanedClients += $clientCount;
+                
+                // Check if stream is inactive (no clients and inactive for more than 5 minutes)
+                $isInactive = $clientCount === 0 && (time() - $lastActivity) > 300;
+                
+                // Check if stream is stale (running for more than 4 hours with no recent activity)
+                $isStale = isset($streamData['uptime']) && 
+                          $streamData['uptime'] > 14400 && 
+                          (time() - $lastActivity) > 1800; // 30 minutes
+                
+                if ($isInactive || $isStale) {
+                    $reason = $isInactive ? 'no clients' : 'stale/inactive';
+                    Log::channel('ffmpeg')->info("CleanupInactiveStreams: Cleaning up stream {$streamKey} ({$reason})");
+                    
+                    $success = $this->cleanupStream($streamKey, true);
+                    
+                    if ($success) {
+                        $cleanedStreams++;
+                    }
+                }
+            }
+            
+            // Also clean up orphaned keys and temp files
+            $orphanedKeys = $this->cleanupOrphanedKeys();
+            $tempFiles = $this->cleanupTempFiles();
+            
+            Log::channel('ffmpeg')->info("CleanupInactiveStreams: Completed - Cleaned {$cleanedStreams} streams, {$cleanedClients} clients, {$orphanedKeys} orphaned keys, cleaned " . round($tempFiles / 1024 / 1024, 2) . "MB temp files");
+            
+            return [
+                'cleaned_streams' => $cleanedStreams,
+                'cleaned_clients' => $cleanedClients,
+                'orphaned_keys' => $orphanedKeys,
+                'temp_files_freed' => $tempFiles
+            ];
+            
+        } catch (\Exception $e) {
+            Log::error("Failed to cleanup inactive streams: " . $e->getMessage());
+            throw $e;
+        }
+    }
+
 }
