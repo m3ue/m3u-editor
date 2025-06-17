@@ -435,8 +435,22 @@ class SharedStreamService
 
     private function getStreamInfo(string $streamKey): ?array
     {
-        $data = Redis::get(self::CACHE_PREFIX . $streamKey);
-        return $data ? json_decode($data, true) : null;
+        // Try both with and without database prefix
+        $key1 = self::CACHE_PREFIX . $streamKey;
+        $key2 = config('database.redis.options.prefix', '') . self::CACHE_PREFIX . $streamKey;
+        
+        $data = Redis::get($key1);
+        if (!$data) {
+            $data = Redis::get($key2);
+        }
+        
+        // Return null if data is empty or invalid
+        if (!$data || empty(trim($data))) {
+            return null;
+        }
+        
+        $decoded = json_decode($data, true);
+        return $decoded && !empty($decoded) ? $decoded : null;
     }
 
     private function setStreamInfo(string $streamKey, array $streamInfo): void
