@@ -217,6 +217,14 @@ class SharedStreamController extends Controller
             });            // Wait for stream to become active before starting streaming loop
             while (!connection_aborted() && (time() - $startTime) < $maxWaitTime) {
                 $stats = $this->sharedStreamService->getStreamStats($streamKey);
+                
+                // Enhanced debugging for the 30-second timeout issue
+                if ($stats) {
+                    Log::channel('ffmpeg')->debug("Stream {$streamKey} status check for client {$clientId}: status='{$stats['status']}', process_running=" . ($stats['process_running'] ? 'true' : 'false') . ", client_count={$stats['client_count']}");
+                } else {
+                    Log::channel('ffmpeg')->debug("Stream {$streamKey} status check for client {$clientId}: No stats returned");
+                }
+                
                 if ($stats && in_array($stats['status'], ['active', 'starting'])) {
                     $streamStarted = true;
                     break;

@@ -46,16 +46,18 @@ class SharedStreamCleanup implements ShouldQueue
                 $clientCount = $streamData['client_count'];
                 $lastActivity = $streamData['last_activity'] ?? time();
                 $uptime = $streamData['uptime'] ?? 0;
+                $createdAt = $streamInfo['created_at'] ?? time();
+                $streamAge = time() - $createdAt;
                 
-                // Check if stream is stale (no clients and inactive for more than 5 minutes)
-                $isStale = $clientCount === 0 && (time() - $lastActivity) > 300;
+                // Check if stream is stale (no clients and inactive for more than 10 minutes, but only if stream is older than 2 minutes)
+                $isStale = $clientCount === 0 && (time() - $lastActivity) > 600 && $streamAge > 120;
                 
                 // Check if stream is stuck (running for more than 4 hours with no recent activity)
                 $isStuck = $uptime > 14400 && (time() - $lastActivity) > 1800; // 30 minutes
                 
                 if ($isStale || $isStuck) {
-                    $reason = $isStale ? 'no clients' : 'stuck/inactive';
-                    Log::channel('ffmpeg')->info("SharedStreamCleanup: Cleaning up stream {$streamKey} ({$reason})");
+                    $reason = $isStale ? 'no clients for 10+ minutes' : 'stuck/inactive';
+                    Log::channel('ffmpeg')->info("SharedStreamCleanup: Cleaning up stream {$streamKey} ({$reason}, age: {$streamAge}s)");
                     
                     // Force cleanup of the stream
                     $success = $sharedStreamService->cleanupStream($streamKey, true);

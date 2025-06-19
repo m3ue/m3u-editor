@@ -344,8 +344,10 @@ class SharedStreamService
         // Build command using proven working approach from StreamController
         $cmd = escapeshellcmd($ffmpegPath) . ' ';
         
-        // Better error handling (from working approach)
+        // Better error handling and more robust connection options
         $cmd .= '-err_detect ignore_err -ignore_unknown ';
+        $cmd .= '-fflags +nobuffer+igndts -flags low_delay ';
+        $cmd .= '-analyzeduration 1M -probesize 1M -max_delay 500000 ';
         
         // HTTP options (simplified to match working approach)
         $cmd .= "-user_agent " . escapeshellarg($userAgent) . " -referer " . escapeshellarg("MyComputer") . " ";
@@ -357,7 +359,7 @@ class SharedStreamService
         // Input
         $cmd .= '-i ' . escapeshellarg($streamUrl) . ' ';
         
-        // Output options - simplified to match working direct streaming
+        // Output options - use copy by default for better compatibility and performance
         $videoCodec = $settings['ffmpeg_codec_video'] ?? 'copy';
         $audioCodec = $settings['ffmpeg_codec_audio'] ?? 'copy';
         
@@ -377,10 +379,12 @@ class SharedStreamService
             $audioCodec = 'copy';
         }
         
-        // Output format (simplified to match working approach)
-        $cmd .= "-c:v {$videoCodec} -c:a {$audioCodec} -f mpegts pipe:1";
+        // Output format with better streaming options
+        $cmd .= "-c:v {$videoCodec} -c:a {$audioCodec} ";
+        $cmd .= "-avoid_negative_ts disabled -copyts -start_at_zero ";
+        $cmd .= "-f mpegts pipe:1";
         
-        Log::channel('ffmpeg')->debug("SharedStream: Built simplified direct command matching working approach");
+        Log::channel('ffmpeg')->debug("SharedStream: Built optimized direct command for reliable streaming");
         
         return $cmd;
     }
@@ -390,123 +394,12 @@ class SharedStreamService
      */
     private function setupErrorLogging(string $streamKey, $stderr, $process): void
     {
-        // Start background monitoring of the process
-        $this->monitorProcessHealth($streamKey, $stderr, $process);
+        // Make stderr non-blocking to prevent hanging
+        stream_set_blocking($stderr, false);
         
-        // Register shutdown function to handle stderr and process cleanup
-        register_shutdown_function(function () use ($streamKey, $stderr, $process) {
-            $logger = Log::channel('ffmpeg');
-            
-            // Drain stderr
-            while (!feof($stderr)) {
-                $line = fgets($stderr);
-                if ($line !== false && !empty(trim($line))) {
-                    $logger->error("Stream {$streamKey}: " . trim($line));
-                }
-            }
-            
-            fclose($stderr);
-            
-            // Clean up process
-            if (is_resource($process)) {
-                proc_close($process);
-            }
-            
-            // Mark stream as stopped if process ended
-            $this->cleanupStream($streamKey, true);
-        });
-    }
-
-    /**
-     * Monitor process health and detect failures early
-     */
-    private function monitorProcessHealth(string $streamKey, $stderr, $process): void
-    {
-        // Schedule a delayed check to validate the process is still running
-        // Using a simple approach without jobs for immediate processing
-        $this->scheduleHealthCheck($streamKey, $stderr, $process);
-    }
-
-    /**
-     * Schedule a health check for the process
-     */
-    private function scheduleHealthCheck(string $streamKey, $stderr, $process): void
-    {
-        // Use a simple background process approach
-        if (function_exists('pcntl_fork')) {
-            $pid = pcntl_fork();
-            if ($pid == 0) {
-                // Child process
-                sleep(2); // Give FFmpeg a moment to initialize
-                $this->performHealthCheck($streamKey, $stderr, $process);
-                exit(0);
-            }
-        } else {
-            // Fallback: perform immediate check after a delay
-            // This is not ideal but works for development
-            register_shutdown_function(function () use ($streamKey, $stderr, $process) {
-                sleep(1);
-                $this->performHealthCheck($streamKey, $stderr, $process);
-            });
-        }
-    }
-
-    /**
-     * Perform the actual health check
-     */
-    private function performHealthCheck(string $streamKey, $stderr, $process): void
-    {
-        $status = proc_get_status($process);
-        $isRunning = $status['running'];
-        
-        if (!$isRunning) {
-            Log::channel('ffmpeg')->warning("Stream {$streamKey}: FFmpeg process failed during startup");
-            
-            // Read any error output
-            $errorOutput = '';
-            if (is_resource($stderr)) {
-                while (!feof($stderr)) {
-                    $line = fgets($stderr);
-                    if ($line !== false && !empty(trim($line))) {
-                        $errorOutput .= trim($line) . "\n";
-                    }
-                }
-            }
-            
-            if (!empty($errorOutput)) {
-                Log::channel('ffmpeg')->error("Stream {$streamKey} startup errors: " . $errorOutput);
-            }
-            
-            // Mark stream as failed
-            $this->markStreamAsFailed($streamKey, 'FFmpeg process failed during startup');
-        } else {
-            Log::channel('ffmpeg')->debug("Stream {$streamKey}: FFmpeg process health check passed");
-        }
-    }
-
-    /**
-     * Mark a stream as failed and clean up
-     */
-    private function markStreamAsFailed(string $streamKey, string $reason): void
-    {
-        // Update stream status
-        $streamInfo = $this->getStreamInfo($streamKey);
-        if ($streamInfo) {
-            $streamInfo['status'] = 'failed';
-            $streamInfo['error'] = $reason;
-            $this->setStreamInfo($streamKey, $streamInfo);
-        }
-        
-        // Update database status
-        SharedStream::where('stream_id', $streamKey)->update([
-            'status' => 'failed',
-            'error_message' => $reason
-        ]);
-        
-        // Clean up resources
-        $this->cleanupStream($streamKey, true);
-        
-        Log::channel('ffmpeg')->error("Stream {$streamKey} marked as failed: {$reason}");
+        // Simple error monitoring without complex shutdown functions
+        // The main buffer manager will handle stderr monitoring
+        Log::channel('ffmpeg')->debug("Stream {$streamKey}: Error logging setup completed");
     }
 
     /**
@@ -895,19 +788,28 @@ class SharedStreamService
         } catch (\Exception $e) {
             Log::channel('ffmpeg')->error("Stream {$streamKey}: Buffer manager error: " . $e->getMessage());
         } finally {
-            // Cleanup resources
-            if (is_resource($stdout)) {
-                fclose($stdout);
-            }
-            if (is_resource($stderr)) {
-                fclose($stderr);
-            }
-            if (is_resource($process)) {
-                proc_close($process);
+            // Safer cleanup that doesn't cause Redis connection issues
+            try {
+                if (is_resource($stdout)) {
+                    fclose($stdout);
+                }
+                if (is_resource($stderr)) {
+                    fclose($stderr);
+                }
+                if (is_resource($process)) {
+                    proc_close($process);
+                }
+                
+                // Update database status only (avoid Redis cleanup that can cause connection errors)
+                SharedStream::where('stream_id', $streamKey)->update([
+                    'status' => 'stopped',
+                    'stopped_at' => now()
+                ]);
+                
+            } catch (\Exception $e) {
+                Log::channel('ffmpeg')->error("Stream {$streamKey}: Error during safe cleanup: " . $e->getMessage());
             }
             
-            // Mark stream as stopped
-            $this->cleanupStream($streamKey, true);
             Log::channel('ffmpeg')->info("Stream {$streamKey}: Buffer manager ended after {$segmentNumber} segments");
         }
     }
@@ -917,24 +819,16 @@ class SharedStreamService
      */
     private function runAsyncBufferManager(string $streamKey, $stdout, $stderr, $process): void
     {
-        // Use a simple approach that doesn't block the main HTTP response
-        // Similar to xTeVe's buffer management approach
+        // IMPORTANT: Don't use pcntl_fork in web context as it causes issues with:
+        // - Redis connections being shared across processes
+        // - File handle inheritance problems
+        // - HTTP response handling
         
-        if (function_exists('pcntl_fork')) {
-            $pid = pcntl_fork();
-            if ($pid == 0) {
-                // Child process - run buffer manager
-                $this->runBufferManager($streamKey, $stdout, $stderr, $process);
-                exit(0);
-            } elseif ($pid > 0) {
-                // Parent process - continue
-                Log::channel('ffmpeg')->debug("Stream {$streamKey}: Buffer manager forked to PID {$pid}");
-                return;
-            }
-        }
+        // Instead, use a more stable approach that keeps everything in the same process
+        // but uses non-blocking I/O and proper resource management
+        Log::channel('ffmpeg')->debug("Stream {$streamKey}: Starting buffer manager in current process (no fork)");
         
-        // Fallback for systems without pcntl_fork
-        // Run buffer manager in current process but return quickly
+        // Run the optimized buffer manager that uses stream_select for efficient I/O
         $this->runOptimizedBufferManager($streamKey, $stdout, $stderr, $process);
     }
 
@@ -947,9 +841,9 @@ class SharedStreamService
         stream_set_blocking($stdout, false);
         stream_set_blocking($stderr, false);
         
-        // Register a shutdown function to handle cleanup
+        // Register a shutdown function to handle cleanup safely
         register_shutdown_function(function () use ($streamKey, $stdout, $stderr, $process) {
-            $this->performFinalCleanup($streamKey, $stdout, $stderr, $process);
+            $this->performFinalCleanupSafe($streamKey, $stdout, $stderr, $process);
         });
         
         // Start a background buffer reader using stream_select for efficiency
@@ -970,10 +864,11 @@ class SharedStreamService
         
         Log::channel('ffmpeg')->debug("Stream {$streamKey}: Starting stream selector buffer manager");
         
-        $maxIterations = 100; // Limit iterations to prevent hanging
-        $iteration = 0;
+        // Remove arbitrary iteration limit that was causing premature termination
+        $lastActivity = time();
+        $maxInactiveTime = 60; // 60 seconds of no data before giving up
         
-        while ($iteration < $maxIterations && $this->isStreamActive($streamKey)) {
+        while ($this->isStreamActive($streamKey)) {
             $read = [$stdout, $stderr];
             $write = null;
             $except = null;
@@ -982,12 +877,16 @@ class SharedStreamService
             $result = stream_select($read, $write, $except, 0, 100000); // 100ms timeout
             
             if ($result > 0) {
+                $hasData = false;
+                
                 // Data available on stdout
                 if (in_array($stdout, $read)) {
                     $chunk = fread($stdout, 32768);
                     if ($chunk !== false && strlen($chunk) > 0) {
                         $accumulatedData .= $chunk;
                         $accumulatedSize += strlen($chunk);
+                        $hasData = true;
+                        $lastActivity = time();
                         
                         // Flush when we have enough data
                         if ($accumulatedSize >= $targetChunkSize) {
@@ -1002,6 +901,11 @@ class SharedStreamService
                             
                             // Update stream activity
                             $this->updateStreamActivity($streamKey);
+                            
+                            // Log progress for first few segments and then periodically
+                            if ($segmentNumber <= 10 || $segmentNumber % 100 === 0) {
+                                Log::channel('ffmpeg')->debug("Stream {$streamKey}: Buffered segment {$segmentNumber}");
+                            }
                         }
                     }
                 }
@@ -1013,18 +917,37 @@ class SharedStreamService
                         Log::channel('ffmpeg')->error("Stream {$streamKey}: {$error}");
                     }
                 }
+                
+                // Check if we have any data activity
+                if ($hasData) {
+                    $lastActivity = time();
+                }
             }
             
-            $iteration++;
-            
-            // Check if process is still running every 10 iterations
-            if ($iteration % 10 === 0) {
+            // Check if process is still running periodically
+            if ($segmentNumber % 50 === 0 || (time() - $lastActivity) > 10) {
                 $status = proc_get_status($process);
                 if (!$status['running']) {
+                    // Flush any remaining data before ending
+                    if ($accumulatedSize > 0) {
+                        $segmentKey = "{$bufferKey}:segment_{$segmentNumber}";
+                        $redis->setex($segmentKey, self::SEGMENT_EXPIRY, $accumulatedData);
+                        $redis->lpush("{$bufferKey}:segments", $segmentNumber);
+                        $segmentNumber++;
+                    }
                     Log::channel('ffmpeg')->info("Stream {$streamKey}: FFmpeg process ended, stopping buffer manager");
                     break;
                 }
             }
+            
+            // Check for inactivity timeout
+            if (time() - $lastActivity > $maxInactiveTime) {
+                Log::channel('ffmpeg')->warning("Stream {$streamKey}: No data for {$maxInactiveTime}s, ending buffer manager");
+                break;
+            }
+            
+            // Small sleep to prevent CPU spinning
+            usleep(1000); // 1ms sleep
         }
         
         // Flush any remaining data
@@ -1036,6 +959,41 @@ class SharedStreamService
         }
         
         Log::channel('ffmpeg')->debug("Stream {$streamKey}: Stream selector completed with {$segmentNumber} segments");
+    }
+
+    /**
+     * Perform final cleanup safely without causing Redis connection issues
+     */
+    private function performFinalCleanupSafe(string $streamKey, $stdout, $stderr, $process): void
+    {
+        try {
+            Log::channel('ffmpeg')->debug("Stream {$streamKey}: Starting safe final cleanup");
+            
+            // Close file handles first
+            if (is_resource($stdout)) {
+                fclose($stdout);
+            }
+            if (is_resource($stderr)) {
+                fclose($stderr);
+            }
+            if (is_resource($process)) {
+                proc_close($process);
+            }
+            
+            // Update stream status in database only (avoid Redis operations in shutdown function)
+            // This prevents Redis connection issues during cleanup
+            try {
+                SharedStream::where('stream_id', $streamKey)->update([
+                    'status' => 'stopped',
+                    'stopped_at' => now()
+                ]);
+            } catch (\Exception $e) {
+                // Don't log errors during shutdown to avoid recursive issues
+            }
+            
+        } catch (\Exception $e) {
+            // Silent handling to prevent cascading errors during shutdown
+        }
     }
 
     /**
@@ -1113,8 +1071,30 @@ class SharedStreamService
      */
     private function getStreamInfo(string $streamKey): ?array
     {
-        $data = $this->redis()->get($streamKey);
-        return $data ? json_decode($data, true) : null;
+        try {
+            $data = $this->redis()->get($streamKey);
+            if ($data === null || $data === false) {
+                Log::channel('ffmpeg')->debug("Stream {$streamKey}: No stream info found in Redis");
+                return null;
+            }
+            
+            if (empty($data)) {
+                Log::channel('ffmpeg')->warning("Stream {$streamKey}: Empty stream info data in Redis");
+                return null;
+            }
+            
+            $decoded = json_decode($data, true);
+            if ($decoded === null && json_last_error() !== JSON_ERROR_NONE) {
+                Log::channel('ffmpeg')->error("Stream {$streamKey}: Failed to decode stream info JSON: " . json_last_error_msg() . " (data: " . substr($data, 0, 100) . ")");
+                return null;
+            }
+            
+            Log::channel('ffmpeg')->debug("Stream {$streamKey}: Successfully retrieved stream info from Redis (" . strlen($data) . " bytes)");
+            return $decoded;
+        } catch (\Exception $e) {
+            Log::channel('ffmpeg')->error("Stream {$streamKey}: Error retrieving stream info: " . $e->getMessage());
+            return null;
+        }
     }
 
     /**
@@ -1122,7 +1102,22 @@ class SharedStreamService
      */
     private function setStreamInfo(string $streamKey, array $streamInfo): void
     {
-        $this->redis()->setex($streamKey, self::SEGMENT_EXPIRY, json_encode($streamInfo));
+        try {
+            $jsonData = json_encode($streamInfo);
+            if ($jsonData === false) {
+                Log::channel('ffmpeg')->error("Stream {$streamKey}: Failed to encode stream info to JSON: " . json_last_error_msg());
+                return;
+            }
+            
+            $result = $this->redis()->setex($streamKey, self::SEGMENT_EXPIRY, $jsonData);
+            if (!$result) {
+                Log::channel('ffmpeg')->error("Stream {$streamKey}: Failed to store stream info in Redis");
+            } else {
+                Log::channel('ffmpeg')->debug("Stream {$streamKey}: Successfully stored stream info in Redis (" . strlen($jsonData) . " bytes)");
+            }
+        } catch (\Exception $e) {
+            Log::channel('ffmpeg')->error("Stream {$streamKey}: Error storing stream info: " . $e->getMessage());
+        }
     }
 
     /**
@@ -1593,13 +1588,23 @@ class SharedStreamService
                 $streamInfo = $redis->get($key);
                 if ($streamInfo) {
                     $data = json_decode($streamInfo, true);
+                    $streamKey = str_replace(self::CACHE_PREFIX, '', $key);
+                    $status = $data['status'] ?? 'UNKNOWN';
+                    
                     if ($data && isset($data['status']) && in_array($data['status'], ['active', 'starting'])) {
-                        $activeStreamKeys[] = str_replace(self::CACHE_PREFIX, '', $key);
+                        $activeStreamKeys[] = $streamKey;
+                        Log::channel('ffmpeg')->debug("CleanupOrphanedKeys: Keeping active stream {$streamKey} (status: {$status})");
                     } else {
                         // Remove inactive stream key
+                        Log::channel('ffmpeg')->info("CleanupOrphanedKeys: Removing inactive stream {$streamKey} (status: {$status})");
                         $redis->del($key);
                         $cleaned++;
                     }
+                } else {
+                    $streamKey = str_replace(self::CACHE_PREFIX, '', $key);
+                    Log::channel('ffmpeg')->info("CleanupOrphanedKeys: Removing empty stream key {$streamKey}");
+                    $redis->del($key);
+                    $cleaned++;
                 }
             }
             
@@ -1703,29 +1708,91 @@ class SharedStreamService
     }
 
     /**
+     * Attempt to restart a stream that died but still has clients
+     */
+    private function attemptStreamRestart(string $streamKey, array $streamInfo): bool
+    {
+        try {
+            Log::channel('ffmpeg')->info("Stream {$streamKey}: Attempting automatic restart");
+            
+            // Update stream status to starting
+            $streamInfo['status'] = 'starting';
+            $streamInfo['restart_attempt'] = time();
+            $this->setStreamInfo($streamKey, $streamInfo);
+            
+            // Start the streaming process based on format
+            if ($streamInfo['format'] === 'hls') {
+                $this->startHLSStream($streamKey, $streamInfo);
+            } else {
+                $this->startDirectStream($streamKey, $streamInfo);
+            }
+            
+            // Update database
+            SharedStream::where('stream_id', $streamKey)->update([
+                'status' => 'starting',
+                'process_id' => $this->getProcessPid($streamKey),
+                'last_activity' => now()
+            ]);
+            
+            return true;
+            
+        } catch (\Exception $e) {
+            Log::channel('ffmpeg')->error("Stream {$streamKey}: Failed to restart - " . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
      * Get stream statistics/status
      */
     public function getStreamStats(string $streamKey): ?array
     {
         try {
-            $streamInfo = $this->getStreamInfo($streamKey);
+            // If streamKey doesn't have prefix, add it for Redis lookup
+            $redisKey = str_starts_with($streamKey, self::CACHE_PREFIX) ? $streamKey : self::CACHE_PREFIX . $streamKey;
+            $streamInfo = $this->getStreamInfo($redisKey);
             if (!$streamInfo) {
+                Log::channel('ffmpeg')->debug("getStreamStats: No stream info found for key {$streamKey} (Redis key: {$redisKey})");
                 return null;
             }
             
-            // Get client count
-            $clientKeys = $this->redis()->keys(self::CLIENT_PREFIX . $streamKey . ':*');
+            // Get client count - use clean streamKey for client lookup
+            $cleanStreamKey = str_starts_with($streamKey, self::CACHE_PREFIX) ? 
+                str_replace(self::CACHE_PREFIX, '', $streamKey) : $streamKey;
+            $clientKeys = $this->redis()->keys(self::CLIENT_PREFIX . $cleanStreamKey . ':*');
             $clientCount = count($clientKeys);
             
             // Check if process is running
             $pid = $streamInfo['pid'] ?? null;
             $isProcessRunning = $pid ? $this->isProcessRunning($pid) : false;
             
-            // Determine status
+            // Determine status - be more lenient about dead processes and add restart logic
             $status = $streamInfo['status'] ?? 'unknown';
-            if ($status === 'active' && !$isProcessRunning) {
-                $status = 'stopped';
+            
+            // Handle dead processes more intelligently
+            if (!$isProcessRunning && $status === 'active') {
+                if ($clientCount === 0) {
+                    // No clients connected, safe to mark as stopped
+                    $status = 'stopped';
+                } else {
+                    // Clients are still connected - attempt to restart the stream
+                    Log::channel('ffmpeg')->info("Stream {$streamKey}: Process died but {$clientCount} clients connected, attempting restart");
+                    
+                    // Try to restart the stream
+                    $restartSuccess = $this->attemptStreamRestart($streamKey, $streamInfo);
+                    
+                    if ($restartSuccess) {
+                        $status = 'starting';
+                        Log::channel('ffmpeg')->info("Stream {$streamKey}: Successfully restarted for {$clientCount} clients");
+                    } else {
+                        $status = 'starting'; // Keep as starting to allow manual restart
+                        Log::channel('ffmpeg')->warning("Stream {$streamKey}: Failed to restart, keeping as 'starting' for manual intervention");
+                    }
+                }
             }
+            
+            // Debug logging to track the 30-second timeout issue
+            Log::channel('ffmpeg')->debug("getStreamStats for {$streamKey}: status='{$status}', pid={$pid}, processRunning=" . ($isProcessRunning ? 'true' : 'false') . ", clientCount={$clientCount}");
             
             return [
                 'status' => $status,
@@ -1853,37 +1920,45 @@ class SharedStreamService
     {
         try {
             if ($removeData) {
+                // Use a separate Redis connection for cleanup to avoid connection issues
+                $redis = $this->redis();
+                
                 // Remove stream info from Redis
-                $this->redis()->del($streamKey);
+                $redis->del($streamKey);
                 
                 // Remove buffer data
                 $bufferKey = self::BUFFER_PREFIX . $streamKey;
-                $segmentNumbers = $this->redis()->lrange("{$bufferKey}:segments", 0, -1);
+                $segmentNumbers = $redis->lrange("{$bufferKey}:segments", 0, -1);
                 
                 // Ensure we have an array before foreach
                 if (is_array($segmentNumbers)) {
                     foreach ($segmentNumbers as $segmentNumber) {
-                        $this->redis()->del("{$bufferKey}:segment_{$segmentNumber}");
+                        $redis->del("{$bufferKey}:segment_{$segmentNumber}");
                     }
                 }
-                $this->redis()->del("{$bufferKey}:segments");
+                $redis->del("{$bufferKey}:segments");
                 
                 // Remove client keys
-                $clientKeys = $this->redis()->keys(self::CLIENT_PREFIX . $streamKey . ':*');
+                $clientKeys = $redis->keys(self::CLIENT_PREFIX . $streamKey . ':*');
                 
                 // Ensure we have an array before foreach
                 if (is_array($clientKeys)) {
                     foreach ($clientKeys as $clientKey) {
-                        $this->redis()->del($clientKey);
+                        $redis->del($clientKey);
                     }
                 }
                 
                 // Remove process PID
-                $this->redis()->del("stream_pid:{$streamKey}");
+                $redis->del("stream_pid:{$streamKey}");
+                
+                Log::channel('ffmpeg')->debug("Stream {$streamKey}: Redis cleanup completed");
             }
             
             // Update database status
-            SharedStream::where('stream_id', $streamKey)->update(['status' => 'stopped']);
+            SharedStream::where('stream_id', $streamKey)->update([
+                'status' => 'stopped',
+                'stopped_at' => now()
+            ]);
             
         } catch (\Exception $e) {
             Log::channel('ffmpeg')->error("Error cleaning up stream {$streamKey}: " . $e->getMessage());
