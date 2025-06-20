@@ -88,7 +88,12 @@ class StreamController extends Controller
             }
 
             // Determine the output format
-            $ip = $request->ip();
+            // Check if `X-Forwarded-For` header is set, otherwise use the request IP
+            if ($request->headers->has('X-Forwarded-For')) {
+                $ip = $request->headers->get('X-Forwarded-For');
+            } else {
+                $ip = $request->ip();
+            }
             $streamId = uniqid();
             $channelId = $stream->id;
             $contentType = $format === 'ts' ? 'video/MP2T' : 'video/mp4';
@@ -179,7 +184,12 @@ class StreamController extends Controller
         $streamUrl = $episode->url;
 
         // Determine the output format
-        $ip = $request->ip();
+        // Check if `X-Forwarded-For` header is set, otherwise use the request IP
+        if ($request->headers->has('X-Forwarded-For')) {
+            $ip = $request->headers->get('X-Forwarded-For');
+        } else {
+            $ip = $request->ip();
+        }
         $streamId = uniqid();
         $episodeId = $episode->id;
         $contentType = $format === 'ts' ? 'video/MP2T' : 'video/mp4';
