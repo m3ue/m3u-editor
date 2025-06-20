@@ -249,7 +249,7 @@ class SharedStreamController extends Controller
 
                 Log::channel('ffmpeg')->debug("Stream {$streamKey} is active, starting data flow for client {$clientId}");
                 
-                $lastSegment = 0;
+                $lastSegment = -1; // Start at -1 so segment 0 will be retrieved
                 $lastDataTime = time();
                 $dataSent = false;
                 $initialTimeout = 30; // 30 seconds to get the first chunk of data

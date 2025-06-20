@@ -535,11 +535,8 @@ class SharedStreamService
         stream_set_blocking($stdout, false);
         stream_set_blocking($stderr, false);
         
-        // Use a register_shutdown_function approach instead of forking
-        // This prevents broken pipe issues caused by parent process file handle closure
-        register_shutdown_function(function () use ($streamKey, $stdout, $stderr, $process) {
-            $this->drainPipesOnShutdown($streamKey, $stdout, $stderr, $process);
-        });
+        // DON'T use register_shutdown_function here - it causes premature cleanup
+        // This was causing race conditions where cleanup happens immediately
         
         // Start continuous buffering immediately in current process
         // This prevents the broken pipe issue by keeping the parent process active
@@ -562,12 +559,10 @@ class SharedStreamService
      */
     private function runDirectBufferManager(string $streamKey, $stdout, $stderr, $process): void
     {
-        // Set up a lightweight buffer reader to prevent pipe overflow
-        register_shutdown_function(function () use ($streamKey, $stdout, $stderr, $process) {
-            $this->drainPipesOnShutdown($streamKey, $stdout, $stderr, $process);
-        });
+        // DON'T use register_shutdown_function here - it causes race conditions
+        // where cleanup happens immediately after stream starts successfully
         
-        Log::channel('ffmpeg')->debug("Stream {$streamKey}: Set up direct buffer management with shutdown drain");
+        Log::channel('ffmpeg')->debug("Stream {$streamKey}: Set up direct buffer management");
     }
 
     /**
@@ -641,63 +636,73 @@ class SharedStreamService
         $redis = $this->redis();
 
         while ($waitTime < $maxWait) {
-            // Try to read data in larger chunks for better performance
-            $chunk = fread($stdout, $readChunkSize);
-            if ($chunk !== false && strlen($chunk) > 0) {
-                if (!$hasFirstData) {
-                    Log::channel('ffmpeg')->info("Stream {$streamKey}: First data chunk received from FFmpeg (" . strlen($chunk) . " bytes).");
-                    $hasFirstData = true;
-                }
-                
-                $accumulatedData .= $chunk;
-                $accumulatedSize += strlen($chunk);
-                $this->updateStreamActivity($streamKey);
-                
-                // Create segments more aggressively for faster startup
-                if ($accumulatedSize >= $targetSegmentSize || 
-                    ($accumulatedSize >= 64000 && $segmentNumber < 2)) { // Smaller initial segments for faster startup
-                    
-                    // Use direct Redis calls for initial buffering (faster than pipeline for small operations)
-                    $segmentKey = "{$bufferKey}:segment_{$segmentNumber}";
-                    $redis->setex($segmentKey, self::SEGMENT_EXPIRY, $accumulatedData);
-                    $redis->lpush("{$bufferKey}:segments", $segmentNumber);
-                    $redis->ltrim("{$bufferKey}:segments", 0, 100);
-                    
-                    Log::channel('ffmpeg')->debug("Stream {$streamKey}: Initial buffer segment {$segmentNumber} buffered ({$accumulatedSize} bytes)");
-                    
-                    // Requirement 1.a: Update status to 'active' after first segment
-                    if ($segmentNumber == 0) { // This means it's the first segment successfully processed (about to be incremented)
-                        $streamInfo = $this->getStreamInfo($streamKey);
-                        if ($streamInfo) {
-                            $streamInfo['status'] = 'active';
-                            $streamInfo['first_data_at'] = time(); // Keep this for consistency
-                            $this->setStreamInfo($streamKey, $streamInfo);
-
-                            SharedStream::where('stream_id', $streamKey)->update([
-                                'status' => 'active'
-                            ]);
-                            Log::channel('ffmpeg')->info("Stream {$streamKey}: Initial segment " . ($segmentNumber + 1) . " buffered. Marking stream as ACTIVE.");
-                        }
+            // Use stream_select to properly handle non-blocking I/O
+            $read = [$stdout];
+            $write = null;
+            $except = null;
+            
+            // Wait up to 100ms for data to be available
+            $result = stream_select($read, $write, $except, 0, 100000);
+            
+            if ($result > 0 && in_array($stdout, $read)) {
+                // Data is available, try to read it
+                $chunk = fread($stdout, $readChunkSize);
+                if ($chunk !== false && strlen($chunk) > 0) {
+                    if (!$hasFirstData) {
+                        Log::channel('ffmpeg')->info("Stream {$streamKey}: First data chunk received from FFmpeg (" . strlen($chunk) . " bytes).");
+                        $hasFirstData = true;
                     }
-
-                    $segmentNumber++;
-                    $accumulatedData = '';
-                    $accumulatedSize = 0;
                     
-                    // Build up fewer initial segments for faster startup
-                    if ($segmentNumber >= 1) { // Reduced from 2 to 1 for even faster startup
-                        break;
+                    $accumulatedData .= $chunk;
+                    $accumulatedSize += strlen($chunk);
+                    $this->updateStreamActivity($streamKey);
+                    
+                    // Create segments more aggressively for faster startup
+                    if ($accumulatedSize >= $targetSegmentSize || 
+                        ($accumulatedSize >= 64000 && $segmentNumber < 2)) { // Smaller initial segments for faster startup
+                        
+                        // Use direct Redis calls for initial buffering (faster than pipeline for small operations)
+                        $segmentKey = "{$bufferKey}:segment_{$segmentNumber}";
+                        $redis->setex($segmentKey, self::SEGMENT_EXPIRY, $accumulatedData);
+                        $redis->lpush("{$bufferKey}:segments", $segmentNumber);
+                        $redis->ltrim("{$bufferKey}:segments", 0, 100);
+                        
+                        Log::channel('ffmpeg')->debug("Stream {$streamKey}: Initial buffer segment {$segmentNumber} buffered ({$accumulatedSize} bytes)");
+                        
+                        // Requirement 1.a: Update status to 'active' after first segment
+                        if ($segmentNumber == 0) { // This means it's the first segment successfully processed (about to be incremented)
+                            $streamInfo = $this->getStreamInfo($streamKey);
+                            if ($streamInfo) {
+                                $streamInfo['status'] = 'active';
+                                $streamInfo['first_data_at'] = time(); // Keep this for consistency
+                                $this->setStreamInfo($streamKey, $streamInfo);
+
+                                SharedStream::where('stream_id', $streamKey)->update([
+                                    'status' => 'active'
+                                ]);
+                                Log::channel('ffmpeg')->info("Stream {$streamKey}: Initial segment " . ($segmentNumber + 1) . " buffered. Marking stream as ACTIVE.");
+                            }
+                        }
+
+                        $segmentNumber++;
+                        $accumulatedData = '';
+                        $accumulatedSize = 0;
+                        
+                        // Build up fewer initial segments for faster startup
+                        if ($segmentNumber >= 1) { // Reduced from 2 to 1 for even faster startup
+                            break;
+                        }
                     }
                 }
             } else {
-                // No immediate data available, check for errors and wait less
+                // No immediate data available, check for errors
                 $error = fread($stderr, 1024);
                 if ($error !== false && strlen($error) > 0) {
                     Log::channel('ffmpeg')->error("Stream {$streamKey} FFmpeg error during initial buffering: {$error}");
                 }
                 
-                usleep(100000); // Reduced from 200ms to 100ms for faster startup
-                $waitTime += 0.1;
+                // Increment wait time only when no data is available
+                $waitTime += 0.1; // 100ms increment
             }
         }
         
@@ -953,13 +958,15 @@ class SharedStreamService
         stream_set_blocking($stdout, false);
         stream_set_blocking($stderr, false);
         
-        // Register a shutdown function to handle cleanup safely
-        register_shutdown_function(function () use ($streamKey, $stdout, $stderr, $process) {
-            $this->performFinalCleanupSafe($streamKey, $stdout, $stderr, $process);
-        });
+        // DON'T register shutdown function here - it causes race condition
+        // where cleanup happens immediately after stream starts successfully
+        // Instead, let the stream run and only clean up when actually needed
         
         // Start a background buffer reader using stream_select for efficiency
         $this->startStreamSelector($streamKey, $stdout, $stderr, $process);
+        
+        // Only perform cleanup here if the stream actually ended/failed
+        $this->performFinalCleanupSafe($streamKey, $stdout, $stderr, $process);
     }
 
     /**

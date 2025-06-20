@@ -63,6 +63,15 @@ return [
             
             // Bandwidth monitoring threshold (kbps)
             'bandwidth_threshold' => env('SHARED_BANDWIDTH_THRESHOLD', 50000),
+            
+            // Log status interval (seconds) - how often to log stream status
+            'log_status_interval' => env('SHARED_LOG_STATUS_INTERVAL', 300),
+        ],
+        
+        // Stream cleanup configuration
+        'cleanup' => [
+            // Grace period for clientless streams (seconds) before stopping them
+            'clientless_grace_period' => env('SHARED_CLIENTLESS_GRACE_PERIOD', 15),
         ],
         
         // Client management
