@@ -118,41 +118,65 @@ class StreamController extends Controller
                 );
                 // If startStream completes without throwing an exception, it means streaming occurred
                 // and finished (e.g. client disconnected or finite stream ended).
-                // The request is done.
-                return;
+                // startStream itself should call exit if it sent headers.
+                // If it returns here and headers were sent, we ensure exit.
+                if ($headersSentInfo['value']) {
+                    Log::channel('ffmpeg')->debug('__invoke: startStream completed and headers were sent. Ensuring exit.');
+                    exit;
+                }
+                // If startStream returns and didn't send headers, it implies an issue or an edge case.
+                // For safety, if loop is about to end, it will be handled by post-loop logic.
+                return; // Should ideally be unreachable if startStream handles its exit properly when headersSent.
 
             } catch (SourceNotResponding $e) {
                 $this->decrementActiveStreams($playlist->id);
                 Log::channel('ffmpeg')->error("Source not responding for channel {$title} (URL: {$streamUrl}): " . $e->getMessage());
                 Redis::setex($badSourceCacheKey, ProxyService::BAD_SOURCE_CACHE_SECONDS, "SourceNotResponding: " . $e->getMessage());
-                // Continue to the next stream URL in the loop
+                // If headers were already sent by a previous stream attempt, we can't try another.
+                if ($headersSentInfo['value']) {
+                    Log::channel('ffmpeg')->error("SourceNotResponding for {$title}, but headers already sent. Terminating request.");
+                    exit;
+                }
+                continue; // Try next stream
             } catch (MaxRetriesReachedException $e) {
                 $this->decrementActiveStreams($playlist->id);
                 Log::channel('ffmpeg')->error("Max retries reached mid-stream for channel {$title} (URL: {$streamUrl}): " . $e->getMessage() . ". Attempting next failover stream.");
                 Redis::setex($badSourceCacheKey, ProxyService::BAD_SOURCE_CACHE_SECONDS, "MaxRetriesReached: " . $e->getMessage());
-                // Continue to the next stream URL in the loop
+                // If headers were already sent by this (now failed) stream attempt, we can't try another.
+                if ($headersSentInfo['value']) {
+                    Log::channel('ffmpeg')->error("MaxRetriesReachedException for {$title}, but headers already sent by this stream. Terminating request.");
+                    exit;
+                }
+                continue; // Try next stream
             } catch (Exception $e) {
                 $this->decrementActiveStreams($playlist->id);
                 Log::channel('ffmpeg')->error("Generic error streaming channel {$title} (URL: {$streamUrl}): " . $e->getMessage() . \PHP_EOL . $e->getTraceAsString());
                 Redis::setex($badSourceCacheKey, ProxyService::BAD_SOURCE_CACHE_SECONDS, "GenericError: " . $e->getMessage());
-                // Continue to the next stream URL in the loop
+                // If headers were already sent by a previous stream attempt, we can't try another.
+                if ($headersSentInfo['value']) {
+                    Log::channel('ffmpeg')->error("Generic error for {$title}, but headers already sent. Terminating request.");
+                    exit;
+                }
+                continue; // Try next stream
             }
-            // If we are here, an error occurred, and we will loop to try the next stream.
-            // If headers were already sent by a previous successful attempt that then failed mid-stream,
-            // we cannot start a new stream. The client connection is already tied.
+            // This part of the loop should ideally not be reached if startStream handles its exits
+            // or throws an exception. If an error occurred and headers were sent, the catch blocks above should exit.
+            // If an error occurred and headers were NOT sent, it continues.
+            // This explicit check after catch blocks might be redundant if catch blocks handle exit on $headersSentInfo['value'].
+            // However, keeping it for robustness:
             if ($headersSentInfo['value']) {
-                Log::channel('ffmpeg')->error("Cannot attempt failover for channel {$title} because headers were already sent by a previous stream attempt that failed mid-stream.");
-                return; // Terminate the request; client would have a broken stream.
+                Log::channel('ffmpeg')->error("In __invoke loop for {$title}: Unhandled state where error occurred but not caught specifically, and headers were sent. Terminating.");
+                exit;
             }
         }
 
         // If the loop completes, it means all stream URLs (primary and failovers) failed.
-        // If headers were already sent by a stream that started and then failed definitively (MaxRetries),
-        // we can't send a new 503 error page.
         if ($headersSentInfo['value']) {
-            Log::channel('ffmpeg')->error("All stream attempts failed for channel {$channel->id} ({$channel->title}), but headers were already sent. Client will have a broken stream.");
-            // The script will just end. The client connection would likely be cut.
-            return;
+            // This case should ideally not be reached if startStream and catch blocks with $headersSentInfo=true call exit.
+            // This implies a stream started, sent headers, then ended/failed in a way that startStream returned
+            // instead of exiting, and __invoke's loop somehow continued.
+            Log::channel('ffmpeg')->error("All stream attempts failed for channel {$channel->id} ({$channel->title}), but headers were already sent (unexpected state). Forcing exit.");
+            exit;
         }
 
         // If headers were never sent, it means all attempts failed before sending any video data.
@@ -205,7 +229,7 @@ class StreamController extends Controller
         $ip = $request->headers->get('X-Forwarded-For', $request->ip());
         $streamId = uniqid(); // Unique ID for this specific stream attempt
         $contentType = $format === 'ts' ? 'video/MP2T' : 'video/mp4';
-        
+
         $headersSentInfo = ['value' => false]; // Wrapper array for header status
 
         try {
@@ -225,32 +249,37 @@ class StreamController extends Controller
                 playlistId: $playlist->id,
                 headersHaveBeenSent: $headersSentInfo
             );
-            // If startStream completes, the request is done.
-            return;
+            // If startStream completes, the request is done. startStream should handle exit if it sent headers.
+            // This is a safeguard.
+            if ($headersSentInfo['value']) {
+                Log::channel('ffmpeg')->debug('episode: startStream completed and headers were sent. Ensuring exit.');
+                exit;
+            }
+            return; // Should be unreachable if startStream exits properly.
 
         } catch (SourceNotResponding $e) {
             $this->decrementActiveStreams($playlist->id);
             Log::channel('ffmpeg')->error("Source not responding for episode {$title} (URL: {$streamUrl}): " . $e->getMessage());
-            // If headers already sent, can't show a new error page. Client gets broken stream.
-            if ($headersSentInfo['value']) {
-                Log::channel('ffmpeg')->error("SourceNotResponding for episode {$title} but headers already sent.");
-                return;
+            if ($headersSentInfo['value']) { // Should be false if SourceNotResponding is from pre-check
+                Log::channel('ffmpeg')->error("SourceNotResponding for episode {$title} but headers already sent. Terminating.");
+                exit;
             }
             abort(503, "Episode source not responding: " . $e->getMessage());
         } catch (MaxRetriesReachedException $e) {
             $this->decrementActiveStreams($playlist->id);
             Log::channel('ffmpeg')->error("Max retries reached for episode {$title} (URL: {$streamUrl}): " . $e->getMessage());
-            if ($headersSentInfo['value']) {
-                Log::channel('ffmpeg')->error("MaxRetriesReachedException for episode {$title} but headers already sent.");
-                return;
+            if ($headersSentInfo['value']) { // Failure happened after this stream started sending data
+                Log::channel('ffmpeg')->error("MaxRetriesReachedException for episode {$title} but headers already sent by this stream. Terminating.");
+                exit;
             }
+            // If headers not sent, means all retries for the episode URL failed before output
             abort(503, "Episode stream failed after multiple retries: " . $e->getMessage());
         } catch (Exception $e) {
             $this->decrementActiveStreams($playlist->id);
             Log::channel('ffmpeg')->error("Generic error streaming episode {$title} (URL: {$streamUrl}): " . $e->getMessage() . \PHP_EOL . $e->getTraceAsString());
             if ($headersSentInfo['value']) {
-                Log::channel('ffmpeg')->error("Generic error for episode {$title} but headers already sent.");
-                return;
+                Log::channel('ffmpeg')->error("Generic error for episode {$title} but headers already sent. Terminating.");
+                exit;
             }
             abort(503, "Error streaming episode: " . $e->getMessage());
         }
@@ -469,9 +498,19 @@ class StreamController extends Controller
         if (connection_aborted()) {
             Log::channel('ffmpeg')->info("Client disconnected after streaming loop for {$type} {$title}.");
         }
-        // If loop finishes without throwing MaxRetriesReachedException and without returning due to successful stream completion/abort,
-        // it implies something went wrong, or it's a stream type that should not end.
-        // However, the typical exit paths are: return on successful completion/abort, or throw MaxRetriesReachedException.
+
+        // If this stream instance sent headers, it's responsible for ending the script.
+        if ($headersHaveBeenSent['value']) {
+            Log::channel('ffmpeg')->debug("Exiting from startStream for {$type} {$title} as headers were sent by this instance and processing is complete or aborted.");
+            // Ensure all output buffers are flushed before exiting.
+            while (ob_get_level() > 0) {
+                ob_end_flush();
+            }
+            flush();
+            exit;
+        }
+        // If headers were not sent by this instance (e.g. all ffmpeg attempts failed before output, and MaxRetriesReachedException was thrown and caught by __invoke),
+        // then __invoke will handle further logic (like trying a new stream or aborting with 503).
     }
 
     /**
