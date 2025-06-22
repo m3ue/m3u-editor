@@ -205,7 +205,7 @@ class StreamController extends Controller
         $ip = $request->headers->get('X-Forwarded-For', $request->ip());
         $streamId = uniqid(); // Unique ID for this specific stream attempt
         $contentType = $format === 'ts' ? 'video/MP2T' : 'video/mp4';
-
+        
         $headersSentInfo = ['value' => false]; // Wrapper array for header status
 
         try {
