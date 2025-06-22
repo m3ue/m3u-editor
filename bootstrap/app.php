@@ -21,5 +21,14 @@ return Application::configure(basePath: dirname(__DIR__))
             ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {
-        //
+        $exceptions->render(function (\App\Exceptions\MaxRetriesReachedException $e, \Illuminate\Http\Request $request) {
+            // Log the error fully
+            \Illuminate\Support\Facades\Log::error('Stream failed with MaxRetriesReachedException: ' . $e->getMessage(), [
+                'exception' => $e,
+                'url' => $request->fullUrl(),
+            ]);
+
+            // Return a simple text response to avoid the HTML error page, which causes "headers already sent"
+            return new \Illuminate\Http\Response('Stream failed after multiple retries.', 503, ['Content-Type' => 'text/plain']);
+        });
     })->create();
