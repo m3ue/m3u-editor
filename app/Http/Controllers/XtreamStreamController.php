@@ -39,7 +39,7 @@ class XtreamStreamController extends Controller
             }
         } else {
             $user = $playlistModel->user;
-            if ($user && $user->username === $username && Hash::check($password, $user->password)) {
+            if ($user && $user->name === $username && Hash::check($password, $user->password)) {
                 // Authenticated via User
                 $streamModel = $this->getValidatedStreamFromPlaylist($playlistModel, $streamId, $streamType);
             }
@@ -99,7 +99,7 @@ class XtreamStreamController extends Controller
      * @param string $uuid The UUID of the Xtream API (path parameter)
      * @param string $username User's Xtream API username (path parameter)
      * @param string $password User's Xtream API password (path parameter)
-     * @param int $streamId The ID of the live stream (channel ID) (path parameter)
+     * @param string $streamId The ID of the live stream (channel ID) (path parameter)
      * @param string $format The requested stream format (e.g., 'ts', 'm3u8') (path parameter)
      *
      * @response 302 scenario="Successful redirect to stream URL" description="Redirects to the internal live stream URL."
@@ -107,14 +107,14 @@ class XtreamStreamController extends Controller
      * 
      * @unauthenticated
      */
-    public function handleLive(Request $request, string $uuid, string $username, string $password, int $streamId, string $format)
+    public function handleLive(Request $request, string $uuid, string $username, string $password, string $streamId, string $format)
     {
         // Find the channel by ID
         if (strpos($streamId, '==') === false) {
             $streamId .= '=='; // right pad to ensure proper decoding
         }
-        $streamId = base64_decode($streamId);
-        $channel = $this->findAuthenticatedPlaylistAndStreamModel($uuid, $username, $password, $streamId, 'live');
+        $channelId = base64_decode($streamId);
+        $channel = $this->findAuthenticatedPlaylistAndStreamModel($uuid, $username, $password, (int)$channelId, 'live');
 
         if ($channel instanceof Channel) {
             $internalUrl = '';
@@ -143,7 +143,7 @@ class XtreamStreamController extends Controller
      * @param string $uuid The UUID of the Xtream API (path parameter)
      * @param string $username User's Xtream API username (path parameter)
      * @param string $password User's Xtream API password (path parameter)
-     * @param int $streamId The ID of the VOD stream (episode ID) (path parameter)
+     * @param string $streamId The ID of the VOD stream (episode ID) (path parameter)
      *
      * @response 302 scenario="Successful redirect to stream URL" description="Redirects to the internal VOD episode stream URL."
      * @response 403 scenario="Forbidden/Unauthorized" {"error": "Unauthorized or stream not found"}
@@ -151,14 +151,14 @@ class XtreamStreamController extends Controller
      * 
      * @unauthenticated
      */
-    public function handleVod(Request $request, string $uuid, string $username, string $password, int $streamId)
+    public function handleVod(Request $request, string $uuid, string $username, string $password, string $streamId)
     {
         // Find the channel by ID
         if (strpos($streamId, '==') === false) {
             $streamId .= '=='; // right pad to ensure proper decoding
         }
-        $streamId = base64_decode($streamId);
-        $channel = $this->findAuthenticatedPlaylistAndStreamModel($uuid, $username, $password, $streamId, 'vod');
+        $channelId = base64_decode($streamId);
+        $channel = $this->findAuthenticatedPlaylistAndStreamModel($uuid, $username, $password, (int)$channelId, 'vod');
 
         if ($channel instanceof Channel) {
             return Redirect::to(route('stream', ['encodedId' => $streamId, 'format' => 'ts']));
@@ -195,8 +195,8 @@ class XtreamStreamController extends Controller
         if (strpos($streamId, '==') === false) {
             $streamId .= '=='; // right pad to ensure proper decoding
         }
-        $streamId = base64_decode($streamId);
-        $episode = $this->findAuthenticatedPlaylistAndStreamModel($uuid, $username, $password, $streamId, 'episode');
+        $episodeId = base64_decode($streamId);
+        $episode = $this->findAuthenticatedPlaylistAndStreamModel($uuid, $username, $password, (int)$episodeId, 'episode');
 
         if ($episode instanceof Episode) {
             return Redirect::to(route('stream.episode', ['encodedId' => $streamId, 'format' => $format]));

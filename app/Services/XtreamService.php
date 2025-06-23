@@ -104,7 +104,10 @@ class XtreamService
             'action'   => $action,
         ], $extra);
 
-        return Str::start($this->server, 'http://')
+        if (!Str::startsWith($this->server, 'http://') && !Str::startsWith($this->server, 'https://')) {
+            $this->server = 'http://' . $this->server; // ensure server URL starts with http:// or https://
+        }
+        return $this->server
             . '/player_api.php?' . http_build_query($params);
     }
 
@@ -118,7 +121,7 @@ class XtreamService
     public function getLiveCategories(): array
     {
         return $this->call($this->makeUrl('get_live_categories'));
-    }   
+    }
 
     public function getLiveStreams(string $catId): array
     {

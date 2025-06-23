@@ -105,7 +105,10 @@ class ProcessM3uImportSeriesEpisodes implements ShouldQueue
             foreach ($episodes as $ep) {
                 $episodeCount++;
                 $url = $xtream->buildSeriesUrl($ep['id'], $ep['container_extension']);
-                $title = preg_match('/S\d{2}E\d{2} - (.*)/', $ep['title'], $m) ? $m[1] : 'Unknown';
+                $title = preg_match('/S\d{2}E\d{2} - (.*)/', $ep['title'], $m) ? $m[1] : null;
+                if (!$title) {
+                    $title = $ep['title'] ?? "Episode {$ep['episode_num']}";
+                }
                 $bulk[] = [
                     'title' => $title,
                     'source_episode_id' => (int) $ep['id'],

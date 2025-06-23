@@ -227,7 +227,7 @@ class ProcessM3uImportComplete implements ShouldQueue
             } catch (\Exception $e) {
                 // Handle any exceptions that occur during EPG creation
                 Notification::make()
-                    ->error()
+                    ->danger()
                     ->title('EPG Creation Failed')
                     ->body("Failed to create EPG for \"{$playlist->name}\". Error: {$e->getMessage()}")
                     ->broadcast($playlist->user)

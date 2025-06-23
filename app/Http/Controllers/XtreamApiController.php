@@ -572,8 +572,9 @@ class XtreamApiController extends Controller
                                     'bitrate' => $episode->bitrate ?? 0,
                                     'rating' => (string)($episode->rating ?? 0),
                                 ],
-                                'added' => (string)($episode->created_at ? $episode->created_at->timestamp : $now->timestamp),
-                                'season' => $seasonNumber,
+                                'added' => $episode->added,
+                                'season' => $episode->season,
+                                'custom_sid' => $espisode->custom_sid ?? '',
                                 'stream_id' => $streamId,
                                 'direct_source' => url("/xtream/{$uuid}/series/{$username}/{$password}/" . $streamId . ".{$containerExtension}")
                             ];

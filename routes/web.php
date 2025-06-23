@@ -72,7 +72,7 @@ Route::get('/stream/e/{encodedId}.{format?}', [\App\Http\Controllers\StreamContr
  */
 
 // Xtream API handling route
-Route::get('/xtream/{uuid}', [XtreamApiController::class, 'handle'])->name('playlist.xtream.api');
+Route::get('/xtream/{uuid}/player_api.php', [XtreamApiController::class, 'handle'])->name('playlist.xtream.api');
 
 // Xtream API Stream Handling Routes
 Route::get('/xtream/{uuid}/live/{username}/{password}/{encodedId}.{format}', [App\Http\Controllers\XtreamStreamController::class, 'handleLive'])
