@@ -136,7 +136,11 @@ class RunPostProcess implements ShouldQueue
                             $value = PlaylistUrlFacade::getUrls($this->model)['m3u'];
                         }
                     } else {
-                        $value = $this->model->{$var['value']};
+                        if ($var['value'] === 'status') {
+                            $value = $this->model->status->value ?? '';
+                        } else {
+                            $value = $this->model->{$var['value']};
+                        }
                     }
                     $exportVars[$var['export_name']] = $value;
                 }
