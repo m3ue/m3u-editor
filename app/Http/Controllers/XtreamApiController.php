@@ -294,17 +294,18 @@ class XtreamApiController extends Controller
                     // It's better to ensure category_id exists in a predefined list of categories if strict adherence is needed.
                     // For now, defaulting to 'all' if not found or being more robust based on actual category data available.
 
+                    $streamId = rtrim(base64_encode($channel->id), '=');
                     $liveStreams[] = [
                         'num' => $channel->channel ?? null,
                         'name' => $channel->title_custom ?? $channel->title,
                         'stream_type' => 'live',
-                        'stream_id' => base64_encode($channel->id),
+                        'stream_id' => $streamId,
                         'stream_icon' => $streamIcon,
                         'epg_channel_id' => $channel->epgChannel->epg_channel_id ?? $channel->stream_id_custom ?? $channel->stream_id ?? (string)$channel->id,
                         'added' => (string)$channel->created_at->timestamp,
                         'category_id' => $channelCategoryId, // Ensure this category_id is valid based on your categories logic
                         'tv_archive' => !empty($channel->catchup) ? 1 : 0, // Based on catchup field availability
-                        'direct_source' => url("/live/{$username}/{$password}/" . base64_encode($channel->id) . ".ts"),
+                        'direct_source' => url("xtream/{$uuid}/live/{$username}/{$password}/" . $streamId . ".ts"),
                         'tv_archive_duration' => !empty($channel->catchup) ? 24 : 0, // Default 24 hours if catchup available
                     ];
                 }
