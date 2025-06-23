@@ -91,7 +91,7 @@ class PlaylistUrlService
 
         // Return the results
         return [
-            'url' => route('playlist.xtream.api', ['uuid' => $playlist->uuid]),
+            'url' => str_replace('/player_api.php', '', route('playlist.xtream.api', ['uuid' => $playlist->uuid])),
             ...$auth
         ];
     }
