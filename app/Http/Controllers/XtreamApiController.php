@@ -67,6 +67,12 @@ class XtreamApiController extends Controller
      * ### get_series_categories
      * Returns a JSON array of series categories. Only categories with enabled series are included.
      * Each category contains: `category_id`, `category_name`, `parent_id`.
+     * 
+     * ### get_account_info
+     * Returns account information including user details and allowed output formats.
+     * This provides the same user information as the panel action but in a more focused format.
+     * Contains: `username`, `password`, `message`, `auth`, `status`, `exp_date`, `is_trial`, 
+     * `active_cons`, `created_at`, `max_connections`, `allowed_output_formats`.
      *
      * @param string $uuid The UUID of the playlist (required path parameter)
      * @param \Illuminate\Http\Request $request The HTTP request containing query parameters:
@@ -245,6 +251,20 @@ class XtreamApiController extends Controller
      *     "parent_id": 0
      *   }
      * ]
+     *
+     * @response 200 scenario="Account info response" {
+     *   "username": "test_user",
+     *   "password": "test_pass",
+     *   "message": "",
+     *   "auth": 1,
+     *   "status": "Active",
+     *   "exp_date": "1767225600",
+     *   "is_trial": "0",
+     *   "active_cons": 1,
+     *   "created_at": "1640995200",
+     *   "max_connections": "2",
+     *   "allowed_output_formats": ["m3u8", "ts"]
+     * }
      *
      * @response 400 scenario="Bad Request" {"error": "Invalid action"}
      * @response 400 scenario="Missing category_id for get_series" {"error": "category_id parameter is required for get_series action"}
@@ -678,6 +698,24 @@ class XtreamApiController extends Controller
             }
 
             return response()->json($seriesCategories);
+        }
+        else if ($action === 'get_account_info') {
+            // Return the same user info as panel action but in a focused format
+            $userInfo = [
+                'username' => $username,
+                'password' => $password,
+                'message' => '',
+                'auth' => 1,
+                'status' => 'Active',
+                'exp_date' => (string)Carbon::now()->addYears(50)->timestamp,
+                'is_trial' => '0',
+                'active_cons' => 1,
+                'created_at' => (string)Carbon::now()->subYears(2)->timestamp,
+                'max_connections' => '2',
+                'allowed_output_formats' => ['m3u8', 'ts'],
+            ];
+
+            return response()->json($userInfo);
         } else {
             return response()->json(['error' => "Action '{$action}' not implemented"]);
         }
