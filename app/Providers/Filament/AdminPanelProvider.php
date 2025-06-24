@@ -117,6 +117,9 @@ class AdminPanelProvider extends PanelProvider
                 FilamentLaravelLogPlugin::make()
                     ->navigationGroup('Tools')
                     ->navigationSort(99)
+                    ->logDirs([
+                        config('app.log.dir'),
+                    ])
                     ->authorize(fn(): bool => $settings['show_logs'] && in_array(auth()->user()->email, config('dev.admin_emails'), true))
             ])
             ->maxContentWidth($settings['content_width'])

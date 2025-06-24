@@ -56,6 +56,10 @@ return [
 
     'port' => env('APP_PORT', 36400),
 
+    'log' => [
+        'dir' => env('LOG_DIR', storage_path('logs')),
+    ],
+
     /*
     |--------------------------------------------------------------------------
     | Application Timezone

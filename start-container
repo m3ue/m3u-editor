@@ -90,6 +90,9 @@ nginx_log_file="${log_dir}/nginx.log"
 postgres_log_file="${log_dir}/postgress.log"
 startup_log_file="${log_dir}/startup.log"
 
+# Set log directory variable
+export LOG_DIR="${log_dir}"
+
 # Invalid log files, or files that will be created by the app
 swoole_log_file="${log_dir}/swoole_http.log"
 reverb_log_file="${log_dir}/reverb.log"
