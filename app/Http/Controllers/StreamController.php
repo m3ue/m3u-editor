@@ -509,13 +509,11 @@ class StreamController extends Controller
             // Catch other exceptions, like the "Connection aborted by client during ffmpeg run"
             if (str_contains($e->getMessage(), 'Connection aborted')) {
                 Log::channel('ffmpeg')->info("Connection aborted for {$type} {$title}: " . $e->getMessage());
+                // Do not re-throw, allow startStream to exit gracefully if possible, client is gone.
             } else {
-                Log::channel('ffmpeg')->error("Generic error during streaming for {$type} {$title}: " . $e->getMessage());
+                Log::channel('ffmpeg')->error("Generic error during streaming for {$type} {$title} (re-throwing): " . $e->getMessage() . \PHP_EOL . $e->getTraceAsString());
+                throw $e; // Re-throw other exceptions to be handled by __invoke
             }
-            // If it's a connection abort, the shutdown function will handle cleanup.
-            // If it's another error, it might be an issue with process setup or similar.
-            // Depending on policy, might re-throw or just let shutdown function handle it.
-            // For now, let it fall through, shutdown function will run.
         } finally {
             // Ensure process is stopped if it's still running (e.g. if loop exited unexpectedly)
             if ($process && $process->isRunning()) {
