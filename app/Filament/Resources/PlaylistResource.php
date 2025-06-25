@@ -248,7 +248,7 @@ class PlaylistResource extends Resource
                         })->after(function () {
                             Notification::make()
                                 ->success()
-                                ->title('Playlist is processing VOD data')
+                                ->title('Playlist is fetching metadata for VOD channels')
                                 ->body('Playlist VOD channels are being processed in the background. Depending on the number of VOD entries, this may take a while. You will be notified on completion.')
                                 ->duration(10000)
                                 ->send();
