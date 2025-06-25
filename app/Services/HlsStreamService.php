@@ -616,8 +616,8 @@ class HlsStreamService
             }
 
             if ($audioCodec === 'libopus' && $audioCodec !== 'copy') {
-                $audioParams = ' -b:a 128k -vbr on';
-                Log::channel('ffmpeg')->debug("HLS: Setting default bitrate and VBR for libopus: 128k, on.");
+                $audioParams = ' -b:a 128k -vbr 1'; // Changed from -vbr on
+                Log::channel('ffmpeg')->debug("HLS: Setting default bitrate and VBR for libopus: 128k, 1.");
             } elseif (($audioCodec === 'vorbis' || $audioCodec === 'libvorbis') && $audioCodec !== 'copy') {
                 $audioParams = ' -strict -2';
                 Log::channel('ffmpeg')->debug("HLS: Setting -strict -2 for vorbis.");
@@ -720,8 +720,8 @@ class HlsStreamService
             }
 
             if ($audioCodecForTemplate === 'libopus' && $audioCodecForTemplate !== 'copy') {
-                $audioParamsForTemplate = ' -b:a 128k -vbr on';
-                Log::channel('ffmpeg')->debug("HLS: Setting default bitrate and VBR (template) for libopus: 128k, on.");
+                $audioParamsForTemplate = ' -b:a 128k -vbr 1'; // Changed from -vbr on
+                Log::channel('ffmpeg')->debug("HLS: Setting default bitrate and VBR (template) for libopus: 128k, 1.");
             } elseif (($audioCodecForTemplate === 'vorbis' || $audioCodecForTemplate === 'libvorbis') && $audioCodecForTemplate !== 'copy') {
                 $audioParamsForTemplate = ' -strict -2';
                 Log::channel('ffmpeg')->debug("HLS: Setting -strict -2 (template) for vorbis.");

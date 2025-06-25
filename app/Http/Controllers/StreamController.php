@@ -661,12 +661,12 @@ class StreamController extends Controller
             if ($audioCodec === 'libopus') {
                 // Add default bitrate and VBR for libopus if no other audio bitrate is implicitly set by other args
                 if (strpos($userArgs, '-b:a') === false && strpos($codecSpecificArgs, '-b:a') === false) {
-                    $qsvAudioArguments .= " -b:a 128k -vbr on";
+                    $qsvAudioArguments .= " -b:a 128k -vbr 1"; // Changed from -vbr on
                     Log::channel('ffmpeg')->debug("QSV Path: Added default bitrate and VBR for libopus. Audio Args: {$qsvAudioArguments}");
                 } elseif (strpos($userArgs, '-vbr') === false && strpos($codecSpecificArgs, '-vbr') === false) {
-                    // If bitrate is set but VBR is not, add VBR on
-                    $qsvAudioArguments .= " -vbr on";
-                    Log::channel('ffmpeg')->debug("QSV Path: Added VBR on for libopus as bitrate was already set. Audio Args: {$qsvAudioArguments}");
+                    // If bitrate is set but VBR is not, add VBR 1
+                    $qsvAudioArguments .= " -vbr 1"; // Changed from -vbr on
+                    Log::channel('ffmpeg')->debug("QSV Path: Added VBR 1 for libopus as bitrate was already set. Audio Args: {$qsvAudioArguments}");
                 } else {
                     Log::channel('ffmpeg')->debug("QSV Path: Bitrate and VBR for libopus seem to be set by other arguments. Current Audio Args: {$qsvAudioArguments}");
                 }
@@ -770,8 +770,8 @@ class StreamController extends Controller
 
             if ($audioCodecForTemplate === 'libopus' && $audioCodecForTemplate !== 'copy') {
                 // Add default bitrate and VBR for libopus if not copying
-                $audioParamsForTemplate = ' -b:a 128k -vbr on';
-                Log::channel('ffmpeg')->debug("Setting default bitrate and VBR (template) for libopus: 128k, on.");
+                $audioParamsForTemplate = ' -b:a 128k -vbr 1'; // Changed from -vbr on
+                Log::channel('ffmpeg')->debug("Setting default bitrate and VBR (template) for libopus: 128k, 1.");
             } elseif (($audioCodecForTemplate === 'vorbis' || $audioCodecForTemplate === 'libvorbis') && $audioCodecForTemplate !== 'copy') {
                 // Add -strict -2 for vorbis encoder
                 $audioParamsForTemplate = ' -strict -2';
