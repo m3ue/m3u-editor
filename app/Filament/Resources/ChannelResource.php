@@ -120,7 +120,15 @@ class ChannelResource extends Resource
                     ->sortable(),
                 Tables\Columns\IconColumn::make('has_metadata')
                     ->label('Metadata')
-                    ->icon(fn($record): string => $record->has_metadata ? 'heroicon-o-check-circle' : 'heroicon-o-x-circle')
+                    ->icon(function($record): string {
+                        if ($record->has_metadata) {
+                            return 'heroicon-o-check-circle';
+                        }
+                        if ($record->is_vod) {
+                            return 'heroicon-o-x-circle';
+                        }
+                        return 'heroicon-o-minus';
+                    })
                     ->color(fn($record): string => $record->has_metadata ? 'success' : 'gray'),
                 Tables\Columns\TextInputColumn::make('stream_id_custom')
                     ->label('ID')
