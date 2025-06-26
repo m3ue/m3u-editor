@@ -114,19 +114,14 @@ class XtreamStreamController extends Controller
     /**
      * Live stream requests.
      */
-    public function handleLive(Request $request, string $username, string $password, string $streamId, string $format = 'ts')
+    public function handleLive(Request $request, string $username, string $password, int $streamId, string $format = 'ts')
     {
-        // Decode the stream ID
-        if (strpos($streamId, '==') === false) {
-            $streamId .= '=='; // right pad to ensure proper decoding
-        }
-        $channelId = (int)base64_decode($streamId);
-        list($playlist, $channel) = $this->findAuthenticatedPlaylistAndStreamModel($username, $password, $channelId, 'live');
+        list($playlist, $channel) = $this->findAuthenticatedPlaylistAndStreamModel($username, $password, $streamId, 'live');
 
         if ($channel instanceof Channel) {
             if ($playlist->enable_proxy) {
                 $url = rtrim(route('stream', [
-                    'encodedId' => rtrim($streamId, '=')
+                    'encodedId' => rtrim(base64_encode($streamId), '=')
                 ]), '.');
             } else {
                 $url = $channel->url_custom ?? $channel->url;
@@ -142,17 +137,12 @@ class XtreamStreamController extends Controller
      */
     public function handleVod(Request $request, string $username, string $password, string $streamId, string $format = 'ts')
     {
-        // Decode the stream ID
-        if (strpos($streamId, '==') === false) {
-            $streamId .= '=='; // right pad to ensure proper decoding
-        }
-        $channelId = (int)base64_decode($streamId);
-        list($playlist, $channel) = $this->findAuthenticatedPlaylistAndStreamModel($username, $password, $channelId, 'vod');
+        list($playlist, $channel) = $this->findAuthenticatedPlaylistAndStreamModel($username, $password, $streamId, 'vod');
 
         if ($channel instanceof Channel) {
             if ($playlist->enable_proxy) {
                 $url = rtrim(route('stream', [
-                    'encodedId' => rtrim($streamId, '=')
+                    'encodedId' => rtrim(base64_encode($streamId), '=')
                 ]), '.');
             } else {
                 $url = $channel->url_custom ?? $channel->url;
