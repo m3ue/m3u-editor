@@ -81,7 +81,7 @@ class TestXtream extends Command implements PromptsForMissingInput
     protected function getInfo(XtreamService $xtream)
     {
         $this->info('Fetching Xtream info...');
-        $info = $xtream->authenticate();
+        $info = $xtream->userInfo();
         if (empty($info)) {
             $this->error('No information available from Xtream service.');
             return;

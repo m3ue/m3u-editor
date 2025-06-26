@@ -281,6 +281,8 @@ class XtreamApiController extends Controller
     public function handle(Request $request)
     {
 
+        dump($request->all());
+
         $username = $request->input('username');
         $password = $request->input('password'); // This is the playlist UUID
 
@@ -335,12 +337,12 @@ class XtreamApiController extends Controller
             $userInfo = [
                 'username' => $username,
                 'password' => $password,
-                'message' => '',
+                'message' => 'Welcome to m3u editor Xtream API',
                 'auth' => 1,
                 'status' => 'Active',
-                'exp_date' => (string)$now->copy()->addYears(10)->timestamp,
+                'exp_date' => (string)$now->copy()->startOfYear()->addYears(1)->timestamp,
                 'is_trial' => '0',
-                'active_cons' => 1,
+                'active_cons' => '0',
                 'created_at' => (string)($playlist->user ? $playlist->user->created_at->timestamp : $now->timestamp),
                 'max_connections' => (string)($playlist->streams ?? 1),
                 'allowed_output_formats' => ['m3u8', 'ts'],
@@ -350,18 +352,21 @@ class XtreamApiController extends Controller
             $host = $request->getHost();
             $currentPort = $request->getPort();
             $baseUrl = $scheme . '://' . $host;
-            $httpsPort = ($scheme === 'https') ? (string)$currentPort : "443";
+            $httpsPort = ($scheme === 'https') ? (string)$currentPort : "";
 
             $serverInfo = [
+                'xui' => false, // Assuming this is not an XUI panel
+                'version' => null, // Placeholder version, update as needed
+                'revision' => null, // No revision info available
                 'url' => $baseUrl,
                 'port' => (string)$currentPort,
                 'https_port' => $httpsPort,
-                'rtmp_port' => null, // RTMP not available currently
                 'server_protocol' => $scheme,
-                'timezone' => Config::get('app.timezone', 'UTC'),
+                'rtmp_port' => "", // RTMP not available currently
                 'server_software' => config('app.name') . ' Xtream API',
-                'timestamp_now' => (string)$now->timestamp,
+                'timestamp_now' => $now->timestamp,
                 'time_now' => $now->toDateTimeString(),
+                'timezone' => Config::get('app.timezone', 'UTC'),
             ];
 
             return response()->json([
