@@ -2297,149 +2297,65 @@ class SharedStreamService
     }
 
     /**
-     * Synchronize stream state between Redis and database
-     * Called by ManageSharedStreams command
+     * Create a shared stream with minimal parameters (for restarts)
      */
-    public function synchronizeState(): void
+    public function createSharedStream(string $sourceUrl, string $format = 'ts'): ?string
     {
+        // Generate a simple stream key for restart scenarios
+        $streamKey = 'restart_' . md5($sourceUrl . time());
+        
+        // Use defaults for restart scenarios
+        $type = 'channel'; // Default type
+        $modelId = 0; // Default model ID for restart
+        $title = 'Restarted Stream';
+        $clientId = 'system_restart';
+        $options = [];
+        
         try {
-            $redis = $this->redis();
+            $streamInfo = $this->getOrCreateSharedStream(
+                $type,
+                $modelId,
+                $sourceUrl,
+                $title,
+                $format,
+                $clientId,
+                $options
+            );
             
-            // Get all active stream keys from Redis
-            $streamKeys = $redis->keys(self::STREAM_PREFIX . '*');
-            
-            foreach ($streamKeys as $fullKey) {
-                $streamKey = str_replace(self::STREAM_PREFIX, '', $fullKey);
-                $streamInfo = $this->getStreamInfo($streamKey);
-                
-                if ($streamInfo) {
-                    // Check if process is still running
-                    $pid = $streamInfo['pid'] ?? null;
-                    $isRunning = false;
-                    
-                    if ($pid) {
-                        $isRunning = $this->isProcessRunning($pid);
-                    }
-                    
-                    // Update database status based on actual process state
-                    $status = $isRunning ? 'active' : 'stopped';
-                    
-                    SharedStream::where('stream_id', $streamKey)->update([
-                        'status' => $status,
-                        'last_activity' => now()
-                    ]);
-                    
-                    // Clean up if process is dead
-                    if (!$isRunning) {
-                        $this->cleanupStream($streamKey, true);
-                    }
-                }
-            }
-            
-            Log::channel('ffmpeg')->debug("Synchronized " . count($streamKeys) . " stream states");
-            
+            return $streamInfo['stream_key'] ?? null;
         } catch (\Exception $e) {
-            Log::channel('ffmpeg')->error("Error synchronizing stream states: " . $e->getMessage());
-        }
-    }
-
-    /**
-     * Cleanup inactive streams
-     * 
-     * Stops streams that have no active clients and cleans up orphaned data
-     */
-    public function cleanupInactiveStreams(): array
-    {
-        try {
-            $cleanupResults = [
-                'streams_stopped' => 0,
-                'orphaned_keys_cleaned' => 0,
-                'temp_files_cleaned' => 0,
-                'errors' => []
-            ];
-
-            Log::channel('ffmpeg')->info("Starting cleanup of inactive streams");
-
-            // Get streams from database that should be stopped
-            $streamsToStop = SharedStream::whereIn('status', ['starting', 'active'])
-                ->where(function($query) {
-                    // No clients for more than 5 minutes
-                    $query->where('client_count', '=', 0)
-                          ->where('last_client_activity', '<', now()->subMinutes(5))
-                          // Or streams that were supposed to start but have been starting for too long
-                          ->orWhere(function($subQuery) {
-                              $subQuery->where('status', 'starting')
-                                       ->where('started_at', '<', now()->subMinutes(2));
-                          });
-                })
-                ->get();
-
-            foreach ($streamsToStop as $stream) {
-                try {
-                    Log::channel('ffmpeg')->info("Stopping inactive stream {$stream->stream_id}: No clients for extended period");
-                    
-                    if ($this->stopStream($stream->stream_id)) {
-                        $cleanupResults['streams_stopped']++;
-                    } else {
-                        $cleanupResults['errors'][] = "Failed to stop stream {$stream->stream_id}";
-                    }
-                } catch (\Exception $e) {
-                    $cleanupResults['errors'][] = "Error stopping stream {$stream->stream_id}: " . $e->getMessage();
-                    Log::channel('ffmpeg')->error("Error during cleanup of stream {$stream->stream_id}: " . $e->getMessage());
-                }
-            }
-
-            // Clean up orphaned Redis keys
-            try {
-                $orphanedCount = $this->cleanupOrphanedKeys();
-                $cleanupResults['orphaned_keys_cleaned'] = $orphanedCount;
-                Log::channel('ffmpeg')->info("Cleaned up {$orphanedCount} orphaned Redis keys");
-            } catch (\Exception $e) {
-                $cleanupResults['errors'][] = "Error cleaning orphaned keys: " . $e->getMessage();
-                Log::channel('ffmpeg')->error("Error cleaning orphaned keys: " . $e->getMessage());
-            }
-
-            // Clean up old temp files
-            try {
-                $tempFilesCount = $this->cleanupTempFiles(3600); // Clean files older than 1 hour
-                $cleanupResults['temp_files_cleaned'] = $tempFilesCount;
-                Log::channel('ffmpeg')->info("Cleaned up {$tempFilesCount} old temp files");
-            } catch (\Exception $e) {
-                $cleanupResults['errors'][] = "Error cleaning temp files: " . $e->getMessage();
-                Log::channel('ffmpeg')->error("Error cleaning temp files: " . $e->getMessage());
-            }
-
-            Log::channel('ffmpeg')->info("Cleanup completed", $cleanupResults);
-            return $cleanupResults;
-
-        } catch (\Exception $e) {
-            Log::channel('ffmpeg')->error("Error during cleanup: " . $e->getMessage());
-            throw $e;
+            Log::error('Failed to create shared stream for restart', [
+                'source_url' => $sourceUrl,
+                'format' => $format,
+                'error' => $e->getMessage()
+            ]);
+            return null;
         }
     }
 
     /**
      * Check if a process is running by PID
      */
-    private function isProcessRunning(int $pid): bool
+    private function isProcessRunning($pid): bool
     {
         if (!$pid) {
             return false;
         }
-
+        
         try {
-            // Use posix_kill with signal 0 to check if process exists without killing it
-            if (function_exists('posix_kill')) {
-                return posix_kill($pid, 0);
-            }
-            
-            // Fallback to ps command if posix_kill is not available
-            $result = shell_exec("ps -p {$pid} > /dev/null 2>&1; echo $?");
-            return trim($result) === '0';
+            return posix_kill($pid, 0);
         } catch (\Exception $e) {
-            Log::channel('ffmpeg')->debug("Error checking process {$pid}: " . $e->getMessage());
             return false;
         }
+    }
+
+    /**
+     * Get stream storage directory
+     */
+    private function getStreamStorageDir(string $streamKey): string
+    {
+        $baseDir = storage_path('app/shared_streams');
+        return $baseDir . '/' . $streamKey;
     }
 
     /**
@@ -2447,8 +2363,11 @@ class SharedStreamService
      */
     private function updateStreamActivity(string $streamKey): void
     {
-        $activityKey = self::BUFFER_PREFIX . $streamKey . ':activity';
-        $this->redis()->set($activityKey, time());
+        $streamInfo = $this->getStreamInfo($streamKey);
+        if ($streamInfo) {
+            $streamInfo['last_activity'] = now()->timestamp;
+            $this->setStreamInfo($streamKey, $streamInfo);
+        }
     }
 
     /**
@@ -2456,13 +2375,13 @@ class SharedStreamService
      */
     private function updateClientActivity(string $streamKey, string $clientId): void
     {
-        $clientKey = self::CLIENT_PREFIX . $streamKey . ':' . $clientId;
-        $clientData = $this->redis()->get($clientKey);
+        $clientKey = "stream_clients:{$streamKey}";
+        $clientData = Redis::hget($clientKey, $clientId);
         
         if ($clientData) {
-            $data = json_decode($clientData, true);
-            $data['last_activity'] = time();
-            $this->redis()->set($clientKey, json_encode($data));
+            $clientInfo = json_decode($clientData, true);
+            $clientInfo['last_activity'] = now()->timestamp;
+            Redis::hset($clientKey, $clientId, json_encode($clientInfo));
         }
     }
 
@@ -2474,99 +2393,35 @@ class SharedStreamService
         $streamInfo = $this->getStreamInfo($streamKey);
         if ($streamInfo) {
             $streamInfo['status'] = $status;
-            $streamInfo['last_activity'] = time();
             $this->setStreamInfo($streamKey, $streamInfo);
+            
+            // Also update database
+            SharedStream::where('stream_id', $streamKey)->update(['status' => $status]);
         }
     }
 
     /**
-     * Get stream storage directory
+     * Cleanup stream data
      */
-    private function getStreamStorageDir(string $streamKey): string
+    private function cleanupStream(string $streamKey, bool $removeFiles = false): void
     {
-        return "shared_streams/{$streamKey}";
-    }
-
-    /**
-     * Clean up stream data and processes
-     */
-    private function cleanupStream(string $streamKey, bool $force = false): bool
-    {
-        try {
-            Log::channel('ffmpeg')->debug("Stream {$streamKey}: Starting cleanup (force: " . ($force ? 'yes' : 'no') . ")");
-            
-            // Get stream info before cleanup
-            $streamInfo = $this->getStreamInfo($streamKey);
-            $pid = $streamInfo['pid'] ?? null;
-            
-            // Stop the process if it's running
-            if ($pid && $this->isProcessRunning($pid)) {
-                $this->stopStreamProcess($pid);
+        // Remove Redis data
+        Redis::del("shared_stream:{$streamKey}");
+        Redis::del("stream_clients:{$streamKey}");
+        Redis::del("stream_buffer:{$streamKey}");
+        
+        // Clean up files if requested
+        if ($removeFiles) {
+            $storageDir = $this->getStreamStorageDir($streamKey);
+            if (is_dir($storageDir)) {
+                $this->removeDirectory($storageDir);
             }
-            
-            // Clean up Redis keys
-            $redis = $this->redis();
-            
-            // Remove main stream info
-            $redis->del(self::STREAM_PREFIX . $streamKey);
-            
-            // Remove PID key
-            $redis->del("stream_pid:{$streamKey}");
-            
-            // Remove client keys
-            $clientKeys = $redis->keys(self::CLIENT_PREFIX . $streamKey . ':*');
-            if ($clientKeys) {
-                $redis->del($clientKeys);
-            }
-            
-            // Remove buffer keys
-            $bufferKey = self::BUFFER_PREFIX . $streamKey;
-            $segmentKeys = $redis->keys("{$bufferKey}:*");
-            if ($segmentKeys) {
-                $redis->del($segmentKeys);
-            }
-            
-            // Update database
-            SharedStream::where('stream_id', $streamKey)->update([
-                'status' => 'stopped',
-                'stopped_at' => now()
-            ]);
-            
-            Log::channel('ffmpeg')->debug("Stream {$streamKey}: Redis cleanup completed");
-            return true;
-            
-        } catch (\Exception $e) {
-            Log::channel('ffmpeg')->error("Stream {$streamKey}: Error during cleanup: " . $e->getMessage());
-            return false;
         }
-    }
-
-    /**
-     * Stop a stream process by PID
-     */
-    private function stopStreamProcess(int $pid): bool
-    {
-        try {
-            if (function_exists('posix_kill')) {
-                // Try graceful termination first
-                posix_kill($pid, SIGTERM);
-                sleep(2);
-                
-                // Force kill if still running
-                if ($this->isProcessRunning($pid)) {
-                    posix_kill($pid, SIGKILL);
-                }
-            } else {
-                // Fallback to exec commands
-                exec("kill -TERM {$pid}");
-                sleep(2);
-                exec("kill -KILL {$pid} 2>/dev/null");
-            }
-            
-            return true;
-        } catch (\Exception $e) {
-            Log::channel('ffmpeg')->error("Error stopping process {$pid}: " . $e->getMessage());
-            return false;
-        }
+        
+        // Update database
+        SharedStream::where('stream_id', $streamKey)->update([
+            'status' => 'stopped',
+            'stopped_at' => now()
+        ]);
     }
 }
