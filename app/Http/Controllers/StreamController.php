@@ -162,7 +162,7 @@ class StreamController extends Controller
                 continue; // Try next stream
             } catch (Exception $e) {
                 $this->decrementActiveStreams($playlist->id);
-                Log::channel('ffmpeg')->error("Generic error streaming channel {$title} (URL: {$streamUrl}): " . $e->getMessage() . \PHP_EOL . $e->getTraceAsString());
+                Log::channel('ffmpeg')->error("Generic error streaming channel {$title} (URL: {$streamUrl}): " . $e->getMessage());
                 Redis::setex($badSourceCacheKey, ProxyService::BAD_SOURCE_CACHE_SECONDS, "GenericError: " . $e->getMessage());
                 // If headers were already sent.
                 if ($headersSentInfo['value']) {
@@ -294,7 +294,7 @@ class StreamController extends Controller
             abort(503, "Episode stream failed after multiple retries: " . $e->getMessage());
         } catch (Exception $e) {
             $this->decrementActiveStreams($playlist->id);
-            Log::channel('ffmpeg')->error("Generic error streaming episode {$title} (URL: {$streamUrl}): " . $e->getMessage() . \PHP_EOL . $e->getTraceAsString());
+            Log::channel('ffmpeg')->error("Generic error streaming episode {$title} (URL: {$streamUrl}): " . $e->getMessage());
             if ($headersSentInfo['value']) {
                 Log::channel('ffmpeg')->error("Generic error for episode {$title} but headers already sent. Terminating.");
                 exit;
@@ -511,7 +511,7 @@ class StreamController extends Controller
                 Log::channel('ffmpeg')->info("Connection aborted for {$type} {$title}: " . $e->getMessage());
                 // Do not re-throw, allow startStream to exit gracefully if possible, client is gone.
             } else {
-                Log::channel('ffmpeg')->error("Generic error during streaming for {$type} {$title} (re-throwing): " . $e->getMessage() . \PHP_EOL . $e->getTraceAsString());
+                Log::channel('ffmpeg')->error("Generic error during streaming for {$type} {$title}: " . $e->getMessage());
                 throw $e; // Re-throw other exceptions to be handled by __invoke
             }
         } finally {
