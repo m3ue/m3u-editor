@@ -45,8 +45,13 @@
         </div>
         <div class="mt-4">
             <p class="text-sm text-gray-500 dark:text-gray-400 mb-2">
-                NOTE: You will use your <strong>m3u editor</strong> username and the Playlist <strong>unique identifier</strong> as the password to use the Xtream API for this playlist.
+                The default username is your <strong>m3u editor</strong> username and the Playlist <strong>unique identifier</strong> is the password.
             </p>
+            @if($record->playlistAuths()->count() > 0)
+                <p class="text-sm text-gray-500 dark:text-gray-400 mb-2">
+                    You can also use your assigned <strong>Playlist Auths</strong> to access the Xtream API.
+                </p>
+            @endif
         </div>
     </div>
 </x-dynamic-component>
