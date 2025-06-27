@@ -281,34 +281,54 @@ class XtreamApiController extends Controller
     public function handle(Request $request)
     {
         $username = $request->input('username');
-        $password = $request->input('password'); // This is the playlist UUID
+        $password = $request->input('password');
 
         if (empty($username) || empty($password)) {
             return response()->json(['error' => 'Unauthorized - Missing credentials'], 401);
         }
 
         $playlist = null;
+        $authMethod = 'none';
 
-        // Try to find playlist by UUID (password parameter)
-        try {
-            $playlist = Playlist::with([
-                'user',
-                'channels' => fn($q) => $q->where('enabled', true)->with(['group', 'epgChannel']),
-                'series' => fn($q) => $q->where('enabled', true)->with(['seasons.episodes', 'category'])
-            ])->where('uuid', $password)->firstOrFail();
-        } catch (ModelNotFoundException $e) {
-            try {
-                $playlist = MergedPlaylist::with([
+        // Method 1: Try to authenticate using PlaylistAuth credentials
+        $playlistAuth = \App\Models\PlaylistAuth::where('username', $username)
+            ->where('password', $password)
+            ->where('enabled', true)
+            ->first();
+
+        if ($playlistAuth) {
+            $playlist = $playlistAuth->getAssignedModel();
+            if ($playlist) {
+                // Load necessary relationships for the playlist
+                $playlist->load([
                     'user',
-                    'channels' => fn($q) => $q->where('enabled', true)->with(['group', 'epgChannel'])
+                    'channels' => fn($q) => $q->where('enabled', true)->with(['group', 'epgChannel']),
+                    'series' => fn($q) => $q->where('enabled', true)->with(['seasons.episodes', 'category'])
+                ]);
+                $authMethod = 'playlist_auth';
+            }
+        }
+
+        // Method 2: Fall back to original authentication (username = playlist owner, password = playlist UUID)
+        if (!$playlist) {
+            // Try to find playlist by UUID (password parameter)
+            try {
+                $playlist = Playlist::with([
+                    'user',
+                    'channels' => fn($q) => $q->where('enabled', true)->with(['group', 'epgChannel']),
+                    'series' => fn($q) => $q->where('enabled', true)->with(['seasons.episodes', 'category'])
                 ])->where('uuid', $password)->firstOrFail();
 
-                if (method_exists($playlist, 'series')) {
-                    $playlist->load(['series' => fn($q) => $q->where('enabled', true)->with(['seasons.episodes', 'category'])]);
+                // Verify username matches playlist owner's name
+                if ($playlist->user->name === $username) {
+                    $authMethod = 'owner_auth';
+                } else {
+                    $playlist = null;
                 }
             } catch (ModelNotFoundException $e) {
+                // Try MergedPlaylist
                 try {
-                    $playlist = CustomPlaylist::with([
+                    $playlist = MergedPlaylist::with([
                         'user',
                         'channels' => fn($q) => $q->where('enabled', true)->with(['group', 'epgChannel'])
                     ])->where('uuid', $password)->firstOrFail();
@@ -316,14 +336,40 @@ class XtreamApiController extends Controller
                     if (method_exists($playlist, 'series')) {
                         $playlist->load(['series' => fn($q) => $q->where('enabled', true)->with(['seasons.episodes', 'category'])]);
                     }
+
+                    // Verify username matches playlist owner's name
+                    if ($playlist->user->name === $username) {
+                        $authMethod = 'owner_auth';
+                    } else {
+                        $playlist = null;
+                    }
                 } catch (ModelNotFoundException $e) {
-                    return response()->json(['error' => 'Playlist not found'], 404);
+                    // Try CustomPlaylist
+                    try {
+                        $playlist = CustomPlaylist::with([
+                            'user',
+                            'channels' => fn($q) => $q->where('enabled', true)->with(['group', 'epgChannel'])
+                        ])->where('uuid', $password)->firstOrFail();
+
+                        if (method_exists($playlist, 'series')) {
+                            $playlist->load(['series' => fn($q) => $q->where('enabled', true)->with(['seasons.episodes', 'category'])]);
+                        }
+
+                        // Verify username matches playlist owner's name
+                        if ($playlist->user->name === $username) {
+                            $authMethod = 'owner_auth';
+                        } else {
+                            $playlist = null;
+                        }
+                    } catch (ModelNotFoundException $e) {
+                        // No playlist found
+                    }
                 }
             }
         }
 
-        // Verify username matches playlist owner's name
-        if ($playlist->user->name !== $username) {
+        // If no authentication method worked, return error
+        if (!$playlist || $authMethod === 'none') {
             return response()->json(['error' => 'Unauthorized'], 401);
         }
 

@@ -50,6 +50,16 @@ class PlaylistAuth extends Model
     }
 
     /**
+     * Get the assigned playlist model directly (convenience method)
+     * This is used by the Xtream API controllers
+     */
+    public function playlist()
+    {
+        $pivot = $this->assignedPlaylist;
+        return $pivot ? $pivot->authenticatable : null;
+    }
+
+    /**
      * Assign this PlaylistAuth to a specific model
      * This will remove any existing assignment and create a new one
      */

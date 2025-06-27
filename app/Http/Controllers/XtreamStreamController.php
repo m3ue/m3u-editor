@@ -18,30 +18,63 @@ use Illuminate\Database\Eloquent\ModelNotFoundException;
 class XtreamStreamController extends Controller
 {
     /**
-     * Authenticates a playlist using username = playlist owner's name, password = playlist UUID.
+     * Authenticates a playlist using either PlaylistAuth credentials or the original method 
+     * (username = playlist owner's name, password = playlist UUID).
      */
     private function findAuthenticatedPlaylistAndStreamModel(string $username, string $password, int $streamId, string $streamType): array
     {
         $streamModel = null;
         $playlist = null;
 
-        // Try to find playlist by UUID (password parameter)
-        try {
-            $playlist = Playlist::with(['user'])->where('uuid', $password)->firstOrFail();
-        } catch (ModelNotFoundException $e) {
+        // Method 1: Try to authenticate using PlaylistAuth credentials
+        $playlistAuth = \App\Models\PlaylistAuth::where('username', $username)
+            ->where('password', $password)
+            ->where('enabled', true)
+            ->first();
+
+        if ($playlistAuth) {
+            $playlist = $playlistAuth->getAssignedModel();
+            if ($playlist) {
+                // Load necessary relationships for the playlist
+                $playlist->load(['user']);
+            }
+        }
+
+        // Method 2: Fall back to original authentication (username = playlist owner, password = playlist UUID)
+        if (!$playlist) {
+            // Try to find playlist by UUID (password parameter)
             try {
-                $playlist = MergedPlaylist::with(['user'])->where('uuid', $password)->firstOrFail();
+                $playlist = Playlist::with(['user'])->where('uuid', $password)->firstOrFail();
+                
+                // Verify username matches playlist owner's name
+                if ($playlist->user->name !== $username) {
+                    $playlist = null;
+                }
             } catch (ModelNotFoundException $e) {
                 try {
-                    $playlist = CustomPlaylist::with(['user'])->where('uuid', $password)->firstOrFail();
+                    $playlist = MergedPlaylist::with(['user'])->where('uuid', $password)->firstOrFail();
+                    
+                    // Verify username matches playlist owner's name
+                    if ($playlist->user->name !== $username) {
+                        $playlist = null;
+                    }
                 } catch (ModelNotFoundException $e) {
-                    return [null, null];
+                    try {
+                        $playlist = CustomPlaylist::with(['user'])->where('uuid', $password)->firstOrFail();
+                        
+                        // Verify username matches playlist owner's name
+                        if ($playlist->user->name !== $username) {
+                            $playlist = null;
+                        }
+                    } catch (ModelNotFoundException $e) {
+                        return [null, null];
+                    }
                 }
             }
         }
 
-        // Verify username matches playlist owner's name
-        if ($playlist->user->name !== $username) {
+        // If no authentication method worked, return null
+        if (!$playlist) {
             return [null, null];
         }
 
