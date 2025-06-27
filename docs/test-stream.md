@@ -44,12 +44,12 @@ GET /api/stream/test/{timeout}.ts
 
 ### Infinite test stream for proxy testing (shows runtime counter)  
 ```
-http://m3ueditor.test/api/stream/test/0.ts
+http://localhost:36400/api/stream/test/0.ts
 ```
 
 ### 30-second test stream (shows countdown)
 ```
-http://m3ueditor.test/api/stream/test/30.ts
+http://localhost:36400/api/stream/test/30.ts
 ```
 - **Resolution**: 720p (1280x720) with H.264 video and AAC audio
 - **Format**: MPEG-TS segments suitable for HLS streaming
@@ -160,13 +160,13 @@ The infinite test streams (`timeout=0`) are specifically designed for testing pr
 #### FFmpeg Stream Copy (Most Common)
 ```bash
 # Proxy the infinite test stream with stream copying
-ffmpeg -i "http://m3ueditor.test/api/stream/test/0.ts" \
+ffmpeg -i "http://localhost:36400/api/stream/test/0.ts" \
        -c:v copy -c:a copy \
        -f mpegts \
        pipe:1
 
 # Proxy with timeout (useful for testing)
-ffmpeg -i "http://m3ueditor.test/api/stream/test/0.ts" \
+ffmpeg -i "http://localhost:36400/api/stream/test/0.ts" \
        -c:v copy -c:a copy \
        -t 60 \
        -f mpegts \
@@ -177,7 +177,7 @@ ffmpeg -i "http://m3ueditor.test/api/stream/test/0.ts" \
 ```bash
 # Test your proxy by using the test stream as source
 # Replace with your actual proxy implementation
-your-proxy-command --source="http://m3ueditor.test/api/stream/test/0.ts" --output=mp4
+your-proxy-command --source="http://localhost:36400/api/stream/test/0.ts" --output=mp4
 ```
 
 ### Troubleshooting Proxy Issues
