@@ -80,8 +80,8 @@ class ProcessM3uImportChunk implements ShouldQueue
                 // 'enabled',
                 // 'epg_channel_id',
                 // 'new'
+                // 'sort',
                 // ...only update the following fields
-                'sort',
                 'url',
                 'stream_id',
                 'lang', // should we update this? Not sure it's set anywhere...
