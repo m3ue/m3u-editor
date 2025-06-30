@@ -105,6 +105,7 @@ Route::group(['prefix' => 'epg'], function () {
  */
 // Main Xtream API endpoint at /player_api.php
 Route::get('/player_api.php', [XtreamApiController::class, 'handle'])->name('xtream.api');
+Route::get('/xmltv.php', [XtreamApiController::class, 'epg'])->name('xtream.api.epg');
 
 // Stream endpoints
 Route::get('/live/{username}/{password}/{streamId}.{format}', [App\Http\Controllers\XtreamStreamController::class, 'handleLive'])
