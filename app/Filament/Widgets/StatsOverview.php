@@ -5,14 +5,16 @@ namespace App\Filament\Widgets;
 use App\Models\Channel;
 use App\Models\Epg;
 use App\Models\EpgChannel;
+use App\Models\Episode;
 use App\Models\Group;
 use App\Models\Playlist;
+use App\Models\Series;
 use Carbon\Carbon;
 use Filament\Widgets\StatsOverviewWidget as BaseWidget;
 use Filament\Widgets\StatsOverviewWidget\Stat;
 
 class StatsOverview extends BaseWidget
-{
+{    
     protected function getStats(): array
     {
         $lastSynced = Carbon::parse(Playlist::where('user_id', auth()->id())->max('synced'));
@@ -41,6 +43,8 @@ class StatsOverview extends BaseWidget
                     ['epg_channel_id', '!=', null]
                 ]
             )->count()),
+            Stat::make('Series', Series::where('user_id', auth()->id())->count()),
+            Stat::make('Episodes', Episode::where('user_id', auth()->id())->count()),
         ];
     }
 }

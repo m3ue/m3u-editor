@@ -188,7 +188,11 @@ php artisan up
 
 # Set Sqlite WAL mode
 echo "🗂️ Enabling SQLite WAL mode..."
-php artisan sqlite:wal-enable sqlite
+if [ "${ENABLE_POSTGRES}" != "true" ]; then
+  # If postgres not enabled, enable WAL on main SQLite database
+  php artisan sqlite:wal-enable sqlite
+fi
+# Always enable WAL on jobs database
 php artisan sqlite:wal-enable jobs
 echo ""
 
