@@ -1534,7 +1534,7 @@ class SharedStreamService
     /**
      * Check if a process is currently running
      */
-    private function isProcessRunning(?int $pid): bool
+    public function isProcessRunning(?int $pid): bool
     {
         if (!$pid) {
             return false;
