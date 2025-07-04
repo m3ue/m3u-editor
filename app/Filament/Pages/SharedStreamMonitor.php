@@ -166,9 +166,10 @@ class SharedStreamMonitor extends Page
         return $streams->map(function ($stream) {
             $recentStats = $stream->recentStats(5)->first();
             $clientInfo = $this->sharedStreamService->getClients($stream->stream_id);
-            $model = $stream->stream_info['type'] === 'episode'
-                ? Episode::find($stream->stream_info['model_id'])
-                : Channel::find($stream->stream_info['model_id']);
+            $streamInfo = json_decode($stream->stream_info, true);
+            $model = $streamInfo['type'] === 'episode'
+                ? Episode::find($streamInfo['model_id'])
+                : Channel::find($streamInfo['model_id']);
 
             $clientsData = array_map(function ($client) {
                 $connectedAt = date('H:i:s', $client['connected_at']);
@@ -200,7 +201,7 @@ class SharedStreamMonitor extends Page
                 'model' => $model ? [
                     'id' => $model->id,
                     'title' => $model->title,
-                    'type' => $stream->stream_info['type'],
+                    'type' => $streamInfo['type'],
                     'logo' => $model->logo ?? null,
                 ] : null,
             ];

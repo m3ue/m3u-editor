@@ -182,9 +182,6 @@ class SharedStreamController extends Controller
         while ($waited < $maxWait) {
             $playlist = $this->sharedStreamService->getHLSPlaylist($streamKey, $clientId);
             if ($playlist) {
-                // Update last client activity
-                $this->sharedStreamService->updateLastClientActivity($streamKey);
-
                 return response($playlist, 200, [
                     'Content-Type' => 'application/vnd.apple.mpegurl',
                     'Cache-Control' => 'no-cache, no-store, must-revalidate',
@@ -316,14 +313,15 @@ class SharedStreamController extends Controller
                         usleep(100000); // Wait before trying for more data
                     }
 
+                    // !! NOTE: Causing false possitives, and the stream being killed and restarted prematurely
                     // Check stream status periodically to detect if the source has died
-                    if ($lastSegment > 0 && $lastSegment % 100 === 0) {
-                        $currentStats = $this->sharedStreamService->getStreamStats($streamKey);
-                        if (!$currentStats || !in_array($currentStats['status'], ['active', 'starting'])) {
-                            Log::channel('ffmpeg')->info("Stream {$streamKey} is no longer active, disconnecting client {$clientId}.");
-                            break;
-                        }
-                    }
+                    // if ($lastSegment > 0 && $lastSegment % 100 === 0) {
+                    //     $currentStats = $this->sharedStreamService->getStreamStats($streamKey);
+                    //     if (!$currentStats || !in_array($currentStats['status'], ['active', 'starting'])) {
+                    //         Log::channel('ffmpeg')->info("Stream {$streamKey} is no longer active, disconnecting client {$clientId}.");
+                    //         break;
+                    //     }
+                    // }
                 }
             } finally {
                 Log::channel('ffmpeg')->info("Stream {$streamKey}: Client {$clientId} disconnecting. Attempting to remove client from stream service.");
