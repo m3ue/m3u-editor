@@ -161,6 +161,21 @@ class HlsStreamService
                 Log::channel('ffmpeg')->error("Fatal stream content error for {$currentStreamTitle} (Original: {$title}, Stream ID: {$stream->id}): " . $e->getMessage() . ". Attempting failover.");
                 Redis::setex($badSourceCacheKey, ProxyService::BAD_SOURCE_CACHE_SECONDS_CONTENT_ERROR ?? 10, "Fatal content error: " . $e->getMessage()); // Mark bad for a very short time
                 $allAttemptsFailedDueToPlaylistLimits = false; // Mark failure as not due to playlist limits
+
+                // If a fatal content error occurs on a stream, and we are about to try a failover,
+                // touch the 'last_seen' timestamp of the *original* model. This gives the client
+                // time to be redirected and start requesting segments from the failover stream
+                // before the PruneStaleHlsProcesses job might consider the original model ID stale.
+                if ($model->id != $stream->id) { // Check if this was an attempt on a failover stream already
+                    // This logic primarily applies if the *first* attempt (original model) fails this way.
+                    // If a failover stream itself has a fatal content error, the original model's last_seen
+                    // would have already been updated when the first failover was initiated.
+                } else {
+                    // This means the original stream attempt had a fatal content error.
+                    // Update its last_seen to prevent immediate pruning.
+                    Redis::set("hls:{$type}_last_seen:{$model->id}", now()->timestamp);
+                    Log::channel('ffmpeg')->debug("HLS Stream: Touched last_seen for original $type ID {$model->id} due to fatal content error, before attempting further failovers.");
+                }
                 continue;
             } catch (Exception $e) {
                 // Log the error and potentially mark source as bad before trying next failover

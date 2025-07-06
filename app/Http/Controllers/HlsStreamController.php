@@ -188,6 +188,15 @@ class HlsStreamController extends Controller
                     $actualStreamingModel = $returnedModel; // This is the model that is actually streaming
                     Cache::put($streamMappingKey, $actualStreamingModel->id, now()->addHours(24));
                     Log::channel('ffmpeg')->debug("HLS Stream: Original request for $type ID {$model->id} ({$logTitle}). Actual streaming $type ID {$actualStreamingModel->id} (" . ($actualStreamingModel->title_custom ?? $actualStreamingModel->title) . ").");
+
+                    // If a failover occurred (actual streaming model is different from the original),
+                    // explicitly update the 'last_seen' timestamp for the *original* model ID.
+                    // This prevents the pruning job from removing the original model's HLS data
+                    // prematurely while the client switches to the failover stream.
+                    if ($model->id != $actualStreamingModel->id) {
+                        Redis::set("hls:{$type}_last_seen:{$model->id}", now()->timestamp);
+                        Log::channel('ffmpeg')->debug("HLS Stream: Touched last_seen for original $type ID {$model->id} because failover to $type ID {$actualStreamingModel->id} occurred.");
+                    }
                 } else {
                     // This case should ideally be less frequent if AllPlaylistsExhaustedException is thrown for specific limit failures.
                     // This would now primarily catch other null returns from startStream.
