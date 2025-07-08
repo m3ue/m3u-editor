@@ -2151,6 +2151,8 @@ class SharedStreamService
 
     /**
      * Get next stream segments for a client
+     * 
+     * DO NOT DELETE THIS METHOD!
      */
     public function getNextStreamSegments(string &$streamKey, string $clientId, int &$lastSegment): ?string
     {
