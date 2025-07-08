@@ -2797,29 +2797,25 @@ class SharedStreamService
                     } else {
                         $this->startDirectStream($failoverStreamKey, $streamInfo);
                     }
-                    try {
-                        // Mark old stream as failed
-                        SharedStream::where('stream_id', $originalStreamKey)->update([
-                            'status' => 'error',
-                            'stopped_at' => now(),
-                            'error_message' => "Failed over to channel {$failoverChannel->id} after {$attemptNumber} attempts",
-                            // 'client_count' => 0, // Clients should be migrated, not deleted, so we don't reset this
-                            // 'bandwidth_kbps' => 0,
-                            // 'bytes_transferred' => 0,
-                            'last_client_activity' => null, // Reset last activity since this stream is no longer active
-                            'health_check_at' => now(),
-                            'health_status' => 'unhealthy',
-                            'stream_info' => [
-                                ...$originalStreamInfo,
-                                'status' => 'failed_over',
-                                'failover_stream_key' => $failoverStreamKey,
-                                'failed_over_at' => now()->timestamp,
-                            ]
-                        ]);
-                    } catch (\Exception $dbError) {
-                        Log::channel('ffmpeg')->warning("Stream {$originalStreamKey}: Database update failed during failover: " . $dbError->getMessage());
-                        // Continue with failover even if DB update fails
-                    }
+                    
+                    // Mark primary stream as failed over
+                    SharedStream::where('stream_id', $originalStreamKey)->update([
+                        'status' => 'error',
+                        'stopped_at' => now(),
+                        'error_message' => "Failed over to channel {$failoverChannel->id} after {$attemptNumber} attempts",
+                        // 'client_count' => 0, // Clients should be migrated, not deleted, so we don't reset this
+                        // 'bandwidth_kbps' => 0,
+                        // 'bytes_transferred' => 0,
+                        'last_client_activity' => null, // Reset last activity since this stream is no longer active
+                        'health_check_at' => now(),
+                        'health_status' => 'unhealthy',
+                        'stream_info' => [
+                            ...$originalStreamInfo,
+                            'status' => 'failed_over',
+                            'failover_stream_key' => $failoverStreamKey,
+                            'failed_over_at' => now()->timestamp,
+                        ]
+                    ]);
 
                     // Don't immediately clean up original stream Redis data - leave redirect info
                     // Store redirect mapping for future client requests  
@@ -2899,34 +2895,31 @@ class SharedStreamService
             ->where('status', 'connected')
             ->get();
 
+        // If no clients, nothing to migrate
         if ($clients->isEmpty()) {
             return;
         }
 
         Log::channel('ffmpeg')->debug("Migrating " . $clients->count() . " clients from {$originalStreamKey} to {$failoverStreamKey}");
-
         foreach ($clients as $client) {
             // Register client with the failover stream
             $this->registerClient($failoverStreamKey, $client->client_id, $client->options ?? []);
 
             // Remove client from the original stream
             $client->delete();
-
             Log::channel('ffmpeg')->debug("Migrated client {$client->client_id} from {$originalStreamKey} to {$failoverStreamKey}");
         }
 
         // Update the client count in the database for both streams
         $failoverClientCount = SharedStreamClient::where('stream_id', $failoverStreamKey)
-            ->where('status', 'connected')
-            ->count();
-
-        SharedStream::where('stream_id', $failoverStreamKey)->update(['client_count' => $failoverClientCount]);
+            ->where('status', 'connected')->count();
+        SharedStream::where('stream_id', $failoverStreamKey)
+            ->update(['client_count' => $failoverClientCount]);
 
         $originalClientCount = SharedStreamClient::where('stream_id', $originalStreamKey)
-            ->where('status', 'connected')
-            ->count();
-
-        SharedStream::where('stream_id', $originalStreamKey)->update(['client_count' => $originalClientCount]);
+            ->where('status', 'connected')->count();
+        SharedStream::where('stream_id', $originalStreamKey)
+            ->update(['client_count' => $originalClientCount]);
 
         Log::channel('ffmpeg')->debug("Updated client count for failover stream {$failoverStreamKey} to {$failoverClientCount}");
     }
