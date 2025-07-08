@@ -21,13 +21,6 @@ class EditPlaylist extends EditRecord
         return true;
     }
 
-    protected function getHeaderWidgets(): array
-    {
-        return [
-            PlaylistResource\Widgets\PlaylistStatsWidget::class,
-        ];
-    }
-
     protected function getHeaderActions(): array
     {
         return [

@@ -28,6 +28,7 @@ use App\Filament\Resources\PlaylistSyncStatusResource\Pages\EditPlaylistSyncStat
 use App\Filament\Resources\PlaylistSyncStatusResource\Pages\ListPlaylistSyncStatuses;
 use App\Filament\Resources\PlaylistSyncStatusResource\Pages\ViewPlaylistSyncStatus;
 use App\Forms\Components\MediaFlowProxyUrl;
+use App\Forms\Components\PlaylistInfo;
 use App\Forms\Components\XtreamApiInfo;
 use App\Models\PlaylistSyncStatus;
 use App\Models\SourceGroup;
@@ -916,6 +917,17 @@ class PlaylistResource extends Resource
             Forms\Components\Grid::make()
                 ->columns(5)
                 ->schema([
+                    Forms\Components\Section::make('Playlist Stats')
+                        ->icon('heroicon-m-chart-bar')
+                        ->collapsible()
+                        ->columnSpan(2)
+                        ->collapsed(true)
+                        ->schema([
+                            PlaylistInfo::make('play_list_info')
+                                ->label('') // disable the label
+                                ->columnSpan(2)
+                                ->dehydrated(false), // don't save the value in the database
+                        ])->columnSpanFull(),
                     Forms\Components\Tabs::make()
                         ->tabs($tabs)
                         ->columnSpan(3)
@@ -925,7 +937,7 @@ class PlaylistResource extends Resource
                         ->columnSpan(2)
                         ->schema([
                             Forms\Components\Section::make('Auth')
-                                ->description('Add authentication to your playlist.')
+                                ->description('Add and manage authentication.')
                                 ->icon('heroicon-m-key')
                                 ->collapsible()
                                 ->collapsed(true)
@@ -936,7 +948,7 @@ class PlaylistResource extends Resource
                                         ->multiple()
                                         ->options(function ($record) {
                                             $options = [];
-                                            
+
                                             // Get currently assigned auths for this playlist
                                             if ($record) {
                                                 $currentAuths = $record->playlistAuths()->get();
@@ -944,16 +956,16 @@ class PlaylistResource extends Resource
                                                     $options[$auth->id] = $auth->name . ' (currently assigned)';
                                                 }
                                             }
-                                            
+
                                             // Get unassigned auths
                                             $unassignedAuths = \App\Models\PlaylistAuth::where('user_id', \Illuminate\Support\Facades\Auth::id())
                                                 ->whereDoesntHave('assignedPlaylist')
                                                 ->get();
-                                            
+
                                             foreach ($unassignedAuths as $auth) {
                                                 $options[$auth->id] = $auth->name;
                                             }
-                                            
+
                                             return $options;
                                         })
                                         ->searchable()
@@ -974,10 +986,10 @@ class PlaylistResource extends Resource
                                         ->helperText('Only unassigned auths are available. Each auth can only be assigned to one playlist at a time.')
                                         ->afterStateUpdated(function ($state, $record) {
                                             if (!$record) return;
-                                            
+
                                             $currentAuthIds = $record->playlistAuths()->pluck('playlist_auths.id')->toArray();
                                             $newAuthIds = $state ? (is_array($state) ? $state : [$state]) : [];
-                                            
+
                                             // Find auths to remove (currently assigned but not in new selection)
                                             $authsToRemove = array_diff($currentAuthIds, $newAuthIds);
                                             foreach ($authsToRemove as $authId) {
@@ -986,7 +998,7 @@ class PlaylistResource extends Resource
                                                     $auth->clearAssignment();
                                                 }
                                             }
-                                            
+
                                             // Find auths to add (in new selection but not currently assigned)
                                             $authsToAdd = array_diff($newAuthIds, $currentAuthIds);
                                             foreach ($authsToAdd as $authId) {
@@ -999,6 +1011,7 @@ class PlaylistResource extends Resource
                                         ->dehydrated(false), // Don't save this field directly
                                 ]),
                             Forms\Components\Section::make('Xtream API')
+                                ->description('Xtream API connection details.')
                                 ->icon('heroicon-m-bolt')
                                 ->collapsible()
                                 ->columnSpan(2)

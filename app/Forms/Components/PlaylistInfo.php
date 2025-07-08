@@ -1,40 +1,36 @@
 <?php
 
-namespace App\Filament\Resources\PlaylistResource\Widgets;
+namespace App\Forms\Components;
 
 use App\Models\Playlist;
 use App\Services\XtreamService;
 use Carbon\Carbon;
-use Filament\Widgets\StatsOverviewWidget as BaseWidget;
-use Filament\Widgets\StatsOverviewWidget\Stat;
-use Illuminate\Database\Eloquent\Model;
+use Filament\Forms\Components\Field;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Redis;
 
-class PlaylistStatsWidget extends BaseWidget
+class PlaylistInfo extends Field
 {
-    public ?Model $record = null;
+    protected string $view = 'forms.components.playlist-info';
 
-    protected function getStats(): array
+    public function getStats(): array
     {
-        $playlist = Playlist::find($this->record?->id);
+        $playlist = Playlist::find($this->getRecord()?->id);
         if (!$playlist) {
             return [];
         }
 
-        $stats = [];
+        $stats = ['proxy_enabled' => $playlist->enable_proxy];
         if ($playlist->enable_proxy) {
             $activeStreams = Redis::get("active_streams:{$playlist->id}") ?? 0;
             $availableStreams = $playlist->available_streams ?? 0;
             if ($availableStreams === 0) {
                 $availableStreams = "∞";
             }
-            $maxStreamsReached = $activeStreams > 0 && $activeStreams >= $availableStreams;
-            $stats[] = Stat::make('proxy_streams', "$activeStreams/$availableStreams")
-                ->label('Proxy Connections')
-                ->description('Active vs. available')
-                ->descriptionIcon('heroicon-o-chart-bar', 'before')
-                ->color($maxStreamsReached ? 'danger' : 'primary');
+            $stats['active_streams'] = $activeStreams;
+            $stats['available_streams'] = $availableStreams;
+            $stats['max_streams_reached'] = $activeStreams > 0 && $activeStreams >= $availableStreams;
+            $stats['active_connections'] = "$activeStreams/$availableStreams";
         }
         if ($playlist->xtream) {
             $xtreamStats = $this->getXtreamStats($playlist);
@@ -75,16 +71,13 @@ class PlaylistStatsWidget extends BaseWidget
             $expiresIn24HoursOrLess = $expires->isToday() || $expires->isTomorrow();
         }
         return [
-            Stat::make('active_connections', "$activeConnections/$maxConnections")
-                ->label('Provider Connections')
-                ->description('Active vs. available')
-                ->descriptionIcon('heroicon-o-chart-bar', 'before')
-                ->color($activeConnections >= $maxConnections ? 'danger' : 'primary'),
-            Stat::make('expires', $expires->diffForHumans())
-                ->label('Expires')
-                ->description('Account expires: ' . $expires->toDateTimeString())
-                ->descriptionIcon('heroicon-o-calendar', 'before')
-                ->color($expiresIn24HoursOrLess ? 'danger' : 'primary'),
+            'xtream_info' => [
+                'active_connections' => "$activeConnections/$maxConnections",
+                'max_streams_reached' => $activeConnections >= $maxConnections,
+                'expires' => $expires->diffForHumans(),
+                'expires_description' => $expires->toDateTimeString(),
+                'expires_in_24_hours_or_less' => $expiresIn24HoursOrLess,
+            ]
         ];
     }
 }
