@@ -364,7 +364,8 @@ class CustomPlaylistResource extends Resource
                         ->columnSpan(2)
                         ->schema([
                             Forms\Components\Section::make('Auth')
-                                ->description('Add authentication to your playlist.')
+                                ->compact()
+                                ->description('Add and manage authentication.')
                                 ->icon('heroicon-m-key')
                                 ->collapsible()
                                 ->collapsed(true)
@@ -437,6 +438,8 @@ class CustomPlaylistResource extends Resource
                                         ->dehydrated(false), // Don't save this field directly
                                 ]),
                             Forms\Components\Section::make('Xtream API')
+                                ->compact()
+                                ->description('Xtream API connection details.')
                                 ->icon('heroicon-m-bolt')
                                 ->collapsible()
                                 ->columnSpan(2)
@@ -448,6 +451,7 @@ class CustomPlaylistResource extends Resource
                                         ->dehydrated(false), // don't save the value in the database
                                 ]),
                             Forms\Components\Section::make('Links')
+                                ->compact()
                                 ->icon('heroicon-m-link')
                                 ->collapsible()
                                 ->collapsed(false)
