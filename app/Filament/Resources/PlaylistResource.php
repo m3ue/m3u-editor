@@ -985,7 +985,11 @@ class PlaylistResource extends Resource
                                                 $component->state($currentAuthIds);
                                             }
                                         })
-                                        ->helperText('Only unassigned auths are available. Each auth can only be assigned to one playlist at a time.')
+                                        ->hintIcon(
+                                            'heroicon-m-question-mark-circle',
+                                            tooltip: 'Only unassigned auths are available. Each auth can only be assigned to one playlist at a time. You will also be able to access the Xtream API using any assigned auths.'
+                                        )
+                                        ->helperText('Simple authentication for playlist access.')
                                         ->afterStateUpdated(function ($state, $record) {
                                             if (!$record) return;
 
