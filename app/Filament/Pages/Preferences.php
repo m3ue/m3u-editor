@@ -59,40 +59,47 @@ class Preferences extends SettingsPage
                                     ->description('FFmpeg proxy settings')
                                     ->columnSpan('full')
                                     ->columns(3)
+                                    ->collapsible()
+                                    ->collapsed(false)
                                     ->schema([
                                         Forms\Components\Toggle::make('ffmpeg_debug')
                                             ->label('Debug')
-                                            ->columnSpan(1)
+                                            ->columnSpanFull()
                                             ->helperText('When enabled FFmpeg will output verbose logging to the log file (/var/www/logs/ffmpeg-YYYY-MM-DD.log). When disabled, FFmpeg will only log errors.'),
-                                        Forms\Components\Select::make('ffmpeg_path')
-                                            ->label('FFmpeg')
-                                            ->columnSpan(2)
-                                            ->helperText('Which ffmpeg variant would you like to use.')
-                                            ->options([
-                                                'jellyfin-ffmpeg' => 'jellyfin-ffmpeg (default)',
-                                                'ffmpeg' => 'ffmpeg (v6)',
-                                            ])
-                                            ->searchable()
-                                            ->suffixIcon(fn() => !empty($ffmpegPath) ? 'heroicon-m-lock-closed' : null)
-                                            ->disabled(fn() => !empty($ffmpegPath))
-                                            ->hint(fn() => !empty($ffmpegPath) ? 'Already set by environment variable!' : null)
-                                            ->dehydrated(fn() => empty($ffmpegPath))
-                                            ->placeholder(fn() => empty($ffmpegPath) ? 'jellyfin-ffmpeg' : $ffmpegPath),
-                                        Forms\Components\Select::make('ffprobe_path')
-                                            ->label('FFprobe')
-                                            ->columnSpan(2)
-                                            ->helperText('Which ffprobe variant would you like to use.')
-                                            ->options([
-                                                'jellyfin-ffprobe' => 'jellyfin-ffprobe (default)',
-                                                'ffprobe' => 'ffprobe',
-                                            ])
-                                            ->searchable()
-                                            // Assuming similar logic for ffprobe path being set by env var
-                                            ->suffixIcon(fn() => !empty(config('proxy.ffprobe_path')) ? 'heroicon-m-lock-closed' : null)
-                                            ->disabled(fn() => !empty(config('proxy.ffprobe_path')))
-                                            ->hint(fn() => !empty(config('proxy.ffprobe_path')) ? 'Already set by environment variable!' : null)
-                                            ->dehydrated(fn() => empty(config('proxy.ffprobe_path')))
-                                            ->placeholder(fn() => empty(config('proxy.ffprobe_path')) ? 'jellyfin-ffprobe' : config('proxy.ffprobe_path')),
+                                        Forms\Components\Grid::make()
+                                            ->columnSpanFull()
+                                            ->columns(2)
+                                            ->schema([
+                                                Forms\Components\Select::make('ffmpeg_path')
+                                                    ->label('FFmpeg')
+                                                    ->columnSpan(1)
+                                                    ->helperText('Which ffmpeg variant would you like to use.')
+                                                    ->options([
+                                                        'jellyfin-ffmpeg' => 'jellyfin-ffmpeg (default)',
+                                                        'ffmpeg' => 'ffmpeg (v6)',
+                                                    ])
+                                                    ->searchable()
+                                                    ->suffixIcon(fn() => !empty($ffmpegPath) ? 'heroicon-m-lock-closed' : null)
+                                                    ->disabled(fn() => !empty($ffmpegPath))
+                                                    ->hint(fn() => !empty($ffmpegPath) ? 'Already set by environment variable!' : null)
+                                                    ->dehydrated(fn() => empty($ffmpegPath))
+                                                    ->placeholder(fn() => empty($ffmpegPath) ? 'jellyfin-ffmpeg' : $ffmpegPath),
+                                                Forms\Components\Select::make('ffprobe_path')
+                                                    ->label('FFprobe')
+                                                    ->columnSpan(1)
+                                                    ->helperText('Which ffprobe variant would you like to use.')
+                                                    ->options([
+                                                        'jellyfin-ffprobe' => 'jellyfin-ffprobe (default)',
+                                                        'ffprobe' => 'ffprobe',
+                                                    ])
+                                                    ->searchable()
+                                                    // Assuming similar logic for ffprobe path being set by env var
+                                                    ->suffixIcon(fn() => !empty(config('proxy.ffprobe_path')) ? 'heroicon-m-lock-closed' : null)
+                                                    ->disabled(fn() => !empty(config('proxy.ffprobe_path')))
+                                                    ->hint(fn() => !empty(config('proxy.ffprobe_path')) ? 'Already set by environment variable!' : null)
+                                                    ->dehydrated(fn() => empty(config('proxy.ffprobe_path')))
+                                                    ->placeholder(fn() => empty(config('proxy.ffprobe_path')) ? 'jellyfin-ffprobe' : config('proxy.ffprobe_path')),
+                                            ]),
                                         Forms\Components\TextInput::make('ffmpeg_max_tries')
                                             ->label('Max tries')
                                             ->columnSpan(1)
@@ -101,10 +108,17 @@ class Preferences extends SettingsPage
                                             ->default(3)
                                             ->minValue(0)
                                             ->helperText('If the FFmpeg process crashes or fails for any reason, how many times should it try to reconnect before aborting?'),
+                                        Forms\Components\TextInput::make('ffmpeg_ffprobe_timeout')
+                                            ->label('FFprobe Timeout (seconds)')
+                                            ->columnSpan(1)
+                                            ->type('number')
+                                            ->minValue(1)
+                                            ->default(5)
+                                            ->helperText('Timeout for ffprobe pre-check in seconds. Default: 5.'),
                                         Forms\Components\TextInput::make('ffmpeg_user_agent')
                                             ->label('User agent')
                                             ->required()
-                                            ->columnSpan(2)
+                                            ->columnSpan(1)
                                             ->default('VLC/3.0.21 LibVLC/3.0.21')
                                             ->placeholder('VLC/3.0.21 LibVLC/3.0.21')
                                             ->helperText('Fallback user agent (defaults to the streams Playlist user agent, when set).'),
@@ -115,13 +129,6 @@ class Preferences extends SettingsPage
                                             ->minValue(1)
                                             ->default(4)
                                             ->helperText('Target HLS segment duration in seconds. Default: 4.'),
-                                        Forms\Components\TextInput::make('ffmpeg_ffprobe_timeout')
-                                            ->label('FFprobe Timeout (seconds)')
-                                            ->columnSpan(1)
-                                            ->type('number')
-                                            ->minValue(1)
-                                            ->default(5)
-                                            ->helperText('Timeout for ffprobe pre-check in seconds. Default: 5.'),
                                         Forms\Components\TextInput::make('hls_playlist_max_attempts')
                                             ->label('HLS Playlist Max Wait Attempts')
                                             ->columnSpan(1)
@@ -141,6 +148,8 @@ class Preferences extends SettingsPage
                                     ]),
                                 Forms\Components\Section::make('Advanced FFmpeg Settings')
                                     ->description('These settings allow you to customize the FFmpeg transcoding process. Use with caution, as incorrect settings can lead to poor performance or compatibility issues.')
+                                    ->collapsible()
+                                    ->collapsed(true)
                                     ->schema([
                                         Forms\Components\Select::make('hardware_acceleration_method')
                                             ->label('Hardware Acceleration')
@@ -239,12 +248,12 @@ class Preferences extends SettingsPage
                                             ->rows(5)
                                             ->helperText('Define a full FFmpeg command template. Use placeholders like {FFMPEG_PATH}, {INPUT_URL}, {OUTPUT_OPTIONS}, {USER_AGENT}, {REFERER}, {HWACCEL_INIT_ARGS}, {HWACCEL_ARGS}, {VIDEO_FILTER_ARGS}, {AUDIO_CODEC_ARGS}, {VIDEO_CODEC_ARGS}, {SUBTITLE_CODEC_ARGS}. If this field is filled, it will override most other FFmpeg settings. Leave empty to use the application-generated command. Use with caution: an improperly configured custom command can expose security vulnerabilities or cause instability.'),
                                     ])->columns(3),
-
-
                                 Forms\Components\Section::make('MediaFlow Proxy')
                                     ->description('If you have MediaFlow Proxy installed, you can use it to proxy your m3u editor playlist streams. When enabled, the app will auto-generate URLs for you to use via MediaFlow Proxy.')
                                     ->columnSpan('full')
                                     ->columns(3)
+                                    ->collapsible()
+                                    ->collapsed(true)
                                     ->headerActions([
                                         Forms\Components\Actions\Action::make('mfproxy_git')
                                             ->label('GitHub')
