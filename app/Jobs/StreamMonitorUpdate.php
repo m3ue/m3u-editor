@@ -51,7 +51,7 @@ class StreamMonitorUpdate implements ShouldQueue
             $activeClients = $sharedStreamService->getAllActiveClients();
             $removedClients = 0;
             foreach ($activeClients as $client) {
-                if (isset($client['last_activity_at']) && time() - $client['last_activity_at'] > 60) { // 1 minute
+                if (isset($client['last_activity_at']) && time() - $client['last_activity_at'] > 30) { // 30 seconds
                     Log::channel('ffmpeg')->info("StreamMonitor: Removing stale client {$client['client_id']} from stream {$client['stream_id']}");
                     $sharedStreamService->removeClient($client['stream_id'], $client['client_id']);
                     $removedClients++;
