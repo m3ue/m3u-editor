@@ -17,12 +17,7 @@ class ImportProgress extends Widget
         return 'full';
     }
 
-    public function getPollingInterval(): ?string
-    {
-        return '5s';
-    }
-
-    public function getViewData(): array
+    public function getProgressData(): array
     {
         $record = $this->record;
         $isProcessing = false;
