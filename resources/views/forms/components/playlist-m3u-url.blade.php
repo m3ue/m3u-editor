@@ -6,6 +6,9 @@
     <div x-data="{ state: $wire.$entangle('{{ $getStatePath() }}') }">
         <div class="flex gap-2 items-center justify-start mb-4">
             <x-filament::input.wrapper>
+                <x-slot name="prefix">
+                   <x-copy-to-clipboard :text="$m3uUrl" />
+                </x-slot> 
                 <x-filament::input
                     type="text"
                     :value="$m3uUrl"
@@ -19,6 +22,9 @@
         </div>
         <div class="flex gap-2 items-center justify-start">
             <x-filament::input.wrapper>
+                <x-slot name="prefix">
+                    <x-copy-to-clipboard :text="$hdhrUrl" />
+                </x-slot>
                 <x-filament::input
                     type="text"
                     :value="$hdhrUrl"

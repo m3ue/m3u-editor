@@ -25,10 +25,13 @@ class MapPlaylistChannelsToEpg implements ShouldQueue
 {
     use Queueable;
 
+    // Don't retry the job on failure
+    public $tries = 1;
+
     public $deleteWhenMissingModels = true;
 
-    // Giving a timeout of 30 minutes to the Job to process the mapping
-    public $timeout = 60 * 30;
+    // Giving a timeout of 15 minutes to the Job to process the mapping
+    public $timeout = 60 * 15;
 
     // Similarity search service
     protected SimilaritySearchService $similaritySearch;
@@ -98,20 +101,24 @@ class MapPlaylistChannelsToEpg implements ShouldQueue
             // Fetch the playlist (if set)
             $channels = [];
             if ($this->channels) {
-                $totalChannelCount = count($this->channels);
-                $mappedCount = collect($this->channels)
+                $channels = collect($this->channels);
+                $totalChannelCount = $channels->where('is_vod', false)->count();
+                $mappedCount = $channels
                     ->filter(fn($channel) => $channel->epg_channel_id !== null)
                     ->count();
-                $channels = Channel::whereIn('id', $this->channels)
+                $channels = Channel::whereIn('id', $channels->pluck('id'))
+                    ->where('is_vod', false)
                     ->when(!$this->force, function ($query) {
                         $query->where('epg_channel_id', null);
                     })->cursor();
             } else if ($playlist) {
-                $totalChannelCount = $playlist->channels()->count();
+                $totalChannelCount = $playlist->channels()->where('is_vod', false)->count();
                 $mappedCount = $playlist->channels()
+                    ->where('is_vod', false)
                     ->whereNotNull('epg_channel_id')
                     ->count();
                 $channels = $playlist->channels()
+                    ->where('is_vod', false)
                     ->when(!$this->force, function ($query) {
                         $query->where('epg_channel_id', null);
                     })->cursor();

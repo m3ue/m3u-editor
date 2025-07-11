@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "3ab9e05a994d7e263f67a8259918df31",
+    "content-hash": "4ef8fc32eefa2a944138e94a70fd8a9a",
     "packages": [
         {
             "name": "anourvalar/eloquent-serialize",
@@ -610,81 +610,6 @@
                 }
             ],
             "time": "2024-02-09T16:56:22+00:00"
-        },
-        {
-            "name": "cerbero/json-parser",
-            "version": "1.1.1",
-            "source": {
-                "type": "git",
-                "url": "https://github.com/cerbero90/json-parser.git",
-                "reference": "02af3cd5396b50b05d287b6e6964bc5c42d40e8a"
-            },
-            "dist": {
-                "type": "zip",
-                "url": "https://api.github.com/repos/cerbero90/json-parser/zipball/02af3cd5396b50b05d287b6e6964bc5c42d40e8a",
-                "reference": "02af3cd5396b50b05d287b6e6964bc5c42d40e8a",
-                "shasum": ""
-            },
-            "require": {
-                "php": "^8.1"
-            },
-            "require-dev": {
-                "guzzlehttp/guzzle": "^7.2",
-                "illuminate/http": ">=6.20",
-                "mockery/mockery": "^1.5",
-                "pestphp/pest": "^2.0",
-                "phpstan/phpstan": "^1.9",
-                "scrutinizer/ocular": "^1.8",
-                "squizlabs/php_codesniffer": "^3.0"
-            },
-            "suggest": {
-                "guzzlehttp/guzzle": "Required to load JSON from endpoints (^7.2)."
-            },
-            "type": "library",
-            "extra": {
-                "branch-alias": {
-                    "dev-master": "1.0-dev"
-                }
-            },
-            "autoload": {
-                "files": [
-                    "helpers.php"
-                ],
-                "psr-4": {
-                    "Cerbero\\JsonParser\\": "src"
-                }
-            },
-            "notification-url": "https://packagist.org/downloads/",
-            "license": [
-                "MIT"
-            ],
-            "authors": [
-                {
-                    "name": "Andrea Marco Sartori",
-                    "email": "andrea.marco.sartori@gmail.com",
-                    "homepage": "https://github.com/cerbero90",
-                    "role": "Developer"
-                }
-            ],
-            "description": "Zero-dependencies pull parser to read large JSON from any source in a memory-efficient way.",
-            "homepage": "https://github.com/cerbero90/json-parser",
-            "keywords": [
-                "json",
-                "json-parser",
-                "lexer",
-                "memory",
-                "parser"
-            ],
-            "support": {
-                "source": "https://github.com/cerbero90/json-parser/tree/1.1.1"
-            },
-            "funding": [
-                {
-                    "url": "https://github.com/cerbero90",
-                    "type": "github"
-                }
-            ],
-            "time": "2025-01-17T18:41:04+00:00"
         },
         {
             "name": "clue/redis-protocol",
@@ -2686,6 +2611,68 @@
                 }
             ],
             "time": "2025-02-03T10:55:03+00:00"
+        },
+        {
+            "name": "halaxa/json-machine",
+            "version": "1.2.5",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/halaxa/json-machine.git",
+                "reference": "d0f84abf79ac98145d478b66d2bcf363d706477c"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/halaxa/json-machine/zipball/d0f84abf79ac98145d478b66d2bcf363d706477c",
+                "reference": "d0f84abf79ac98145d478b66d2bcf363d706477c",
+                "shasum": ""
+            },
+            "require": {
+                "php": "7.2 - 8.4"
+            },
+            "require-dev": {
+                "ext-json": "*",
+                "friendsofphp/php-cs-fixer": "^3.0",
+                "phpstan/phpstan": "^1.10",
+                "phpunit/phpunit": "^8.0"
+            },
+            "suggest": {
+                "ext-json": "To run JSON Machine out of the box without custom decoders.",
+                "guzzlehttp/guzzle": "To run example with GuzzleHttp"
+            },
+            "type": "library",
+            "autoload": {
+                "files": [
+                    "src/functions.php"
+                ],
+                "psr-4": {
+                    "JsonMachine\\": "src/"
+                },
+                "exclude-from-classmap": [
+                    "src/autoloader.php"
+                ]
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "Apache-2.0"
+            ],
+            "authors": [
+                {
+                    "name": "Filip Halaxa",
+                    "email": "filip@halaxa.cz"
+                }
+            ],
+            "description": "Efficient, easy-to-use and fast JSON pull parser",
+            "support": {
+                "issues": "https://github.com/halaxa/json-machine/issues",
+                "source": "https://github.com/halaxa/json-machine/tree/1.2.5"
+            },
+            "funding": [
+                {
+                    "url": "https://ko-fi.com/G2G57KTE4",
+                    "type": "other"
+                }
+            ],
+            "time": "2025-07-07T13:38:34+00:00"
         },
         {
             "name": "hashids/hashids",

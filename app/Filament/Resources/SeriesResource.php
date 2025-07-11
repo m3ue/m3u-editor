@@ -181,7 +181,7 @@ class SeriesResource extends Resource
             ], position: Tables\Enums\ActionsPosition::BeforeCells)
             ->bulkActions([
                 Tables\Actions\BulkActionGroup::make([
-                    Tables\Actions\Action::make('process')
+                    Tables\Actions\BulkAction::make('process')
                         ->label('Process Selected Series')
                         ->icon('heroicon-o-arrow-path')
                         ->action(function ($records) {
@@ -204,7 +204,7 @@ class SeriesResource extends Resource
                         ->modalIcon('heroicon-o-arrow-path')
                         ->modalDescription('Process selected series now? This will fetch all episodes and seasons for this series. This may take a while depending on the number of series selected.')
                         ->modalSubmitActionLabel('Yes, process now'),
-                    Tables\Actions\Action::make('sync')
+                    Tables\Actions\BulkAction::make('sync')
                         ->label('Sync Series .strm files')
                         ->action(function ($records) {
                             foreach ($records as $record) {
@@ -474,7 +474,7 @@ class SeriesResource extends Resource
                         ->onColor('warning')
                         ->hint('Use with caution')
                         ->live()
-                        ->helperText('If enabled, all series in the selected category will be imported. Use with caution as this will make a lot of requests to your provider. It is recomended to import only the series you want to watch.')
+                        ->helperText('If enabled, all series in the selected category will be imported. Use with caution as this will make a lot of requests to your provider to fetch metadata and episodes. It is recomended to import only the series you want to watch. You can also enable the series option on your playlist under the "Groups and Streams to Import" to import all the base data for all available series.')
                         ->default(false)
                         ->columnSpanFull()
                         ->afterStateUpdated(function (Get $get, $set) {

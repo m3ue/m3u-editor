@@ -88,7 +88,21 @@ class PlaylistsRelationManager extends RelationManager
             ->headerActions([
                 Tables\Actions\CreateAction::make()
                     ->label('Assign Auth to Playlist')
-                    ->modalHeading('Assign Auth to Playlist'),
+                    ->modalHeading('Assign Auth to Playlist')
+                    ->using(function (array $data): \Illuminate\Database\Eloquent\Model {
+                        $playlistAuth = $this->ownerRecord;
+                        
+                        // Get the model to assign to
+                        $modelClass = $data['authenticatable_type'];
+                        $modelId = $data['authenticatable_id'];
+                        $model = $modelClass::findOrFail($modelId);
+                        
+                        // Use the assignTo method to ensure single assignment
+                        $playlistAuth->assignTo($model);
+                        
+                        // Return the created pivot record for Filament
+                        return $playlistAuth->assignedPlaylist;
+                    }),
             ])
             ->actions([
                 Tables\Actions\DeleteAction::make()

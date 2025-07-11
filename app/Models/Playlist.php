@@ -113,6 +113,11 @@ class Playlist extends Model
         return $this->hasMany(Series::class);
     }
 
+    public function enabled_series(): HasMany
+    {
+        return $this->series()->where('enabled', true);
+    }
+
     public function seasons(): HasMany
     {
         return $this->hasMany(Season::class);

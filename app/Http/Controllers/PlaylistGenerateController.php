@@ -29,12 +29,20 @@ class PlaylistGenerateController extends Controller
         }
 
         // Check auth
-        $auth = $playlist->playlistAuths()->where('enabled', true)->first();
-        if ($auth) {
-            if (
-                $request->get('username') !== $auth->username ||
-                $request->get('password') !== $auth->password
-            ) {
+        $auths = $playlist->playlistAuths()->where('enabled', true)->get();
+        if ($auths->isNotEmpty()) {
+            $authenticated = false;
+            foreach ($auths as $auth) {
+                if (
+                    $request->get('username') === $auth->username &&
+                    $request->get('password') === $auth->password
+                ) {
+                    $authenticated = true;
+                    break;
+                }
+            }
+            
+            if (!$authenticated) {
                 return response()->json(['Error' => 'Unauthorized'], 401);
             }
         }
@@ -210,12 +218,20 @@ class PlaylistGenerateController extends Controller
         }
 
         // Check auth
-        $auth = $playlist->playlistAuths()->where('enabled', true)->first();
-        if ($auth) {
-            if (
-                $request->get('username') !== $auth->username ||
-                $request->get('password') !== $auth->password
-            ) {
+        $auths = $playlist->playlistAuths()->where('enabled', true)->get();
+        if ($auths->isNotEmpty()) {
+            $authenticated = false;
+            foreach ($auths as $auth) {
+                if (
+                    $request->get('username') === $auth->username &&
+                    $request->get('password') === $auth->password
+                ) {
+                    $authenticated = true;
+                    break;
+                }
+            }
+            
+            if (!$authenticated) {
                 return response()->json(['Error' => 'Unauthorized'], 401);
             }
         }

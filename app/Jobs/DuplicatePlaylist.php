@@ -74,10 +74,10 @@ class DuplicatePlaylist implements ShouldQueue
                 }
             }
 
-            // Attach the auth to this playlist
-            foreach ($playlist->playlistAuths()->get() as $auth) {
-                $newPlaylist->playlistAuths()->syncWithoutDetaching($auth->id);
-            }
+            // Note: Since PlaylistAuth can now only be assigned to one model at a time,
+            // we skip copying auth assignments when duplicating playlists.
+            // Users will need to manually assign auth to the duplicated playlist if needed.
+            // This prevents conflicts with the unique constraint.
 
             // @TODO: Copy the uploaded file
             // // Copy uploaded file

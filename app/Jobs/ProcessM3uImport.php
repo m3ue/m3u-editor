@@ -15,17 +15,21 @@ use M3uParser\M3uParser;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\LazyCollection;
-use Cerbero\JsonParser\JsonParser;
 use Illuminate\Support\Facades\Log;
+use JsonMachine\Items;
 
 class ProcessM3uImport implements ShouldQueue
 {
     use Queueable;
+
+    // Don't retry the job on failure
+    public $tries = 1;
 
     // To prevent errors when processing large files, limit imported channels to 50,000
     // NOTE: this only applies to M3U+ files
@@ -98,7 +102,6 @@ class ProcessM3uImport implements ShouldQueue
             'status' => Status::Processing,
             'errors' => null,
             'progress' => 0,
-            'series_progress' => 0,
         ]);
 
         // Determine if using Xtream API or M3U+
@@ -173,9 +176,15 @@ class ProcessM3uImport implements ShouldQueue
             // Setup the category and stream URLs
             $userInfo = "$baseUrl/player_api.php?username=$user&password=$password";
             $liveCategories = "$baseUrl/player_api.php?username=$user&password=$password&action=get_live_categories";
-            $liveStreams = "$baseUrl/player_api.php?username=$user&password=$password&action=get_live_streams";
+            $liveStreamsUrl = "$baseUrl/player_api.php?username=$user&password=$password&action=get_live_streams";
             $vodCategories = "$baseUrl/player_api.php?username=$user&password=$password&action=get_vod_categories";
-            $vodStreams = "$baseUrl/player_api.php?username=$user&password=$password&action=get_vod_streams";
+            $vodStreamsUrl = "$baseUrl/player_api.php?username=$user&password=$password&action=get_vod_streams";
+            $seriesCategories = "$baseUrl/player_api.php?username=$user&password=$password&action=get_series_categories";
+
+            // Determine which imports are enabled
+            $liveStreamsEnabled = in_array('live', $categoriesToImport);
+            $vodStreamsEnabled = in_array('vod', $categoriesToImport);
+            $seriesStreamsEnabled = in_array('series', $categoriesToImport);
 
             // Setup the user agent and SSL verification
             $verify = !$playlist->disable_ssl_verification;
@@ -195,8 +204,8 @@ class ProcessM3uImport implements ShouldQueue
             // Set the initial progress
             $initialProgress = 3; // start at 3%
 
-            if (in_array('live', $categoriesToImport)) {
-                // Get the live categories
+            // If including Live streams, get the categories and streams
+            if ($liveStreamsEnabled) {
                 $categoriesResponse = Http::withUserAgent($userAgent)
                     ->withOptions(['verify' => $verify])
                     ->timeout(60) // set timeout to one minute
@@ -207,27 +216,38 @@ class ProcessM3uImport implements ShouldQueue
                     $this->sendError($message, $error);
                     return;
                 }
+                $liveCategories = collect($categoriesResponse->json());
 
-                $liveStreamsResponse = Http::withUserAgent($userAgent)
+                // Get the live streams and save to a file
+                $liveFp = Storage::disk('local')->path("{$playlist->folder_path}/live_streams.json");
+
+                // Make sure the folder exists
+                Storage::disk('local')->makeDirectory($playlist->folder_path, 0755, true);
+
+                // Delete the file if it already exists so we can start fresh
+                if (Storage::disk('local')->exists($liveFp)) {
+                    Storage::disk('local')->delete($liveFp);
+                }
+                $liveResponse = Http::withUserAgent($userAgent)
+                    ->sink($liveFp) // Save the response to a file for later processing
                     ->withOptions(['verify' => $verify])
-                    ->timeout(60 * 5) // set timeout to five minute
-                    ->throw()->get($liveStreams);
-                if (!$liveStreamsResponse->ok()) {
-                    $error = $liveStreamsResponse->body();
+                    ->timeout(60 * 5)
+                    ->throw()->get($liveStreamsUrl);
+                if (!$liveResponse->ok()) {
+                    $error = $liveResponse->body();
                     $message = "Error processing Live streams: $error";
                     $this->sendError($message, $error);
                     return;
                 }
                 $initialProgress += 3;
                 $playlist->update(['progress' => $initialProgress]);
-                $liveCategories = collect($categoriesResponse->json());
             }
 
-            // If including VOD, get the categories
-            if (in_array('vod', $categoriesToImport)) {
+            // If including VOD, get the categories and streams
+            if ($vodStreamsEnabled) {
                 $vodCategoriesResponse = Http::withUserAgent($userAgent)
                     ->withOptions(['verify' => $verify])
-                    ->timeout(60 * 5)
+                    ->timeout(60) // set timeout to one minute
                     ->throw()->get($vodCategories);
                 if (!$vodCategoriesResponse->ok()) {
                     $error = $vodCategoriesResponse->body();
@@ -235,21 +255,50 @@ class ProcessM3uImport implements ShouldQueue
                     $this->sendError($message, $error);
                     return;
                 }
+                $vodCategories = collect($vodCategoriesResponse->json());
 
-                // Get the VOD streams
-                $vodStreamsResponse = Http::withUserAgent($userAgent)
+                // Get the VOD streams and save to a file
+                $vodFp = Storage::disk('local')->path("{$playlist->folder_path}/vod_streams.json");
+
+                // Make sure the folder exists
+                Storage::disk('local')->makeDirectory($playlist->folder_path, 0755, true);
+
+                // Delete the file if it already exists so we can start fresh
+                if (Storage::disk('local')->exists($vodFp)) {
+                    Storage::disk('local')->delete($vodFp);
+                }
+                $vodResponse = Http::withUserAgent($userAgent)
+                    ->sink($vodFp) // Save the response to a file for later processing
                     ->withOptions(['verify' => $verify])
-                    ->timeout(60 * 10) // set timeout to ten minute
-                    ->throw()->get($vodStreams);
-                if (!$vodStreamsResponse->ok()) {
-                    $error = $vodStreamsResponse->body();
+                    ->timeout(60 * 5)
+                    ->throw()->get($vodStreamsUrl);
+                if (!$vodResponse->ok()) {
+                    $error = $vodResponse->body();
                     $message = "Error processing VOD streams: $error";
                     $this->sendError($message, $error);
                     return;
                 }
                 $initialProgress += 3;
                 $playlist->update(['progress' => $initialProgress]);
-                $vodCategories = collect($vodCategoriesResponse->json());
+            }
+
+            // If including Series streams, get the categories and streams
+            if ($seriesStreamsEnabled) {
+                $seriesCategoriesResponse = Http::withUserAgent($userAgent)
+                    ->withOptions(['verify' => $verify])
+                    ->timeout(60) // set timeout to one minute
+                    ->throw()->get($seriesCategories);
+                if (!$seriesCategoriesResponse->ok()) {
+                    $error = $seriesCategoriesResponse->body();
+                    $message = "Error processing Series categories: $error";
+                    $this->sendError($message, $error);
+                    return;
+                }
+                $seriesCategories = collect($seriesCategoriesResponse->json());
+                $initialProgress += 3;
+                $playlist->update(['progress' => $initialProgress]);
+            } else {
+                $seriesCategories = null;
             }
 
             // Update progress
@@ -291,6 +340,7 @@ class ProcessM3uImport implements ShouldQueue
                 'year' => null, // new field for year
                 'rating' => null, // new field for rating
                 'rating_5based' => null, // new field for 5-based rating
+                'source_id' => null, // source ID for the channel
             ];
 
             // Update progress
@@ -303,8 +353,8 @@ class ProcessM3uImport implements ShouldQueue
             }
 
             // Get the live streams
-            $liveStreams = isset($liveStreamsResponse) ? JsonParser::parse($liveStreamsResponse->body()) : null;
-            $vodStreams = isset($vodStreamsResponse) ? JsonParser::parse($vodStreamsResponse->body()) : null;
+            $liveStreams = $liveStreamsEnabled && $liveFp ? Items::fromFile($liveFp) : null;
+            $vodStreams = $vodStreamsEnabled && $vodFp ? Items::fromFile($vodFp) : null;
 
             // Process the live streams
             $streamBaseUrl = "$baseUrl/live/$user/$password";
@@ -328,7 +378,7 @@ class ProcessM3uImport implements ShouldQueue
                         ++$channelNo;
 
                         // Get the category
-                        $category = $liveCategories->firstWhere('category_id', $item['category_id']);
+                        $category = $liveCategories->firstWhere('category_id', $item->category_id);
 
                         // Determine if the channel should be included
                         if ($this->preprocess && !$this->shouldIncludeChannel($category['category_name'] ?? '')) {
@@ -336,17 +386,17 @@ class ProcessM3uImport implements ShouldQueue
                         }
                         $channel = [
                             ...$channelFields,
-                            'title' => $item['name'],
-                            'name' => $item['name'],
-                            'url' => "$streamBaseUrl/{$item['stream_id']}.$output",
-                            'logo' => $item['stream_icon'],
+                            'title' => $item->name,
+                            'name' => $item->name,
+                            'url' => "$streamBaseUrl/{$item->stream_id}.$output",
+                            'logo' => $item->stream_icon,
                             'group' => $category['category_name'] ?? '',
                             'group_internal' => $category['category_name'] ?? '',
-                            'stream_id' => $item['epg_channel_id'] ?? $item['stream_id'], // prefer EPG id for mapping, if set
-                            'channel' => $item['num'] ?? null,
-                            'catchup' => $item['tv_archive'] ?? null,
-                            'shift' => $item['tv_archive_duration'] ?? 0,
-                            // 'tvg_shift' => $item['tvg_shift'] ?? null, // @TODO: check if this is on Xtream API, not seeing it as a deffinition in the API docs
+                            'stream_id' => $item->epg_channel_id ?? $item->stream_id, // prefer EPG id for mapping, if set
+                            'channel' => $item->num ?? null,
+                            'catchup' => $item->tv_archive ?? null,
+                            'shift' => $item->tv_archive_duration ?? 0,
+                            // 'tvg_shift' => $item->tvg_shift ?? null, // @TODO: check if this is on Xtream API, not seeing it as a deffinition in the API docs
                         ];
                         if ($autoSort) {
                             $channel['sort'] = $channelNo;
@@ -362,28 +412,28 @@ class ProcessM3uImport implements ShouldQueue
                         ++$channelNo;
 
                         // Get the category
-                        $category = $vodCategories->firstWhere('category_id', $item['category_id']);
+                        $category = $vodCategories->firstWhere('category_id', $item->category_id);
 
                         // Determine if the channel should be included
                         if ($this->preprocess && !$this->shouldIncludeChannel($category['category_name'] ?? '')) {
                             continue;
                         }
-                        $extension = $item['container_extension'] ?? "mp4";
+                        $extension = $item->container_extension ?? "mp4";
                         $channel = [
                             ...$channelFields,
-                            'title' => $item['name'],
-                            'name' => $item['name'],
-                            'url' => "$vodBaseUrl/{$item['stream_id']}." . $extension,
-                            'logo' => $item['stream_icon'],
+                            'title' => $item->name,
+                            'name' => $item->name,
+                            'url' => "$vodBaseUrl/{$item->stream_id}." . $extension,
+                            'logo' => $item->stream_icon,
                             'group' => $category['category_name'] ?? '',
                             'group_internal' => $category['category_name'] ?? '',
-                            'stream_id' => $item['stream_id'],
-                            'channel' => $item['num'] ?? null,
+                            'stream_id' => $item->stream_id,
+                            'channel' => $item->num ?? null,
                             'is_vod' => true, // mark as VOD
                             'container_extension' => $extension, // store the container extension
-                            'year' => $item['year'] ?? null, // new field for year
-                            'rating' => $item['rating'] ?? null, // new field for rating
-                            'rating_5based' => $item['rating_5based'] ?? null, // new field for 5-based rating
+                            'year' => $item->year ?? null, // new field for year
+                            'rating' => $item->rating ?? null, // new field for rating
+                            'rating_5based' => $item->rating_5based ?? null, // new field for 5-based rating
                         ];
                         if ($autoSort) {
                             $channel['sort'] = $channelNo;
@@ -392,7 +442,7 @@ class ProcessM3uImport implements ShouldQueue
                     }
                 }
             });
-            $this->processChannelCollection($collection, $playlist, $batchNo, $userId, $start);
+            $this->processChannelCollection($collection, $playlist, $batchNo, $userId, $start, $seriesCategories);
         } catch (Exception $e) {
             // Log the exception
             logger()->error("Error processing \"{$this->playlist->name}\": {$e->getMessage()}");
@@ -509,7 +559,8 @@ class ProcessM3uImport implements ShouldQueue
                     'catchup' => null,
                     'catchup_source' => null,
                     'shift' => 0,
-                    'tvg_shift' => null
+                    'tvg_shift' => null,
+                    'source_id' => null, // source ID for the channel
                 ];
                 if ($autoSort) {
                     $channelFields['sort'] = 0;
@@ -565,9 +616,17 @@ class ProcessM3uImport implements ShouldQueue
                                 continue 2;
                             }
                         }
+                        // Get the source ID from the URL
+                        $sourceId = null;
+                        if (str_contains($url, '/')) {
+                            $urlParts = explode('/', $url);
+                            $streamIdWithExtension = end($urlParts);
+                            $sourceId = pathinfo($streamIdWithExtension, PATHINFO_FILENAME); // Get the stream ID without extension
+                        }
                         $channel = [
                             ...$channelFields,
                             'url' => $url,
+                            'source_id' => $sourceId, // source ID for the channel
                         ];
                         $extvlcopt = [];
                         $kodidrop = [];
@@ -739,7 +798,8 @@ class ProcessM3uImport implements ShouldQueue
         Playlist       $playlist,
         string         $batchNo,
         int            $userId,
-        Carbon         $start
+        Carbon         $start,
+        ?Collection    $seriesCategories
     ) {
         // Get the playlist ID
         $playlistId = $playlist->id;
@@ -812,7 +872,8 @@ class ProcessM3uImport implements ShouldQueue
         $groups = array_values(array_unique($this->groups));
 
         // Create the source groups
-        // Need to call AFTER the channel loop has been executed
+        // Need to call **AFTER** the channel loop has been executed
+        // NOTE: If called before, the loop will not have run yet, and no groups will be created
         foreach (array_chunk($groups, 50) as $chunk) {
             SourceGroup::upsert(
                 collect($chunk)->map(function ($groupName) use ($playlistId) {
@@ -858,8 +919,12 @@ class ProcessM3uImport implements ShouldQueue
 
         // Get the jobs for the batch
         $jobs = [];
-        $batchCount = Job::where('batch_no', $batchNo)->count();
-        $jobsBatch = Job::where('batch_no', $batchNo)->select('id')->cursor();
+        $jobsWhere = [
+            ['batch_no', '=', $batchNo],
+            ['variables', '!=', null],
+        ];
+        $batchCount = Job::where($jobsWhere)->count();
+        $jobsBatch = Job::where($jobsWhere)->select('id')->cursor();
         $jobsBatch->chunk(100)->each(function ($chunk) use (&$jobs, $batchCount) {
             $jobs[] = new ProcessM3uImportChunk($chunk->pluck('id')->toArray(), $batchCount);
         });
@@ -873,6 +938,33 @@ class ProcessM3uImport implements ShouldQueue
             maxHit: $this->maxItemsHit,
             isNew: $this->isNew,
         );
+
+        // Add series processing to the chain, if passed in
+        if ($seriesCategories) {
+            $categoryCount = $seriesCategories->count();
+            $seriesCategories->each(function ($category, $index) use (&$jobs, $playlistId, $batchNo, $categoryCount) {
+                // Create a job for each series category
+                $jobs[] = new ProcessM3uImportSeriesChunk(
+                    [
+                        'categoryId' => $category['category_id'],
+                        'categoryName' => $category['category_name'],
+                        'playlistId' => $playlistId,
+                    ],
+                    $categoryCount,
+                    $batchNo,
+                    $index,
+                );
+            });
+
+            // Add series processing to the chain
+            $jobs[] = new ProcessM3uImportSeriesComplete(
+                playlist: $playlist,
+                batchNo: $batchNo,
+                fetchedMeta: false // flag as not fetching metadata (default is true)
+            );
+        }
+
+        // Start the chain!
         Bus::chain($jobs)
             ->onConnection('redis') // force to use redis connection
             ->onQueue('import')

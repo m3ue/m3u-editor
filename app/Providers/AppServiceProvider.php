@@ -9,6 +9,7 @@ use App\Events\EpgUpdated;
 use App\Events\PlaylistCreated;
 use App\Events\PlaylistDeleted;
 use App\Events\PlaylistUpdated;
+use App\Livewire\BackupDestinationListRecords;
 use App\Models\ChannelFailover;
 use App\Models\CustomPlaylist;
 use App\Models\MergedPlaylist;
@@ -39,6 +40,7 @@ use Dedoc\Scramble\Support\Generator\SecurityScheme;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\URL;
+use Livewire\Livewire;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -98,6 +100,9 @@ class AppServiceProvider extends ServiceProvider
 
         // Setup the services
         $this->setupServices();
+
+        // Livewire components
+        $this->registerLivewireComponents();
     }
 
     /**
@@ -214,6 +219,13 @@ class AppServiceProvider extends ServiceProvider
                 if ($mergedPlaylist->isDirty('short_urls_enabled')) {
                     $mergedPlaylist->generateShortUrl();
                 }
+                if ($mergedPlaylist->isDirty('uuid')) {
+                    // If changing the UUID, remove the old short URLs and generate new ones
+                    if ($mergedPlaylist->short_urls_enabled) {
+                        $mergedPlaylist->removeShortUrls();
+                        $mergedPlaylist->generateShortUrl();
+                    }
+                }
                 return $mergedPlaylist;
             });
 
@@ -229,6 +241,13 @@ class AppServiceProvider extends ServiceProvider
             CustomPlaylist::updating(function (CustomPlaylist $customPlaylist) {
                 if ($customPlaylist->isDirty('short_urls_enabled')) {
                     $customPlaylist->generateShortUrl();
+                }
+                if ($customPlaylist->isDirty('uuid')) {
+                    // If changing the UUID, remove the old short URLs and generate new ones
+                    if ($customPlaylist->short_urls_enabled) {
+                        $customPlaylist->removeShortUrls();
+                        $customPlaylist->generateShortUrl();
+                    }
                 }
                 return $customPlaylist;
             });
@@ -299,7 +318,7 @@ class AppServiceProvider extends ServiceProvider
                     'playlist/',
                     'epg/',
                     'user/',
-                    'xtream/'
+                    'player_api.php'
                 ]);
             })
             ->withDocumentTransformers(function (OpenApi $openApi) {
@@ -329,5 +348,14 @@ class AppServiceProvider extends ServiceProvider
 
         // Register the FFmpeg codec service
         $this->app->singleton(FfmpegCodecService::class);
+    }
+
+    /**
+     * Register Livewire components.
+     */
+    private function registerLivewireComponents(): void
+    {
+        // Register the backup destination list records component
+        Livewire::component('backup-destination-list-records', BackupDestinationListRecords::class);
     }
 }

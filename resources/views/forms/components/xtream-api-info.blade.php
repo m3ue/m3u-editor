@@ -11,7 +11,10 @@
             </p>
         </div>
         <div class="flex gap-2 items-center justify-start mb-4">
-            <x-filament::input.wrapper prefix-icon="heroicon-m-globe-alt">
+            <x-filament::input.wrapper suffix-icon="heroicon-m-globe-alt">
+                <x-slot name="prefix">
+                    <x-copy-to-clipboard :text="$url" />
+                 </x-slot> 
                 <x-filament::input
                     type="text"
                     :value="$url"
@@ -21,7 +24,10 @@
             <x-qr-modal :title="$record->name" body="Xtream API URL" :text="$url" />
         </div>
         <div class="flex gap-2 items-center justify-start mb-4">
-            <x-filament::input.wrapper prefix-icon="heroicon-m-user">
+            <x-filament::input.wrapper suffix-icon="heroicon-m-user">
+                <x-slot name="prefix">
+                    <x-copy-to-clipboard :text="$username" />
+                 </x-slot> 
                 <x-filament::input
                     type="text"
                     :value="$username"
@@ -31,7 +37,10 @@
             <x-qr-modal :title="$record->name" body="Xtream API Username" :text="$username" />
         </div>
         <div class="flex gap-2 items-center justify-start">
-            <x-filament::input.wrapper prefix-icon="heroicon-m-lock-closed">
+            <x-filament::input.wrapper suffix-icon="heroicon-m-lock-closed">
+                <x-slot name="prefix">
+                    <x-copy-to-clipboard :text="$password" />
+                 </x-slot> 
                 <x-filament::input
                     type="text"
                     :value="$password === 'YOUR_M3U_EDITOR_PASSWORD' ? '' : $password"
@@ -45,8 +54,13 @@
         </div>
         <div class="mt-4">
             <p class="text-sm text-gray-500 dark:text-gray-400 mb-2">
-                NOTE: If you <u>do not</u> have an <strong>Auth</strong> assigned to this Playlist, you will use the same username and password you use to login to <strong>m3u editor</strong>.
+                The default username is your <strong>m3u editor</strong> username and the Playlist <strong>unique identifier</strong> is the password.
             </p>
+            @if($record->playlistAuths()->count() > 0)
+                <p class="text-sm text-gray-500 dark:text-gray-400 mb-2">
+                    You can also use your assigned <strong>Playlist Auths</strong> to access the Xtream API.
+                </p>
+            @endif
         </div>
     </div>
 </x-dynamic-component>

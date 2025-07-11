@@ -70,7 +70,7 @@ class AdminPanelProvider extends PanelProvider
         $adminPanel = $panel
             ->default()
             ->id('admin')
-            ->path('')
+            ->path('/')
             ->login(Login::class)
             // ->profile(EditProfile::class, isSimple: false)
             ->brandName('m3u editor')
@@ -142,6 +142,13 @@ class AdminPanelProvider extends PanelProvider
                 '*/playlist.m3u',
                 '*/epg.xml',
                 'epgs/*/epg.xml',
+                '/logs*',
+                // Xtream API endpoints
+                'player_api.php*',
+                'xmltv.php*',
+                'live/*/*/*/*',
+                'movie/*/*/*',
+                'series/*/*/*/*',
             ]);
         if ($settings['navigation_position'] === 'top') {
             $adminPanel->topNavigation();

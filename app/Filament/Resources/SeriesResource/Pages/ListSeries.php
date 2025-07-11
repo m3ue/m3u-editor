@@ -12,7 +12,7 @@ class ListSeries extends ListRecords
 {
     protected static string $resource = SeriesResource::class;
 
-    protected ?string $subheading = 'NOTE: Only enabled series will be autmatically synced and updated on Playlist sync.';
+    protected ?string $subheading = 'Only enabled series will be automatically updated on Playlist sync, this includes fetching episodes and metadata. You can also manually sync series to update episodes and metadata.';
 
     protected function getHeaderActions(): array
     {
@@ -42,7 +42,7 @@ class ListSeries extends ListRecords
                 ->modalWidth('2xl')
                 ->modalIcon(null)
                 ->modalDescription('Select the playlist Series you would like to add.')
-                ->modalSubmitActionLabel('Create'),
+                ->modalSubmitActionLabel('Import Series Episodes & Metadata'),
         ];
     }
 

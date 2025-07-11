@@ -4,11 +4,13 @@ namespace App\Filament\Resources\PlaylistResource\Pages;
 
 use App\Enums\Status;
 use App\Filament\Resources\PlaylistResource;
+use App\Filament\Resources\PlaylistResource\Widgets\ImportProgress;
 use App\Models\Playlist;
 use Filament\Actions;
 use Filament\Forms;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\EditRecord;
+use Illuminate\Support\Facades\Redis;
 
 class EditPlaylist extends EditRecord
 {
@@ -19,6 +21,13 @@ class EditPlaylist extends EditRecord
     public function hasSkippableSteps(): bool
     {
         return true;
+    }
+
+    public function getVisibleHeaderWidgets(): array
+    {
+        return [
+            ImportProgress::class
+        ];
     }
 
     protected function getHeaderActions(): array
@@ -62,7 +71,7 @@ class EditPlaylist extends EditRecord
                     ->modalDescription('Process playlist now?')
                     ->modalSubmitActionLabel('Yes, process now'),
                 Actions\Action::make('process_series')
-                    ->label('Process Series Only')
+                    ->label('Process Series')
                     ->icon('heroicon-o-arrow-path')
                     ->action(function ($record) {
                         $record->update([
@@ -85,6 +94,31 @@ class EditPlaylist extends EditRecord
                     ->icon('heroicon-o-arrow-path')
                     ->modalIcon('heroicon-o-arrow-path')
                     ->modalDescription('Process playlist series now?')
+                    ->modalSubmitActionLabel('Yes, process now'),
+                Actions\Action::make('process_vod')
+                    ->label('Process VOD')
+                    ->icon('heroicon-o-arrow-path')
+                    ->action(function ($record) {
+                        $record->update([
+                            'status' => Status::Processing,
+                            'progress' => 0,
+                        ]);
+                        app('Illuminate\Contracts\Bus\Dispatcher')
+                            ->dispatch(new \App\Jobs\ProcessVodChannels(playlist: $record));
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title('Playlist is fetching metadata for VOD channels')
+                            ->body('Playlist VOD channels are being processed in the background. Depending on the number of enabled VOD channels, this may take a while. You will be notified on completion.')
+                            ->duration(10000)
+                            ->send();
+                    })
+                    ->disabled(fn($record): bool => $record->status === Status::Processing)
+                    ->hidden(fn($record): bool => !$record->xtream)
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-arrow-path')
+                    ->modalIcon('heroicon-o-arrow-path')
+                    ->modalDescription('Fetch VOD metadata for this playlist now? Only enabled VOD channels will be included.')
                     ->modalSubmitActionLabel('Yes, process now'),
                 Actions\Action::make('Download M3U')
                     ->label('Download M3U')
@@ -151,6 +185,23 @@ class EditPlaylist extends EditRecord
                     ->icon('heroicon-o-arrow-uturn-left')
                     ->modalIcon('heroicon-o-arrow-uturn-left')
                     ->modalDescription('Reset playlist status so it can be processed again. Only perform this action if you are having problems with the playlist syncing.')
+                    ->modalSubmitActionLabel('Yes, reset now'),
+                Actions\Action::make('reset_active_count')
+                    ->label('Reset active count')
+                    ->icon('heroicon-o-numbered-list')
+                    ->color('warning')
+                    ->action(fn($record) => Redis::set("active_streams:{$record->id}", 0))->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title('Active stream count reset')
+                            ->body('Playlist active stream count has been reset.')
+                            ->duration(3000)
+                            ->send();
+                    })
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-arrow-uturn-left')
+                    ->modalIcon('heroicon-o-numbered-list')
+                    ->modalDescription('Reset playlist active streams count. Proceed with caution as this could lead to an incorrect count if there are streams currently running.')
                     ->modalSubmitActionLabel('Yes, reset now'),
                 Actions\DeleteAction::make(),
             ])->button(),

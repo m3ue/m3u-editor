@@ -28,6 +28,7 @@ use App\Filament\Resources\PlaylistSyncStatusResource\Pages\EditPlaylistSyncStat
 use App\Filament\Resources\PlaylistSyncStatusResource\Pages\ListPlaylistSyncStatuses;
 use App\Filament\Resources\PlaylistSyncStatusResource\Pages\ViewPlaylistSyncStatus;
 use App\Forms\Components\MediaFlowProxyUrl;
+use App\Forms\Components\PlaylistInfo;
 use App\Forms\Components\XtreamApiInfo;
 use App\Models\PlaylistSyncStatus;
 use App\Models\SourceGroup;
@@ -62,7 +63,7 @@ class PlaylistResource extends Resource
     public static function getGlobalSearchEloquentQuery(): Builder
     {
         return parent::getGlobalSearchEloquentQuery()
-            ->where('user_id', auth()->id());
+            ->where('user_id', \Illuminate\Support\Facades\Auth::id());
     }
 
     protected static ?string $navigationIcon = 'heroicon-o-play';
@@ -90,7 +91,8 @@ class PlaylistResource extends Resource
         return $table->persistFiltersInSession()
             ->persistSortInSession()
             ->modifyQueryUsing(function (Builder $query) {
-                $query->withCount('enabled_channels');
+                $query->withCount('enabled_channels')
+                    ->withCount('enabled_series');
             })
             ->columns([
                 Tables\Columns\TextColumn::make('id')
@@ -123,13 +125,24 @@ class PlaylistResource extends Resource
                     ->description(fn(Playlist $record): string => "Enabled: {$record->enabled_channels_count}")
                     ->toggleable()
                     ->sortable(),
+                Tables\Columns\TextColumn::make('series_count')
+                    ->label('Series')
+                    ->counts('series')
+                    ->description(fn(Playlist $record): string => "Enabled: {$record->enabled_series_count}")
+                    ->toggleable()
+                    ->sortable(),
                 Tables\Columns\TextColumn::make('status')
                     ->sortable()
                     ->badge()
                     ->toggleable()
                     ->color(fn(Status $state) => $state->getColor()),
                 ProgressColumn::make('progress')
-                    ->label('Sync Progress')
+                    ->label('Channel Sync')
+                    ->sortable()
+                    ->poll(fn($record) => $record->status === Status::Processing || $record->status === Status::Pending ? '3s' : null)
+                    ->toggleable(),
+                ProgressColumn::make('series_progress')
+                    ->label('Series Sync')
                     ->sortable()
                     ->poll(fn($record) => $record->status === Status::Processing || $record->status === Status::Pending ? '3s' : null)
                     ->toggleable(),
@@ -211,7 +224,7 @@ class PlaylistResource extends Resource
                         ->modalDescription('Process playlist now?')
                         ->modalSubmitActionLabel('Yes, process now'),
                     Tables\Actions\Action::make('process_series')
-                        ->label('Process Series Only')
+                        ->label('Process Series')
                         ->icon('heroicon-o-arrow-path')
                         ->action(function ($record) {
                             $record->update([
@@ -233,7 +246,32 @@ class PlaylistResource extends Resource
                         ->requiresConfirmation()
                         ->icon('heroicon-o-arrow-path')
                         ->modalIcon('heroicon-o-arrow-path')
-                        ->modalDescription('Process playlist series now?')
+                        ->modalDescription('Process playlist series now? Only enabled series will be included.')
+                        ->modalSubmitActionLabel('Yes, process now'),
+                    Tables\Actions\Action::make('process_vod')
+                        ->label('Process VOD')
+                        ->icon('heroicon-o-arrow-path')
+                        ->action(function ($record) {
+                            $record->update([
+                                'status' => Status::Processing,
+                                'progress' => 0,
+                            ]);
+                            app('Illuminate\Contracts\Bus\Dispatcher')
+                                ->dispatch(new \App\Jobs\ProcessVodChannels(playlist: $record));
+                        })->after(function () {
+                            Notification::make()
+                                ->success()
+                                ->title('Playlist is fetching metadata for VOD channels')
+                                ->body('Playlist VOD channels are being processed in the background. Depending on the number of enabled VOD channels, this may take a while. You will be notified on completion.')
+                                ->duration(10000)
+                                ->send();
+                        })
+                        ->disabled(fn($record): bool => $record->status === Status::Processing)
+                        ->hidden(fn($record): bool => !$record->xtream)
+                        ->requiresConfirmation()
+                        ->icon('heroicon-o-arrow-path')
+                        ->modalIcon('heroicon-o-arrow-path')
+                        ->modalDescription('Fetch VOD metadata for this playlist now? Only enabled VOD channels will be included.')
                         ->modalSubmitActionLabel('Yes, process now'),
                     Tables\Actions\Action::make('Download M3U')
                         ->label('Download M3U')
@@ -585,7 +623,8 @@ class PlaylistResource extends Resource
                                         ->options([
                                             'live' => 'Live',
                                             'vod' => 'VOD',
-                                        ])->helperText('NOTE: Playlist series can be imported in the Series section.'),
+                                            'series' => 'Series',
+                                        ])->helperText('NOTE: Playlist series can be managed in the Series section. You will need to enabled the VOD channels and Series you wish to import metadata for as it will only be imported for enabled channels and series.'),
                                     Forms\Components\Toggle::make('xtream_config.import_epg')
                                         ->label('Import EPG')
                                         ->helperText('If your provider supports EPG, you can import it automatically.')
@@ -891,6 +930,19 @@ class PlaylistResource extends Resource
             Forms\Components\Grid::make()
                 ->columns(5)
                 ->schema([
+                    Forms\Components\Section::make('Playlist Stats')
+                        ->compact()
+                        ->icon('heroicon-o-chart-bar-square')
+                        ->collapsible()
+                        ->persistCollapsed()
+                        ->columnSpanFull()
+                        ->collapsed(true)
+                        ->schema([
+                            PlaylistInfo::make('play_list_info')
+                                ->label('') // disable the label
+                                ->columnSpanFull()
+                                ->dehydrated(false), // don't save the value in the database
+                        ]),
                     Forms\Components\Tabs::make()
                         ->tabs($tabs)
                         ->columnSpan(3)
@@ -900,21 +952,87 @@ class PlaylistResource extends Resource
                         ->columnSpan(2)
                         ->schema([
                             Forms\Components\Section::make('Auth')
-                                ->description('Add authentication to your playlist.')
+                                ->compact()
+                                ->description('Add and manage authentication.')
                                 ->icon('heroicon-m-key')
                                 ->collapsible()
                                 ->collapsed(true)
                                 ->columnSpan(2)
                                 ->schema([
-                                    Forms\Components\Select::make('auth')
-                                        ->relationship('playlistAuths', 'playlist_auths.name')
-                                        ->label('Assigned Auth(s)')
+                                    Forms\Components\Select::make('assigned_auth_ids')
+                                        ->label('Assigned Auths')
                                         ->multiple()
+                                        ->options(function ($record) {
+                                            $options = [];
+
+                                            // Get currently assigned auths for this playlist
+                                            if ($record) {
+                                                $currentAuths = $record->playlistAuths()->get();
+                                                foreach ($currentAuths as $auth) {
+                                                    $options[$auth->id] = $auth->name . ' (currently assigned)';
+                                                }
+                                            }
+
+                                            // Get unassigned auths
+                                            $unassignedAuths = \App\Models\PlaylistAuth::where('user_id', \Illuminate\Support\Facades\Auth::id())
+                                                ->whereDoesntHave('assignedPlaylist')
+                                                ->get();
+
+                                            foreach ($unassignedAuths as $auth) {
+                                                $options[$auth->id] = $auth->name;
+                                            }
+
+                                            return $options;
+                                        })
                                         ->searchable()
-                                        ->preload()
-                                        ->helperText('NOTE: only the first enabled auth will be used if multiple assigned.'),
+                                        ->nullable()
+                                        ->placeholder('Select auths or leave empty')
+                                        ->default(function ($record) {
+                                            if ($record) {
+                                                return $record->playlistAuths()->pluck('playlist_auths.id')->toArray();
+                                            }
+                                            return [];
+                                        })
+                                        ->afterStateHydrated(function ($component, $state, $record) {
+                                            if ($record) {
+                                                $currentAuthIds = $record->playlistAuths()->pluck('playlist_auths.id')->toArray();
+                                                $component->state($currentAuthIds);
+                                            }
+                                        })
+                                        ->hintIcon(
+                                            'heroicon-m-question-mark-circle',
+                                            tooltip: 'Only unassigned auths are available. Each auth can only be assigned to one playlist at a time. You will also be able to access the Xtream API using any assigned auths.'
+                                        )
+                                        ->helperText('Simple authentication for playlist access.')
+                                        ->afterStateUpdated(function ($state, $record) {
+                                            if (!$record) return;
+
+                                            $currentAuthIds = $record->playlistAuths()->pluck('playlist_auths.id')->toArray();
+                                            $newAuthIds = $state ? (is_array($state) ? $state : [$state]) : [];
+
+                                            // Find auths to remove (currently assigned but not in new selection)
+                                            $authsToRemove = array_diff($currentAuthIds, $newAuthIds);
+                                            foreach ($authsToRemove as $authId) {
+                                                $auth = \App\Models\PlaylistAuth::find($authId);
+                                                if ($auth) {
+                                                    $auth->clearAssignment();
+                                                }
+                                            }
+
+                                            // Find auths to add (in new selection but not currently assigned)
+                                            $authsToAdd = array_diff($newAuthIds, $currentAuthIds);
+                                            foreach ($authsToAdd as $authId) {
+                                                $auth = \App\Models\PlaylistAuth::find($authId);
+                                                if ($auth) {
+                                                    $auth->assignTo($record);
+                                                }
+                                            }
+                                        })
+                                        ->dehydrated(false), // Don't save this field directly
                                 ]),
                             Forms\Components\Section::make('Xtream API')
+                                ->compact()
+                                ->description('Xtream API connection details.')
                                 ->icon('heroicon-m-bolt')
                                 ->collapsible()
                                 ->columnSpan(2)
@@ -926,6 +1044,7 @@ class PlaylistResource extends Resource
                                         ->dehydrated(false), // don't save the value in the database
                                 ]),
                             Forms\Components\Section::make('Links')
+                                ->compact()
                                 ->icon('heroicon-m-link')
                                 ->collapsible()
                                 ->columnSpan(2)

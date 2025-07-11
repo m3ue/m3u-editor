@@ -18,7 +18,7 @@ class PlaylistUrlService
      */
     public static function getUrls($playlist)
     {
-        // Get the first auth
+        // Get the first enabled auth (URLs can only contain one set of credentials)
         $playlistAuth = $playlist->playlistAuths()->where('enabled', true)->first();
         $auth = null;
         if ($playlistAuth) {
@@ -74,24 +74,16 @@ class PlaylistUrlService
      */
     public static function getXtreamInfo($playlist)
     {
-        // Get the first auth
-        $playlistAuth = $playlist->playlistAuths()->where('enabled', true)->first();
-        $auth = null;
-        if ($playlistAuth) {
-            $auth = [
-                'username' => $playlistAuth->username,
-                'password' => $playlistAuth->password,
-            ];
-        } else {
-            $auth = [
-                'username' => $playlist->user->name,
-                'password' => 'YOUR_M3U_EDITOR_PASSWORD',
-            ];
-        }
+        // For Xtream API, we use the playlist UUID as the password
+        // and the user's name as the username
+        $auth = [
+            'username' => $playlist->user->name,
+            'password' => $playlist->uuid,
+        ];
 
         // Return the results
         return [
-            'url' => str_replace('/player_api.php', '', route('playlist.xtream.api', ['uuid' => $playlist->uuid])),
+            'url' => url(''), // Base URL of the application
             ...$auth
         ];
     }
@@ -119,7 +111,7 @@ class PlaylistUrlService
      */
     public function getMediaFlowProxyUrls($playlist)
     {
-        // Get the first auth
+        // Get the first enabled auth (URLs can only contain one set of credentials)
         $playlistAuth = $playlist->playlistAuths()->where('enabled', true)->first();
         $auth = null;
         if ($playlistAuth) {

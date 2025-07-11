@@ -17,6 +17,7 @@ use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\SoftDeletingScope;
 use App\Facades\PlaylistUrlFacade;
+use App\Forms\Components\XtreamApiInfo;
 use Filament\Forms\FormsComponent;
 use Illuminate\Support\Facades\Redis;
 
@@ -34,7 +35,7 @@ class CustomPlaylistResource extends Resource
     public static function getGlobalSearchEloquentQuery(): Builder
     {
         return parent::getGlobalSearchEloquentQuery()
-            ->where('user_id', auth()->id());
+            ->where('user_id', \Illuminate\Support\Facades\Auth::id());
     }
 
     protected static ?string $navigationIcon = 'heroicon-o-list-bullet';
@@ -170,6 +171,36 @@ class CustomPlaylistResource extends Resource
                 ->helperText('User agent string to use for making requests.')
                 ->default('Mozilla/5.0 (Windows; U; Windows NT 5.1; en-US; rv:1.8.1.13) Gecko/20080311 Firefox/2.0.0.13')
                 ->required(),
+            Forms\Components\Grid::make()
+                ->columnSpanFull()
+                ->columns(3)
+                ->schema([
+                    Forms\Components\Toggle::make('edit_uuid')
+                        ->label('View/Update Unique Identifier')
+                        ->columnSpanFull()
+                        ->inline(false)
+                        ->live()
+                        ->dehydrated(false)
+                        ->default(false),
+                    Forms\Components\TextInput::make('uuid')
+                        ->label('Unique Identifier')
+                        ->columnSpanFull()
+                        ->rules(function ($record) {
+                            return [
+                                'required',
+                                'min:3',
+                                'max:36',
+                                \Illuminate\Validation\Rule::unique('playlists', 'uuid')->ignore($record?->id),
+                            ];
+                        })
+                        ->helperText('Value must be between 3 and 36 characters.')
+                        ->hintIcon(
+                            'heroicon-m-exclamation-triangle',
+                            tooltip: 'Be careful changing this value as this will change the URLs for the Playlist, its EPG, and HDHR.'
+                        )
+                        ->hidden(fn($get): bool => !$get('edit_uuid'))
+                        ->required(),
+                ])->hiddenOn('create'),
         ];
         if (PlaylistUrlFacade::mediaFlowProxyEnabled()) {
             $schema[] = Forms\Components\Section::make('MediaFlow Proxy')
@@ -333,20 +364,94 @@ class CustomPlaylistResource extends Resource
                         ->columnSpan(2)
                         ->schema([
                             Forms\Components\Section::make('Auth')
-                                ->description('Add authentication to your playlist.')
+                                ->compact()
+                                ->description('Add and manage authentication.')
                                 ->icon('heroicon-m-key')
                                 ->collapsible()
                                 ->collapsed(true)
                                 ->schema([
-                                    Forms\Components\Select::make('auth')
-                                        ->relationship('playlistAuths', 'playlist_auths.name')
-                                        ->label('Assigned Auth(s)')
+                                    Forms\Components\Select::make('assigned_auth_ids')
+                                        ->label('Assigned Auths')
                                         ->multiple()
+                                        ->options(function ($record) {
+                                            $options = [];
+
+                                            // Get currently assigned auths for this playlist
+                                            if ($record) {
+                                                $currentAuths = $record->playlistAuths()->get();
+                                                foreach ($currentAuths as $auth) {
+                                                    $options[$auth->id] = $auth->name . ' (currently assigned)';
+                                                }
+                                            }
+
+                                            // Get unassigned auths
+                                            $unassignedAuths = \App\Models\PlaylistAuth::where('user_id', \Illuminate\Support\Facades\Auth::id())
+                                                ->whereDoesntHave('assignedPlaylist')
+                                                ->get();
+
+                                            foreach ($unassignedAuths as $auth) {
+                                                $options[$auth->id] = $auth->name;
+                                            }
+
+                                            return $options;
+                                        })
                                         ->searchable()
-                                        ->preload()
-                                        ->helperText('NOTE: only the first enabled auth will be used if multiple assigned.'),
+                                        ->nullable()
+                                        ->placeholder('Select auths or leave empty')
+                                        ->default(function ($record) {
+                                            if ($record) {
+                                                return $record->playlistAuths()->pluck('playlist_auths.id')->toArray();
+                                            }
+                                            return [];
+                                        })
+                                        ->afterStateHydrated(function ($component, $state, $record) {
+                                            if ($record) {
+                                                $currentAuthIds = $record->playlistAuths()->pluck('playlist_auths.id')->toArray();
+                                                $component->state($currentAuthIds);
+                                            }
+                                        })
+                                        ->helperText('Only unassigned auths are available. Each auth can only be assigned to one playlist at a time.')
+                                        ->afterStateUpdated(function ($state, $record) {
+                                            if (!$record) return;
+
+                                            $currentAuthIds = $record->playlistAuths()->pluck('playlist_auths.id')->toArray();
+                                            $newAuthIds = $state ? (is_array($state) ? $state : [$state]) : [];
+
+                                            // Find auths to remove (currently assigned but not in new selection)
+                                            $authsToRemove = array_diff($currentAuthIds, $newAuthIds);
+                                            foreach ($authsToRemove as $authId) {
+                                                $auth = \App\Models\PlaylistAuth::find($authId);
+                                                if ($auth) {
+                                                    $auth->clearAssignment();
+                                                }
+                                            }
+
+                                            // Find auths to add (in new selection but not currently assigned)
+                                            $authsToAdd = array_diff($newAuthIds, $currentAuthIds);
+                                            foreach ($authsToAdd as $authId) {
+                                                $auth = \App\Models\PlaylistAuth::find($authId);
+                                                if ($auth) {
+                                                    $auth->assignTo($record);
+                                                }
+                                            }
+                                        })
+                                        ->dehydrated(false), // Don't save this field directly
+                                ]),
+                            Forms\Components\Section::make('Xtream API')
+                                ->compact()
+                                ->description('Xtream API connection details.')
+                                ->icon('heroicon-m-bolt')
+                                ->collapsible()
+                                ->columnSpan(2)
+                                ->collapsed(true)
+                                ->schema([
+                                    XtreamApiInfo::make('xtream_api_info')
+                                        ->label('Xtream API Info')
+                                        ->columnSpan(2)
+                                        ->dehydrated(false), // don't save the value in the database
                                 ]),
                             Forms\Components\Section::make('Links')
+                                ->compact()
                                 ->icon('heroicon-m-link')
                                 ->collapsible()
                                 ->collapsed(false)

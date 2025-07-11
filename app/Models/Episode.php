@@ -28,6 +28,7 @@ class Episode extends Model
         'episode_num' => 'integer',
         'added' => 'timestamp',
         'season' => 'integer',
+        'info' => 'array',
     ];
 
     public function user(): BelongsTo

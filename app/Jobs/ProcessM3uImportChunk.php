@@ -12,6 +12,9 @@ class ProcessM3uImportChunk implements ShouldQueue
 {
     use Queueable;
 
+    // Don't retry the job on failure
+    public $tries = 1;
+
     public $deleteWhenMissingModels = true;
 
     /**
@@ -80,8 +83,8 @@ class ProcessM3uImportChunk implements ShouldQueue
                 // 'enabled',
                 // 'epg_channel_id',
                 // 'new'
+                // 'sort',
                 // ...only update the following fields
-                'sort',
                 'url',
                 'stream_id',
                 'lang', // should we update this? Not sure it's set anywhere...
@@ -97,6 +100,7 @@ class ProcessM3uImportChunk implements ShouldQueue
                 'year', // new field for year
                 'rating', // new field for rating
                 'rating_5based', // new field for 5-based rating
+                'source_id', // new field for source ID
             ]);
         }
     }

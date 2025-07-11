@@ -33,6 +33,8 @@ class Channel extends Model
         'group_id' => 'integer',
         'extvlcopt' => 'array',
         'kodidrop' => 'array',
+        'info' => 'array',
+        'movie_data' => 'array',
         'is_custom' => 'boolean',
         'is_vod' => 'boolean',
         'logo_type' => ChannelLogoType::class,
@@ -93,6 +95,17 @@ class Channel extends Model
             'id', // Local key on the projects table...
             'channel_failover_id' // Local key on the environments table...
         )->orderBy('channel_failovers.sort');
+    }
+
+    /**
+     * Check if the channel has metadata.
+     * 
+     * @return bool
+     */
+    public function getHasMetadataAttribute(): bool
+    {
+        // Check if the channel has metadata (info or movie_data)
+        return !empty($this->info) || !empty($this->movie_data);
     }
 
     /**

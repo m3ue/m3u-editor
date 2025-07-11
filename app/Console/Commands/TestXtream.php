@@ -66,9 +66,10 @@ class TestXtream extends Command implements PromptsForMissingInput
             return 1;
         }
 
-        $choice = $this->choice('Type L(ive), S(eries), M(ovies), or I(nfo)', ['L', 'S', 'M', 'I'], 0);
+        $choice = $this->choice('Type L(ive), (A)ll (L)ive, S(eries), M(ovies), or I(nfo)', ['L', 'AL', 'S', 'M', 'I'], 0);
         match (Str::upper($choice)) {
             'L' => $this->processLive($xtream),
+            'AL' => $this->processLive($xtream, true),
             'S' => $this->processSeries($xtream),
             'M' => $this->processMovies($xtream),
             'I' => $this->getInfo($xtream),
@@ -80,7 +81,7 @@ class TestXtream extends Command implements PromptsForMissingInput
     protected function getInfo(XtreamService $xtream)
     {
         $this->info('Fetching Xtream info...');
-        $info = $xtream->authenticate();
+        $info = $xtream->userInfo();
         if (empty($info)) {
             $this->error('No information available from Xtream service.');
             return;
@@ -104,13 +105,8 @@ class TestXtream extends Command implements PromptsForMissingInput
         if ($pick === 'All') {
             $this->generateMovies($xtream, $movies, $catName);
         } else {
-            $id = $movieMap[$pick];
             $movie = $movies[array_search($pick, array_column($movies, 'name'))];
-            $this->generateMovies($xtream, [
-                [
-                    ...$movie
-                ]
-            ], $catName);
+            $this->generateMovies($xtream, [$movie], $catName);
         }
     }
 
@@ -118,9 +114,10 @@ class TestXtream extends Command implements PromptsForMissingInput
     {
         $folder = Str::of($catName)->replace(' | ', ' - ')->trim();
         foreach ($movies as $movie) {
+            $info = $xtream->getVodInfo($movie['stream_id']);
             $this->info("[Movie] {$movie['name']}");
             $this->info("[Category] {$folder}");
-            $this->line(json_encode($movie, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+            $this->line(json_encode($info, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
         }
     }
 
@@ -143,22 +140,30 @@ class TestXtream extends Command implements PromptsForMissingInput
         }
     }
 
-    protected function processLive(XtreamService $xtream)
+    protected function processLive(XtreamService $xtream, $all = false)
     {
-        $cats = $xtream->getLiveCategories();
-        $map = collect($cats)->pluck('category_id', 'category_name')->toArray();
-        $catName = $this->choice('Pick a Live Category', array_keys($map));
-        $catId = $map[$catName];
-
-        $channels = $xtream->getLiveStreams($catId);
-        $channelMap = collect($channels)->pluck('stream_id', 'name')->toArray();
-        $pick = $this->choice('Pick a channel or All', array_merge(['All'], array_keys($channelMap)));
-
-        if ($pick === 'All') {
-            $this->generateCategoryChannels($xtream, $channels, $catName, $catId);
+        if ($all) {
+            $channels = $xtream->getLiveStreams();
+            foreach ($channels as $channel) {
+                $this->generateOneChannel($xtream, $channel, 'All', 0);
+            }
+            return;
         } else {
-            $channel = $channels[array_search($pick, array_column($channels, 'name'))];
-            $this->generateOneChannel($xtream, $channel, $catName, $catId);
+            $cats = $xtream->getLiveCategories();
+            $map = collect($cats)->pluck('category_id', 'category_name')->toArray();
+            $catName = $this->choice('Pick a Live Category', array_keys($map));
+            $catId = $map[$catName];
+
+            $channels = $xtream->getLiveStreams($catId);
+            $channelMap = collect($channels)->pluck('stream_id', 'name')->toArray();
+            $pick = $this->choice('Pick a channel or All', array_merge(['All'], array_keys($channelMap)));
+
+            if ($pick === 'All') {
+                $this->generateCategoryChannels($xtream, $channels, $catName, $catId);
+            } else {
+                $channel = $channels[array_search($pick, array_column($channels, 'name'))];
+                $this->generateOneChannel($xtream, $channel, $catName, $catId);
+            }
         }
     }
 
