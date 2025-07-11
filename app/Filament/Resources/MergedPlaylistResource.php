@@ -56,7 +56,8 @@ class MergedPlaylistResource extends Resource
     {
         return $table
             ->modifyQueryUsing(function (Builder $query) {
-                $query->withCount('enabled_channels');
+                $query->withCount('enabled_channels')
+                    ->withCount('enabled_series');
             })
             ->columns([
                 Tables\Columns\TextColumn::make('id')
@@ -70,6 +71,12 @@ class MergedPlaylistResource extends Resource
                     ->label('Channels')
                     ->counts('channels')
                     ->description(fn(MergedPlaylist $record): string => "Enabled: {$record->enabled_channels_count}")
+                    ->toggleable()
+                    ->sortable(),
+                Tables\Columns\TextColumn::make('series_count')
+                    ->label('Series')
+                    ->counts('series')
+                    ->description(fn(MergedPlaylist $record): string => "Enabled: {$record->enabled_series_count}")
                     ->toggleable()
                     ->sortable(),
                 Tables\Columns\ToggleColumn::make('enable_proxy')

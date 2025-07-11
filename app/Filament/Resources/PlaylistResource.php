@@ -91,7 +91,8 @@ class PlaylistResource extends Resource
         return $table->persistFiltersInSession()
             ->persistSortInSession()
             ->modifyQueryUsing(function (Builder $query) {
-                $query->withCount('enabled_channels');
+                $query->withCount('enabled_channels')
+                    ->withCount('enabled_series');
             })
             ->columns([
                 Tables\Columns\TextColumn::make('id')
@@ -122,6 +123,12 @@ class PlaylistResource extends Resource
                     ->label('Channels')
                     ->counts('channels')
                     ->description(fn(Playlist $record): string => "Enabled: {$record->enabled_channels_count}")
+                    ->toggleable()
+                    ->sortable(),
+                Tables\Columns\TextColumn::make('series_count')
+                    ->label('Series')
+                    ->counts('series')
+                    ->description(fn(Playlist $record): string => "Enabled: {$record->enabled_series_count}")
                     ->toggleable()
                     ->sortable(),
                 Tables\Columns\TextColumn::make('status')

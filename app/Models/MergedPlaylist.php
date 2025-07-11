@@ -72,6 +72,47 @@ class MergedPlaylist extends Model
         return $this->channels()->where('enabled', true);
     }
 
+    public function series(): hasManyThrough
+    {
+        return $this->hasManyThrough(
+            Series::class,
+            MergedPlaylistPivot::class,
+            'merged_playlist_id',
+            'playlist_id',
+            'id',
+            'playlist_id'
+        );
+    }
+
+    public function enabled_series(): hasManyThrough
+    {
+        return $this->series()->where('enabled', true);
+    }
+
+    public function seasons(): hasManyThrough
+    {
+        return $this->hasManyThrough(
+            Season::class,
+            MergedPlaylistPivot::class,
+            'merged_playlist_id',
+            'playlist_id',
+            'id',
+            'playlist_id'
+        );
+    }
+
+    public function episodes(): hasManyThrough
+    {
+        return $this->hasManyThrough(
+            Episode::class,
+            MergedPlaylistPivot::class,
+            'merged_playlist_id',
+            'playlist_id',
+            'id',
+            'playlist_id'
+        );
+    }
+
     public function playlistAuths(): MorphToMany
     {
         return $this->morphToMany(PlaylistAuth::class, 'authenticatable');
