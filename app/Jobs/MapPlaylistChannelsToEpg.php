@@ -25,10 +25,13 @@ class MapPlaylistChannelsToEpg implements ShouldQueue
 {
     use Queueable;
 
+    // Don't retry the job on failure
+    public $tries = 1;
+
     public $deleteWhenMissingModels = true;
 
-    // Giving a timeout of 30 minutes to the Job to process the mapping
-    public $timeout = 60 * 30;
+    // Giving a timeout of 15 minutes to the Job to process the mapping
+    public $timeout = 60 * 15;
 
     // Similarity search service
     protected SimilaritySearchService $similaritySearch;
