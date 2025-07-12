@@ -23,7 +23,19 @@ class PlaylistInfo extends Field
             return [];
         }
 
-        $stats = ['proxy_enabled' => $playlist->enable_proxy];
+        $stats = [
+            'proxy_enabled' => $playlist->enable_proxy,
+
+            'channel_count' => $playlist->live_channels()->count(),
+            'vod_count' => $playlist->vod_channels()->count(),
+            'series_count' => $playlist->series()->count(),
+            'group_count' => $playlist->groups()->count(),
+
+            'enabled_channel_count' => $playlist->enabled_live_channels()->count(),
+            'enabled_vod_count' => $playlist->enabled_vod_channels()->count(),
+            'enabled_series_count' => $playlist->enabled_series()->count(),
+            // 'last_synced' => $playlist->synced ? Carbon::parse($playlist->synced)->diffForHumans() : 'Never',
+        ];
         if ($playlist->enable_proxy) {
             $activeStreams = Redis::get("active_streams:{$playlist->id}") ?? 0;
             $availableStreams = $playlist->available_streams ?? 0;

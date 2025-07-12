@@ -5,7 +5,7 @@
             <div class="">
                 @if(isset($stats['proxy_enabled']) && $stats['proxy_enabled'])
                     <!-- Proxy Streams Section -->
-                    <div class=" pb-4">
+                    <div class="pb-4">
                         <h3 class="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3 flex items-center">
                             <div class="p-1 mr-1 bg-gray-100 dark:bg-gray-800 rounded-lg">
                                 <x-heroicon-s-signal class="text-blue-500 h-4 w-4" />
@@ -55,7 +55,7 @@
                 
                 @if(isset($stats['xtream_info']))
                     <!-- Xtream Info Section -->
-                    <div>
+                    <div class="pb-4">
                         <h3 class="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3 flex items-center">
                             <div class="p-1 mr-1 bg-gray-100 dark:bg-gray-800 rounded-lg">
                                 <x-heroicon-s-bolt class="text-green-500 h-4 w-4" />
@@ -115,7 +115,58 @@
                         </div>
                     </div>
                 @endif
+
+                <!-- Channel & Series Stats Section -->
+                <div>
+                    <h3 class="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3 flex items-center">
+                        <div class="p-1 mr-1 bg-gray-100 dark:bg-gray-800 rounded-lg">
+                            <x-heroicon-s-play class="text-green-500 h-4 w-4" />
+                        </div>
+                        Channel & Series
+                    </h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                        <!-- Channels -->
+                        <div class="bg-gray-100 dark:bg-gray-800 rounded-md p-3">
+                            <div class="flex flex-col items-center">
+                                <span class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Live</span>
+                                <div class="text-2xl font-bold text-gray-900 dark:text-gray-100">
+                                    {{ $stats['channel_count'] ?? 0 }}
+                                </div>
+                                <span class="text-xs text-gray-500 dark:text-gray-400">Enabled: {{ $stats['enabled_channel_count'] ?? 0 }}</span>
+                            </div>
+                        </div>
+                        <!-- VOD -->
+                        <div class="bg-gray-100 dark:bg-gray-800 rounded-md p-3">
+                            <div class="flex flex-col items-center">
+                                <span class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">VOD</span>
+                                <div class="text-2xl font-bold text-gray-900 dark:text-gray-100">
+                                    {{ $stats['vod_count'] ?? 0 }}
+                                </div>
+                                <span class="text-xs text-gray-500 dark:text-gray-400">Enabled: {{ $stats['enabled_vod_count'] ?? 0 }}</span>
+                            </div>
+                        </div>
+                        <!-- Series -->
+                        <div class="bg-gray-100 dark:bg-gray-800 rounded-md p-3">
+                            <div class="flex flex-col items-center">
+                                <span class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Series</span>
+                                <div class="text-2xl font-bold text-gray-900 dark:text-gray-100">
+                                    {{ $stats['series_count'] ?? 0 }}
+                                </div>
+                                <span class="text-xs text-gray-500 dark:text-gray-400">Enabled: {{ $stats['enabled_series_count'] ?? 0 }}</span>
+                            </div>
+                        </div>
+                        <!-- Groups -->
+                        <div class="bg-gray-100 dark:bg-gray-800 rounded-md p-3">
+                            <div class="flex flex-col items-center">
+                                <span class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Groups</span>
+                                <div class="text-2xl font-bold text-gray-900 dark:text-gray-100">
+                                    {{ $stats['group_count'] ?? 0 }}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
         @endif
     </div>
-</x-dynamic-component>    
+</x-dynamic-component>
