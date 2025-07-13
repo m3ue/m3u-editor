@@ -3066,4 +3066,26 @@ class SharedStreamService
     {
         return $this->getStreamStoragePath($streamKey) . "/{$segment}";
     }
+
+    /**
+     * Track bandwidth usage for HLS streaming (file-based segments)
+     */
+    public function trackHLSBandwidth(string $streamKey, string $clientId, int $bytesTransferred, string $segment): void
+    {
+        try {
+            // Track bandwidth using the same method as direct streaming
+            $this->trackBandwidth($streamKey, $bytesTransferred);
+
+            // Update client and stream activity
+            // This is already happening since the client is regularly fetching the playlist
+            // and segments, so we don't need to explicitly update here.
+            // If you want to update activity, uncomment the following lines:
+            //$this->updateStreamActivity($streamKey);
+            //$this->updateClientActivity($streamKey, $clientId);
+
+            Log::channel('ffmpeg')->debug("HLS bandwidth tracked for {$streamKey}: {$bytesTransferred} bytes from client {$clientId} for segment {$segment}");
+        } catch (\Exception $e) {
+            Log::channel('ffmpeg')->error("Error tracking HLS bandwidth for {$streamKey}: " . $e->getMessage());
+        }
+    }
 }

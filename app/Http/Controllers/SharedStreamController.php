@@ -337,18 +337,31 @@ class SharedStreamController extends Controller
             abort(404, 'Stream not found');
         }
 
+        // Get client ID for tracking
+        $clientId = $this->generateClientId($request);
+
         // Get segment data from shared stream
         $segmentPath = $this->sharedStreamService->getHLSSegmentPath($streamKey, $segment);
         $fullPath = Storage::disk('app')->path($segmentPath);
         if (!($segmentPath && file_exists($fullPath))) {
             abort(404, 'Segment not found');
         }
-        return response('', 200, [
+
+        // Track bandwidth for HLS segment serving
+        $segmentSize = filesize($fullPath);
+        if ($segmentSize > 0) {
+            $this->sharedStreamService->trackHLSBandwidth($streamKey, $clientId, $segmentSize, $segment);
+        }
+        $response = response('', 200, [
             'Content-Type'     => 'video/MP2T',
             'X-Accel-Redirect' => "/internal/{$segmentPath}",
             'Cache-Control'    => 'no-cache, no-transform',
             'Connection'       => 'keep-alive',
         ]);
+        if (!$request->cookie('client_id')) {
+            $response->withCookie(cookie('client_id', $clientId, 60)); // 60 minutes
+        }
+        return $response;
     }
 
     /**
