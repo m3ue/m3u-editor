@@ -72,6 +72,7 @@ class MapPlaylistChannelsToEpg implements ShouldQueue
         $playlist = $this->playlist ? Playlist::find($this->playlist) : null;
         $subtext = $playlist ? ' -> ' . $playlist->name . ' mapping' : ' custom channel mapping';
         if ($this->epgMapId) {
+            // Fetch and update existing map record
             $map = EpgMap::find($this->epgMapId);
             $map->update([
                 'uuid' => $batchNo,
@@ -80,6 +81,9 @@ class MapPlaylistChannelsToEpg implements ShouldQueue
                 'processing' => true,
                 'mapped_at' => now(),
             ]);
+
+            // Set force to the existing map override setting if not explicitly set
+            $this->force = $map->override;
         } else {
             $map = EpgMap::create([
                 'name' => $epg->name . $subtext,
