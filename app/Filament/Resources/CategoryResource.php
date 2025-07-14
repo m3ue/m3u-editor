@@ -197,8 +197,8 @@ class CategoryResource extends Resource
                             foreach ($records as $record) {
                                 foreach ($record->enabled_series as $series) {
                                     app('Illuminate\Contracts\Bus\Dispatcher')
-                                        ->dispatch(new \App\Jobs\SyncSeriesStrmFiles(
-                                            series: $series,
+                                        ->dispatch(new \App\Jobs\ProcessM3uImportSeriesEpisodes(
+                                            playlistSeries: $series,
                                         ));
                                 }
                             }
