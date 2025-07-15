@@ -9,7 +9,7 @@
         {{ $title }}
     </x-slot>
 
-    <div class="relative flex flex-col gap-2 items-center w-auto">
+    <div class="relative flex flex-col gap-2 items-center w-auto" wire:ignore>
         <p>
             {{ $body }}
         </p>
