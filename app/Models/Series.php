@@ -24,7 +24,6 @@ class Series extends Model
         'user_id' => 'integer',
         'playlist_id' => 'integer',
         'category_id' => 'integer',
-        'release_date' => 'date',
         'rating_5based' => 'integer',
         'enabled' => 'boolean',
         'backdrop_path' => 'array',
@@ -55,5 +54,28 @@ class Series extends Model
     public function episodes(): HasMany
     {
         return $this->hasMany(Episode::class);
+    }
+
+    /**
+     * Get the release date attribute with safe parsing
+     */
+    public function getReleaseDateAttribute($value)
+    {
+        if (!$value) {
+            return null;
+        }
+
+        try {
+            // Extract just the date part (remove any text after the date)
+            if (preg_match('/(\d{4}-\d{2}-\d{2})/', $value, $matches)) {
+                return \Carbon\Carbon::parse($matches[1]);
+            }
+
+            // Try to parse the full value if it's a valid date
+            return \Carbon\Carbon::parse($value);
+        } catch (\Exception $e) {
+            // If parsing fails, return null or the raw value
+            return null;
+        }
     }
 }

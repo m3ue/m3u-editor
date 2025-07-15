@@ -7427,12 +7427,12 @@
             "source": {
                 "type": "git",
                 "url": "https://github.com/sparkison/M3uParser.git",
-                "reference": "2fc119765ef618d3b1d21cf0ab0e64fe7c6b2f5b"
+                "reference": "e4255a0c31dc81e4675bd7efd00b23e4cfd76942"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/sparkison/M3uParser/zipball/2fc119765ef618d3b1d21cf0ab0e64fe7c6b2f5b",
-                "reference": "2fc119765ef618d3b1d21cf0ab0e64fe7c6b2f5b",
+                "url": "https://api.github.com/repos/sparkison/M3uParser/zipball/e4255a0c31dc81e4675bd7efd00b23e4cfd76942",
+                "reference": "e4255a0c31dc81e4675bd7efd00b23e4cfd76942",
                 "shasum": ""
             },
             "require": {
@@ -7471,7 +7471,7 @@
             "support": {
                 "source": "https://github.com/sparkison/M3uParser/tree/master"
             },
-            "time": "2025-03-20T17:46:20+00:00"
+            "time": "2025-07-14T21:16:37+00:00"
         },
         {
             "name": "spatie/color",

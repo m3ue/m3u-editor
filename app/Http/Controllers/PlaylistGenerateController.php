@@ -358,15 +358,26 @@ class PlaylistGenerateController extends Controller
         $uuid = $playlist->uuid;
         $tunerCount = $playlist->streams;
         $deviceId = substr($uuid, 0, 8);
+        $proxyOverrideUrl = config('proxy.url_override');
+        if (!empty($proxyOverrideUrl)) {
+            $parsedUrl = parse_url($proxyOverrideUrl);
+            $scheme = $parsedUrl['scheme'] ?? 'http';
+            $host = $parsedUrl['host'];
+            $port = isset($parsedUrl['port']) ? ':' . $parsedUrl['port'] : '';
+            $base = "{$scheme}://{$host}{$port}";
+            $baseUrl = "$base/$uuid/hdhr";
+        } else {
+            $baseUrl = url("/{$uuid}/hdhr");
+        }
         return [
             'DeviceID' => $deviceId,
             'FriendlyName' => "{$playlist->name} HDHomeRun",
-            'ModelNumber' => 'HDTC-2US',
-            'FirmwareName' => 'hdhomerun3_atsc',
-            'FirmwareVersion' => '20200101',
+            'ModelNumber' => 'HDHR5-4K',
+            'FirmwareName' => 'hdhomerun5_firmware_20240425',
+            'FirmwareVersion' => '20240425',
             'DeviceAuth' => 'test_auth_token',
-            'BaseURL' => route('playlist.hdhr.overview', $uuid),
-            'LineupURL' => route('playlist.hdhr.lineup', $uuid),
+            'BaseURL' => $baseUrl,
+            'LineupURL' => "$baseUrl/lineup.json",
             'TunerCount' => $tunerCount,
         ];
     }

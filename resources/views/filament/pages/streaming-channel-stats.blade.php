@@ -1,5 +1,6 @@
 <x-filament-panels::page>
-    <div class="space-y-4">
+    <div wire:poll.5s.visible class="space-y-4">
+        @php($statsData = $this->getStatsData())
         @if (!empty($statsData))
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 @foreach ($statsData as $stat)
@@ -197,8 +198,8 @@
                         <div class="mt-4 pt-3 border-t border-gray-200 dark:border-gray-700">
                             <div class="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
                                 <span>Started:</span>
-                                <span class="relative-timestamp font-mono" data-timestamp="{{ $stat['processStartTime'] }}">
-                                    {{ $stat['processStartTime'] ? 'Loading...' : 'N/A' }}
+                                <span class="relative-timestamp font-mono">
+                                    {{ $stat['processStartTime'] ?? 'N/A' }}
                                 </span>
                             </div>
                         </div>
@@ -207,52 +208,4 @@
             </div>
         @endif
     </div>
-
-    @push('scripts')
-    <script>
-        function timeDifference(current, previous) {
-            const msPerMinute = 60 * 1000;
-            const msPerHour = msPerMinute * 60;
-            const msPerDay = msPerHour * 24;
-            const msPerMonth = msPerDay * 30; // Approx
-            const msPerYear = msPerDay * 365; // Approx
-
-            const elapsed = current - previous;
-
-            if (elapsed < msPerMinute) {
-                 return Math.round(elapsed/1000) + ' seconds ago';
-            } else if (elapsed < msPerHour) {
-                 return Math.round(elapsed/msPerMinute) + ' minutes ago';
-            } else if (elapsed < msPerDay ) {
-                 return Math.round(elapsed/msPerHour ) + ' hours ago';
-            } else if (elapsed < msPerMonth) {
-                return 'approximately ' + Math.round(elapsed/msPerDay) + ' days ago';
-            } else if (elapsed < msPerYear) {
-                return 'approximately ' + Math.round(elapsed/msPerMonth) + ' months ago';
-            } else {
-                return 'approximately ' + Math.round(elapsed/msPerYear ) + ' years ago';
-            }
-        }
-
-        function updateRelativeTimes() {
-            const elements = document.querySelectorAll('.relative-timestamp');
-            elements.forEach(function(element) {
-                const timestamp = parseInt(element.getAttribute('data-timestamp'), 10);
-                if (timestamp && !isNaN(timestamp)) {
-                    // Convert Unix timestamp (seconds) to milliseconds for JavaScript Date
-                    element.textContent = timeDifference(Date.now(), timestamp * 1000);
-                } else {
-                    element.textContent = 'N/A'; // If timestamp is invalid or null
-                }
-            });
-        }
-
-        // Update on initial load
-        document.addEventListener('DOMContentLoaded', function() {
-            updateRelativeTimes();
-            // Update every 30 seconds
-            setInterval(updateRelativeTimes, 30000);
-        });
-    </script>
-    @endpush
 </x-filament-panels::page>

@@ -227,20 +227,25 @@ class ListChannels extends ListRecords
 
     public static function setupTabs($relationId = null): array
     {
+        $where = [
+            ['user_id', auth()->id()],
+            // ...
+        ];
+
         // Change count based on view
         $totalCount = Channel::query()
             ->when($relationId, function ($query, $relationId) {
                 return $query->where('group_id', $relationId);
             })->count();
-        $enabledCount = Channel::query()->where('enabled', true)
+        $enabledCount = Channel::query()->where([...$where, ['enabled', true]])
             ->when($relationId, function ($query, $relationId) {
                 return $query->where('group_id', $relationId);
             })->count();
-        $disabledCount = Channel::query()->where('enabled', false)
+        $disabledCount = Channel::query()->where([...$where, ['enabled', false]])
             ->when($relationId, function ($query, $relationId) {
                 return $query->where('group_id', $relationId);
             })->count();
-        $customCount = Channel::query()->where('is_custom', true)
+        $customCount = Channel::query()->where([...$where, ['is_custom', true]])
             ->when($relationId, function ($query, $relationId) {
                 return $query->where('group_id', $relationId);
             })->count();

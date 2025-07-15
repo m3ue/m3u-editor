@@ -62,6 +62,9 @@ class ProcessM3uImport implements ShouldQueue
     // Available groups for the playlist
     public array $groups = [];
 
+    // M3U Parser instance
+    public $m3uParser = null;
+
     /**
      * Create a new job instance.
      *
@@ -393,6 +396,7 @@ class ProcessM3uImport implements ShouldQueue
                             'group' => $category['category_name'] ?? '',
                             'group_internal' => $category['category_name'] ?? '',
                             'stream_id' => $item->epg_channel_id ?? $item->stream_id, // prefer EPG id for mapping, if set
+                            'source_id' => $item->stream_id, // source ID for the channel
                             'channel' => $item->num ?? null,
                             'catchup' => $item->tv_archive ?? null,
                             'shift' => $item->tv_archive_duration ?? 0,
@@ -428,6 +432,7 @@ class ProcessM3uImport implements ShouldQueue
                             'group' => $category['category_name'] ?? '',
                             'group_internal' => $category['category_name'] ?? '',
                             'stream_id' => $item->stream_id,
+                            'source_id' => $item->stream_id, // source ID for the channel
                             'channel' => $item->num ?? null,
                             'is_vod' => true, // mark as VOD
                             'container_extension' => $extension, // store the container extension
@@ -596,10 +601,10 @@ class ProcessM3uImport implements ShouldQueue
 
                     // Parse the M3U file
                     // NOTE: max line length is set to 2048 to prevent memory issues
-                    $m3uParser = new M3uParser();
-                    $m3uParser->addDefaultTags();
+                    $this->m3uParser = new M3uParser();
+                    $this->m3uParser->addDefaultTags();
                     $count = 0;
-                    foreach ($m3uParser->parseFile($filePath, max_length: 2048) as $item) {
+                    foreach ($this->m3uParser->parseFile($filePath, max_length: 2048) as $item) {
                         // Increment channel number
                         ++$channelNo;
 
@@ -799,7 +804,7 @@ class ProcessM3uImport implements ShouldQueue
         string         $batchNo,
         int            $userId,
         Carbon         $start,
-        ?Collection    $seriesCategories
+        ?Collection    $seriesCategories = null
     ) {
         // Get the playlist ID
         $playlistId = $playlist->id;
@@ -870,6 +875,23 @@ class ProcessM3uImport implements ShouldQueue
 
         // Remove duplicate groups
         $groups = array_values(array_unique($this->groups));
+
+        // If m3u parser set, check if any errors were logged
+        if ($this->m3uParser) {
+            $errors = $this->m3uParser->getParseErrors();
+            if (count($errors) > 0) {
+                Notification::make()
+                    ->warning()
+                    ->title('Error(s) detected during parsing')
+                    ->body("While parsing the playlist, please check your notifications for details.")
+                    ->broadcast($playlist->user);
+                Notification::make()
+                    ->warning()
+                    ->title('Error(s) detected during parsing')
+                    ->body("There were issues with the following lines, and they will not be imported due to formatting issues: " . implode('; ', $errors))
+                    ->sendToDatabase($playlist->user);
+            }
+        }
 
         // Create the source groups
         // Need to call **AFTER** the channel loop has been executed

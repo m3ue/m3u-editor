@@ -11,6 +11,8 @@ use App\Services\XtreamService;
 use Filament\Forms;
 use Filament\Forms\Form;
 use Filament\Forms\Get;
+use Filament\Infolists;
+use Filament\Infolists\Infolist;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Tables;
@@ -55,6 +57,11 @@ class SeriesResource extends Resource
 
     public static function table(Table $table): Table
     {
+        return self::setupTable($table);
+    }
+
+    public static function setupTable(Table $table, $relationId = null): Table
+    {
         return $table->persistFiltersInSession()
             ->persistSortInSession()
             ->filtersTriggerAction(function ($action) {
@@ -98,7 +105,26 @@ class SeriesResource extends Resource
                     ->openUrlInNewTab()
                     ->icon('heroicon-s-play'),
                 Tables\Columns\TextColumn::make('release_date')
-                    ->searchable(),
+                    ->searchable()
+                    ->formatStateUsing(function ($state, $record) {
+                        try {
+                            // Try to parse the release_date from the raw attributes to avoid casting issues
+                            $rawDate = $record->getAttributes()['release_date'] ?? null;
+                            if (!$rawDate) {
+                                return null;
+                            }
+
+                            // Extract just the date part (remove any text after the date)
+                            if (preg_match('/(\d{4}-\d{2}-\d{2})/', $rawDate, $matches)) {
+                                return \Carbon\Carbon::parse($matches[1])->format('Y-m-d');
+                            }
+
+                            return $rawDate; // Return as-is if no date pattern found
+                        } catch (\Exception $e) {
+                            // If parsing fails, return the raw value
+                            return $record->getAttributes()['release_date'] ?? null;
+                        }
+                    }),
                 Tables\Columns\TextColumn::make('rating')
                     ->searchable(),
                 Tables\Columns\TextColumn::make('rating_5based')
@@ -106,7 +132,8 @@ class SeriesResource extends Resource
                     ->sortable(),
                 Tables\Columns\TextColumn::make('playlist.name')
                     ->numeric()
-                    ->sortable(),
+                    ->sortable()
+                    ->hidden(fn() => $relationId !== null),
                 Tables\Columns\TextColumn::make('created_at')
                     ->dateTime()
                     ->sortable()
@@ -121,7 +148,8 @@ class SeriesResource extends Resource
                     ->relationship('playlist', 'name')
                     ->multiple()
                     ->preload()
-                    ->searchable(),
+                    ->searchable()
+                    ->hidden(fn() => $relationId !== null),
                 Tables\Filters\Filter::make('enabled')
                     ->label('Series is enabled')
                     ->toggle()
@@ -291,6 +319,23 @@ class SeriesResource extends Resource
         ];
     }
 
+    public static function infolist(Infolist $infolist): Infolist
+    {
+        return $infolist
+            ->schema([
+                Infolists\Components\Section::make('Group Details')
+                    ->columns(2)
+                    ->schema([
+                        Infolists\Components\TextEntry::make('name')
+                            ->badge(),
+                        Infolists\Components\TextEntry::make('playlist.name')
+                            ->label('Playlist')
+                            //->badge(),
+                            ->url(fn($record) => PlaylistResource::getUrl('edit', ['record' => $record->playlist_id])),
+                    ])
+            ]);
+    }
+
     public static function getForm(): array
     {
         return [
@@ -321,7 +366,32 @@ class SeriesResource extends Resource
                                     Forms\Components\TextInput::make('genre')
                                         ->maxLength(255),
                                     Forms\Components\DatePicker::make('release_date')
-                                        ->label('Release Date'),
+                                        ->label('Release Date')
+                                        ->dehydrateStateUsing(function ($state) {
+                                            // Ensure we store a properly formatted date
+                                            if ($state) {
+                                                try {
+                                                    return \Carbon\Carbon::parse($state)->format('Y-m-d');
+                                                } catch (\Exception $e) {
+                                                    return null;
+                                                }
+                                            }
+                                            return null;
+                                        })
+                                        ->formatStateUsing(function ($state) {
+                                            // Extract just the date part for display
+                                            if ($state) {
+                                                try {
+                                                    if (preg_match('/(\d{4}-\d{2}-\d{2})/', $state, $matches)) {
+                                                        return $matches[1];
+                                                    }
+                                                    return \Carbon\Carbon::parse($state)->format('Y-m-d');
+                                                } catch (\Exception $e) {
+                                                    return null;
+                                                }
+                                            }
+                                            return null;
+                                        }),
                                     Forms\Components\TextInput::make('rating')
                                         ->maxLength(255),
                                     Forms\Components\TextInput::make('rating_5based')

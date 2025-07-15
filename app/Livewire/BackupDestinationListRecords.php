@@ -48,10 +48,10 @@ class BackupDestinationListRecords extends Component implements HasForms, HasTab
                     ->label(__('filament-spatie-backup::backup.components.backup_destination_list.table.fields.path'))
                     ->searchable()
                     ->sortable(),
-                Tables\Columns\TextColumn::make('disk')
-                    ->label(__('filament-spatie-backup::backup.components.backup_destination_list.table.fields.disk'))
-                    ->searchable()
-                    ->sortable(),
+                // Tables\Columns\TextColumn::make('disk')
+                //     ->label(__('filament-spatie-backup::backup.components.backup_destination_list.table.fields.disk'))
+                //     ->searchable()
+                //     ->sortable(),
                 Tables\Columns\TextColumn::make('date')
                     ->label(__('filament-spatie-backup::backup.components.backup_destination_list.table.fields.date'))
                     ->dateTime()
@@ -62,39 +62,38 @@ class BackupDestinationListRecords extends Component implements HasForms, HasTab
                     ->badge(),
             ])
             ->filters([
-                Tables\Filters\SelectFilter::make('disk')
-                    ->label(__('filament-spatie-backup::backup.components.backup_destination_list.table.filters.disk'))
-                    ->options(FilamentSpatieLaravelBackup::getFilterDisks()),
+                // Tables\Filters\SelectFilter::make('disk')
+                //     ->label(__('filament-spatie-backup::backup.components.backup_destination_list.table.filters.disk'))
+                //     ->options(FilamentSpatieLaravelBackup::getFilterDisks()),
             ])
             ->actions([
-                Tables\Actions\ActionGroup::make([
-                    Tables\Actions\Action::make('download')
-                        ->label(__('filament-spatie-backup::backup.components.backup_destination_list.table.actions.download'))
-                        ->icon('heroicon-o-arrow-down-tray')
-                        ->visible(auth()->user()->can('download-backup'))
-                        ->action(fn(BackupDestination $record) => Storage::disk($record->disk)->download($record->path)),
+                Tables\Actions\Action::make('delete')
+                    ->label(__('filament-spatie-backup::backup.components.backup_destination_list.table.actions.delete'))
+                    ->icon('heroicon-o-trash')
+                    ->visible(auth()->user()->can('delete-backup'))
+                    ->requiresConfirmation()
+                    ->color('danger')
+                    ->modalIcon('heroicon-o-trash')
+                    ->button()->hiddenLabel()->size('sm')
+                    ->action(function (BackupDestination $record) {
+                        SpatieBackupDestination::create($record->disk, config('backup.backup.name'))
+                            ->backups()
+                            ->first(function (Backup $backup) use ($record) {
+                                return $backup->path() === $record->path;
+                            })
+                            ->delete();
 
-                    Tables\Actions\Action::make('delete')
-                        ->label(__('filament-spatie-backup::backup.components.backup_destination_list.table.actions.delete'))
-                        ->icon('heroicon-o-trash')
-                        ->visible(auth()->user()->can('delete-backup'))
-                        ->requiresConfirmation()
-                        ->color('danger')
-                        ->modalIcon('heroicon-o-trash')
-                        ->action(function (BackupDestination $record) {
-                            SpatieBackupDestination::create($record->disk, config('backup.backup.name'))
-                                ->backups()
-                                ->first(function (Backup $backup) use ($record) {
-                                    return $backup->path() === $record->path;
-                                })
-                                ->delete();
-
-                            Notification::make()
-                                ->title(__('filament-spatie-backup::backup.pages.backups.messages.backup_delete_success'))
-                                ->success()
-                                ->send();
-                        }),
-                ])->button()->hiddenLabel()->size('sm')
+                        Notification::make()
+                            ->title(__('filament-spatie-backup::backup.pages.backups.messages.backup_delete_success'))
+                            ->success()
+                            ->send();
+                    }),
+                Tables\Actions\Action::make('download')
+                    ->label(__('filament-spatie-backup::backup.components.backup_destination_list.table.actions.download'))
+                    ->icon('heroicon-o-arrow-down-tray')
+                    ->visible(auth()->user()->can('download-backup'))
+                    ->button()->hiddenLabel()->size('sm')
+                    ->action(fn(BackupDestination $record) => Storage::disk($record->disk)->download($record->path)),
             ], position: Tables\Enums\ActionsPosition::BeforeCells)
             ->bulkActions([
                 Tables\Actions\BulkActionGroup::make([

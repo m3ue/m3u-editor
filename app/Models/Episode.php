@@ -26,7 +26,6 @@ class Episode extends Model
         'series_id' => 'integer',
         'season_id' => 'integer',
         'episode_num' => 'integer',
-        'added' => 'timestamp',
         'season' => 'integer',
         'info' => 'array',
     ];
@@ -118,5 +117,28 @@ class Episode extends Model
             Log::error("Error running ffprobe for episode \"{$this->title}\": {$e->getMessage()}");
         }
         return [];
+    }
+
+    /**
+     * Get the added attribute with safe parsing
+     */
+    public function getAddedAttribute($value)
+    {
+        if (!$value) {
+            return null;
+        }
+
+        try {
+            // If it's a timestamp string, parse it
+            if (is_numeric($value)) {
+                return \Carbon\Carbon::createFromTimestamp($value);
+            }
+
+            // Try to parse as a regular date/time string
+            return \Carbon\Carbon::parse($value);
+        } catch (\Exception $e) {
+            // If parsing fails, return null
+            return null;
+        }
     }
 }

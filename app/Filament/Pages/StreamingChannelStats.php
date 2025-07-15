@@ -5,6 +5,7 @@ namespace App\Filament\Pages;
 use App\Models\Channel;
 use App\Models\Episode;
 use App\Services\ProxyService;
+use Carbon\Carbon;
 use Filament\Pages\Page;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Cache;
@@ -20,13 +21,6 @@ class StreamingChannelStats extends Page
     protected static ?int $navigationSort = 10;
 
     protected static string $view = 'filament.pages.streaming-channel-stats';
-
-    public $statsData = [];
-
-    public function mount(): void
-    {
-        $this->statsData = $this->getStatsData();
-    }
 
     public function getSubheading(): ?string
     {
@@ -143,6 +137,9 @@ class StreamingChannelStats extends Page
             } elseif ($format === 'mpts' && $streamId) {
                 $startTimeKey = "mpts:streaminfo:starttime:{$streamId}";
                 $processStartTime = Redis::get($startTimeKey) ?: null;
+            }
+            if ($processStartTime) {
+                $processStartTime = Carbon::createFromTimestamp((int)$processStartTime)->diffForHumans();
             }
 
             // Fetch detailed stream information

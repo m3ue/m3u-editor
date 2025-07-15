@@ -111,11 +111,9 @@ class ChannelResource extends Resource
                     ->sortable(),
                 Tables\Columns\TextColumn::make('is_vod')
                     ->label('Type')
-                    ->formatStateUsing(fn($record) => new HtmlString(
-                        $record->is_vod
-                            ? '<span class="text-blue-500">VOD</span>'
-                            : '<span class="text-green-500">Live</span>'
-                    ))
+                    ->badge()
+                    ->color(fn($record) => $record->is_vod ? 'primary' : 'success')
+                    ->formatStateUsing(fn($record) => $record->is_vod ? 'VOD' : 'Live')
                     ->toggleable()
                     ->sortable(),
                 Tables\Columns\IconColumn::make('has_metadata')

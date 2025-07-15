@@ -17,11 +17,11 @@ class Category extends Model
      * @var array
      */
     protected $casts = [
-            'id' => 'integer',
-            'source_category_id' => 'integer',
-            'user_id' => 'integer',
-            'playlist_id' => 'integer',
-        ];
+        'id' => 'integer',
+        'source_category_id' => 'integer',
+        'user_id' => 'integer',
+        'playlist_id' => 'integer',
+    ];
 
     public function user(): BelongsTo
     {
@@ -36,5 +36,15 @@ class Category extends Model
     public function series(): HasMany
     {
         return $this->hasMany(Series::class);
+    }
+
+    public function enabled_series()
+    {
+        return $this->hasMany(Series::class)->where('enabled', true);
+    }
+
+    public function episodes(): HasMany
+    {
+        return $this->hasMany(Episode::class);
     }
 }

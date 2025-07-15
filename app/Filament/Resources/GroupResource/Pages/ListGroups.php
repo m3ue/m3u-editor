@@ -13,7 +13,7 @@ class ListGroups extends ListRecords
 {
     protected static string $resource = GroupResource::class;
 
-    protected ?string $subheading = 'Change group names, or add new groups, to organize your channels. Only custom groups can be deleted. Head to channels to bulk move channels between groups.';
+    protected ?string $subheading = 'Manage channel groups.';
 
     protected function getHeaderActions(): array
     {

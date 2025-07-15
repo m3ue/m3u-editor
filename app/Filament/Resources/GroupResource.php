@@ -58,7 +58,9 @@ class GroupResource extends Resource
         return $table->persistFiltersInSession()
             ->persistSortInSession()
             ->modifyQueryUsing(function (Builder $query) {
-                $query->withCount('enabled_live_channels')
+                $query->withCount('live_channels')
+                    ->withCount('enabled_live_channels')
+                    ->withCount('vod_channels')
                     ->withCount('enabled_vod_channels');
             })
             ->filtersTriggerAction(function ($action) {
@@ -88,13 +90,11 @@ class GroupResource extends Resource
                     ->sortable(),
                 Tables\Columns\TextColumn::make('live_channels_count')
                     ->label('Live Channels')
-                    ->counts('live_channels')
                     ->description(fn(Group $record): string => "Enabled: {$record->enabled_live_channels_count}")
                     ->toggleable()
                     ->sortable(),
                 Tables\Columns\TextColumn::make('vod_channels_count')
                     ->label('VOD Channels')
-                    ->counts('vod_channels')
                     ->description(fn(Group $record): string => "Enabled: {$record->enabled_vod_channels_count}")
                     ->toggleable()
                     ->sortable(),
