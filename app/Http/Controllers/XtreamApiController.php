@@ -554,15 +554,15 @@ class XtreamApiController extends Controller
             return response()->json($vodStreams);
         } else if ($action === 'get_series') {
             $categoryId = $request->input('category_id');
-
-            // Require category_id for series endpoint
-            if (!$categoryId || $categoryId === 'all') {
-                return response()->json(['error' => 'category_id parameter is required for get_series action'], 400);
+            if (!$categoryId) {
+                $categoryId = 'all';
             }
 
             $seriesQuery = $playlist->series()
                 ->where('enabled', true)
-                ->where('category_id', $categoryId);
+                ->when($categoryId !== 'all', function ($query) use ($categoryId) {
+                    return $query->where('category_id', $categoryId);
+                });
 
             $enabledSeries = $seriesQuery->get();
             $seriesList = [];
