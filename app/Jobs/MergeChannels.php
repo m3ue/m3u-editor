@@ -35,8 +35,13 @@ class MergeChannels implements ShouldQueue
     {
         $processed = 0;
         if ($this->channels->count() > 1) {
-            // Find the channel with the highest resolution
-            $master = $this->channels->reduce(function ($highest, $channel) {
+            $preferredChannels = $this->channels;
+            if ($this->playlistId) {
+                $preferredChannels = $this->channels->where('playlist_id', $this->playlistId);
+            }
+
+            // Find the channel with the highest resolution in the preferred playlist
+            $master = $preferredChannels->reduce(function ($highest, $channel) {
                 if (!$highest) {
                     return $channel;
                 }
