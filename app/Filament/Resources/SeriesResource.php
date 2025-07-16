@@ -70,316 +70,336 @@ class SeriesResource extends Resource
             })
             ->paginated([10, 25, 50, 100])
             ->defaultPaginationPageOption(25)
-            ->columns([
-                Tables\Columns\ImageColumn::make('cover')
-                    ->width(80)
-                    ->height(120)
-                    ->searchable(),
-                Tables\Columns\TextColumn::make('name')
-                    ->description((fn($record) => Str::limit($record->plot, 200)))
-                    ->wrap()
-                    ->extraAttributes(['style' => 'min-width: 400px;'])
-                    ->searchable(),
-                Tables\Columns\ToggleColumn::make('enabled')
-                    ->toggleable()
-                    ->tooltip('Toggle series status')
-                    ->sortable(),
-                Tables\Columns\TextColumn::make('seasons_count')
-                    ->label('Seasons')
-                    ->counts('seasons')
-                    ->toggleable()
-                    ->sortable(),
-                Tables\Columns\TextColumn::make('episodes_count')
-                    ->label('Episodes')
-                    ->counts('episodes')
-                    ->toggleable()
-                    ->sortable(),
-                Tables\Columns\TextColumn::make('category.name')
-                    ->numeric()
-                    ->sortable(),
-                Tables\Columns\TextColumn::make('genre')
-                    ->searchable(),
-                Tables\Columns\TextColumn::make('youtube_trailer')
-                    ->label('YouTube Trailer')
-                    ->placeholder('No trailer ID set.')
-                    ->url(fn($record): string => 'https://www.youtube.com/watch?v=' . $record->youtube_trailer)
-                    ->openUrlInNewTab()
-                    ->icon('heroicon-s-play'),
-                Tables\Columns\TextColumn::make('release_date')
-                    ->searchable()
-                    ->formatStateUsing(function ($state, $record) {
-                        try {
-                            // Try to parse the release_date from the raw attributes to avoid casting issues
-                            $rawDate = $record->getAttributes()['release_date'] ?? null;
-                            if (!$rawDate) {
-                                return null;
-                            }
+            ->columns(self::getTableColumns(showPlaylist: !$relationId))
+            ->filters(self::getTableFilters(showPlaylist: !$relationId))
+            ->actions(self::getTableActions(), position: Tables\Enums\ActionsPosition::BeforeCells)
+            ->bulkActions(self::getTableBulkActions());
+    }
 
-                            // Extract just the date part (remove any text after the date)
-                            if (preg_match('/(\d{4}-\d{2}-\d{2})/', $rawDate, $matches)) {
-                                return \Carbon\Carbon::parse($matches[1])->format('Y-m-d');
-                            }
-
-                            return $rawDate; // Return as-is if no date pattern found
-                        } catch (\Exception $e) {
-                            // If parsing fails, return the raw value
-                            return $record->getAttributes()['release_date'] ?? null;
+    public static function getTableColumns($showPlaylist = true): array
+    {
+        return [
+            Tables\Columns\ImageColumn::make('cover')
+                ->width(80)
+                ->height(120)
+                ->searchable(),
+            Tables\Columns\TextColumn::make('name')
+                ->description((fn($record) => Str::limit($record->plot, 200)))
+                ->wrap()
+                ->extraAttributes(['style' => 'min-width: 400px;'])
+                ->searchable(),
+            Tables\Columns\ToggleColumn::make('enabled')
+                ->toggleable()
+                ->tooltip('Toggle series status')
+                ->sortable(),
+            Tables\Columns\TextColumn::make('seasons_count')
+                ->label('Seasons')
+                ->counts('seasons')
+                ->toggleable()
+                ->sortable(),
+            Tables\Columns\TextColumn::make('episodes_count')
+                ->label('Episodes')
+                ->counts('episodes')
+                ->toggleable()
+                ->sortable(),
+            Tables\Columns\TextColumn::make('category.name')
+                ->numeric()
+                ->sortable(),
+            Tables\Columns\TextColumn::make('genre')
+                ->searchable(),
+            Tables\Columns\TextColumn::make('youtube_trailer')
+                ->label('YouTube Trailer')
+                ->placeholder('No trailer ID set.')
+                ->url(fn($record): string => 'https://www.youtube.com/watch?v=' . $record->youtube_trailer)
+                ->openUrlInNewTab()
+                ->icon('heroicon-s-play'),
+            Tables\Columns\TextColumn::make('release_date')
+                ->searchable()
+                ->formatStateUsing(function ($state, $record) {
+                    try {
+                        // Try to parse the release_date from the raw attributes to avoid casting issues
+                        $rawDate = $record->getAttributes()['release_date'] ?? null;
+                        if (!$rawDate) {
+                            return null;
                         }
-                    }),
-                Tables\Columns\TextColumn::make('rating')
-                    ->searchable(),
-                Tables\Columns\TextColumn::make('rating_5based')
-                    ->numeric()
-                    ->sortable(),
-                Tables\Columns\TextColumn::make('playlist.name')
-                    ->numeric()
-                    ->sortable()
-                    ->hidden(fn() => $relationId !== null),
-                Tables\Columns\TextColumn::make('created_at')
-                    ->dateTime()
-                    ->sortable()
-                    ->toggleable(isToggledHiddenByDefault: true),
-                Tables\Columns\TextColumn::make('updated_at')
-                    ->dateTime()
-                    ->sortable()
-                    ->toggleable(isToggledHiddenByDefault: true),
-            ])
-            ->filters([
-                Tables\Filters\SelectFilter::make('playlist')
-                    ->relationship('playlist', 'name')
-                    ->multiple()
-                    ->preload()
-                    ->searchable()
-                    ->hidden(fn() => $relationId !== null),
-                Tables\Filters\Filter::make('enabled')
-                    ->label('Series is enabled')
-                    ->toggle()
-                    ->query(function ($query) {
-                        return $query->where('enabled', true);
-                    }),
-            ])
-            ->actions([
-                Tables\Actions\ActionGroup::make([
-                    Tables\Actions\EditAction::make(),
-                    Tables\Actions\Action::make('move')
-                        ->label('Move series to category')
-                        ->form([
-                            Forms\Components\Select::make('category')
-                                ->required()
-                                ->live()
-                                ->label('Category')
-                                ->helperText('Select the category you would like to move the series to.')
-                                ->options(fn(Get $get, $record) => Category::where(['user_id' => auth()->id(), 'playlist_id' => $record->playlist_id])->get(['name', 'id'])->pluck('name', 'id'))
-                                ->searchable(),
-                        ])
-                        ->action(function ($record, array $data): void {
-                            $category = Category::findOrFail($data['category']);
+
+                        // Extract just the date part (remove any text after the date)
+                        if (preg_match('/(\d{4}-\d{2}-\d{2})/', $rawDate, $matches)) {
+                            return \Carbon\Carbon::parse($matches[1])->format('Y-m-d');
+                        }
+
+                        return $rawDate; // Return as-is if no date pattern found
+                    } catch (\Exception $e) {
+                        // If parsing fails, return the raw value
+                        return $record->getAttributes()['release_date'] ?? null;
+                    }
+                }),
+            Tables\Columns\TextColumn::make('rating')
+                ->searchable(),
+            Tables\Columns\TextColumn::make('rating_5based')
+                ->numeric()
+                ->sortable(),
+            Tables\Columns\TextColumn::make('playlist.name')
+                ->numeric()
+                ->sortable()
+                ->hidden(fn() => !$showPlaylist),
+            Tables\Columns\TextColumn::make('created_at')
+                ->dateTime()
+                ->sortable()
+                ->toggleable(isToggledHiddenByDefault: true),
+            Tables\Columns\TextColumn::make('updated_at')
+                ->dateTime()
+                ->sortable()
+                ->toggleable(isToggledHiddenByDefault: true),
+        ];
+    }
+
+    public static function getTableFilters($showPlaylist = true): array
+    {
+        return [
+            Tables\Filters\SelectFilter::make('playlist')
+                ->relationship('playlist', 'name')
+                ->multiple()
+                ->preload()
+                ->searchable()
+                ->hidden(fn() => !$showPlaylist),
+            Tables\Filters\Filter::make('enabled')
+                ->label('Series is enabled')
+                ->toggle()
+                ->query(function ($query) {
+                    return $query->where('enabled', true);
+                }),
+        ];
+    }
+
+    public static function getTableActions(): array
+    {
+        return [
+            Tables\Actions\ActionGroup::make([
+                Tables\Actions\EditAction::make(),
+                Tables\Actions\Action::make('move')
+                    ->label('Move series to category')
+                    ->form([
+                        Forms\Components\Select::make('category')
+                            ->required()
+                            ->live()
+                            ->label('Category')
+                            ->helperText('Select the category you would like to move the series to.')
+                            ->options(fn(Get $get, $record) => Category::where(['user_id' => auth()->id(), 'playlist_id' => $record->playlist_id])->get(['name', 'id'])->pluck('name', 'id'))
+                            ->searchable(),
+                    ])
+                    ->action(function ($record, array $data): void {
+                        $category = Category::findOrFail($data['category']);
+                        $record->update([
+                            'category_id' => $category->id,
+                        ]);
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title('Series moved to category')
+                            ->body('The series has been moved to the chosen category.')
+                            ->send();
+                    })
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-arrows-right-left')
+                    ->modalIcon('heroicon-o-arrows-right-left')
+                    ->modalDescription('Move the series to another category.')
+                    ->modalSubmitActionLabel('Move now'),
+                Tables\Actions\Action::make('process')
+                    ->label('Process Series')
+                    ->action(function ($record) {
+                        app('Illuminate\Contracts\Bus\Dispatcher')
+                            ->dispatch(new \App\Jobs\ProcessM3uImportSeriesEpisodes(
+                                playlistSeries: $record,
+                            ));
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title('Series is being processed')
+                            ->body('You will be notified once complete.')
+                            ->duration(10000)
+                            ->send();
+                    })
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-arrow-path')
+                    ->modalIcon('heroicon-o-arrow-path')
+                    ->modalDescription('Process series now? This will fetch all episodes and seasons for this series.')
+                    ->modalSubmitActionLabel('Yes, process now'),
+                Tables\Actions\Action::make('sync')
+                    ->label('Sync Series .strm files')
+                    ->action(function ($record) {
+                        app('Illuminate\Contracts\Bus\Dispatcher')
+                            ->dispatch(new \App\Jobs\SyncSeriesStrmFiles(
+                                series: $record,
+                            ));
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title('Series .strm files are being synced')
+                            ->body('You will be notified once complete.')
+                            ->duration(10000)
+                            ->send();
+                    })
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-document-arrow-down')
+                    ->modalIcon('heroicon-o-document-arrow-down')
+                    ->modalDescription('Sync series .strm files now? This will generate .strm files for this series at the path set for this series.')
+                    ->modalSubmitActionLabel('Yes, sync now')
+                    ->disabled(fn($record): bool => ! $record->sync_location),
+                Tables\Actions\DeleteAction::make()
+                    ->modalIcon('heroicon-o-trash')
+                    ->modalDescription('Are you sure you want to delete this series? This will delete all episodes and seasons for this series. This action cannot be undone.')
+                    ->modalSubmitActionLabel('Yes, delete series'),
+            ])->button()->hiddenLabel()->size('sm'),
+        ];
+    }
+
+    public static function getTableBulkActions(): array
+    {
+        return [
+            Tables\Actions\BulkActionGroup::make([
+                Tables\Actions\BulkAction::make('move')
+                    ->label('Move series to category')
+                    ->form([
+                        Forms\Components\Select::make('category')
+                            ->required()
+                            ->live()
+                            ->label('Category')
+                            ->helperText('Select the category you would like to move the series to.')
+                            ->options(
+                                fn() => Category::query()
+                                    ->with(['playlist'])
+                                    ->where(['user_id' => auth()->id()])
+                                    ->get(['name', 'id', 'playlist_id'])
+                                    ->transform(fn($category) => [
+                                        'id' => $category->id,
+                                        'name' => $category->name . ' (' . $category->playlist->name . ')',
+                                    ])->pluck('name', 'id')
+                            )->searchable(),
+                    ])
+                    ->action(function (Collection $records, array $data): void {
+                        $category = Category::findOrFail($data['category']);
+                        foreach ($records as $record) {
+                            // Update the series to the new category
+                            // This will change the category_id for the series in the database
+                            // to reflect the new category
+                            if ($category->playlist_id !== $record->playlist_id) {
+                                Notification::make()
+                                    ->warning()
+                                    ->title('Warning')
+                                    ->body("Cannot move \"{$category->name}\" to \"{$record->name}\" as they belong to different playlists.")
+                                    ->persistent()
+                                    ->send();
+                                continue;
+                            }
                             $record->update([
                                 'category_id' => $category->id,
                             ]);
-                        })->after(function () {
-                            Notification::make()
-                                ->success()
-                                ->title('Series moved to category')
-                                ->body('The series has been moved to the chosen category.')
-                                ->send();
-                        })
-                        ->requiresConfirmation()
-                        ->icon('heroicon-o-arrows-right-left')
-                        ->modalIcon('heroicon-o-arrows-right-left')
-                        ->modalDescription('Move the series to another category.')
-                        ->modalSubmitActionLabel('Move now'),
-                    Tables\Actions\Action::make('process')
-                        ->label('Process Series')
-                        ->action(function ($record) {
+                        }
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title('Series moved to category')
+                            ->body('The category series have been moved to the chosen category.')
+                            ->send();
+                    })
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-arrows-right-left')
+                    ->modalIcon('heroicon-o-arrows-right-left')
+                    ->modalDescription('Move the category series to another category.')
+                    ->modalSubmitActionLabel('Move now'),
+                Tables\Actions\BulkAction::make('process')
+                    ->label('Process Selected Series')
+                    ->icon('heroicon-o-arrow-path')
+                    ->action(function ($records) {
+                        foreach ($records as $record) {
                             app('Illuminate\Contracts\Bus\Dispatcher')
                                 ->dispatch(new \App\Jobs\ProcessM3uImportSeriesEpisodes(
                                     playlistSeries: $record,
                                 ));
-                        })->after(function () {
-                            Notification::make()
-                                ->success()
-                                ->title('Series is being processed')
-                                ->body('You will be notified once complete.')
-                                ->duration(10000)
-                                ->send();
-                        })
-                        ->requiresConfirmation()
-                        ->icon('heroicon-o-arrow-path')
-                        ->modalIcon('heroicon-o-arrow-path')
-                        ->modalDescription('Process series now? This will fetch all episodes and seasons for this series.')
-                        ->modalSubmitActionLabel('Yes, process now'),
-                    Tables\Actions\Action::make('sync')
-                        ->label('Sync Series .strm files')
-                        ->action(function ($record) {
+                        }
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title('Series are being processed')
+                            ->body('You will be notified once complete.')
+                            ->duration(10000)
+                            ->send();
+                    })
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-arrow-path')
+                    ->modalIcon('heroicon-o-arrow-path')
+                    ->modalDescription('Process selected series now? This will fetch all episodes and seasons for this series. This may take a while depending on the number of series selected.')
+                    ->modalSubmitActionLabel('Yes, process now'),
+                Tables\Actions\BulkAction::make('sync')
+                    ->label('Sync Series .strm files')
+                    ->action(function ($records) {
+                        foreach ($records as $record) {
                             app('Illuminate\Contracts\Bus\Dispatcher')
                                 ->dispatch(new \App\Jobs\SyncSeriesStrmFiles(
                                     series: $record,
                                 ));
-                        })->after(function () {
-                            Notification::make()
-                                ->success()
-                                ->title('Series .strm files are being synced')
-                                ->body('You will be notified once complete.')
-                                ->duration(10000)
-                                ->send();
-                        })
-                        ->requiresConfirmation()
-                        ->icon('heroicon-o-document-arrow-down')
-                        ->modalIcon('heroicon-o-document-arrow-down')
-                        ->modalDescription('Sync series .strm files now? This will generate .strm files for this series at the path set for this series.')
-                        ->modalSubmitActionLabel('Yes, sync now')
-                        ->disabled(fn($record): bool => ! $record->sync_location),
-                    Tables\Actions\DeleteAction::make()
-                        ->modalIcon('heroicon-o-trash')
-                        ->modalDescription('Are you sure you want to delete this series? This will delete all episodes and seasons for this series. This action cannot be undone.')
-                        ->modalSubmitActionLabel('Yes, delete series'),
-                ])->button()->hiddenLabel()->size('sm'),
-            ], position: Tables\Enums\ActionsPosition::BeforeCells)
-            ->bulkActions([
-                Tables\Actions\BulkActionGroup::make([
-                    Tables\Actions\BulkAction::make('move')
-                        ->label('Move series to category')
-                        ->form([
-                            Forms\Components\Select::make('category')
-                                ->required()
-                                ->live()
-                                ->label('Category')
-                                ->helperText('Select the category you would like to move the series to.')
-                                ->options(
-                                    fn() => Category::query()
-                                        ->with(['playlist'])
-                                        ->where(['user_id' => auth()->id()])
-                                        ->get(['name', 'id', 'playlist_id'])
-                                        ->transform(fn($category) => [
-                                            'id' => $category->id,
-                                            'name' => $category->name . ' (' . $category->playlist->name . ')',
-                                        ])->pluck('name', 'id')
-                                )->searchable(),
-                        ])
-                        ->action(function (Collection $records, array $data): void {
-                            $category = Category::findOrFail($data['category']);
-                            foreach ($records as $record) {
-                                // Update the series to the new category
-                                // This will change the category_id for the series in the database
-                                // to reflect the new category
-                                if ($category->playlist_id !== $record->playlist_id) {
-                                    Notification::make()
-                                        ->warning()
-                                        ->title('Warning')
-                                        ->body("Cannot move \"{$category->name}\" to \"{$record->name}\" as they belong to different playlists.")
-                                        ->persistent()
-                                        ->send();
-                                    continue;
-                                }
-                                $record->update([
-                                    'category_id' => $category->id,
-                                ]);
-                            }
-                        })->after(function () {
-                            Notification::make()
-                                ->success()
-                                ->title('Series moved to category')
-                                ->body('The category series have been moved to the chosen category.')
-                                ->send();
-                        })
-                        ->requiresConfirmation()
-                        ->icon('heroicon-o-arrows-right-left')
-                        ->modalIcon('heroicon-o-arrows-right-left')
-                        ->modalDescription('Move the category series to another category.')
-                        ->modalSubmitActionLabel('Move now'),
-                    Tables\Actions\BulkAction::make('process')
-                        ->label('Process Selected Series')
-                        ->icon('heroicon-o-arrow-path')
-                        ->action(function ($records) {
-                            foreach ($records as $record) {
-                                app('Illuminate\Contracts\Bus\Dispatcher')
-                                    ->dispatch(new \App\Jobs\ProcessM3uImportSeriesEpisodes(
-                                        playlistSeries: $record,
-                                    ));
-                            }
-                        })->after(function () {
-                            Notification::make()
-                                ->success()
-                                ->title('Series are being processed')
-                                ->body('You will be notified once complete.')
-                                ->duration(10000)
-                                ->send();
-                        })
-                        ->requiresConfirmation()
-                        ->icon('heroicon-o-arrow-path')
-                        ->modalIcon('heroicon-o-arrow-path')
-                        ->modalDescription('Process selected series now? This will fetch all episodes and seasons for this series. This may take a while depending on the number of series selected.')
-                        ->modalSubmitActionLabel('Yes, process now'),
-                    Tables\Actions\BulkAction::make('sync')
-                        ->label('Sync Series .strm files')
-                        ->action(function ($records) {
-                            foreach ($records as $record) {
-                                app('Illuminate\Contracts\Bus\Dispatcher')
-                                    ->dispatch(new \App\Jobs\SyncSeriesStrmFiles(
-                                        series: $record,
-                                    ));
-                            }
-                        })->after(function () {
-                            Notification::make()
-                                ->success()
-                                ->title('.strm files are being synced for selected series')
-                                ->body('You will be notified once complete.')
-                                ->duration(10000)
-                                ->send();
-                        })
-                        ->requiresConfirmation()
-                        ->icon('heroicon-o-document-arrow-down')
-                        ->modalIcon('heroicon-o-document-arrow-down')
-                        ->modalDescription('Sync selected series .strm files now? This will generate .strm files for the selected series at the path set for the series.')
-                        ->modalSubmitActionLabel('Yes, sync now'),
-                    Tables\Actions\BulkAction::make('enable')
-                        ->label('Enable selected')
-                        ->action(function (Collection $records): void {
-                            foreach ($records as $record) {
-                                $record->update([
-                                    'enabled' => true,
-                                ]);
-                            }
-                        })->after(function () {
-                            Notification::make()
-                                ->success()
-                                ->title('Selected series enabled')
-                                ->body('The selected series have been enabled.')
-                                ->send();
-                        })
-                        ->color('success')
-                        ->deselectRecordsAfterCompletion()
-                        ->requiresConfirmation()
-                        ->icon('heroicon-o-check-circle')
-                        ->modalIcon('heroicon-o-check-circle')
-                        ->modalDescription('Enable the selected channel(s) now?')
-                        ->modalSubmitActionLabel('Yes, enable now'),
-                    Tables\Actions\BulkAction::make('disable')
-                        ->label('Disable selected')
-                        ->action(function (Collection $records): void {
-                            foreach ($records as $record) {
-                                $record->update([
-                                    'enabled' => false,
-                                ]);
-                            }
-                        })->after(function () {
-                            Notification::make()
-                                ->success()
-                                ->title('Selected series disabled')
-                                ->body('The selected series have been disabled.')
-                                ->send();
-                        })
-                        ->color('warning')
-                        ->deselectRecordsAfterCompletion()
-                        ->requiresConfirmation()
-                        ->icon('heroicon-o-x-circle')
-                        ->modalIcon('heroicon-o-x-circle')
-                        ->modalDescription('Disable the selected channel(s) now?')
-                        ->modalSubmitActionLabel('Yes, disable now'),
-                    Tables\Actions\DeleteBulkAction::make(),
-                ]),
-            ]);
+                        }
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title('.strm files are being synced for selected series')
+                            ->body('You will be notified once complete.')
+                            ->duration(10000)
+                            ->send();
+                    })
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-document-arrow-down')
+                    ->modalIcon('heroicon-o-document-arrow-down')
+                    ->modalDescription('Sync selected series .strm files now? This will generate .strm files for the selected series at the path set for the series.')
+                    ->modalSubmitActionLabel('Yes, sync now'),
+                Tables\Actions\BulkAction::make('enable')
+                    ->label('Enable selected')
+                    ->action(function (Collection $records): void {
+                        foreach ($records as $record) {
+                            $record->update([
+                                'enabled' => true,
+                            ]);
+                        }
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title('Selected series enabled')
+                            ->body('The selected series have been enabled.')
+                            ->send();
+                    })
+                    ->color('success')
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-check-circle')
+                    ->modalIcon('heroicon-o-check-circle')
+                    ->modalDescription('Enable the selected channel(s) now?')
+                    ->modalSubmitActionLabel('Yes, enable now'),
+                Tables\Actions\BulkAction::make('disable')
+                    ->label('Disable selected')
+                    ->action(function (Collection $records): void {
+                        foreach ($records as $record) {
+                            $record->update([
+                                'enabled' => false,
+                            ]);
+                        }
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title('Selected series disabled')
+                            ->body('The selected series have been disabled.')
+                            ->send();
+                    })
+                    ->color('warning')
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-x-circle')
+                    ->modalIcon('heroicon-o-x-circle')
+                    ->modalDescription('Disable the selected channel(s) now?')
+                    ->modalSubmitActionLabel('Yes, disable now'),
+                Tables\Actions\DeleteBulkAction::make(),
+            ]),
+        ];
     }
 
     public static function getRelations(): array
@@ -415,7 +435,7 @@ class SeriesResource extends Resource
             ]);
     }
 
-    public static function getForm(): array
+    public static function getForm($customPlaylist = null): array
     {
         return [
             Forms\Components\Grid::make()

@@ -69,7 +69,7 @@ class ChannelResource extends Resource
 
     public static function setupTable(Table $table, $relationId = null): Table
     {
-        //        $livewire = $table->getLivewire();
+        // $livewire = $table->getLivewire();
         return $table->persistFiltersInSession()
             ->persistSortInSession()
             ->filtersTriggerAction(function ($action) {
@@ -82,645 +82,666 @@ class ChannelResource extends Resource
             ->deferLoading()
             ->paginated([10, 25, 50, 100])
             ->defaultPaginationPageOption(25)
-            ->columns([
-                Tables\Columns\ImageColumn::make('logo')
-                    ->label('Logo')
-                    ->checkFileExistence(false)
-                    ->height(30)
-                    ->width('auto')
-                    ->getStateUsing(function ($record) {
-                        if ($record->logo_type === ChannelLogoType::Channel) {
-                            return $record->logo;
-                        }
-                        return $record->epgChannel?->icon ?? $record->logo;
-                    })
-                    ->toggleable(),
-                Tables\Columns\TextInputColumn::make('sort')
-                    ->label('Sort Order')
-                    ->rules(['min:0'])
-                    ->type('number')
-                    ->placeholder('Sort Order')
-                    ->sortable()
-                    ->tooltip(fn($record) => !$record->is_custom && $record->playlist?->auto_sort ? 'Playlist auto-sort enabled; disable to change' : 'Channel sort order')
-                    ->disabled(fn($record) => !$record->is_custom && $record->playlist?->auto_sort)
-                    ->toggleable(),
-                Tables\Columns\TextColumn::make('failovers_count')
-                    ->label('Failovers')
-                    ->counts('failovers')
-                    ->toggleable()
-                    ->sortable(),
-                Tables\Columns\TextColumn::make('is_vod')
-                    ->label('Type')
-                    ->badge()
-                    ->color(fn($record) => $record->is_vod ? 'primary' : 'success')
-                    ->formatStateUsing(fn($record) => $record->is_vod ? 'VOD' : 'Live')
-                    ->toggleable()
-                    ->sortable(),
-                Tables\Columns\IconColumn::make('has_metadata')
-                    ->label('Metadata')
-                    ->icon(function ($record): string {
-                        if ($record->has_metadata) {
-                            return 'heroicon-o-check-circle';
-                        }
-                        if ($record->is_vod) {
-                            return 'heroicon-o-x-circle';
-                        }
-                        return 'heroicon-o-minus';
-                    })
-                    ->color(fn($record): string => $record->has_metadata ? 'success' : 'gray'),
-                Tables\Columns\TextInputColumn::make('stream_id_custom')
-                    ->label('ID')
-                    ->rules(['min:0', 'max:255'])
-                    ->tooltip(fn($record) => $record->stream_id)
-                    ->placeholder(fn($record) => $record->stream_id)
-                    ->searchable()
-                    ->toggleable(),
-                Tables\Columns\TextInputColumn::make('title_custom')
-                    ->label('Title')
-                    ->rules(['min:0', 'max:255'])
-                    ->tooltip(fn($record) => $record->title)
-                    ->placeholder(fn($record) => $record->title)
-                    ->searchable()
-                    ->toggleable(),
-                Tables\Columns\TextInputColumn::make('name_custom')
-                    ->label('Name')
-                    ->rules(['min:0', 'max:255'])
-                    ->tooltip(fn($record) => $record->name)
-                    ->placeholder(fn($record) => $record->name)
-                    ->searchable()
-                    ->toggleable(),
-                Tables\Columns\ToggleColumn::make('enabled')
-                    ->toggleable()
-                    ->tooltip('Toggle channel status')
-                    ->sortable(),
-                Tables\Columns\TextInputColumn::make('channel')
-                    ->rules(['numeric', 'min:0'])
-                    ->type('number')
-                    ->placeholder('Channel No.')
-                    ->tooltip('Channel number')
-                    ->toggleable()
-                    ->sortable(),
-                Tables\Columns\TextInputColumn::make('url_custom')
-                    ->label('URL')
-                    ->rules(['url'])
-                    ->type('url')
-                    ->tooltip('Channel url')
-                    ->placeholder(fn($record) => $record->url)
-                    ->searchable()
-                    ->toggleable(),
-                Tables\Columns\TextInputColumn::make('shift')
-                    ->label('Time Shift')
-                    ->rules(['numeric', 'min:0'])
-                    ->type('number')
-                    ->placeholder('Time Shift')
-                    ->tooltip('Time Shift')
-                    ->toggleable()
-                    ->sortable(),
-                Tables\Columns\TextColumn::make('group')
-                    ->hidden(fn() => $relationId)
-                    ->toggleable()
-                    ->searchable(query: function ($query, string $search): Builder {
-                        $connection = $query->getConnection();
-                        $driver = $connection->getDriverName();
+            ->columns(self::getTableColumns(showGroup: !$relationId, showPlaylist: !$relationId))
+            ->filters(self::getTableFilters(showPlaylist: !$relationId))
+            ->actions(self::getTableActions(), position: Tables\Enums\ActionsPosition::BeforeCells)
+            ->bulkActions(self::getTableBulkActions());
+    }
 
-                        switch ($driver) {
-                            case 'pgsql':
-                                return $query->orWhereRaw('LOWER("group"::text) LIKE ?', ["%{$search}%"]);
-                            case 'mysql':
-                                return $query->orWhereRaw('LOWER(`group`) LIKE ?', ["%{$search}%"]);
-                            case 'sqlite':
-                                return $query->orWhereRaw('LOWER("group") LIKE ?', ["%{$search}%"]);
-                            default:
-                                // Fallback using Laravel's database abstraction
-                                return $query->orWhere(DB::raw('LOWER(group)'), 'LIKE', "%{$search}%");
-                        }
+    public static function getTableColumns($showGroup = true, $showPlaylist = true): array
+    {
+        return [
+            Tables\Columns\ImageColumn::make('logo')
+                ->label('Logo')
+                ->checkFileExistence(false)
+                ->height(30)
+                ->width('auto')
+                ->getStateUsing(function ($record) {
+                    if ($record->logo_type === ChannelLogoType::Channel) {
+                        return $record->logo;
+                    }
+                    return $record->epgChannel?->icon ?? $record->logo;
+                })
+                ->toggleable(),
+            Tables\Columns\TextInputColumn::make('sort')
+                ->label('Sort Order')
+                ->rules(['min:0'])
+                ->type('number')
+                ->placeholder('Sort Order')
+                ->sortable()
+                ->tooltip(fn($record) => !$record->is_custom && $record->playlist?->auto_sort ? 'Playlist auto-sort enabled; disable to change' : 'Channel sort order')
+                ->disabled(fn($record) => !$record->is_custom && $record->playlist?->auto_sort)
+                ->toggleable(),
+            Tables\Columns\TextColumn::make('failovers_count')
+                ->label('Failovers')
+                ->counts('failovers')
+                ->toggleable()
+                ->sortable(),
+            Tables\Columns\TextColumn::make('is_vod')
+                ->label('Type')
+                ->badge()
+                ->color(fn($record) => $record->is_vod ? 'primary' : 'success')
+                ->formatStateUsing(fn($record) => $record->is_vod ? 'VOD' : 'Live')
+                ->toggleable()
+                ->sortable(),
+            Tables\Columns\IconColumn::make('has_metadata')
+                ->label('Metadata')
+                ->icon(function ($record): string {
+                    if ($record->has_metadata) {
+                        return 'heroicon-o-check-circle';
+                    }
+                    if ($record->is_vod) {
+                        return 'heroicon-o-x-circle';
+                    }
+                    return 'heroicon-o-minus';
+                })
+                ->color(fn($record): string => $record->has_metadata ? 'success' : 'gray'),
+            Tables\Columns\TextInputColumn::make('stream_id_custom')
+                ->label('ID')
+                ->rules(['min:0', 'max:255'])
+                ->tooltip(fn($record) => $record->stream_id)
+                ->placeholder(fn($record) => $record->stream_id)
+                ->searchable()
+                ->toggleable(),
+            Tables\Columns\TextInputColumn::make('title_custom')
+                ->label('Title')
+                ->rules(['min:0', 'max:255'])
+                ->tooltip(fn($record) => $record->title)
+                ->placeholder(fn($record) => $record->title)
+                ->searchable()
+                ->toggleable(),
+            Tables\Columns\TextInputColumn::make('name_custom')
+                ->label('Name')
+                ->rules(['min:0', 'max:255'])
+                ->tooltip(fn($record) => $record->name)
+                ->placeholder(fn($record) => $record->name)
+                ->searchable()
+                ->toggleable(),
+            Tables\Columns\ToggleColumn::make('enabled')
+                ->toggleable()
+                ->tooltip('Toggle channel status')
+                ->sortable(),
+            Tables\Columns\TextInputColumn::make('channel')
+                ->rules(['numeric', 'min:0'])
+                ->type('number')
+                ->placeholder('Channel No.')
+                ->tooltip('Channel number')
+                ->toggleable()
+                ->sortable(),
+            Tables\Columns\TextInputColumn::make('url_custom')
+                ->label('URL')
+                ->rules(['url'])
+                ->type('url')
+                ->tooltip('Channel url')
+                ->placeholder(fn($record) => $record->url)
+                ->searchable()
+                ->toggleable(),
+            Tables\Columns\TextInputColumn::make('shift')
+                ->label('Time Shift')
+                ->rules(['numeric', 'min:0'])
+                ->type('number')
+                ->placeholder('Time Shift')
+                ->tooltip('Time Shift')
+                ->toggleable()
+                ->sortable(),
+            Tables\Columns\TextColumn::make('group')
+                ->hidden(fn() => !$showGroup)
+                ->toggleable()
+                ->searchable(query: function ($query, string $search): Builder {
+                    $connection = $query->getConnection();
+                    $driver = $connection->getDriverName();
+
+                    switch ($driver) {
+                        case 'pgsql':
+                            return $query->orWhereRaw('LOWER("group"::text) LIKE ?', ["%{$search}%"]);
+                        case 'mysql':
+                            return $query->orWhereRaw('LOWER(`group`) LIKE ?', ["%{$search}%"]);
+                        case 'sqlite':
+                            return $query->orWhereRaw('LOWER("group") LIKE ?', ["%{$search}%"]);
+                        default:
+                            // Fallback using Laravel's database abstraction
+                            return $query->orWhere(DB::raw('LOWER(group)'), 'LIKE', "%{$search}%");
+                    }
+                })
+                ->sortable(),
+            Tables\Columns\TextColumn::make('epgChannel.name')
+                ->label('EPG Channel')
+                ->toggleable()
+                ->searchable()
+                ->limit(40)
+                ->sortable(),
+            Tables\Columns\TextInputColumn::make('tvg_shift')
+                ->label('EPG Shift')
+                ->rules(['numeric'])
+                ->placeholder('EPG Shift')
+                ->tooltip('EPG Shift')
+                ->toggleable()
+                ->sortable(),
+            Tables\Columns\SelectColumn::make('logo_type')
+                ->label('Preferred Icon')
+                ->options([
+                    'channel' => 'Channel',
+                    'epg' => 'EPG',
+                ])
+                ->sortable()
+                ->tooltip('Preferred icon source')
+                ->toggleable(),
+            Tables\Columns\TextColumn::make('lang')
+                ->searchable()
+                ->toggleable(isToggledHiddenByDefault: true)
+                ->sortable(),
+            Tables\Columns\TextColumn::make('country')
+                ->searchable()
+                ->toggleable(isToggledHiddenByDefault: true)
+                ->sortable(),
+            Tables\Columns\TextColumn::make('playlist.name')
+                ->hidden(fn() => !$showPlaylist)
+                ->numeric()
+                ->toggleable()
+                ->sortable(),
+
+            Tables\Columns\TextColumn::make('stream_id')
+                ->label('Default ID')
+                ->sortable()
+                ->searchable()
+                ->toggleable(isToggledHiddenByDefault: true),
+            Tables\Columns\TextColumn::make('title')
+                ->label('Default Title')
+                ->sortable()
+                ->searchable()
+                ->toggleable(isToggledHiddenByDefault: true),
+            Tables\Columns\TextColumn::make('name')
+                ->label('Default Name')
+                ->sortable()
+                ->searchable()
+                ->toggleable(isToggledHiddenByDefault: true),
+            Tables\Columns\TextColumn::make('url')
+                ->label('Default URL')
+                ->sortable()
+                ->searchable()
+                ->toggleable(isToggledHiddenByDefault: true),
+
+            Tables\Columns\TextColumn::make('created_at')
+                ->dateTime()
+                ->sortable()
+                ->toggleable(isToggledHiddenByDefault: true),
+            Tables\Columns\TextColumn::make('updated_at')
+                ->dateTime()
+                ->sortable()
+                ->toggleable(isToggledHiddenByDefault: true),
+        ];
+    }
+
+    public static function getTableFilters($showPlaylist = true): array
+    {
+        return [
+            Tables\Filters\SelectFilter::make('playlist')
+                ->relationship('playlist', 'name')
+                ->hidden(fn() => !$showPlaylist)
+                ->multiple()
+                ->preload()
+                ->searchable(),
+            Tables\Filters\Filter::make('enabled')
+                ->label('Channel is enabled')
+                ->toggle()
+                ->query(function ($query) {
+                    return $query->where('enabled', true);
+                }),
+            Tables\Filters\Filter::make('disabled')
+                ->label('Channel is disabled')
+                ->toggle()
+                ->query(function ($query) {
+                    return $query->where('enabled', false);
+                }),
+            Tables\Filters\Filter::make('mapped')
+                ->label('EPG is mapped')
+                ->toggle()
+                ->query(function ($query) {
+                    return $query->where('epg_channel_id', '!=', null);
+                }),
+            Tables\Filters\Filter::make('un_mapped')
+                ->label('EPG is not mapped')
+                ->toggle()
+                ->query(function ($query) {
+                    return $query->where('epg_channel_id', '=', null);
+                }),
+            Tables\Filters\Filter::make('has_metadata')
+                ->label('VOD Has metadata')
+                ->toggle()
+                ->query(function ($query) {
+                    return $query->where([
+                        ['is_vod', '=', true],
+                        ['info', '!=', null],
+                        ['movie_data', '!=', null],
+                    ]);
+                }),
+            Tables\Filters\Filter::make('does_not_have_metadata')
+                ->label('VOD Does not have metadata')
+                ->toggle()
+                ->query(function ($query) {
+                    return $query->where([
+                        ['is_vod', '=', true],
+                        ['info', '=', null],
+                        ['movie_data', '=', null],
+                    ]);
+                }),
+        ];
+    }
+
+    public static function getTableActions(): array
+    {
+        return [
+            Tables\Actions\ActionGroup::make([
+                Tables\Actions\Action::make('process_vod')
+                    ->label('Process VOD')
+                    ->icon('heroicon-o-arrow-path')
+                    ->action(function ($record) {
+                        app('Illuminate\Contracts\Bus\Dispatcher')
+                            ->dispatch(new \App\Jobs\ProcessVodChannels(channel: $record));
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title('Fetching VOD metadata for channel')
+                            ->body('The VOD metadata fetching and processing has been started. You will be notified when it is complete.')
+                            ->duration(10000)
+                            ->send();
                     })
-                    ->sortable(),
-                Tables\Columns\TextColumn::make('epgChannel.name')
-                    ->label('EPG Channel')
-                    ->toggleable()
-                    ->searchable()
-                    ->limit(40)
-                    ->sortable(),
-                Tables\Columns\TextInputColumn::make('tvg_shift')
-                    ->label('EPG Shift')
-                    ->rules(['numeric'])
-                    ->placeholder('EPG Shift')
-                    ->tooltip('EPG Shift')
-                    ->toggleable()
-                    ->sortable(),
-                Tables\Columns\SelectColumn::make('logo_type')
-                    ->label('Preferred Icon')
-                    ->options([
-                        'channel' => 'Channel',
-                        'epg' => 'EPG',
-                    ])
-                    ->sortable()
-                    ->tooltip('Preferred icon source')
-                    ->toggleable(),
-                Tables\Columns\TextColumn::make('lang')
-                    ->searchable()
-                    ->toggleable(isToggledHiddenByDefault: true)
-                    ->sortable(),
-                Tables\Columns\TextColumn::make('country')
-                    ->searchable()
-                    ->toggleable(isToggledHiddenByDefault: true)
-                    ->sortable(),
-                Tables\Columns\TextColumn::make('playlist.name')
-                    ->hidden(fn() => $relationId)
-                    ->numeric()
-                    ->toggleable()
-                    ->sortable(),
-
-                Tables\Columns\TextColumn::make('stream_id')
-                    ->label('Default ID')
-                    ->sortable()
-                    ->searchable()
-                    ->toggleable(isToggledHiddenByDefault: true),
-                Tables\Columns\TextColumn::make('title')
-                    ->label('Default Title')
-                    ->sortable()
-                    ->searchable()
-                    ->toggleable(isToggledHiddenByDefault: true),
-                Tables\Columns\TextColumn::make('name')
-                    ->label('Default Name')
-                    ->sortable()
-                    ->searchable()
-                    ->toggleable(isToggledHiddenByDefault: true),
-                Tables\Columns\TextColumn::make('url')
-                    ->label('Default URL')
-                    ->sortable()
-                    ->searchable()
-                    ->toggleable(isToggledHiddenByDefault: true),
-
-                Tables\Columns\TextColumn::make('created_at')
-                    ->dateTime()
-                    ->sortable()
-                    ->toggleable(isToggledHiddenByDefault: true),
-                Tables\Columns\TextColumn::make('updated_at')
-                    ->dateTime()
-                    ->sortable()
-                    ->toggleable(isToggledHiddenByDefault: true),
-            ])
-            ->filters([
-                Tables\Filters\SelectFilter::make('playlist')
-                    ->relationship('playlist', 'name')
-                    ->hidden(fn() => $relationId)
-                    ->multiple()
-                    ->preload()
-                    ->searchable(),
-                Tables\Filters\Filter::make('enabled')
-                    ->label('Channel is enabled')
-                    ->toggle()
-                    ->query(function ($query) {
-                        return $query->where('enabled', true);
-                    }),
-                Tables\Filters\Filter::make('disabled')
-                    ->label('Channel is disabled')
-                    ->toggle()
-                    ->query(function ($query) {
-                        return $query->where('enabled', false);
-                    }),
-                Tables\Filters\Filter::make('mapped')
-                    ->label('EPG is mapped')
-                    ->toggle()
-                    ->query(function ($query) {
-                        return $query->where('epg_channel_id', '!=', null);
-                    }),
-                Tables\Filters\Filter::make('un_mapped')
-                    ->label('EPG is not mapped')
-                    ->toggle()
-                    ->query(function ($query) {
-                        return $query->where('epg_channel_id', '=', null);
-                    }),
-                Tables\Filters\Filter::make('has_metadata')
-                    ->label('VOD Has metadata')
-                    ->toggle()
-                    ->query(function ($query) {
-                        return $query->where([
-                            ['is_vod', '=', true],
-                            ['info', '!=', null],
-                            ['movie_data', '!=', null],
-                        ]);
-                    }),
-                Tables\Filters\Filter::make('does_not_have_metadata')
-                    ->label('VOD Does not have metadata')
-                    ->toggle()
-                    ->query(function ($query) {
-                        return $query->where([
-                            ['is_vod', '=', true],
-                            ['info', '=', null],
-                            ['movie_data', '=', null],
-                        ]);
-                    }),
-            ])
-            ->actions([
-                Tables\Actions\ActionGroup::make([
-                    Tables\Actions\Action::make('process_vod')
-                        ->label('Process VOD')
-                        ->icon('heroicon-o-arrow-path')
-                        ->action(function ($record) {
-                            app('Illuminate\Contracts\Bus\Dispatcher')
-                                ->dispatch(new \App\Jobs\ProcessVodChannels(channel: $record));
-                        })->after(function () {
-                            Notification::make()
-                                ->success()
-                                ->title('Fetching VOD metadata for channel')
-                                ->body('The VOD metadata fetching and processing has been started. You will be notified when it is complete.')
-                                ->duration(10000)
-                                ->send();
-                        })
-                        ->disabled(fn($record): bool => !$record->is_vod)
-                        ->hidden(fn($record): bool => !$record->is_vod)
-                        ->requiresConfirmation()
-                        ->icon('heroicon-o-arrow-path')
-                        ->modalIcon('heroicon-o-arrow-path')
-                        ->modalDescription('Fetch and process VOD metadata for the selected channel.')
-                        ->modalSubmitActionLabel('Yes, process now'),
-                    Tables\Actions\EditAction::make('edit_custom')
-                        ->slideOver()
-                        ->form(fn(Tables\Actions\EditAction $action): array => [
-                            Forms\Components\Grid::make()
-                                ->schema(self::getForm(edit: true))
-                                ->columns(2)
-                        ]),
-                    Tables\Actions\DeleteAction::make()->hidden(fn(Model $record) => $record->is_vod),
-                ])->button()->hiddenLabel()->size('sm')->hidden(fn(Model $record) => !($record->is_custom || $record->is_vod)),
-                Tables\Actions\EditAction::make('edit')
+                    ->disabled(fn($record): bool => !$record->is_vod)
+                    ->hidden(fn($record): bool => !$record->is_vod)
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-arrow-path')
+                    ->modalIcon('heroicon-o-arrow-path')
+                    ->modalDescription('Fetch and process VOD metadata for the selected channel.')
+                    ->modalSubmitActionLabel('Yes, process now'),
+                Tables\Actions\EditAction::make('edit_custom')
                     ->slideOver()
                     ->form(fn(Tables\Actions\EditAction $action): array => [
                         Forms\Components\Grid::make()
                             ->schema(self::getForm(edit: true))
                             ->columns(2)
+                    ]),
+                Tables\Actions\DeleteAction::make()->hidden(fn(Model $record) => $record->is_vod),
+            ])->button()->hiddenLabel()->size('sm')->hidden(fn(Model $record) => !($record->is_custom || $record->is_vod)),
+            Tables\Actions\EditAction::make('edit')
+                ->slideOver()
+                ->form(fn(Tables\Actions\EditAction $action): array => [
+                    Forms\Components\Grid::make()
+                        ->schema(self::getForm(edit: true))
+                        ->columns(2)
+                ])
+                ->button()
+                ->hiddenLabel()
+                ->disabled(fn(Model $record) => $record->is_custom || $record->is_vod)
+                ->hidden(fn(Model $record) => $record->is_custom || $record->is_vod),
+            Tables\Actions\ViewAction::make()
+                ->button()
+                ->hiddenLabel()
+                ->slideOver(),
+        ];
+    }
+
+    public static function getTableBulkActions($addToCustom = true): array
+    {
+        return [
+            Tables\Actions\BulkActionGroup::make([
+                Tables\Actions\BulkAction::make('add')
+                    ->label('Add to custom playlist')
+                    ->form([
+                        Forms\Components\Select::make('playlist')
+                            ->required()
+                            ->label('Custom Playlist')
+                            ->helperText('Select the custom playlist you would like to add the selected channel(s) to.')
+                            ->options(CustomPlaylist::where(['user_id' => auth()->id()])->get(['name', 'id'])->pluck('name', 'id'))
+                            ->searchable(),
                     ])
-                    ->button()
-                    ->hiddenLabel()
-                    ->disabled(fn(Model $record) => $record->is_custom || $record->is_vod)
-                    ->hidden(fn(Model $record) => $record->is_custom || $record->is_vod),
-                Tables\Actions\ViewAction::make()
-                    ->button()
-                    ->hiddenLabel()
-                    ->slideOver(),
-            ], position: Tables\Enums\ActionsPosition::BeforeCells)
-            ->bulkActions([
-                Tables\Actions\BulkActionGroup::make([
-                    Tables\Actions\BulkAction::make('add')
-                        ->label('Add to custom playlist')
-                        ->form([
-                            Forms\Components\Select::make('playlist')
-                                ->required()
-                                ->label('Custom Playlist')
-                                ->helperText('Select the custom playlist you would like to add the selected channel(s) to.')
-                                ->options(CustomPlaylist::where(['user_id' => auth()->id()])->get(['name', 'id'])->pluck('name', 'id'))
-                                ->searchable(),
-                        ])
-                        ->action(function (Collection $records, array $data): void {
-                            $playlist = CustomPlaylist::findOrFail($data['playlist']);
-                            $playlist->channels()->syncWithoutDetaching($records->pluck('id'));
-                        })->after(function () {
-                            Notification::make()
-                                ->success()
-                                ->title('Channels added to custom playlist')
-                                ->body('The selected channels have been added to the chosen custom playlist.')
-                                ->send();
-                        })
-                        ->deselectRecordsAfterCompletion()
-                        ->requiresConfirmation()
-                        ->icon('heroicon-o-play')
-                        ->modalIcon('heroicon-o-play')
-                        ->modalDescription('Add the selected channel(s) to the chosen custom playlist.')
-                        ->modalSubmitActionLabel('Add now'),
-                    Tables\Actions\BulkAction::make('move')
-                        ->label('Move to group')
-                        ->form([
-                            Forms\Components\Select::make('playlist')
-                                ->required()
+                    ->action(function (Collection $records, array $data): void {
+                        $playlist = CustomPlaylist::findOrFail($data['playlist']);
+                        $playlist->channels()->syncWithoutDetaching($records->pluck('id'));
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title('Channels added to custom playlist')
+                            ->body('The selected channels have been added to the chosen custom playlist.')
+                            ->send();
+                    })
+                    ->hidden(fn() => !$addToCustom)
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-play')
+                    ->modalIcon('heroicon-o-play')
+                    ->modalDescription('Add the selected channel(s) to the chosen custom playlist.')
+                    ->modalSubmitActionLabel('Add now'),
+                Tables\Actions\BulkAction::make('move')
+                    ->label('Move to group')
+                    ->form([
+                        Forms\Components\Select::make('playlist')
+                            ->required()
+                            ->live()
+                            ->afterStateUpdated(function (Forms\Set $set) {
+                                $set('group', null);
+                            })
+                            ->label('Playlist')
+                            ->helperText('Select a playlist - only channels in the selected playlist will be moved. Any channels selected from another playlist will be ignored.')
+                            ->options(Playlist::where(['user_id' => auth()->id()])->get(['name', 'id'])->pluck('name', 'id'))
+                            ->searchable(),
+                        Forms\Components\Select::make('group')
+                            ->required()
+                            ->live()
+                            ->label('Group')
+                            ->helperText(fn(Get $get) => $get('playlist') === null ? 'Select a playlist first...' : 'Select the group you would like to move the items to.')
+                            ->options(fn(Get $get) => Group::where(['user_id' => auth()->id(), 'playlist_id' => $get('playlist')])->get(['name', 'id'])->pluck('name', 'id'))
+                            ->searchable()
+                            ->disabled(fn(Get $get) => $get('playlist') === null),
+                    ])
+                    ->action(function (Collection $records, array $data): void {
+                        $filtered = $records->where('playlist_id', $data['playlist']);
+                        $group = Group::findOrFail($data['group']);
+                        foreach ($filtered as $record) {
+                            $record->update([
+                                'group' => $group->name,
+                                'group_id' => $group->id,
+                            ]);
+                        }
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title('Channels moved to group')
+                            ->body('The selected channels have been moved to the chosen group.')
+                            ->send();
+                    })
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-arrows-right-left')
+                    ->modalIcon('heroicon-o-arrows-right-left')
+                    ->modalDescription('Move the selected channel(s) to the chosen group.')
+                    ->modalSubmitActionLabel('Move now'),
+                Tables\Actions\BulkAction::make('map')
+                    ->label('Map EPG to selected')
+                    ->form(EpgMapResource::getForm(showPlaylist: false, showEpg: true))
+                    ->action(function (Collection $records, array $data): void {
+                        app('Illuminate\Contracts\Bus\Dispatcher')
+                            ->dispatch(new \App\Jobs\MapPlaylistChannelsToEpg(
+                                epg: (int)$data['epg_id'],
+                                channels: $records->pluck('id')->toArray(),
+                                force: $data['override'],
+                                settings: $data['settings'] ?? [],
+                            ));
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title('EPG to Channel mapping')
+                            ->body('Mapping started, you will be notified when the process is complete.')
+                            ->send();
+                    })
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-link')
+                    ->modalIcon('heroicon-o-link')
+                    ->modalDescription('Map the selected EPG to the selected channel(s).')
+                    ->modalSubmitActionLabel('Map now'),
+                Tables\Actions\BulkAction::make('preferred_logo')
+                    ->label('Update preferred icon')
+                    ->form([
+                        Forms\Components\Select::make('logo_type')
+                            ->label('Preferred Icon')
+                            ->helperText('Prefer logo from channel or EPG.')
+                            ->options([
+                                'channel' => 'Channel',
+                                'epg' => 'EPG',
+                            ])
+                            ->searchable(),
+
+                    ])
+                    ->action(function (Collection $records, array $data): void {
+                        Channel::whereIn('id', $records->pluck('id')->toArray())
+                            ->update([
+                                'logo_type' => $data['logo_type'],
+                            ]);
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title('Preferred icon updated')
+                            ->body('The preferred icon has been updated.')
+                            ->send();
+                    })
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-photo')
+                    ->modalIcon('heroicon-o-photo')
+                    ->modalDescription('Update the preferred icon for the selected channel(s).')
+                    ->modalSubmitActionLabel('Update now'),
+                Tables\Actions\BulkAction::make('failover')
+                    ->label('Add as failover')
+                    ->form(function (Collection $records) {
+                        $existingFailoverIds = $records->pluck('id')->toArray();
+                        $initialMasterOptions = [];
+                        foreach ($records as $record) {
+                            $displayTitle = $record->title_custom ?: $record->title;
+                            $playlistName = $record->getEffectivePlaylist()->name ?? 'Unknown';
+                            $initialMasterOptions[$record->id] = "{$displayTitle} [{$playlistName}]";
+                        }
+                        return [
+                            Forms\Components\ToggleButtons::make('master_source')
+                                ->label('Choose master from?')
+                                ->options([
+                                    'selected' => 'Selected Channels',
+                                    'searched' => 'Channel Search',
+                                ])
+                                ->icons([
+                                    'selected' => 'heroicon-o-check',
+                                    'searched' => 'heroicon-o-magnifying-glass',
+                                ])
+                                ->default('selected')
                                 ->live()
-                                ->afterStateUpdated(function (Forms\Set $set) {
-                                    $set('group', null);
-                                })
-                                ->label('Playlist')
-                                ->helperText('Select a playlist - only channels in the selected playlist will be moved. Any channels selected from another playlist will be ignored.')
-                                ->options(Playlist::where(['user_id' => auth()->id()])->get(['name', 'id'])->pluck('name', 'id'))
-                                ->searchable(),
-                            Forms\Components\Select::make('group')
+                                ->grouped(),
+                            Forms\Components\Select::make('selected_master_id')
+                                ->label('Select master channel')
+                                ->helperText('From the selected channels')
+                                ->options($initialMasterOptions)
                                 ->required()
-                                ->live()
-                                ->label('Group')
-                                ->helperText(fn(Get $get) => $get('playlist') === null ? 'Select a playlist first...' : 'Select the group you would like to move the items to.')
-                                ->options(fn(Get $get) => Group::where(['user_id' => auth()->id(), 'playlist_id' => $get('playlist')])->get(['name', 'id'])->pluck('name', 'id'))
+                                ->hidden(fn(Get $get) => $get('master_source') !== 'selected')
+                                ->searchable(),
+                            Forms\Components\Select::make('master_channel_id')
+                                ->label('Search for master channel')
                                 ->searchable()
-                                ->disabled(fn(Get $get) => $get('playlist') === null),
-                        ])
-                        ->action(function (Collection $records, array $data): void {
-                            $filtered = $records->where('playlist_id', $data['playlist']);
-                            $group = Group::findOrFail($data['group']);
-                            foreach ($filtered as $record) {
-                                $record->update([
-                                    'group' => $group->name,
-                                    'group_id' => $group->id,
-                                ]);
-                            }
-                        })->after(function () {
-                            Notification::make()
-                                ->success()
-                                ->title('Channels moved to group')
-                                ->body('The selected channels have been moved to the chosen group.')
-                                ->send();
-                        })
-                        ->deselectRecordsAfterCompletion()
-                        ->requiresConfirmation()
-                        ->icon('heroicon-o-arrows-right-left')
-                        ->modalIcon('heroicon-o-arrows-right-left')
-                        ->modalDescription('Move the selected channel(s) to the chosen group.')
-                        ->modalSubmitActionLabel('Move now'),
-                    Tables\Actions\BulkAction::make('map')
-                        ->label('Map EPG to selected')
-                        ->form(EpgMapResource::getForm(showPlaylist: false, showEpg: true))
-                        ->action(function (Collection $records, array $data): void {
-                            app('Illuminate\Contracts\Bus\Dispatcher')
-                                ->dispatch(new \App\Jobs\MapPlaylistChannelsToEpg(
-                                    epg: (int)$data['epg_id'],
-                                    channels: $records->pluck('id')->toArray(),
-                                    force: $data['override'],
-                                    settings: $data['settings'] ?? [],
-                                ));
-                        })->after(function () {
-                            Notification::make()
-                                ->success()
-                                ->title('EPG to Channel mapping')
-                                ->body('Mapping started, you will be notified when the process is complete.')
-                                ->send();
-                        })
-                        ->deselectRecordsAfterCompletion()
-                        ->requiresConfirmation()
-                        ->icon('heroicon-o-link')
-                        ->modalIcon('heroicon-o-link')
-                        ->modalDescription('Map the selected EPG to the selected channel(s).')
-                        ->modalSubmitActionLabel('Map now'),
-                    Tables\Actions\BulkAction::make('preferred_logo')
-                        ->label('Update preferred icon')
-                        ->form([
-                            Forms\Components\Select::make('logo_type')
-                                ->label('Preferred Icon')
-                                ->helperText('Prefer logo from channel or EPG.')
-                                ->options([
-                                    'channel' => 'Channel',
-                                    'epg' => 'EPG',
-                                ])
-                                ->searchable(),
-
-                        ])
-                        ->action(function (Collection $records, array $data): void {
-                            Channel::whereIn('id', $records->pluck('id')->toArray())
-                                ->update([
-                                    'logo_type' => $data['logo_type'],
-                                ]);
-                        })->after(function () {
-                            Notification::make()
-                                ->success()
-                                ->title('Preferred icon updated')
-                                ->body('The preferred icon has been updated.')
-                                ->send();
-                        })
-                        ->deselectRecordsAfterCompletion()
-                        ->requiresConfirmation()
-                        ->icon('heroicon-o-photo')
-                        ->modalIcon('heroicon-o-photo')
-                        ->modalDescription('Update the preferred icon for the selected channel(s).')
-                        ->modalSubmitActionLabel('Update now'),
-                    Tables\Actions\BulkAction::make('failover')
-                        ->label('Add as failover')
-                        ->form(function (Collection $records) {
-                            $existingFailoverIds = $records->pluck('id')->toArray();
-                            $initialMasterOptions = [];
-                            foreach ($records as $record) {
-                                $displayTitle = $record->title_custom ?: $record->title;
-                                $playlistName = $record->getEffectivePlaylist()->name ?? 'Unknown';
-                                $initialMasterOptions[$record->id] = "{$displayTitle} [{$playlistName}]";
-                            }
-                            return [
-                                Forms\Components\ToggleButtons::make('master_source')
-                                    ->label('Choose master from?')
-                                    ->options([
-                                        'selected' => 'Selected Channels',
-                                        'searched' => 'Channel Search',
-                                    ])
-                                    ->icons([
-                                        'selected' => 'heroicon-o-check',
-                                        'searched' => 'heroicon-o-magnifying-glass',
-                                    ])
-                                    ->default('selected')
-                                    ->live()
-                                    ->grouped(),
-                                Forms\Components\Select::make('selected_master_id')
-                                    ->label('Select master channel')
-                                    ->helperText('From the selected channels')
-                                    ->options($initialMasterOptions)
-                                    ->required()
-                                    ->hidden(fn(Get $get) => $get('master_source') !== 'selected')
-                                    ->searchable(),
-                                Forms\Components\Select::make('master_channel_id')
-                                    ->label('Search for master channel')
-                                    ->searchable()
-                                    ->required()
-                                    ->hidden(fn(Get $get) => $get('master_source') !== 'searched')
-                                    ->getSearchResultsUsing(function (string $search) use ($existingFailoverIds) {
-                                        $searchLower = strtolower($search);
-                                        $channels = Auth::user()->channels()
-                                            ->withoutEagerLoads()
-                                            ->with('playlist')
-                                            ->whereNotIn('id', $existingFailoverIds)
-                                            ->where(function ($query) use ($searchLower) {
-                                                $query->whereRaw('LOWER(title) LIKE ?', ["%{$searchLower}%"])
-                                                    ->orWhereRaw('LOWER(title_custom) LIKE ?', ["%{$searchLower}%"])
-                                                    ->orWhereRaw('LOWER(name) LIKE ?', ["%{$searchLower}%"])
-                                                    ->orWhereRaw('LOWER(name_custom) LIKE ?', ["%{$searchLower}%"])
-                                                    ->orWhereRaw('LOWER(stream_id) LIKE ?', ["%{$searchLower}%"])
-                                                    ->orWhereRaw('LOWER(stream_id_custom) LIKE ?', ["%{$searchLower}%"]);
-                                            })
-                                            ->limit(50) // Keep a reasonable limit
-                                            ->get();
-
-                                        // Create options array
-                                        $options = [];
-                                        foreach ($channels as $channel) {
-                                            $displayTitle = $channel->title_custom ?: $channel->title;
-                                            $playlistName = $channel->getEffectivePlaylist()->name ?? 'Unknown';
-                                            $options[$channel->id] = "{$displayTitle} [{$playlistName}]";
-                                        }
-
-                                        return $options;
-                                    })
-                                    ->helperText('To use as the master for the selected channel.')
-                                    ->required(),
-                            ];
-                        })
-                        ->action(function (Collection $records, array $data): void {
-                            // Filter out the master channel from the records to be added as failovers
-                            $masterRecordId = $data['master_source'] === 'selected'
-                                ? $data['selected_master_id']
-                                : $data['master_channel_id'];
-                            $failoverRecords = $records->filter(function ($record) use ($masterRecordId) {
-                                return (int)$record->id !== (int)$masterRecordId;
-                            });
-
-                            foreach ($failoverRecords as $record) {
-                                ChannelFailover::updateOrCreate([
-                                    'channel_id' => $masterRecordId,
-                                    'channel_failover_id' => $record->id,
-                                ]);
-                            }
-                        })->after(function () {
-                            Notification::make()
-                                ->success()
-                                ->title('Channels as failover')
-                                ->body('The selected channels have been added as failovers.')
-                                ->send();
-                        })
-                        ->deselectRecordsAfterCompletion()
-                        ->requiresConfirmation()
-                        ->icon('heroicon-o-arrow-path-rounded-square')
-                        ->modalIcon('heroicon-o-arrow-path-rounded-square')
-                        ->modalDescription('Add the selected channel(s) to the chosen channel as failover sources.')
-                        ->modalSubmitActionLabel('Add failovers now'),
-
-                    Tables\Actions\BulkAction::make('find-replace')
-                        ->label('Find & Replace')
-                        ->form([
-                            Forms\Components\Toggle::make('use_regex')
-                                ->label('Use Regex')
-                                ->live()
-                                ->helperText('Use regex patterns to find and replace. If disabled, will use direct string comparison.')
-                                ->default(true),
-                            Forms\Components\Select::make('column')
-                                ->label('Column to modify')
-                                ->options([
-                                    'title' => 'Channel Title',
-                                    'name' => 'Channel Name (tvg-name)',
-                                ])
-                                ->default('title')
                                 ->required()
-                                ->columnSpan(1),
-                            Forms\Components\TextInput::make('find_replace')
-                                ->label(fn(Get $get) =>  !$get('use_regex') ? 'String to replace' : 'Pattern to replace')
-                                ->required()
-                                ->placeholder(
-                                    fn(Get $get) => $get('use_regex')
-                                        ? '^(US- |UK- |CA- )'
-                                        : 'US -'
-                                )->helperText(
-                                    fn(Get $get) => !$get('use_regex')
-                                        ? 'This is the string you want to find and replace.'
-                                        : 'This is the regex pattern you want to find. Make sure to use valid regex syntax.'
-                                ),
-                            Forms\Components\TextInput::make('replace_with')
-                                ->label('Replace with (optional)')
-                                ->placeholder('Leave empty to remove')
+                                ->hidden(fn(Get $get) => $get('master_source') !== 'searched')
+                                ->getSearchResultsUsing(function (string $search) use ($existingFailoverIds) {
+                                    $searchLower = strtolower($search);
+                                    $channels = Auth::user()->channels()
+                                        ->withoutEagerLoads()
+                                        ->with('playlist')
+                                        ->whereNotIn('id', $existingFailoverIds)
+                                        ->where(function ($query) use ($searchLower) {
+                                            $query->whereRaw('LOWER(title) LIKE ?', ["%{$searchLower}%"])
+                                                ->orWhereRaw('LOWER(title_custom) LIKE ?', ["%{$searchLower}%"])
+                                                ->orWhereRaw('LOWER(name) LIKE ?', ["%{$searchLower}%"])
+                                                ->orWhereRaw('LOWER(name_custom) LIKE ?', ["%{$searchLower}%"])
+                                                ->orWhereRaw('LOWER(stream_id) LIKE ?', ["%{$searchLower}%"])
+                                                ->orWhereRaw('LOWER(stream_id_custom) LIKE ?', ["%{$searchLower}%"]);
+                                        })
+                                        ->limit(50) // Keep a reasonable limit
+                                        ->get();
 
-                        ])
-                        ->action(function (Collection $records, array $data): void {
-                            app('Illuminate\Contracts\Bus\Dispatcher')
-                                ->dispatch(new \App\Jobs\ChannelFindAndReplace(
-                                    user_id: auth()->id(), // The ID of the user who owns the content
-                                    use_regex: $data['use_regex'] ?? true,
-                                    column: $data['column'] ?? 'title',
-                                    find_replace: $data['find_replace'] ?? null,
-                                    replace_with: $data['replace_with'] ?? '',
-                                    channels: $records
-                                ));
-                        })->after(function () {
-                            Notification::make()
-                                ->success()
-                                ->title('Find & Replace started')
-                                ->body('Find & Replace working in the background. You will be notified once the process is complete.')
-                                ->send();
-                        })
-                        ->requiresConfirmation()
-                        ->icon('heroicon-o-magnifying-glass')
-                        ->color('gray')
-                        ->modalIcon('heroicon-o-magnifying-glass')
-                        ->modalDescription('Select what you would like to find and replace in the selected channels.')
-                        ->modalSubmitActionLabel('Replace now'),
-                    Tables\Actions\BulkAction::make('find-replace-reset')
-                        ->label('Undo Find & Replace')
-                        ->form([
-                            Forms\Components\Select::make('column')
-                                ->label('Column to reset')
-                                ->options([
-                                    'title' => 'Channel Title',
-                                    'name' => 'Channel Name (tvg-name)',
-                                ])
-                                ->default('title')
-                                ->required()
-                                ->columnSpan(1),
-                        ])
-                        ->action(function (Collection $records, array $data): void {
-                            app('Illuminate\Contracts\Bus\Dispatcher')
-                                ->dispatch(new \App\Jobs\ChannelFindAndReplaceReset(
-                                    user_id: auth()->id(), // The ID of the user who owns the content
-                                    column: $data['column'] ?? 'title',
-                                    channels: $records
-                                ));
-                        })->after(function () {
-                            Notification::make()
-                                ->success()
-                                ->title('Find & Replace reset started')
-                                ->body('Find & Replace reset working in the background. You will be notified once the process is complete.')
-                                ->send();
-                        })
-                        ->requiresConfirmation()
-                        ->icon('heroicon-o-arrow-uturn-left')
-                        ->color('warning')
-                        ->modalIcon('heroicon-o-arrow-uturn-left')
-                        ->modalDescription('Reset Find & Replace results back to playlist defaults for the selected channels. This will remove any custom values set in the selected column.')
-                        ->modalSubmitActionLabel('Reset now'),
-                    Tables\Actions\BulkAction::make('enable')
-                        ->label('Enable selected')
-                        ->action(function (Collection $records): void {
-                            foreach ($records as $record) {
-                                $record->update([
-                                    'enabled' => true,
-                                ]);
-                            }
-                        })->after(function () {
-                            Notification::make()
-                                ->success()
-                                ->title('Selected channels enabled')
-                                ->body('The selected channels have been enabled.')
-                                ->send();
-                        })
-                        ->color('success')
-                        ->deselectRecordsAfterCompletion()
-                        ->requiresConfirmation()
-                        ->icon('heroicon-o-check-circle')
-                        ->modalIcon('heroicon-o-check-circle')
-                        ->modalDescription('Enable the selected channel(s) now?')
-                        ->modalSubmitActionLabel('Yes, enable now'),
-                    Tables\Actions\BulkAction::make('disable')
-                        ->label('Disable selected')
-                        ->action(function (Collection $records): void {
-                            foreach ($records as $record) {
-                                $record->update([
-                                    'enabled' => false,
-                                ]);
-                            }
-                        })->after(function () {
-                            Notification::make()
-                                ->success()
-                                ->title('Selected channels disabled')
-                                ->body('The selected channels have been disabled.')
-                                ->send();
-                        })
-                        ->color('danger')
-                        ->deselectRecordsAfterCompletion()
-                        ->requiresConfirmation()
-                        ->icon('heroicon-o-x-circle')
-                        ->modalIcon('heroicon-o-x-circle')
-                        ->modalDescription('Disable the selected channel(s) now?')
-                        ->modalSubmitActionLabel('Yes, disable now')
-                ]),
-            ]);
+                                    // Create options array
+                                    $options = [];
+                                    foreach ($channels as $channel) {
+                                        $displayTitle = $channel->title_custom ?: $channel->title;
+                                        $playlistName = $channel->getEffectivePlaylist()->name ?? 'Unknown';
+                                        $options[$channel->id] = "{$displayTitle} [{$playlistName}]";
+                                    }
+
+                                    return $options;
+                                })
+                                ->helperText('To use as the master for the selected channel.')
+                                ->required(),
+                        ];
+                    })
+                    ->action(function (Collection $records, array $data): void {
+                        // Filter out the master channel from the records to be added as failovers
+                        $masterRecordId = $data['master_source'] === 'selected'
+                            ? $data['selected_master_id']
+                            : $data['master_channel_id'];
+                        $failoverRecords = $records->filter(function ($record) use ($masterRecordId) {
+                            return (int)$record->id !== (int)$masterRecordId;
+                        });
+
+                        foreach ($failoverRecords as $record) {
+                            ChannelFailover::updateOrCreate([
+                                'channel_id' => $masterRecordId,
+                                'channel_failover_id' => $record->id,
+                            ]);
+                        }
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title('Channels as failover')
+                            ->body('The selected channels have been added as failovers.')
+                            ->send();
+                    })
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-arrow-path-rounded-square')
+                    ->modalIcon('heroicon-o-arrow-path-rounded-square')
+                    ->modalDescription('Add the selected channel(s) to the chosen channel as failover sources.')
+                    ->modalSubmitActionLabel('Add failovers now'),
+
+                Tables\Actions\BulkAction::make('find-replace')
+                    ->label('Find & Replace')
+                    ->form([
+                        Forms\Components\Toggle::make('use_regex')
+                            ->label('Use Regex')
+                            ->live()
+                            ->helperText('Use regex patterns to find and replace. If disabled, will use direct string comparison.')
+                            ->default(true),
+                        Forms\Components\Select::make('column')
+                            ->label('Column to modify')
+                            ->options([
+                                'title' => 'Channel Title',
+                                'name' => 'Channel Name (tvg-name)',
+                            ])
+                            ->default('title')
+                            ->required()
+                            ->columnSpan(1),
+                        Forms\Components\TextInput::make('find_replace')
+                            ->label(fn(Get $get) =>  !$get('use_regex') ? 'String to replace' : 'Pattern to replace')
+                            ->required()
+                            ->placeholder(
+                                fn(Get $get) => $get('use_regex')
+                                    ? '^(US- |UK- |CA- )'
+                                    : 'US -'
+                            )->helperText(
+                                fn(Get $get) => !$get('use_regex')
+                                    ? 'This is the string you want to find and replace.'
+                                    : 'This is the regex pattern you want to find. Make sure to use valid regex syntax.'
+                            ),
+                        Forms\Components\TextInput::make('replace_with')
+                            ->label('Replace with (optional)')
+                            ->placeholder('Leave empty to remove')
+
+                    ])
+                    ->action(function (Collection $records, array $data): void {
+                        app('Illuminate\Contracts\Bus\Dispatcher')
+                            ->dispatch(new \App\Jobs\ChannelFindAndReplace(
+                                user_id: auth()->id(), // The ID of the user who owns the content
+                                use_regex: $data['use_regex'] ?? true,
+                                column: $data['column'] ?? 'title',
+                                find_replace: $data['find_replace'] ?? null,
+                                replace_with: $data['replace_with'] ?? '',
+                                channels: $records
+                            ));
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title('Find & Replace started')
+                            ->body('Find & Replace working in the background. You will be notified once the process is complete.')
+                            ->send();
+                    })
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-magnifying-glass')
+                    ->color('gray')
+                    ->modalIcon('heroicon-o-magnifying-glass')
+                    ->modalDescription('Select what you would like to find and replace in the selected channels.')
+                    ->modalSubmitActionLabel('Replace now'),
+                Tables\Actions\BulkAction::make('find-replace-reset')
+                    ->label('Undo Find & Replace')
+                    ->form([
+                        Forms\Components\Select::make('column')
+                            ->label('Column to reset')
+                            ->options([
+                                'title' => 'Channel Title',
+                                'name' => 'Channel Name (tvg-name)',
+                            ])
+                            ->default('title')
+                            ->required()
+                            ->columnSpan(1),
+                    ])
+                    ->action(function (Collection $records, array $data): void {
+                        app('Illuminate\Contracts\Bus\Dispatcher')
+                            ->dispatch(new \App\Jobs\ChannelFindAndReplaceReset(
+                                user_id: auth()->id(), // The ID of the user who owns the content
+                                column: $data['column'] ?? 'title',
+                                channels: $records
+                            ));
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title('Find & Replace reset started')
+                            ->body('Find & Replace reset working in the background. You will be notified once the process is complete.')
+                            ->send();
+                    })
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-arrow-uturn-left')
+                    ->color('warning')
+                    ->modalIcon('heroicon-o-arrow-uturn-left')
+                    ->modalDescription('Reset Find & Replace results back to playlist defaults for the selected channels. This will remove any custom values set in the selected column.')
+                    ->modalSubmitActionLabel('Reset now'),
+                Tables\Actions\BulkAction::make('enable')
+                    ->label('Enable selected')
+                    ->action(function (Collection $records): void {
+                        foreach ($records as $record) {
+                            $record->update([
+                                'enabled' => true,
+                            ]);
+                        }
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title('Selected channels enabled')
+                            ->body('The selected channels have been enabled.')
+                            ->send();
+                    })
+                    ->color('success')
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-check-circle')
+                    ->modalIcon('heroicon-o-check-circle')
+                    ->modalDescription('Enable the selected channel(s) now?')
+                    ->modalSubmitActionLabel('Yes, enable now'),
+                Tables\Actions\BulkAction::make('disable')
+                    ->label('Disable selected')
+                    ->action(function (Collection $records): void {
+                        foreach ($records as $record) {
+                            $record->update([
+                                'enabled' => false,
+                            ]);
+                        }
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title('Selected channels disabled')
+                            ->body('The selected channels have been disabled.')
+                            ->send();
+                    })
+                    ->color('danger')
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-x-circle')
+                    ->modalIcon('heroicon-o-x-circle')
+                    ->modalDescription('Disable the selected channel(s) now?')
+                    ->modalSubmitActionLabel('Yes, disable now')
+            ]),
+        ];
     }
 
     public static function getRelations(): array

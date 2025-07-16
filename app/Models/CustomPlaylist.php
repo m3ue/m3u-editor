@@ -49,6 +49,17 @@ class CustomPlaylist extends Model
             ->where('enabled', true);
     }
 
+    public function series(): BelongsToMany
+    {
+        return $this->belongsToMany(Series::class, 'series_custom_playlist');
+    }
+
+    public function enabled_series(): BelongsToMany
+    {
+        return $this->series()
+            ->where('enabled', true);
+    }
+
     public function live_channels(): BelongsToMany
     {
         return $this->channels()

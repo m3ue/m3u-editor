@@ -58,7 +58,11 @@ class CustomPlaylistResource extends Resource
     {
         return $table
             ->modifyQueryUsing(function (Builder $query) {
-                $query->withCount('enabled_live_channels')
+                $query->withCount('live_channels')
+                    ->withCount('vod_channels')
+                    ->withCount('series')
+                    ->withCount('enabled_series')
+                    ->withCount('enabled_live_channels')
                     ->withCount('enabled_vod_channels');
             })
             ->columns([
@@ -76,27 +80,19 @@ class CustomPlaylistResource extends Resource
                     ->tooltip('Total streams available for this playlist (∞ indicates no limit)')
                     ->description(fn(CustomPlaylist $record): string => "Active: " . (int) Redis::get("active_streams:{$record->id}") ?? 0)
                     ->sortable(),
-                // Tables\Columns\TextColumn::make('channels_count')
-                //     ->label('Channels')
-                //     ->counts('channels')
-                //     ->toggleable()
-                //     ->sortable(),
                 Tables\Columns\TextColumn::make('live_channels_count')
                     ->label('Live')
-                    ->counts('live_channels')
                     ->description(fn(CustomPlaylist $record): string => "Enabled: {$record->enabled_live_channels_count}")
                     ->toggleable()
                     ->sortable(),
                 Tables\Columns\TextColumn::make('vod_channels_count')
                     ->label('VOD')
-                    ->counts('vod_channels')
                     ->description(fn(CustomPlaylist $record): string => "Enabled: {$record->enabled_vod_channels_count}")
                     ->toggleable()
                     ->sortable(),
-                Tables\Columns\TextColumn::make('channels_count')
-                    ->label('Channels')
-                    ->counts('channels')
-                    ->description(fn(CustomPlaylist $record): string => "Enabled: {$record->enabled_channels_count}")
+                Tables\Columns\TextColumn::make('series_count')
+                    ->label('Series')
+                    ->description(fn(CustomPlaylist $record): string => "Enabled: {$record->enabled_series_count}")
                     ->toggleable()
                     ->sortable(),
                 Tables\Columns\ToggleColumn::make('enable_proxy')
@@ -162,6 +158,7 @@ class CustomPlaylistResource extends Resource
         return [
             RelationManagers\ChannelsRelationManager::class,
             RelationManagers\TagsRelationManager::class,
+            RelationManagers\SeriesRelationManager::class,
         ];
     }
 
