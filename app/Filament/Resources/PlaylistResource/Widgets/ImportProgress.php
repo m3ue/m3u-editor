@@ -28,8 +28,8 @@ class ImportProgress extends Widget
         }
         return [
             'processing' => $isProcessing,
-            'progress' => $record->progress ?? 100, // default to complete if no record
-            'seriesProgress' => $record->series_progress ?? 100, // default to complete if no record
+            'progress' => round($record->progress ?? 100, 2), // default to complete if no record
+            'seriesProgress' => round($record->series_progress ?? 100, 2), // default to complete if no record
         ];
     }
 }
