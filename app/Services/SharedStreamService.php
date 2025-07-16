@@ -231,7 +231,6 @@ class SharedStreamService
             } else {
                 // Join existing active stream
                 Log::channel('ffmpeg')->debug("SharedStream: Client {$clientId} joining existing active stream {$streamKey}");
-                $this->incrementClientCount($streamKey);
                 $this->registerClient($streamKey, $clientId, $options);
                 return $streamInfo;
             }
@@ -318,7 +317,6 @@ class SharedStreamService
         // If primary was not attempted (e.g. stream already running), just return existing streamInfo
         if (!$primaryAttempted) {
             Log::channel('ffmpeg')->debug("SharedStream: Client {$clientId} joining existing active stream {$streamKey} (no new attempt needed).");
-            $this->incrementClientCount($streamKey);
             $this->registerClient($streamKey, $clientId, $options);
             return $streamInfo;
         }
@@ -1364,15 +1362,21 @@ class SharedStreamService
             $client = SharedStreamClient::where('stream_id', $streamKey)
                 ->where('client_id', $clientId)
                 ->first();
+
+            $disconnected = true; // Assume disconnected by default
             if ($client) {
+                // Check if the client was previously disconnected
+                $disconnected = $client->status !== 'connected';
+
                 // Update existing client info
                 $update = [
                     'ip_address' => $ipAddress,
                     'user_agent' => $userAgent,
                     'last_activity_at' => now(),
                 ];
-                if ($client->status !== 'connected') {
-                    // Only update connected_at if the status is changing to connected
+
+                // Only update connected_at if the status is changing to connected
+                if ($disconnected) {
                     $update['connected_at'] = now();
                     $update['bytes_received'] = 0; // Reset bytes received on reconnect
                     $update['status'] = 'connected'; // Ensure status is set to connected
@@ -1390,7 +1394,13 @@ class SharedStreamService
                     'status' => 'connected'
                 ]);
             }
-            Log::channel('ffmpeg')->debug("Registered client {$clientId} for stream {$streamKey} in database");
+
+            // If previously disconnected (or newly created), update last activity and log it
+            if ($disconnected) {
+                // Increment client count in stream info
+                $this->incrementClientCount($streamKey);
+                Log::channel('ffmpeg')->debug("Registered client {$clientId} for stream {$streamKey} in database");
+            }
         } catch (\Exception $e) {
             Log::channel('ffmpeg')->error("Error registering client {$clientId} for stream {$streamKey}: " . $e->getMessage());
         }
