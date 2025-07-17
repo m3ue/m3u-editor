@@ -12,15 +12,15 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletingScope;
 
-class TagsRelationManager extends RelationManager
+class CategoriesRelationManager extends RelationManager
 {
     protected static string $relationship = 'tags';
 
-    protected static ?string $label = 'Group';
-    protected static ?string $pluralLabel = 'Groups';
+    protected static ?string $label = 'Category';
+    protected static ?string $pluralLabel = 'Categories';
 
-    protected static ?string $title = 'Groups';
-    protected static ?string $navigationLabel = 'Groups';
+    protected static ?string $title = 'Categories';
+    protected static ?string $navigationLabel = 'Categories';
 
     public function form(Form $form): Form
     {
@@ -43,7 +43,7 @@ class TagsRelationManager extends RelationManager
                 return $action->button()->label('Filters');
             })
             ->modifyQueryUsing(function (Builder $query) use ($ownerRecord) {
-                $query->where('type', $ownerRecord->uuid);
+                $query->where('type', $ownerRecord->uuid . '-category');
             })
             ->paginated([10, 25, 50, 100])
             ->defaultPaginationPageOption(25)
@@ -51,13 +51,14 @@ class TagsRelationManager extends RelationManager
                 Tables\Columns\TextInputColumn::make('name')
                     ->sortable(),
             ])
+            ->reorderable('order_column')
             ->filters([
                 //
             ])
             ->headerActions([
                 Tables\Actions\CreateAction::make()
                     ->using(function (array $data, string $model) use ($ownerRecord): Model {
-                        $data['type'] = $ownerRecord->uuid;
+                        $data['type'] = $ownerRecord->uuid . '-category';
                         $tag = $model::create($data);
                         $ownerRecord->attachTag($tag);
                         return $tag;

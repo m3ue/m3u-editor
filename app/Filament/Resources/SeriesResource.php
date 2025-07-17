@@ -88,7 +88,10 @@ class SeriesResource extends Resource
                 ->description((fn($record) => Str::limit($record->plot, 200)))
                 ->wrap()
                 ->extraAttributes(['style' => 'min-width: 400px;'])
-                ->searchable(),
+                ->searchable()
+                ->searchable(query: function (Builder $query, string $search): Builder {
+                    return $query->orWhereRaw('LOWER(series.name) LIKE ?', ['%' . strtolower($search) . '%']);
+                }),
             Tables\Columns\ToggleColumn::make('enabled')
                 ->toggleable()
                 ->tooltip('Toggle series status')
