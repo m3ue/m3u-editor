@@ -250,6 +250,11 @@ class ListChannels extends ListRecords
                 return $query->where('group_id', $relationId);
             })->count();
 
+        $withFailoverCount = Channel::query()->whereHas('failovers')->where($where)
+            ->when($relationId, function ($query, $relationId) {
+                return $query->where('group_id', $relationId);
+            })->count();
+
         // Return tabs
         return [
             'all' => Tab::make('All Channels')
@@ -264,6 +269,11 @@ class ListChannels extends ListRecords
                 ->badgeColor('danger')
                 ->modifyQueryUsing(fn($query) => $query->where('enabled', false))
                 ->badge($disabledCount),
+            'failover' => Tab::make('Failover')
+                // ->icon('heroicon-m-x-mark')
+                ->badgeColor('info')
+                ->modifyQueryUsing(fn($query) => $query->whereHas('failovers'))
+                ->badge($withFailoverCount),
             'custom' => Tab::make('Custom')
                 // ->icon('heroicon-m-x-mark')
                 ->modifyQueryUsing(fn($query) => $query->where('is_custom', true))
