@@ -98,16 +98,16 @@ class ProcessM3uImportComplete implements ShouldQueue
 
             // Check if we need to invalidate the import before proceeding
             if ($this->invalidateImport) {
-                // Only invalidate if there are new channels
+                // Only invalidate if there are channels being removed
                 if ($removedChannelCount > 0) {
                     $currentCount = $playlist->channels()->where(
                         ['is_custom', false]
                     )->count();
 
-                    // See how many new channels were added
+                    // See how many new channels there will be after the import
                     $newCount = $currentCount + $newChannelCount - $removedChannelCount;
 
-                    // If the new count is less than the current count minus the threshold, invalidate the import
+                    // If the new count will be less than the current count (minus the threshold), invalidate the import
                     if ($newCount < ($currentCount - $this->invalidateImportThreshold)) {
                         $message = "Playlist Sync Invalidated: The channel count would have been {$newCount} after import, which is less than the current count of {$currentCount} minus the threshold of {$this->invalidateImportThreshold}.";
 
