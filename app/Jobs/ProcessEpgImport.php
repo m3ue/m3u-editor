@@ -92,23 +92,28 @@ class ProcessEpgImport implements ShouldQueue
                 // We need to grab the file contents first and set to temp file
                 $verify = !$epg->disable_ssl_verification;
                 $userAgent = empty($epg->user_agent) ? $this->userAgent : $epg->user_agent;
+
+                // Make sure the directory exists
+                Storage::disk('local')->makeDirectory($epg->folder_path);
+
+                // Get the file path
+                $filePath = Storage::disk('local')->path($epg->file_path);
+                
+                // If the file exists, delete it
+                if (Storage::disk('local')->exists($epg->file_path)) {
+                    Storage::disk('local')->delete($epg->file_path);
+                }
                 $response = Http::withUserAgent($userAgent)
+                    ->sink($filePath)
                     ->withOptions(['verify' => $verify])
-                    ->timeout(60 * 5) // set timeout to five minues
+                    ->timeout(60 * 5) // set timeout to five minutes
                     ->throw()->get($url->toString());
 
-                if ($response->ok()) {
-                    // Remove previous saved files
-                    Storage::disk('local')->deleteDirectory($epg->folder_path);
-
-                    // Save the file to local storage
-                    Storage::disk('local')->put(
-                        $epg->file_path,
-                        $response->body()
-                    );
-
+                if ($response->ok() && Storage::disk('local')->exists($epg->file_path)) {
                     // Update the file path
                     $filePath = Storage::disk('local')->path($epg->file_path);
+                } else {
+                    $filePath = null;
                 }
             } else {
                 // Get uploaded file contents

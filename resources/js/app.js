@@ -7,6 +7,7 @@ import './echo'
 // Vendor
 import './vendor/qrcode'
 import './vendor/video'
+import './vendor/epg-viewer'
 
 // Fix broken images
 document.addEventListener('error', event => {

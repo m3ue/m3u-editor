@@ -179,6 +179,8 @@ class EpgResource extends Resource
                         ->modalSubmitActionLabel('Yes, reset now'),
                     Tables\Actions\DeleteAction::make(),
                 ])->button()->hiddenLabel()->size('sm'),
+                // Tables\Actions\ViewAction::make()
+                //     ->button()->hiddenLabel()->size('sm'),
             ], position: Tables\Enums\ActionsPosition::BeforeCells)
             ->bulkActions([
                 Tables\Actions\BulkActionGroup::make([
@@ -226,6 +228,7 @@ class EpgResource extends Resource
     {
         return [
             'index' => Pages\ListEpgs::route('/'),
+            // 'view' => Pages\ViewEpg::route('/{record}'),
             // 'create' => Pages\CreateEpg::route('/create'),
             // 'edit' => Pages\EditEpg::route('/{record}/edit'),
         ];

@@ -90,3 +90,11 @@ Route::group(['prefix' => 'monitor'], function () {
     Route::post('cleanup', [\App\Http\Controllers\Api\SharedStreamApiController::class, 'cleanup'])
         ->name('api.monitor.cleanup');
 });
+
+/*
+ * EPG API routes
+ */
+Route::group(['prefix' => 'epg'], function () {
+    Route::get('{uuid}/data', [\App\Http\Controllers\Api\EpgApiController::class, 'getData'])
+        ->name('api.epg.data');
+});

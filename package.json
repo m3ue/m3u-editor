@@ -22,6 +22,7 @@
         "vite": ">=6.1.6"
     },
     "dependencies": {
+        "@iptv/xmltv": "^1.0.1",
         "easyqrcodejs": "^4.6.2"
     }
 }
