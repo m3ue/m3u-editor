@@ -14,7 +14,7 @@ use XMLReader;
 class EpgApiController extends Controller
 {
     /**
-     * Get EPG data for viewing
+     * Get EPG data for viewing with pagination support
      *
      * @param string $uuid
      * @param Request $request
@@ -26,6 +26,11 @@ class EpgApiController extends Controller
         set_time_limit(120);
         
         $epg = Epg::where('uuid', $uuid)->firstOrFail();
+        
+        // Pagination parameters
+        $page = (int) $request->get('page', 1);
+        $perPage = (int) $request->get('per_page', 50);
+        $skip = ($page - 1) * $perPage;
 
         // Get the date range for EPG data (default to current day)
         $startDate = $request->get('start_date', Carbon::now()->format('Y-m-d'));
@@ -33,6 +38,9 @@ class EpgApiController extends Controller
         
         Log::info('EPG API Request', [
             'uuid' => $uuid,
+            'page' => $page,
+            'per_page' => $perPage,
+            'skip' => $skip,
             'start_date' => $startDate,
             'end_date' => $endDate,
             'file_path' => $epg->file_path
@@ -50,7 +58,8 @@ class EpgApiController extends Controller
         $programmes = [];
 
         try {
-            // First pass: get channels
+            // First pass: get all channels and apply pagination
+            $allChannels = [];
             $channelReader = new XMLReader();
             $channelReader->open('compress.zlib://' . $filePath);
 
@@ -86,13 +95,32 @@ class EpgApiController extends Controller
                     $innerReader->close();
 
                     if ($channelId) {
-                        $channels[$channelId] = $channel;
+                        $allChannels[] = $channel;
                     }
                 }
             }
             $channelReader->close();
+            
+            // Apply pagination to channels
+            $totalChannels = count($allChannels);
+            $paginatedChannels = array_slice($allChannels, $skip, $perPage);
+            $channelIds = array_column($paginatedChannels, 'id');
+            
+            // Convert paginated channels to associative array
+            $channels = [];
+            foreach ($paginatedChannels as $channel) {
+                $channels[$channel['id']] = $channel;
+            }
+            
+            Log::info('Channel pagination', [
+                'total_channels' => $totalChannels,
+                'page' => $page,
+                'per_page' => $perPage,
+                'returned_channels' => count($paginatedChannels),
+                'has_more' => ($skip + $perPage) < $totalChannels
+            ]);
 
-            // Second pass: get programmes for the date range
+            // Second pass: get programmes only for the paginated channels
             $programmes = [];
             $programmeCount = 0;
             $filteredCount = 0;
@@ -103,9 +131,10 @@ class EpgApiController extends Controller
             $startTimestamp = Carbon::parse($startDate)->startOfDay();
             $endTimestamp = Carbon::parse($endDate)->endOfDay();
             
-            Log::info('Starting programme parsing', [
+            Log::info('Starting programme parsing for paginated channels', [
                 'start_date' => $startDate,
                 'end_date' => $endDate,
+                'channel_count' => count($channelIds),
                 'start_timestamp' => $startTimestamp->toISOString(),
                 'end_timestamp' => $endTimestamp->toISOString()
             ]);
@@ -115,7 +144,7 @@ class EpgApiController extends Controller
                     $programmeCount++;
                     
                     // Add safety limit to prevent excessive processing
-                    if ($programmeCount > 50000) {
+                    if ($programmeCount > 100000) {
                         Log::info('Programme processing limit reached', ['count' => $programmeCount]);
                         break;
                     }
@@ -127,21 +156,15 @@ class EpgApiController extends Controller
                     if (!$channelId || !$start) {
                         continue;
                     }
+                    
+                    // Only process programmes for channels in current page
+                    if (!in_array($channelId, $channelIds)) {
+                        continue;
+                    }
 
                     // Parse the datetime format (YYYYMMDDHHMMSS +ZZZZ)
                     $startDateTime = $this->parseXmltvDateTime($start);
                     $stopDateTime = $stop ? $this->parseXmltvDateTime($stop) : null;
-
-                    // Log first few programmes for debugging
-                    if ($programmeCount <= 5) {
-                        Log::info('Programme sample', [
-                            'count' => $programmeCount,
-                            'channel_id' => $channelId,
-                            'start_raw' => $start,
-                            'start_parsed' => $startDateTime ? $startDateTime->toISOString() : null,
-                            'in_range' => $startDateTime && $startDateTime >= $startTimestamp && $startDateTime <= $endTimestamp
-                        ]);
-                    }
 
                     // Filter by date range
                     if ($startDateTime && ($startDateTime < $startTimestamp || $startDateTime > $endTimestamp)) {
@@ -223,6 +246,14 @@ class EpgApiController extends Controller
             'date_range' => [
                 'start' => $startDate,
                 'end' => $endDate,
+            ],
+            'pagination' => [
+                'current_page' => $page,
+                'per_page' => $perPage,
+                'total_channels' => $totalChannels,
+                'returned_channels' => count($paginatedChannels),
+                'has_more' => ($skip + $perPage) < $totalChannels,
+                'next_page' => ($skip + $perPage) < $totalChannels ? $page + 1 : null,
             ],
             'channels' => $channels,
             'programmes' => $programmes,

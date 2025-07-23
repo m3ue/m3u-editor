@@ -4,18 +4,34 @@ function epgViewer(config) {
         epgUuid: config.epgUuid,
         apiUrl: config.apiUrl,
         loading: false,
+        loadingMore: false,
         error: null,
         epgData: null,
         currentDate: new Date().toISOString().split('T')[0],
         timeSlots: [],
         selectedProgramme: null,
         currentTimePosition: -1,
-
+        
+        // Pagination
+        currentPage: 1,
+        perPage: 50,
+        hasMore: true,
+        allChannels: {},
+        allProgrammes: {},
+        
         init() {
             this.generateTimeSlots();
             this.updateCurrentTime();
             // Update current time every minute
             setInterval(() => this.updateCurrentTime(), 60000);
+            
+            // Setup scroll listener for pagination
+            this.$nextTick(() => {
+                const container = this.$refs.epgContainer;
+                if (container) {
+                    container.addEventListener('scroll', this.handleScroll.bind(this));
+                }
+            });
         },
 
         generateTimeSlots() {
@@ -48,39 +64,99 @@ function epgViewer(config) {
         async loadEpgData() {
             this.loading = true;
             this.error = null;
-            this.selectedProgramme = null;
-
+            this.currentPage = 1;
+            this.allChannels = {};
+            this.allProgrammes = {};
+            
             try {
-                console.log('Loading EPG data from:', this.apiUrl + `?start_date=${this.currentDate}&end_date=${this.currentDate}`);
-                const response = await fetch(this.apiUrl + `?start_date=${this.currentDate}&end_date=${this.currentDate}`);
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-
-                this.epgData = await response.json();
-                console.log('EPG data loaded:', this.epgData);
-                console.log('Channels found:', Object.keys(this.epgData?.channels || {}).length);
-                console.log('Programmes found:', Object.keys(this.epgData?.programmes || {}).length);
-                
-                // Debug first few programmes
-                const firstChannelId = Object.keys(this.epgData?.channels || {})[0];
-                if (firstChannelId) {
-                    console.log('First channel programmes:', this.epgData?.programmes?.[firstChannelId]?.slice(0, 3));
-                }
-                
-                this.updateCurrentTime();
-                
-                // Auto-scroll to current time if viewing today
-                if (this.isToday()) {
-                    setTimeout(() => this.scrollToCurrentTime(), 100);
-                }
+                await this.loadPage(1);
+                this.loading = false;
             } catch (error) {
                 console.error('Error loading EPG data:', error);
-                this.error = 'Failed to load EPG data. Please try again.';
-            } finally {
+                this.error = 'Failed to load EPG data: ' + error.message;
                 this.loading = false;
             }
+        },
+
+        async loadPage(page = 1) {
+            const isInitialLoad = page === 1;
+            
+            if (!isInitialLoad) {
+                this.loadingMore = true;
+            }
+            
+            try {
+                console.log(`Loading page ${page} of EPG data...`);
+                const url = `${this.apiUrl}?start_date=${this.currentDate}&end_date=${this.getEndDate()}&page=${page}&per_page=${this.perPage}`;
+                console.log('Request URL:', url);
+                
+                const response = await fetch(url);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                console.log('EPG data loaded successfully:', data);
+                
+                // Merge channels and programmes
+                Object.assign(this.allChannels, data.channels || {});
+                Object.assign(this.allProgrammes, data.programmes || {});
+                
+                // Update pagination state
+                this.currentPage = data.pagination.current_page;
+                this.hasMore = data.pagination.has_more;
+                
+                // Set epgData for template compatibility
+                this.epgData = {
+                    epg: data.epg,
+                    date_range: data.date_range,
+                    channels: this.allChannels,
+                    programmes: this.allProgrammes,
+                    pagination: data.pagination
+                };
+                
+                console.log('Loaded channels:', Object.keys(this.allChannels).length);
+                console.log('Has more pages:', this.hasMore);
+                
+            } catch (error) {
+                console.error('Error loading page:', error);
+                if (isInitialLoad) {
+                    throw error;
+                }
+            } finally {
+                if (!isInitialLoad) {
+                    this.loadingMore = false;
+                }
+            }
+        },
+
+        async loadMoreData() {
+            if (!this.hasMore || this.loadingMore) {
+                return;
+            }
+            
+            const nextPage = this.currentPage + 1;
+            await this.loadPage(nextPage);
+        },
+
+        handleScroll(event) {
+            const container = event.target;
+            const scrollTop = container.scrollTop;
+            const scrollHeight = container.scrollHeight;
+            const clientHeight = container.clientHeight;
+            
+            // Check if we're near the bottom (within 200px)
+            const nearBottom = scrollTop + clientHeight >= scrollHeight - 200;
+            
+            if (nearBottom && this.hasMore && !this.loadingMore) {
+                console.log('Near bottom, loading more data...');
+                this.loadMoreData();
+            }
+        },
+
+        getEndDate() {
+            return this.currentDate;
         },
 
         selectProgramme(programme) {
@@ -165,7 +241,7 @@ function epgViewer(config) {
         },
 
         getChannelProgrammes(channelId) {
-            const programmes = this.epgData?.programmes?.[channelId] || [];
+            const programmes = this.allProgrammes?.[channelId] || [];
             if (programmes.length === 0) {
                 console.log('No programmes found for channel:', channelId);
             }
