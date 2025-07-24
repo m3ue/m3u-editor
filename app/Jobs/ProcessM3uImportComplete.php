@@ -100,9 +100,9 @@ class ProcessM3uImportComplete implements ShouldQueue
             if ($this->invalidateImport) {
                 // Only invalidate if there are channels being removed
                 if ($removedChannelCount > 0) {
-                    $currentCount = $playlist->channels()->where(
-                        ['is_custom', false]
-                    )->count();
+                    $currentCount = $playlist->channels()
+                        ->where('is_custom', false)
+                        ->count();
 
                     // See how many new channels there will be after the import
                     $newCount = $currentCount + $newChannelCount - $removedChannelCount;
