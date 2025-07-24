@@ -1,12 +1,14 @@
 @php
     $record = $getRecord();
-    $epgUuid = $record?->uuid;
+    $class = class_basename($record);
+    $route = $class === 'Epg' 
+        ? route('api.epg.data', ['uuid' => $record?->uuid]) 
+        : route('api.epg.playlist.data', ['uuid' => $record?->uuid]) ;
 @endphp
 
 <div 
     x-data="epgViewer({ 
-        epgUuid: '{{ $epgUuid }}',
-        apiUrl: '{{ route('api.epg.data', ['uuid' => $epgUuid]) }}' 
+        apiUrl: '{{ $route }}' 
     })"
     x-init="init(); loadEpgData()"
     class="w-full"
@@ -87,34 +89,15 @@
                 </div>
             </div>
 
-            <!-- EPG Grid Container with Pagination -->
-            <div class="bg-white border border-gray-200 rounded-lg overflow-hidden relative" style="height: 600px;">
-                <!-- Loading More Overlay -->
-                <div 
-                    x-show="loadingMore" 
-                    x-transition:enter="transition ease-out duration-300"
-                    x-transition:enter-start="opacity-0"
-                    x-transition:enter-end="opacity-100"
-                    x-transition:leave="transition ease-in duration-200"
-                    x-transition:leave-start="opacity-100"
-                    x-transition:leave-end="opacity-0"
-                    class="absolute top-0 left-0 right-0 z-50 bg-blue-50 border-b border-blue-200 px-4 py-2"
-                >
-                    <div class="flex items-center justify-center space-x-2">
-                        <svg class="animate-spin h-4 w-4 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                        </svg>
-                        <span class="text-sm text-blue-700">Loading more channels...</span>
-                    </div>
-                </div>
+            <!-- EPG Grid Container -->
+            <div class="bg-white border border-gray-200 rounded-lg overflow-hidden" style="height: 600px;">
                 <!-- Time Header -->
                 <div class="sticky top-0 z-20 bg-gray-50 border-b border-gray-200">
                     <div class="flex">
                         <!-- Channel Column Header -->
                         <div class="w-48 px-4 py-3 border-r border-gray-200 bg-gray-100">
                             <span class="text-sm font-medium text-gray-900">Channels</span>
-                            <span class="text-xs text-gray-500 ml-2" x-text="`(${Object.keys(allChannels || {}).length}${hasMore ? '+' : ''})`"></span>
+                            <span class="text-xs text-gray-500 ml-2" x-text="`(${Object.keys(epgData?.channels || {}).length})`"></span>
                         </div>
                         <!-- Time Slots Header (Scrollable) -->
                         <div class="flex-1 relative overflow-hidden">
@@ -157,7 +140,7 @@
                             @scroll="if (scrollContainer) scrollContainer.scrollTop = $el.scrollTop"
                             x-ref="channelScroll"
                         >
-                            <template x-for="(channel, channelId) in allChannels || {}" :key="channelId">
+                            <template x-for="(channel, channelId) in epgData?.channels || {}" :key="channelId">
                                 <div class="px-4 py-3 border-b border-gray-100 flex items-center space-x-3 hover:bg-gray-100 transition-colors" style="height: 60px;">
                                     <div class="flex-shrink-0">
                                         <img 
@@ -173,22 +156,15 @@
                                     </div>
                                 </div>
                             </template>
-                            
-                            <!-- Loading indicator at bottom when more data is being loaded -->
-                            <div x-show="hasMore && !loadingMore" class="px-4 py-3 text-center">
-                                <div class="text-xs text-gray-500">Scroll down for more channels...</div>
-                            </div>
                         </div>
                     </div>
 
                     <!-- Programme Timeline (Scrollable) -->
                     <div 
                         class="flex-1 overflow-auto relative timeline-scroll"
-                        x-ref="epgContainer"
                         @scroll="
                             $refs.channelScroll.scrollTop = $el.scrollTop;
                             document.querySelector('.time-header-scroll').scrollLeft = $el.scrollLeft;
-                            handleScroll($event);
                         "
                     >
                         <div class="relative" style="width: 2400px;"> <!-- 24 hours * 100px per hour -->
@@ -199,7 +175,7 @@
                                 :style="`left: ${currentTimePosition}px;`"
                             ></div>
                             
-                            <template x-for="(channel, channelId) in allChannels || {}" :key="channelId">
+                            <template x-for="(channel, channelId) in epgData?.channels || {}" :key="channelId">
                                 <div class="relative border-b border-gray-100" style="height: 60px;">
                                     <!-- Time grid background -->
                                     <div class="absolute inset-0 flex">

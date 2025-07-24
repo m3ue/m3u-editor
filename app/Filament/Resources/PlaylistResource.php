@@ -397,6 +397,8 @@ class PlaylistResource extends Resource
                     Tables\Actions\DeleteAction::make(),
                 ])->button()->hiddenLabel()->size('sm'),
                 Tables\Actions\EditAction::make()->button()->hiddenLabel()->size('sm'),
+                // Tables\Actions\ViewAction::make()
+                //     ->button()->hiddenLabel()->size('sm'),
             ], position: Tables\Enums\ActionsPosition::BeforeCells)
             ->bulkActions([
                 Tables\Actions\BulkActionGroup::make([
@@ -494,6 +496,7 @@ class PlaylistResource extends Resource
         return [
             // Playlists
             'index' => Pages\ListPlaylists::route('/'),
+            'view' => Pages\ViewPlaylist::route('/{record}'),
             'create' => Pages\CreatePlaylist::route('/create'),
             'edit' => Pages\EditPlaylist::route('/{record}/edit'),
 

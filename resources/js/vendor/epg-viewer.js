@@ -1,7 +1,6 @@
 // EPG Viewer Alpine.js Component
 function epgViewer(config) {
     return {
-        epgUuid: config.epgUuid,
         apiUrl: config.apiUrl,
         loading: false,
         loadingMore: false,
