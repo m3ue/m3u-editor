@@ -115,7 +115,7 @@
                 <div class="sticky top-0 z-20 bg-gray-50 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-600">
                     <div class="flex">
                         <!-- Channel Column Header -->
-                        <div class="w-48 px-4 py-3 border-r border-gray-200 dark:border-gray-600 bg-gray-100 dark:bg-gray-800">
+                        <div class="w-60 px-4 py-3 border-r border-gray-200 dark:border-gray-600 bg-gray-100 dark:bg-gray-800">
                             <span class="text-sm font-medium text-gray-900 dark:text-gray-100">Channels</span>
                             <span class="text-xs text-gray-500 dark:text-gray-400 ml-2" x-text="`(${Object.keys(epgData?.channels || {}).length})`"></span>
                         </div>
@@ -154,7 +154,7 @@
                 <!-- Scrollable Content Area -->
                 <div class="flex h-full overflow-hidden" x-data="{ scrollContainer: null }" x-init="scrollContainer = $el.querySelector('.timeline-scroll')">
                     <!-- Channel List (Fixed vertically, scrolls with timeline) -->
-                    <div class="w-48 border-r border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 overflow-hidden">
+                    <div class="w-60 border-r border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 overflow-hidden">
                         <div 
                             class="overflow-y-auto h-full"
                             @scroll="if (scrollContainer) scrollContainer.scrollTop = $el.scrollTop"

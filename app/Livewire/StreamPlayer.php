@@ -3,7 +3,6 @@
 namespace App\Livewire;
 
 use Livewire\Component;
-use Livewire\Attributes\On;
 
 class StreamPlayer extends Component
 {
@@ -14,22 +13,22 @@ class StreamPlayer extends Component
     public $showModal = false;
     public $playerId;
 
+    protected $listeners = ['openStreamPlayer' => 'openPlayer', 'closeStreamPlayer' => 'closePlayer'];
+
     public function mount()
     {
         $this->playerId = 'stream-player-' . uniqid();
     }
 
-    #[On('openStreamPlayer')]
-    public function openPlayer($url = '', $format = 'ts', $title = '', $display_name = '', $logo = '')
+    public function openPlayer($channelData = [])
     {
-        $this->streamUrl = $url;
-        $this->streamFormat = $format ?: 'ts';
-        $this->channelTitle = $title ?: $display_name ?: 'Unknown Channel';
-        $this->channelLogo = $logo;
+        $this->streamUrl = $channelData['url'] ?? '';
+        $this->streamFormat = $channelData['format'] ?? 'ts';
+        $this->channelTitle = $channelData['title'] ?? $channelData['display_name'] ?? 'Unknown Channel';
+        $this->channelLogo = $channelData['logo'] ?? $channelData['icon'] ?? '';
         $this->showModal = true;
     }
 
-    #[On('closeStreamPlayer')]
     public function closePlayer()
     {
         $this->showModal = false;
@@ -37,7 +36,7 @@ class StreamPlayer extends Component
         $this->streamFormat = 'ts';
         $this->channelTitle = '';
         $this->channelLogo = '';
-        
+
         // Dispatch event to cleanup player
         $this->dispatch('cleanupPlayer', playerId: $this->playerId);
     }

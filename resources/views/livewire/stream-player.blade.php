@@ -11,7 +11,7 @@
             <!-- Backdrop -->
             <div 
                 class="fixed inset-0 bg-black bg-opacity-75 transition-opacity"
-                @click="$wire.closeStreamPlayer()"
+                @click="$wire.closePlayer()"
             ></div>
             
             <!-- Modal Content -->
@@ -42,7 +42,7 @@
                         </div>
                     </div>
                     <button 
-                        @click="$wire.closeStreamPlayer()"
+                        @click="$wire.closePlayer()"
                         class="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 focus:outline-none"
                     >
                         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
