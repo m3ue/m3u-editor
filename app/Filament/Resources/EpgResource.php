@@ -86,15 +86,9 @@ class EpgResource extends Resource
                     ->color(fn(Status $state) => $state->getColor()),
                 Tables\Columns\IconColumn::make('is_cached')
                     ->label('Cached')
-                    ->icon(fn(string $state): string => match ($state) {
-                        '1' => 'heroicon-o-check-circle',
-                        '0' => 'heroicon-o-minus-circle',
-                        '' => 'heroicon-o-minus-circle',
-                    })->color(fn(string $state): string => match ($state) {
-                        '1' => 'success',
-                        '0' => 'danger',
-                        '' => 'danger',
-                    })->toggleable()->sortable(),
+                    ->boolean()
+                    ->toggleable()
+                    ->sortable(),
                 ProgressColumn::make('progress')
                     ->sortable()
                     ->poll(fn($record) => $record->status === Status::Processing || $record->status === Status::Pending ? '3s' : null)

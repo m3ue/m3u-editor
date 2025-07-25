@@ -37,6 +37,7 @@ class EpgCacheHealthCheck extends Command
             foreach ($epgs as $epg) {
                 if (!$cacheService->isCacheValid($epg)) {
                     $this->warn("Cache for EPG \"{$epg->name}\" is invalid. Regenerating...");
+                    $epg->update(['is_cached' => false]);
                     dispatch(new GenerateEpgCache($epg->uuid, notify: false));
                 } else {
                     $this->info("Cache for EPG \"{$epg->name}\" is valid.");
