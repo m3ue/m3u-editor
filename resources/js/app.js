@@ -14,7 +14,6 @@ window.mpegts = mpegts
 
 // Vendor
 import './vendor/qrcode'
-import './vendor/video'
 import './vendor/epg-viewer'
 import './vendor/stream-viewer'
 
