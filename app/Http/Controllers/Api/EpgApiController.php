@@ -2,12 +2,15 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Enums\PlaylistChannelId;
+use App\Facades\ProxyFacade;
 use App\Http\Controllers\Controller;
 use App\Models\Epg;
 use App\Models\Playlist;
 use App\Models\MergedPlaylist;
 use App\Models\CustomPlaylist;
 use App\Services\EpgCacheService;
+use App\Services\ProxyService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -108,11 +111,9 @@ class EpgApiController extends Controller
         if (!$playlist) {
             $playlist = CustomPlaylist::where('uuid', $uuid)->first();
         }
-
         if (!$playlist) {
             return response()->json(['error' => 'Playlist not found'], 404);
         }
-
         $cacheService = new EpgCacheService();
 
         // Pagination parameters
@@ -123,6 +124,7 @@ class EpgApiController extends Controller
         $startDate = $request->get('start_date', Carbon::now()->format('Y-m-d'));
         $endDate = $request->get('end_date', Carbon::parse($startDate)->format('Y-m-d'));
 
+        // Debug logging
         Log::debug('EPG API Request for Playlist', [
             'playlist_uuid' => $uuid,
             'playlist_name' => $playlist->name,
@@ -131,29 +133,56 @@ class EpgApiController extends Controller
             'start_date' => $startDate,
             'end_date' => $endDate,
         ]);
-
         try {
             // Get enabled channels from the playlist
             $playlistChannels = $playlist->channels()
-                ->where('enabled', true)
-                ->with('epgChannel')
-                ->orderBy('sort')
-                ->orderBy('channel')
-                ->orderBy('title')
+                ->leftJoin('groups', 'channels.group_id', '=', 'groups.id')
+                ->where('channels.enabled', true)
+                ->with(['epgChannel', 'tags', 'group'])
+                ->orderBy('groups.sort_order') // Primary sort
+                ->orderBy('channels.sort') // Secondary sort
+                ->orderBy('channels.channel')
+                ->orderBy('channels.title')
+                ->select('channels.*')
                 ->get();
+
+            // Check the proxy format
+            $proxyEnabled = $playlist->enable_proxy;
+            $format = $playlist->proxy_options['output'] ?? 'ts';
+
+            // If auto channel increment is enabled, set the starting channel number
+            $channelNumber = $playlist->auto_channel_increment ? $playlist->channel_start - 1 : 0;
+            $idChannelBy = $playlist->id_channel_by;
 
             // Group channels by EPG and collect EPG data
             $epgChannelMap = [];
             $epgIds = [];
             $playlistChannelData = [];
-
             foreach ($playlistChannels as $channel) {
                 $epgData = $channel->epgChannel ?? null;
+                $channelNo = $channel->channel;
+                if (!$channelNo && $playlist->auto_channel_increment) {
+                    $channelNo = ++$channelNumber;
+                }
+                // Get the TVG ID
+                switch ($idChannelBy) {
+                    case PlaylistChannelId::ChannelId:
+                        $tvgId = $channelNo;
+                        break;
+                    case PlaylistChannelId::Name:
+                        $tvgId = $channel->name_custom ?? $channel->name;
+                        break;
+                    case PlaylistChannelId::Title:
+                        $tvgId = $channel->title_custom ?? $channel->title;
+                        break;
+                    default:
+                        $tvgId = $channel->stream_id_custom ?? $channel->stream_id;
+                        break;
+                }
 
                 if ($epgData) {
                     $epgId = $epgData->epg_id;
                     $epgIds[] = $epgId;
-
                     if (!isset($epgChannelMap[$epgId])) {
                         $epgChannelMap[$epgId] = [];
                     }
@@ -164,8 +193,9 @@ class EpgApiController extends Controller
                         $epgChannelMap[$epgId][$epgData->channel_id] = [];
                     }
 
+                    // Add the playlist channel info to the EPG channel map
                     $epgChannelMap[$epgId][$epgData->channel_id][] = [
-                        'playlist_channel_id' => $channel->id,
+                        'playlist_channel_id' => $tvgId,
                         'title' => $channel->title_custom ?? $channel->title,
                         'display_name' => $channel->name_custom ?? $channel->name,
                         'channel_number' => $channel->channel,
@@ -175,8 +205,16 @@ class EpgApiController extends Controller
                 }
 
                 // Store channel data for pagination
+                $url = $channel->url_custom ?? $channel->url;
+                if ($proxyEnabled) {
+                    $url = ProxyFacade::getProxyUrlForChannel(
+                        id: $channel->id,
+                        format: $format
+                    );
+                }
                 $playlistChannelData[] = [
-                    'id' => $channel->id,
+                    'id' => $tvgId,
+                    'url' => $url,
                     'title' => $channel->title_custom ?? $channel->title,
                     'display_name' => $channel->name_custom ?? $channel->name,
                     'channel_number' => $channel->channel,
@@ -202,8 +240,7 @@ class EpgApiController extends Controller
             $programmes = [];
             $epgIds = array_unique($epgIds);
 
-            Log::info("Processing EPG data for " . count($epgIds) . " unique EPGs");
-
+            Log::debug("Processing EPG data for " . count($epgIds) . " unique EPGs");
             foreach ($epgIds as $epgId) {
                 try {
                     $epg = Epg::find($epgId);
@@ -214,7 +251,7 @@ class EpgApiController extends Controller
 
                     // Check if cache exists and is valid
                     if (!$epg->is_cached) {
-                        Log::info("Cache invalid for EPG {$epg->name}, skipping (no auto-regeneration for playlist requests)");
+                        Log::debug("Cache invalid for EPG {$epg->name}, skipping (no auto-regeneration for playlist requests)");
                         continue;
                     }
 

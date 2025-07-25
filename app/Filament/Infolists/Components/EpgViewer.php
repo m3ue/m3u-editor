@@ -12,10 +12,4 @@ class EpgViewer extends Component
     {
         return app(static::class);
     }
-
-    public function epgUuid(string $uuid): static
-    {
-        $this->state(['epg_uuid' => $uuid]);
-        return $this;
-    }
 }
