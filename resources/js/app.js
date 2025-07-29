@@ -16,7 +16,6 @@ window.mpegts = mpegts
 import './vendor/qrcode'
 import './vendor/epg-viewer'
 import './vendor/stream-viewer'
-import './vendor/video.js'
 
 // Fix broken images
 document.addEventListener('error', event => {

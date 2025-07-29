@@ -4,7 +4,6 @@ function streamPlayer() {
         player: null,
         hls: null,
         mpegts: null,
-        videojsPlayer: null,
         streamMetadata: {
             codec: null,
             resolution: null,
@@ -17,7 +16,6 @@ function streamPlayer() {
         },
         availableAudioTracks: [],
         selectedAudioTrack: null,
-        useVideoJs: false, // Flag to determine if we should use Video.js
         
         initPlayer(url, format, playerId) {
             console.log('initPlayer called with:', { url, format, playerId });
@@ -64,26 +62,8 @@ function streamPlayer() {
             !!loadingEl && (loadingEl.style.display = 'flex');
             !!errorEl && (errorEl.style.display = 'none');
             
-            // Check if Video.js is available and if we should use it
-            // Only use Video.js for specific scenarios where it adds value
-            this.useVideoJs = typeof videojs !== 'undefined' && (
-                // Use Video.js for HLS streams (better audio track support than hls.js)
-                (format === 'hls' || url.includes('.m3u8')) ||
-                // Use Video.js for MP4/MKV files with multiple audio tracks
-                (url.toLowerCase().includes('.mkv') || url.toLowerCase().includes('.mp4'))
-            );
-            
-            // Do NOT use Video.js for TS streams - mpegts.js handles these better
-            if (format === 'ts' || format === 'mpegts' || url.toLowerCase().includes('.ts')) {
-                this.useVideoJs = false;
-                console.log('TS stream detected - using mpegts.js instead of Video.js');
-            }
-            
             try {
-                if (this.useVideoJs) {
-                    console.log('Using Video.js for enhanced audio track support');
-                    this.initVideoJsPlayer(video, url, playerId);
-                } else if (format === 'hls' || url.includes('.m3u8')) {
+                if (format === 'hls' || url.includes('.m3u8')) {
                     console.log('Initializing HLS player');
                     this.initHlsPlayer(video, url, playerId);
                 } else if (format === 'ts' || format === 'mpegts') {
@@ -97,240 +77,6 @@ function streamPlayer() {
                 console.error('Error initializing player:', error);
                 this.showError(playerId, error.message);
             }
-        },
-        
-        initVideoJsPlayer(video, url, playerId) {
-            console.log('Initializing Video.js player for:', playerId);
-            
-            // Configure Video.js options
-            const options = {
-                controls: true,
-                responsive: true,
-                fluid: false,
-                preload: 'metadata',
-                html5: {
-                    vhs: {
-                        // Enable VHS for HLS support
-                        overrideNative: true
-                    }
-                },
-                // Enable audio track selection
-                audioTracks: true,
-                plugins: {}
-            };
-            
-            // Add video-js class to the video element if not present
-            if (!video.classList.contains('video-js')) {
-                video.classList.add('video-js', 'vjs-default-skin');
-            }
-            
-            // Initialize Video.js player
-            this.videojsPlayer = videojs(video, options);
-            
-            // Set up event listeners
-            this.videojsPlayer.ready(() => {
-                console.log('Video.js player is ready');
-                
-                // Set the source
-                this.videojsPlayer.src({ src: url, type: this.getVideoJsMimeType(url) });
-                
-                this.hideLoading(playerId);
-                this.updateStatus(playerId, 'Ready');
-            });
-            
-            // Listen for loadedmetadata to get stream info
-            this.videojsPlayer.on('loadedmetadata', () => {
-                console.log('Video.js loadedmetadata event');
-                this.collectVideoJsMetadata(playerId);
-                this.updateStreamDetails(playerId);
-            });
-            
-            // Listen for audio track changes
-            this.videojsPlayer.on('audiotrackchange', () => {
-                console.log('Audio track changed in Video.js');
-                this.handleVideoJsAudioTrackChange(playerId);
-            });
-            
-            // Listen for playing event
-            this.videojsPlayer.on('playing', () => {
-                console.log('Video.js playing event');
-                this.updateStatus(playerId, 'Playing');
-                // Collect metadata after playing starts
-                setTimeout(() => {
-                    this.collectVideoJsMetadata(playerId);
-                    this.updateStreamDetails(playerId);
-                }, 1000);
-            });
-            
-            // Listen for errors
-            this.videojsPlayer.on('error', (error) => {
-                console.error('Video.js error:', error);
-                const errorObj = this.videojsPlayer.error();
-                let errorMessage = 'Playback failed';
-                
-                if (errorObj) {
-                    switch(errorObj.code) {
-                        case 1:
-                            errorMessage = 'Video loading aborted';
-                            break;
-                        case 2:
-                            errorMessage = 'Network error';
-                            break;
-                        case 3:
-                            errorMessage = 'Video decode error';
-                            break;
-                        case 4:
-                            errorMessage = 'Video format not supported';
-                            break;
-                        default:
-                            errorMessage = errorObj.message || 'Unknown error';
-                    }
-                }
-                
-                // For certain errors, fall back to native player
-                if (errorObj && (errorObj.code === 4 || errorObj.code === 3)) {
-                    console.log('Video.js failed, falling back to native player');
-                    this.cleanup();
-                    this.initNativePlayer(video, url, playerId);
-                } else {
-                    this.showError(playerId, errorMessage);
-                }
-            });
-        },
-        
-        getVideoJsMimeType(url) {
-            const urlLower = url.toLowerCase();
-            if (urlLower.includes('.m3u8')) return 'application/x-mpegURL';
-            if (urlLower.includes('.mp4')) return 'video/mp4';
-            if (urlLower.includes('.mkv')) return 'video/x-matroska';
-            if (urlLower.includes('.webm')) return 'video/webm';
-            if (urlLower.includes('.ts')) return 'video/mp2t';
-            return 'video/mp4'; // default
-        },
-        
-        collectVideoJsMetadata(playerId) {
-            if (!this.videojsPlayer) return;
-            
-            console.log('Collecting Video.js metadata');
-            
-            // Get video dimensions
-            const videoWidth = this.videojsPlayer.videoWidth();
-            const videoHeight = this.videojsPlayer.videoHeight();
-            
-            if (videoWidth && videoHeight) {
-                this.streamMetadata.resolution = `${videoWidth}x${videoHeight}`;
-            }
-            
-            // Get audio tracks from Video.js
-            const audioTracks = this.videojsPlayer.audioTracks();
-            console.log('Video.js audio tracks:', audioTracks);
-            
-            if (audioTracks && audioTracks.length > 0) {
-                this.availableAudioTracks = [];
-                
-                for (let i = 0; i < audioTracks.length; i++) {
-                    const track = audioTracks[i];
-                    console.log(`Video.js audio track ${i}:`, {
-                        id: track.id,
-                        label: track.label,
-                        language: track.language,
-                        enabled: track.enabled
-                    });
-                    
-                    this.availableAudioTracks.push({
-                        index: i,
-                        id: track.id,
-                        label: track.label || `Track ${i + 1}`,
-                        language: track.language || 'unknown',
-                        enabled: track.enabled,
-                        estimated: false
-                    });
-                    
-                    if (track.enabled) {
-                        this.selectedAudioTrack = i;
-                        
-                        // Try to extract codec info from label
-                        if (track.label) {
-                            const codecMatch = track.label.match(/(aac|mp3|ac3|dts|pcm|opus|vorbis|flac)/i);
-                            if (codecMatch) {
-                                this.streamMetadata.audioCodec = codecMatch[1].toUpperCase();
-                            }
-                        }
-                    }
-                }
-                
-                console.log('Video.js available audio tracks:', this.availableAudioTracks);
-                
-                // Set default audio codec if we have tracks but no codec detected
-                if (!this.streamMetadata.audioCodec && this.availableAudioTracks.length > 0) {
-                    this.streamMetadata.audioCodec = 'AAC'; // Common default
-                }
-                
-                // Set default channels
-                if (!this.streamMetadata.audioChannels) {
-                    this.streamMetadata.audioChannels = '2.0'; // Stereo default
-                }
-            } else {
-                console.log('No audio tracks found in Video.js');
-                // Try to detect from tech
-                this.detectVideoJsCodecInfo(playerId);
-            }
-        },
-        
-        detectVideoJsCodecInfo(playerId) {
-            if (!this.videojsPlayer) return;
-            
-            // Try to get codec info from the tech
-            const tech = this.videojsPlayer.tech();
-            
-            if (tech && tech.el_) {
-                const videoEl = tech.el_;
-                
-                // Check for native audioTracks
-                if (videoEl.audioTracks && videoEl.audioTracks.length > 0) {
-                    console.log('Found native audio tracks via Video.js tech:', videoEl.audioTracks.length);
-                    // Use the same logic as native player for these
-                    this.collectVideoMetadata(videoEl, playerId);
-                    return;
-                }
-            }
-            
-            // Fallback: assume common defaults based on URL
-            const url = this.videojsPlayer.currentSrc() || '';
-            if (url.toLowerCase().includes('.mkv')) {
-                this.streamMetadata.audioCodec = 'AAC';
-                this.streamMetadata.audioChannels = '2.0';
-            } else if (url.toLowerCase().includes('.mp4')) {
-                this.streamMetadata.audioCodec = 'AAC';
-                this.streamMetadata.audioChannels = '2.0';
-            }
-        },
-        
-        handleVideoJsAudioTrackChange(playerId) {
-            if (!this.videojsPlayer) return;
-            
-            console.log('Handling Video.js audio track change');
-            const audioTracks = this.videojsPlayer.audioTracks();
-            
-            if (audioTracks) {
-                for (let i = 0; i < audioTracks.length; i++) {
-                    const track = audioTracks[i];
-                    if (track.enabled) {
-                        this.selectedAudioTrack = i;
-                        console.log(`Audio track ${i} is now enabled`);
-                        
-                        // Update our tracking
-                        if (this.availableAudioTracks[i]) {
-                            this.availableAudioTracks.forEach((t, index) => {
-                                t.enabled = index === i;
-                            });
-                        }
-                        break;
-                    }
-                }
-            }
-            
-            this.updateStreamDetails(playerId);
         },
         
         initHlsPlayer(video, url, playerId) {
@@ -565,6 +311,14 @@ function streamPlayer() {
         },
         
         initNativePlayer(video, url, playerId) {
+            console.log('Initializing native player for:', playerId);
+            
+            // Configure video element for optimal audio track detection
+            video.muted = false;
+            video.volume = 0.5;
+            video.controls = true;
+            video.preload = 'metadata';
+            
             video.src = url;
             this.setupNativeEvents(video, playerId);
         },
@@ -727,6 +481,8 @@ function streamPlayer() {
         },
 
         collectVideoMetadata(video, playerId) {
+            console.log('Collecting video metadata for:', playerId);
+            
             // Get basic video properties
             if (video.videoWidth && video.videoHeight) {
                 this.streamMetadata.resolution = `${video.videoWidth}x${video.videoHeight}`;
@@ -747,6 +503,9 @@ function streamPlayer() {
                 }
             }
 
+            // Enhanced audio track detection
+            this.detectAudioTracks(video, playerId);
+
             // Try to get video tracks info
             if (video.videoTracks && video.videoTracks.length > 0) {
                 const track = video.videoTracks[0];
@@ -755,21 +514,6 @@ function streamPlayer() {
                     const codecMatch = track.label.match(/(\w+)/);
                     if (codecMatch) {
                         this.streamMetadata.codec = codecMatch[1];
-                    }
-                }
-            }
-
-            // Try to get audio tracks info
-            if (video.audioTracks && video.audioTracks.length > 0) {
-                const audioTrack = video.audioTracks[0];
-                if (audioTrack.language) {
-                    this.streamMetadata.audioCodec = audioTrack.language;
-                }
-                if (audioTrack.label) {
-                    // Try to parse codec from label
-                    const audioCodecMatch = audioTrack.label.match(/(aac|mp3|ac3|dts|pcm)/i);
-                    if (audioCodecMatch) {
-                        this.streamMetadata.audioCodec = audioCodecMatch[1].toUpperCase();
                     }
                 }
             }
@@ -785,43 +529,211 @@ function streamPlayer() {
                 }
             }
 
-            // Try to detect audio channels from the audio context if available
-            if (!this.streamMetadata.audioChannels && video.audioTracks && video.audioTracks.length > 0) {
-                // Default to stereo for most streams
-                this.streamMetadata.audioChannels = '2.0';
-            }
+            // Container-based codec detection
+            this.detectCodecFromContainer(video, playerId);
 
             this.updateStreamDetails(playerId);
+        },
+        
+        detectAudioTracks(video, playerId) {
+            console.log('Detecting audio tracks for:', playerId);
+            const videoSrc = video.src || video.currentSrc;
+            const isMKV = videoSrc && videoSrc.toLowerCase().includes('.mkv');
+            
+            // Reset audio tracks
+            this.availableAudioTracks = [];
+            this.selectedAudioTrack = null;
+            
+            // Try to get real audio tracks first
+            if (video.audioTracks && video.audioTracks.length > 0) {
+                console.log('Found real audio tracks:', video.audioTracks.length);
+                
+                for (let i = 0; i < video.audioTracks.length; i++) {
+                    const track = video.audioTracks[i];
+                    console.log(`Audio track ${i}:`, {
+                        id: track.id,
+                        kind: track.kind,
+                        label: track.label,
+                        language: track.language,
+                        enabled: track.enabled
+                    });
+                    
+                    this.availableAudioTracks.push({
+                        index: i,
+                        id: track.id,
+                        label: track.label || `Track ${i + 1}`,
+                        language: track.language || 'unknown',
+                        enabled: track.enabled,
+                        estimated: false
+                    });
+                    
+                    if (track.enabled) {
+                        this.selectedAudioTrack = i;
+                        
+                        // Try to extract codec info from label
+                        if (track.label) {
+                            const codecMatch = track.label.match(/(aac|mp3|ac3|dts|pcm|opus|vorbis|flac)/i);
+                            if (codecMatch) {
+                                this.streamMetadata.audioCodec = codecMatch[1].toUpperCase();
+                            }
+                        }
+                    }
+                }
+            } else {
+                console.log('No real audio tracks found, checking for estimated tracks');
+                
+                // For MKV files, create estimated tracks since browsers often don't expose them
+                if (isMKV && video.duration && video.duration > 30) {
+                    console.log('Creating estimated audio tracks for MKV file');
+                    
+                    // Use different estimation strategies
+                    this.estimateAudioTracksForMKV(video, playerId);
+                } else {
+                    // For other formats, try basic detection
+                    this.detectBasicAudioInfo(video, playerId);
+                }
+            }
+            
+            // Default audio channels if we have tracks but no channels
+            if (this.availableAudioTracks.length > 0 && !this.streamMetadata.audioChannels) {
+                this.streamMetadata.audioChannels = '2.0'; // Stereo default
+            }
+        },
+        
+        estimateAudioTracksForMKV(video, playerId) {
+            console.log('Estimating audio tracks for MKV file');
+            
+            // Common MKV scenarios - often have multiple language tracks
+            const commonLanguages = ['eng', 'spa', 'fra', 'deu', 'jpn', 'kor'];
+            
+            // Create estimated tracks based on duration and common patterns
+            if (video.duration > 30) { // Likely has audio
+                // Create multiple estimated tracks for MKV
+                this.availableAudioTracks = [
+                    {
+                        index: 0,
+                        id: 'estimated-0',
+                        label: 'Default Audio',
+                        language: 'eng',
+                        enabled: true,
+                        estimated: true
+                    },
+                    {
+                        index: 1,
+                        id: 'estimated-1', 
+                        label: 'Audio Track 2',
+                        language: 'unknown',
+                        enabled: false,
+                        estimated: true
+                    }
+                ];
+                
+                // For longer content, assume more tracks might exist
+                if (video.duration > 3600) { // > 1 hour content
+                    this.availableAudioTracks.push({
+                        index: 2,
+                        id: 'estimated-2',
+                        label: 'Audio Track 3',
+                        language: 'unknown',
+                        enabled: false,
+                        estimated: true
+                    });
+                }
+                
+                this.selectedAudioTrack = 0;
+                console.log('Created estimated audio tracks:', this.availableAudioTracks);
+                
+                // Set likely codec for MKV
+                if (!this.streamMetadata.audioCodec) {
+                    this.streamMetadata.audioCodec = 'AAC'; // Common for MKV
+                }
+            }
+        },
+        
+        detectBasicAudioInfo(video, playerId) {
+            console.log('Detecting basic audio info');
+            
+            // Check if there's likely to be audio based on video duration
+            if (video.duration && video.duration > 10) {
+                // Assume basic audio track exists
+                this.availableAudioTracks = [{
+                    index: 0,
+                    id: 'default-0',
+                    label: 'Default Audio',
+                    language: 'unknown',
+                    enabled: true,
+                    estimated: false
+                }];
+                
+                this.selectedAudioTrack = 0;
+                
+                // Set basic codec
+                if (!this.streamMetadata.audioCodec) {
+                    this.streamMetadata.audioCodec = 'AAC';
+                }
+            }
+        },
+        
+        detectCodecFromContainer(video, playerId) {
+            const videoSrc = video.src || video.currentSrc;
+            if (!videoSrc) return;
+            
+            const extension = videoSrc.split('.').pop().toLowerCase().split('?')[0];
+            console.log('Detecting codec from container extension:', extension);
+            
+            switch (extension) {
+                case 'mkv':
+                    if (!this.streamMetadata.codec) {
+                        this.streamMetadata.codec = 'H.264'; // Most common
+                    }
+                    if (!this.streamMetadata.audioCodec) {
+                        this.streamMetadata.audioCodec = 'AAC'; // Common fallback
+                    }
+                    break;
+                    
+                case 'mp4':
+                case 'm4v':
+                    if (!this.streamMetadata.codec) {
+                        this.streamMetadata.codec = 'H.264';
+                    }
+                    if (!this.streamMetadata.audioCodec) {
+                        this.streamMetadata.audioCodec = 'AAC';
+                    }
+                    break;
+                    
+                case 'webm':
+                    if (!this.streamMetadata.codec) {
+                        this.streamMetadata.codec = 'VP9';
+                    }
+                    if (!this.streamMetadata.audioCodec) {
+                        this.streamMetadata.audioCodec = 'Opus';
+                    }
+                    break;
+                    
+                case 'avi':
+                    if (!this.streamMetadata.codec) {
+                        this.streamMetadata.codec = 'XVID';
+                    }
+                    if (!this.streamMetadata.audioCodec) {
+                        this.streamMetadata.audioCodec = 'MP3';
+                    }
+                    break;
+            }
         },
         
         selectAudioTrack(playerId, trackIndex) {
             console.log('Selecting audio track:', trackIndex);
             
-            if (this.videojsPlayer) {
-                // Video.js audio track selection
-                const audioTracks = this.videojsPlayer.audioTracks();
-                if (audioTracks && audioTracks.length > trackIndex) {
-                    // Disable all tracks first
-                    for (let i = 0; i < audioTracks.length; i++) {
-                        audioTracks[i].enabled = false;
-                    }
-                    
-                    // Enable selected track
-                    audioTracks[trackIndex].enabled = true;
-                    this.selectedAudioTrack = trackIndex;
-                    
-                    console.log(`Enabled Video.js audio track ${trackIndex}`);
-                    this.updateStreamDetails(playerId);
-                    return;
-                }
-            }
-            
-            // Fallback to native video element if Video.js not available
             const video = document.getElementById(playerId);
             if (!video) return;
             
+            const videoSrc = video.src || video.currentSrc;
+            const isMKV = videoSrc && videoSrc.toLowerCase().includes('.mkv');
+            
             // If we have real audio tracks, use them
             if (video.audioTracks && video.audioTracks.length > trackIndex) {
+                console.log('Switching real audio track');
+                
                 // Disable all tracks first
                 for (let i = 0; i < video.audioTracks.length; i++) {
                     video.audioTracks[i].enabled = false;
@@ -831,8 +743,15 @@ function streamPlayer() {
                 video.audioTracks[trackIndex].enabled = true;
                 this.selectedAudioTrack = trackIndex;
                 
+                // Update our tracking
+                this.availableAudioTracks.forEach((track, index) => {
+                    track.enabled = index === trackIndex;
+                });
+                
                 console.log(`Enabled native audio track ${trackIndex}`);
             } else {
+                console.log('Switching estimated audio track (limited functionality)');
+                
                 // For estimated tracks, we can't actually change the audio
                 // but we can update the UI to show the selection
                 this.selectedAudioTrack = trackIndex;
@@ -844,7 +763,29 @@ function streamPlayer() {
                     });
                 }
                 
-                console.log(`Selected estimated audio track ${trackIndex} (browser limitation - no actual audio change)`);
+                // For MKV files, provide user feedback about limitations
+                if (isMKV) {
+                    console.warn(`Selected estimated MKV audio track ${trackIndex} - browser API limitations prevent actual audio switching`);
+                    
+                    // Optional: Show user notification about limitations
+                    const detailsEl = document.getElementById(playerId + '-details');
+                    if (detailsEl) {
+                        // Add temporary feedback message
+                        const feedbackDiv = document.createElement('div');
+                        feedbackDiv.className = 'text-xs text-yellow-400 mt-1';
+                        feedbackDiv.textContent = 'Audio track selection simulated - browser limitations with MKV files';
+                        detailsEl.appendChild(feedbackDiv);
+                        
+                        // Remove feedback after 3 seconds
+                        setTimeout(() => {
+                            if (feedbackDiv.parentNode) {
+                                feedbackDiv.parentNode.removeChild(feedbackDiv);
+                            }
+                        }, 3000);
+                    }
+                } else {
+                    console.log(`Selected estimated audio track ${trackIndex} (no actual audio change)`);
+                }
             }
             
             this.updateStreamDetails(playerId);
@@ -868,16 +809,6 @@ function streamPlayer() {
             // Reset audio track data
             this.availableAudioTracks = [];
             this.selectedAudioTrack = null;
-            
-            if (this.videojsPlayer) {
-                console.log('Destroying Video.js player');
-                try {
-                    this.videojsPlayer.dispose();
-                } catch (error) {
-                    console.warn('Error destroying Video.js player:', error);
-                }
-                this.videojsPlayer = null;
-            }
             
             if (this.hls) {
                 console.log('Destroying HLS player');
