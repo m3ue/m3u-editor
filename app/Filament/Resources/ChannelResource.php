@@ -861,17 +861,6 @@ class ChannelResource extends Resource
                             ->trueColor('success')
                             ->falseColor('danger'),
                     ]),
-                Infolists\Components\Section::make('Stream Info')
-                    ->description('Click to load stream info')
-                    ->icon('heroicon-m-wifi')
-                    ->collapsible()
-                    ->collapsed()
-                    ->schema([
-                        Infolists\Components\Livewire::make(ChannelStreamStats::class)
-                            ->label('Stream Stats')
-                            ->columnSpanFull()
-                            ->lazy(),
-                    ]),
             ]);
     }
 

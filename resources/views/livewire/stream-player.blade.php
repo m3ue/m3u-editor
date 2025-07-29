@@ -85,7 +85,7 @@
 
                 <!-- Video Player -->
                 <div class="p-4">
-                    <div class="relative bg-black rounded-lg overflow-hidden" style="aspect-ratio: 16/9;">
+                    <div class="relative bg-black rounded-lg overflow-hidden group" style="aspect-ratio: 16/9;">
                         <video 
                             id="{{ $playerId }}"
                             class="w-full h-full"
@@ -142,15 +142,13 @@
                         </div>
 
                         <!-- Stream Details Toggle -->
-                        <div class="absolute bottom-2 right-2">
+                        <div class="absolute top-2 left-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
                             <button 
                                 onclick="toggleStreamDetails('{{ $playerId }}')"
                                 class="bg-black bg-opacity-75 hover:bg-opacity-90 text-white text-xs px-2 py-1 rounded transition-colors"
                                 title="Toggle Stream Details"
                             >
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                                </svg>
+                                <x-heroicon-o-information-circle class="w-5 h-5" />
                             </button>
                         </div>
 
@@ -165,9 +163,7 @@
                                     onclick="toggleStreamDetails('{{ $playerId }}')"
                                     class="text-gray-300 hover:text-white"
                                 >
-                                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-                                    </svg>
+                                    <x-heroicon-s-x-mark class="w-4 h-4" />
                                 </button>
                             </div>
                             <div id="{{ $playerId }}-details" class="space-y-1">
@@ -176,7 +172,7 @@
                         </div>
                     </div>
 
-                    <!-- Stream Info -->
+                    {{-- <!-- Stream Info -->
                     <div class="mt-4 p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
                         <div class="grid grid-cols-2 gap-4 text-sm">
                             <div>
@@ -188,7 +184,7 @@
                                 <span id="{{ $playerId }}-status" class="text-gray-600 dark:text-gray-400 ml-2">Connecting...</span>
                             </div>
                         </div>
-                    </div>
+                    </div> --}}
                 </div>
             </div>
         </div>

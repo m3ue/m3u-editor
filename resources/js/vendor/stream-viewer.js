@@ -53,9 +53,9 @@ function streamPlayer() {
             this.cleanup();
             
             // Update status
-            statusEl.textContent = 'Connecting...';
-            loadingEl.style.display = 'flex';
-            errorEl.style.display = 'none';
+            !!statusEl && (statusEl.textContent = 'Connecting...');
+            !!loadingEl && (loadingEl.style.display = 'flex');
+            !!errorEl && (errorEl.style.display = 'none');
             
             try {
                 if (format === 'hls' || url.includes('.m3u8')) {
@@ -244,8 +244,6 @@ function streamPlayer() {
                 this.mpegts.load();
                 
                 this.mpegts.on(mpegts.Events.METADATA_ARRIVED, (metadata) => {
-                    console.log('MPEG-TS metadata arrived:', metadata);
-                    
                     // Collect MPEG-TS metadata - override defaults with actual values
                     if (metadata.videoCodec) {
                         this.streamMetadata.codec = metadata.videoCodec;
@@ -272,8 +270,6 @@ function streamPlayer() {
                 });
 
                 this.mpegts.on(mpegts.Events.MEDIA_INFO, (mediaInfo) => {
-                    console.log('MPEG-TS media info:', mediaInfo);
-                    
                     // Additional metadata from media info
                     if (mediaInfo.width && mediaInfo.height) {
                         this.streamMetadata.resolution = `${mediaInfo.width}x${mediaInfo.height}`;
@@ -310,49 +306,16 @@ function streamPlayer() {
         },
         
         initNativePlayer(video, url, playerId) {
-            console.log('Initializing native player for URL:', url);
-            
-            // Try to infer some basic details from the URL/format before loading
-            this.inferStreamDetailsFromUrl(url, playerId);
-            
             video.src = url;
             this.setupNativeEvents(video, playerId);
-        },
-
-        inferStreamDetailsFromUrl(url, playerId) {
-            console.log('Inferring stream details from URL:', url);
-            
-            // Common defaults for different stream types
-            if (url.includes('.ts') || url.includes('mpegts') || url.includes('transport')) {
-                this.streamMetadata.codec = 'H.264';
-                this.streamMetadata.audioCodec = 'AAC';
-                this.streamMetadata.audioChannels = '2.0';
-                console.log('Detected MPEG-TS stream, setting default codecs');
-            } else if (url.includes('.m3u8') || url.includes('hls')) {
-                this.streamMetadata.codec = 'H.264';
-                this.streamMetadata.audioCodec = 'AAC';
-                this.streamMetadata.audioChannels = '2.0';
-                console.log('Detected HLS stream, setting default codecs');
-            } else if (url.includes('.mp4')) {
-                this.streamMetadata.codec = 'H.264';
-                this.streamMetadata.audioCodec = 'AAC';
-                this.streamMetadata.audioChannels = '2.0';
-                console.log('Detected MP4 stream, setting default codecs');
-            }
-            
-            // Update details with initial inference
-            this.updateStreamDetails(playerId);
         },
         
         setupNativeEvents(video, playerId) {
             video.addEventListener('loadstart', () => {
-                console.log('Native video loadstart');
                 this.updateStatus(playerId, 'Loading...');
             });
             
             video.addEventListener('loadedmetadata', () => {
-                console.log('Native video metadata loaded');
-                
                 // Collect basic metadata
                 if (video.videoWidth && video.videoHeight) {
                     this.streamMetadata.resolution = `${video.videoWidth}x${video.videoHeight}`;
@@ -365,20 +328,15 @@ function streamPlayer() {
             });
             
             video.addEventListener('loadeddata', () => {
-                console.log('Native video data loaded - trying to collect more metadata');
                 this.collectVideoMetadata(video, playerId);
             });
             
             video.addEventListener('canplay', () => {
-                console.log('Native video can play');
                 this.updateStatus(playerId, 'Ready');
-                
-                // Try to collect metadata again once we can play
                 this.collectVideoMetadata(video, playerId);
             });
             
             video.addEventListener('playing', () => {
-                console.log('Native video playing');
                 this.updateStatus(playerId, 'Playing');
                 
                 // Try to collect additional metadata once playing
@@ -418,12 +376,9 @@ function streamPlayer() {
         },
         
         hideLoading(playerId) {
-            console.log('hideLoading called for:', playerId);
             const loadingEl = document.getElementById(playerId + '-loading');
-            console.log('Loading element found:', !!loadingEl);
             if (loadingEl) {
                 loadingEl.style.display = 'none';
-                console.log('Loading overlay hidden');
             }
         },
         
@@ -448,37 +403,35 @@ function streamPlayer() {
             const detailsEl = document.getElementById(playerId + '-details');
             if (!detailsEl) return;
 
-            console.log('Updating stream details for:', playerId, 'Metadata:', this.streamMetadata);
-
             let detailsHtml = '';
             
             if (this.streamMetadata.resolution) {
-                detailsHtml += `<div class="flex justify-between"><span>Resolution:</span><span class="font-mono">${this.streamMetadata.resolution}</span></div>`;
+                detailsHtml += `<div class="flex justify-between gap-1"><span>Resolution:</span><span class="font-mono">${this.streamMetadata.resolution}</span></div>`;
             }
             
             if (this.streamMetadata.codec) {
-                detailsHtml += `<div class="flex justify-between"><span>Video Codec:</span><span class="font-mono">${this.streamMetadata.codec}</span></div>`;
+                detailsHtml += `<div class="flex justify-between gap-1"><span>Video Codec:</span><span class="font-mono">${this.streamMetadata.codec}</span></div>`;
             }
             
             if (this.streamMetadata.audioCodec) {
-                detailsHtml += `<div class="flex justify-between"><span>Audio Codec:</span><span class="font-mono">${this.streamMetadata.audioCodec}</span></div>`;
+                detailsHtml += `<div class="flex justify-between gap-1"><span>Audio Codec:</span><span class="font-mono">${this.streamMetadata.audioCodec}</span></div>`;
             }
             
             if (this.streamMetadata.audioChannels) {
-                detailsHtml += `<div class="flex justify-between"><span>Audio Channels:</span><span class="font-mono">${this.streamMetadata.audioChannels}</span></div>`;
+                detailsHtml += `<div class="flex justify-between gap-1"><span>Audio Channels:</span><span class="font-mono">${this.streamMetadata.audioChannels}</span></div>`;
             }
             
             if (this.streamMetadata.bitrate) {
                 const bitrateKbps = Math.round(this.streamMetadata.bitrate / 1000);
-                detailsHtml += `<div class="flex justify-between"><span>Bitrate:</span><span class="font-mono">${bitrateKbps} kbps</span></div>`;
+                detailsHtml += `<div class="flex justify-between gap-1"><span>Bitrate:</span><span class="font-mono">${bitrateKbps} kbps</span></div>`;
             }
             
             if (this.streamMetadata.framerate) {
-                detailsHtml += `<div class="flex justify-between"><span>Frame Rate:</span><span class="font-mono">${this.streamMetadata.framerate} fps</span></div>`;
+                detailsHtml += `<div class="flex justify-between gap-1"><span>Frame Rate:</span><span class="font-mono">${this.streamMetadata.framerate} fps</span></div>`;
             }
             
             if (this.streamMetadata.profile) {
-                detailsHtml += `<div class="flex justify-between"><span>Profile:</span><span class="font-mono">${this.streamMetadata.profile}</span></div>`;
+                detailsHtml += `<div class="flex justify-between gap-1"><span>Profile:</span><span class="font-mono">${this.streamMetadata.profile}</span></div>`;
             }
             
             if (detailsHtml) {
@@ -491,19 +444,6 @@ function streamPlayer() {
         },
 
         collectVideoMetadata(video, playerId) {
-            console.log('Collecting video metadata for:', playerId);
-            console.log('Video element properties:', {
-                videoWidth: video.videoWidth,
-                videoHeight: video.videoHeight,
-                videoTracks: video.videoTracks?.length,
-                audioTracks: video.audioTracks?.length,
-                textTracks: video.textTracks?.length,
-                duration: video.duration,
-                buffered: video.buffered?.length,
-                networkState: video.networkState,
-                readyState: video.readyState
-            });
-
             // Get basic video properties
             if (video.videoWidth && video.videoHeight) {
                 this.streamMetadata.resolution = `${video.videoWidth}x${video.videoHeight}`;
@@ -513,7 +453,6 @@ function streamPlayer() {
             if (video.getVideoPlaybackQuality) {
                 try {
                     const quality = video.getVideoPlaybackQuality();
-                    console.log('Video playback quality:', quality);
                     if (quality.totalVideoFrames && quality.creationTime) {
                         const fps = Math.round(quality.totalVideoFrames / (quality.creationTime / 1000));
                         if (fps > 0 && fps < 120) { // Reasonable FPS range
@@ -521,14 +460,13 @@ function streamPlayer() {
                         }
                     }
                 } catch (e) {
-                    console.log('getVideoPlaybackQuality not available');
+                    // getVideoPlaybackQuality not available
                 }
             }
 
             // Try to get video tracks info
             if (video.videoTracks && video.videoTracks.length > 0) {
                 const track = video.videoTracks[0];
-                console.log('Video track:', track);
                 if (track.label) {
                     // Parse codec info from track label if available
                     const codecMatch = track.label.match(/(\w+)/);
@@ -541,7 +479,6 @@ function streamPlayer() {
             // Try to get audio tracks info
             if (video.audioTracks && video.audioTracks.length > 0) {
                 const audioTrack = video.audioTracks[0];
-                console.log('Audio track:', audioTrack);
                 if (audioTrack.language) {
                     this.streamMetadata.audioCodec = audioTrack.language;
                 }
@@ -552,25 +489,6 @@ function streamPlayer() {
                         this.streamMetadata.audioCodec = audioCodecMatch[1].toUpperCase();
                     }
                 }
-            }
-
-            // Try to get more detailed info from the video element's capabilities
-            if (video.mozPaintedFrames !== undefined) {
-                // Firefox specific
-                console.log('Firefox video stats:', {
-                    paintedFrames: video.mozPaintedFrames,
-                    presentedFrames: video.mozPresentedFrames,
-                    parsedFrames: video.mozParsedFrames,
-                    decodedFrames: video.mozDecodedFrames
-                });
-            }
-
-            if (video.webkitDroppedFrameCount !== undefined) {
-                // Webkit specific
-                console.log('Webkit video stats:', {
-                    droppedFrames: video.webkitDroppedFrameCount,
-                    decodedFrames: video.webkitDecodedFrameCount
-                });
             }
 
             // For TS streams, try to infer codec from URL or file extension
