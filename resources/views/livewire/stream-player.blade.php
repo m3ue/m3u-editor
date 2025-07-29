@@ -133,6 +133,7 @@
                                 <h4 class="text-lg font-medium mb-1">Playback Error</h4>
                                 <p class="text-sm text-gray-300" id="{{ $playerId }}-error-message">Unable to load the stream. Please try again.</p>
                                 <button 
+                                    type="button"
                                     onclick="retryStream('{{ $playerId }}')"
                                     class="mt-3 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-md transition-colors"
                                 >
@@ -144,6 +145,7 @@
                         <!-- Stream Details Toggle -->
                         <div class="absolute top-2 left-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
                             <button 
+                                type="button"
                                 onclick="toggleStreamDetails('{{ $playerId }}')"
                                 class="bg-black bg-opacity-75 hover:bg-opacity-90 text-white text-xs px-2 py-1 rounded transition-colors"
                                 title="Toggle Stream Details"
