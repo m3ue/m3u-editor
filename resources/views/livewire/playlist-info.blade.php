@@ -6,7 +6,7 @@
                 <!-- Proxy Streams Section -->
                 <div class="pb-4">
                     <h3 class="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3 flex items-center">
-                        <div class="p-1 mr-1 bg-gray-100 dark:bg-gray-800 rounded-lg">
+                        <div class="p-1 mr-1 bg-white ring-1 ring-gray-950/5 dark:bg-gray-900 dark:ring-white/10 dark:bg-gray-900 rounded-lg">
                             <x-heroicon-s-signal class="text-blue-500 h-4 w-4" />
                         </div>
                         Proxy Usage
@@ -14,7 +14,7 @@
                     
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <!-- Stream Count -->
-                        <div class="bg-gray-100 dark:bg-gray-800 rounded-md p-3">
+                        <div class="bg-white ring-1 ring-gray-950/5 dark:bg-gray-900 dark:ring-white/10 dark:bg-gray-900 rounded-md p-3">
                             <div class="flex items-center justify-between">
                                 <span class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Active Connections</span>
                                 <div class="text-right">
@@ -26,7 +26,7 @@
                         </div>
                         
                         <!-- Max Streams Status -->
-                        <div class="bg-gray-100 dark:bg-gray-800 rounded-md p-3">
+                        <div class="bg-white ring-1 ring-gray-950/5 dark:bg-gray-900 dark:ring-white/10 dark:bg-gray-900 rounded-md p-3">
                             <div class="flex items-center justify-between">
                                 <span class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Max Reached</span>
                                 <div class="text-right">
@@ -56,7 +56,7 @@
                 <!-- Xtream Info Section -->
                 <div class="pb-4">
                     <h3 class="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3 flex items-center">
-                        <div class="p-1 mr-1 bg-gray-100 dark:bg-gray-800 rounded-lg">
+                        <div class="p-1 mr-1 bg-white ring-1 ring-gray-950/5 dark:bg-gray-900 dark:ring-white/10 dark:bg-gray-900 rounded-lg">
                             <x-heroicon-s-bolt class="text-green-500 h-4 w-4" />
                         </div>
                         Xtream Provider Details
@@ -64,7 +64,7 @@
                     
                     <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
                         <!-- Active Connections -->
-                        <div class="bg-gray-100 dark:bg-gray-800 rounded-md p-3">
+                        <div class="bg-white ring-1 ring-gray-950/5 dark:bg-gray-900 dark:ring-white/10 dark:bg-gray-900 rounded-md p-3">
                             <div class="flex items-center justify-between">
                                 <span class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Active Connections</span>
                                 <div class="text-lg font-bold text-gray-900 dark:text-gray-100">
@@ -74,7 +74,7 @@
                         </div>
                         
                         <!-- Expiration Info -->
-                        <div class="bg-gray-100 dark:bg-gray-800 rounded-md p-3">
+                        <div class="bg-white ring-1 ring-gray-950/5 dark:bg-gray-900 dark:ring-white/10 dark:bg-gray-900 rounded-md p-3">
                             <div class="space-y-1">
                                 <div class="flex items-center justify-between">
                                     <span class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Expires</span>
@@ -89,7 +89,7 @@
                         </div>
 
                         <!-- Max Streams Status -->
-                        <div class="bg-gray-100 dark:bg-gray-800 rounded-md p-3">
+                        <div class="bg-white ring-1 ring-gray-950/5 dark:bg-gray-900 dark:ring-white/10 dark:bg-gray-900 rounded-md p-3">
                             <div class="flex items-center justify-between">
                                 <span class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Max Reached</span>
                                 <div class="text-right">
@@ -118,14 +118,14 @@
             <!-- Channel & Series Stats Section -->
             <div>
                 <h3 class="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3 flex items-center">
-                    <div class="p-1 mr-1 bg-gray-100 dark:bg-gray-800 rounded-lg">
+                    <div class="p-1 mr-1 bg-white ring-1 ring-gray-950/5 dark:bg-gray-900 dark:ring-white/10 dark:bg-gray-900 rounded-lg">
                         <x-heroicon-s-play class="text-green-500 h-4 w-4" />
                     </div>
                     Channel & Series
                 </h3>
                 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                     <!-- Channels -->
-                    <div class="bg-gray-100 dark:bg-gray-800 rounded-md p-3">
+                    <div class="bg-white ring-1 ring-gray-950/5 dark:bg-gray-900 dark:ring-white/10 dark:bg-gray-900 rounded-md p-3">
                         <div class="flex flex-col items-center">
                             <span class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Live</span>
                             <div class="text-2xl font-bold text-gray-900 dark:text-gray-100">
@@ -135,7 +135,7 @@
                         </div>
                     </div>
                     <!-- VOD -->
-                    <div class="bg-gray-100 dark:bg-gray-800 rounded-md p-3">
+                    <div class="bg-white ring-1 ring-gray-950/5 dark:bg-gray-900 dark:ring-white/10 dark:bg-gray-900 rounded-md p-3">
                         <div class="flex flex-col items-center">
                             <span class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">VOD</span>
                             <div class="text-2xl font-bold text-gray-900 dark:text-gray-100">
@@ -145,7 +145,7 @@
                         </div>
                     </div>
                     <!-- Series -->
-                    <div class="bg-gray-100 dark:bg-gray-800 rounded-md p-3">
+                    <div class="bg-white ring-1 ring-gray-950/5 dark:bg-gray-900 dark:ring-white/10 dark:bg-gray-900 rounded-md p-3">
                         <div class="flex flex-col items-center">
                             <span class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Series</span>
                             <div class="text-2xl font-bold text-gray-900 dark:text-gray-100">
@@ -155,7 +155,7 @@
                         </div>
                     </div>
                     <!-- Groups -->
-                    <div class="bg-gray-100 dark:bg-gray-800 rounded-md p-3">
+                    <div class="bg-white ring-1 ring-gray-950/5 dark:bg-gray-900 dark:ring-white/10 dark:bg-gray-900 rounded-md p-3">
                         <div class="flex flex-col items-center">
                             <span class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Groups</span>
                             <div class="text-2xl font-bold text-gray-900 dark:text-gray-100">

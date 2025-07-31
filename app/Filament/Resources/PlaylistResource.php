@@ -697,7 +697,7 @@ class PlaylistResource extends Resource
                         Infolists\Components\Tabs\Tab::make('Links')
                             ->icon('heroicon-m-link')
                             ->schema([
-                                Infolists\Components\Grid::make()
+                                Infolists\Components\Section::make()
                                     ->columns(2)
                                     ->schema([
                                         Infolists\Components\Livewire::make(PlaylistM3uUrl::class),
@@ -707,10 +707,14 @@ class PlaylistResource extends Resource
                         Infolists\Components\Tabs\Tab::make('Xtream API')
                             ->icon('heroicon-m-bolt')
                             ->schema([
-                                Infolists\Components\Livewire::make(XtreamApiInfo::class)
+                                Infolists\Components\Section::make()
+                                    ->columns(1)
+                                    ->schema([
+                                        Infolists\Components\Livewire::make(XtreamApiInfo::class)
+                                    ])
                             ]),
-                    ]),
-                Infolists\Components\Section::make('Guide')
+                    ])->contained(false),
+                Infolists\Components\Section::make()
                     ->schema([
                         EpgViewer::make(),
                     ])
