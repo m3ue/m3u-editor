@@ -18,36 +18,6 @@ class Epg extends Model
     use HasFactory;
 
     /**
-     * The attributes that are mass assignable.
-     *
-     * @var array
-     */
-    protected $fillable = [
-        'name',
-        'url',
-        'user_id',
-        'synced',
-        'auto_sync',
-        'sync_interval',
-        'processing',
-        'user_agent',
-        'disable_ssl_verification',
-        'preferred_local',
-        'is_cached',
-        'source_type',
-        'sd_username',
-        'sd_password',  // This will be automatically hashed
-        'sd_country',
-        'sd_postal_code',
-        'sd_lineup_id',
-        'sd_token',
-        'sd_token_expires_at',
-        'sd_last_sync',
-        'sd_station_ids',
-        'sd_errors',
-    ];
-
-    /**
      * The attributes that should be cast to native types.
      *
      * @var array
@@ -65,6 +35,7 @@ class Epg extends Model
         'sd_last_sync' => 'datetime',
         'sd_station_ids' => 'array',
         'sd_errors' => 'array',
+        'sd_days_to_import' => 'integer',
     ];
 
     /**

@@ -17,13 +17,12 @@ class SchedulesDirectService
 
     // Configuration constants for performance tuning
     private const MAX_STATIONS_PER_SYNC = null;      // Limit stations for faster processing
-    private const STATIONS_PER_CHUNK = 50;           // Much smaller chunks for speed
-    private const DAYS_TO_FETCH = 3;                 // Reduce days for speed (was 7)
+    private const STATIONS_PER_CHUNK = 50;           // Smaller chunks for speed
     private const SCHEDULES_TIMEOUT = 180;           // Reduced timeout
     private const DEFAULT_TIMEOUT = 60;              // Default timeout
     private const CHUNK_DELAY_MICROSECONDS = 50000;  // Reduced delay (50ms)
     private const MAX_RETRIES = 2;                   // Fewer retries for speed
-    private const PROGRAMS_BATCH_SIZE = 500;         // Smaller batches for speed
+    private const PROGRAMS_BATCH_SIZE = 1000;        // Batch size for program requests
 
     public function __construct()
     {
@@ -288,11 +287,11 @@ class SchedulesDirectService
     }
 
     /**
-     * Sync EPG data from Schedules Direct
+     * Fetch Schedules Direct EPG data and update the EPG record
      */
     public function syncEpgData(Epg $epg): void
     {
-        Log::debug("Starting EPG sync", [
+        Log::debug("Starting Schedules Direct sync", [
             'epg_id' => $epg->id,
             'chunk_size' => self::STATIONS_PER_CHUNK
         ]);
@@ -306,6 +305,13 @@ class SchedulesDirectService
             if (!$epg->hasSchedulesDirectLineup()) {
                 throw new \Exception('No lineup configured for Schedules Direct EPG');
             }
+
+            // Reset EPG SD sync status
+            $epg->update([
+                'sd_errors' => null,
+                'sd_last_sync' => null,
+                'sd_progress' => 0,
+            ]);
 
             // Check if lineup is already in account, if not add it
             try {
@@ -331,7 +337,7 @@ class SchedulesDirectService
                 ? array_slice($epg->sd_station_ids, 0, self::MAX_STATIONS_PER_SYNC)
                 : $epg->sd_station_ids;
 
-            Log::debug("Starting streaming EPG sync", [
+            Log::debug("Starting Schedules Direct sync", [
                 'epg_id' => $epg->id,
                 'station_count' => count($stationIds),
                 'chunk_size' => self::STATIONS_PER_CHUNK
@@ -339,7 +345,7 @@ class SchedulesDirectService
 
             // Generate dates
             $dates = [];
-            for ($i = 0; $i < self::DAYS_TO_FETCH; $i++) {
+            for ($i = 0; $i < $epg->sd_days_to_import; $i++) {
                 $dates[] = Carbon::now()->addDays($i)->format('Y-m-d');
             }
 
@@ -350,8 +356,9 @@ class SchedulesDirectService
             $epg->update([
                 'sd_last_sync' => now(),
                 'sd_errors' => null,
+                'sd_progress' => 100,
             ]);
-            Log::debug("Successfully completed EPG sync", [
+            Log::debug("Successfully completed Schedules Direct sync", [
                 'epg_id' => $epg->id,
                 'stations_processed' => count($stationIds),
                 'file_path' => $xmlFilePath
@@ -419,6 +426,7 @@ class SchedulesDirectService
             throw $e;
         } finally {
             fclose($file);
+            $epg->update(['sd_progress' => 100]);
         }
 
         return $filePath;
@@ -495,42 +503,45 @@ class SchedulesDirectService
                 'total_chunks' => $totalChunks
             ]);
 
-            // Collect unique program IDs from this schedule chunk
-            $programIds = [];
+            // Stream through schedule chunk and collect unique program IDs using file-based deduplication
+            $tempProgramIdFile = tempnam(sys_get_temp_dir(), 'epg_programs_chunk_' . $chunkIndex . '_');
+            $programIdHandle = fopen($tempProgramIdFile, 'w');
+            $seenProgramIds = []; // Small lookup table for deduplication
             $scheduleCount = 0;
+            $programCount = 0;
+            
             foreach ($scheduleChunk as $schedule) {
                 $scheduleCount++;
                 foreach ($schedule['programs'] ?? [] as $program) {
                     $programId = $program['programID'];
-                    if (!in_array($programId, $programIds)) {
-                        $programIds[] = $programId;
+                    // Use array key existence check for O(1) deduplication
+                    if (!isset($seenProgramIds[$programId])) {
+                        $seenProgramIds[$programId] = true;
+                        fwrite($programIdHandle, $programId . "\n");
+                        $programCount++;
                     }
                 }
             }
+            fclose($programIdHandle);
 
             Log::debug("Collected program IDs from schedule chunk", [
                 'chunk' => $chunkIndex,
                 'schedules_in_chunk' => $scheduleCount,
-                'unique_program_ids' => count($programIds)
+                'unique_program_ids' => $programCount
             ]);
 
-            // Fetch programs for this chunk only
-            if (!empty($programIds)) {
+            // Fetch programs for this chunk only using streaming batches
+            if ($programCount > 0) {
                 Log::debug("Fetching programs for chunk", [
                     'chunk' => $chunkIndex,
-                    'program_count' => count($programIds)
+                    'program_count' => $programCount
                 ]);
 
                 try {
-                    $programData = $this->getPrograms($epg->sd_token, $programIds);
-                    
-                    // Create a simple lookup array for this chunk only
-                    $programLookup = [];
-                    foreach ($programData as $program) {
-                        $programLookup[$program['programID']] = $program;
-                    }
+                    // Stream program IDs from file and fetch in batches
+                    $programLookup = $this->streamFetchPrograms($tempProgramIdFile, $epg->sd_token, $chunkIndex);
 
-                    // Process schedules with the fetched program data
+                    // Process schedules with the fetched program data using streaming approach
                     $chunkProgramsWritten = 0;
                     foreach ($scheduleChunk as $schedule) {
                         $stationId = $schedule['stationID'] ?? null;
@@ -554,20 +565,28 @@ class SchedulesDirectService
                         'total_programs_written' => $totalProgramsWritten
                     ]);
 
-                    // Clear data immediately
-                    unset($programData, $programLookup);
+                    // Update progress
+                    $progress = min(100, (int)(($chunkIndex / $totalChunks) * 100));
+                    $epg->update(['sd_progress' => $progress]);
 
+                    // Clear data immediately to free memory
+                    unset($programLookup);
                 } catch (\Exception $e) {
                     Log::error("Error processing chunk programs", [
                         'chunk' => $chunkIndex,
                         'error' => $e->getMessage()
                     ]);
                     continue;
+                } finally {
+                    // Clean up temporary file
+                    if (isset($tempProgramIdFile) && file_exists($tempProgramIdFile)) {
+                        unlink($tempProgramIdFile);
+                    }
                 }
             }
 
             // Clear schedule chunk from memory
-            unset($scheduleChunk, $programIds);
+            unset($scheduleChunk, $seenProgramIds);
 
             // Force garbage collection every few chunks
             if ($chunkIndex % 2 === 0) {
@@ -582,6 +601,127 @@ class SchedulesDirectService
     }
 
     /**
+     * Stream fetch programs from file-based program ID list using JsonMachine for memory efficiency
+     */
+    private function streamFetchPrograms(string $programIdFile, string $token, int $chunkIndex): array
+    {
+        $programLookup = [];
+        $handle = fopen($programIdFile, 'r');
+        
+        if (!$handle) {
+            throw new \Exception("Cannot open program ID file: {$programIdFile}");
+        }
+
+        $batch = [];
+        $batchIndex = 0;
+        $totalPrograms = 0;
+
+        try {
+            // Stream through program IDs and batch them
+            while (($line = fgets($handle)) !== false) {
+                $programId = trim($line);
+                if (!empty($programId)) {
+                    $batch[] = $programId;
+                    $totalPrograms++;
+
+                    // When we reach batch size, fetch the programs
+                    if (count($batch) >= self::PROGRAMS_BATCH_SIZE) {
+                        $this->processProgramBatch($batch, $batchIndex, $token, $chunkIndex, $programLookup);
+                        $batch = []; // Clear the batch
+                        $batchIndex++;
+                        
+                        // Small delay between batches
+                        usleep(100000); // 100ms
+                    }
+                }
+            }
+
+            // Process remaining programs in the last batch
+            if (!empty($batch)) {
+                $this->processProgramBatch($batch, $batchIndex, $token, $chunkIndex, $programLookup);
+            }
+
+            Log::debug("Completed streaming program fetch", [
+                'chunk' => $chunkIndex,
+                'total_programs' => $totalPrograms,
+                'total_batches' => $batchIndex + 1,
+                'programs_in_lookup' => count($programLookup)
+            ]);
+
+        } finally {
+            fclose($handle);
+        }
+
+        return $programLookup;
+    }
+
+    /**
+     * Process a batch of programs using JsonMachine streaming for memory efficiency
+     */
+    private function processProgramBatch(array $programBatch, int $batchIndex, string $token, int $chunkIndex, array &$programLookup): void
+    {
+        // Create a temporary file for the API response
+        $tempResponseFile = tempnam(sys_get_temp_dir(), 'epg_programs_response_');
+        
+        try {
+            Log::debug("Fetching program batch", [
+                'chunk' => $chunkIndex,
+                'batch' => $batchIndex + 1,
+                'batch_size' => count($programBatch)
+            ]);
+
+            // Stream the API response directly to a file to avoid memory usage
+            $response = Http::withHeaders([
+                'User-Agent' => self::$USER_AGENT,
+                'token' => $token,
+            ])
+                ->timeout(300) // 5 minutes for large batches
+                ->sink($tempResponseFile)
+                ->post(self::BASE_URL . '/programs', $programBatch);
+
+            if ($response->successful()) {
+                // Use JsonMachine to stream through the response file
+                $programs = Items::fromFile($tempResponseFile);
+                
+                foreach ($programs as $program) {
+                    // Convert JsonMachine object to array for consistency
+                    $programArray = json_decode(json_encode($program), true);
+                    if (isset($programArray['programID'])) {
+                        $programLookup[$programArray['programID']] = $programArray;
+                    }
+                }
+
+                // Clear the JsonMachine iterator
+                unset($programs);
+
+                Log::debug("Program batch processed with streaming", [
+                    'chunk' => $chunkIndex,
+                    'batch' => $batchIndex + 1,
+                    'programs_in_batch' => count($programBatch),
+                    'lookup_size' => count($programLookup)
+                ]);
+            } else {
+                Log::error("Failed to fetch program batch", [
+                    'chunk' => $chunkIndex,
+                    'batch' => $batchIndex + 1,
+                    'status' => $response->status()
+                ]);
+            }
+        } catch (\Exception $e) {
+            Log::error("Error fetching program batch", [
+                'chunk' => $chunkIndex,
+                'batch' => $batchIndex + 1,
+                'error' => $e->getMessage()
+            ]);
+        } finally {
+            // Clean up temporary response file
+            if (file_exists($tempResponseFile)) {
+                unlink($tempResponseFile);
+            }
+        }
+    }
+
+    /**
      * Write a single program to XMLTV file
      */
     private function writeProgramToXMLTV($file, string $stationId, $program, array $programData): void
@@ -590,7 +730,7 @@ class SchedulesDirectService
         $airDateTime = is_object($program) ? $program->airDateTime : $program['airDateTime'];
         $duration = is_object($program) ? $program->duration : $program['duration'];
         $isNew = is_object($program) ? ($program->new ?? false) : ($program['new'] ?? false);
-        
+
         $start = Carbon::parse($airDateTime)->format('YmdHis O');
         $stop = Carbon::parse($airDateTime)
             ->addSeconds($duration)

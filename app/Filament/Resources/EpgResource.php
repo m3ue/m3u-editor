@@ -97,6 +97,11 @@ class EpgResource extends Resource
                     ->sortable()
                     ->poll(fn($record) => $record->status === Status::Processing || $record->status === Status::Pending ? '3s' : null)
                     ->toggleable(),
+                ProgressColumn::make('sd_progress')
+                    ->label('Schedules Direct')
+                    ->sortable()
+                    ->poll(fn($record) => $record->status === Status::Processing || $record->status === Status::Pending ? '3s' : null)
+                    ->toggleable(),
                 Tables\Columns\ToggleColumn::make('auto_sync')
                     ->label('Auto Sync')
                     ->toggleable()
@@ -186,6 +191,7 @@ class EpgResource extends Resource
                                 'status' => Status::Pending,
                                 'processing' => false,
                                 'progress' => 0,
+                                'sd_progress' => 0,
                                 'synced' => null,
                                 'errors' => null,
                             ]);
@@ -351,98 +357,110 @@ class EpgResource extends Resource
                                 ->required(fn(Get $get): bool => $get('source_type') === EpgSourceType::SCHEDULES_DIRECT->value),
                         ]),
 
-                    Forms\Components\Select::make('sd_lineup_id')
-                        ->label('Lineup')
-                        ->helperText('Select your Schedules Direct lineup')
-                        ->searchable()
-                        ->getSearchResultsUsing(function (string $search, Get $get, SchedulesDirectService $service) {
-                            $country = $get('sd_country');
-                            $postalCode = $get('sd_postal_code');
-                            $username = $get('sd_username');
-                            $password = $get('sd_password');
+                    Forms\Components\Grid::make()
+                        ->columns(2)
+                        ->schema([
+                            Forms\Components\Select::make('sd_lineup_id')
+                                ->label('Lineup')
+                                ->helperText('Select your Schedules Direct lineup')
+                                ->searchable()
+                                ->getSearchResultsUsing(function (string $search, Get $get, SchedulesDirectService $service) {
+                                    $country = $get('sd_country');
+                                    $postalCode = $get('sd_postal_code');
+                                    $username = $get('sd_username');
+                                    $password = $get('sd_password');
 
-                            if (!$country || !$postalCode || !$username || !$password) {
-                                return [];
-                            }
-
-                            try {
-                                $authData = $service->authenticate($username, $password);
-
-                                // Get account lineups first
-                                $accountLineups = [];
-                                try {
-                                    $userLineups = $service->getUserLineups($authData['token']);
-                                    $accountLineups = $userLineups['lineups'] ?? [];
-                                } catch (\Exception $e) {
-                                    // If we can't get account lineups, fall back to headend search
-                                }
-
-                                $options = [];
-
-                                // First, add account lineups that match the search
-                                foreach ($accountLineups as $lineup) {
-                                    if (stripos($lineup['name'], $search) !== false) {
-                                        $options[$lineup['lineup']] = "✅ {$lineup['name']} (In Account)";
+                                    if (!$country || !$postalCode || !$username || !$password) {
+                                        return [];
                                     }
-                                }
 
-                                // Then add available lineups from headends
-                                $headends = $service->getHeadends($authData['token'], $country, $postalCode);
-                                foreach ($headends as $headend) {
-                                    foreach ($headend['lineups'] as $lineup) {
-                                        if (stripos($lineup['name'], $search) !== false) {
-                                            // Don't duplicate if already in account
-                                            if (!isset($options[$lineup['lineup']])) {
-                                                $options[$lineup['lineup']] = "⚠️ {$lineup['name']} ({$headend['transport']}) - Not Added";
+                                    try {
+                                        $authData = $service->authenticate($username, $password);
+
+                                        // Get account lineups first
+                                        $accountLineups = [];
+                                        try {
+                                            $userLineups = $service->getUserLineups($authData['token']);
+                                            $accountLineups = $userLineups['lineups'] ?? [];
+                                        } catch (\Exception $e) {
+                                            // If we can't get account lineups, fall back to headend search
+                                        }
+
+                                        $options = [];
+
+                                        // First, add account lineups that match the search
+                                        foreach ($accountLineups as $lineup) {
+                                            if (stripos($lineup['name'], $search) !== false) {
+                                                $options[$lineup['lineup']] = "✅ {$lineup['name']} (In Account)";
                                             }
                                         }
-                                    }
-                                }
 
-                                return $options;
-                            } catch (\Exception $e) {
-                                return [];
-                            }
-                        })
-                        ->getOptionLabelUsing(function ($value, Get $get, SchedulesDirectService $service) {
-                            try {
-                                $country = $get('sd_country');
-                                $postalCode = $get('sd_postal_code');
-                                $username = $get('sd_username');
-                                $password = $get('sd_password');
-
-                                if (!$country || !$postalCode || !$username || !$password) {
-                                    return $value;
-                                }
-
-                                $authData = $service->authenticate($username, $password);
-
-                                // Check account lineups first
-                                try {
-                                    $userLineups = $service->getUserLineups($authData['token']);
-                                    foreach ($userLineups['lineups'] ?? [] as $lineup) {
-                                        if ($lineup['lineup'] === $value) {
-                                            return "✅ {$lineup['name']} (In Account)";
+                                        // Then add available lineups from headends
+                                        $headends = $service->getHeadends($authData['token'], $country, $postalCode);
+                                        foreach ($headends as $headend) {
+                                            foreach ($headend['lineups'] as $lineup) {
+                                                if (stripos($lineup['name'], $search) !== false) {
+                                                    // Don't duplicate if already in account
+                                                    if (!isset($options[$lineup['lineup']])) {
+                                                        $options[$lineup['lineup']] = "⚠️ {$lineup['name']} ({$headend['transport']}) - Not Added";
+                                                    }
+                                                }
+                                            }
                                         }
-                                    }
-                                } catch (\Exception $e) {
-                                    // Continue to headend search
-                                }
 
-                                // Check available lineups
-                                $headends = $service->getHeadends($authData['token'], $country, $postalCode);
-                                foreach ($headends as $headend) {
-                                    foreach ($headend['lineups'] as $lineup) {
-                                        if ($lineup['lineup'] === $value) {
-                                            return "⚠️ {$lineup['name']} ({$headend['transport']}) - Not Added";
-                                        }
+                                        return $options;
+                                    } catch (\Exception $e) {
+                                        return [];
                                     }
-                                }
-                                return $value;
-                            } catch (\Exception $e) {
-                                return $value;
-                            }
-                        }),
+                                })
+                                ->getOptionLabelUsing(function ($value, Get $get, SchedulesDirectService $service) {
+                                    try {
+                                        $country = $get('sd_country');
+                                        $postalCode = $get('sd_postal_code');
+                                        $username = $get('sd_username');
+                                        $password = $get('sd_password');
+
+                                        if (!$country || !$postalCode || !$username || !$password) {
+                                            return $value;
+                                        }
+
+                                        $authData = $service->authenticate($username, $password);
+
+                                        // Check account lineups first
+                                        try {
+                                            $userLineups = $service->getUserLineups($authData['token']);
+                                            foreach ($userLineups['lineups'] ?? [] as $lineup) {
+                                                if ($lineup['lineup'] === $value) {
+                                                    return "✅ {$lineup['name']} (In Account)";
+                                                }
+                                            }
+                                        } catch (\Exception $e) {
+                                            // Continue to headend search
+                                        }
+
+                                        // Check available lineups
+                                        $headends = $service->getHeadends($authData['token'], $country, $postalCode);
+                                        foreach ($headends as $headend) {
+                                            foreach ($headend['lineups'] as $lineup) {
+                                                if ($lineup['lineup'] === $value) {
+                                                    return "⚠️ {$lineup['name']} ({$headend['transport']}) - Not Added";
+                                                }
+                                            }
+                                        }
+                                        return $value;
+                                    } catch (\Exception $e) {
+                                        return $value;
+                                    }
+                                }),
+                            Forms\Components\TextInput::make('sd_days_to_import')
+                                ->label('Days to Import')
+                                ->numeric()
+                                ->default(3)
+                                ->minValue(1)
+                                ->maxValue(14)
+                                ->helperText('Number of days to import from Schedules Direct (1-14)')
+                                ->required(fn(Get $get): bool => $get('source_type') === EpgSourceType::SCHEDULES_DIRECT->value),
+                        ]),
 
                     Forms\Components\Grid::make()
                         ->columns(2)
