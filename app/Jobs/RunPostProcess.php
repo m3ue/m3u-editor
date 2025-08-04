@@ -4,16 +4,21 @@ namespace App\Jobs;
 
 use App\Enums\Status;
 use App\Facades\PlaylistUrlFacade;
+use App\Mail\PostProcessMail;
 use App\Models\Epg;
 use App\Models\PostProcess;
 use App\Models\PostProcessLog;
+use App\Settings\GeneralSettings;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use Symfony\Component\Process\Process as SymfonyProcess;
+use Illuminate\Support\Str;
 
 class RunPostProcess implements ShouldQueue
 {
@@ -39,7 +44,7 @@ class RunPostProcess implements ShouldQueue
     /**
      * Execute the job.
      */
-    public function handle(): void
+    public function handle(GeneralSettings $settings): void
     {
         $modelType = get_class($this->model);
         $name = $this->model->name;
@@ -82,7 +87,62 @@ class RunPostProcess implements ShouldQueue
         try {
             // See if calling webhook, or running a script
             // If the metadata is a URL, then we're calling a webhook
-            if (str_starts_with($metadata['path'], 'http')) {
+            if (str_contains($metadata['path'], '@')) {
+                // Email processing
+                $emailVars = [];
+                $vars = $metadata['email_vars'] ?? [];
+                foreach ($vars as $var) {
+                    if ($var['value'] === 'url') {
+                        if ($modelType === Epg::class) {
+                            $value = route('epg.file', ['uuid' => $this->model->uuid]);
+                        } else {
+                            $value = PlaylistUrlFacade::getUrls($this->model)['m3u'];
+                        }
+                    } else {
+                        if ($var['value'] === 'status') {
+                            $value = $this->model->status->value ?? '';
+                        } else {
+                            $value = $this->model->{$var['value']} ?? '';
+                        }
+                    }
+                    $emailVars[$var['value']] = $value;
+                }
+
+                // Send email using the configured email service
+                $to = explode(',', $metadata['path']);
+                Config::set('mail.default', 'smtp');
+                Config::set('mail.from.address', $settings->smtp_from_address);
+                Config::set('mail.from.name', 'm3u editor');
+                Config::set('mail.mailers.smtp.host', $settings->smtp_host);
+                Config::set('mail.mailers.smtp.username', $settings->smtp_username);
+                Config::set('mail.mailers.smtp.password', $settings->smtp_password);
+                Config::set('mail.mailers.smtp.port', $settings->smtp_port);
+                Config::set('mail.mailers.smtp.encryption', $settings->smtp_encryption);
+                Mail::to($to)
+                    ->send(new PostProcessMail(
+                        emailSubject: $metadata['subject'] ?? "Sync completed for \"{$name}\"",
+                        body: $metadata['body'] ?? "Sync completed for \"{$name}\". Please see below for details.",
+                        variables: $emailVars,
+                        user: $user
+                    ));
+
+                // Log that we've sent the email
+                $title = "Post processing email for \"$name\"";
+                $body = "Email sent with the following variables:\n" . print_r($emailVars, true);
+                PostProcessLog::create([
+                    'name' => $name,
+                    'type' => $postProcess->event,
+                    'post_process_id' => $postProcess->id,
+                    'status' => 'success',
+                    'message' => $body,
+                ]);
+                Notification::make()
+                    ->success()
+                    ->title($title)
+                    ->body($body)
+                    ->broadcast($user)
+                    ->sendToDatabase($user);
+            } else if (str_starts_with($metadata['path'], 'http')) {
                 // Using `post` as true/false; true = POST, false = GET
                 $post = ((bool)$metadata['post']) ?? false;
                 $method = $post ? 'post' : 'get';

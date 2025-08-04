@@ -13,6 +13,8 @@ class GeneralSettings extends Settings
     public ?bool $show_api_docs = false;
     public ?bool $show_queue_manager = false;
     public ?string $content_width = MaxWidth::ScreenExtraLarge->value;
+
+    // Proxy settings
     public ?string $ffmpeg_user_agent = 'VLC/3.0.21 LibVLC/3.0.21';
     public ?bool $ffmpeg_debug = false;
     public ?int $ffmpeg_max_tries = 3;
@@ -40,6 +42,14 @@ class GeneralSettings extends Settings
     public ?string $ffmpeg_qsv_video_filter = null;
     public ?string $ffmpeg_qsv_encoder_options = null;
     public ?string $ffmpeg_qsv_additional_args = null;
+
+    // SMTP settings
+    public ?string $smtp_host = null;
+    public ?int $smtp_port = null;
+    public ?string $smtp_username = null;
+    public ?string $smtp_password = null;
+    public ?string $smtp_encryption = null; // e.g. 'tls', 'ssl', or null
+    public ?string $smtp_from_address = null;
 
     public static function group(): string
     {

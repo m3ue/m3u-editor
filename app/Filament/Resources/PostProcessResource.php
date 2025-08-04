@@ -141,23 +141,53 @@ class PostProcessResource extends Resource
                 ->grouped()
                 ->required()
                 ->options([
-                    false => 'URL',
-                    true => 'Local file',
+                    'url' => 'URL',
+                    'path' => 'Local file',
+                    'email' => 'Email',
                 ])
                 ->icons([
-                    false => 'heroicon-s-link',
-                    true => 'heroicon-s-document',
+                    'url' => 'heroicon-s-link',
+                    'path' => 'heroicon-s-document',
+                    'email' => 'heroicon-s-envelope',
                 ])
                 ->live()
-                ->default(false),
+                ->default('url'),
             Forms\Components\TextInput::make('metadata.path')
-                ->label(fn(Get $get) => $get('metadata.local') ? 'Path' : 'URL')
+                ->label(fn(Get $get) => ucfirst($get('metadata.local') ?? 'url'))
                 ->columnSpan(2)
-                ->prefixIcon(fn(Get $get) => $get('metadata.local') ? 'heroicon-o-document' : 'heroicon-o-globe-alt')
-                ->placeholder(fn(Get $get) => $get('metadata.local') ? '/var/www/html/custom_script' : route('webhook.test.get'))
-                ->helperText(fn(Get $get) => $get('metadata.local') ? 'Path to local file' : 'Webhook URL')
+                ->prefixIcon(function (Get $get) {
+                    if ($get('metadata.local') === 'url') {
+                        return 'heroicon-o-globe-alt';
+                    } elseif ($get('metadata.local') === 'path') {
+                        return 'heroicon-o-document';
+                    } elseif ($get('metadata.local') === 'email') {
+                        return 'heroicon-o-envelope';
+                    }
+                    return 'heroicon-o-question-mark-circle';
+                })
+                ->placeholder(function (Get $get) {
+                    if ($get('metadata.local') === 'url') {
+                        return route('webhook.test.get');
+                    } elseif ($get('metadata.local') === 'path') {
+                        return '/var/www/html/custom_script';
+                    } elseif ($get('metadata.local') === 'email') {
+                        return 'user@example.com';
+                    }
+                })
+                ->helperText(function (Get $get) {
+                    if ($get('metadata.local') === 'url') {
+                        return 'The URL to your webhook endpoint.';
+                    } elseif ($get('metadata.local') === 'path') {
+                        return 'The path to your local script.';
+                    } elseif ($get('metadata.local') === 'email') {
+                        return 'The email address to send notifications to (use commas to separate multiple addresses).';
+                    }
+                    return 'The URL or path to your webhook endpoint.';
+                })
                 ->required()
-                ->rules(fn(Get $get) => [
+                ->rules(fn(Get $get) => $get('metadata.local') === 'email' ? [
+                    'email',
+                ] : [
                     new CheckIfUrlOrLocalPath(
                         urlOnly: !$get('metadata.local'),
                         localOnly: $get('metadata.local'),
@@ -210,7 +240,7 @@ class PostProcessResource extends Resource
                         ->columns(2)
                         ->columnSpanFull()
                         ->addActionLabel('Add GET/POST variable'),
-                ])->hidden(fn(Get $get) => !! $get('metadata.local')),
+                ])->hidden(fn(Get $get) => $get('metadata.local') !== 'url'),
             Forms\Components\Fieldset::make('Script Options')
                 ->schema([
                     Forms\Components\Repeater::make('metadata.script_vars')
@@ -250,7 +280,33 @@ class PostProcessResource extends Resource
                         ->columns(2)
                         ->columnSpanFull()
                         ->addActionLabel('Add named export'),
-                ])->hidden(fn(Get $get) => ! $get('metadata.local')),
+                ])->hidden(fn(Get $get) => $get('metadata.local') !== 'path'),
+            Forms\Components\Fieldset::make('Email Variables')
+                ->schema([
+                    Forms\Components\Repeater::make('metadata.email_vars')
+                        ->label('Email variables')
+                        ->schema([
+                            Forms\Components\Select::make('value')
+                                ->label('Value')
+                                ->required()
+                                ->columnSpanFull()
+                                ->options([
+                                    'id' => 'ID',
+                                    'uuid' => 'UUID',
+                                    'name' => 'Name',
+                                    'url' => 'URL',
+                                    'status' => 'Status',
+                                    'synctime' => 'Sync time',
+                                    'added_groups' => '# Groups added (Playlist only)',
+                                    'removed_groups' => '# Groups removed (Playlist only)',
+                                    'added_channels' => '# Channels added (Playlist only)',
+                                    'removed_channels' => '# Channels removed (Playlist only)',
+                                ])->helperText('Value to include in the email.'),
+                        ])
+                        ->columns(2)
+                        ->columnSpanFull()
+                        ->addActionLabel('Add variable'),
+                ])->hidden(fn(Get $get) => $get('metadata.local') !== 'email'),
             Forms\Components\Fieldset::make('Conditional Settings')
                 ->schema([
                     Forms\Components\Repeater::make('conditions')

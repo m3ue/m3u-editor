@@ -317,6 +317,35 @@ class Preferences extends SettingsPage
                                             ->helperText('When enabled you can access the API documentation using the "API Docs" button. When disabled, the docs endpoint will return a 403 (Unauthorized). NOTE: The API will respond regardless of this setting. You do not need to enable it to use the API.'),
                                     ])
                             ]),
+                        Forms\Components\Tabs\Tab::make('SMTP')
+                            ->columns(2)
+                            ->schema([
+                                Forms\Components\TextInput::make('smtp_host')
+                                    ->label('SMTP Host')
+                                    ->placeholder('Enter SMTP Host'),
+                                Forms\Components\TextInput::make('smtp_port')
+                                    ->label('SMTP Port')
+                                    ->placeholder('Enter SMTP Port')
+                                    ->numeric(),
+                                Forms\Components\TextInput::make('smtp_username')
+                                    ->label('SMTP Username')
+                                    ->placeholder('Enter SMTP Username'),
+                                Forms\Components\TextInput::make('smtp_password')
+                                    ->label('SMTP Password')
+                                    ->revealable()
+                                    ->placeholder('Enter SMTP Password')
+                                    ->password(),
+                                Forms\Components\Select::make('smtp_encryption')
+                                    ->label('SMTP Encryption')
+                                    ->options([
+                                        'tls' => 'TLS',
+                                        'ssl' => 'SSL',
+                                        null => 'None',
+                                    ]),
+                                Forms\Components\TextInput::make('smtp_from_address')
+                                    ->label('SMTP From Address')
+                                    ->placeholder('Enter SMTP From Address'),
+                            ]),
                         Forms\Components\Tabs\Tab::make('Debugging')
                             ->schema([
                                 Forms\Components\Section::make('Debugging')
