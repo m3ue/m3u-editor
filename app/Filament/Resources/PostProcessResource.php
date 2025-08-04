@@ -180,7 +180,7 @@ class PostProcessResource extends Resource
                     } elseif ($get('metadata.local') === 'path') {
                         return 'The path to your local script.';
                     } elseif ($get('metadata.local') === 'email') {
-                        return 'The email address to send notifications to (use commas to separate multiple addresses).';
+                        return 'The email address to send notifications to.';
                     }
                     return 'The URL or path to your webhook endpoint.';
                 })
@@ -189,8 +189,8 @@ class PostProcessResource extends Resource
                     'email',
                 ] : [
                     new CheckIfUrlOrLocalPath(
-                        urlOnly: !$get('metadata.local'),
-                        localOnly: $get('metadata.local'),
+                        urlOnly: $get('metadata.local') === 'url',
+                        localOnly: $get('metadata.local') === 'path',
                     ),
                 ])
                 ->maxLength(255),
