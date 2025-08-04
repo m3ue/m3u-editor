@@ -225,12 +225,15 @@ class PostProcessResource extends Resource
                                 ->label('Value')
                                 ->required()
                                 ->options([
+                                    // Playlist fields
                                     'id' => 'ID',
                                     'uuid' => 'UUID',
                                     'name' => 'Name',
                                     'url' => 'URL',
                                     'status' => 'Status',
-                                    'synctime' => 'Sync time',
+
+                                    // Playlist sync fields
+                                    'time' => 'Sync time',
                                     'added_groups' => '# Groups added (Playlist only)',
                                     'removed_groups' => '# Groups removed (Playlist only)',
                                     'added_channels' => '# Channels added (Playlist only)',
@@ -265,12 +268,15 @@ class PostProcessResource extends Resource
                                 ->label('Value')
                                 ->required()
                                 ->options([
+                                    // Playlist fields
                                     'id' => 'ID',
                                     'uuid' => 'UUID',
                                     'name' => 'Name',
                                     'url' => 'URL',
                                     'status' => 'Status',
-                                    'synctime' => 'Sync time',
+
+                                    // Playlist sync fields
+                                    'time' => 'Sync time',
                                     'added_groups' => '# Groups added (Playlist only)',
                                     'removed_groups' => '# Groups removed (Playlist only)',
                                     'added_channels' => '# Channels added (Playlist only)',
@@ -291,12 +297,15 @@ class PostProcessResource extends Resource
                                 ->required()
                                 ->columnSpanFull()
                                 ->options([
+                                    // Playlist fields
                                     'id' => 'ID',
                                     'uuid' => 'UUID',
                                     'name' => 'Name',
                                     'url' => 'URL',
                                     'status' => 'Status',
-                                    'synctime' => 'Sync time',
+
+                                    // Playlist sync fields
+                                    'time' => 'Sync time',
                                     'added_groups' => '# Groups added (Playlist only)',
                                     'removed_groups' => '# Groups removed (Playlist only)',
                                     'added_channels' => '# Channels added (Playlist only)',
@@ -316,12 +325,15 @@ class PostProcessResource extends Resource
                                 ->label('Field')
                                 ->required()
                                 ->options([
+                                    // Playlist fields
                                     'id' => 'ID',
                                     'uuid' => 'UUID',
                                     'name' => 'Name',
                                     'url' => 'URL',
                                     'status' => 'Status',
-                                    'synctime' => 'Sync time',
+
+                                    // Playlist sync fields
+                                    'time' => 'Sync time',
                                     'added_groups' => '# Groups added (Playlist only)',
                                     'removed_groups' => '# Groups removed (Playlist only)',
                                     'added_channels' => '# Channels added (Playlist only)',

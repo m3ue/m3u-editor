@@ -61,7 +61,7 @@ class RunPostProcess implements ShouldQueue
 
         // Merge the sync data with the model
         if ($this->lastSync) {
-            $syncData = $this->lastSync->syncStats;
+            $syncData = $this->lastSync->sync_stats;
             if ($syncData) {
                 foreach ($syncData as $key => $value) {
                     // Only add if not already present in the model
@@ -88,6 +88,15 @@ class RunPostProcess implements ShouldQueue
             // See if calling webhook, or running a script
             // If the metadata is a URL, then we're calling a webhook
             if (str_contains($metadata['path'], '@')) {
+                // If last sync is available, we can use it to get the list of groups/channels added/removed
+                // and include that in the email variables
+                if ($this->lastSync) {
+                    $addedGroups = $this->lastSync->addedGroups()->pluck('name')->toArray();
+                    $removedGroups = $this->lastSync->removedGroups()->pluck('name')->toArray();
+                    $addedChannels = $this->lastSync->addedChannels()->pluck('name')->toArray();
+                    $removedChannels = $this->lastSync->removedChannels()->pluck('name')->toArray();
+                }
+
                 // Email processing
                 $emailVars = [];
                 $vars = $metadata['email_vars'] ?? [];
@@ -106,6 +115,20 @@ class RunPostProcess implements ShouldQueue
                         }
                     }
                     $emailVars[$var['value']] = $value;
+
+                    // If added/removed groups/channels, include them
+                    if (isset($addedGroups) && $var['value'] === 'added_groups') {
+                        $emailVars['added_groups'] = "Added {$value} groups [" . implode(' • ', $addedGroups) . "]";
+                    }
+                    if (isset($removedGroups) && $var['value'] === 'removed_groups') {
+                        $emailVars['removed_groups'] = "Removed {$value} groups [" . implode(' • ', $removedGroups) . "]";
+                    }
+                    if (isset($addedChannels) && $var['value'] === 'added_channels') {
+                        $emailVars['added_channels'] = "Added {$value} channels [" . implode(' • ', $addedChannels) . "]";
+                    }
+                    if (isset($removedChannels) && $var['value'] === 'removed_channels') {
+                        $emailVars['removed_channels'] = "Removed {$value} channels [" . implode(' • ', $removedChannels) . "]";
+                    }
                 }
 
                 // Send email using the configured email service
@@ -128,7 +151,7 @@ class RunPostProcess implements ShouldQueue
 
                 // Log that we've sent the email
                 $title = "Post processing email for \"$name\"";
-                $body = "Email sent with the following variables:\n" . print_r($emailVars, true);
+                $body = "Email sent with details.";
                 PostProcessLog::create([
                     'name' => $name,
                     'type' => $postProcess->event,

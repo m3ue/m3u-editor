@@ -16,7 +16,4 @@
 @endforeach
 @endif
 
-@if ($user)
-<p>Sent to: {{ $user->name }} ({{ $user->email }})</p>
-@endif
 </x-mail::message>
