@@ -76,6 +76,9 @@ class ViewEpg extends ViewRecord
         return $infolist
             ->schema([
                 Infolists\Components\Section::make('EPG Information')
+                    ->collapsible(true)
+                    ->compact()
+                    ->persistCollapsed(true)
                     ->schema([
                         Infolists\Components\Grid::make()
                             ->columns(2)
