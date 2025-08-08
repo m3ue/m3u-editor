@@ -455,7 +455,7 @@ class ChannelResource extends Resource
                     ->modalDescription('Add the selected channel(s) to the chosen custom playlist.')
                     ->modalSubmitActionLabel('Add now'),
                 Tables\Actions\BulkAction::make('move')
-                    ->label('Move to group')
+                    ->label('Move to Group')
                     ->form([
                         Forms\Components\Select::make('playlist')
                             ->required()

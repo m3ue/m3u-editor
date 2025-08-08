@@ -158,7 +158,7 @@ class GroupResource extends Resource
                         ->modalDescription('Add the group channels to the chosen custom playlist.')
                         ->modalSubmitActionLabel('Add now'),
                     Tables\Actions\Action::make('move')
-                        ->label('Move channels to group')
+                        ->label('Move Channels to Group')
                         ->form([
                             Forms\Components\Select::make('group')
                                 ->required()
@@ -263,7 +263,7 @@ class GroupResource extends Resource
                         ->modalDescription('Add the group channels to the chosen custom playlist.')
                         ->modalSubmitActionLabel('Add now'),
                     Tables\Actions\BulkAction::make('move')
-                        ->label('Move channels to group')
+                        ->label('Move Channels to Group')
                         ->form([
                             Forms\Components\Select::make('group')
                                 ->required()

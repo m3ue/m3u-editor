@@ -46,7 +46,7 @@ class ViewGroup extends ViewRecord
                     ->modalDescription('Add the group channels to the chosen custom playlist.')
                     ->modalSubmitActionLabel('Add now'),
                 Actions\Action::make('move')
-                    ->label('Move to group')
+                    ->label('Move to Group')
                     ->form([
                         Forms\Components\Select::make('group')
                             ->required()
