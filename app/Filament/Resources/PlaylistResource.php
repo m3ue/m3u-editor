@@ -767,37 +767,6 @@ class PlaylistResource extends Resource
                 ])->hiddenOn('create'),
         ];
 
-        // See if MediaFlow Proxy is set up
-        if (PlaylistUrlFacade::mediaFlowProxyEnabled()) {
-            $nameFields[] = Forms\Components\Section::make('MediaFlow Proxy')
-                ->description('Your MediaFlow Proxy generated links – to disable clear the MediaFlow Proxy values from the app Settings page.')
-                ->collapsible()
-                ->collapsed($creating)
-                ->headerActions([
-                    Forms\Components\Actions\Action::make('mfproxy_git')
-                        ->label('GitHub')
-                        ->icon('heroicon-o-arrow-top-right-on-square')
-                        ->iconPosition('after')
-                        ->color('gray')
-                        ->size('sm')
-                        ->url('https://github.com/mhdzumair/mediaflow-proxy')
-                        ->openUrlInNewTab(true),
-                    Forms\Components\Actions\Action::make('mfproxy_docs')
-                        ->label('Docs')
-                        ->icon('heroicon-o-arrow-top-right-on-square')
-                        ->iconPosition('after')
-                        ->size('sm')
-                        ->url(fn($record) => PlaylistUrlFacade::getMediaFlowProxyServerUrl($record) . '/docs')
-                        ->openUrlInNewTab(true),
-                ])
-                ->schema([
-                    MediaFlowProxyUrl::make('mediaflow_proxy_url')
-                        ->label('Proxied M3U URL')
-                        ->columnSpan(2)
-                        ->dehydrated(false) // don't save the value in the database
-                ])->hiddenOn(['create']);
-        }
-
         $typeFields = [
             Forms\Components\Grid::make()
                 ->columns(2)
@@ -1176,9 +1145,50 @@ class PlaylistResource extends Resource
             if ($section === 'Name') {
                 $section = 'General';
             }
+            if ($section !== 'Output') {
+                // Wrap the fields in a section
+                $fields = [
+                    Forms\Components\Section::make($section)
+                        ->schema($fields),
+                ];
+
+                // See if MediaFlow Proxy is set up
+                if ($section === 'General' && PlaylistUrlFacade::mediaFlowProxyEnabled()) {
+                    $fields[] = Forms\Components\Section::make('MediaFlow Proxy')
+                        ->description('Your MediaFlow Proxy generated links – to disable clear the MediaFlow Proxy values from the app Settings page.')
+                        ->collapsible()
+                        ->collapsed(false)
+                        ->headerActions([
+                            Forms\Components\Actions\Action::make('mfproxy_git')
+                                ->label('GitHub')
+                                ->icon('heroicon-o-arrow-top-right-on-square')
+                                ->iconPosition('after')
+                                ->color('gray')
+                                ->size('sm')
+                                ->url('https://github.com/mhdzumair/mediaflow-proxy')
+                                ->openUrlInNewTab(true),
+                            Forms\Components\Actions\Action::make('mfproxy_docs')
+                                ->label('Docs')
+                                ->icon('heroicon-o-arrow-top-right-on-square')
+                                ->iconPosition('after')
+                                ->size('sm')
+                                ->url(fn($record) => PlaylistUrlFacade::getMediaFlowProxyServerUrl($record) . '/docs')
+                                ->openUrlInNewTab(true),
+                        ])
+                        ->schema([
+                            MediaFlowProxyUrl::make('mediaflow_proxy_url')
+                                ->label('Proxied M3U URL')
+                                ->columnSpan(2)
+                                ->dehydrated(false) // don't save the value in the database
+                        ]);
+                };
+            }
+
             $tabs[] = Forms\Components\Tabs\Tab::make($section)
                 ->schema($fields);
         }
+
+        // Compose the form with tabs and sections
         return [
             Forms\Components\Grid::make()
                 ->columns(5)
@@ -1186,6 +1196,7 @@ class PlaylistResource extends Resource
                     Forms\Components\Tabs::make()
                         ->tabs($tabs)
                         ->columnSpan(3)
+                        ->contained(false)
                         ->persistTabInQueryString(),
                     Forms\Components\Grid::make()
                         ->columns(2)
@@ -1195,8 +1206,6 @@ class PlaylistResource extends Resource
                                 ->compact()
                                 ->description('Add and manage authentication.')
                                 ->icon('heroicon-m-key')
-                                ->collapsible()
-                                ->collapsed(false)
                                 ->columnSpan(2)
                                 ->schema([
                                     Forms\Components\Select::make('assigned_auth_ids')
