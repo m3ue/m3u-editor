@@ -90,6 +90,9 @@ class ProcessM3uImportComplete implements ShouldQueue
 
         // See if sync logs are disabled
         $syncLogsDisabled = config('dev.disable_sync_logs', false);
+        if (!$playlist->sync_logs_enabled) {
+            $syncLogsDisabled = true;
+        }
 
         // If not a new playlist create a new playlst sync status!
         if (!$this->isNew) {

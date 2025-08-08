@@ -40,6 +40,7 @@ class Playlist extends Model
         'proxy_options' => 'array',
         'short_urls_enabled' => 'boolean',
         'backup_before_sync' => 'boolean',
+        'sync_logs_enabled' => 'boolean',
         'status' => Status::class,
         'id_channel_by' => PlaylistChannelId::class
     ];
