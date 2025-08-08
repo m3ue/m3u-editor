@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Models\Series;
+use App\Settings\GeneralSettings;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -23,13 +24,26 @@ class SyncSeriesStrmFiles implements ShouldQueue
     /**
      * Execute the job.
      */
-    public function handle(): void
+    public function handle(GeneralSettings $settings): void
     {
         // Get all the series episodes
         $series = $this->series;
         try {
-            // Make sure series is has sync enabled
+            // Get playlist sync settings
             $sync_settings = $series->sync_settings;
+
+            // Get global sync settings
+            $global_sync_settings = [
+                'enabled' => $settings->stream_file_sync_enabled ?? false,
+                'include_series' => $settings->stream_file_sync_include_series ?? true,
+                'include_season' => $settings->stream_file_sync_include_season ?? true,
+                'sync_location' => $series->sync_location ?? $settings->stream_file_sync_location ?? null,
+            ];
+
+            // Merge global settings with series specific settings
+            $sync_settings = array_merge($global_sync_settings, $sync_settings ?? []);
+
+            // Check if sync is enabled
             if (!$sync_settings['enabled'] ?? false) {
                 Notification::make()
                     ->danger()
@@ -55,7 +69,7 @@ class SyncSeriesStrmFiles implements ShouldQueue
             }
 
             // Get the path info
-            $path = rtrim($series->sync_location ?? '', '/');
+            $path = rtrim($sync_settings['sync_location'], '/');
             if (!is_dir($path)) {
                 Notification::make()
                     ->danger()

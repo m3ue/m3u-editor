@@ -51,6 +51,12 @@ class GeneralSettings extends Settings
     public ?string $smtp_encryption = null; // e.g. 'tls', 'ssl', or null
     public ?string $smtp_from_address = null;
 
+    // Stream file sync options
+    public ?bool $stream_file_sync_enabled = false;
+    public ?bool $stream_file_sync_include_series = false;
+    public ?bool $stream_file_sync_include_season = false;
+    public ?string $stream_file_sync_location = null;
+
     public static function group(): string
     {
         return 'general';

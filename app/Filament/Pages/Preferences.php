@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Rules\CheckIfUrlOrLocalPath;
 use App\Settings\GeneralSettings;
 use App\Services\FfmpegCodecService;
 use Filament\Forms;
@@ -296,6 +297,44 @@ class Preferences extends SettingsPage
                                             ->columnSpan(2),
                                     ])
                             ]),
+
+                        Forms\Components\Tabs\Tab::make('File Sync Options')
+                            ->schema([
+                                Forms\Components\Section::make('Stream location file settings')
+                                    ->description('Generate .strm files and sync them to a local file path. Options can be overriden per Series on the Series edit page.')
+                                    ->columnSpan('full')
+                                    ->columns(1)
+                                    ->collapsible(false)
+                                    ->schema([
+                                        Forms\Components\Toggle::make('stream_file_sync_enabled')
+                                            ->live()
+                                            ->label('Enable .strm file generation'),
+                                        Forms\Components\Toggle::make('stream_file_sync_include_series')
+                                            ->label('Create series folder')
+                                            ->live()
+                                            ->default(true)
+                                            ->hidden(fn($get) => !$get('stream_file_sync_enabled')),
+                                        Forms\Components\Toggle::make('stream_file_sync_include_season')
+                                            ->label('Create season folders')
+                                            ->live()
+                                            ->default(true)
+                                            ->hidden(fn($get) => !$get('stream_file_sync_enabled')),
+                                        Forms\Components\TextInput::make('stream_file_sync_location')
+                                            ->label('Series Sync Location')
+                                            ->live()
+                                            ->rules([new CheckIfUrlOrLocalPath(localOnly: true, isDirectory: true)])
+                                            ->helperText(
+                                                fn($get) => !$get('stream_file_sync_include_series')
+                                                    ? 'File location: ' . $get('stream_file_sync_location') . ($get('stream_file_sync_include_season') ?? false ? '/Season 01' : '') . '/S01E01 - Episode Title.strm'
+                                                    : 'File location: ' . $get('stream_file_sync_location') . '/Series Name' . ($get('stream_file_sync_include_season') ?? false ? '/Season 01' : '') . '/S01E01 - Episode Title.strm'
+                                            )
+                                            ->maxLength(255)
+                                            ->required()
+                                            ->hidden(fn($get) => !$get('stream_file_sync_enabled'))
+                                            ->placeholder('/usr/local/bin/streamlink'),
+                                    ])
+                            ]),
+
                         Forms\Components\Tabs\Tab::make('API')
                             ->schema([
                                 Forms\Components\Section::make('API Settings')

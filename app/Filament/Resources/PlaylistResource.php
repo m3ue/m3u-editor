@@ -1038,6 +1038,16 @@ class PlaylistResource extends Resource
                 ->collapsed($creating)
                 ->columns(2)
                 ->schema([
+                    Forms\Components\Toggle::make('sync_logs_enabled')
+                        ->label('Enable Sync Logs')
+                        ->columnSpan('full')
+                        ->inline(false)
+                        ->live()
+                        ->default(true)
+                        ->disabled(fn(Get $get): bool => config('dev.disable_sync_logs', false))
+                        ->hint(fn(Get $get): string => config('dev.disable_sync_logs', false) ? 'Sync logs disabled globally in settings' : '')
+                        ->hintIcon(fn(Get $get): string => config('dev.disable_sync_logs', false) ? 'heroicon-m-lock-closed' : '')
+                        ->helperText('Retain logs of playlist syncs. This is useful for debugging and tracking changes to the playlist. This can lead to increased sync time and storage usage depending on the size of the playlist.'),
                     Forms\Components\Toggle::make('auto_sort')
                         ->label('Automatically assign sort number based on playlist order')
                         ->columnSpan(1)

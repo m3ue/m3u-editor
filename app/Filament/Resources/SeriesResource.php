@@ -231,8 +231,7 @@ class SeriesResource extends Resource
                     ->icon('heroicon-o-document-arrow-down')
                     ->modalIcon('heroicon-o-document-arrow-down')
                     ->modalDescription('Sync series .strm files now? This will generate .strm files for this series at the path set for this series.')
-                    ->modalSubmitActionLabel('Yes, sync now')
-                    ->disabled(fn($record): bool => ! $record->sync_location),
+                    ->modalSubmitActionLabel('Yes, sync now'),
                 Tables\Actions\DeleteAction::make()
                     ->modalIcon('heroicon-o-trash')
                     ->modalDescription('Are you sure you want to delete this series? This will delete all episodes and seasons for this series. This action cannot be undone.')
