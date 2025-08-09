@@ -386,9 +386,6 @@ class RunPostProcess implements ShouldQueue
      */
     protected function getFieldValue(string $field): mixed
     {
-        $syncData = $this->lastSync
-            ? $this->lastSync->syncStats
-            : null;
         return match ($field) {
             'id' => $this->model->id,
             'uuid' => $this->model->uuid,
@@ -396,10 +393,14 @@ class RunPostProcess implements ShouldQueue
             'url' => $this->model->url ?? null,
             'status' => $this->model->status?->value ?? $this->model->status,
             'synctime' => $this->model->sync_time,
-            'added_groups' => $syncData ? $syncData->added_groups : 'N/A',
-            'removed_groups' => $syncData ? $syncData->removed_groups : 'N/A',
-            'added_channels' => $syncData ? $syncData->added_channels : 'N/A',
-            'removed_channels' => $syncData ? $syncData->removed_channels : 'N/A',
+            'added_groups' => $this->model->added_groups ?? null,
+            'removed_groups' => $this->model->removed_groups ?? null,
+            'added_channels' => $this->model->added_channels ?? null,
+            'removed_channels' => $this->model->removed_channels ?? null,
+            'added_group_names' => $this->model->added_group_names ?? null,
+            'removed_group_names' => $this->model->removed_group_names ?? null,
+            'added_channel_names' => $this->model->added_channel_names ?? null,
+            'removed_channel_names' => $this->model->removed_channel_names ?? null,
             default => null,
         };
     }
