@@ -120,7 +120,7 @@ class MergedPlaylistResource extends Resource
                         ->openUrlInNewTab(),
                     EpgCacheService::getEpgTableAction(),
                     Tables\Actions\Action::make('HDHomeRun URL')
-                        ->label('HDHomeRun Url')
+                        ->label('HDHomeRun URL')
                         ->icon('heroicon-o-arrow-top-right-on-square')
                         ->url(fn($record) => PlaylistUrlFacade::getUrls($record)['hdhr'])
                         ->openUrlInNewTab(),
