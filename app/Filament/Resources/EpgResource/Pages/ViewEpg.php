@@ -132,11 +132,8 @@ class ViewEpg extends ViewRecord
                     ])
                     ->columns(3),
 
-                Infolists\Components\Section::make('Guide')
-                    ->schema([
-                        Infolists\Components\Livewire::make(EpgViewer::class),
-                    ])
-                    ->collapsible(false),
+                Infolists\Components\Livewire::make(EpgViewer::class)
+                    ->columnSpanFull(),
             ]);
     }
 }

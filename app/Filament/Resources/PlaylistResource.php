@@ -698,11 +698,8 @@ class PlaylistResource extends Resource
                                     ])
                             ]),
                     ])->contained(false),
-                Infolists\Components\Section::make()
-                    ->schema([
-                        Infolists\Components\Livewire::make(EpgViewer::class),
-                    ])
-                    ->collapsible(false),
+                Infolists\Components\Livewire::make(EpgViewer::class)
+                    ->columnSpanFull(),
             ]);
     }
 

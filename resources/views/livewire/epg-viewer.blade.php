@@ -33,7 +33,7 @@
         <!-- EPG Content -->
         <div x-show="!loading && !error" class="space-y-6" wire:ignore.self>
             <!-- Date Navigation and Search -->
-            <div class="filament-section bg-white dark:bg-gray-800 shadow-sm ring-1 ring-gray-950/5 dark:ring-white/10 rounded-xl p-4 md:p-6">
+            <div class="bg-white ring-1 ring-gray-950/5 dark:bg-gray-900 dark:ring-white/10 dark:bg-gray-900 rounded-md p-3">
                 <div class="flex flex-col gap-4">
                     <!-- Header Row -->
                     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -132,7 +132,7 @@
             </div>
 
             <!-- EPG Grid Container -->
-            <div class="filament-section bg-white dark:bg-gray-800 shadow-sm ring-1 ring-gray-950/5 dark:ring-white/10 rounded-xl overflow-hidden relative" 
+            <div class="bg-white ring-1 ring-gray-950/5 dark:bg-gray-900 dark:ring-white/10 dark:bg-gray-900 rounded-md p-0 overflow-hidden relative" 
                  :style="isMobile ? 'height: 500px; padding-bottom: 48px;' : 'height: 600px; padding-bottom: 48px;'"
             >
                  <!-- Loading More Overlay -->
