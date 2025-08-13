@@ -2,9 +2,11 @@
 
 ![logo](./public/favicon.png)
 
-A simple `m3u` playlist editor, similar to **xteve** or **threadfin**, with `epg` management.
+A powerful `IPTV` editor, similar to **xteve** or **threadfin**, with `EPG` management and much more!
 
 Works with m3u, m3u8, m3u+ and Xtream codes api!
+
+EPG support for XMLTV files (local or remote), XMLTV URLs, and full **Schedules Direct** integration.
 
 ### Questions/issues/suggestions
 
@@ -27,6 +29,20 @@ Check out the docs: [m3u editor docs](https://sparkison.github.io/m3u-editor-doc
 ## 🐳 Docker quick start
 
 View our [getting started](https://sparkison.github.io/m3u-editor-docs/docs/about/getting-started/) docs to get up and running in minutes! 🥳
+
+## 📸 Screenshots
+
+![Channel editor](./screenshots/channel-editing.png)
+
+![Series management](./screenshots/series-mgmt.png)
+
+![Playlist EPG preview](./screenshots/in-app-playlist-epg-preview.png)
+
+![EPG preview with playpack](./screenshots/in-app-playlist-epg-playback.png)
+
+![Proxy stats](./screenshots/proxy-monitor.png)
+
+![API](./screenshots/api.png)
 
 ---
 
