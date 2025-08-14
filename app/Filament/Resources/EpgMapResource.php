@@ -5,12 +5,14 @@ namespace App\Filament\Resources;
 use App\Enums\Status;
 use App\Filament\Resources\EpgMapResource\Pages;
 use App\Filament\Resources\EpgMapResource\RelationManagers;
+use App\Jobs\MapPlaylistChannelsToEpg;
 use App\Models\Epg;
 use App\Models\EpgMap;
 use App\Models\Playlist;
 use Filament\Forms;
 use Filament\Forms\Form;
 use Filament\Forms\Get;
+use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Table;
@@ -107,10 +109,72 @@ class EpgMapResource extends Resource
                     ->hiddenLabel(),
                 Tables\Actions\EditAction::make()
                     ->button()
+                    ->hiddenLabel(),
+                Tables\Actions\Action::make('run')
+                    ->label('Run Now')
+                    ->icon('heroicon-s-play-circle')
+                    ->button()
                     ->hiddenLabel()
+                    ->requiresConfirmation()
+                    ->modalIcon('heroicon-s-arrow-path')
+                    ->modalDescription('Are you sure you want to manually trigger this EPG mapping to run again? This will not modify the "Recurring" setting.')
+                    ->modalSubmitActionLabel('Run Now')
+                    ->action(function ($record) {
+                        $record->update([
+                            'status' => Status::Processing,
+                            'progress' => 0,
+                        ]);
+                        app('Illuminate\Contracts\Bus\Dispatcher')
+                            ->dispatch(new MapPlaylistChannelsToEpg(
+                                epg: $record->epg_id,
+                                playlist: $record->playlist_id,
+                                epgMapId: $record->id,
+                            ));
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title('EPG mapping started')
+                            ->body('The EPG mapping process has been initiated.')
+                            ->duration(10000)
+                            ->send();
+                    })
+                    ->disabled(fn($record) => $record->status === Status::Processing || $record->status === Status::Pending)
+                    ->tooltip(fn($record) => $record->status === Status::Processing || $record->status === Status::Pending ? 'Mapping in progress' : 'Manually trigger this EPG mapping to run again. This will not modify the "Recurring" setting.'),
             ], position: Tables\Enums\ActionsPosition::BeforeCells)
             ->bulkActions([
                 Tables\Actions\BulkActionGroup::make([
+                    Tables\Actions\BulkAction::make('run')
+                        ->label('Run Now')
+                        ->icon('heroicon-s-play-circle')
+                        ->requiresConfirmation()
+                        ->modalIcon('heroicon-s-arrow-path')
+                        ->modalDescription('Are you sure you want to manually trigger this EPG mapping to run again? This will not modify the "Recurring" setting.')
+                        ->modalSubmitActionLabel('Run Now')
+                        ->action(function ($records) {
+                            foreach ($records as $record) {
+                                if ($record->status === Status::Processing || $record->status === Status::Pending) {
+                                    // Skip records that are already processing
+                                    continue;
+                                }
+                                $record->update([
+                                    'status' => Status::Processing,
+                                    'progress' => 0,
+                                ]);
+                                app('Illuminate\Contracts\Bus\Dispatcher')
+                                    ->dispatch(new MapPlaylistChannelsToEpg(
+                                        epg: $record->epg_id,
+                                        playlist: $record->playlist_id,
+                                        epgMapId: $record->id,
+                                    ));
+                            }
+                        })->after(function () {
+                            Notification::make()
+                                ->success()
+                                ->title('EPG mapping started')
+                                ->body('The EPG mapping process has been initiated for the selected mappings.')
+                                ->duration(10000)
+                                ->send();
+                        }),
                     Tables\Actions\DeleteBulkAction::make(),
                 ]),
             ]);
