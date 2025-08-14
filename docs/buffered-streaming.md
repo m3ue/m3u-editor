@@ -104,16 +104,18 @@ curl http://localhost:36400/api/monitor/performance?period=24h&metric=bandwidth
 
 1. **SharedStreamCleanup**: Removes inactive streams and clients
 2. **StreamMonitorUpdate**: Updates stream health and statistics
-3. **BufferManagement**: Manages stream buffer files
+3. **StreamBufferManager**: Manages stream buffer
 
 ### Scheduling
 
-Jobs are scheduled in `routes/console.php`:
+Jobs and commands are scheduled in `routes/console.php`:
 
 ```php
-Schedule::job(new SharedStreamCleanup)->everyFiveMinutes();
 Schedule::job(new StreamMonitorUpdate)->everyMinute();
-Schedule::job(new BufferManagement)->everyTenMinutes();
+Schedule::job(new SharedStreamCleanup)->everyFiveMinutes();
+Schedule::job(new StreamBufferManager())->everyFiveMinutes();
+Schedule::command('app:shared-streams cleanup')->everyFiveMinutes()->withoutOverlapping();
+Schedule::command('app:shared-streams sync')->everyTenMinutes()->withoutOverlapping();
 ```
 
 ## Alert System

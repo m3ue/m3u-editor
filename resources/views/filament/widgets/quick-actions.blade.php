@@ -66,20 +66,6 @@
                     <span class="text-xs text-gray-500 dark:text-gray-400 text-center mt-1">Remove inactive streams and clients</span>
                 </button>
 
-                <!-- Optimize Buffers -->
-                <button 
-                    wire:click="optimizeBuffers"
-                    class="flex flex-col items-center p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors group"
-                >
-                    <div class="p-2 bg-purple-100 dark:bg-purple-900/50 rounded-lg mb-3 group-hover:bg-purple-200 dark:group-hover:bg-purple-900/70 transition-colors">
-                        <svg class="w-6 h-6 text-purple-600 dark:text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"></path>
-                        </svg>
-                    </div>
-                    <span class="text-sm font-medium text-gray-900 dark:text-white">Optimize Buffers</span>
-                    <span class="text-xs text-gray-500 dark:text-gray-400 text-center mt-1">Clean up buffer files and optimize storage</span>
-                </button>
-
                 <!-- Refresh Stats -->
                 <button 
                     wire:click="refreshSystemStats"

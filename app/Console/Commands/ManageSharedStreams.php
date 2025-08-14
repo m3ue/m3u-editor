@@ -46,7 +46,7 @@ class ManageSharedStreams extends Command
         switch ($action) {
             case 'list':
                 return $this->listStreams();
-                
+
             case 'stop':
                 if (!$streamKey) {
                     $this->error('--stream-key is required for stop action');
@@ -68,7 +68,7 @@ class ManageSharedStreams extends Command
 
             case 'health':
                 return $this->checkHealth();
-                
+
             case 'debug':
                 if (!$streamKey) {
                     $this->error('--stream-key is required for debug action');
@@ -237,12 +237,10 @@ class ManageSharedStreams extends Command
 
             // Clean up orphaned keys and temp files
             $orphanedKeys = $this->sharedStreamService->cleanupOrphanedKeys();
-            $tempFiles = $this->sharedStreamService->cleanupTempFiles();
 
             $this->info("Cleanup completed:");
             $this->line("- Cleaned up {$cleanedUp} streams");
             $this->line("- Removed {$orphanedKeys} orphaned keys");
-            $this->line("- Cleaned {$tempFiles} bytes of temp files");
 
             return 0;
         } catch (\Exception $e) {
@@ -383,7 +381,7 @@ class ManageSharedStreams extends Command
             // Get stream info from Redis
             $redis = app('redis')->connection();
             $streamInfo = $redis->hgetall("shared_stream:{$streamKey}");
-            
+
             if (empty($streamInfo)) {
                 $this->error('Stream not found in Redis');
                 return 1;
@@ -426,7 +424,6 @@ class ManageSharedStreams extends Command
             }
 
             return 0;
-
         } catch (\Exception $e) {
             $this->error('Error getting debug info: ' . $e->getMessage());
             return 1;
@@ -442,7 +439,7 @@ class ManageSharedStreams extends Command
         try {
             $redis = app('redis')->connection();
             $redirectKeys = $redis->keys('stream_failover_redirect:*');
-            
+
             if (empty($redirectKeys)) {
                 $this->info('No failover redirects found');
                 return 0;
@@ -456,7 +453,6 @@ class ManageSharedStreams extends Command
 
             $this->info("Cleared {$deleted} failover redirects");
             return 0;
-
         } catch (\Exception $e) {
             $this->error('Error clearing redirects: ' . $e->getMessage());
             return 1;

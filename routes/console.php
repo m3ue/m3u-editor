@@ -25,6 +25,7 @@ Schedule::command('app:refresh-epg')
     ->withoutOverlapping();
 
 // Prune stale processes
+// Job won't run when the shared streaming functionality is enabled
 Schedule::command('app:hls-prune')
     ->everyFifteenSeconds()
     ->withoutOverlapping();
@@ -34,13 +35,11 @@ Schedule::job(new \App\Jobs\StreamMonitorUpdate())
     ->everyMinute()
     ->withoutOverlapping()
     ->name('shared-stream-monitor');
-
 Schedule::job(new \App\Jobs\SharedStreamCleanup())
     ->everyFiveMinutes()
     ->withoutOverlapping()
     ->name('shared-stream-cleanup');
-
-Schedule::job(new \App\Jobs\BufferManagement())
+Schedule::job(new \App\Jobs\StreamBufferManager())
     ->everyFiveMinutes()
     ->withoutOverlapping()
     ->name('shared-stream-buffer-management');
@@ -49,7 +48,6 @@ Schedule::job(new \App\Jobs\BufferManagement())
 Schedule::command('app:shared-streams cleanup')
     ->everyFiveMinutes()
     ->withoutOverlapping();
-
 Schedule::command('app:shared-streams sync')
     ->everyTenMinutes()
     ->withoutOverlapping();

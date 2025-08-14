@@ -35,27 +35,6 @@ class QuickActionsWidget extends Widget
         }
     }
 
-    public function optimizeBuffers()
-    {
-        try {
-            // Run buffer optimization job
-            \App\Jobs\BufferManagement::dispatch();
-            
-            Notification::make()
-                ->title('Buffer Optimization Started')
-                ->body('Buffer cleanup and optimization job has been queued')
-                ->info()
-                ->send();
-                
-        } catch (\Exception $e) {
-            Notification::make()
-                ->title('Optimization Failed')
-                ->body($e->getMessage())
-                ->danger()
-                ->send();
-        }
-    }
-
     public function refreshSystemStats()
     {
         try {

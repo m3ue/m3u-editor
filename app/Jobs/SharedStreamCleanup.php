@@ -84,10 +84,6 @@ class SharedStreamCleanup implements ShouldQueue
 
             // Clean up orphaned Redis keys that don't have a database entry
             $orphanedKeys = $sharedStreamService->cleanupOrphanedKeys();
-
-            // Clean up old temporary files
-            $tempFilesCleanup = $sharedStreamService->cleanupTempFiles();
-
             Log::channel('ffmpeg')->info("SharedStreamCleanup: Completed - Cleaned {$cleanedUp} streams ({$staleStreams} stale), {$orphanedKeys} orphaned keys, {$tempFilesCleanup} temp files cleaned");
         } catch (\Exception $e) {
             Log::channel('ffmpeg')->error('SharedStreamCleanup: Error during cleanup: ' . $e->getMessage());
