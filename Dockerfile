@@ -30,8 +30,10 @@ RUN apk update && apk --no-cache add \
     # HW accelerated video encoding
     libva \
     libva-utils \
+    libva-vdpau-driver \
     mesa-dri-gallium \
     mesa-va-gallium \
+    mesa-vdpau-gallium \
     # nginx + php-fpm
     nginx \
     php84-cli \
@@ -41,8 +43,16 @@ RUN apk update && apk --no-cache add \
     php84-dev
 
 # Add architecture-specific packages conditionally
+# Add architecture-specific packages conditionally with enhanced Intel support
 RUN if [ "$(uname -m)" = "x86_64" ]; then \
-        apk add --no-cache intel-media-driver libva-intel-driver intel-media-sdk; \
+        apk add --no-cache \
+            intel-media-driver \
+            libva-intel-driver \
+            intel-media-sdk \
+            libmfx \
+            # Add additional VAAPI components
+            libva-dev \
+            mesa-dev; \
     else \
         echo "Skipping Intel-specific packages on $(uname -m) architecture"; \
     fi
