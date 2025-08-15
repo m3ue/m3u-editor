@@ -4,6 +4,7 @@ namespace App\Filament\Resources\PlaylistResource\Pages;
 
 use App\Filament\Resources\PlaylistResource;
 use App\Filament\Resources\PlaylistResource\Widgets;
+use App\Models\Playlist;
 use Filament\Actions;
 use Filament\Infolists\Infolist;
 use Filament\Notifications\Notification;
@@ -30,6 +31,18 @@ class ViewPlaylist extends ViewRecord
                 ->action(function () {
                     $this->redirect($this->getRecord()->getUrl('edit'));
                 }),
+            Actions\Action::make('Sync Logs')
+                ->label('Sync Logs')
+                ->color('gray')
+                ->icon('heroicon-m-arrows-right-left')
+                ->url(
+                    fn(): string => PlaylistResource::getUrl(
+                        name: 'playlist-sync-statuses.index',
+                        parameters: [
+                            'parent' => $this->getRecord()->id,
+                        ]
+                    )
+                ),
             //...PlaylistResource::getHeaderActions()
         ];
     }
