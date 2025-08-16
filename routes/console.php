@@ -31,11 +31,11 @@ Schedule::command('app:hls-prune')
 
 // Shared stream management jobs
 Schedule::job(new \App\Jobs\SharedStreamCleanup())
-    ->everyFiveMinutes()
+    ->everyTenMinutes()
     ->withoutOverlapping()
     ->name('shared-stream-cleanup');
 Schedule::job(new \App\Jobs\StreamBufferManager())
-    ->everyFiveMinutes()
+    ->everyTenMinutes()
     ->withoutOverlapping()
     ->name('shared-stream-buffer-management');
 
@@ -49,5 +49,5 @@ Schedule::command('app:shared-streams sync')
 
 // EPG cache health
 Schedule::command('app:epg-cache-health-check')
-    ->hourly()
+    ->everyFifteenMinutes()
     ->withoutOverlapping();
