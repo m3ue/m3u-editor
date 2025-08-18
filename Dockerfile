@@ -70,7 +70,8 @@ RUN if [ "$(uname -m)" = "x86_64" ]; then \
 # Install PostgreSQL server & client
 RUN apk update && apk add --no-cache \
     postgresql \
-    postgresql-client
+    postgresql-client \
+    postgresql-contrib
 
 # Install CRON
 RUN touch crontab.tmp \

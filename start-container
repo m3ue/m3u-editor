@@ -305,6 +305,19 @@ END
 \$\$;
 EOSQL
 
+    # Create extensions in the database
+    echo "- Creating PostgreSQL extensions..."
+    su-exec $WWWUSER psql \
+    --quiet \
+    -U postgres \
+    -h localhost -p "$PG_PORT" \
+    -d "${PG_DATABASE}" \
+    <<-EOSQL
+-- Create extensions if they don't exist
+CREATE EXTENSION IF NOT EXISTS fuzzystrmatch;
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+EOSQL
+
     # If the database exists but is owned by someone else, reassign it (for local postgres)
     if su-exec $WWWUSER psql -U postgres -h localhost -p "$PG_PORT" --quiet -tAc "SELECT 1 FROM pg_database WHERE datname='${PG_DATABASE}'" | grep -q 1; then
       echo "- Database '${PG_DATABASE}' exists. Ensuring correct owner ('${PG_USER}')."
