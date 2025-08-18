@@ -33,7 +33,7 @@ class XtreamApiController extends Controller
      * ## Supported Actions:
      * 
      * ### panel (default)
-     * Returns user authentication info and server details.
+     * Returns user authentication info and server details. This is the default action if none is specified. Returns the same response as: `get_user_info`, `get_account_info`, and `get_server_info`.
      * 
      * ### get_live_streams
      * Returns a JSON array of live stream objects. Only enabled, non-VOD channels are included.
@@ -303,6 +303,7 @@ class XtreamApiController extends Controller
         $action = $request->input('action', 'panel');
         if (
             $action === 'panel' ||
+            $action === 'get_user_info' ||
             $action === 'get_account_info' ||
             $action === 'get_server_info' ||
             empty($request->input('action'))
