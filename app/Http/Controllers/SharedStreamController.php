@@ -137,7 +137,7 @@ class SharedStreamController extends Controller
         /* ─────────────────────────────────────────────────────────────────── */
 
         // ── Apply timeshift rewriting AFTER we know the provider timezone ──
-        if ($utcPresent && $format === 'ts') { // only live-TS needs shift
+        if ($utcPresent) {
             // Use the portal/provider timezone (DST-aware). Prefer per-playlist; last resort UTC.
             $providerTz = $playlist->server_timezone ?? 'Etc/UTC';
 
