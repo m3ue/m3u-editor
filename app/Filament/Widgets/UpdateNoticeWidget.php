@@ -16,18 +16,7 @@ class UpdateNoticeWidget extends Widget
 
     public function mount(): void
     {
-        // Get the branch
-        $branch = GitInfo::getBranch();
-        switch ($branch) {
-            case 'dev':
-                $version = config('dev.dev_version');
-                break;
-            case 'experimental':
-                $version = config('dev.experimental_version');
-                break;
-            default:
-                $version = config('dev.version');
-        }
+        $version = VersionServiceProvider::getVersion();
         $latestVersion = VersionServiceProvider::getRemoteVersion();
         $updateAvailable = VersionServiceProvider::updateAvailable();
         $this->versionData = [

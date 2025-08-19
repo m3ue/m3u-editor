@@ -32,6 +32,9 @@ class CompareVersion extends Command
         $remoteVersion = VersionServiceProvider::getRemoteVersion(refresh: true);
         $updateAvailable = VersionServiceProvider::updateAvailable();
 
+        $this->info("Installed version: $installedVersion");
+        $this->info("Latest version: $remoteVersion");
+
         // Output results
         if ($updateAvailable) {
             $this->info("🔥 Update available! Latest version: $remoteVersion, installed version: $installedVersion\n");

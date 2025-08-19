@@ -11,6 +11,8 @@ class VersionServiceProvider extends ServiceProvider
 {
     public static string $cacheKey = 'app.remoteVersion';
 
+    public static string $branch = 'master'; // Default branch, can be overridden
+
     /**
      * Register services.
      */
@@ -24,7 +26,11 @@ class VersionServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        //
+        try {
+            self::$branch = GitInfo::getBranch();
+        } catch (\Exception $e) {
+            self::$branch = 'master'; // Default branch if GitInfo is not available
+        }
     }
 
     public static function updateAvailable(): bool
@@ -39,7 +45,17 @@ class VersionServiceProvider extends ServiceProvider
 
     public static function getVersion(): string
     {
-        return config('dev.version');
+        switch (self::$branch) {
+            case 'dev':
+                $version = config('dev.dev_version');
+                break;
+            case 'experimental':
+                $version = config('dev.experimental_version');
+                break;
+            default:
+                $version = config('dev.version');
+        }
+        return $version;
     }
 
     public static function getRemoteVersion($refresh = false): string
@@ -50,18 +66,13 @@ class VersionServiceProvider extends ServiceProvider
         } catch (\Exception $e) {
             $remoteVersion = null;
         }
-        try {
-            $branch = GitInfo::getBranch();
-        } catch (\Exception $e) {
-            $branch = 'master'; // Default branch if GitInfo is not available
-        }
         if ($remoteVersion === null || $refresh) {
             $remoteVersion = '';
             try {
-                $response = Http::get('https://raw.githubusercontent.com/sparkison/m3u-editor/refs/heads/' . $branch . '/config/dev.php');
+                $response = Http::get('https://raw.githubusercontent.com/sparkison/m3u-editor/refs/heads/' . self::$branch . '/config/dev.php');
                 if ($response->ok()) {
                     $results = $response->body();
-                    switch ($branch) {
+                    switch (self::$branch) {
                         case 'dev':
                             preg_match("/'dev_version'\s*=>\s*'([^']+)'/", $results, $matches);
                             break;
