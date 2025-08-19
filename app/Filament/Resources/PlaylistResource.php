@@ -1057,7 +1057,7 @@ class PlaylistResource extends Resource
                         )
                         ->rules(['min:0'])
                         ->type('number')
-                        ->default(1) // Default to 1 stream
+                        ->default(0) // Default to 0 streams (unlimited)
                         ->required(),
                     Forms\Components\TextInput::make('available_streams')
                         ->label('Available Streams')

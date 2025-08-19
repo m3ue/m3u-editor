@@ -360,6 +360,7 @@ class PlaylistGenerateController extends Controller
         $tunerCount = (int)$playlist->streams === 0
             ? ($xtreamStatus['user_info']['max_connections'] ?? $playlist->streams ?? 1)
             : $playlist->streams;
+        $tunerCount = max($tunerCount, 1); // Ensure at least 1 tuner
         $deviceId = substr($uuid, 0, 8);
         $proxyOverrideUrl = config('proxy.url_override');
         if (!empty($proxyOverrideUrl)) {
