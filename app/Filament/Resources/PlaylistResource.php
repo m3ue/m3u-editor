@@ -1268,26 +1268,53 @@ class PlaylistResource extends Resource
             if ($step === 'Type') {
                 $wizard[] = Forms\Components\Wizard\Step::make('Auth')
                     ->schema([
-                        Forms\Components\Toggle::make('create_auth')
-                            ->label('Create authentication for this playlist')
-                            ->helperText('Enable this to create new authentication credentials that will be assigned to this playlist. You can also create and assign auths to this playlist after creation.')
+                        Forms\Components\ToggleButtons::make('auth_option')
+                            ->label('Authentication Option')
+                            ->options([
+                                'none' => 'No Authentication',
+                                'existing' => 'Use Existing Auth',
+                                'create' => 'Create New Auth',
+                            ])
+                            ->icons([
+                                'none' => 'heroicon-o-lock-open',
+                                'existing' => 'heroicon-o-key',
+                                'create' => 'heroicon-o-plus',
+                            ])
+                            ->default('none')
                             ->live()
-                            ->default(false)
+                            ->inline()
+                            ->grouped()
                             ->columnSpanFull(),
 
+                        // Existing Auth Selection
+                        Forms\Components\Select::make('existing_auth_id')
+                            ->label('Select Existing Auth')
+                            ->helperText('Only unassigned auths are available. Each auth can only be assigned to one playlist at a time.')
+                            ->options(function () {
+                                return \App\Models\PlaylistAuth::where('user_id', \Illuminate\Support\Facades\Auth::id())
+                                    ->whereDoesntHave('assignedPlaylist')
+                                    ->pluck('name', 'id')
+                                    ->toArray();
+                            })
+                            ->searchable()
+                            ->placeholder('Select an auth to assign')
+                            ->columnSpanFull()
+                            ->visible(fn(Forms\Get $get): bool => $get('auth_option') === 'existing'),
+
+                        // Create New Auth Fields
                         Forms\Components\Grid::make(2)
                             ->schema([
                                 Forms\Components\TextInput::make('auth_name')
                                     ->label('Auth Name')
                                     ->helperText('Internal name for this authentication.')
                                     ->placeholder('Auth for My Playlist')
-                                    ->requiredWith('auth_username')
+                                    ->required()
                                     ->columnSpan(2),
 
                                 Forms\Components\TextInput::make('auth_username')
                                     ->label('Username')
                                     ->helperText('Username for playlist access.')
-                                    ->requiredWith('auth_name')
+                                    ->required()
                                     ->columnSpan(1),
 
                                 Forms\Components\TextInput::make('auth_password')
@@ -1295,10 +1322,10 @@ class PlaylistResource extends Resource
                                     ->password()
                                     ->revealable()
                                     ->helperText('Password for playlist access.')
-                                    ->requiredWith('auth_username')
+                                    ->required()
                                     ->columnSpan(1),
                             ])
-                            ->hidden(fn(Forms\Get $get): bool => !$get('create_auth')),
+                            ->visible(fn(Forms\Get $get): bool => $get('auth_option') === 'create'),
                     ]);
             }
         }

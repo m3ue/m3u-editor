@@ -28,7 +28,7 @@ class CreatePlaylist extends CreateRecord
     {
         // Remove auth-related fields from playlist creation data
         // These will be handled after the playlist is created
-        unset($data['create_auth'], $data['auth_name'], $data['auth_username'], $data['auth_password']);
+        unset($data['auth_option'], $data['existing_auth_id'], $data['auth_name'], $data['auth_username'], $data['auth_password']);
 
         return $data;
     }
@@ -37,24 +37,39 @@ class CreatePlaylist extends CreateRecord
     {
         $data = $this->form->getState();
 
-        // Check if user wants to create auth and has provided necessary data
-        if (
-            isset($data['create_auth']) &&
-            $data['create_auth'] &&
-            !empty($data['auth_username']) &&
-            !empty($data['auth_password'])
-        ) {
-            // Create the PlaylistAuth
-            $auth = PlaylistAuth::create([
-                'user_id' => Auth::id(),
-                'name' => $data['auth_name'] ?: 'Auth for ' . $this->record->name,
-                'username' => $data['auth_username'],
-                'password' => $data['auth_password'],
-                'enabled' => true,
-            ]);
+        // Handle authentication based on the selected option
+        if (isset($data['auth_option'])) {
+            switch ($data['auth_option']) {
+                case 'existing':
+                    // Assign existing auth to the playlist
+                    if (!empty($data['existing_auth_id'])) {
+                        $auth = PlaylistAuth::find($data['existing_auth_id']);
+                        if ($auth && !$auth->isAssigned()) {
+                            $auth->assignTo($this->record);
+                        }
+                    }
+                    break;
 
-            // Assign the auth to the created playlist
-            $auth->assignTo($this->record);
+                case 'create':
+                    // Create new auth and assign to playlist
+                    if (!empty($data['auth_username']) && !empty($data['auth_password'])) {
+                        $auth = PlaylistAuth::create([
+                            'user_id' => Auth::id(),
+                            'name' => $data['auth_name'] ?: 'Auth for ' . $this->record->name,
+                            'username' => $data['auth_username'],
+                            'password' => $data['auth_password'],
+                            'enabled' => true,
+                        ]);
+
+                        $auth->assignTo($this->record);
+                    }
+                    break;
+
+                case 'none':
+                default:
+                    // No authentication setup
+                    break;
+            }
         }
     }
 }
