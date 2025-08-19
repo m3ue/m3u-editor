@@ -217,11 +217,7 @@ class MapPlaylistChannelsToEpg implements ShouldQueue
                         ];
                     }
                 }
-            })->chunk(50)->each(function ($chunk) use ($epg, $map, $channelCount, $batchNo) {
-                // Update the progress
-                $map->update([
-                    'progress' => min(50, $map->progress + (50 / $channelCount) * 100)
-                ]);
+            })->chunk(50)->each(function ($chunk) use ($epg, $map, $batchNo) {
                 Job::create([
                     'title' => "Processing channel import for EPG: {$epg->name}",
                     'batch_no' => $batchNo,
@@ -231,6 +227,9 @@ class MapPlaylistChannelsToEpg implements ShouldQueue
                     ]
                 ]);
             });
+
+            // Update the progress
+            $map->update(['progress' => 20]);
 
             // Get the jobs for the batch
             $jobs = [];
