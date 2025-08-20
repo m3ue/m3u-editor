@@ -643,7 +643,7 @@ class ProcessM3uImport implements ShouldQueue
                                         if ($attribute === 'tvg-chno') {
                                             $channel[$key] = (int)$extTag->getAttribute($attribute);
                                         } elseif ($attribute === 'tvg-logo') {
-                                            $channel[$key] = urlencode($extTag->getAttribute($attribute));
+                                            $channel[$key] = urlencode(trim($extTag->getAttribute($attribute)));
                                         } else {
                                             $channel[$key] = str_replace(
                                                 [',', '"', "'"],
