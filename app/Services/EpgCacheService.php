@@ -23,7 +23,7 @@ class EpgCacheService
     private const CACHE_VERSION = 'v1';
     private const CHANNELS_FILE = 'channels.json';
     private const METADATA_FILE = 'metadata.json';
-    private const MAX_PROGRAMMES = 200000; // Safety limit to prevent memory issues
+    private const MAX_PROGRAMMES = 10000000; // Safety limit
 
     /**
      * Get the cache directory path for an EPG
@@ -155,7 +155,9 @@ class EpgCacheService
 
                 // Update progress
                 // Max is 20% for channels since programmes are more intensive
-                $progress = $totalChannels > 0 ? min(20, round(($channelCount / $totalChannels) * 20)) : 20;
+                $progress = $totalChannels > 0
+                    ? min(20, round(($channelCount / $totalChannels) * 20))
+                    : 20;
                 $epg->update(['cache_progress' => $progress]);
             }
         }
@@ -177,6 +179,7 @@ class EpgCacheService
         $dateRangeTracker = ['min_date' => null, 'max_date' => null];
         $processedDates = [];
         $openFiles = []; // Keep track of open file handles
+        $programmeCount = $this->countProgrammesInFile($filePath);
 
         foreach ($this->parseProgrammesStream($filePath) as $programme) {
             $date = Carbon::parse($programme['start'])->format('Y-m-d');
@@ -211,8 +214,9 @@ class EpgCacheService
                 }
 
                 // Update progress
-                // Max is 80% for programmes
-                $progress = $totalChannels > 0 ? 20 + min(80, round(($totalProgrammes / (self::MAX_PROGRAMMES)) * 80)) : 100;
+                $progress = $totalChannels > 0
+                    ? min(99, 20 + round(($totalProgrammes / $programmeCount) * 80))
+                    : 99;
                 $epg->update(['cache_progress' => $progress]);
             }
         }
@@ -229,6 +233,48 @@ class EpgCacheService
             'date_count' => count($processedDates),
             'date_range' => $dateRangeTracker,
         ];
+    }
+
+    /**
+     * Count programmes in file for progress tracking
+     */
+    private function countProgrammesInFile(string $filePath): int
+    {
+        $count = 0;
+
+        try {
+            // Open compressed file for reading
+            $handle = gzopen($filePath, 'r');
+            if (!$handle) {
+                Log::warning("Could not open file for programme counting: {$filePath}");
+                return 0;
+            }
+
+            // Read file in chunks and count programme occurrences
+            while (!gzeof($handle)) {
+                $chunk = gzread($handle, 8192); // 8KB chunks
+                if ($chunk === false) {
+                    break;
+                }
+
+                // Count occurrences of '<programme' in this chunk
+                $count += substr_count($chunk, '<programme');
+
+                // Apply safety limit
+                if ($count > self::MAX_PROGRAMMES) {
+                    Log::warning("Programme counting limit reached at {$count}");
+                    $count = self::MAX_PROGRAMMES;
+                    break;
+                }
+            }
+
+            gzclose($handle);
+        } catch (\Exception $e) {
+            Log::warning("Error counting programmes: {$e->getMessage()}");
+            return 0;
+        }
+
+        return $count;
     }
 
     /**
