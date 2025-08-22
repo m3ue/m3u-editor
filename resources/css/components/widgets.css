@@ -1,5 +1,7 @@
-.fi-wi-widget dl,
-.fi-wi-widget section,
-.fi-wi-widget .fi-fo-component-ctn {
+.fi-sc-component .fi-wi-stats-overview-stat,
+.fi-wi-widget section {
     @apply h-full;
+}
+.fi-wi-widget .fi-section-content .flex {
+    @apply flex-1;
 }
