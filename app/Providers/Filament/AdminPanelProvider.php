@@ -19,6 +19,7 @@ use App\Filament\Widgets\StatsOverview;
 use App\Filament\Widgets\SystemHealthWidget;
 use App\Models\SharedStream;
 use App\Settings\GeneralSettings;
+use Filament\Auth\MultiFactor\App\AppAuthentication;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
 use Filament\Http\Middleware\DisableBladeIconComponents;
@@ -70,7 +71,11 @@ class AdminPanelProvider extends PanelProvider
             ->id('admin')
             ->path('')
             ->login(Login::class)
-            // ->profile(EditProfile::class, isSimple: false)
+            ->profile(EditProfile::class, isSimple: false)
+            ->multiFactorAuthentication([
+                AppAuthentication::make()
+                    ->recoverable(),
+            ])
             ->brandName('m3u editor')
             ->brandLogo(fn() => view('filament.admin.logo'))
             ->favicon('/favicon.png')
