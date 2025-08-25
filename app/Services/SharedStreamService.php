@@ -1908,7 +1908,8 @@ class SharedStreamService
             $redis->del($keys);
         }
 
-        Log::channel('ffmpeg')->debug("Stream {$streamKey}: Cleaned up Redis buffer keys: " . implode(', ', $keys));
+        $keyCount = count($keys) ?? 0;
+        Log::channel('ffmpeg')->debug("Stream {$streamKey}: Cleaned up Redis {$keyCount} buffer keys");
     }
 
     /**
