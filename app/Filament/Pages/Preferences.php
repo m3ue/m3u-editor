@@ -399,7 +399,7 @@ class Preferences extends SettingsPage
                                             ->icon('heroicon-s-key')
                                             ->iconPosition('before')
                                             ->size('sm')
-                                            ->url('/profile'),
+                                            ->url('/personal-access-tokens'),
                                         Action::make('view_api_docs')
                                             ->label('API Docs')
                                             ->icon('heroicon-o-arrow-top-right-on-square')
