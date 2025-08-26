@@ -611,7 +611,7 @@ class ProxyService
             // Set the output format and codecs
             if ($format === 'ts') {
                 $output = "-c:v {$videoCodec} " . ($codecSpecificArgs ? trim($codecSpecificArgs) . " " : "") . " {$audioOutputArgs} -c:s {$subtitleCodec} ";
-                
+
                 // Add MPEG-TS specific options for better compatibility
                 $output .= "-f mpegts -mpegts_copyts 0 -mpegts_original_network_id 1 ";
                 $output .= "-mpegts_transport_stream_id 1 -mpegts_service_id 1 ";
@@ -648,12 +648,6 @@ class ProxyService
 
             // Better error handling and stream format detection
             $cmd .= '-err_detect ignore_err -ignore_unknown -fflags +discardcorrupt ';
-
-            // Add H.264 specific error resilience for PPS issues
-            $cmd .= '-skip_frame nokey -skip_loop 0 -skip_idct 0 ';
-
-            // Additional decoder options for problematic streams
-            $cmd .= '-ec guess_mvs -ec deblock ';
             $cmd .= '-thread_queue_size 256 ';
 
             // Pre-input HTTP options:
@@ -670,7 +664,7 @@ class ProxyService
             if ($isMkv) {
                 $cmd .= ' -analyzeduration 10M -probesize 10M ';
             }
-            
+
             // Add stream copy options to preserve timing
             $cmd .= ' -copyts -start_at_zero -noautorotate ';
 
