@@ -33,7 +33,8 @@ class FlushJobsTable extends Command
             Job::truncate();
             $this->info('Jobs table flushed successfully.');
         } else {
-            $olderThan = now()->subDays(3);
+            // Anything older than 1 day
+            $olderThan = now()->subDay();
             $where = ['created_at', '<=',  $olderThan];
             $this->info("Flushing jobs table where job is older than {$olderThan->toDateTimeString()}...");
             $this->info("Clearing: " . Job::whereDate(...$where)->count() . " jobs");
