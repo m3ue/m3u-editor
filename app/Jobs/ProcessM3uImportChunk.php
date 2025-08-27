@@ -83,6 +83,7 @@ class ProcessM3uImportChunk implements ShouldQueue
                 // 'epg_channel_id',
                 // 'new',
                 // 'sort',
+                // 'station_id', // Gracenote station ID
                 // 'source_id', // won't change - for Xtream API this will be the `stream_id`, for M3U it will be a hash of the title, name, group and playlist ID
                 // ...only update the following fields
                 'url',
