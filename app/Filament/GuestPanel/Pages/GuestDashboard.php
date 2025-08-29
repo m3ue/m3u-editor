@@ -34,6 +34,11 @@ class GuestDashboard extends Page implements HasSchemas
         ]);
     }
 
+    static function shouldRegisterNavigation(): bool
+    {
+        return false;
+    }
+
     public function getTitle(): string|Htmlable
     {
         $playlist = PlaylistFacade::resolvePlaylistByUuid($this->getCurrentUuid());
