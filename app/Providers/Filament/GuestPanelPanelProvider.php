@@ -29,6 +29,10 @@ class GuestPanelPanelProvider extends PanelProvider
         return $panel
             ->id('playlist')
             ->path('playlist/{uuid}')
+            ->homeUrl(function () {
+                $uuid = request()->route('uuid') ?? request()->attributes->get('playlist_uuid');
+                return $uuid ? route('filament.playlist.home', ['uuid' => $uuid]) : '/';
+            })
             ->brandName('Playlist viewer')
             ->brandLogo(fn() => view('filament.admin.logo'))
             ->favicon('/favicon.png')
