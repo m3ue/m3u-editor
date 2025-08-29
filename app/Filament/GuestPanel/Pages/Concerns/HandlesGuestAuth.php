@@ -69,11 +69,6 @@ class GuestAuthPage extends Page implements HasSchemas
         return $this->isAuthenticated();
     }
 
-    public function getGuestAuthUserData(): ?array
-    {
-        return $this->getGuestAuthUser();
-    }
-
     public function form(Schema $schema): Schema
     {
         return $schema
@@ -125,16 +120,5 @@ class GuestAuthPage extends Page implements HasSchemas
     protected function logoutGuest(): void
     {
         session()->forget(['guest_auth_username', 'guest_auth_password']);
-    }
-
-    protected function getGuestAuthUser(): ?array
-    {
-        $username = session('guest_auth_username');
-        $password = session('guest_auth_password');
-        if (!$username || !$password) {
-            return null;
-        }
-        $result = PlaylistFacade::authenticate($username, $password);
-        return $result && $result[0] ? $result : null;
     }
 }
