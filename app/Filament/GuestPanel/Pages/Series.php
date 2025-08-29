@@ -3,13 +3,20 @@
 namespace App\Filament\GuestPanel\Pages;
 
 use Filament\Pages\Page;
+use App\Filament\GuestPanel\Pages\Concerns\GuestAuthPage;
+use Illuminate\Contracts\Support\Htmlable;
 
-class Series extends Page
+class Series extends GuestAuthPage
 {
     protected string $view = 'filament.guest-panel.pages.series';
     protected static string | \BackedEnum | null $navigationIcon = 'heroicon-s-play';
     protected static ?string $navigationLabel = 'Series';
     protected static ?string $slug = 'series';
+
+    public function getTitle(): string|Htmlable
+    {
+        return '';
+    }
 
     protected static function getCurrentUuid(): ?string
     {
