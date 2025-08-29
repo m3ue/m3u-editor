@@ -14,8 +14,12 @@
             </form>
         </div>
     @else
-        <div class="flex justify-end mb-4">
-            <button wire:click="logout" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold py-1 px-3 rounded">Logout</button>
+        <div class="flex items-end justify-end fixed z-50 top-4 right-4">
+            {{-- Display current playlist name --}}
+            {{-- Logout button --}}
+            <x-filament::button type="button" size="sm" color="gray" icon="heroicon-o-arrow-left-on-rectangle" wire:click="logout" class="">
+                Sign out
+            </x-filament::button>
         </div>
         {{-- Authenticated dashboard content goes here --}}
         <div>

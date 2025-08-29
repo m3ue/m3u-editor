@@ -21,6 +21,7 @@ class GuestDashboard extends Page implements HasSchemas
     protected string $view = 'filament.guest-panel.pages.guest-dashboard';
     protected static string | \BackedEnum | null $navigationIcon = 'heroicon-o-play';
     protected static ?string $navigationLabel = 'Playlist';
+    protected static ?string $title = '';
     protected static ?string $slug = 'guest';
 
     public ?array $data = [];
@@ -37,12 +38,6 @@ class GuestDashboard extends Page implements HasSchemas
     static function shouldRegisterNavigation(): bool
     {
         return false;
-    }
-
-    public function getTitle(): string|Htmlable
-    {
-        $playlist = PlaylistFacade::resolvePlaylistByUuid($this->getCurrentUuid());
-        return $playlist->name ?? 'Playlist';
     }
 
     protected static function getCurrentUuid(): ?string
