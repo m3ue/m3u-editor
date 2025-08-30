@@ -10,13 +10,18 @@ use Filament\Infolists\Components\TextEntry;
 use Filament\Resources\Pages\ViewRecord;
 use Filament\Schemas;
 use Filament\Schemas\Components\Section;
+use Illuminate\Contracts\Support\Htmlable;
 
 class ViewSeries extends ViewRecord
 {
     use HasPlaylist;
 
     protected static string $resource = SeriesResource::class;
-    protected static ?string $title = '';
+
+    public function getTitle(): string|Htmlable
+    {
+        return $this->record->name;
+    }
 
     protected function getHeaderActions(): array
     {
@@ -41,9 +46,6 @@ class ViewSeries extends ViewRecord
                     ->collapsible(true)
                     ->persistCollapsed(true)
                     ->schema([
-                        TextEntry::make('name')
-                            ->label('Series Name')
-                            ->columnSpanFull(),
                         TextEntry::make('plot')
                             ->label('Description')
                             ->columnSpanFull(),
