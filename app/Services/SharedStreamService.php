@@ -29,6 +29,7 @@ class SharedStreamService
     const STREAM_PREFIX = 'shared_stream:'; // For compatibility with existing code
     const SEGMENT_EXPIRY = 300; // 5 minutes
     const STAT_UPDATE_INTERVAL = 2; // Seconds between stat updates, lower value increases update frequency and database activity
+    const BANDWIDTH_UPDATE_INTERVAL = 5; // Seconds between bandwidth updates, lower value increases update frequency and database activity
 
     private int $clientTimeout;
     private array $activeProcesses = []; // Store active FFmpeg processes
@@ -635,8 +636,33 @@ class SharedStreamService
         fclose($pipes[0]);
         fclose($pipes[1]);
 
-        // Make stderr non-blocking for error logging
+        // Make stderr non-blocking for immediate error read
         stream_set_blocking($pipes[2], false);
+
+        // Read any immediate error output
+        $initialError = fread($pipes[2], 4096);
+        if ($initialError !== false && !empty(trim($initialError))) {
+            Log::channel('ffmpeg')->error("Stream {$streamKey}: Immediate FFmpeg stderr after proc_open: " . trim($initialError));
+        }
+
+        // Wait briefly (200ms) to allow process to fail if command is invalid
+        usleep(200000); // 200ms
+
+        // Re-check process status
+        $status = proc_get_status($process);
+        if (!$status || !isset($status['pid'])) {
+            Log::channel('ffmpeg')->error("Failed to get process status for {$streamKey}");
+            proc_close($process);
+            throw new \Exception("Failed to get process PID for {$streamKey}");
+        }
+
+        // If process is not running after short wait, treat as failure
+        if (!$status['running']) {
+            $errorOutput = stream_get_contents($pipes[2]);
+            Log::channel('ffmpeg')->error("Stream {$streamKey}: FFmpeg process exited immediately after start. Stderr: " . trim($errorOutput));
+            proc_close($process);
+            throw new \Exception("FFmpeg process failed to start for {$streamKey}. Error: " . trim($errorOutput));
+        }
 
         // Get the PID and store it
         $status = proc_get_status($process);
@@ -686,7 +712,19 @@ class SharedStreamService
         // Close stdin (we don't write to FFmpeg)
         fclose($pipes[0]);
 
-        // Get the PID and store it
+        // Make stderr non-blocking for immediate error read
+        stream_set_blocking($pipes[2], false);
+
+        // Read any immediate error output
+        $initialError = fread($pipes[2], 4096);
+        if ($initialError !== false && !empty(trim($initialError))) {
+            Log::channel('ffmpeg')->error("Stream {$streamKey}: Immediate FFmpeg stderr after proc_open: " . trim($initialError));
+        }
+
+        // Wait briefly (200ms) to allow process to fail if command is invalid
+        usleep(200000); // 200ms
+
+        // Re-check process status
         $status = proc_get_status($process);
         if (!$status || !isset($status['pid'])) {
             Log::channel('ffmpeg')->error("Failed to get process status for {$streamKey}");
@@ -694,6 +732,15 @@ class SharedStreamService
             throw new \Exception("Failed to get process PID for {$streamKey}");
         }
 
+        // If process is not running after short wait, treat as failure
+        if (!$status['running']) {
+            $errorOutput = stream_get_contents($pipes[2]);
+            Log::channel('ffmpeg')->error("Stream {$streamKey}: FFmpeg process exited immediately after start. Stderr: " . trim($errorOutput));
+            proc_close($process);
+            throw new \Exception("FFmpeg process failed to start for {$streamKey}. Error: " . trim($errorOutput));
+        }
+
+        // Get the PID and store it
         $pid = $status['pid'];
         $this->setStreamProcess($streamKey, $pid);
 
@@ -2367,7 +2414,7 @@ class SharedStreamService
             if ($playlistId) {
                 $this->decrementActiveStreams($playlistId);
             }
-            
+
             // Clean up the stream data (this will also stop the process)
             $this->cleanupStream($streamId, true);
             Log::channel('ffmpeg')->debug("Successfully stopped stream {$streamId} manually");
@@ -2972,20 +3019,22 @@ class SharedStreamService
             // Track bandwidth using the same method as direct streaming
             $this->trackBandwidth($streamKey, $bytesTransferred);
 
-            // Get current time
-            $now = time();
-
-            // Update database periodically (every 10 seconds to avoid too many writes)
-            // Don't need to update too often as this is a pretty rough calculation, and won't change much once the stream is stable
-            if ($now % 10 === 0) {
-                // Update the calculated buffer size (determined by the segment count)
-                $hlsListSize = 15; // Kept as a variable for future configurability
-
-                // Use the transferred bytes (current segment size) multiplied by the list size as the buffer size
-                $estimatedBufferSize = $bytesTransferred * $hlsListSize;
-                SharedStream::where('stream_id', $streamKey)
-                    ->update(['buffer_size' => $estimatedBufferSize]);
+            // Debounce rapid updates
+            $debounceKey = "hls_bandwidth_debounce:{$streamKey}";
+            if (Redis::get($debounceKey)) {
+                return; // Skip update if within debounce period
             }
+
+            // Set debounce key with expiration (value is arbitrary)
+            Redis::setex($debounceKey, self::BANDWIDTH_UPDATE_INTERVAL, '1');
+
+            // Update the calculated buffer size (determined by the segment count)
+            $hlsListSize = 15; // Kept as a variable for future configurability
+
+            // Use the transferred bytes (current segment size) multiplied by the list size as the buffer size
+            $estimatedBufferSize = $bytesTransferred * $hlsListSize;
+            SharedStream::where('stream_id', $streamKey)
+                ->update(['buffer_size' => $estimatedBufferSize]);
         } catch (\Exception $e) {
             Log::channel('ffmpeg')->error("Error tracking HLS bandwidth for {$streamKey}: " . $e->getMessage());
         }
