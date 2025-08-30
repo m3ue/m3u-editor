@@ -48,7 +48,7 @@ class GuestPlaylistAuth extends Middleware
                 throw new AuthenticationException(
                     'Unauthenticated.',
                     $guards,
-                    route('filament.playlist.home') // Redirect to base panel route if no UUID found
+                    $this->redirectTo($request)
                 );
             }
         }
@@ -57,7 +57,7 @@ class GuestPlaylistAuth extends Middleware
             throw new AuthenticationException(
                 'Invalid playlist unique identifier',
                 $guards,
-                route('filament.playlist.home', ['uuid' => $uuid]) // Redirect to base panel route if no valid playlist found
+                $this->redirectTo($request)
             );
         }
         if (!$this->checkExistingAuth($uuid)) {
@@ -69,7 +69,7 @@ class GuestPlaylistAuth extends Middleware
                 throw new AuthenticationException(
                     'Not authenticated',
                     $guards,
-                    route('filament.playlist.home', ['uuid' => $uuid]) // Redirect to base panel route if not authenticated
+                    $this->redirectTo($request)
                 );
             }
         }
@@ -80,6 +80,12 @@ class GuestPlaylistAuth extends Middleware
 
     protected function redirectTo($request): ?string
     {
+        $uuid = $request->route('uuid');
+
+        if ($uuid) {
+            return route('filament.playlist.home', ['uuid' => $uuid]);
+        }
+
         return '/'; // return to homepage if not authenticated
     }
 
