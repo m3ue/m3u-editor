@@ -169,6 +169,66 @@ class PlaylistGenerateController extends Controller
                     }
                     echo $url . "\n";
                 }
+
+                // If the playlist includes series in M3U, include the series episodes
+                if ($playlist->include_series_in_m3u) {
+                    // Get the seasons
+                    $series = $playlist->series()
+                        ->where('series.enabled', true)
+                        ->with([
+                            'category',
+                            'episodes' => function ($q) {
+                                $q->where('episodes.enabled', true);
+                            }
+                        ])
+                        ->orderBy('sort')
+                        ->get();
+
+                    foreach ($series as $s) {
+                        // Append the episodes
+                        foreach ($s->episodes as $episode) {
+                            // Set channel variables
+                            $channelNo = ++$channelNumber;
+                            $group = $s->category->name ?? 'Seasons';
+                            $name = $s->name;
+                            $title = $episode->title;
+                            $runtime = $episode->info['duration_secs'] ?? -1;
+                            $icon = $episode->info['movie_image'] ?? $streamId->info['cover'] ?? '';
+                            if (empty($icon)) {
+                                $icon = url('/placeholder.png');
+                            }
+
+                            $url = $episode->url;
+                            if ($proxyEnabled) {
+                                $url = ProxyFacade::getProxyUrlForEpisode(
+                                    id: $episode->id,
+                                    format: $episode->container_extension
+                                );
+                            }
+
+                            // Get the TVG ID
+                            switch ($idChannelBy) {
+                                case PlaylistChannelId::ChannelId:
+                                    $tvgId = $channelNo;
+                                    break;
+                                case PlaylistChannelId::Name:
+                                    $tvgId = $name;
+                                    break;
+                                case PlaylistChannelId::Title:
+                                    $tvgId = $name;
+                                    break;
+                                default:
+                                    $tvgId = $episode->id;
+                                    break;
+                            }
+
+                            $extInf = "#EXTINF:$runtime";
+                            $extInf .= " tvg-chno=\"$channelNo\" tvg-id=\"$tvgId\" tvg-name=\"$name\" tvg-logo=\"$icon\" group-title=\"$group\"";
+                            echo "$extInf," . $title . "\n";
+                            echo $url . "\n";
+                        }
+                    }
+                }
             },
             200,
             [

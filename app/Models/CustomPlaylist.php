@@ -30,6 +30,7 @@ class CustomPlaylist extends Model
         'short_urls' => 'array',
         'proxy_options' => 'array',
         'short_urls_enabled' => 'boolean',
+        'include_series_in_m3u' => 'boolean',
         'id_channel_by' => PlaylistChannelId::class
     ];
 
