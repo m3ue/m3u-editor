@@ -43,7 +43,7 @@ use Filament\Forms\Components\Repeater;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Database\QueryException;
-use App\Enums\ChannelLogoType;
+use App\Facades\LogoFacade;
 use App\Facades\ProxyFacade;
 use App\Filament\Resources\VodResource\Pages;
 use App\Filament\Resources\VodResource\RelationManagers;
@@ -125,7 +125,7 @@ class VodResource extends Resource
                 return $action->button()->label('Filters');
             })
             ->modifyQueryUsing(function (Builder $query) {
-                $query->with(['epgChannel', 'playlist'])
+                $query->with(['epgChannel', 'playlist', 'customPlaylist'])
                     ->withCount(['failovers'])
                     ->where('is_vod', true);
             })
@@ -148,12 +148,7 @@ class VodResource extends Resource
                 ->extraImgAttributes(fn($record): array => [
                     'style' => 'width:80px; height:120px;', // VOD channel style
                 ])
-                ->getStateUsing(function ($record) {
-                    if ($record->logo_type === ChannelLogoType::Channel) {
-                        return $record->logo ?? $record->logo_internal;
-                    }
-                    return $record->epgChannel?->icon ?? $record->logo ?? $record->logo_internal;
-                })
+                ->getStateUsing(fn($record) => LogoFacade::getChannelLogoUrl($record))
                 ->toggleable(),
             TextColumn::make('info')
                 ->label('Info')

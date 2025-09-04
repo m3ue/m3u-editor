@@ -2,6 +2,7 @@
 
 namespace App\Filament\GuestPanel\Resources\Series;
 
+use App\Facades\LogoFacade;
 use App\Facades\PlaylistFacade;
 use App\Filament\GuestPanel\Pages\Concerns\HasPlaylist;
 use App\Filament\GuestPanel\Resources\Series\RelationManagers\EpisodesRelationManager;
@@ -56,6 +57,7 @@ class SeriesResource extends Resource
     {
         $playlist = PlaylistFacade::resolvePlaylistByUuid(static::getCurrentUuid());
         return parent::getEloquentQuery()
+            ->with('playlist') // Eager load the playlist relationship
             ->where([
                 ['enabled', true], // Only show enabled series
                 ['playlist_id', $playlist?->id] // Only show series from the current playlist
@@ -85,6 +87,8 @@ class SeriesResource extends Resource
                 Tables\Columns\ImageColumn::make('cover')
                     ->width(80)
                     ->height(120)
+                    ->checkFileExistence(false)
+                    ->getStateUsing(fn($record) => LogoFacade::getSeriesLogoUrl($record))
                     ->searchable(),
                 Tables\Columns\TextColumn::make('name')
                     ->label('Info')

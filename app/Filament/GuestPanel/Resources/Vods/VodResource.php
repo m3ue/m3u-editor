@@ -17,7 +17,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\HtmlString;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Str;
-use App\Enums\ChannelLogoType;
+use App\Facades\LogoFacade;
 use App\Facades\PlaylistFacade;
 use Filament\Tables\Enums\RecordActionsPosition;
 
@@ -62,6 +62,7 @@ class VodResource extends Resource
     {
         $playlist = PlaylistFacade::resolvePlaylistByUuid(static::getCurrentUuid());
         return parent::getEloquentQuery()
+            ->with(['epgChannel', 'playlist', 'customPlaylist'])
             ->where([
                 ['enabled', true], // Only show enabled channels
                 ['is_vod', true], // Only show VOD channels
@@ -96,12 +97,7 @@ class VodResource extends Resource
                     ->extraImgAttributes(fn($record): array => [
                         'style' => 'width:80px; height:120px;', // VOD channel style
                     ])
-                    ->getStateUsing(function ($record) {
-                        if ($record->logo_type === ChannelLogoType::Channel) {
-                            return $record->logo ?? $record->logo_internal;
-                        }
-                        return $record->epgChannel?->icon ?? $record->logo ?? $record->logo_internal;
-                    })
+                    ->getStateUsing(fn($record) => LogoFacade::getChannelLogoUrl($record))
                     ->toggleable(),
                 Tables\Columns\TextColumn::make('info')
                     ->label('Info')

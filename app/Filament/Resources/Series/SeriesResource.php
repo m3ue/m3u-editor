@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Series;
 
+use App\Facades\LogoFacade;
 use App\Filament\Resources\Playlists\PlaylistResource;
 use Filament\Schemas\Schema;
 use Filament\Tables\Enums\RecordActionsPosition;
@@ -99,6 +100,9 @@ class SeriesResource extends Resource
             ->filtersTriggerAction(function ($action) {
                 return $action->button()->label('Filters');
             })
+            ->modifyQueryUsing(function (Builder $query) {
+                $query->with(['playlist']);
+            })
             ->paginated([10, 25, 50, 100])
             ->defaultPaginationPageOption(25)
             ->columns(self::getTableColumns(showCategory: !$relationId, showPlaylist: !$relationId))
@@ -113,6 +117,8 @@ class SeriesResource extends Resource
             ImageColumn::make('cover')
                 ->width(80)
                 ->height(120)
+                ->checkFileExistence(false)
+                ->getStateUsing(fn($record) => LogoFacade::getSeriesLogoUrl($record))
                 ->searchable(),
             TextColumn::make('name')
                 ->description((fn($record) => Str::limit($record->plot, 200)))

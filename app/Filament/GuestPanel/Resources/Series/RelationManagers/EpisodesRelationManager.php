@@ -2,6 +2,7 @@
 
 namespace App\Filament\GuestPanel\Resources\Series\RelationManagers;
 
+use App\Facades\LogoFacade;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\Layout\Stack;
 use Filament\Tables\Columns\ImageColumn;
@@ -36,7 +37,7 @@ class EpisodesRelationManager extends RelationManager
         return $table
             ->recordTitleAttribute('title')
             ->modifyQueryUsing(function (Builder $query) {
-                $query->with(['season', 'series']);
+                $query->with(['season', 'series', 'playlist']);
             })
             ->defaultGroup('season')
             ->defaultSort('episode_num', 'asc')
@@ -53,13 +54,9 @@ class EpisodesRelationManager extends RelationManager
                         ->label('')
                         ->height(200)
                         ->width('full')
-                        ->checkFileExistence(false)
-                        ->defaultImageUrl('/episode-placeholder.png')
                         ->extraImgAttributes(['class' => 'episode-placeholder rounded-t-lg object-cover w-full h-48'])
-                        ->getStateUsing(function ($record) {
-                            $info = $record->info ?? [];
-                            return $info['movie_image'] ?? $info['cover_big'] ?? url('/episode-placeholder.png');
-                        }),
+                        ->checkFileExistence(false)
+                        ->getStateUsing(fn($record) => LogoFacade::getEpisodeLogoUrl($record)),
 
                     Stack::make([
                         TextColumn::make('title')

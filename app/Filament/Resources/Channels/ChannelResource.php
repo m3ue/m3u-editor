@@ -39,6 +39,7 @@ use Illuminate\Validation\ValidationException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Database\QueryException;
 use App\Enums\ChannelLogoType;
+use App\Facades\LogoFacade;
 use App\Facades\ProxyFacade;
 use App\Filament\Resources\ChannelResource\Pages;
 use App\Filament\Resources\ChannelResource\RelationManagers;
@@ -122,7 +123,7 @@ class ChannelResource extends Resource
                 return $action->button()->label('Filters');
             })
             ->modifyQueryUsing(function (Builder $query) {
-                $query->with(['epgChannel', 'playlist'])
+                $query->with(['epgChannel', 'playlist', 'customPlaylist'])
                     ->withCount(['failovers'])
                     ->where('is_vod', false);
             })
@@ -145,12 +146,7 @@ class ChannelResource extends Resource
                 ->extraImgAttributes(fn($record): array => [
                     'style' => 'height:2.5rem; width:auto; border-radius:4px;', // Live channel style
                 ])
-                ->getStateUsing(function ($record) {
-                    if ($record->logo_type === ChannelLogoType::Channel) {
-                        return $record->logo ?? $record->logo_internal;
-                    }
-                    return $record->epgChannel?->icon ?? $record->logo ?? $record->logo_internal;
-                })
+                ->getStateUsing(fn($record) => LogoFacade::getChannelLogoUrl($record))
                 ->toggleable(),
             TextColumn::make('info')
                 ->label('Info')
