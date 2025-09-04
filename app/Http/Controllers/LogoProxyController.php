@@ -29,8 +29,11 @@ class LogoProxyController extends Controller
             $cacheKey = 'logo_' . md5($originalUrl);
             $cacheFile = "cached-logos/{$cacheKey}";
 
+            // Make sure the cache directory exists
+            Storage::disk('local')->makeDirectory('cached-logos');
+
             // Check if the logo is already cached
-            if (Storage::disk('public')->exists($cacheFile)) {
+            if (Storage::disk('local')->exists($cacheFile)) {
                 return $this->serveFromCache($cacheFile);
             }
 
@@ -42,7 +45,7 @@ class LogoProxyController extends Controller
             }
 
             // Cache the logo
-            Storage::disk('public')->put($cacheFile, $logoData['content']);
+            Storage::disk('local')->put($cacheFile, $logoData['content']);
 
             return $this->serveFromCache($cacheFile, $logoData['content_type']);
         } catch (\Exception $e) {
@@ -76,9 +79,8 @@ class LogoProxyController extends Controller
         try {
             $response = Http::timeout(10)
                 ->withHeaders([
-                    'User-Agent' => 'M3U-Editor-Logo-Proxy/1.0',
-                ])
-                ->get($url);
+                    'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
+                ])->get($url);
 
             if (!$response->successful()) {
                 return null;
@@ -116,7 +118,7 @@ class LogoProxyController extends Controller
      */
     private function serveFromCache(string $cacheFile, ?string $contentType = null): StreamedResponse
     {
-        $filePath = Storage::disk('public')->path($cacheFile);
+        $filePath = Storage::disk('local')->path($cacheFile);
 
         if (!$contentType) {
             // Try to determine content type from file
@@ -193,15 +195,15 @@ class LogoProxyController extends Controller
     public function clearExpiredCache(): int
     {
         $cleared = 0;
-        $logoFiles = Storage::disk('public')->files('cached-logos');
+        $logoFiles = Storage::disk('local')->files('cached-logos');
 
         foreach ($logoFiles as $file) {
             // Get file last modified timestamp
-            $lastModified = Storage::disk('public')->lastModified($file);
+            $lastModified = Storage::disk('local')->lastModified($file);
 
             // If no metadata or file is older than 30 days, delete it
             if (now()->diffInDays($lastModified) > 30) {
-                Storage::disk('public')->delete($file);
+                Storage::disk('local')->delete($file);
                 $cleared++;
             }
         }
