@@ -70,6 +70,11 @@ class GeneralSettings extends Settings
     public ?bool $invalidate_import = false;
     public ?int $invalidate_import_threshold = 100;
 
+    // Backup options
+    public ?bool $auto_backup_database = false;
+    public ?string $auto_backup_database_schedule = null;
+    public ?int $auto_backup_database_max_backups = 5;
+
     public static function group(): string
     {
         return 'general';

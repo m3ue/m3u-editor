@@ -51,3 +51,8 @@ Schedule::command('app:shared-streams sync')
 Schedule::command('app:epg-cache-health-check')
     ->everyFifteenMinutes()
     ->withoutOverlapping();
+
+// Check backup
+Schedule::command('app:run-scheduled-backups')
+    ->everyMinute()
+    ->withoutOverlapping();
