@@ -187,22 +187,6 @@ class ChannelsRelationManager extends RelationManager
                             });
                         }
                     }),
-                Group::make('group')
-                    ->label('Default Group')
-                    ->collapsible()
-                    ->getTitleFromRecordUsing(function ($record) {
-                        return $record->group ?: 'No Group';
-                    })
-                    ->getKeyFromRecordUsing(function ($record) {
-                        return $record->group ? strtolower($record->group) : 'no_group';
-                    })
-                    ->scopeQueryByKeyUsing(function (Builder $query, string $key) {
-                        if ($key === 'no_group') {
-                            return $query->whereNull('group');
-                        } else {
-                            return $query->whereRaw('LOWER(group) = ?', [strtolower($key)]);
-                        }
-                    }),
             ])
             ->defaultGroup('custom_group_name')
             ->columns($defaultColumns)
