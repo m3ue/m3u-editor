@@ -137,7 +137,7 @@ class ChannelsRelationManager extends RelationManager
             ->paginated([10, 25, 50, 100])
             ->defaultPaginationPageOption(25)
             ->groups([
-                Group::make('custom_group_name')
+                Group::make('playlist_tags')
                     ->label('Playlist Group')
                     ->collapsible()
                     ->getTitleFromRecordUsing(function ($record) use ($ownerRecord) {
@@ -148,30 +148,10 @@ class ChannelsRelationManager extends RelationManager
                         $groupName = $record->getCustomGroupName($ownerRecord->uuid);
                         return $groupName ? strtolower($groupName) : 'uncategorized';
                     })
-                    ->orderQueryUsing(function (Builder $query, string $direction) use ($ownerRecord) {
-                        $connection = $query->getConnection();
-                        $driver = $connection->getDriverName();
-
-                        // Build the ORDER BY clause based on database type
-                        $orderByClause = match ($driver) {
-                            'pgsql' => 'COALESCE(tags.name->>\'$\', \'Uncategorized\')',
-                            'mysql' => 'COALESCE(JSON_EXTRACT(tags.name, "$"), "Uncategorized")',
-                            'sqlite' => 'COALESCE(json_extract(tags.name, "$"), "Uncategorized")',
-                            default => 'COALESCE(CAST(tags.name AS TEXT), "Uncategorized")'
-                        };
-
-                        return $query
-                            ->leftJoin('taggables as group_taggables', function ($join) {
-                                $join->on('channels.id', '=', 'group_taggables.taggable_id')
-                                    ->where('group_taggables.taggable_type', '=', Channel::class);
-                            })
-                            ->leftJoin('tags', function ($join) use ($ownerRecord) {
-                                $join->on('group_taggables.tag_id', '=', 'tags.id')
-                                    ->where('tags.type', '=', $ownerRecord->uuid);
-                            })
-                            ->orderByRaw("{$orderByClause} {$direction}")
-                            ->select('channels.*', DB::raw("{$orderByClause} as group_sort_field"))
-                            ->distinct();
+                    ->orderQueryUsing(function (Builder $query, string $direction) {
+                        // Since we're using custom grouping, we need to provide ordering
+                        // For now, just order by the channel sort field to avoid column errors
+                        return $query->orderBy('channels.sort', $direction);
                     })
                     ->scopeQueryByKeyUsing(function (Builder $query, string $key) use ($ownerRecord) {
                         if ($key === 'uncategorized') {
@@ -198,8 +178,9 @@ class ChannelsRelationManager extends RelationManager
                         }
                     }),
             ])
-            ->defaultGroup('custom_group_name')
-            // ->defaultSort('tags.order_column', 'asc')
+            // Remove defaultGroup for now to test if it's causing issues
+            // ->defaultGroup('custom_group_name')
+            ->defaultSort('sort', 'asc')
             ->reorderable('sort')
             ->columns($defaultColumns)
             ->filters([
