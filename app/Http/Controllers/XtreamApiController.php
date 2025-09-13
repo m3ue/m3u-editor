@@ -7,7 +7,7 @@ use Illuminate\Http\Response;
 use Illuminate\Http\RedirectResponse;
 use App\Enums\ChannelLogoType;
 use App\Enums\PlaylistChannelId;
-use App\Facades\ProxyFacade;
+use App\Facades\PlaylistFacade;
 use App\Models\Channel;
 use App\Models\CustomPlaylist;
 use App\Models\Epg;
