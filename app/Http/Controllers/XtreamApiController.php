@@ -401,13 +401,12 @@ class XtreamApiController extends Controller
                 $streams = (int)$playlist->streams === 0
                     ? ($xtreamStatus['user_info']['max_connections'] ?? $playlist->streams ?? 1)
                     : $playlist->streams;
+                $activeConnections = (int)($xtreamStatus['user_info']['active_cons'] ?? 0);
             } else {
                 $expires = $now->copy()->startOfYear()->addYears(1)->timestamp;
                 $streams = $playlist->streams ?? 1;
+                $activeConnections = 0;
             }
-            $activeConnections = SharedStream::active()
-                ->where('stream_info->options->playlist_id', $playlist->id)
-                ->count();
 
             $outputFormats = ['m3u8', 'ts'];
             if ($playlist->enable_proxy) {
@@ -417,6 +416,9 @@ class XtreamApiController extends Controller
                 } else {
                     $outputFormats = [$proxyOutput];
                 }
+                $activeConnections = SharedStream::active()
+                    ->where('stream_info->options->playlist_id', $playlist->uuid)
+                    ->count();
             }
 
             $userInfo = [
