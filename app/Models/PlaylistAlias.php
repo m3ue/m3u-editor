@@ -86,6 +86,24 @@ class PlaylistAlias extends Model
     }
 
     /**
+     * Get the user agent, prioritizing alias config if available
+     */
+    public function getUserAgentAttribute(): ?string
+    {
+        $effectivePlaylist = $this->getEffectivePlaylist();
+        return $effectivePlaylist?->user_agent;
+    }
+
+    /**
+     * Get the server timezone, prioritizing alias config if available
+     */
+    public function getServerTimezoneAttribute(): ?string
+    {
+        $effectivePlaylist = $this->getEffectivePlaylist();
+        return $effectivePlaylist?->server_timezone;
+    }
+
+    /**
      * Get the available_streams limit, prioritizing alias config if available
      */
     public function getAvailableStreamsAttribute(): ?int

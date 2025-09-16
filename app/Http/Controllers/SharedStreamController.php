@@ -35,9 +35,10 @@ class SharedStreamController extends Controller
      * @param Request $request
      * @param string $encodedId
      * @param string $format
+     * @param Playlist|CustomPlaylist|MergedPlaylist|PlaylistAlias|null $playlist
      * @return StreamedResponse
      */
-    public function streamChannel(Request $request, string $encodedId, string $format = 'ts')
+    public function streamChannel(Request $request, string $encodedId, string $format = 'ts', $playlist = null)
     {
         Log::channel('ffmpeg')->info("SharedStreamController: streamChannel called with encodedId: {$encodedId}, format: {$format}");
 
@@ -58,7 +59,7 @@ class SharedStreamController extends Controller
         $channel = Channel::findOrFail($channelId);
         Log::channel('ffmpeg')->debug("SharedStreamController: Found channel: {$channel->title}");
 
-        return $this->handleSharedStream($request, 'channel', $channel, $format);
+        return $this->handleSharedStream($request, 'channel', $channel, $format, $playlist);
     }
 
     /**
@@ -67,9 +68,10 @@ class SharedStreamController extends Controller
      * @param Request $request
      * @param string $encodedId
      * @param string $format
+     * @param Playlist|CustomPlaylist|MergedPlaylist|PlaylistAlias|null $playlist
      * @return StreamedResponse
      */
-    public function streamEpisode(Request $request, string $encodedId, string $format = 'ts')
+    public function streamEpisode(Request $request, string $encodedId, string $format = 'ts', $playlist = null)
     {
         // Validate format
         if (!in_array($format, ['ts', 'm3u8', 'mkv', 'mp4'])) {
@@ -82,13 +84,13 @@ class SharedStreamController extends Controller
         }
         $episode = Episode::findOrFail(base64_decode($encodedId));
 
-        return $this->handleSharedStream($request, 'episode', $episode, $format);
+        return $this->handleSharedStream($request, 'episode', $episode, $format, $playlist);
     }
 
     /**
      * Handle shared streaming for both channels and episodes
      */
-    private function handleSharedStream(Request $request, string $type, $model, string $format)
+    private function handleSharedStream(Request $request, string $type, $model, string $format, $playlist = null)
     {
         Log::channel('ffmpeg')->info("SharedStreamController: Starting handleSharedStream for {$type} ID {$model->id}, format: {$format}");
 
@@ -109,7 +111,10 @@ class SharedStreamController extends Controller
         Log::channel('ffmpeg')->debug("SharedStreamController: Stream URL found for {$title}: {$streamUrl}");
 
         // Get playlist for stream limits
-        $playlist = $model->getEffectivePlaylist();
+        if (!$playlist) {
+            // If no playlist provided, use the model's effective playlist
+            $playlist = $model->getEffectivePlaylist();
+        }
 
         // Generate timeshift URL if applicable
         $streamUrl = ProxyService::generateTimeshiftUrl($request, $streamUrl, $playlist);

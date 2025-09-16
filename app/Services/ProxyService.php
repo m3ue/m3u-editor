@@ -75,7 +75,7 @@ class ProxyService
      *
      * @param \Illuminate\Http\Request $request
      * @param string $streamUrl
-     * @param Playlist|MergedPlaylist|CustomPlaylist $playlist
+     * @param Playlist|MergedPlaylist|CustomPlaylist|PlaylistAlias $playlist
      * 
      * @return string
      */

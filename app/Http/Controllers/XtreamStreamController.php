@@ -178,7 +178,8 @@ class XtreamStreamController extends Controller
                 $encodedId = rtrim(base64_encode($streamId), '=');
                 return app()->call('App\\Http\\Controllers\\SharedStreamController@streamChannel', [
                     'encodedId' => $encodedId,
-                    'format' => $format
+                    'format' => $format,
+                    'playlist' => $playlist,
                 ]);
             } else {
                 return Redirect::to(PlaylistUrlService::getChannelUrl($channel, $playlist));
@@ -200,7 +201,8 @@ class XtreamStreamController extends Controller
                 $encodedId = rtrim(base64_encode($streamId), '=');
                 return app()->call('App\\Http\\Controllers\\SharedStreamController@streamChannel', [
                     'encodedId' => $encodedId,
-                    'format' => $format
+                    'format' => $format,
+                    'playlist' => $playlist,
                 ]);
             } else {
                 return Redirect::to(PlaylistUrlService::getChannelUrl($channel, $playlist));
@@ -222,7 +224,8 @@ class XtreamStreamController extends Controller
                 $encodedId = rtrim(base64_encode($streamId), '=');
                 return app()->call('App\\Http\\Controllers\\SharedStreamController@streamEpisode', [
                     'encodedId' => $encodedId,
-                    'format' => $format
+                    'format' => $format,
+                    'playlist' => $playlist,
                 ]);
             } else {
                 return Redirect::to(PlaylistUrlService::getEpisodeUrl($episode, $playlist));
@@ -278,7 +281,8 @@ class XtreamStreamController extends Controller
             $encodedId = rtrim(base64_encode($streamId), '=');
             return app()->call('App\\Http\\Controllers\\SharedStreamController@streamChannel', [
                 'encodedId' => $encodedId,
-                'format' => $format
+                'format' => $format,
+                'playlist' => $playlist,
             ]);
         } else {
             // If proxy is not enabled, simply return the timeshift URL
