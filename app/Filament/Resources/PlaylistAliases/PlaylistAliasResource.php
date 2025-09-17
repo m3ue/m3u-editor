@@ -228,7 +228,7 @@ class PlaylistAliasResource extends Resource
                         'required',
                         'min:3',
                         'max:36',
-                        Rule::unique('playlist_auths', 'uuid')->ignore($record?->id),
+                        Rule::unique('playlist_aliases', 'uuid')->ignore($record?->id),
                     ];
                 })
                 ->helperText('Value must be between 3 and 36 characters.')
