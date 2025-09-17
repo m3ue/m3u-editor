@@ -124,10 +124,11 @@ class PlaylistAliasResource extends Resource
                     ->description(fn(PlaylistAlias $record): string => "Enabled: {$record->enabled_series()->count()}")
                     ->toggleable()
                     ->sortable(),
-                Tables\Columns\IconColumn::make('enable_proxy')
+                Tables\Columns\ToggleColumn::make('enable_proxy')
                     ->label('Proxy')
-                    ->tooltip('Inherited from parent playlist. Change settings in the parent playlist to modify.')
-                    ->boolean(),
+                    ->toggleable()
+                    ->tooltip('Toggle proxy status')
+                    ->sortable(),
                 Tables\Columns\TextColumn::make('exp_date')
                     ->label('Expiry Date')
                     ->getStateUsing(function ($record) {
@@ -211,7 +212,20 @@ class PlaylistAliasResource extends Resource
                 ->columnSpan('full')
                 ->schema([
                     Forms\Components\TextInput::make('name')
+                        ->required()
+                        ->helperText('Enter the name of the alias. Internal use only.'),
+                    Forms\Components\TextInput::make('user_agent')
+                        ->helperText('User agent string to use for making requests.')
+                        ->default('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36')
                         ->required(),
+                ]),
+
+            Grid::make()
+                ->columns(2)
+                ->columnSpan('full')
+                ->schema([
+                    Forms\Components\Textarea::make('description')
+                        ->helperText('Optional description for your reference.'),
                     Forms\Components\Toggle::make('edit_uuid')
                         ->label('View/Update Unique Identifier')
                         ->inline(false)
@@ -239,9 +253,7 @@ class PlaylistAliasResource extends Resource
                 )
                 ->hidden(fn($get): bool => !$get('edit_uuid'))
                 ->required(),
-            Forms\Components\Textarea::make('description')
-                ->helperText('Optional description for your reference.')
-                ->columnSpanFull(),
+
             Schemas\Components\Fieldset::make('Alias of (choose one)')
                 ->schema([
                     Forms\Components\Select::make('playlist_id')
@@ -306,6 +318,56 @@ class PlaylistAliasResource extends Resource
                         ->password()
                         ->revealable(),
                 ]),
+
+            Schemas\Components\Fieldset::make('Proxy Options')
+                ->columns(2)
+                ->schema([
+                    Forms\Components\Toggle::make('enable_proxy')
+                        ->label('Enable Proxy')
+                        ->hint(fn(Get $get): string => $get('enable_proxy') ? 'Proxied' : 'Not proxied')
+                        ->hintIcon(fn(Get $get): string => !$get('enable_proxy') ? 'heroicon-m-lock-open' : 'heroicon-m-lock-closed')
+                        ->live()
+                        ->helperText('When enabled, all streams will be proxied through the application. This allows for better compatibility with various clients and enables features such as stream limiting and output format selection.')
+                        ->inline(false)
+                        ->default(false),
+                    Forms\Components\TextInput::make('streams')
+                        ->label('HDHR/Xtream API Streams')
+                        ->helperText('Number of streams available for HDHR and Xtream API service (if using).')
+                        ->columnSpan(1)
+                        ->hintIcon(
+                            'heroicon-m-question-mark-circle',
+                            tooltip: 'Enter 0 to use to use provider defined value. This value is also used when generating the Xtream API user info response.'
+                        )
+                        ->rules(['min:0'])
+                        ->type('number')
+                        ->default(0) // Default to 0 streams (unlimited)
+                        ->required(),
+                    Forms\Components\TextInput::make('available_streams')
+                        ->label('Available Streams')
+                        ->hint('Set to 0 for unlimited streams.')
+                        ->helperText('Number of streams available for this provider. If set to a value other than 0, will prevent any streams from starting if the number of active streams exceeds this value.')
+                        ->columnSpan(1)
+                        ->rules(['min:1'])
+                        ->type('number')
+                        ->default(0) // Default to 0 streams (for unlimted)
+                        ->required()
+                        ->hidden(fn(Get $get): bool => !$get('enable_proxy')),
+                    Forms\Components\Select::make('proxy_options.output')
+                        ->label('Proxy Output Format')
+                        ->required()
+                        ->options([
+                            'ts' => 'MPEG-TS (.ts)',
+                            'hls' => 'HLS (.m3u8)',
+                        ])
+                        ->default('ts')
+                        ->hidden(fn(Get $get): bool => !$get('enable_proxy')),
+                    Forms\Components\TextInput::make('server_timezone')
+                        ->label('Provider Timezone')
+                        ->helperText('The portal/provider timezone (DST-aware). Needed to correctly use timeshift functionality when playlist proxy is enabled.')
+                        ->placeholder('Etc/UTC')
+                        ->columnSpanFull()
+                        ->hidden(fn(Get $get): bool => !$get('enable_proxy')),
+                ])->columnSpanFull(),
 
             Schemas\Components\Fieldset::make('Auth (optional)')
                 ->columns(2)

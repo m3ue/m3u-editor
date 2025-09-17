@@ -20,7 +20,9 @@ class PlaylistAlias extends Model
 
     protected $casts = [
         'xtream_config' => 'array',
+        'proxy_options' => 'array',
         'enabled' => 'boolean',
+        'enable_proxy' => 'boolean',
         'priority' => 'integer',
     ];
 
@@ -65,51 +67,6 @@ class PlaylistAlias extends Model
         }
 
         return $this->playlist ?? $this->customPlaylist;
-    }
-
-    /**
-     * Get the enable_proxy setting, prioritizing alias config if available
-     */
-    public function getEnableProxyAttribute(): bool
-    {
-        $effectivePlaylist = $this->getEffectivePlaylist();
-        return $effectivePlaylist?->enable_proxy ?? false;
-    }
-
-    /**
-     * Get the streams limit, prioritizing alias config if available
-     */
-    public function getStreamsAttribute(): ?int
-    {
-        $effectivePlaylist = $this->getEffectivePlaylist();
-        return $effectivePlaylist?->streams;
-    }
-
-    /**
-     * Get the user agent, prioritizing alias config if available
-     */
-    public function getUserAgentAttribute(): ?string
-    {
-        $effectivePlaylist = $this->getEffectivePlaylist();
-        return $effectivePlaylist?->user_agent;
-    }
-
-    /**
-     * Get the server timezone, prioritizing alias config if available
-     */
-    public function getServerTimezoneAttribute(): ?string
-    {
-        $effectivePlaylist = $this->getEffectivePlaylist();
-        return $effectivePlaylist?->server_timezone;
-    }
-
-    /**
-     * Get the available_streams limit, prioritizing alias config if available
-     */
-    public function getAvailableStreamsAttribute(): ?int
-    {
-        $effectivePlaylist = $this->getEffectivePlaylist();
-        return $effectivePlaylist?->available_streams;
     }
 
     /**
