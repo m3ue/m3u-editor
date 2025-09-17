@@ -6,6 +6,7 @@ use App\Enums\Status;
 use App\Jobs\ProcessEpgImport;
 use App\Models\Epg;
 use Carbon\CarbonInterval;
+use Cron\CronExpression;
 use Illuminate\Console\Command;
 
 class RefreshEpg extends Command
@@ -54,11 +55,8 @@ class RefreshEpg extends Command
             $count = 0;
             $epgs->get()->each(function (Epg $epg) use (&$count) {
                 // Check the sync interval to see if we need to refresh yet
-                $nextSync = $epg->sync_interval
-                    ? $epg->synced->add(CarbonInterval::fromString($epg->sync_interval))
-                    : $epg->synced->addDay();
-
-                if (!$nextSync->isFuture()) {
+                $isDue = (new CronExpression($epg->sync_interval))->isDue();
+                if ($isDue) {
                     $count++;
                     dispatch(new ProcessEpgImport($epg));
                 }

@@ -16,12 +16,12 @@ Schedule::command('app:flush-jobs-table')
 
 // Refresh playlists
 Schedule::command('app:refresh-playlist')
-    ->everyFiveMinutes()
+    ->everyMinute()
     ->withoutOverlapping();
 
 // Refresh EPG
 Schedule::command('app:refresh-epg')
-    ->everyFiveMinutes()
+    ->everyMinute()
     ->withoutOverlapping();
 
 // Prune stale processes

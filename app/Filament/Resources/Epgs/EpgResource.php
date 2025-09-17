@@ -36,7 +36,9 @@ use App\Filament\Resources\EpgResource\Pages;
 use App\Filament\Resources\EpgResource\RelationManagers;
 use App\Models\Epg;
 use App\Rules\CheckIfUrlOrLocalPath;
+use App\Rules\Cron;
 use App\Services\SchedulesDirectService;
+use Cron\CronExpression;
 use Filament\Forms;
 use Filament\Forms\Set;
 use Filament\Notifications\Notification;
@@ -146,8 +148,14 @@ class EpgResource extends Resource
                     ->toggleable()
                     ->sortable(),
                 TextColumn::make('sync_interval')
-                    ->label('Interval')
+                    ->label('Next Sync')
                     ->toggleable()
+                    ->formatStateUsing(function ($state, $record) {
+                        if ($record->auto_sync && $record->sync_interval && CronExpression::isValidExpression($record->sync_interval)) {
+                            return (new CronExpression($record->sync_interval))->getNextRunDate()->format('Y-m-d H:i:s');
+                        }
+                        return 'N/A';
+                    })
                     ->sortable(),
                 TextColumn::make('sync_time')
                     ->label('Sync Time')
@@ -243,7 +251,6 @@ class EpgResource extends Resource
                                 ->duration(3000)
                                 ->send();
                         })
-                        // ->disabled(fn($record): bool => ! $record->auto_sync)
                         ->requiresConfirmation()
                         ->icon('heroicon-o-arrow-uturn-left')
                         ->modalIcon('heroicon-o-arrow-uturn-left')
@@ -681,47 +688,40 @@ class EpgResource extends Resource
 
             Section::make('Scheduling')
                 ->description('Auto sync and scheduling options')
-                ->columns(3)
+                ->columns(2)
                 ->schema([
                     Toggle::make('auto_sync')
                         ->label('Automatically sync EPG')
                         ->helperText('When enabled, the EPG will be automatically re-synced at the specified interval.')
                         ->live()
-                        ->columnSpan(2)
                         ->inline(false)
                         ->default(true),
-                    Select::make('sync_interval')
-                        ->label('Sync Every')
-                        ->helperText('Default is every 24hr if left empty.')
-                        ->columnSpan(1)
-                        ->options([
-                            '15 minutes' => '15 minutes',
-                            '30 minutes' => '30 minutes',
-                            '45 minutes' => '45 minutes',
-                            '1 hour' => '1 hour',
-                            '2 hours' => '2 hours',
-                            '3 hours' => '3 hours',
-                            '4 hours' => '4 hours',
-                            '5 hours' => '5 hours',
-                            '6 hours' => '6 hours',
-                            '7 hours' => '7 hours',
-                            '8 hours' => '8 hours',
-                            '12 hours' => '12 hours',
-                            '24 hours' => '24 hours',
-                            '2 days' => '2 days',
-                            '3 days' => '3 days',
-                            '1 week' => '1 week',
-                            '2 weeks' => '2 weeks',
-                            '1 month' => '1 month',
-                        ])->hidden(fn(Get $get): bool => ! $get('auto_sync')),
+                    TextInput::make('sync_interval')
+                        ->label('Sync Schedule')
+                        ->suffix(config('app.timezone'))
+                        ->rules([new Cron()])
+                        ->live()
+                        ->hintAction(
+                            Action::make('view_cron_example')
+                                ->label('CRON Example')
+                                ->icon('heroicon-o-arrow-top-right-on-square')
+                                ->iconPosition('after')
+                                ->size('sm')
+                                ->url('https://crontab.guru')
+                                ->openUrlInNewTab(true)
+                        )
+                        ->helperText(fn($get) => CronExpression::isValidExpression($get('sync_interval'))
+                            ? 'Next scheduled sync: ' . (new CronExpression($get('sync_interval')))->getNextRunDate()->format('Y-m-d H:i:s')
+                            : 'Specify the CRON schedule for automatic sync, e.g. "0 3 * * *".')
+                        ->hidden(fn(Get $get): bool => !$get('auto_sync')),
                     DateTimePicker::make('synced')
-                        ->columnSpan(3)
-                        ->suffix('UTC')
+                        ->columnSpanFull()
+                        ->suffix(config('app.timezone'))
                         ->native(false)
                         ->label('Last Synced')
-                        ->hidden(fn(Get $get, string $operation): bool => ! $get('auto_sync') || $operation === 'create')
-                        ->helperText('EPG will be synced at the specified interval. Timestamp is automatically updated after each sync. Set to any time in the past (or future) and the next sync will run when the defined interval has passed since the time set.'),
-
+                        ->disabled()
+                        ->helperText('The last time the EPG was successfully synced.')
+                        ->dehydrated(false),
                 ]),
 
             Section::make('Mapping')

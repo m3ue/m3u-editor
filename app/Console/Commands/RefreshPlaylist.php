@@ -6,6 +6,7 @@ use App\Enums\Status;
 use App\Jobs\ProcessM3uImport;
 use App\Models\Playlist;
 use Carbon\CarbonInterval;
+use Cron\CronExpression;
 use Illuminate\Console\Command;
 
 class RefreshPlaylist extends Command
@@ -44,21 +45,18 @@ class RefreshPlaylist extends Command
                 '!=',
                 Status::Processing,
             )->whereNotNull('synced');
-            
+
             $totalPlaylists = $playlists->count();
             if ($totalPlaylists === 0) {
                 $this->info('No playlists available for refresh');
                 return;
             }
-            
+
             $count = 0;
             $playlists->get()->each(function (Playlist $playlist) use (&$count) {
                 // Check the sync interval to see if we need to refresh yet
-                $nextSync = $playlist->sync_interval
-                    ? $playlist->synced->add(CarbonInterval::fromString($playlist->sync_interval))
-                    : $playlist->synced->addDay();
-                    
-                if (!$nextSync->isFuture()) {
+                $isDue = (new CronExpression($playlist->sync_interval))->isDue();
+                if ($isDue) {
                     $count++;
                     dispatch(new ProcessM3uImport($playlist));
                 }

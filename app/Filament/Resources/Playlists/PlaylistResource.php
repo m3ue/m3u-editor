@@ -68,7 +68,9 @@ use App\Livewire\XtreamApiInfo;
 use App\Models\Category;
 use App\Models\SharedStream;
 use App\Models\SourceGroup;
+use App\Rules\Cron;
 use App\Services\EpgCacheService;
+use Cron\CronExpression;
 use Filament\Infolists;
 use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Database\Eloquent\Model;
@@ -218,8 +220,14 @@ class PlaylistResource extends Resource
                     ->toggleable()
                     ->sortable(),
                 TextColumn::make('sync_interval')
-                    ->label('Interval')
+                    ->label('Next Sync')
                     ->toggleable()
+                    ->formatStateUsing(function ($state, $record) {
+                        if ($record->auto_sync && $record->sync_interval && CronExpression::isValidExpression($record->sync_interval)) {
+                            return (new CronExpression($record->sync_interval))->getNextRunDate()->format('Y-m-d H:i:s');
+                        }
+                        return 'N/A';
+                    })
                     ->sortable(),
                 TextColumn::make('sync_time')
                     ->label('Sync Time')
@@ -864,55 +872,50 @@ class PlaylistResource extends Resource
                 ->columnSpanFull()
                 ->schema([
                     Grid::make()
-                        ->columns(3)
+                        ->columns(2)
                         ->columnSpanFull()
                         ->schema([
                             Toggle::make('auto_sync')
                                 ->label('Automatically sync playlist')
                                 ->helperText('When enabled, the playlist will be automatically re-synced at the specified interval.')
                                 ->live()
-                                ->columnSpan(2)
                                 ->inline(false)
                                 ->default(true),
-                            Select::make('sync_interval')
-                                ->label('Sync Every')
-                                ->helperText('Default is every 24hr if left empty.')
-                                ->columnSpan(1)
-                                ->options([
-                                    '15 minutes' => '15 minutes',
-                                    '30 minutes' => '30 minutes',
-                                    '45 minutes' => '45 minutes',
-                                    '1 hour' => '1 hour',
-                                    '2 hours' => '2 hours',
-                                    '3 hours' => '3 hours',
-                                    '4 hours' => '4 hours',
-                                    '5 hours' => '5 hours',
-                                    '6 hours' => '6 hours',
-                                    '7 hours' => '7 hours',
-                                    '8 hours' => '8 hours',
-                                    '12 hours' => '12 hours',
-                                    '24 hours' => '24 hours',
-                                    '2 days' => '2 days',
-                                    '3 days' => '3 days',
-                                    '1 week' => '1 week',
-                                    '2 weeks' => '2 weeks',
-                                    '1 month' => '1 month',
-                                ])->hidden(fn(Get $get): bool => !$get('auto_sync')),
                             Toggle::make('backup_before_sync')
                                 ->label('Backup Before Sync')
                                 ->helperText('When enabled, a backup will be created before syncing.')
-                                ->columnSpanFull()
                                 ->inline(false)
                                 ->default(false),
                         ]),
+
+                    TextInput::make('sync_interval')
+                        ->label('Sync Schedule')
+                        ->suffix(config('app.timezone'))
+                        ->rules([new Cron()])
+                        ->live()
+                        ->columnSpanFull()
+                        ->hintAction(
+                            Action::make('view_cron_example')
+                                ->label('CRON Example')
+                                ->icon('heroicon-o-arrow-top-right-on-square')
+                                ->iconPosition('after')
+                                ->size('sm')
+                                ->url('https://crontab.guru')
+                                ->openUrlInNewTab(true)
+                        )
+                        ->helperText(fn($get) => CronExpression::isValidExpression($get('sync_interval'))
+                            ? 'Next scheduled sync: ' . (new CronExpression($get('sync_interval')))->getNextRunDate()->format('Y-m-d H:i:s')
+                            : 'Specify the CRON schedule for automatic sync, e.g. "0 3 * * *".')
+                        ->hidden(fn(Get $get): bool => !$get('auto_sync')),
 
                     DateTimePicker::make('synced')
                         ->columnSpan(2)
                         ->suffix(config('app.timezone'))
                         ->native(false)
                         ->label('Last Synced')
-                        ->hidden(fn(Get $get, string $operation): bool => !$get('auto_sync') || $operation === 'create')
-                        ->helperText('Playlist will be synced at the specified interval. Timestamp is automatically updated after each sync. Set to any time in the past (or future) and the next sync will run when the defined interval has passed since the time set.'),
+                        ->disabled()
+                        ->helperText('The last time the playlist was successfully synced.')
+                        ->dehydrated(false),
                 ])
         ];
 
