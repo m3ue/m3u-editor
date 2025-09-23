@@ -86,7 +86,7 @@ class ProxyService
         $utcPresent = $request->filled('utc');
         $xtreamTimeshiftPresent = $request->filled('timeshift_duration') && $request->filled('timeshift_date');
 
-        if ($utcPresent) {
+        if ($utcPresent && !$xtreamTimeshiftPresent) {
             $utc = (int) $request->query('utc'); // programme start (UTC epoch)
             $lutc = (int) ($request->query('lutc') ?? time()); // “live” now (UTC epoch)
 
@@ -135,7 +135,7 @@ class ProxyService
         /* ─────────────────────────────────────────────────────────────────── */
 
         // ── Apply timeshift rewriting AFTER we know the provider timezone ──
-        if ($utcPresent) {
+        if ($utcPresent && !$xtreamTimeshiftPresent) {
             // Use the portal/provider timezone (DST-aware). Prefer per-playlist; last resort UTC.
             $providerTz = $playlist?->server_timezone ?? 'Etc/UTC';
 
