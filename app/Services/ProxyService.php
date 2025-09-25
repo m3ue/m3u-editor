@@ -81,11 +81,16 @@ class ProxyService
      */
     public static function generateTimeshiftUrl(Request $request, string $streamUrl, $playlist)
     {
-        /* ── Timeshift SETUP (TiviMate → portal format) ───────────────────── */
         // TiviMate sends utc/lutc as UNIX epochs (UTC). We only convert TZ + format.
         $utcPresent = $request->filled('utc');
+
+        // Xtream API sends timeshift_duration (minutes) and timeshift_date (YYYY-MM-DD:HH-MM-SS)
         $xtreamTimeshiftPresent = $request->filled('timeshift_duration') && $request->filled('timeshift_date');
 
+        // Use the portal/provider timezone (DST-aware). Prefer per-playlist; last resort UTC.
+        $providerTz = $playlist?->server_timezone ?? 'Etc/UTC';
+
+        /* ── Timeshift SETUP (TiviMate → portal format) ───────────────────── */
         if ($utcPresent && !$xtreamTimeshiftPresent) {
             $utc = (int) $request->query('utc'); // programme start (UTC epoch)
             $lutc = (int) ($request->query('lutc') ?? time()); // “live” now (UTC epoch)
@@ -110,6 +115,8 @@ class ProxyService
                 return $url; // fallback if pattern does not match
             };
         } elseif ($xtreamTimeshiftPresent) {
+            /* ── Timeshift SETUP (Xtream API → Xtream API format) ─────────────────── */
+
             // Handle Xtream API timeshift format
             $duration = (int) $request->get('timeshift_duration'); // Duration in minutes
             $date = $request->get('timeshift_date'); // Format: YYYY-MM-DD:HH-MM-SS
@@ -136,9 +143,6 @@ class ProxyService
 
         // ── Apply timeshift rewriting AFTER we know the provider timezone ──
         if ($utcPresent && !$xtreamTimeshiftPresent) {
-            // Use the portal/provider timezone (DST-aware). Prefer per-playlist; last resort UTC.
-            $providerTz = $playlist?->server_timezone ?? 'Etc/UTC';
-
             // Convert the absolute UTC epoch from TiviMate to provider-local time string expected by timeshift.php
             $stamp = Carbon::createFromTimestampUTC($utc)
                 ->setTimezone($providerTz)
@@ -166,6 +170,11 @@ class ProxyService
                 $stamp = preg_replace('/[^\d\-:]/', '', $date);
                 $stamp = preg_replace('/:(\d{2})$/', '', $stamp); // Remove seconds if present
             }
+
+            // Need to convert from app timezone to provider timezone
+            $stamp = Carbon::createFromFormat('Y-m-d:H-i', $stamp, 'UTC')
+                ->setTimezone($providerTz)
+                ->format('Y-m-d:H-i');
 
             $streamUrl = $rewrite($streamUrl, $stamp, $duration);
 
