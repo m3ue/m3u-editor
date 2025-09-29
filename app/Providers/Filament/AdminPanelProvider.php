@@ -2,24 +2,22 @@
 
 namespace App\Providers\Filament;
 
-use Filament\Support\Enums\Width;
-use Exception;
-use App\Filament\Pages\Backups;
-use App\Filament\Widgets\UpdateNoticeWidget;
-use App\Filament\Auth\Login;
 use App\Filament\Auth\EditProfile;
+use App\Filament\Auth\Login;
+use App\Filament\Pages\Backups;
 use App\Filament\Pages\CustomDashboard;
 use App\Filament\Widgets\DiscordWidget;
 use App\Filament\Widgets\DocumentsWidget;
 use App\Filament\Widgets\DonateCrypto;
 use App\Filament\Widgets\KoFiWidget;
 use App\Filament\Widgets\SharedStreamStatsWidget;
-//use App\Filament\Widgets\PayPalDonateWidget;
 use App\Filament\Widgets\StatsOverview;
 use App\Filament\Widgets\SystemHealthWidget;
-use App\Models\SharedStream;
+use App\Filament\Widgets\UpdateNoticeWidget;
+// use App\Filament\Widgets\PayPalDonateWidget;
 use App\Settings\GeneralSettings;
 use Boquizo\FilamentLogViewer\FilamentLogViewerPlugin;
+use Exception;
 use Filament\Auth\MultiFactor\App\AppAuthentication;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
@@ -29,7 +27,10 @@ use Filament\Navigation\NavigationGroup;
 use Filament\Panel;
 use Filament\PanelProvider;
 use Filament\Support\Colors\Color;
+use Filament\Support\Enums\Width;
 use Filament\Support\Facades\FilamentView;
+use Filament\View\PanelsRenderHook;
+use Filament\Widgets\AccountWidget;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
 use Illuminate\Cookie\Middleware\EncryptCookies;
 use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
@@ -37,7 +38,6 @@ use Illuminate\Routing\Middleware\SubstituteBindings;
 use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\View\Middleware\ShareErrorsFromSession;
-use Filament\Widgets\AccountWidget;
 use ShuvroRoy\FilamentSpatieLaravelBackup\FilamentSpatieLaravelBackupPlugin;
 
 class AdminPanelProvider extends PanelProvider
@@ -84,7 +84,7 @@ class AdminPanelProvider extends PanelProvider
             ->discoverResources(in: app_path('Filament/Resources'), for: 'App\\Filament\\Resources')
             ->discoverPages(in: app_path('Filament/Pages'), for: 'App\\Filament\\Pages')
             ->pages([
-                CustomDashboard::class
+                CustomDashboard::class,
             ])
             ->navigationGroups([
                 NavigationGroup::make('Playlist')
@@ -157,6 +157,7 @@ class AdminPanelProvider extends PanelProvider
         } else {
             $adminPanel->sidebarCollapsibleOnDesktop();
         }
+
         return $adminPanel;
     }
 
@@ -164,5 +165,13 @@ class AdminPanelProvider extends PanelProvider
     {
         parent::register();
         FilamentView::registerRenderHook('panels::body.end', fn() => Blade::render("@vite('resources/js/app.js')"));
+
+        // Register External IP display in the navigation bar
+        if (config('dev.show_wan_details', false)) {
+            FilamentView::registerRenderHook(
+                PanelsRenderHook::GLOBAL_SEARCH_BEFORE, // Place it before the global search
+                fn(): string => view('components.external-ip-display')->render()
+            );
+        }
     }
 }

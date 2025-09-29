@@ -5,12 +5,20 @@ use App\Http\Controllers\EpgGenerateController;
 use App\Http\Controllers\LogoProxyController;
 use App\Http\Controllers\PlaylistGenerateController;
 use App\Http\Controllers\XtreamApiController;
+use App\Services\ExternalIpService;
 use AshAllenDesign\ShortURL\Controllers\ShortURLController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
+// External IP refresh route for admin panel
+Route::post('/admin/refresh-external-ip', function (ExternalIpService $ipService) {
+    $ipService->clearCache();
+    $ip = $ipService->getExternalIp();
+    return response()->json(['success' => true, 'external_ip' => $ip]);
+})->middleware(['auth']);
+
 // Handle short URLs with optional path forwarding (e.g. /s/{key}/device.xml)
-Route::get('/s/{shortUrlKey}/{path?}', function (Request $request, string $shortUrlKey, string $path = null) {
+Route::get('/s/{shortUrlKey}/{path?}', function (Request $request, string $shortUrlKey, ?string $path = null) {
     $response = app()->call(ShortURLController::class, [
         'request' => $request,
         'shortURLKey' => $shortUrlKey,
@@ -23,15 +31,15 @@ Route::get('/s/{shortUrlKey}/{path?}', function (Request $request, string $short
     if ($path) {
         $parsed = parse_url($response->getTargetUrl());
 
-        $base = ($parsed['scheme'] ?? '') . '://' . ($parsed['host'] ?? '');
+        $base = ($parsed['scheme'] ?? '').'://'.($parsed['host'] ?? '');
         if (isset($parsed['port'])) {
-            $base .= ':' . $parsed['port'];
+            $base .= ':'.$parsed['port'];
         }
         $base .= $parsed['path'] ?? '';
-        $base = rtrim($base, '/') . '/' . ltrim($path, '/');
+        $base = rtrim($base, '/').'/'.ltrim($path, '/');
 
         if (! empty($parsed['query'])) {
-            $base .= '?' . $parsed['query'];
+            $base .= '?'.$parsed['query'];
         }
 
         return redirect($base, $response->getStatusCode());
@@ -76,7 +84,6 @@ Route::get('/{uuid}/epg.xml.gz', [EpgGenerateController::class, 'compressed'])
 Route::get('epgs/{uuid}/epg.xml', EpgFileController::class)
     ->name('epg.file');
 
-
 /*
  * DEBUG routes
  */
@@ -95,7 +102,6 @@ Route::get('/phpinfo', function () {
         abort(404);
     }
 });
-
 
 /*
  * Proxy routes
@@ -120,7 +126,6 @@ Route::get('/shared/stream/{streamKey}', [\App\Http\Controllers\SharedStreamCont
 // Channel route (catch-all for encoded IDs with optional format)
 Route::get('/shared/stream/{encodedId}.{format?}', [\App\Http\Controllers\SharedStreamController::class, 'streamChannel'])
     ->name('shared.stream.channel');
-
 
 /*
  * API routes
@@ -149,7 +154,6 @@ Route::group(['prefix' => 'epg'], function () {
         ->name('api.epg.sync');
 });
 
-
 /*
  * Xtream API endpoints at root
  */
@@ -173,5 +177,5 @@ Route::get('/timeshift/{username}/{password}/{duration}/{date}/{streamId}.{forma
 // Add this route for the image proxy
 Route::get('/schedules-direct/{epg}/image/{imageHash}', [
     \App\Http\Controllers\SchedulesDirectImageProxyController::class,
-    'proxyImage'
+    'proxyImage',
 ])->name('schedules-direct.image.proxy');
