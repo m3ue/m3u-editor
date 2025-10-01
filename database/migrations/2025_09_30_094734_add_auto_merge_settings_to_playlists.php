@@ -14,7 +14,7 @@ return new class extends Migration
         Schema::table('playlists', function (Blueprint $table) {
             $table->boolean('auto_merge_channels_enabled')->default(false)->after('auto_sync');
             $table->boolean('auto_merge_deactivate_failover')->default(false)->after('auto_merge_channels_enabled');
-            $table->json('auto_merge_config')->nullable()->after('auto_merge_deactivate_failover');
+            $table->jsonb('auto_merge_config')->nullable()->after('auto_merge_deactivate_failover');
         });
     }
 

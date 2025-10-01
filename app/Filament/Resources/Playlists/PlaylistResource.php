@@ -147,14 +147,14 @@ class PlaylistResource extends Resource
 
                         return 'N/A';
                     })
-                    ->description(fn (Playlist $record): string => $record->xtream ? 'Active: '.($record->xtream_status['user_info']['active_cons'] ?? 0) : '')
+                    ->description(fn(Playlist $record): string => $record->xtream ? 'Active: ' . ($record->xtream_status['user_info']['active_cons'] ?? 0) : '')
                     ->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('available_streams')
                     ->label('Proxy Streams')
                     ->toggleable()
-                    ->formatStateUsing(fn (int $state): string => $state === 0 ? '∞' : (string) $state)
+                    ->formatStateUsing(fn(int $state): string => $state === 0 ? '∞' : (string) $state)
                     ->tooltip('Total streams available for this playlist (∞ indicates no limit)')
-                    ->description(fn (Playlist $record): string => 'Active: '.SharedStream::active()->where('stream_info->options->playlist_id', $record->uuid)->count())
+                    ->description(fn(Playlist $record): string => 'Active: ' . SharedStream::active()->where('stream_info->options->playlist_id', $record->uuid)->count())
                     ->sortable(),
                 TextColumn::make('groups_count')
                     ->label('Groups')
@@ -170,35 +170,35 @@ class PlaylistResource extends Resource
                 TextColumn::make('live_channels_count')
                     ->label('Live')
                     ->counts('live_channels')
-                    ->description(fn (Playlist $record): string => "Enabled: {$record->enabled_live_channels_count}")
+                    ->description(fn(Playlist $record): string => "Enabled: {$record->enabled_live_channels_count}")
                     ->toggleable()
                     ->sortable(),
                 TextColumn::make('vod_channels_count')
                     ->label('VOD')
                     ->counts('vod_channels')
-                    ->description(fn (Playlist $record): string => "Enabled: {$record->enabled_vod_channels_count}")
+                    ->description(fn(Playlist $record): string => "Enabled: {$record->enabled_vod_channels_count}")
                     ->toggleable()
                     ->sortable(),
                 TextColumn::make('series_count')
                     ->label('Series')
                     ->counts('series')
-                    ->description(fn (Playlist $record): string => "Enabled: {$record->enabled_series_count}")
+                    ->description(fn(Playlist $record): string => "Enabled: {$record->enabled_series_count}")
                     ->toggleable()
                     ->sortable(),
                 TextColumn::make('status')
                     ->sortable()
                     ->badge()
                     ->toggleable()
-                    ->color(fn (Status $state) => $state->getColor()),
+                    ->color(fn(Status $state) => $state->getColor()),
                 ProgressColumn::make('progress')
                     ->label('Channel Sync')
                     ->sortable()
-                    ->poll(fn ($record) => $record->status === Status::Processing || $record->status === Status::Pending ? '3s' : null)
+                    ->poll(fn($record) => $record->status === Status::Processing || $record->status === Status::Pending ? '3s' : null)
                     ->toggleable(),
                 ProgressColumn::make('series_progress')
                     ->label('Series Sync')
                     ->sortable()
-                    ->poll(fn ($record) => $record->status === Status::Processing || $record->status === Status::Pending ? '3s' : null)
+                    ->poll(fn($record) => $record->status === Status::Processing || $record->status === Status::Pending ? '3s' : null)
                     ->toggleable(),
                 ToggleColumn::make('enable_proxy')
                     ->label('Proxy')
@@ -228,7 +228,7 @@ class PlaylistResource extends Resource
                     ->sortable(),
                 TextColumn::make('sync_time')
                     ->label('Sync Time')
-                    ->formatStateUsing(fn (string $state): string => gmdate('H:i:s', (int) $state))
+                    ->formatStateUsing(fn(string $state): string => gmdate('H:i:s', (int) $state))
                     ->toggleable()
                     ->sortable(),
                 TextColumn::make('exp_date')
@@ -280,7 +280,7 @@ class PlaylistResource extends Resource
                                 ->duration(10000)
                                 ->send();
                         })
-                        ->disabled(fn ($record): bool => $record->status === Status::Processing)
+                        ->disabled(fn($record): bool => $record->status === Status::Processing)
                         ->requiresConfirmation()
                         ->icon('heroicon-o-arrow-path')
                         ->modalIcon('heroicon-o-arrow-path')
@@ -304,8 +304,8 @@ class PlaylistResource extends Resource
                                 ->duration(10000)
                                 ->send();
                         })
-                        ->disabled(fn ($record): bool => $record->status === Status::Processing)
-                        ->hidden(fn ($record): bool => ! $record->xtream)
+                        ->disabled(fn($record): bool => $record->status === Status::Processing)
+                        ->hidden(fn($record): bool => ! $record->xtream)
                         ->requiresConfirmation()
                         ->icon('heroicon-o-arrow-down-tray')
                         ->modalIcon('heroicon-o-arrow-down-tray')
@@ -329,8 +329,8 @@ class PlaylistResource extends Resource
                                 ->duration(10000)
                                 ->send();
                         })
-                        ->disabled(fn ($record): bool => $record->status === Status::Processing)
-                        ->hidden(fn ($record): bool => ! $record->xtream)
+                        ->disabled(fn($record): bool => $record->status === Status::Processing)
+                        ->hidden(fn($record): bool => ! $record->xtream)
                         ->requiresConfirmation()
                         ->icon('heroicon-o-arrow-down-tray')
                         ->modalIcon('heroicon-o-arrow-down-tray')
@@ -339,18 +339,18 @@ class PlaylistResource extends Resource
                     Action::make('Download M3U')
                         ->label('Download M3U')
                         ->icon('heroicon-o-arrow-down-tray')
-                        ->url(fn ($record) => PlaylistFacade::getUrls($record)['m3u'])
+                        ->url(fn($record) => PlaylistFacade::getUrls($record)['m3u'])
                         ->openUrlInNewTab(),
                     EpgCacheService::getEpgTableAction(),
                     Action::make('HDHomeRun URL')
                         ->label('HDHomeRun URL')
                         ->icon('heroicon-o-arrow-top-right-on-square')
-                        ->url(fn ($record) => PlaylistFacade::getUrls($record)['hdhr'])
+                        ->url(fn($record) => PlaylistFacade::getUrls($record)['hdhr'])
                         ->openUrlInNewTab(),
                     Action::make('Public URL')
                         ->label('Public URL')
                         ->icon('heroicon-o-arrow-top-right-on-square')
-                        ->url(fn ($record) => '/playlist/v/'.$record->uuid)
+                        ->url(fn($record) => '/playlist/v/' . $record->uuid)
                         ->openUrlInNewTab(),
                     Action::make('Duplicate')
                         ->label('Duplicate')
@@ -413,7 +413,7 @@ class PlaylistResource extends Resource
                                 ->multiple()
                                 ->required()
                                 ->helperText('Select the channel attributes you want to copy to the target playlist.')
-                                ->hidden(fn ($get) => (bool) $get('all_attributes')),
+                                ->hidden(fn($get) => (bool) $get('all_attributes')),
                             Toggle::make('overwrite')
                                 ->label('Overwrite Existing Attributes')
                                 ->helperText('If enabled, existing custom attributes in the target playlist will be overwritten. If disabled, only empty custom attributes will be updated.'),
@@ -488,7 +488,7 @@ class PlaylistResource extends Resource
                         ->modalIcon('heroicon-s-trash')
                         ->modalDescription('This action will permanently delete all series associated with the playlist. Proceed with caution.')
                         ->modalSubmitActionLabel('Purge now')
-                        ->hidden(fn ($record): bool => ! $record->xtream),
+                        ->hidden(fn($record): bool => ! $record->xtream),
                     DeleteAction::make(),
                 ])->button()->hiddenLabel()->size('sm'),
                 EditAction::make()->button()->hiddenLabel()->size('sm'),
@@ -554,7 +554,7 @@ class PlaylistResource extends Resource
                     DeleteBulkAction::make(),
                 ]),
             ])->checkIfRecordIsSelectableUsing(
-                fn ($record): bool => $record->status !== Status::Processing,
+                fn($record): bool => $record->status !== Status::Processing,
             );
     }
 
@@ -599,7 +599,7 @@ class PlaylistResource extends Resource
                             ->duration(10000)
                             ->send();
                     })
-                    ->disabled(fn ($record): bool => $record->status === Status::Processing)
+                    ->disabled(fn($record): bool => $record->status === Status::Processing)
                     ->requiresConfirmation()
                     ->icon('heroicon-o-arrow-path')
                     ->modalIcon('heroicon-o-arrow-path')
@@ -623,8 +623,8 @@ class PlaylistResource extends Resource
                             ->duration(10000)
                             ->send();
                     })
-                    ->disabled(fn ($record): bool => $record->status === Status::Processing)
-                    ->hidden(fn ($record): bool => ! $record->xtream)
+                    ->disabled(fn($record): bool => $record->status === Status::Processing)
+                    ->hidden(fn($record): bool => ! $record->xtream)
                     ->requiresConfirmation()
                     ->icon('heroicon-o-arrow-down-tray')
                     ->modalIcon('heroicon-o-arrow-down-tray')
@@ -648,8 +648,8 @@ class PlaylistResource extends Resource
                             ->duration(10000)
                             ->send();
                     })
-                    ->disabled(fn ($record): bool => $record->status === Status::Processing)
-                    ->hidden(fn ($record): bool => ! $record->xtream)
+                    ->disabled(fn($record): bool => $record->status === Status::Processing)
+                    ->hidden(fn($record): bool => ! $record->xtream)
                     ->requiresConfirmation()
                     ->icon('heroicon-o-arrow-down-tray')
                     ->modalIcon('heroicon-o-arrow-down-tray')
@@ -658,13 +658,13 @@ class PlaylistResource extends Resource
                 Action::make('Download M3U')
                     ->label('Download M3U')
                     ->icon('heroicon-o-arrow-down-tray')
-                    ->url(fn ($record) => PlaylistFacade::getUrls($record)['m3u'])
+                    ->url(fn($record) => PlaylistFacade::getUrls($record)['m3u'])
                     ->openUrlInNewTab(),
                 EpgCacheService::getEpgPlaylistAction(),
                 Action::make('HDHomeRun URL')
                     ->label('HDHomeRun URL')
                     ->icon('heroicon-o-arrow-top-right-on-square')
-                    ->url(fn ($record) => PlaylistFacade::getUrls($record)['hdhr'])
+                    ->url(fn($record) => PlaylistFacade::getUrls($record)['hdhr'])
                     ->openUrlInNewTab(),
                 Action::make('Duplicate')
                     ->label('Duplicate')
@@ -816,7 +816,7 @@ class PlaylistResource extends Resource
                             'heroicon-m-exclamation-triangle',
                             tooltip: 'Be careful changing this value as this will change the URLs for the Playlist, its EPG, and HDHR.'
                         )
-                        ->hidden(fn ($get): bool => ! $get('edit_uuid'))
+                        ->hidden(fn($get): bool => ! $get('edit_uuid'))
                         ->required(),
                 ])->hiddenOn('create'),
         ];
@@ -848,7 +848,7 @@ class PlaylistResource extends Resource
                         ->url()
                         ->columnSpan(2)
                         ->required()
-                        ->hidden(fn (Get $get): bool => ! $get('xtream')),
+                        ->hidden(fn(Get $get): bool => ! $get('xtream')),
                     Grid::make()
                         ->columnSpanFull()
                         ->schema([
@@ -891,7 +891,7 @@ class PlaylistResource extends Resource
                                         ->inline(false)
                                         ->default(true),
                                 ]),
-                        ])->hidden(fn (Get $get): bool => ! $get('xtream')),
+                        ])->hidden(fn(Get $get): bool => ! $get('xtream')),
                     TextInput::make('url')
                         ->label('URL or Local file path')
                         ->columnSpan(2)
@@ -900,7 +900,7 @@ class PlaylistResource extends Resource
                         ->requiredWithout('uploads')
                         ->rules([new CheckIfUrlOrLocalPath])
                         ->maxLength(255)
-                        ->hidden(fn (Get $get): bool => (bool) $get('xtream')),
+                        ->hidden(fn(Get $get): bool => (bool) $get('xtream')),
                     FileUpload::make('uploads')
                         ->label('File')
                         ->columnSpan(2)
@@ -909,7 +909,7 @@ class PlaylistResource extends Resource
                         ->helperText('Upload the playlist file. This will be used to import groups and channels.')
                         ->rules(['file'])
                         ->requiredWithout('url')
-                        ->hidden(fn (Get $get): bool => (bool) $get('xtream')),
+                        ->hidden(fn(Get $get): bool => (bool) $get('xtream')),
                 ]),
 
             Grid::make()
@@ -965,16 +965,24 @@ class PlaylistResource extends Resource
                                 ->hidden(fn(Get $get): bool => !$get('auto_merge_channels_enabled')),
                         ]),
 
-                    Fieldset::make('Auto-Merge Advanced Settings')
+                    Fieldset::make('Auto-Merge advanced settings')
                         ->columnSpanFull()
                         ->hidden(fn(Get $get): bool => !$get('auto_merge_channels_enabled'))
                         ->schema([
                             static::makeToggle('auto_merge_config.check_resolution')
                                 ->label('Prioritize by resolution')
-                                ->helperText('When enabled, channels with higher resolution will be prioritized as master channels during merge. This process takes longer as stream resolution needs to be analyzed.'),
+                                ->hintIcon(
+                                    'heroicon-m-exclamation-triangle',
+                                    tooltip: 'This process takes longer as stream resolution needs to be analyzed. Only recommended for smaller playlists.'
+                                )
+                                ->helperText('When enabled, channels with higher resolution will be prioritized as master channels during merge.'),
                             static::makeToggle('auto_merge_config.force_complete_remerge')
                                 ->label('Force complete re-merge')
-                                ->helperText('When enabled, all channels will be re-evaluated during merge, including existing failover relationships. Disable this for better performance if you only want to merge new channels.'),
+                                ->hintIcon(
+                                    'heroicon-m-exclamation-triangle',
+                                    tooltip: 'Disable this for better performance if you only want to merge new channels.'
+                                )
+                                ->helperText('When enabled, all channels will be re-evaluated during merge, including existing failover relationships.'),
                         ]),
 
                     TextInput::make('sync_interval')
@@ -992,10 +1000,10 @@ class PlaylistResource extends Resource
                                 ->url('https://crontab.guru')
                                 ->openUrlInNewTab(true)
                         )
-                        ->helperText(fn ($get) => $get('sync_interval') && CronExpression::isValidExpression($get('sync_interval'))
-                            ? 'Next scheduled sync: '.(new CronExpression($get('sync_interval')))->getNextRunDate()->format('Y-m-d H:i:s')
+                        ->helperText(fn($get) => $get('sync_interval') && CronExpression::isValidExpression($get('sync_interval'))
+                            ? 'Next scheduled sync: ' . (new CronExpression($get('sync_interval')))->getNextRunDate()->format('Y-m-d H:i:s')
                             : 'Specify the CRON schedule for automatic sync, e.g. "0 3 * * *".')
-                        ->hidden(fn (Get $get): bool => ! $get('auto_sync')),
+                        ->hidden(fn(Get $get): bool => ! $get('auto_sync')),
 
                     DateTimePicker::make('synced')
                         ->columnSpan(2)
@@ -1034,7 +1042,7 @@ class PlaylistResource extends Resource
                         ->live()
                         ->default(false)
                         ->helperText('When enabled, groups will be included based on regex pattern match instead of prefix.')
-                        ->hidden(fn (Get $get): bool => ! $get('import_prefs.preprocess') || ! $get('status')),
+                        ->hidden(fn(Get $get): bool => ! $get('import_prefs.preprocess') || ! $get('status')),
 
                     Fieldset::make('Channel & VOD processing')
                         ->schema([
@@ -1045,11 +1053,11 @@ class PlaylistResource extends Resource
                                 ->multiple()
                                 ->helperText('NOTE: If the list is empty, sync the playlist and check again once complete.')
                                 ->options(
-                                    fn ($record): array => SourceGroup::where('playlist_id', $record->id)
+                                    fn($record): array => SourceGroup::where('playlist_id', $record->id)
                                         ->get()->pluck('name', 'name')->toArray()
                                 ),
                             TagsInput::make('import_prefs.included_group_prefixes')
-                                ->label(fn (Get $get) => ! $get('import_prefs.use_regex') ? 'Group prefixes to import' : 'Regex patterns to import')
+                                ->label(fn(Get $get) => ! $get('import_prefs.use_regex') ? 'Group prefixes to import' : 'Regex patterns to import')
                                 ->helperText('Press [tab] or [return] to add item.')
                                 ->columnSpan(1)
                                 ->suggestions([
@@ -1061,7 +1069,7 @@ class PlaylistResource extends Resource
                                     '\[.*\]',
                                 ])
                                 ->splitKeys(['Tab', 'Return']),
-                        ])->hidden(fn (Get $get): bool => ! $get('import_prefs.preprocess') || ! $get('status')),
+                        ])->hidden(fn(Get $get): bool => ! $get('import_prefs.preprocess') || ! $get('status')),
 
                     Fieldset::make('Series processing')
                         ->schema([
@@ -1072,11 +1080,11 @@ class PlaylistResource extends Resource
                                 ->multiple()
                                 ->helperText('NOTE: If the list is empty, sync the playlist and check again once complete.')
                                 ->options(
-                                    fn ($record): array => Category::where('playlist_id', $record->id)
+                                    fn($record): array => Category::where('playlist_id', $record->id)
                                         ->get()->pluck('name', 'name')->toArray()
                                 ),
                             TagsInput::make('import_prefs.included_category_prefixes')
-                                ->label(fn (Get $get) => ! $get('import_prefs.use_regex') ? 'Category prefixes to import' : 'Regex patterns to import')
+                                ->label(fn(Get $get) => ! $get('import_prefs.use_regex') ? 'Category prefixes to import' : 'Regex patterns to import')
                                 ->helperText('Press [tab] or [return] to add item.')
                                 ->columnSpan(1)
                                 ->suggestions([
@@ -1088,7 +1096,7 @@ class PlaylistResource extends Resource
                                     '\[.*\]',
                                 ])
                                 ->splitKeys(['Tab', 'Return']),
-                        ])->hidden(fn (Get $get): bool => ! $get('import_prefs.preprocess') || ! $get('status')),
+                        ])->hidden(fn(Get $get): bool => ! $get('import_prefs.preprocess') || ! $get('status')),
 
                     TagsInput::make('import_prefs.ignored_file_types')
                         ->label('Ignored file types')
@@ -1125,7 +1133,7 @@ class PlaylistResource extends Resource
                         )
                         ->default(false)
                         ->helperText('When enabled, series will be included in the M3U output. It is recommended to enable the "Auto-fetch series metadata" option when enabled.'),
-                ])->hidden(fn (Get $get): bool => ! $get('xtream')),
+                ])->hidden(fn(Get $get): bool => ! $get('xtream')),
 
             Section::make('VOD Processing')
                 ->description('Processing options for playlist VOD')
@@ -1152,7 +1160,7 @@ class PlaylistResource extends Resource
                         )
                         ->default(false)
                         ->helperText('This will only sync stream files for enabled VOD channels.'),
-                ])->hidden(fn (Get $get): bool => ! $get('xtream')),
+                ])->hidden(fn(Get $get): bool => ! $get('xtream')),
         ];
 
         $outputFields = [
@@ -1169,9 +1177,9 @@ class PlaylistResource extends Resource
                         ->inline(false)
                         ->live()
                         ->default(true)
-                        ->disabled(fn (Get $get): bool => config('dev.disable_sync_logs', false))
-                        ->hint(fn (Get $get): string => config('dev.disable_sync_logs', false) ? 'Sync logs disabled globally in settings' : '')
-                        ->hintIcon(fn (Get $get): string => config('dev.disable_sync_logs', false) ? 'heroicon-m-lock-closed' : '')
+                        ->disabled(fn(Get $get): bool => config('dev.disable_sync_logs', false))
+                        ->hint(fn(Get $get): string => config('dev.disable_sync_logs', false) ? 'Sync logs disabled globally in settings' : '')
+                        ->hintIcon(fn(Get $get): string => config('dev.disable_sync_logs', false) ? 'heroicon-m-lock-closed' : '')
                         ->helperText('Retain logs of playlist syncs. This is useful for debugging and tracking changes to the playlist. This can lead to increased sync time and storage usage depending on the size of the playlist.'),
                     Toggle::make('auto_sort')
                         ->label('Automatically assign sort number based on playlist order')
@@ -1191,7 +1199,7 @@ class PlaylistResource extends Resource
                         ->columnSpan(1)
                         ->rules(['min:1'])
                         ->type('number')
-                        ->hidden(fn (Get $get): bool => ! $get('auto_channel_increment'))
+                        ->hidden(fn(Get $get): bool => ! $get('auto_channel_increment'))
                         ->required(),
                 ]),
             Section::make('Streaming Output')
@@ -1203,16 +1211,16 @@ class PlaylistResource extends Resource
                 ->schema([
                     Toggle::make('enable_proxy')
                         ->label('Enable Stream Proxy')
-                        ->hint(fn (Get $get): string => $get('enable_proxy') ? 'Proxied' : 'Not proxied')
-                        ->hintIcon(fn (Get $get): string => ! $get('enable_proxy') ? 'heroicon-m-lock-open' : 'heroicon-m-lock-closed')
+                        ->hint(fn(Get $get): string => $get('enable_proxy') ? 'Proxied' : 'Not proxied')
+                        ->hintIcon(fn(Get $get): string => ! $get('enable_proxy') ? 'heroicon-m-lock-open' : 'heroicon-m-lock-closed')
                         ->live()
                         ->helperText('When enabled, all streams will be proxied through the application. This allows for better compatibility with various clients and enables features such as stream limiting and output format selection.')
                         ->inline(false)
                         ->default(false),
                     Toggle::make('enable_logo_proxy')
                         ->label('Enable Logo Proxy')
-                        ->hint(fn (Get $get): string => $get('enable_logo_proxy') ? 'Proxied' : 'Not proxied')
-                        ->hintIcon(fn (Get $get): string => ! $get('enable_logo_proxy') ? 'heroicon-m-lock-open' : 'heroicon-m-lock-closed')
+                        ->hint(fn(Get $get): string => $get('enable_logo_proxy') ? 'Proxied' : 'Not proxied')
+                        ->hintIcon(fn(Get $get): string => ! $get('enable_logo_proxy') ? 'heroicon-m-lock-open' : 'heroicon-m-lock-closed')
                         ->live()
                         ->helperText('When enabled, channel logos will be proxied through the application. Logos will be cached for up to 30 days to reduce bandwidth and speed up loading times.')
                         ->inline(false)
@@ -1238,7 +1246,7 @@ class PlaylistResource extends Resource
                         ->type('number')
                         ->default(0) // Default to 0 streams (for unlimted)
                         ->required()
-                        ->hidden(fn (Get $get): bool => ! $get('enable_proxy')),
+                        ->hidden(fn(Get $get): bool => ! $get('enable_proxy')),
                     Select::make('proxy_options.output')
                         ->label('Proxy Output Format')
                         ->required()
@@ -1247,12 +1255,12 @@ class PlaylistResource extends Resource
                             'hls' => 'HLS (.m3u8)',
                         ])
                         ->default('ts')
-                        ->hidden(fn (Get $get): bool => ! $get('enable_proxy')),
+                        ->hidden(fn(Get $get): bool => ! $get('enable_proxy')),
                     TextInput::make('server_timezone')
                         ->label('Provider Timezone')
                         ->helperText('The portal/provider timezone (DST-aware). Needed to correctly use timeshift functionality when playlist proxy is enabled.')
                         ->placeholder('Etc/UTC')
-                        ->hidden(fn (Get $get): bool => ! $get('enable_proxy')),
+                        ->hidden(fn(Get $get): bool => ! $get('enable_proxy')),
                 ]),
             Section::make('EPG Output')
                 ->description('EPG output options')
@@ -1286,14 +1294,14 @@ class PlaylistResource extends Resource
                         ->inline(false)
                         ->default(false)
                         ->helperText('When enabled, the channel group will be assigned to the dummy EPG as a <category> tag.')
-                        ->hidden(fn (Get $get): bool => ! $get('dummy_epg')),
+                        ->hidden(fn(Get $get): bool => ! $get('dummy_epg')),
                     TextInput::make('dummy_epg_length')
                         ->label('Dummy program length (in minutes)')
                         ->columnSpan(1)
                         ->rules(['min:1'])
                         ->type('number')
                         ->default(120)
-                        ->hidden(fn (Get $get): bool => ! $get('dummy_epg')),
+                        ->hidden(fn(Get $get): bool => ! $get('dummy_epg')),
                 ]),
         ];
 
@@ -1342,7 +1350,7 @@ class PlaylistResource extends Resource
                                             if ($record) {
                                                 $currentAuths = $record->playlistAuths()->get();
                                                 foreach ($currentAuths as $auth) {
-                                                    $options[$auth->id] = $auth->name.' (currently assigned)';
+                                                    $options[$auth->id] = $auth->name . ' (currently assigned)';
                                                 }
                                             }
 
@@ -1481,7 +1489,7 @@ class PlaylistResource extends Resource
                                     ->searchable()
                                     ->placeholder('Select an auth to assign')
                                     ->columnSpanFull()
-                                    ->visible(fn (Get $get): bool => $get('auth_option') === 'existing'),
+                                    ->visible(fn(Get $get): bool => $get('auth_option') === 'existing'),
 
                                 // Create New Auth Fields
                                 Grid::make(2)
@@ -1507,7 +1515,7 @@ class PlaylistResource extends Resource
                                             ->required()
                                             ->columnSpan(1),
                                     ])
-                                    ->visible(fn (Get $get): bool => $get('auth_option') === 'create'),
+                                    ->visible(fn(Get $get): bool => $get('auth_option') === 'create'),
                             ]),
                     ]);
             }
