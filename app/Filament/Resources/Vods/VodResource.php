@@ -175,6 +175,10 @@ class VodResource extends Resource
                 ->sortable()
                 ->tooltip(fn($record) => !$record->is_custom && $record->playlist?->auto_sort ? 'Playlist auto-sort enabled; any changes will be overwritten on next sync' : 'Channel sort order')
                 ->toggleable(),
+            ToggleColumn::make('enabled')
+                ->toggleable()
+                ->tooltip('Toggle channel status')
+                ->sortable(),
             TextColumn::make('failovers_count')
                 ->label('Failovers')
                 ->counts('failovers')
@@ -212,10 +216,6 @@ class VodResource extends Resource
                     return $query->orWhereRaw('LOWER(channels.name_custom) LIKE ?', ['%' . strtolower($search) . '%']);
                 })
                 ->toggleable(),
-            ToggleColumn::make('enabled')
-                ->toggleable()
-                ->tooltip('Toggle channel status')
-                ->sortable(),
             TextInputColumn::make('channel')
                 ->rules(['numeric', 'min:0'])
                 ->type('number')
