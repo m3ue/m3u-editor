@@ -31,15 +31,15 @@ Route::get('/s/{shortUrlKey}/{path?}', function (Request $request, string $short
     if ($path) {
         $parsed = parse_url($response->getTargetUrl());
 
-        $base = ($parsed['scheme'] ?? '').'://'.($parsed['host'] ?? '');
+        $base = ($parsed['scheme'] ?? '') . '://' . ($parsed['host'] ?? '');
         if (isset($parsed['port'])) {
-            $base .= ':'.$parsed['port'];
+            $base .= ':' . $parsed['port'];
         }
         $base .= $parsed['path'] ?? '';
-        $base = rtrim($base, '/').'/'.ltrim($path, '/');
+        $base = rtrim($base, '/') . '/' . ltrim($path, '/');
 
         if (! empty($parsed['query'])) {
-            $base .= '?'.$parsed['query'];
+            $base .= '?' . $parsed['query'];
         }
 
         return redirect($base, $response->getStatusCode());
@@ -173,6 +173,10 @@ Route::get('/series/{username}/{password}/{streamId}.{format?}', [App\Http\Contr
 // Timeshift endpoints
 Route::get('/timeshift/{username}/{password}/{duration}/{date}/{streamId}.{format}', [App\Http\Controllers\XtreamStreamController::class, 'handleTimeshift'])
     ->name('xtream.stream.timeshift.root');
+
+// (Fallback) direct stream access (without /live/ or /movie/ prefix)
+Route::get('/{username}/{password}/{streamId}.{format?}', [App\Http\Controllers\XtreamStreamController::class, 'handleDirect'])
+    ->name('xtream.stream.direct');
 
 // Add this route for the image proxy
 Route::get('/schedules-direct/{epg}/image/{imageHash}', [

@@ -145,6 +145,30 @@ class XtreamStreamController extends Controller
     }
 
     /**
+     * Handle direct stream requests.
+     * 
+     * Determine best path when `/live/`, `/movie/`, or `/series/` is not specified.
+     */
+    public function handleDirect(Request $request, string $username, string $password, int $streamId, ?string $format = null)
+    {
+        // If no live or VOD stream type specified, determine stream type by model
+        $model = Channel::find($streamId);
+        if ($model instanceof Channel) {
+            if ($model->is_vod) {
+                return $this->handleVod($request, $username, $password, $streamId, $format);
+            } else {
+                return $this->handleLive($request, $username, $password, $streamId, $format);
+            }
+        }
+        $model = Episode::find($streamId);
+        if ($model instanceof Episode) {
+            return $this->handleSeries($request, $username, $password, $streamId, $format);
+        }
+
+        return response()->json(['error' => 'Stream not found'], 404);
+    }
+
+    /**
      * Live stream requests.
      * 
      * @tags Xtream API Streams

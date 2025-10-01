@@ -333,7 +333,7 @@ class ProcessM3uImportComplete implements ShouldQueue
             Notification::make()
                 ->info()
                 ->title('Fetching Series Metadata')
-                ->body('Fetching series metadata now. This may take a while depending on how many series you have enabled. Please check back later.')
+                ->body('Fetching series metadata now. This may take a while depending on how many series you have enabled. If stream file syncing is enabled, it will also be ran. Please check back later.')
                 ->broadcast($playlist->user)
                 ->sendToDatabase($playlist->user);
             return; // Exit early if series import is enabled, sync complete event will be fired after series import completes
