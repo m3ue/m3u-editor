@@ -35,6 +35,7 @@ use Filament\Infolists;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Tables;
+use Filament\Tables\Columns\ToggleColumn;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
@@ -105,6 +106,11 @@ class GroupResource extends Resource
                     ->sortable()
                     ->tooltip(fn($record) => $record->playlist->auto_sort ? 'Playlist auto-sort enabled; any changes will be overwritten on next sync' : 'Group sort order')
                     ->toggleable(),
+                ToggleColumn::make('enabled')
+                    ->label('Auto Enable')
+                    ->toggleable()
+                    ->tooltip('Auto enable newly added group channels')
+                    ->sortable(),
                 TextColumn::make('name_internal')
                     ->label('Default name')
                     ->searchable()

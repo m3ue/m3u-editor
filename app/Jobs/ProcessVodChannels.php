@@ -28,6 +28,7 @@ class ProcessVodChannels implements ShouldQueue
         public ?Playlist $playlist = null,
         public ?Channel $channel = null,
         public ?bool $force = false,
+        public ?bool $updateProgress = true
     ) {
         //
     }
@@ -101,11 +102,13 @@ class ProcessVodChannels implements ShouldQueue
                     ->sendToDatabase($playlist->user);
 
                 // Update the playlist with the error
-                $playlist->update([
-                    'processing' => false,
-                    'status' => 'failed',
-                    'errors' => 'Failed to process VOD data for channel ID ' . $channel->id . ': ' . $e->getMessage(),
-                ]);
+                if ($this->updateProgress) {
+                    $playlist->update([
+                        'processing' => false,
+                        'status' => 'failed',
+                        'errors' => 'Failed to process VOD data for channel ID ' . $channel->id . ': ' . $e->getMessage(),
+                    ]);
+                }
                 return; // Exit the job if an error occurs
             }
             if ($index % 10 === 0) {
@@ -120,12 +123,14 @@ class ProcessVodChannels implements ShouldQueue
 
         // Update the playlist status after processing
         if (!$this->channel) {
-            $playlist->update([
-                'processing' => false,
-                'progress' => 100,
-                'status' => 'completed',
-                'errors' => null,
-            ]);
+            if ($this->updateProgress) {
+                $playlist->update([
+                    'processing' => false,
+                    'progress' => 100,
+                    'status' => 'completed',
+                    'errors' => null,
+                ]);
+            }
             Log::info('Completed processing VOD channels for playlist ID ' . $playlist->id);
             Notification::make()
                 ->title('VOD Channels Processed')

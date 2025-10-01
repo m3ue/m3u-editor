@@ -33,7 +33,8 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
         public array $payload,
         public int $batchCount,
         public string $batchNo,
-        public int $index
+        public int $index,
+        public bool $autoEnable = false,
     ) {
         //
     }
@@ -141,7 +142,7 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
 
             // If we reach here, it means we need to create a new series
             $bulk[] = [
-                'enabled' => false, // Disable the series by default
+                'enabled' => $this->autoEnable, // Disable the series by default
                 'name' => $item->name,
                 'source_series_id' => $item->series_id,
                 'source_category_id' => $sourceCategoryId,

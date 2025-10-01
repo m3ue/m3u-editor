@@ -72,6 +72,12 @@ class ProcessM3uImport implements ShouldQueue
     // Included category prefixes for import
     public array $includedCategoryPrefixes;
 
+    // Groups we should auto-enable channels for
+    public Collection $enabledGroups;
+
+    // Categories we should auto-enable series for
+    public Collection $enabledCategories;
+
     // M3U Parser instance
     public $m3uParser = null;
 
@@ -94,6 +100,10 @@ class ProcessM3uImport implements ShouldQueue
         // Selected categories for import
         $this->selectedCategories = $playlist->import_prefs['selected_categories'] ?? [];
         $this->includedCategoryPrefixes = $playlist->import_prefs['included_category_prefixes'] ?? [];
+
+        // Get the enabled groups and categories for this playlist
+        $this->enabledGroups = $playlist->groups()->where('enabled', true)->get('name')->pluck('name');
+        $this->enabledCategories = $playlist->categories()->where('enabled', true)->get('name')->pluck('name');
     }
 
     /**
@@ -421,6 +431,9 @@ class ProcessM3uImport implements ShouldQueue
                         if ($autoSort) {
                             $channel['sort'] = $channelNo;
                         }
+                        if ($this->enabledGroups->contains($category['category_name'] ?? '')) {
+                            $channel['enabled'] = true;
+                        }
                         yield $channel;
                     }
                 }
@@ -458,6 +471,9 @@ class ProcessM3uImport implements ShouldQueue
                         ];
                         if ($autoSort) {
                             $channel['sort'] = $channelNo;
+                        }
+                        if ($this->enabledGroups->contains($category['category_name'] ?? '')) {
+                            $channel['enabled'] = true;
                         }
                         yield $channel;
                     }
@@ -720,6 +736,11 @@ class ProcessM3uImport implements ShouldQueue
                                     $channel['sort'] = $channelNo;
                                 }
 
+                                // Auto-enable if in enabled group
+                                if ($this->enabledGroups->contains($channel['group'] ?? '')) {
+                                    $channel['enabled'] = true;
+                                }
+
                                 // Return the channel
                                 yield $channel;
                             }
@@ -741,6 +762,11 @@ class ProcessM3uImport implements ShouldQueue
                             // Set channel number, if auto sort is enabled
                             if ($autoSort) {
                                 $channel['sort'] = $channelNo;
+                            }
+
+                            // Auto-enable if in enabled group
+                            if ($this->enabledGroups->contains($channel['group'] ?? '')) {
+                                $channel['enabled'] = true;
                             }
 
                             // Return the channel   
@@ -1008,6 +1034,9 @@ class ProcessM3uImport implements ShouldQueue
             $categoryCount = $seriesCategories->count();
             $seriesCategories->each(function ($category, $index) use (&$jobs, $playlistId, $batchNo, $categoryCount) {
                 if (!$this->preprocess || $this->shouldIncludeSeries($category['category_name'] ?? '')) {
+                    // Check if category is auto-enabled
+                    $autoEnable = $this->enabledCategories->contains($category['category_name'] ?? '');
+
                     // Create a job for each series category
                     $jobs[] = new ProcessM3uImportSeriesChunk(
                         [
@@ -1018,6 +1047,7 @@ class ProcessM3uImport implements ShouldQueue
                         $categoryCount,
                         $batchNo,
                         $index,
+                        $autoEnable
                     );
                 }
             });

@@ -32,6 +32,7 @@ use Filament\Infolists;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Tables;
+use Filament\Tables\Columns\ToggleColumn;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
@@ -91,6 +92,11 @@ class CategoryResource extends Resource
                     ->placeholder(fn($record) => $record->name_internal)
                     ->searchable()
                     ->toggleable(),
+                ToggleColumn::make('enabled')
+                    ->label('Auto Enable')
+                    ->toggleable()
+                    ->tooltip('Auto enable newly added category series')
+                    ->sortable(),
                 TextColumn::make('name_internal')
                     ->label('Default name')
                     ->searchable()

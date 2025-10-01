@@ -322,7 +322,10 @@ class ProcessM3uImportComplete implements ShouldQueue
         }
 
         // Determine if syncing series metadata as well
-        if ($playlist->auto_fetch_series_metadata && $playlist->series()->where('enabled', true)->exists()) {
+        $syncSeriesMetadata = $playlist->auto_fetch_series_metadata
+            && $playlist->series()->where('enabled', true)->exists();
+
+        if ($syncSeriesMetadata) {
             // Process series import
             dispatch(new ProcessM3uImportSeries(
                 playlist: $playlist,
@@ -336,6 +339,41 @@ class ProcessM3uImportComplete implements ShouldQueue
                 ->body('Fetching series metadata now. This may take a while depending on how many series you have enabled. If stream file syncing is enabled, it will also be ran. Please check back later.')
                 ->broadcast($playlist->user)
                 ->sendToDatabase($playlist->user);
+        }
+
+        $syncVod = ($playlist->auto_sync_vod_stream_files || $playlist->auto_fetch_vod_metadata)
+            && $playlist->channels()->where([
+                ['enabled', true],
+                ['is_vod', true]
+            ])->exists();
+
+        if ($syncVod) {
+            // Check if syncing stream files too
+            $syncStreamFiles = $playlist->auto_sync_vod_stream_files;
+            $syncMetaData = $playlist->auto_fetch_vod_metadata;
+            if ($syncStreamFiles && $syncMetaData) {
+                $message = "Syncing VOD stream files and fetching VOD metadata now. Please check back later.";
+            } elseif ($syncStreamFiles) {
+                $message = "Syncing VOD stream files now. Please check back later.";
+            } elseif ($syncMetaData) {
+                $message = "Fetching VOD metadata now. Please check back later.";
+            }
+
+            // Process VOD import
+            dispatch(new ProcessM3uImportVod(
+                playlist: $playlist,
+                isNew: $this->isNew,
+                batchNo: $this->batchNo,
+            ));
+            Notification::make()
+                ->info()
+                ->title('Syncing VOD Channels')
+                ->body($message)
+                ->broadcast($playlist->user)
+                ->sendToDatabase($playlist->user);
+        }
+
+        if ($syncSeriesMetadata) {
             return; // Exit early if series import is enabled, sync complete event will be fired after series import completes
         }
 
