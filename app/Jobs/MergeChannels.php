@@ -95,9 +95,18 @@ class MergeChannels implements ShouldQueue
             // Create failover relationships for remaining channels
             $failoverChannels = $group->where('id', '!=', $master->id);
             if ($this->checkResolution) {
-                $failoverChannels = $failoverChannels->sortByDesc(fn($channel) => $this->getResolution($channel));
+                // Sort failovers by resolution (highest first), then by playlist priority, then by ID for consistency
+                $failoverChannels = $failoverChannels->sortBy([
+                    fn($channel) => -$this->getResolution($channel), // Negative for desc sort
+                    fn($channel) => $playlistPriority[$channel->playlist_id] ?? 999,
+                    fn($channel) => $channel->id
+                ]);
             } else {
-                $failoverChannels = $failoverChannels->sortBy(fn($channel) => $playlistPriority[$channel->playlist_id] ?? 999);
+                // Sort failovers by playlist priority, then by ID for consistency
+                $failoverChannels = $failoverChannels->sortBy([
+                    fn($channel) => $playlistPriority[$channel->playlist_id] ?? 999,
+                    fn($channel) => $channel->id
+                ]);
             }
 
             // Create failover relationships using updateOrCreate for compatibility
@@ -129,33 +138,45 @@ class MergeChannels implements ShouldQueue
     private function selectMasterChannel($group, array $playlistPriority)
     {
         if ($this->checkResolution) {
-            // Priority 1: Preferred playlist with highest resolution
-            if ($this->playlistId) {
-                $preferredChannels = $group->where('playlist_id', $this->playlistId);
-                if ($preferredChannels->isNotEmpty()) {
-                    return $preferredChannels->reduce(function ($highest, $channel) {
-                        if (!$highest) return $channel;
-                        return $this->getResolution($channel) > $this->getResolution($highest) ? $channel : $highest;
-                    });
-                }
-            }
-
-            // Priority 2: Highest resolution overall
-            return $group->reduce(function ($highest, $channel) {
-                if (!$highest) return $channel;
-                return $this->getResolution($channel) > $this->getResolution($highest) ? $channel : $highest;
+            // Resolution-based selection: Find channel(s) with highest resolution
+            $channelsWithResolution = $group->map(function ($channel) {
+                return [
+                    'channel' => $channel,
+                    'resolution' => $this->getResolution($channel)
+                ];
             });
-        } else {
-            // Priority 1: Preferred playlist with earliest order
+
+            $maxResolution = $channelsWithResolution->max('resolution');
+            $highestResChannels = $channelsWithResolution->where('resolution', $maxResolution)->pluck('channel');
+
+            // If preferred playlist is set, prioritize it among highest resolution channels
             if ($this->playlistId) {
-                $preferredChannels = $group->where('playlist_id', $this->playlistId);
-                if ($preferredChannels->isNotEmpty()) {
-                    return $preferredChannels->sortBy(fn($channel) => $playlistPriority[$channel->playlist_id] ?? 999)->first();
+                $preferredHighRes = $highestResChannels->where('playlist_id', $this->playlistId);
+                if ($preferredHighRes->isNotEmpty()) {
+                    // Return first channel from preferred playlist with highest resolution (sorted by ID for consistency)
+                    return $preferredHighRes->sortBy('id')->first();
                 }
             }
 
-            // Priority 2: Earliest playlist order overall
-            return $group->sortBy(fn($channel) => $playlistPriority[$channel->playlist_id] ?? 999)->first();
+            // No preferred playlist or none found with highest res: return first highest resolution channel
+            return $highestResChannels->sortBy('id')->first();
+        } else {
+            // Simple selection without resolution check
+            
+            // If preferred playlist is set, try to use it first
+            if ($this->playlistId) {
+                $preferredChannels = $group->where('playlist_id', $this->playlistId);
+                if ($preferredChannels->isNotEmpty()) {
+                    // Return first channel from preferred playlist (sorted by ID for consistency)
+                    return $preferredChannels->sortBy('id')->first();
+                }
+            }
+
+            // No preferred playlist or none found: use playlist priority order, then ID for consistency
+            return $group->sortBy([
+                fn($channel) => $playlistPriority[$channel->playlist_id] ?? 999,
+                fn($channel) => $channel->id
+            ])->first();
         }
     }
 
