@@ -4,13 +4,13 @@ namespace App\Jobs;
 
 use App\Models\Channel;
 use App\Models\ChannelFailover;
+use Filament\Notifications\Notification;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Collection;
-use Filament\Notifications\Notification;
 
 class MergeChannels implements ShouldQueue
 {
@@ -60,7 +60,7 @@ class MergeChannels implements ShouldQueue
 
         // Get all channels with stream IDs in a single efficient query
         // Exclude channels that are already configured as failovers (unless we're re-merging everything)
-        $shouldExcludeExistingFailovers = !empty($existingFailoverChannelIds) && !$this->forceCompleteRemerge;
+        $shouldExcludeExistingFailovers = ! empty($existingFailoverChannelIds) && ! $this->forceCompleteRemerge;
 
         $allChannels = Channel::where('user_id', $this->user->id)
             ->whereIn('playlist_id', $playlistIds)
@@ -77,6 +77,7 @@ class MergeChannels implements ShouldQueue
         // Group channels by stream ID using LazyCollection
         $groupedChannels = $allChannels->groupBy(function ($channel) {
             $streamId = $channel->stream_id_custom ?: $channel->stream_id;
+
             return strtolower(trim($streamId));
         });
 
@@ -88,7 +89,7 @@ class MergeChannels implements ShouldQueue
 
             // Select master channel based on criteria
             $master = $this->selectMasterChannel($group, $playlistPriority);
-            if (!$master) {
+            if (! $master) {
                 continue; // Skip if no valid master found
             }
 
@@ -97,15 +98,15 @@ class MergeChannels implements ShouldQueue
             if ($this->checkResolution) {
                 // Sort failovers by resolution (highest first), then by playlist priority, then by ID for consistency
                 $failoverChannels = $failoverChannels->sortBy([
-                    fn($channel) => -$this->getResolution($channel), // Negative for desc sort
-                    fn($channel) => $playlistPriority[$channel->playlist_id] ?? 999,
-                    fn($channel) => $channel->id
+                    fn ($channel) => -$this->getResolution($channel), // Negative for desc sort
+                    fn ($channel) => $playlistPriority[$channel->playlist_id] ?? 999,
+                    fn ($channel) => $channel->id,
                 ]);
             } else {
                 // Sort failovers by playlist priority, then by ID for consistency
                 $failoverChannels = $failoverChannels->sortBy([
-                    fn($channel) => $playlistPriority[$channel->playlist_id] ?? 999,
-                    fn($channel) => $channel->id
+                    fn ($channel) => $playlistPriority[$channel->playlist_id] ?? 999,
+                    fn ($channel) => $channel->id,
                 ]);
             }
 
@@ -114,7 +115,7 @@ class MergeChannels implements ShouldQueue
                 ChannelFailover::updateOrCreate(
                     [
                         'channel_id' => $master->id,
-                        'channel_failover_id' => $failover->id
+                        'channel_failover_id' => $failover->id,
                     ],
                     ['user_id' => $this->user->id]
                 );
@@ -142,7 +143,7 @@ class MergeChannels implements ShouldQueue
             $channelsWithResolution = $group->map(function ($channel) {
                 return [
                     'channel' => $channel,
-                    'resolution' => $this->getResolution($channel)
+                    'resolution' => $this->getResolution($channel),
                 ];
             });
 
@@ -162,7 +163,7 @@ class MergeChannels implements ShouldQueue
             return $highestResChannels->sortBy('id')->first();
         } else {
             // Simple selection without resolution check
-            
+
             // If preferred playlist is set, try to use it first
             if ($this->playlistId) {
                 $preferredChannels = $group->where('playlist_id', $this->playlistId);
@@ -174,8 +175,8 @@ class MergeChannels implements ShouldQueue
 
             // No preferred playlist or none found: use playlist priority order, then ID for consistency
             return $group->sortBy([
-                fn($channel) => $playlistPriority[$channel->playlist_id] ?? 999,
-                fn($channel) => $channel->id
+                fn ($channel) => $playlistPriority[$channel->playlist_id] ?? 999,
+                fn ($channel) => $channel->id,
             ])->first();
         }
     }
@@ -188,6 +189,7 @@ class MergeChannels implements ShouldQueue
                 return ($stream['stream']['width'] ?? 0) * ($stream['stream']['height'] ?? 0);
             }
         }
+
         return 0;
     }
 
