@@ -76,6 +76,7 @@ class ChannelController extends Controller
                     'logo' => $channel->logo ?? $channel->logo_internal,
                     'url' => $channel->url_custom ?? $channel->url,
                     'stream_id' => $channel->stream_id_custom ?? $channel->stream_id,
+                    'enabled'=> $channel->enabled,
                 ];
             });
 
@@ -159,6 +160,7 @@ class ChannelController extends Controller
             'logo' => 'sometimes|nullable|string|max:2500',
             'url' => 'sometimes|nullable|url|max:2500',
             'stream_id' => 'sometimes|string|max:500',
+            'enabled' => 'sometimes|boolean',
         ]);
 
         // Update the channel fields
@@ -191,6 +193,11 @@ class ChannelController extends Controller
             $updated = true;
         }
 
+        if (array_key_exists('enabled', $validated)) {
+            $channel->enabled = $validated['enabled'];
+            $updated = true;
+        }
+
         // Save if any updates were made
         if ($updated) {
             $channel->save();
@@ -205,7 +212,8 @@ class ChannelController extends Controller
                 'name' => $channel->name_custom ?? $channel->name,
                 'logo' => $channel->logo ?? $channel->logo_internal,
                 'url' => $channel->url_custom ?? $channel->url,
-                'stream_id' => $channel->stream_id_custom ?? $channel->stream_id
+                'stream_id' => $channel->stream_id_custom ?? $channel->stream_id,
+                'enabled'=> $channel->enabled,
             ],
         ]);
     }
