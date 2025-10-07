@@ -89,7 +89,7 @@
                     </div>
                     <div class="flex-1">
                         <h3 class="text-lg font-semibold text-red-900 dark:text-red-100 mb-2">
-                            Unable to Connect to m3u-proxy
+                            Unable to Connect to <strong>m3u proxy
                         </h3>
                         <p class="text-sm text-red-800 dark:text-red-200 mb-3">
                             {{ $connectionError }}
