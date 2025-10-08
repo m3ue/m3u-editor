@@ -41,6 +41,7 @@ use Illuminate\Database\Eloquent\SoftDeletingScope;
 use App\Facades\PlaylistFacade;
 use App\Forms\Components\XtreamApiInfo;
 use App\Services\EpgCacheService;
+use App\Services\ProxyService;
 
 class MergedPlaylistResource extends Resource
 {
@@ -171,6 +172,8 @@ class MergedPlaylistResource extends Resource
 
     public static function getForm($creating = false): array
     {
+        $m3uProxyEnabled = ProxyService::m3uProxyEnabled();
+
         $schema = [
             Grid::make()
                 ->columns(2)
@@ -327,7 +330,7 @@ class MergedPlaylistResource extends Resource
                             'hls' => 'HLS (.m3u8)',
                         ])
                         ->default('ts')
-                        ->hidden(fn(Get $get): bool => !$get('enable_proxy')),
+                        ->hidden(fn(Get $get): bool => !$get('enable_proxy') || $m3uProxyEnabled),
                 ])
         ];
 

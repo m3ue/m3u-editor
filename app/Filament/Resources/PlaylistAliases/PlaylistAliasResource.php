@@ -11,6 +11,7 @@ use App\Models\PlaylistAlias;
 use App\Models\SharedStream;
 use App\Models\User;
 use App\Services\EpgCacheService;
+use App\Services\ProxyService;
 use Carbon\Carbon;
 use Exception;
 use Filament\Actions;
@@ -203,6 +204,8 @@ class PlaylistAliasResource extends Resource
 
     public static function getForm(): array
     {
+        $m3uProxyEnabled = ProxyService::m3uProxyEnabled();
+
         return [
             // Forms\Components\Toggle::make('enabled')
             //     ->default(true)
@@ -368,7 +371,7 @@ class PlaylistAliasResource extends Resource
                             'hls' => 'HLS (.m3u8)',
                         ])
                         ->default('ts')
-                        ->hidden(fn(Get $get): bool => !$get('enable_proxy')),
+                        ->hidden(fn(Get $get): bool => !$get('enable_proxy') || $m3uProxyEnabled),
                     Forms\Components\TextInput::make('server_timezone')
                         ->label('Provider Timezone')
                         ->helperText('The portal/provider timezone (DST-aware). Needed to correctly use timeshift functionality when playlist proxy is enabled.')

@@ -47,6 +47,7 @@ use App\Filament\Resources\CustomPlaylists\Pages\ViewCustomPlaylist;
 use App\Forms\Components\XtreamApiInfo;
 use App\Models\SharedStream;
 use App\Services\EpgCacheService;
+use App\Services\ProxyService;
 use Filament\Actions\ViewAction;
 use Filament\Forms\FormsComponent;
 use Illuminate\Support\Facades\Redis;
@@ -195,6 +196,8 @@ class CustomPlaylistResource extends Resource
 
     public static function getForm($creating = false): array
     {
+        $m3uProxyEnabled = ProxyService::m3uProxyEnabled();
+
         $schema = [
             Grid::make()
                 ->columns(2)
@@ -356,11 +359,12 @@ class CustomPlaylistResource extends Resource
                             'hls' => 'HLS (.m3u8)',
                         ])
                         ->default('ts')
-                        ->hidden(fn(Get $get): bool => !$get('enable_proxy')),
+                        ->hidden(fn(Get $get): bool => !$get('enable_proxy') || $m3uProxyEnabled),
                     TextInput::make('server_timezone')
                         ->label('Provider Timezone')
                         ->helperText('The portal/provider timezone (DST-aware). Needed to correctly use timeshift functionality when playlist proxy is enabled.')
                         ->placeholder('Etc/UTC')
+                        ->columnSpan($m3uProxyEnabled ? 2 : 1)
                         ->hidden(fn(Get $get): bool => !$get('enable_proxy')),
                 ])
         ];

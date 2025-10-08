@@ -27,6 +27,7 @@ use App\Models\SourceGroup;
 use App\Rules\CheckIfUrlOrLocalPath;
 use App\Rules\Cron;
 use App\Services\EpgCacheService;
+use App\Services\ProxyService;
 use Carbon\Carbon;
 use Cron\CronExpression;
 use Exception;
@@ -814,6 +815,8 @@ class PlaylistResource extends Resource
 
     public static function getFormSections($creating = false): array
     {
+        $m3uProxyEnabled = ProxyService::m3uProxyEnabled();
+
         // Define the form fields for each section
         $nameFields = [
             TextInput::make('name')
@@ -1297,11 +1300,12 @@ class PlaylistResource extends Resource
                             'hls' => 'HLS (.m3u8)',
                         ])
                         ->default('ts')
-                        ->hidden(fn(Get $get): bool => ! $get('enable_proxy')),
+                        ->hidden(fn(Get $get): bool => ! $get('enable_proxy') || $m3uProxyEnabled),
                     TextInput::make('server_timezone')
                         ->label('Provider Timezone')
                         ->helperText('The portal/provider timezone (DST-aware). Needed to correctly use timeshift functionality when playlist proxy is enabled.')
                         ->placeholder('Etc/UTC')
+                        ->columnSpan($m3uProxyEnabled ? 2 : 1)
                         ->hidden(fn(Get $get): bool => ! $get('enable_proxy')),
                 ]),
             Section::make('EPG Output')
