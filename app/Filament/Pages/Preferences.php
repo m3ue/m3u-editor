@@ -550,7 +550,84 @@ class Preferences extends SettingsPage
                                             ->required()
                                             ->hidden(fn($get) => !$get('vod_stream_file_sync_enabled'))
                                             ->placeholder('/usr/local/bin/streamlink'),
+                                    ]),
+                                Section::make('Emby Server Configuration')
+                                    ->description('Configure your Emby server connection to sync media libraries.')
+                                    ->columnSpanFull()
+                                    ->columns(2)
+                                    ->collapsible(false)
+                                    ->headerActions([
+                                        Action::make('test_emby_connection')
+                                            ->label('Test Connection')
+                                            ->icon('heroicon-o-signal')
+                                            ->iconPosition('after')
+                                            ->color('gray')
+                                            ->size('sm')
+                                            ->action(function () {
+                                                try {
+                                                    $settings = app(GeneralSettings::class);
+                                                    
+                                                    if (empty($settings->emby_server_url) || empty($settings->emby_api_key)) {
+                                                        Notification::make()
+                                                            ->danger()
+                                                            ->title('Missing Configuration')
+                                                            ->body('Please configure both Emby Server URL and API Key before testing the connection.')
+                                                            ->send();
+                                                        return;
+                                                    }
+
+                                                    $url = rtrim($settings->emby_server_url, '/') . '/System/Info';
+                                                    $response = Http::withHeaders([
+                                                        'X-Emby-Token' => $settings->emby_api_key,
+                                                    ])->timeout(10)->get($url);
+
+                                                    if ($response->successful()) {
+                                                        $data = $response->json();
+                                                        Notification::make()
+                                                            ->success()
+                                                            ->title('Connection Successful')
+                                                            ->body('Successfully connected to Emby server: ' . ($data['ServerName'] ?? 'Unknown'))
+                                                            ->send();
+                                                    } else {
+                                                        Notification::make()
+                                                            ->danger()
+                                                            ->title('Connection Failed')
+                                                            ->body('Failed to connect to Emby server. Status: ' . $response->status())
+                                                            ->send();
+                                                    }
+                                                } catch (Exception $e) {
+                                                    Notification::make()
+                                                        ->danger()
+                                                        ->title('Connection Error')
+                                                        ->body($e->getMessage())
+                                                        ->send();
+                                                }
+                                            }),
+                                        Action::make('emby_docs')
+                                            ->label('Emby API Docs')
+                                            ->icon('heroicon-o-arrow-top-right-on-square')
+                                            ->iconPosition('after')
+                                            ->size('sm')
+                                            ->url('https://github.com/MediaBrowser/Emby/wiki/API-Documentation')
+                                            ->openUrlInNewTab(true),
                                     ])
+                                    ->schema([
+                                        TextInput::make('emby_server_url')
+                                            ->label('Emby Server URL')
+                                            ->placeholder('http://localhost:8096')
+                                            ->helperText('The full URL to your Emby server (e.g., http://192.168.1.100:8096)')
+                                            ->url()
+                                            ->rule('trim')
+                                            ->columnSpan(2),
+                                        TextInput::make('emby_api_key')
+                                            ->label('Emby API Key')
+                                            ->placeholder('Enter your Emby API key')
+                                            ->helperText('You can generate an API key in Emby Dashboard → Advanced → API Keys')
+                                            ->password()
+                                            ->revealable()
+                                            ->rule('trim')
+                                            ->columnSpan(2),
+                                    ]),
                             ]),
 
                         Tab::make('Backups')
@@ -694,83 +771,6 @@ class Preferences extends SettingsPage
                                             ->placeholder('Enter SMTP From Address')
                                             ->email()
                                             ->helperText('The "From" email address for outgoing emails. Defaults to no-reply@m3u-editor.dev.'),
-                                    ]),
-                            ]),
-                        Tab::make('Emby')
-                            ->schema([
-                                Section::make('Emby Server Configuration')
-                                    ->description('Configure your Emby server connection to sync media libraries.')
-                                    ->columnSpanFull()
-                                    ->columns(2)
-                                    ->headerActions([
-                                        Action::make('test_emby_connection')
-                                            ->label('Test Connection')
-                                            ->icon('heroicon-o-signal')
-                                            ->iconPosition('after')
-                                            ->color('gray')
-                                            ->size('sm')
-                                            ->action(function () {
-                                                try {
-                                                    $settings = app(GeneralSettings::class);
-                                                    
-                                                    if (empty($settings->emby_server_url) || empty($settings->emby_api_key)) {
-                                                        Notification::make()
-                                                            ->danger()
-                                                            ->title('Missing Configuration')
-                                                            ->body('Please configure both Emby Server URL and API Key before testing the connection.')
-                                                            ->send();
-                                                        return;
-                                                    }
-
-                                                    $url = rtrim($settings->emby_server_url, '/') . '/System/Info';
-                                                    $response = Http::withHeaders([
-                                                        'X-Emby-Token' => $settings->emby_api_key,
-                                                    ])->timeout(10)->get($url);
-
-                                                    if ($response->successful()) {
-                                                        $data = $response->json();
-                                                        Notification::make()
-                                                            ->success()
-                                                            ->title('Connection Successful')
-                                                            ->body('Successfully connected to Emby server: ' . ($data['ServerName'] ?? 'Unknown'))
-                                                            ->send();
-                                                    } else {
-                                                        Notification::make()
-                                                            ->danger()
-                                                            ->title('Connection Failed')
-                                                            ->body('Failed to connect to Emby server. Status: ' . $response->status())
-                                                            ->send();
-                                                    }
-                                                } catch (Exception $e) {
-                                                    Notification::make()
-                                                        ->danger()
-                                                        ->title('Connection Error')
-                                                        ->body($e->getMessage())
-                                                        ->send();
-                                                }
-                                            }),
-                                        Action::make('emby_docs')
-                                            ->label('Emby API Docs')
-                                            ->icon('heroicon-o-arrow-top-right-on-square')
-                                            ->iconPosition('after')
-                                            ->size('sm')
-                                            ->url('https://github.com/MediaBrowser/Emby/wiki/API-Documentation')
-                                            ->openUrlInNewTab(true),
-                                    ])
-                                    ->schema([
-                                        TextInput::make('emby_server_url')
-                                            ->label('Emby Server URL')
-                                            ->placeholder('http://localhost:8096')
-                                            ->helperText('The full URL to your Emby server (e.g., http://192.168.1.100:8096)')
-                                            ->url()
-                                            ->columnSpan(2),
-                                        TextInput::make('emby_api_key')
-                                            ->label('Emby API Key')
-                                            ->placeholder('Enter your Emby API key')
-                                            ->helperText('You can generate an API key in Emby Dashboard → Advanced → API Keys')
-                                            ->password()
-                                            ->revealable()
-                                            ->columnSpan(2),
                                     ]),
                             ]),
                         Tab::make('API')
@@ -963,7 +963,9 @@ class Preferences extends SettingsPage
             // 'mediaflow_proxy_url', 'mediaflow_proxy_port', 'mediaflow_proxy_password',
             // 'mediaflow_proxy_user_agent', 
             'ffmpeg_path',
-            'ffprobe_path'
+            'ffprobe_path',
+            'emby_server_url',
+            'emby_api_key'
         ];
 
         foreach ($nullableTextfields as $field) {
@@ -972,6 +974,14 @@ class Preferences extends SettingsPage
             if (array_key_exists($field, $finalData) && $finalData[$field] === '') {
                 $finalData[$field] = null;
             }
+        }
+
+        // Trim whitespace from Emby credentials to prevent URL construction issues
+        if (!empty($finalData['emby_server_url'])) {
+            $finalData['emby_server_url'] = trim($finalData['emby_server_url']);
+        }
+        if (!empty($finalData['emby_api_key'])) {
+            $finalData['emby_api_key'] = trim($finalData['emby_api_key']);
         }
 
         // Ensure 'hardware_acceleration_method' itself has a default if it was somehow missing

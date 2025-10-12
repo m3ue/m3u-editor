@@ -15,8 +15,8 @@ class EmbyService
     public function __construct()
     {
         $settings = app(GeneralSettings::class);
-        $this->serverUrl = $settings->emby_server_url ? rtrim($settings->emby_server_url, '/') : null;
-        $this->apiKey = $settings->emby_api_key;
+        $this->serverUrl = $settings->emby_server_url ? rtrim(trim($settings->emby_server_url), '/') : null;
+        $this->apiKey = $settings->emby_api_key ? trim($settings->emby_api_key) : null;
     }
 
     /**
@@ -225,7 +225,7 @@ class EmbyService
             return null;
         }
 
-        return $this->serverUrl . "/Items/{$itemId}/Images/{$imageType}?api_key=" . $this->apiKey;
+        return $this->serverUrl . "/Items/{$itemId}/Images/{$imageType}?api_key=" . urlencode($this->apiKey);
     }
 
     /**
@@ -240,7 +240,7 @@ class EmbyService
         }
 
         // Use lowercase 'static' parameter as per Emby API specification
-        return $this->serverUrl . "/Videos/{$itemId}/stream?api_key=" . $this->apiKey . "&Static=true";
+        return $this->serverUrl . "/Videos/{$itemId}/stream?api_key=" . urlencode($this->apiKey) . "&Static=true";
     }
 
     /**
@@ -253,7 +253,7 @@ class EmbyService
             throw new Exception('Emby server URL and API key must be configured');
         }
 
-        return $this->serverUrl . "/Videos/{$itemId}/stream?api_key=" . $this->apiKey . "&Static=true&DeviceId=" . urlencode($deviceId);
+        return $this->serverUrl . "/Videos/{$itemId}/stream?api_key=" . urlencode($this->apiKey) . "&Static=true&DeviceId=" . urlencode($deviceId);
     }
 
     /**
