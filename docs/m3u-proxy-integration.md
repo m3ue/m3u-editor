@@ -49,6 +49,10 @@ docker exec -it m3u-editor php artisan m3u-proxy:restart
 | `M3U_PROXY_HOST` | `127.0.0.1` | Proxy bind address (embedded, localhost) |
 | `M3U_PROXY_PORT` | `8085` | Proxy internal port (embedded) |
 | `M3U_PROXY_URL` | auto-set | `${APP_URL}/m3u-proxy` (embedded) or custom (external) |
+| `M3U_PROXY_TOKEN` | auto-set (embedded) | auto generated or custom (if using external instance, should match `API_TOKEN` in m3u-proxy instance) |
+| `M3U_PROXY_LOG_LEVEL` | `ERROR` | (embedded) set embedded instance log level |
+
+NOTE: When using API token authentication, please reference the m3u-proxy docs for more detail: [M3U Proxy Authentication](https://github.com/sparkison/m3u-proxy/blob/master/docs/AUTHENTICATION.md)
 
 ## 🐛 Troubleshooting
 
