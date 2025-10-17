@@ -62,8 +62,7 @@ else
     # Embedded mode - proxy through nginx to localhost
     export M3U_PROXY_NGINX_TARGET="127.0.0.1:${M3U_PROXY_PORT}"
     
-    # Set FastAPI root path to use /m3u-proxy prefix (nginx preserves the prefix)
-    export ROOT_PATH="/m3u-proxy"
+    # Note: ROOT_PATH=/m3u-proxy is now the default in m3u-proxy config, no need to set it
     # Include port unless using https
     if [[ "$APP_URL" == *"https"* ]]; then
         export M3U_PROXY_URL="${APP_URL}/m3u-proxy"

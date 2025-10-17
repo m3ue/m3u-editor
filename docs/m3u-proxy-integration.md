@@ -224,10 +224,11 @@ docker exec -it m3u-editor tail -100 /var/www/html/storage/logs/m3u-proxy.log
 |----------|---------|-------------|
 | `API_TOKEN` | none | API authentication token (must match `M3U_PROXY_TOKEN`) |
 | `REDIS_URL` | none | Redis connection URL (e.g., `redis://redis:6379/0`) |
-| `ENABLE_REDIS_POOLING` | `false` | Enable Redis-based stream pooling (recommended) |
+| `REDIS_ENABLED` | `false` | Enable Redis connection |
+| `ENABLE_TRANSCODING_POOLING` | `true` | Enable transcoding stream pooling (if Redis enabled) |
 | `LOG_LEVEL` | `INFO` | Logging level: `DEBUG`, `INFO`, `WARNING`, `ERROR` |
-| `ROOT_PATH` | `` | API root path if behind proxy |
-| `DOCS_URL` | `/docs` | Swagger UI path |
+| `ROOT_PATH` | `/m3u-proxy` | API root path - default optimized for m3u-editor integration |
+| `DOCS_URL` | `/docs` | Swagger UI path (relative to ROOT_PATH) |
 
 #### Embedded Mode Only Variables
 

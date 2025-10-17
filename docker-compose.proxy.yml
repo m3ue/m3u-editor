@@ -83,6 +83,9 @@ services:
       # Logging
       - LOG_LEVEL=INFO
       
+      # Note: ROOT_PATH=/m3u-proxy is now the default, no need to set it explicitly
+      # Only set ROOT_PATH= (empty) if you need to use the root path instead
+      
       # Optional: Additional configuration
       # - REDIS_POOL_MAX_CONNECTIONS=50
       # - STREAM_TIMEOUT=300
