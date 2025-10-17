@@ -681,13 +681,11 @@ class M3uProxyService
                 $payload['user_agent'] = $userAgent;
             }
 
-            // Add profile variables for FFmpeg template substitution (if not using custom args)
-            // Only send template variables if the profile doesn't have custom args
-            if (!$profile->hasCustomArgs()) {
-                $profileVars = $profile->getTemplateVariables();
-                if (!empty($profileVars)) {
-                    $payload['profile_variables'] = $profileVars;
-                }
+            // Always add profile variables for FFmpeg template substitution
+            // Even custom FFmpeg templates may contain placeholders that need substitution
+            $profileVars = $profile->getTemplateVariables();
+            if (!empty($profileVars)) {
+                $payload['profile_variables'] = $profileVars;
             }
 
             $response = Http::timeout(10)->acceptJson()
