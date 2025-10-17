@@ -4,6 +4,7 @@ $record = $getRecord();
 $url = route('m3u-proxy.episode.player', ['id' => $record->id]);
 $channelTitle = Str::replace("'", "`", $record->title ?? $record->name);
 $playerId = "episode_{$record->id}_preview";
+$format = $getFormat();
 @endphp
     <div 
         x-data="{ 
