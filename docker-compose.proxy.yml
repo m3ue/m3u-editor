@@ -1,0 +1,156 @@
+# M3U Editor with External M3U Proxy and Redis
+# This is the recommended production setup for optimal performance
+#
+# Features:
+# - PostgreSQL database for data persistence
+# - External m3u-proxy container for streaming
+# - Redis for stream pooling and caching
+# - Secure token-based authentication
+#
+# Setup:
+# 1. Copy this file to your project directory as docker-compose.yml
+# 2. Create a .env file with the variables below (or set in environment section)
+# 3. Run: docker-compose up -d
+# 4. Access m3u-editor at http://localhost:36400
+#
+# Required Environment Variables (create .env file):
+# M3U_PROXY_TOKEN=<generate with: openssl rand -hex 32>
+# PG_PASSWORD=<generate with: openssl rand -base64 32>
+# APP_URL=http://localhost  # or your domain
+
+services:
+  m3u-editor:
+    image: sparkison/m3u-editor:latest
+    container_name: m3u-editor
+    environment:
+      # Timezone
+      - TZ=Etc/UTC
+      
+      # Application URL (change to your domain or IP)
+      - APP_URL=${APP_URL:-http://localhost}
+      
+      # PostgreSQL Configuration
+      - ENABLE_POSTGRES=true
+      - PG_DATABASE=${PG_DATABASE:-m3ue}
+      - PG_USER=${PG_USER:-m3ue}
+      - PG_PASSWORD=${PG_PASSWORD:-changeme}
+      - PG_PORT=${PG_PORT:-5432}
+      
+      # Database Connection (Laravel)
+      - DB_CONNECTION=pgsql
+      - DB_HOST=localhost
+      - DB_PORT=${PG_PORT:-5432}
+      - DB_DATABASE=${PG_DATABASE:-m3ue}
+      - DB_USERNAME=${PG_USER:-m3ue}
+      - DB_PASSWORD=${PG_PASSWORD:-changeme}
+      
+      # M3U Proxy Configuration (External)
+      - M3U_PROXY_ENABLED=true
+      - M3U_PROXY_URL=http://m3u-proxy:8085
+      - M3U_PROXY_TOKEN=${M3U_PROXY_TOKEN:-changeme}
+    volumes:
+      # Persistent configuration data
+      - ./data:/var/www/config
+      
+      # PostgreSQL data persistence
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+    ports:
+      - "36400:36400"  # Main application port
+      # - "5432:5432"  # Uncomment to expose PostgreSQL
+    networks:
+      - m3u-network
+    depends_on:
+      - m3u-proxy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:36400/up"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+  m3u-proxy:
+    image: sparkison/m3u-proxy:latest
+    container_name: m3u-proxy
+    environment:
+      # API Authentication Token (must match M3U_PROXY_TOKEN above)
+      - API_TOKEN=${M3U_PROXY_TOKEN:-changeme}
+      
+      # Redis Configuration (for stream pooling)
+      - REDIS_ENABLED=true
+      - REDIS_URL=redis://redis:6379/0
+      - ENABLE_REDIS_POOLING=true
+      
+      # Logging
+      - LOG_LEVEL=INFO
+      
+      # Note: ROOT_PATH=/m3u-proxy is now the default, no need to set it explicitly
+      # Only set ROOT_PATH= (empty) if you need to use the root path instead
+      
+      # Optional: Additional configuration
+      # - REDIS_POOL_MAX_CONNECTIONS=50
+      # - STREAM_TIMEOUT=300
+      # - CLEANUP_INTERVAL=60
+    restart: unless-stopped
+    # Don't expose port externally - only accessible via internal network
+    # ports:
+    #   - "8085:8085"  # Uncomment only if you need direct external access
+    networks:
+      - m3u-network
+    depends_on:
+      - redis
+    devices:
+      - /dev/dri:/dev/dri
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8085/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    
+    # Optional: Resource limits
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '2.0'
+    #       memory: 2G
+    #     reservations:
+    #       cpus: '0.5'
+    #       memory: 512M
+
+  redis:
+    image: redis:alpine3.22
+    container_name: m3u-proxy-redis
+    restart: unless-stopped
+    # Optional: Enable persistence
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    networks:
+      - m3u-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    
+    # Optional: Resource limits
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '1.0'
+    #       memory: 512M
+    #     reservations:
+    #       cpus: '0.25'
+    #       memory: 128M
+networks:
+  m3u-network:
+    driver: bridge
+
+volumes:
+  # PostgreSQL data volume
+  pgdata:
+    driver: local
+    
+  # Redis data volume
+  redis-data:
+    driver: local

@@ -10,11 +10,8 @@ class ProxyService
      * @param string|int $id
      * @return string
      */
-    public function getProxyUrlForChannel($id, $preview = false)
+    public function getProxyUrlForChannel($id)
     {
-        if ($preview) {
-            return route('m3u-proxy.channel.player', ['id' => $id]);
-        }
         return route('m3u-proxy.channel', ['id' => $id]);
     }
 
@@ -24,11 +21,8 @@ class ProxyService
      * @param string|int $id
      * @return string
      */
-    public function getProxyUrlForEpisode($id, $preview = false)
+    public function getProxyUrlForEpisode($id)
     {
-        if ($preview) {
-            return route('m3u-proxy.episode.player', ['id' => $id]);
-        }
         return route('m3u-proxy.episode', ['id' => $id]);
     }
 }

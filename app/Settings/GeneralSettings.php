@@ -91,6 +91,7 @@ class GeneralSettings extends Settings
 
     // Video player proxy options
     public ?bool $force_video_player_proxy = false;
+    public ?int $default_stream_profile_id = null;
 
     // Sync options
     public ?bool $invalidate_import = false;
@@ -100,6 +101,10 @@ class GeneralSettings extends Settings
     public ?bool $auto_backup_database = false;
     public ?string $auto_backup_database_schedule = null;
     public ?int $auto_backup_database_max_backups = 5;
+
+    // Media server integration settings (Emby/Jellyfin compatible)
+    public ?string $emby_server_url = null;
+    public ?string $emby_api_key = null;
 
     public static function group(): string
     {

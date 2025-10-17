@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\PlaylistChannelId;
+use App\Enums\PlaylistSourceType;
 use App\Enums\Status;
 use App\Services\XtreamService;
 use App\Traits\ShortUrlTrait;
@@ -51,7 +52,8 @@ class Playlist extends Model
         'auto_merge_deactivate_failover' => 'boolean',
         'auto_merge_config' => 'array',
         'status' => Status::class,
-        'id_channel_by' => PlaylistChannelId::class
+        'id_channel_by' => PlaylistChannelId::class,
+        'source_type' => PlaylistSourceType::class,
     ];
 
     public function getFolderPathAttribute(): string
@@ -67,6 +69,11 @@ class Playlist extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function streamProfile(): BelongsTo
+    {
+        return $this->belongsTo(StreamProfile::class);
     }
 
     public function channels(): HasMany

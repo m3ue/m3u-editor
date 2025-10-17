@@ -36,13 +36,6 @@ RUN apk update && apk --no-cache add \
     git \
     bash \
     tzdata \
-    # HW accelerated video encoding
-    libva \
-    libva-utils \
-    libdrm \
-    # FFmpeg
-    ffmpeg \
-    jellyfin-ffmpeg \
     # nginx + php-fpm
     nginx \
     php84-cli \
@@ -50,28 +43,6 @@ RUN apk update && apk --no-cache add \
     php84-posix \
     php84-openssl \
     php84-dev
-
-# Add architecture-specific packages conditionally
-RUN if [ "$(uname -m)" = "x86_64" ]; then \
-        echo "Installing Intel VAAPI drivers for x86_64..." && \
-        apk add --no-cache \
-            intel-media-driver \
-            libva-intel-driver \
-            intel-media-sdk \
-            libmfx \
-            libva-dev \
-            libdrm-dev; \
-    elif [ "$(uname -m)" = "aarch64" ]; then \
-        echo "Installing ARM-compatible VAAPI drivers for aarch64..." && \
-        apk add --no-cache \
-            libva-dev \
-            libdrm-dev; \
-    else \
-        echo "Installing basic VAAPI support for $(uname -m) architecture..." && \
-        apk add --no-cache \
-            libva-dev \
-            libdrm-dev; \
-    fi
 
 # Install PostgreSQL server & client
 RUN apk update && apk add --no-cache \
@@ -161,10 +132,6 @@ RUN echo "GIT_BRANCH=${GIT_BRANCH}" > /var/www/html/.git-info && \
 
 # Install composer dependencies
 RUN composer install --no-dev --no-interaction --no-progress -o
-
-# Symlink jellyfin-ffmpeg to usr/bin
-RUN ln -s /usr/lib/jellyfin-ffmpeg/ffmpeg /usr/bin/jellyfin-ffmpeg
-RUN ln -s /usr/lib/jellyfin-ffmpeg/ffprobe /usr/bin/jellyfin-ffprobe
 
 # Setup user, group and permissions
 RUN addgroup $WWWGROUP \

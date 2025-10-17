@@ -32,3 +32,6 @@ DockerfileDev
 .rr.yaml
 rr
 websockets.sh
+config/database
+config/logs
+config/env

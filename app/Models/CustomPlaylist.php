@@ -39,6 +39,11 @@ class CustomPlaylist extends Model
         return $this->belongsTo(User::class);
     }
 
+    public function streamProfile(): BelongsTo
+    {
+        return $this->belongsTo(StreamProfile::class);
+    }
+
     public function channels(): BelongsToMany
     {
         return $this->belongsToMany(Channel::class, 'channel_custom_playlist');

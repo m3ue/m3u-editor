@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\PlaylistSourceType;
 use App\Jobs\SyncSeriesStrmFiles;
 use App\Services\XtreamService;
 use Filament\Notifications\Notification;
@@ -80,6 +81,21 @@ class Series extends Model
     {
         try {
             $playlist = $this->playlist;
+            
+            // Check playlist source type
+            if ($playlist->source_type === PlaylistSourceType::Emby) {
+                // Emby playlists already have metadata from EmbyService during sync
+                // No additional metadata fetching needed
+                Log::info('Skipping metadata fetch for Emby series', ['series_id' => $this->id]);
+                return true;
+            }
+            
+            // For Xtream playlists, use XtreamService
+            if (!$playlist->xtream && $playlist->source_type !== PlaylistSourceType::Xtream) {
+                // Not an Xtream playlist and not Emby, no metadata source available
+                return false;
+            }
+            
             $xtream = XtreamService::make($playlist);
 
             if (!$xtream) {
@@ -89,7 +105,7 @@ class Series extends Model
                     ->body('Unable to connect to Xtream API provider to get series info, unable to fetch metadata.')
                     ->broadcast($playlist->user)
                     ->sendToDatabase($playlist->user);
-                return;
+                return false;
             }
 
             $detail = $xtream->getSeriesInfo($this->source_series_id);

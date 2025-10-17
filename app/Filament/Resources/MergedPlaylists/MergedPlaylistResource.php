@@ -221,6 +221,15 @@ class MergedPlaylistResource extends Resource
                         ->hidden(fn($get): bool => !$get('edit_uuid'))
                         ->required(),
                 ])->hiddenOn('create'),
+
+            Select::make('stream_profile_id')
+                ->label('Stream Profile')
+                ->relationship('streamProfile', 'name')
+                ->searchable()
+                ->preload()
+                ->nullable()
+                ->helperText('Select a transcoding profile to apply to streams from this playlist. Leave empty for direct streaming.')
+                ->columnSpanFull(),
         ];
         $outputScheme = [
             Section::make('Playlist Output')
@@ -319,6 +328,16 @@ class MergedPlaylistResource extends Resource
                         ->label('Provider Timezone')
                         ->helperText('The portal/provider timezone (DST-aware). Needed to correctly use timeshift functionality when playlist proxy is enabled.')
                         ->placeholder('Etc/UTC')
+                        ->hidden(fn(Get $get): bool => !$get('enable_proxy')),
+                    Select::make('stream_profile_id')
+                        ->label('Stream Profile (Transcoding)')
+                        ->relationship('streamProfile', 'name')
+                        ->searchable()
+                        ->preload()
+                        ->nullable()
+                        ->columnSpanFull()
+                        ->helperText('Select a transcoding profile to apply to streams from this playlist. Leave empty for direct streaming.')
+                        ->placeholder('Leave empty for direct streaming')
                         ->hidden(fn(Get $get): bool => !$get('enable_proxy')),
                 ])
         ];

@@ -26,6 +26,7 @@ use Filament\Actions\ActionGroup;
 use Filament\Actions\BulkAction;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
+use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
 use Filament\Actions\ViewAction;
 use Filament\Forms;
@@ -449,7 +450,10 @@ class VodResource extends Resource
                     ->modalIcon('heroicon-o-document-arrow-down')
                     ->modalDescription('Sync VOD .strm files now? This will generate .strm files for this VOD channel at the path set for this channel.')
                     ->modalSubmitActionLabel('Yes, sync now'),
-                DeleteAction::make()->hidden(fn(Model $record) => ! $record->is_custom),
+                DeleteAction::make()
+                    ->modalIcon('heroicon-o-trash')
+                    ->modalDescription('Are you sure you want to delete this VOD channel? This action cannot be undone.')
+                    ->modalSubmitActionLabel('Yes, delete VOD'),
             ])->button()->hiddenLabel()->size('sm'),
             ViewAction::make()
                 ->button()
@@ -906,6 +910,10 @@ class VodResource extends Resource
                     ->modalIcon('heroicon-o-x-circle')
                     ->modalDescription('Disable the selected channel(s) now?')
                     ->modalSubmitActionLabel('Yes, disable now'),
+                DeleteBulkAction::make()
+                    ->modalIcon('heroicon-o-trash')
+                    ->modalDescription('Are you sure you want to delete the selected VOD channels? This action cannot be undone.')
+                    ->modalSubmitActionLabel('Yes, delete VODs'),
             ]),
         ];
     }

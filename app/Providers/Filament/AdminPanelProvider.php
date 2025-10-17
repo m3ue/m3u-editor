@@ -100,6 +100,8 @@ class AdminPanelProvider extends PanelProvider
                     ->icon('heroicon-m-video-camera'),
                 NavigationGroup::make('EPG')
                     ->icon('heroicon-m-calendar-days'),
+                NavigationGroup::make('Proxy')
+                    ->icon('heroicon-m-arrows-right-left'),
                 NavigationGroup::make('Tools')
                     ->collapsed()
                     ->icon('heroicon-m-wrench-screwdriver'),

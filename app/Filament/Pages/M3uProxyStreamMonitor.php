@@ -21,11 +21,11 @@ use Filament\Support\Enums\Size;
  */
 class M3uProxyStreamMonitor extends Page
 {
-    protected static ?string $navigationLabel = 'M3U Proxy';
+    protected static ?string $navigationLabel = 'Stream Monitor';
 
     protected static ?string $title = 'M3U Proxy Stream Monitor';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'Tools';
+    protected static string|\UnitEnum|null $navigationGroup = 'Proxy';
 
     protected static ?int $navigationSort = 6;
 
@@ -211,7 +211,7 @@ class M3uProxyStreamMonitor extends Page
                     'duration' => $connectedAt->diffForHumans(null, true),
                     'bytes_received' => $this->formatBytes($client['bytes_served']),
                     'bandwidth' => 'N/A', // Can calculate if needed
-                    'is_active' => Carbon::parse($client['last_access'])->diffInSeconds(now()) < 30,
+                    'is_active' => Carbon::parse($client['last_access'])->diffInSeconds(now()) < 10,
                 ];
             }, $streamClients);
 
@@ -220,7 +220,7 @@ class M3uProxyStreamMonitor extends Page
                 'source_url' => $this->truncateUrl($stream['original_url']),
                 'current_url' => $stream['current_url'],
                 'format' => strtoupper($stream['stream_type']),
-                'status' => $stream['is_active'] ? 'active' : 'inactive',
+                'status' => $stream['is_active'] && $stream['client_count'] > 0 ? 'active' : 'idle',
                 'client_count' => $stream['client_count'],
                 'bandwidth_kbps' => $bandwidthKbps,
                 'bytes_transferred' => $bytesTransferred,

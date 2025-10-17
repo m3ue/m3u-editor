@@ -48,7 +48,7 @@ class PlaylistAliasResource extends Resource
 
     public static function getNavigationSort(): ?int
     {
-        return 6;
+        return 5;
     }
 
     public static function form(Schema $schema): Schema
@@ -366,7 +366,14 @@ class PlaylistAliasResource extends Resource
                         ->label('Provider Timezone')
                         ->helperText('The portal/provider timezone (DST-aware). Needed to correctly use timeshift functionality when playlist proxy is enabled.')
                         ->placeholder('Etc/UTC')
-                        ->columnSpanFull()
+                        ->hidden(fn(Get $get): bool => !$get('enable_proxy')),
+                    Forms\Components\Select::make('stream_profile_id')
+                        ->label('Stream Profile (Transcoding)')
+                        ->relationship('streamProfile', 'name')
+                        ->searchable()
+                        ->preload()
+                        ->helperText('Optional transcoding profile for processing streams. Leave empty to use direct streaming without transcoding.')
+                        ->placeholder('Leave empty for direct streaming')
                         ->hidden(fn(Get $get): bool => !$get('enable_proxy')),
                 ])->columnSpanFull(),
 

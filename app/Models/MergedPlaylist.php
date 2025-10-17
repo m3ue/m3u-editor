@@ -39,6 +39,11 @@ class MergedPlaylist extends Model
         return $this->belongsTo(User::class);
     }
 
+    public function streamProfile(): BelongsTo
+    {
+        return $this->belongsTo(StreamProfile::class);
+    }
+
     public function playlists(): BelongsToMany
     {
         return $this->belongsToMany(Playlist::class, 'merged_playlist_playlist');

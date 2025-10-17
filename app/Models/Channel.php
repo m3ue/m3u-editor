@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\ChannelLogoType;
+use App\Enums\PlaylistSourceType;
 use App\Facades\ProxyFacade;
 use App\Services\XtreamService;
 use Exception;
@@ -197,10 +198,25 @@ class Channel extends Model
     public function fetchMetadata($xtream = null, $refresh = false)
     {
         try {
-            if (! $xtream) {
-                $playlist = $this->playlist;
+            $playlist = $this->playlist;
+            
+            // Check playlist source type
+            if ($playlist->source_type === PlaylistSourceType::Emby) {
+                // Emby playlists already have metadata from EmbyService during sync
+                // No additional metadata fetching needed
+                Log::info('Skipping metadata fetch for Emby VOD', ['channel_id' => $this->id]);
+                return true;
+            }
+            
+            // For Xtream playlists, use XtreamService
+            if (!$xtream) {
+                if (!$playlist->xtream && $playlist->source_type !== PlaylistSourceType::Xtream) {
+                    // Not an Xtream playlist and not Emby, no metadata source available
+                    return false;
+                }
                 $xtream = XtreamService::make($playlist);
             }
+            
             if (! $xtream) {
                 Notification::make()
                     ->danger()
@@ -209,7 +225,7 @@ class Channel extends Model
                     ->broadcast($playlist->user)
                     ->sendToDatabase($playlist->user);
 
-                return;
+                return false;
             }
             if (! $this->is_vod) {
                 return false;

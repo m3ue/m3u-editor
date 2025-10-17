@@ -126,14 +126,12 @@
                                     <div class="flex-shrink-0">
                                         <div class="h-10 w-10 rounded-full flex items-center justify-center {{ 
                                             $stream['status'] === 'active' ? 'bg-green-100 dark:bg-green-900 text-green-600 dark:text-green-300' : 
-                                            ($stream['status'] === 'starting' ? 'bg-yellow-100 dark:bg-yellow-900 text-yellow-600 dark:text-yellow-300' : 'bg-red-100 dark:bg-red-900 text-red-600 dark:text-red-300') 
+                                            ($stream['status'] === 'idle' ? 'bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300' : 'bg-red-100 dark:bg-red-900 text-red-600 dark:text-red-300') 
                                         }}">
-                                            @if($stream['status'] === 'active')
+                                            @if($stream['status'] === 'idle')
+                                                <x-heroicon-s-pause class="w-5 h-5" />
+                                            @elseif($stream['status'] === 'active')
                                                 <x-heroicon-s-play class="w-5 h-5" />
-                                            @elseif($stream['status'] === 'starting')
-                                                <svg class="w-5 h-5 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-                                                </svg>
                                             @else
                                                 <x-heroicon-s-exclamation-triangle class="w-5 h-5" />
                                             @endif
@@ -161,7 +159,7 @@
                                     </span>
                                     <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium {{ 
                                         $stream['status'] === 'active' ? 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200' : 
-                                        ($stream['status'] === 'starting' ? 'bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200' : 'bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200') 
+                                        ($stream['status'] === 'idle' ? 'bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200' : 'bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200') 
                                     }}">
                                         {{ ucfirst($stream['status']) }}
                                     </span>
@@ -206,7 +204,7 @@
                                 <div class="flex items-center space-x-2">
                                     <button wire:click="stopStream('{{ $stream['stream_id'] }}')" 
                                             class="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-gray-800 focus:ring-red-500">
-                                        Stop
+                                        Remove Stream
                                     </button>
                                 </div>
                             </div>

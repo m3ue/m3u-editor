@@ -3,9 +3,11 @@
 namespace App\Filament\Pages;
 
 use App\Jobs\RestartQueue;
+use App\Models\StreamProfile;
 use App\Rules\CheckIfUrlOrLocalPath;
 use App\Rules\Cron;
 use App\Services\FfmpegCodecService;
+use App\Services\M3uProxyService;
 use App\Services\PlaylistService;
 use App\Services\ProxyService;
 use App\Settings\GeneralSettings;
@@ -18,6 +20,7 @@ use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
+use Filament\Infolists\Components\TextEntry;
 use Filament\Notifications\Notification;
 use Filament\Pages\SettingsPage;
 use Filament\Schemas\Components\Fieldset;
@@ -35,6 +38,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Str;
 use ReflectionClass;
 use ReflectionProperty;
 
@@ -160,95 +164,86 @@ class Preferences extends SettingsPage
                             ]),
                         Tab::make('Proxy')
                             ->schema([
-                                Section::make('Internal Proxy')
-                                    ->description('FFmpeg proxy settings')
-                                    ->columnSpan('full')
-                                    ->columns(3)
-                                    ->collapsible()
-                                    ->collapsed(false)
-                                    ->schema([
-                                        Grid::make()
-                                            ->columnSpanFull()
-                                            ->columns(2)
-                                            ->schema([
-                                                Toggle::make('force_video_player_proxy')
-                                                    ->label('Force Video Player Proxy')
-                                                    ->columnSpan(2)
-                                                    ->helperText('When enabled, the in-app video player will always use the proxy. This can be useful to bypass mixed content issues when using HTTPS. When disabled, the video player will respect the playlist proxy settings.'),
-                                            ]),
-                                        Grid::make()
-                                            ->columnSpanFull()
-                                            ->columns(2)
-                                            ->schema([
-                                                Select::make('ffmpeg_path')
-                                                    ->label('FFmpeg')
-                                                    ->columnSpan(1)
-                                                    ->helperText('Which ffmpeg variant would you like to use.')
-                                                    ->options([
-                                                        'jellyfin-ffmpeg' => 'jellyfin-ffmpeg (default)',
-                                                        'ffmpeg' => 'ffmpeg (v6)',
-                                                    ])
-                                                    ->searchable()
-                                                    ->suffixIcon(fn() => ! empty($ffmpegPath) ? 'heroicon-m-lock-closed' : null)
-                                                    ->disabled(fn() => ! empty($ffmpegPath))
-                                                    ->hint(fn() => ! empty($ffmpegPath) ? 'Already set by environment variable!' : null)
-                                                    ->dehydrated(fn() => empty($ffmpegPath))
-                                                    ->placeholder(fn() => empty($ffmpegPath) ? 'jellyfin-ffmpeg' : $ffmpegPath),
-                                                Select::make('ffprobe_path')
-                                                    ->label('FFprobe')
-                                                    ->columnSpan(1)
-                                                    ->helperText('Which ffprobe variant would you like to use.')
-                                                    ->options([
-                                                        'jellyfin-ffprobe' => 'jellyfin-ffprobe (default)',
-                                                        'ffprobe' => 'ffprobe',
-                                                    ])
-                                                    ->searchable()
-                                                    // Assuming similar logic for ffprobe path being set by env var
-                                                    ->suffixIcon(fn() => ! empty(config('proxy.ffprobe_path')) ? 'heroicon-m-lock-closed' : null)
-                                                    ->disabled(fn() => ! empty(config('proxy.ffprobe_path')))
-                                                    ->hint(fn() => ! empty(config('proxy.ffprobe_path')) ? 'Already set by environment variable!' : null)
-                                                    ->dehydrated(fn() => empty(config('proxy.ffprobe_path')))
-                                                    ->placeholder(fn() => empty(config('proxy.ffprobe_path')) ? 'jellyfin-ffprobe' : config('proxy.ffprobe_path')),
-                                            ]),
-                                    ]),
                                 Section::make('M3U Proxy')
                                     ->description('m3u proxy integration is enabled and will be used to proxy all streams when proxy is enabled')
                                     ->columnSpanFull()
                                     ->columns(4)
                                     ->schema([
+                                        Select::make('default_stream_profile_id')
+                                            ->label('Default Transcoding Profile')
+                                            ->columnSpanFull()
+                                            ->searchable()
+                                            ->options(function () {
+                                                return StreamProfile::where('user_id', Auth::id())->pluck('name', 'id');
+                                            })
+                                            ->helperText('The default transcoding profile used for the in-app player. Leave empty to disable transcoding (some streams may not be playable in the player).'),
+
                                         Action::make('test_connection')
                                             ->color('gray')
                                             ->label('Test m3u proxy connection')
                                             ->icon('heroicon-m-signal')
-                                            ->action(function () use ($m3uProxyUrl, $m3uToken) {
+                                            ->action(function () {
                                                 try {
-                                                    $url = $m3uProxyUrl . '/health';
-                                                    if ($m3uToken) {
-                                                        $url .= '?api_token=' . $m3uToken;
-                                                    }
-                                                    $status = Http::get($url);
-                                                    if ($status->successful()) {
-                                                        $body = $status->body();
+                                                    $service = new M3uProxyService();
+                                                    $result = $service->getProxyInfo();
+
+                                                    if ($result['success']) {
+                                                        $info = $result['info'];
+
+                                                        // Build a nice detailed message
+                                                        $mode = ucfirst($service->mode());
+                                                        $details = "**Version:** {$info['version']}\n\n";
+                                                        if ($service->mode() === 'external') {
+                                                            $details .= "**Deployment Mode:** ✅ {$mode}\n\n";
+                                                            $details .= " Standalone external proxy service\n\n";
+                                                        } else {
+                                                            $details .= "**Deployment Mode:** ❌ {$mode}\n\n";
+                                                            $details .= " Embedded\n\n";
+                                                        }
+
+                                                        // Hardware Acceleration
+                                                        $hwStatus = $info['hardware_acceleration']['enabled'] ? '✅ Enabled' : '❌ Disabled';
+                                                        $details .= "**Hardware Acceleration:** {$hwStatus}\n";
+                                                        if ($info['hardware_acceleration']['enabled']) {
+                                                            $details .= "- Type: {$info['hardware_acceleration']['type']}\n";
+                                                            $details .= "- Device: {$info['hardware_acceleration']['device']}\n";
+                                                        }
+                                                        $details .= "\n";
+
+                                                        // Redis Pooling
+                                                        $redisStatus = $info['redis']['pooling_enabled'] ? '✅ Enabled' : '❌ Disabled';
+                                                        $details .= "**Redis Pooling:** {$redisStatus}\n";
+                                                        if ($info['redis']['pooling_enabled']) {
+                                                            $details .= "- Max clients per stream: {$info['redis']['max_clients_per_stream']}\n";
+                                                            $details .= "- Sharing strategy: {$info['redis']['sharing_strategy']}\n";
+                                                        }
+                                                        $details .= "\n";
+
+                                                        // Ignore this for now, not sure if it will confuse...
+                                                        // // Transcoding Profiles
+                                                        // $profileCount = count($info['transcoding']['profiles']);
+                                                        // $details .= "**Transcoding Profiles:** {$profileCount} available\n";
+                                                        // $details .= "- " . implode(', ', array_keys($info['transcoding']['profiles']));
+
                                                         Notification::make()
-                                                            ->title('Connection successful')
-                                                            ->body('Successfully connected to the m3u proxy instance: ' . $body)
+                                                            ->title('Connection Successful')
+                                                            ->body(Str::markdown($details))
                                                             ->success()
+                                                            ->persistent()
                                                             ->send();
                                                     } else {
                                                         Notification::make()
-                                                            ->title('Connection failed')
-                                                            ->body('Could not connect to the m3u proxy instance. Please check the URL and ensure the service is running.')
+                                                            ->title('Connection Failed')
+                                                            ->body($result['error'] ?? 'Could not connect to the m3u proxy instance. Please check the URL and ensure the service is running.')
                                                             ->danger()
                                                             ->send();
                                                     }
                                                 } catch (Exception $e) {
                                                     Notification::make()
-                                                        ->title('Connection failed')
+                                                        ->title('Connection Failed')
                                                         ->body('Could not connect to the m3u proxy instance. ' . $e->getMessage())
                                                         ->danger()
                                                         ->send();
-
-                                                    return;
                                                 }
                                             }),
                                         Action::make('get_api_key')
@@ -755,6 +750,113 @@ class Preferences extends SettingsPage
                                             ->placeholder('Enter SMTP From Address')
                                             ->email()
                                             ->helperText('The "From" email address for outgoing emails. Defaults to no-reply@m3u-editor.dev.'),
+                                    ]),
+                            ]),
+                        Tab::make('Integrations')
+                            ->schema([
+                                Section::make('Emby/Jellyfin Server Configuration')
+                                    ->description('Configure your Emby or Jellyfin server connection to sync media libraries. Both platforms use the same API structure and are fully compatible.')
+                                    ->columnSpanFull()
+                                    ->columns(2)
+                                    ->headerActions([
+                                        Action::make('test_emby_connection')
+                                            ->label('Test Connection')
+                                            ->icon('heroicon-o-signal')
+                                            ->iconPosition('after')
+                                            ->color('gray')
+                                            ->size('sm')
+                                            ->action(function () {
+                                                try {
+                                                    $settings = app(GeneralSettings::class);
+
+                                                    if (empty($settings->emby_server_url) || empty($settings->emby_api_key)) {
+                                                        Notification::make()
+                                                            ->danger()
+                                                            ->title('Missing Configuration')
+                                                            ->body('Please configure both Server URL and API Key before testing the connection.')
+                                                            ->send();
+                                                        return;
+                                                    }
+
+                                                    $url = rtrim($settings->emby_server_url, '/') . '/System/Info';
+                                                    $response = Http::withHeaders([
+                                                        'X-Emby-Token' => $settings->emby_api_key,
+                                                    ])->timeout(10)->get($url);
+
+                                                    if ($response->successful()) {
+                                                        $data = $response->json();
+                                                        Notification::make()
+                                                            ->success()
+                                                            ->title('Connection Successful')
+                                                            ->body('Successfully connected to media server: ' . ($data['ServerName'] ?? 'Unknown'))
+                                                            ->send();
+                                                    } else {
+                                                        Notification::make()
+                                                            ->danger()
+                                                            ->title('Connection Failed')
+                                                            ->body('Failed to connect to media server. Status: ' . $response->status())
+                                                            ->send();
+                                                    }
+                                                } catch (Exception $e) {
+                                                    Notification::make()
+                                                        ->danger()
+                                                        ->title('Connection Error')
+                                                        ->body($e->getMessage())
+                                                        ->send();
+                                                }
+                                            }),
+                                        Action::make('emby_docs')
+                                            ->label('Emby API Docs')
+                                            ->icon('heroicon-o-arrow-top-right-on-square')
+                                            ->iconPosition('after')
+                                            ->size('sm')
+                                            ->url('https://github.com/MediaBrowser/Emby/wiki/API-Documentation')
+                                            ->openUrlInNewTab(true),
+                                        Action::make('jellyfin_docs')
+                                            ->label('Jellyfin API Docs')
+                                            ->icon('heroicon-o-arrow-top-right-on-square')
+                                            ->iconPosition('after')
+                                            ->size('sm')
+                                            ->url('https://jellyfin.org/docs/general/server/media/')
+                                            ->openUrlInNewTab(true),
+                                    ])
+                                    ->schema([
+                                        TextInput::make('emby_server_url')
+                                            ->label('Server URL')
+                                            ->placeholder('http://localhost:8096')
+                                            ->helperText('The full URL to your Emby or Jellyfin server (e.g., http://192.168.1.100:8096)')
+                                            ->url()
+                                            ->columnSpan(2),
+                                        TextInput::make('emby_api_key')
+                                            ->label('API Key')
+                                            ->placeholder('Enter your server API key')
+                                            ->helperText('Generate an API key in your server dashboard: Settings → Advanced → API Keys')
+                                            ->password()
+                                            ->revealable()
+                                            ->columnSpan(2),
+                                    ]),
+                                Section::make('Plex Media Server')
+                                    ->description('Plex integration support is planned for a future release.')
+                                    ->columnSpanFull()
+                                    ->columns(1)
+                                    ->schema([
+                                        TextEntry::make('plex_coming_soon')
+                                            ->label('')
+                                            ->state(new \Illuminate\Support\HtmlString('
+                                                <div class="flex items-center justify-center p-8 bg-gray-50 dark:bg-gray-800 rounded-lg border-2 border-dashed border-gray-300 dark:border-gray-600">
+                                                    <div class="text-center">
+                                                        <div class="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-blue-100 dark:bg-blue-900 mb-4">
+                                                            <svg class="h-6 w-6 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                                            </svg>
+                                                        </div>
+                                                        <h3 class="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">Plex Integration</h3>
+                                                        <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">Coming Soon</p>
+                                                        <p class="text-xs text-gray-400 dark:text-gray-500">Plex Media Server integration is currently in development and will be available in a future update.</p>
+                                                    </div>
+                                                </div>
+                                            '))
+                                            ->columnSpanFull(),
                                     ]),
                             ]),
                         Tab::make('API')

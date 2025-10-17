@@ -1,22 +1,17 @@
 <x-dynamic-component :component="$getEntryWrapperView()" :entry="$entry">
-    @php($record = $getRecord())
-    @php($settings = app(\App\Settings\GeneralSettings::class))
-    @php($playlist = App\Models\Playlist::find($record->playlist_id) ?? null)
-    @php($proxyEnabled = $settings->force_video_player_proxy || ($playlist->enable_proxy ?? false))
-    @php($url = $record->url)
-    @php($format = pathinfo($record->url, PATHINFO_EXTENSION))
-    @if($proxyEnabled)
-        @php($url = App\Facades\ProxyFacade::getProxyUrlForEpisode(id: $record->id, preview: true))
-    @endif
-    @php($playerId = "episode_{$record->id}_preview")
-
+@php
+$record = $getRecord();
+$url = route('m3u-proxy.episode.player', ['id' => $record->id]);
+$channelTitle = Str::replace("'", "`", $record->title ?? $record->name);
+$playerId = "episode_{$record->id}_preview";
+@endphp
     <div 
         x-data="{ 
             player: null,
             playerId: '{{ $playerId }}',
             streamUrl: '{{ $url }}',
             streamFormat: '{{ $format }}',
-            channelTitle: '{{ Str::replace("'", "`", $record->title ?? $record->name) }}'
+            channelTitle: '{{ $channelTitle }}'
         }"
         x-init="
             console.log('Series preview initializing:', { playerId, streamUrl, streamFormat });

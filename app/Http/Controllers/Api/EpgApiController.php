@@ -159,8 +159,6 @@ class EpgApiController extends Controller
         }
 
         $cacheService = new EpgCacheService;
-        $settings = app(GeneralSettings::class);
-        $forceProxy = $settings->force_video_player_proxy ?? false;
 
         // Pagination parameters
         $page = (int) $request->get('page', 1);
@@ -210,7 +208,7 @@ class EpgApiController extends Controller
                 ->get();
 
             // Check the proxy format
-            $proxyEnabled = $forceProxy || $playlist->enable_proxy;
+            $proxyEnabled = $playlist->enable_proxy;
             $logoProxyEnabled = $playlist->enable_logo_proxy;
 
             // If auto channel increment is enabled, set the starting channel number
@@ -297,28 +295,22 @@ class EpgApiController extends Controller
                 }
 
                 // Store channel data for pagination
-                $url = PlaylistUrlService::getChannelUrl($channel, $playlist);
-                if ($proxyEnabled) {
-                    $url = ProxyFacade::getProxyUrlForChannel(
-                        id: $channel->id,
-                        preview: true
-                    );
-                }
+                
+                // if ($proxyEnabled) {
+                //     $url = route('m3u-proxy.channel.player', ['id' => $channel->id]);
+                // } else {
+                //     $url = PlaylistUrlService::getChannelUrl($channel, $playlist);
+                // }
+
+                // Always proxy the internal proxy so we can attempt to transcode the stream for better compatibility
+                $url = route('m3u-proxy.channel.player', ['id' => $channel->id]);
 
                 // Determine the channel format based on URL or container extension
-                if (Str::endsWith($url, '.m3u8')) {
-                    $channelFormat = 'hls';
-                } elseif (Str::endsWith($url, '.ts')) {
+                $originalUrl = $channel->url_custom ?? $channel->url;
+                if (Str::endsWith($originalUrl, '.m3u8') || Str::endsWith($originalUrl, '.ts')) {
                     $channelFormat = 'ts';
                 } else {
                     $channelFormat = $channel->container_extension ?? 'ts';
-                }
-
-                // MKV compatibility hack
-                if (Str::endsWith($url, '.mkv')) {
-                    // Use a little "hack" to allow playback of MKV streams
-                    // We'll change the format so that the mpegts.js player is used
-                    $channelFormat = 'ts';
                 }
 
                 // Get the icon

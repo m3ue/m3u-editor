@@ -1295,7 +1295,15 @@ class PlaylistResource extends Resource
                         ->label('Provider Timezone')
                         ->helperText('The portal/provider timezone (DST-aware). Needed to correctly use timeshift functionality when playlist proxy is enabled.')
                         ->placeholder('Etc/UTC')
-                        ->columnSpan(2)
+                        ->hidden(fn(Get $get): bool => ! $get('enable_proxy')),
+                    Select::make('stream_profile_id')
+                        ->label('Stream Profile (Transcoding)')
+                        ->relationship('streamProfile', 'name')
+                        ->searchable()
+                        ->preload()
+                        ->nullable()
+                        ->helperText('Select a transcoding profile to apply to streams from this playlist. Leave empty for direct streaming.')
+                        ->placeholder('Leave empty for direct streaming')
                         ->hidden(fn(Get $get): bool => ! $get('enable_proxy')),
                 ]),
             Section::make('EPG Output')

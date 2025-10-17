@@ -1,7 +1,7 @@
 models:
-  ChannelFailover:
+  StreamProfile:
     user_id: id foreign
-    channel_id: id foreign
-    channel_failover_id: id foreign:channels
+    name: string
+    description: string nullable
+    args: jsonb nullable
     sort: unsigned integer
-    metadata: jsonb

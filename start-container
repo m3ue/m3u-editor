@@ -29,6 +29,7 @@ export M3U_PROXY_START_EMBEDDED="true" # Will be set to false if external proxy 
 export M3U_PROXY_HOST="${M3U_PROXY_HOST:-127.0.0.1}" # Bind to localhost for embedded
 export M3U_PROXY_PORT="${M3U_PROXY_PORT:-8085}"
 export M3U_PROXY_LOG_LEVEL="${M3U_PROXY_LOG_LEVEL:-ERROR}" # Default ERROR
+export M3U_PROXY_NGINX_TARGET="" # Will be set based on mode for nginx proxy_pass
 
 # Run PHP as root (or m3ue)
 export SUPERVISOR_PHP_USER="root"
@@ -39,15 +40,29 @@ export APP_PORT="${APP_PORT:-36400}" # Default 36400
 
 # Set M3U_PROXY_URL based on mode
 if [ "${M3U_PROXY_ENABLED}" = "true" ]; then
-    # External mode - use provided URL (could set custom docs paths here if needed)
+    # External mode - proxy through nginx to external container
     export M3U_PROXY_START_EMBEDDED="false"
-    export M3U_PROXY_URL="${M3U_PROXY_URL:-http://m3u-proxy:8085}"
-    # For external proxy, use provided token or leave unset
+    
+    # Parse external URL to get host and port for nginx proxy
+    EXTERNAL_URL="${M3U_PROXY_URL:-http://m3u-proxy:8085}"
+    # Extract host and port from URL (e.g., http://m3u-proxy:38085 -> m3u-proxy:38085)
+    export M3U_PROXY_NGINX_TARGET=$(echo "$EXTERNAL_URL" | sed 's|http[s]*://||')
+    
+    # Laravel will use APP_URL/m3u-proxy for browser-accessible URLs
+    if [[ "$APP_URL" == *"https"* ]]; then
+        export M3U_PROXY_URL="${APP_URL}/m3u-proxy"
+    else
+        export M3U_PROXY_URL="${APP_URL}:${APP_PORT}/m3u-proxy"
+    fi
+    
+    # For external proxy, use provided token
     export M3U_PROXY_TOKEN="${M3U_PROXY_TOKEN}"
+    echo "🔗 External m3u-proxy mode enabled. Nginx will proxy /m3u-proxy/ to ${M3U_PROXY_NGINX_TARGET}"
 else
-    # Embedded mode - use APP_URL with /m3u-proxy/ path
-    # Set FastAPI root path to use /m3u-proxy prefix (nginx preserves the prefix)
-    export ROOT_PATH="/m3u-proxy"
+    # Embedded mode - proxy through nginx to localhost
+    export M3U_PROXY_NGINX_TARGET="127.0.0.1:${M3U_PROXY_PORT}"
+    
+    # Note: ROOT_PATH=/m3u-proxy is now the default in m3u-proxy config, no need to set it
     # Include port unless using https
     if [[ "$APP_URL" == *"https"* ]]; then
         export M3U_PROXY_URL="${APP_URL}/m3u-proxy"
@@ -64,6 +79,7 @@ else
         export M3U_PROXY_TOKEN="${M3U_PROXY_TOKEN}"
         echo "🔑 Using provided m3u proxy API token."
     fi
+    echo "🔗 Embedded m3u-proxy mode enabled. Nginx will proxy /m3u-proxy/ to ${M3U_PROXY_NGINX_TARGET}"
 fi
 
 # Websockets
@@ -133,7 +149,7 @@ if [ -f /etc/nginx/conf.d/laravel.tmpl ]; then
     else
         echo "⚡️ Starting app at: $APP_URL:$APP_PORT"
     fi
-    envsubst '${APP_PORT} ${APP_URL} ${FPMPORT} ${M3U_PROXY_PORT} ${REVERB_PORT}' < /etc/nginx/conf.d/laravel.tmpl > /etc/nginx/conf.d/laravel.conf
+    envsubst '${APP_PORT} ${APP_URL} ${FPMPORT} ${M3U_PROXY_PORT} ${REVERB_PORT} ${M3U_PROXY_NGINX_TARGET}' < /etc/nginx/conf.d/laravel.tmpl > /etc/nginx/conf.d/laravel.conf
 fi
 
 # Check for configuration directories and files
@@ -201,7 +217,6 @@ fi
 # Create log files
 [ ! -f "${queue_log_file}" ] && touch "${queue_log_file}"
 [ ! -f "${websockets_log_file}" ] && touch "${websockets_log_file}"
-[ ! -f "${ffmpeg_log_file}" ] && touch "${ffmpeg_log_file}"
 [ ! -f "${nginx_log_file}" ] && touch "${nginx_log_file}"
 [ ! -f "${startup_log_file}" ] && touch "${startup_log_file}"
 
@@ -210,7 +225,6 @@ echo "" > "/var/log/cron.out.log"
 echo "" > "/var/log/cron.err.log"
 echo "" > "${queue_log_file}"
 echo "" > "${websockets_log_file}"
-echo "" > "${ffmpeg_log_file}"
 echo "" > "${nginx_log_file}"
 echo "" > "${startup_log_file}"
 
@@ -219,6 +233,7 @@ echo "" > "${startup_log_file}"
 [ -f "${reverb_log_file}" ] && rm -f "${reverb_log_file}"
 [ -f "${horizon_log_file}" ] && rm -f "${horizon_log_file}"
 [ -f "${laravel_log_file}" ] && rm -f "${laravel_log_file}"
+[ -f "${ffmpeg_log_file}" ] && rm -f "${ffmpeg_log_file}"
 
 # Link environment file
 ln -sf "${env_file}" .env

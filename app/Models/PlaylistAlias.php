@@ -35,11 +35,17 @@ class PlaylistAlias extends Model
         'xtream_config',
         'enabled',
         'priority',
+        'stream_profile_id',
     ];
 
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function streamProfile(): BelongsTo
+    {
+        return $this->belongsTo(StreamProfile::class);
     }
 
     public function playlist(): BelongsTo

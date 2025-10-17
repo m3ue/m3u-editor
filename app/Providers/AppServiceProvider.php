@@ -20,6 +20,7 @@ use App\Models\Epg;
 use App\Models\Group;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
+use App\Models\StreamProfile;
 use App\Models\User;
 use App\Services\EpgCacheService;
 use App\Services\FfmpegCodecService;
@@ -335,6 +336,16 @@ class AppServiceProvider extends ServiceProvider
                 $playlistAlias->removeShortUrls();
                 return $playlistAlias;
             });
+
+            // StreamProfile
+            StreamProfile::creating(function (StreamProfile $streamProfile) {
+                if (!$streamProfile->user_id) {
+                    $streamProfile->user_id = auth()->id();
+                }
+                return $streamProfile;
+            });
+
+
         } catch (Throwable $e) {
             // Log the error
             report($e);
