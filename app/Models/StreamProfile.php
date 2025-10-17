@@ -109,16 +109,4 @@ class StreamProfile extends Model
         // Otherwise return the profile name (should match predefined profiles: default, hq, 720p, etc.)
         return strtolower(str_replace([' ', '-'], '_', $this->name));
     }
-    
-    /**
-     * Get a formatted profile name for API usage.
-     * This should match one of the predefined profiles in the Python transcoding system.
-     * Available profiles: default, hq, lowlatency, 720p, 1080p, hevc, audio
-     * 
-     * @deprecated Use getProfileIdentifier() instead
-     */
-    public function getProfileName(): string
-    {
-        return $this->getProfileIdentifier();
-    }
 }

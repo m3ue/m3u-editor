@@ -346,13 +346,28 @@ class M3uProxyService
 
         // Use appropriate endpoint based on whether transcoding profile is provided
         if ($profile) {
-            // Use transcoding endpoint
+            // First, check if there's already an active pooled transcoded stream for this channel
+            // This allows multiple clients to share the same transcoded stream without consuming
+            // additional provider connections
+            $existingStreamId = $this->findExistingPooledStream($id, $playlist->uuid);
+
+            if ($existingStreamId) {
+                Log::info('Reusing existing pooled transcoded stream', [
+                    'stream_id' => $existingStreamId,
+                    'channel_id' => $id,
+                    'playlist_uuid' => $playlist->uuid,
+                ]);
+
+                return $this->buildTranscodeStreamUrl($existingStreamId);
+            }
+
+            // No existing pooled stream found, create a new transcoded stream
             $streamId = $this->createTranscodedStream($primaryUrl, $profile, $failovers, $userAgent, [
                 'id' => $id,
                 'type' => 'channel',
                 'playlist_uuid' => $playlist->uuid,
             ]);
-            
+
             // Return transcoded stream URL
             return $this->buildTranscodeStreamUrl($streamId);
         } else {
@@ -420,13 +435,28 @@ class M3uProxyService
 
         // Use appropriate endpoint based on whether transcoding profile is provided
         if ($profile) {
-            // Use transcoding endpoint
+            // First, check if there's already an active pooled transcoded stream for this episode
+            // This allows multiple clients to share the same transcoded stream without consuming
+            // additional provider connections
+            $existingStreamId = $this->findExistingPooledStream($id, $playlist->uuid);
+
+            if ($existingStreamId) {
+                Log::info('Reusing existing pooled transcoded stream', [
+                    'stream_id' => $existingStreamId,
+                    'episode_id' => $id,
+                    'playlist_uuid' => $playlist->uuid,
+                ]);
+
+                return $this->buildTranscodeStreamUrl($existingStreamId);
+            }
+
+            // No existing pooled stream found, create a new transcoded stream
             $streamId = $this->createTranscodedStream($url, $profile, $failoverUrls, $userAgent, [
                 'id' => $id,
                 'type' => 'episode',
                 'playlist_uuid' => $playlist->uuid,
             ]);
-            
+
             // Return transcoded stream URL
             return $this->buildTranscodeStreamUrl($streamId);
         } else {
@@ -663,7 +693,7 @@ class M3uProxyService
     ): string {
         try {
             $endpoint = $this->apiBaseUrl . '/transcode';
-            
+
             // Build the payload for transcoding
             $payload = [
                 'url' => $url,
@@ -701,7 +731,7 @@ class M3uProxyService
                 if (isset($data['stream_id'])) {
                     Log::info('Created transcoded stream on m3u-proxy', [
                         'stream_id' => $data['stream_id'],
-                        'profile' => $profile->getProfileName(),
+                        'profile' => $profile->getProfileIdentifier(),
                         'url' => $url,
                     ]);
 
@@ -715,7 +745,7 @@ class M3uProxyService
         } catch (Exception $e) {
             Log::error('Error creating transcoded stream on m3u-proxy', [
                 'error' => $e->getMessage(),
-                'profile' => $profile->getProfileName(),
+                'profile' => $profile->getProfileIdentifier(),
                 'url' => $url,
             ]);
             throw $e;
@@ -749,6 +779,68 @@ class M3uProxyService
 
         // Direct stream format: /stream/{stream_id}
         return $baseUrl . '/stream/' . $streamId;
+    }
+
+    /**
+     * Find an existing pooled transcoded stream for the given channel.
+     * This allows multiple clients to connect to the same transcoded stream without
+     * consuming additional provider connections.
+     * 
+     * @param int $channelId Channel ID
+     * @param string $playlistUuid Playlist UUID
+     * @return string|null Stream ID if found, null otherwise
+     */
+    protected function findExistingPooledStream(int $channelId, string $playlistUuid): ?string
+    {
+        try {
+            // Query m3u-proxy for streams by metadata
+            $endpoint = $this->apiBaseUrl . '/streams/by-metadata';
+            $response = Http::timeout(5)->acceptJson()
+                ->withHeaders(array_filter([
+                    'X-API-Token' => $this->apiToken,
+                ]))
+                ->get($endpoint, [
+                    'field' => 'id',
+                    'value' => (string) $channelId,
+                    'active_only' => true,  // Only return active streams
+                ]);
+
+            if (!$response->successful()) {
+                return null;
+            }
+
+            $data = $response->json();
+            $matchingStreams = $data['matching_streams'] ?? [];
+
+            // Find a stream for this channel+playlist that's transcoding
+            foreach ($matchingStreams as $stream) {
+                $metadata = $stream['metadata'] ?? [];
+
+                // Check if this stream matches our criteria:
+                // 1. Same channel ID
+                // 2. Same playlist UUID
+                // 3. Is a transcoded stream (has transcoding metadata)
+                if (
+                    ($metadata['id'] ?? null) == $channelId &&
+                    ($metadata['playlist_uuid'] ?? null) === $playlistUuid &&
+                    ($metadata['transcoding'] ?? null) === 'true'
+                ) {
+                    Log::info('Found existing pooled transcoded stream', [
+                        'stream_id' => $stream['stream_id'],
+                        'channel_id' => $channelId,
+                        'playlist_uuid' => $playlistUuid,
+                        'client_count' => $stream['client_count'],
+                    ]);
+
+                    return $stream['stream_id'];
+                }
+            }
+
+            return null;
+        } catch (Exception $e) {
+            Log::warning('Error finding existing pooled stream: ' . $e->getMessage());
+            return null;
+        }
     }
 
     /**
