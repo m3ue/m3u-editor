@@ -3,6 +3,7 @@
 namespace App\Infolists\Components;
 
 use Filament\Infolists\Components\Entry;
+use Illuminate\Support\Str;
 
 class VideoPreview extends Entry
 {
@@ -31,5 +32,18 @@ class VideoPreview extends Entry
     public function isWithDetails(): bool
     {
         return (bool) $this->evaluate($this->showDetails);
+    }
+
+    public function getFormat(): string
+    {
+        // Determine the channel format based on URL or container extension
+        $channel = $this->getRecord();
+        $originalUrl = $channel->url_custom ?? $channel->url;
+        if (Str::endsWith($originalUrl, '.m3u8') || Str::endsWith($originalUrl, '.ts')) {
+            $extension = 'ts';
+        } else {
+            $extension = $channel->container_extension ?? 'ts';
+        }
+        return $extension;
     }
 }

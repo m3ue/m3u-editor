@@ -204,6 +204,12 @@ class M3uProxyStreamMonitor extends Page
             // Normalize clients
             $clients = array_map(function ($client) {
                 $connectedAt = Carbon::parse($client['created_at']);
+                $lastAccess = Carbon::parse($client['last_access']);
+
+                // Client is considered active if:
+                // 1. is_connected is true (from API), OR
+                // 2. last_access was within the last 30 seconds (more lenient for active streaming)
+                $isActive = ($client['is_connected'] ?? false) || $lastAccess->diffInSeconds(now()) < 30;
 
                 return [
                     'ip' => $client['ip_address'],
@@ -211,7 +217,7 @@ class M3uProxyStreamMonitor extends Page
                     'duration' => $connectedAt->diffForHumans(null, true),
                     'bytes_received' => $this->formatBytes($client['bytes_served']),
                     'bandwidth' => 'N/A', // Can calculate if needed
-                    'is_active' => Carbon::parse($client['last_access'])->diffInSeconds(now()) < 10,
+                    'is_active' => $isActive,
                 ];
             }, $streamClients);
 
