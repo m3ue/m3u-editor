@@ -29,7 +29,7 @@
 
 services:
   m3u-editor:
-    image: sparkison/m3u-editor:latest
+    image: sparkison/m3u-editor:dev
     container_name: m3u-editor
     # CRITICAL: Use Gluetun's network stack
     # This routes all m3u-editor traffic through the VPN
@@ -107,6 +107,8 @@ services:
       # - STREAM_TIMEOUT=300
       # - CLEANUP_INTERVAL=60
     restart: unless-stopped
+    devices:
+      - /dev/dri:/dev/dri
     depends_on:
       - gluetun
       - redis
