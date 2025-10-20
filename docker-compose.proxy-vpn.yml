@@ -59,7 +59,7 @@ services:
       # M3U Proxy Configuration (External via Gluetun)
       # IMPORTANT: When m3u-proxy is behind Gluetun, we connect via gluetun container
       - M3U_PROXY_ENABLED=true
-      - M3U_PROXY_URL=http://127.0.0.1:8085
+      - M3U_PROXY_URL=http://127.0.0.1:8085 # Access m3u-proxy via localhost since both use Gluetun's network
       - M3U_PROXY_TOKEN=${M3U_PROXY_TOKEN:-changeme}
     volumes:
       # Persistent configuration data
@@ -71,7 +71,6 @@ services:
     depends_on:
       - gluetun
       - m3u-proxy
-      - redis
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:36400/up"]
       interval: 30s
@@ -88,6 +87,7 @@ services:
     # This routes all m3u-proxy traffic through the VPN
     network_mode: "service:gluetun"
     environment:
+      - PORT=8085 # M3U Proxy listening port (change if needed)
       # API Authentication Token (must match M3U_PROXY_TOKEN above)
       - API_TOKEN=${M3U_PROXY_TOKEN:-changeme}
       
@@ -96,7 +96,7 @@ services:
       # We need to use the Redis container's IP or connect via the m3u-network
       # Solution: Redis connects to m3u-network, and we use host.docker.internal or static IP
       - REDIS_ENABLED=true
-      - REDIS_URL=redis://redis:6379/0
+      - REDIS_URL=redis://127.0.0.1:6379/0
       - ENABLE_REDIS_POOLING=true
       
       # Logging
@@ -112,13 +112,6 @@ services:
       - redis
     # Note: healthcheck removed because network_mode: service:gluetun 
     # means we can't directly healthcheck this container
-    
-    # Optional: Resource limits
-    # deploy:
-    #   resources:
-    #     limits:
-    #       cpus: '2.0'
-    #       memory: 2G
 
   redis:
     image: redis:alpine3.22
@@ -128,13 +121,6 @@ services:
     command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
     volumes:
       - redis-data:/data
-    networks:
-      - m3u-network
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
 
   # Gluetun VPN Container
   # All m3u-proxy traffic will be routed through this VPN tunnel
@@ -147,10 +133,11 @@ services:
       - /dev/net/tun:/dev/net/tun
       - /dev/dri:/dev/dri  # Hardware acceleration for m3u-proxy
     ports:
-      - 36400:36400  # M3U Editor port
+      - 36400:36400  # M3U Editor port, change if needed
+
       # M3U Proxy port (exposed through Gluetun)
       # Uncomment if you need direct external access to m3u-proxy
-      # - "8085:8085"
+      # - "8085:8085" # Change if needed
       
       # Gluetun control server (optional, for VPN management)
       # - "8000:8000/tcp"  # HTTP control server
