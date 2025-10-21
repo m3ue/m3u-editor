@@ -431,53 +431,9 @@ EOSQL
   fi
 fi
 
-# Start Redis server
-echo ""
-echo "📡 Starting Redis server..."
-# Start Redis in background and suppress memory overcommit warning
-redis-server /etc/redis/redis.conf 2>&1 | grep -v "Memory overcommit must be enabled" &
-
-# Give Redis a moment to initialize before the first check
-sleep 0.5
-
-# Wait until Redis is ready
-echo ""
-echo "⏳ Waiting for Redis to be ready..."
-dots=""
-max_wait_seconds_redis=30
-elapsed_wait_redis=0
-wait_interval_redis=1
-
-until redis-cli -p "$REDIS_SERVER_PORT" ping | grep -q PONG; do
-  # Output from redis-cli on failure (like "Connection refused") will go to stderr,
-  # which is fine for the loop condition. We just want to control our own "Waiting..." message.
-  if [ $elapsed_wait_redis -gt 0 ]; then # Print dots only after the first attempt (which is silent from our script's perspective)
-    dots+="."
-    echo "⏳ Waiting for Redis${dots}"
-  fi
-  sleep $wait_interval_redis
-  elapsed_wait_redis=$((elapsed_wait_redis + wait_interval_redis))
-  if [ $elapsed_wait_redis -ge $max_wait_seconds_redis ]; then
-    echo "FATAL: Redis failed to start within ${max_wait_seconds_redis} seconds. Check Redis logs if available."
-    # Decide if to exit: exit 1
-    break # Exit loop, subsequent parts of script might fail
-  fi
-done
-
-if redis-cli -p "$REDIS_SERVER_PORT" ping | grep -q PONG; then # Final check after the loop
-  echo "✅ Redis is ready."
-else
-  echo "⚠️ Redis did not become ready after waiting."
-  # Consider exiting if Redis is critical: exit 1
-fi
-echo ""
-
 # Run migrations
 echo "💾 Running migrations..."
 php artisan migrate --force
-
-# Build assets
-echo "🛠️ Building assets..."
 
 # Ensure composer dir is writable
 [ ! -d /.composer ] && mkdir /.composer
