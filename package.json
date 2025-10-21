@@ -18,7 +18,7 @@
         "pusher-js": "^8.4.0-rc2",
         "sass-embedded": "^1.85.0",
         "tailwindcss": "^4.1.12",
-        "vite": ">=6.3.6"
+        "vite": ">=6.4.1"
     },
     "dependencies": {
         "easyqrcodejs": "^4.6.2",
