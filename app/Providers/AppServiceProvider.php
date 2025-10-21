@@ -84,60 +84,6 @@ class AppServiceProvider extends ServiceProvider
             return;
         }
 
-        // Clear any stale Emby syncing flags on application startup
-        // This prevents stuck processing states after container restarts or crashes
-        try {
-            if (Schema::hasTable('playlists')) {
-                // Get all playlists with stuck syncing flags
-                $stuckPlaylists = DB::table('playlists')
-                    ->whereNotNull('emby_config')
-                    ->get();
-                
-                $clearedCount = 0;
-                
-                foreach ($stuckPlaylists as $playlist) {
-                    $embyConfig = json_decode($playlist->emby_config, true);
-                    $needsUpdate = false;
-                    
-                    // Check and clear VOD syncing flag
-                    if (isset($embyConfig['vod']['syncing']) && $embyConfig['vod']['syncing'] === true) {
-                        $embyConfig['vod']['syncing'] = false;
-                        unset($embyConfig['vod']['sync_started_at']);
-                        $needsUpdate = true;
-                    }
-                    
-                    // Check and clear Series syncing flag
-                    if (isset($embyConfig['series']['syncing']) && $embyConfig['series']['syncing'] === true) {
-                        $embyConfig['series']['syncing'] = false;
-                        unset($embyConfig['series']['sync_started_at']);
-                        $needsUpdate = true;
-                    }
-                    
-                    // Update if any flags were cleared
-                    if ($needsUpdate) {
-                        DB::table('playlists')
-                            ->where('id', $playlist->id)
-                            ->update([
-                                'emby_config' => json_encode($embyConfig),
-                                'processing' => false,
-                            ]);
-                        $clearedCount++;
-                    }
-                }
-                
-                if ($clearedCount > 0) {
-                    Log::info('Cleared stale Emby syncing flags on startup', [
-                        'playlists_cleared' => $clearedCount,
-                    ]);
-                }
-            }
-        } catch (Throwable $e) {
-            // Silently fail if database not ready (e.g., during migrations)
-            Log::debug('Could not clear Emby syncing flags on startup', [
-                'error' => $e->getMessage()
-            ]);
-        }
-
         // Disable mass assignment protection (security handled by Filament)
         Model::unguard();
 
@@ -400,8 +346,6 @@ class AppServiceProvider extends ServiceProvider
                 }
                 return $streamProfile;
             });
-
-
         } catch (Throwable $e) {
             // Log the error
             report($e);
