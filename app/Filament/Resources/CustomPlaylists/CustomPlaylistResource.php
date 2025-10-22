@@ -50,7 +50,9 @@ use App\Services\EpgCacheService;
 use App\Services\M3uProxyService;
 use App\Services\ProxyService;
 use Filament\Actions\ViewAction;
+use Filament\Forms\Components\Repeater;
 use Filament\Forms\FormsComponent;
+use Filament\Schemas\Components\Fieldset;
 use Illuminate\Support\Facades\Redis;
 
 class CustomPlaylistResource extends Resource
@@ -364,6 +366,26 @@ class CustomPlaylistResource extends Resource
                         ->helperText('Select a transcoding profile to apply to streams from this playlist. Leave empty for direct streaming.')
                         ->placeholder('Leave empty for direct streaming')
                         ->hidden(fn(Get $get): bool => !$get('enable_proxy')),
+                    Fieldset::make('HTTP Headers (optional)')
+                        ->columnSpanFull()
+                        ->schema([
+                            Repeater::make('custom_headers')
+                                ->hiddenLabel()
+                                ->helperText('Add any custom headers to include when streaming a channel/episode.')
+                                ->columnSpanFull()
+                                ->columns(2)
+                                ->default([])
+                                ->schema([
+                                    TextInput::make('header')
+                                        ->label('Header')
+                                        ->required()
+                                        ->placeholder('e.g. Authorization'),
+                                    TextInput::make('value')
+                                        ->label('Value')
+                                        ->required()
+                                        ->placeholder('e.g. Bearer abc123'),
+                                ])
+                        ])->hidden(fn(Get $get): bool => !$get('enable_proxy'))
                 ])
         ];
         return [

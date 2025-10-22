@@ -375,6 +375,26 @@ class PlaylistAliasResource extends Resource
                         ->helperText('Optional transcoding profile for processing streams. Leave empty to use direct streaming without transcoding.')
                         ->placeholder('Leave empty for direct streaming')
                         ->hidden(fn(Get $get): bool => !$get('enable_proxy')),
+                    Schemas\Components\Fieldset::make('HTTP Headers (optional)')
+                        ->columnSpanFull()
+                        ->schema([
+                            Forms\Components\Repeater::make('custom_headers')
+                                ->hiddenLabel()
+                                ->helperText('Add any custom headers to include when streaming a channel/episode.')
+                                ->columnSpanFull()
+                                ->columns(2)
+                                ->default([])
+                                ->schema([
+                                    Forms\Components\TextInput::make('header')
+                                        ->label('Header')
+                                        ->required()
+                                        ->placeholder('e.g. Authorization'),
+                                    Forms\Components\TextInput::make('value')
+                                        ->label('Value')
+                                        ->required()
+                                        ->placeholder('e.g. Bearer abc123'),
+                                ])
+                        ])->hidden(fn(Get $get): bool => !$get('enable_proxy')),
                 ])->columnSpanFull(),
 
             Schemas\Components\Fieldset::make('Auth (optional)')

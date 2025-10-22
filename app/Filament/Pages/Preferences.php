@@ -98,8 +98,6 @@ class Preferences extends SettingsPage
 
     public function form(Schema $schema): Schema
     {
-        $ffmpegPath = config('proxy.ffmpeg_path');
-
         $m3uProxyUrl = rtrim(config('proxy.m3u_proxy_url', ''), '/');
         $m3uToken = config('proxy.m3u_proxy_token', null);
         $m3uProxyDocs = $m3uProxyUrl . '/docs';

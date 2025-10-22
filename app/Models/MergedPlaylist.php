@@ -31,6 +31,7 @@ class MergedPlaylist extends Model
         'proxy_options' => 'array',
         'short_urls_enabled' => 'boolean',
         'include_series_in_m3u' => 'boolean',
+        'custom_headers' => 'array',
         'id_channel_by' => PlaylistChannelId::class
     ];
 

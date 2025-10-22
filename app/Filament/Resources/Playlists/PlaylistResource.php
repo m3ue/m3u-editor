@@ -43,6 +43,7 @@ use Filament\Actions\ViewAction;
 use Filament\Forms\Components\CheckboxList;
 use Filament\Forms\Components\DateTimePicker;
 use Filament\Forms\Components\FileUpload;
+use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TagsInput;
 use Filament\Forms\Components\TextInput;
@@ -351,12 +352,12 @@ class PlaylistResource extends Resource
                                     ->send();
                                 return;
                             }
-                            
+
                             $record->update([
                                 'status' => Status::Processing,
                                 'progress' => 0,
                             ]);
-                            
+
                             app('Illuminate\Contracts\Bus\Dispatcher')
                                 ->dispatch(new \App\Jobs\ProcessEmbyVodSync(
                                     playlist: $record,
@@ -394,12 +395,12 @@ class PlaylistResource extends Resource
                                     ->send();
                                 return;
                             }
-                            
+
                             $record->update([
                                 'status' => Status::Processing,
                                 'series_progress' => 0,
                             ]);
-                            
+
                             app('Illuminate\Contracts\Bus\Dispatcher')
                                 ->dispatch(new \App\Jobs\ProcessEmbySeriesSync(
                                     playlist: $record,
@@ -435,33 +436,33 @@ class PlaylistResource extends Resource
                         ->action(function (Playlist $record) {
                             // Clear processing flag
                             $record->processing = false;
-                            
+
                             // Clear Emby syncing flags if they exist
                             if ($record->emby_config) {
                                 $embyConfig = $record->emby_config;
-                                
+
                                 if (isset($embyConfig['vod'])) {
                                     $embyConfig['vod']['syncing'] = false;
                                     unset($embyConfig['vod']['sync_started_at']);
                                 }
-                                
+
                                 if (isset($embyConfig['series'])) {
                                     $embyConfig['series']['syncing'] = false;
                                     unset($embyConfig['series']['sync_started_at']);
                                 }
-                                
+
                                 $record->emby_config = $embyConfig;
                             }
-                            
+
                             $record->save();
-                            
+
                             Notification::make()
                                 ->success()
                                 ->title('Processing state reset')
                                 ->body('The playlist is no longer processing. You can now run new syncs.')
                                 ->send();
                         })
-                        ->visible(fn (Playlist $record) => $record->processing === true),
+                        ->visible(fn(Playlist $record) => $record->processing === true),
                     Action::make('Download M3U')
                         ->label('Download M3U')
                         ->icon('heroicon-o-arrow-down-tray')
@@ -831,12 +832,12 @@ class PlaylistResource extends Resource
                                 ->send();
                             return;
                         }
-                        
+
                         $record->update([
                             'status' => Status::Processing,
                             'progress' => 0,
                         ]);
-                        
+
                         app('Illuminate\Contracts\Bus\Dispatcher')
                             ->dispatch(new \App\Jobs\ProcessEmbyVodSync(
                                 playlist: $record,
@@ -874,12 +875,12 @@ class PlaylistResource extends Resource
                                 ->send();
                             return;
                         }
-                        
+
                         $record->update([
                             'status' => Status::Processing,
                             'series_progress' => 0,
                         ]);
-                        
+
                         app('Illuminate\Contracts\Bus\Dispatcher')
                             ->dispatch(new \App\Jobs\ProcessEmbySeriesSync(
                                 playlist: $record,
@@ -915,33 +916,33 @@ class PlaylistResource extends Resource
                     ->action(function ($record) {
                         // Clear processing flag
                         $record->processing = false;
-                        
+
                         // Clear Emby syncing flags if they exist
                         if ($record->emby_config) {
                             $embyConfig = $record->emby_config;
-                            
+
                             if (isset($embyConfig['vod'])) {
                                 $embyConfig['vod']['syncing'] = false;
                                 unset($embyConfig['vod']['sync_started_at']);
                             }
-                            
+
                             if (isset($embyConfig['series'])) {
                                 $embyConfig['series']['syncing'] = false;
                                 unset($embyConfig['series']['sync_started_at']);
                             }
-                            
+
                             $record->emby_config = $embyConfig;
                         }
-                        
+
                         $record->save();
-                        
+
                         Notification::make()
                             ->success()
                             ->title('Processing state reset')
                             ->body('The playlist is no longer processing. You can now run new syncs.')
                             ->send();
                     })
-                    ->visible(fn ($record) => $record->processing === true),
+                    ->visible(fn($record) => $record->processing === true),
                 Action::make('Download M3U')
                     ->label('Download M3U')
                     ->icon('heroicon-o-arrow-down-tray')
@@ -1553,6 +1554,26 @@ class PlaylistResource extends Resource
                         ->helperText('Select a transcoding profile to apply to streams from this playlist. Leave empty for direct streaming.')
                         ->placeholder('Leave empty for direct streaming')
                         ->hidden(fn(Get $get): bool => ! $get('enable_proxy')),
+                    Fieldset::make('HTTP Headers (optional)')
+                        ->columnSpanFull()
+                        ->schema([
+                            Repeater::make('custom_headers')
+                                ->hiddenLabel()
+                                ->helperText('Custom headers to use when streaming via the proxy.')
+                                ->columnSpanFull()
+                                ->columns(2)
+                                ->default([])
+                                ->schema([
+                                    TextInput::make('header')
+                                        ->label('Header')
+                                        ->required()
+                                        ->placeholder('e.g. Authorization'),
+                                    TextInput::make('value')
+                                        ->label('Value')
+                                        ->required()
+                                        ->placeholder('e.g. Bearer abc123'),
+                                ])
+                        ])->hidden(fn(Get $get): bool => ! $get('enable_proxy'))
                 ]),
             Section::make('EPG Output')
                 ->description('EPG output options')

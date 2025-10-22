@@ -344,6 +344,9 @@ class M3uProxyService
             ->values()
             ->toArray();
 
+        // Get any custom headers for the current playlist
+        $headers = $playlist->custom_headers ?? [];
+
         // Use appropriate endpoint based on whether transcoding profile is provided
         if ($profile) {
             // First, check if there's already an active pooled transcoded stream for this channel
@@ -362,7 +365,7 @@ class M3uProxyService
             }
 
             // No existing pooled stream found, create a new transcoded stream
-            $streamId = $this->createTranscodedStream($primaryUrl, $profile, $failovers, $userAgent, [
+            $streamId = $this->createTranscodedStream($primaryUrl, $profile, $failovers, $userAgent, $headers, [
                 'id' => $id,
                 'type' => 'channel',
                 'playlist_uuid' => $playlist->uuid,
@@ -372,7 +375,7 @@ class M3uProxyService
             return $this->buildTranscodeStreamUrl($streamId);
         } else {
             // Use direct streaming endpoint
-            $streamId = $this->createOrUpdateStream($primaryUrl, $failovers, $userAgent, [
+            $streamId = $this->createStream($primaryUrl, $failovers, $userAgent, $headers, [
                 'id' => $id,
                 'type' => 'channel',
                 'playlist_uuid' => $playlist->uuid,
@@ -430,6 +433,9 @@ class M3uProxyService
 
         $userAgent = $playlist->user_agent;
 
+        // Get any custom headers for the current playlist
+        $headers = $playlist->custom_headers ?? [];
+
         // Episodes typically don't have failovers, but we'll support it if needed
         $failoverUrls = [];
 
@@ -451,7 +457,7 @@ class M3uProxyService
             }
 
             // No existing pooled stream found, create a new transcoded stream
-            $streamId = $this->createTranscodedStream($url, $profile, $failoverUrls, $userAgent, [
+            $streamId = $this->createTranscodedStream($url, $profile, $failoverUrls, $userAgent, $headers, [
                 'id' => $id,
                 'type' => 'episode',
                 'playlist_uuid' => $playlist->uuid,
@@ -461,7 +467,7 @@ class M3uProxyService
             return $this->buildTranscodeStreamUrl($streamId);
         } else {
             // Use direct streaming endpoint
-            $streamId = $this->createOrUpdateStream($url, $failoverUrls, $userAgent, [
+            $streamId = $this->createStream($url, $failoverUrls, $userAgent, $headers, [
                 'id' => $id,
                 'type' => 'episode',
                 'playlist_uuid' => $playlist->uuid,
@@ -615,30 +621,53 @@ class M3uProxyService
      * Returns the stream ID.
      *
      * @param  string  $url  Primary stream URL
-     * @param  array  $failoverUrls  Array of failover URLs
+     * @param  array  $failovers  Array of failover URLs
      * @param  string|null  $userAgent  Custom user agent
+     * @param  array|null  $headers  Custom headers to send with the stream request
      * @param  array|null  $metadata  Additional metadata (e.g. ['id' => 123, 'type' => 'channel'])
      * @return string Stream ID
      *
      * @throws Exception when API request fails
      */
-    protected function createOrUpdateStream(
+    protected function createStream(
         string $url,
-        array $failoverUrls = [],
+        array $failovers = [],
         ?string $userAgent = null,
-        ?array $metadata = []
+        ?array $headers = [],
+        ?array $metadata = [],
     ): string {
         try {
             $endpoint = $this->apiBaseUrl . '/streams';
 
+            // Build the payload for direct streaming
             $payload = [
                 'url' => $url,
-                'failover_urls' => $failoverUrls ?: null,
                 'metadata' => $metadata,
             ];
 
+            // Add failovers if provided
+            if (!empty($failovers)) {
+                $payload['failover_urls'] = $failovers;
+            }
+
+            // Add user agent if provided
             if (! empty($userAgent)) {
                 $payload['user_agent'] = $userAgent;
+            }
+
+            // Add custom headers if provided
+            if (!empty($headers)) {
+                // Need to return as key => value pairs, where `header` is key and `value` is value
+                foreach ($headers as $h) {
+                    if (is_array($h) && isset($h['header'])) {
+                        $key = $h['header'];
+                        $val = $h['value'] ?? null;
+                        $normalized[$key] = $val;
+                    }
+                }
+                if (!empty($normalized)) {
+                    $payload['headers'] = $normalized;
+                }
             }
 
             $response = Http::timeout(10)
@@ -679,7 +708,8 @@ class M3uProxyService
      * @param  StreamProfile  $profile  The transcoding profile to use
      * @param  array  $failovers  Optional failover URLs
      * @param  string|null  $userAgent  Optional user agent
-     * @param  array  $metadata  Stream metadata
+     * @param  array|null  $headers  Custom headers to send with the stream request
+     * @param  array|null  $metadata  Stream metadata
      * @return string The transcoded stream ID
      *
      * @throws Exception when API returns an error
@@ -689,7 +719,8 @@ class M3uProxyService
         StreamProfile $profile,
         array $failovers = [],
         ?string $userAgent = null,
-        array $metadata = []
+        ?array $headers = [],
+        ?array $metadata = [],
     ): string {
         try {
             $endpoint = $this->apiBaseUrl . '/transcode';
@@ -709,6 +740,21 @@ class M3uProxyService
             // Add user agent if provided
             if ($userAgent) {
                 $payload['user_agent'] = $userAgent;
+            }
+
+            // Add custom headers if provided
+            if (!empty($headers)) {
+                // Need to return as key => value pairs, where `header` is key and `value` is value
+                foreach ($headers as $h) {
+                    if (is_array($h) && isset($h['header'])) {
+                        $key = $h['header'];
+                        $val = $h['value'] ?? null;
+                        $normalized[$key] = $val;
+                    }
+                }
+                if (!empty($normalized)) {
+                    $payload['headers'] = $normalized;
+                }
             }
 
             // Always add profile variables for FFmpeg template substitution

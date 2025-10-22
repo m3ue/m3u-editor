@@ -25,17 +25,7 @@ class PlaylistAlias extends Model
         'enabled' => 'boolean',
         'enable_proxy' => 'boolean',
         'priority' => 'integer',
-    ];
-
-    protected $fillable = [
-        'name',
-        'playlist_id',
-        'custom_playlist_id',
-        'user_id',
-        'xtream_config',
-        'enabled',
-        'priority',
-        'stream_profile_id',
+        'custom_headers' => 'array',
     ];
 
     public function user(): BelongsTo

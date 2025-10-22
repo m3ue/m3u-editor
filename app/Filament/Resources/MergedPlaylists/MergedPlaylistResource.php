@@ -42,6 +42,8 @@ use App\Facades\PlaylistFacade;
 use App\Forms\Components\XtreamApiInfo;
 use App\Services\EpgCacheService;
 use App\Services\ProxyService;
+use Filament\Forms\Components\Repeater;
+use Filament\Schemas\Components\Fieldset;
 
 class MergedPlaylistResource extends Resource
 {
@@ -132,7 +134,6 @@ class MergedPlaylistResource extends Resource
             ])
             ->recordActions([
                 ActionGroup::make([
-                    EditAction::make(),
                     Action::make('Download M3U')
                         ->label('Download M3U')
                         ->icon('heroicon-o-arrow-down-tray')
@@ -145,7 +146,9 @@ class MergedPlaylistResource extends Resource
                         ->url(fn($record) => PlaylistFacade::getUrls($record)['hdhr'])
                         ->openUrlInNewTab(),
                     DeleteAction::make(),
-                ])->button()->hiddenLabel()->size('sm')
+                ])->button()->hiddenLabel()->size('sm'),
+                EditAction::make()
+                    ->button()->hiddenLabel()->size('sm'),
             ], position: RecordActionsPosition::BeforeCells)
             ->toolbarActions([
                 BulkActionGroup::make([
@@ -221,15 +224,6 @@ class MergedPlaylistResource extends Resource
                         ->hidden(fn($get): bool => !$get('edit_uuid'))
                         ->required(),
                 ])->hiddenOn('create'),
-
-            Select::make('stream_profile_id')
-                ->label('Stream Profile')
-                ->relationship('streamProfile', 'name')
-                ->searchable()
-                ->preload()
-                ->nullable()
-                ->helperText('Select a transcoding profile to apply to streams from this playlist. Leave empty for direct streaming.')
-                ->columnSpanFull(),
         ];
         $outputScheme = [
             Section::make('Playlist Output')
@@ -339,6 +333,26 @@ class MergedPlaylistResource extends Resource
                         ->helperText('Select a transcoding profile to apply to streams from this playlist. Leave empty for direct streaming.')
                         ->placeholder('Leave empty for direct streaming')
                         ->hidden(fn(Get $get): bool => !$get('enable_proxy')),
+                    Fieldset::make('HTTP Headers (optional)')
+                        ->columnSpanFull()
+                        ->schema([
+                            Repeater::make('custom_headers')
+                                ->hiddenLabel()
+                                ->helperText('Add any custom headers to include when streaming a channel/episode.')
+                                ->columnSpanFull()
+                                ->columns(2)
+                                ->default([])
+                                ->schema([
+                                    TextInput::make('header')
+                                        ->label('Header')
+                                        ->required()
+                                        ->placeholder('e.g. Authorization'),
+                                    TextInput::make('value')
+                                        ->label('Value')
+                                        ->required()
+                                        ->placeholder('e.g. Bearer abc123'),
+                                ])
+                        ])->hidden(fn(Get $get): bool => !$get('enable_proxy'))
                 ])
         ];
 
