@@ -150,8 +150,38 @@ class EpgMapResource extends Resource
                             ->duration(10000)
                             ->send();
                     })
-                    ->disabled(fn($record) => $record->status === Status::Processing || $record->status === Status::Pending)
-                    ->tooltip(fn($record) => $record->status === Status::Processing || $record->status === Status::Pending ? 'Mapping in progress' : 'Manually trigger this EPG mapping to run again. This will not modify the "Recurring" setting.'),
+                    ->hidden(fn($record) => $record->status === Status::Processing || $record->status === Status::Pending)
+                    ->tooltip('Manually trigger this EPG mapping to run again. This will not modify the "Recurring" setting.'),
+                Action::make('restart')
+                    ->label('Restart Now')
+                    ->icon('heroicon-s-arrow-path')
+                    ->button()
+                    ->hiddenLabel()
+                    ->requiresConfirmation()
+                    ->modalIcon('heroicon-s-arrow-path')
+                    ->modalDescription('Manually restart this EPG mapping? This will restart the existing mapping process.')
+                    ->modalSubmitActionLabel('Restart Now')
+                    ->action(function ($record) {
+                        $record->update([
+                            'status' => Status::Processing,
+                            'progress' => 0,
+                        ]);
+                        app('Illuminate\Contracts\Bus\Dispatcher')
+                            ->dispatch(new MapPlaylistChannelsToEpg(
+                                epg: $record->epg_id,
+                                playlist: $record->playlist_id,
+                                epgMapId: $record->id,
+                            ));
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title('EPG mapping restarted')
+                            ->body('The EPG mapping process has been re-initiated.')
+                            ->duration(10000)
+                            ->send();
+                    })
+                    ->hidden(fn($record) => ! ($record->status === Status::Processing || $record->status === Status::Pending))
+                    ->tooltip('Restart existing mapping process.'),
             ], position: RecordActionsPosition::BeforeCells)
             ->toolbarActions([
                 BulkActionGroup::make([
