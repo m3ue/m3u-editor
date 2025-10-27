@@ -50,7 +50,7 @@ function streamPlayer() {
             !!loadingEl && (loadingEl.style.display = 'flex');
             !!errorEl && (errorEl.style.display = 'none');
             try {
-                if (format === 'hls' || url.includes('.m3u8')) {
+                if (format === 'hls' || format === 'm3u8' || url.includes('.m3u8')) {
                     console.log('Initializing HLS player');
                     this.initHlsPlayer(video, url, playerId);
                 } else if (format === 'ts' || format === 'mpegts') {
