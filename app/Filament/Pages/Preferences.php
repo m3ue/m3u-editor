@@ -235,16 +235,12 @@ class Preferences extends SettingsPage
                                                         }
                                                         $details .= "\n";
 
-                                                        // If internal mode, show transcoding is unavailable, else show status
-                                                        if ($service->mode() !== 'external') {
-                                                            $details .= "**Transcoding:** ❌ Unavailable in internal mode\n";
-                                                        } else {
-                                                            $details .= "**Transcoding:** ✅ Available\n";
-                                                        }
+                                                        // Transcoding is available in all modes
+                                                        $details .= "**Transcoding:** ✅ Available\n";
                                                         $details .= "\n";
 
                                                         // Redis Pooling
-                                                        $poolingEnabled = $service->mode() === 'external' && $info['redis']['pooling_enabled'];
+                                                        $poolingEnabled = $info['redis']['pooling_enabled'];
                                                         $redisStatus = $poolingEnabled ? '✅ Enabled' : '❌ Disabled';
                                                         $details .= "**Redis Pooling:** {$redisStatus}\n";
                                                         if ($poolingEnabled) {

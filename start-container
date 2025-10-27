@@ -76,6 +76,13 @@ else
     # Need to set the `PUBLIC_URL` for the proxy to use for re-writing HLS URLs
     export M3U_PROXY_PUBLIC_URL="${M3U_PROXY_URL}"
     
+    # Redis pooling settings for embedded proxy
+    export M3U_PROXY_REDIS_HOST="localhost"
+    export M3U_PROXY_REDIS_PORT="${REDIS_SERVER_PORT}"
+    export M3U_PROXY_REDIS_DB="6" # Default 6 (1-5 used by app)
+    export M3U_REDIS_ENABLED="true"
+    export M3U_ENABLE_TRANSCODING_POOLING="true"
+
     # M3U Proxy API key (for embedded proxy only)
     # Generate if not set
     if [ -z "$M3U_PROXY_TOKEN" ]; then
