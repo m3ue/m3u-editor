@@ -327,21 +327,21 @@ class MergedPlaylistResource extends Resource
                         ->columnSpanFull()
                         ->schema([
                             Select::make('stream_profile_id')
-                                ->label('Default Streaming Profile')
+                                ->label('Live Streaming Profile')
                                 ->relationship('streamProfile', 'name')
                                 ->searchable()
                                 ->preload()
                                 ->nullable()
-                                ->helperText('Select a transcoding profile to apply to streams from this playlist. Leave empty for direct streaming.')
-                                ->placeholder('Leave empty for direct streaming'),
+                                ->helperText('Select a transcoding profile to apply to Live streams from this playlist. Leave empty for direct stream proxying.')
+                                ->placeholder('Leave empty for direct stream proxying'),
                             Select::make('vod_stream_profile_id')
                                 ->label('VOD and Series Streaming Profile')
                                 ->relationship('vodStreamProfile', 'name')
                                 ->searchable()
                                 ->preload()
                                 ->nullable()
-                                ->helperText('Select a transcoding profile to apply to streams from this playlist. Leave empty to use default profile or direct streaming.')
-                                ->placeholder('Leave empty for default profile or direct streaming'),
+                                ->helperText('Select a transcoding profile to apply to VOD and Series streams from this playlist. Leave empty for direct stream proxying.')
+                                ->placeholder('Leave empty for direct stream proxying'),
                         ])->hidden(fn(Get $get): bool => ! $get('enable_proxy')),
                     Fieldset::make('HTTP Headers (optional)')
                         ->columnSpanFull()

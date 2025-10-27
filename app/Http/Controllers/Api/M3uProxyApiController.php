@@ -102,25 +102,21 @@ class M3uProxyApiController extends Controller
 
         // Get stream profile from playlist if set
         $profile = null;
-        if ($channel->is_vod && $playlist->vod_stream_profile_id) {
+        if ($channel->is_vod) {
             // For VOD channels, use the VOD stream profile if set
             $profile = $playlist->vodStreamProfile;
-        }
-        if (! $profile) {
+        } else {
             // Get stream profile from playlist if set
             $profile = $playlist->streamProfile;
         }
+
+        // If no profile set, use default profile for the player
         if (! $profile) {
             // Use default profile set for the player
             $settings = app(GeneralSettings::class);
 
             if ($channel->is_vod) {
-                // For VOD channels, prefer the VOD default profile first
                 $profileId = $settings->default_vod_stream_profile_id ?? null;
-                if (! $profileId) {
-                    // Fallback to general default profile
-                    $profileId = $settings->default_stream_profile_id ?? null;
-                }
             } else {
                 $profileId = $settings->default_stream_profile_id ?? null;
             }
@@ -151,23 +147,12 @@ class M3uProxyApiController extends Controller
         // Get stream profile from playlist if set
         $profile = null;
         if ($playlist->vod_stream_profile_id) {
-            // For Series, use the VOD stream profile if set
             $profile = $playlist->vodStreamProfile;
-        }
-        if (! $profile) {
-            // Get stream profile from playlist if set
-            $profile = $playlist->streamProfile;
         }
         if (! $profile) {
             // Use default profile set for the player
             $settings = app(GeneralSettings::class);
-
-            // For episodes, prefer the VOD default profile first
             $profileId = $settings->default_vod_stream_profile_id ?? null;
-            if (! $profileId) {
-                // Fallback to general default profile
-                $profileId = $settings->default_stream_profile_id ?? null;
-            }
             $profile = $profileId ? StreamProfile::find($profileId) : null;
         }
 

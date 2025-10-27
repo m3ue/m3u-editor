@@ -184,7 +184,7 @@ class Preferences extends SettingsPage
                                                     ->url('/stream-profiles')
                                                     ->openUrlInNewTab(false)
                                             )
-                                            ->helperText('The default transcoding profile used for the in-app player. Leave empty to disable transcoding (some streams may not be playable in the player).'),
+                                            ->helperText('The default transcoding profile used for the in-app player for Live content. Leave empty to disable transcoding (some streams may not be playable in the player).'),
                                         Select::make('default_vod_stream_profile_id')
                                             ->label('VOD and Series Transcoding Profile')
                                             ->columnSpan(2)
@@ -201,7 +201,7 @@ class Preferences extends SettingsPage
                                                     ->url('/stream-profiles')
                                                     ->openUrlInNewTab(false)
                                             )
-                                            ->helperText('The default VOD and series transcoding profile used for the in-app player. When empty will use the default transcoding profile.'),
+                                            ->helperText('The default transcoding profile used for the in-app player for VOD/Series content. Leave empty to disable transcoding (some streams may not be playable in the player).'),
 
                                         Action::make('test_connection')
                                             ->color('gray')

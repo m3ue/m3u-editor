@@ -30,13 +30,13 @@ class ListStreamProfiles extends ListRecords
                             'args' => '-fflags +genpts+discardcorrupt+igndts -i {input_url} -c:v libx264 -preset faster -crf {crf|23} -maxrate {maxrate|2500k} -bufsize {bufsize|5000k} -c:a aac -b:a {audio_bitrate|192k} -f mpegts {output_args|pipe:1}',
                             'format' => 'ts',
                         ],
-                        // [
-                        //     'user_id' => auth()->id(),
-                        //     'name' => 'Default VOD Profile',
-                        //     'description' => 'Optimized for Video on Demand content.',
-                        //     'args' => '-fflags +genpts+discardcorrupt+igndts -i {input_url} -c:v libx264 -preset faster -crf 23 -maxrate 2500k -bufsize 5000k -c:a aac -b:a 192k -hls_time 5 -hls_list_size 15 -hls_flags delete_segments -f hls {output_args|index.m3u8}',
-                        //     'format' => 'm3u8',
-                        // ],
+                        [
+                            'user_id' => auth()->id(),
+                            'name' => 'Default HLS Profile',
+                            'description' => 'Optimized for live streaming content.',
+                            'args' => '-fflags +genpts+discardcorrupt+igndts -i {input_url} -c:v libx264 -preset faster -crf {crf|23} -maxrate {maxrate|2500k} -bufsize {bufsize|5000k} -c:a aac -b:a {audio_bitrate|192k} -hls_time 5 -hls_list_size 15 -hls_flags delete_segments -f hls {output_args|index.m3u8}',
+                            'format' => 'm3u8',
+                        ],
                     ];
                     foreach ($defaultProfiles as $index => $defaultProfile) {
                         StreamProfile::query()->create($defaultProfile);
