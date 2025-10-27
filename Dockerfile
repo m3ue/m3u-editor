@@ -38,7 +38,6 @@ RUN apk update && apk --no-cache add \
     tzdata \
     # ffmpeg
     ffmpeg \
-    ffmpeg-dev \
     # nginx + php-fpm
     nginx \
     php84-cli \
