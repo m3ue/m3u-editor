@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Enums\Status;
+use App\Jobs\GenerateEpgCache;
 use App\Jobs\ProcessEpgImport;
 use App\Models\Epg;
 use Cron\CronExpression;
@@ -38,7 +39,20 @@ class RefreshEpg extends Command
             $this->info('Dispatched EPG for refresh');
         } else {
             $this->info('Refreshing all EPGs');
-            // Get all EPGs that are not currently processing
+
+            // First, let's see if we have any EPGs that have processed, but errored out creating a cache
+            $failed = Epg::query()
+                ->where([
+                    ['status', Status::Failed],
+                    ['auto_sync', '=', true],
+                    ['is_cached', '=', false],
+                ])->whereNotNull('synced')->get();
+            foreach ($failed as $epg) {
+                $this->info("Attempting to re-cache EPG: {$epg->id}");
+                dispatch(new GenerateEpgCache($epg));
+            }
+
+            // Next, let's get all EPGs that are not currently processing and check if they are due for a sync
             $epgs = Epg::query()->where([
                 ['status', '!=', Status::Processing],
                 ['auto_sync', '=', true],
@@ -64,8 +78,7 @@ class RefreshEpg extends Command
                     dispatch(new ProcessEpgImport($epg));
                 }
             });
-            $this->info('Dispatched '.$count.' epgs for refresh');
+            $this->info('Dispatched ' . $count . ' epgs for refresh');
         }
-
     }
 }
