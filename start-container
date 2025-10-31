@@ -206,7 +206,6 @@ fi
 [ ! -f "${queue_log_file}" ] && touch "${queue_log_file}"
 [ ! -f "${websockets_log_file}" ] && touch "${websockets_log_file}"
 [ ! -f "${nginx_log_file}" ] && touch "${nginx_log_file}"
-[ ! -f "${startup_log_file}" ] && touch "${startup_log_file}"
 
 # Clear out the log content (could build up over time, clean on container reboot)
 echo "" > "/var/log/cron.out.log"
@@ -214,7 +213,6 @@ echo "" > "/var/log/cron.err.log"
 echo "" > "${queue_log_file}"
 echo "" > "${websockets_log_file}"
 echo "" > "${nginx_log_file}"
-echo "" > "${startup_log_file}"
 
 # Cleanup
 [ -f "${swoole_log_file}" ] && rm -f "${swoole_log_file}"
@@ -222,6 +220,7 @@ echo "" > "${startup_log_file}"
 [ -f "${horizon_log_file}" ] && rm -f "${horizon_log_file}"
 [ -f "${laravel_log_file}" ] && rm -f "${laravel_log_file}"
 [ -f "${ffmpeg_log_file}" ] && rm -f "${ffmpeg_log_file}"
+[ -f "${startup_log_file}" ] && rm -f "${startup_log_file}"
 
 # Link environment file
 ln -sf "${env_file}" .env
