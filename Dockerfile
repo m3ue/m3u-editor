@@ -1,8 +1,3 @@
-# Git build arguments
-ARG GIT_BRANCH
-ARG GIT_COMMIT
-ARG GIT_TAG
-
 ########################################
 # Composer builder — installs PHP dependencies
 ########################################
@@ -46,6 +41,11 @@ RUN npm run build
 # Main runtime image
 FROM alpine:3.21.3 as runtime
 WORKDIR /var/www/html
+
+# Re-declare ARG in this stage so they're available here
+ARG GIT_BRANCH
+ARG GIT_COMMIT
+ARG GIT_TAG
 
 # Set environment variables for git information
 ENV GIT_BRANCH=${GIT_BRANCH}
