@@ -31,71 +31,164 @@ Complete docker-compose setup with m3u-editor, m3u-proxy, and Redis:
 ```yaml
 services:
   m3u-editor:
-    image: sparkison/m3u-editor:latest
+    image: sparkison/m3u-editor:dev
     container_name: m3u-editor
     environment:
+      # Timezone
       - TZ=Etc/UTC
-      - APP_URL=http://localhost
-      # PostgreSQL settings
-      - ENABLE_POSTGRES=true
+      
+      # Application URL (change to your domain or IP)
+      - APP_URL=${APP_URL:-http://localhost}
+      - APP_PORT=${APP_PORT:-36400}
+
+      # Web Server Configuration
+      # - NGINX_ENABLED=true # Set to false to disable embedded NGINX and use your own service
+      # - FPMPORT=9000 # Default FPM port
+
+      # Postgres Configuration
+      - ENABLE_POSTGRES=true # Use embedded Postgres, disable to use your own Postgres service
       - PG_DATABASE=${PG_DATABASE:-m3ue}
       - PG_USER=${PG_USER:-m3ue}
-      - PG_PASSWORD=${PG_PASSWORD:-secret}
+      - PG_PASSWORD=${PG_PASSWORD:-changeme}
       - PG_PORT=${PG_PORT:-5432}
+      
+      # Database Connection (m3u-editor)
       - DB_CONNECTION=pgsql
       - DB_HOST=localhost
       - DB_PORT=${PG_PORT:-5432}
       - DB_DATABASE=${PG_DATABASE:-m3ue}
       - DB_USERNAME=${PG_USER:-m3ue}
-      - DB_PASSWORD=${PG_PASSWORD:-secret}
-      # M3U Proxy settings (external)
-      - M3U_PROXY_ENABLED=false # Disable embedded instance
-      - M3U_PROXY_URL=http://m3u-proxy:8085
-      - M3U_PROXY_TOKEN=${M3U_PROXY_TOKEN:-your-secure-token-here}
+      - DB_PASSWORD=${PG_PASSWORD:-changeme}
+
+      # Redis configuration
+      - REDIS_ENABLED=false # Disable embedded Redis
+      - REDIS_SERVER_PORT=${REDIS_PORT:-6379}
+      - REDIS_HOST=${REDIS_HOST:-redis}
+      
+      # M3U Proxy Configuration (External)
+      - M3U_PROXY_ENABLED=false # Disable embedded and use external m3u-proxy
+      - M3U_PROXY_PORT=${M3U_PROXY_PORT:-38085}
+      - M3U_PROXY_HOST=${M3U_PROXY_HOST:-m3u-proxy} # Internal network hostname of m3u-proxy container
+      # Public URL for m3u-proxy (used for rewriting stream URLs)
+      - M3U_PROXY_PUBLIC_URL=${M3U_PROXY_PUBLIC_URL:-http://localhost:36400/m3u-proxy}
+      - M3U_PROXY_TOKEN=${M3U_PROXY_TOKEN:-changeme}
     volumes:
+      # Persistent configuration data
       - ./data:/var/www/config
+      
+      # PostgreSQL data persistence
       - pgdata:/var/lib/postgresql/data
     restart: unless-stopped
     ports:
-      - 36400:36400
+      - "${APP_PORT:-36400}:${APP_PORT:-36400}"  # Main application port
+      # - "${PG_PORT:-5432}:${PG_PORT:-5432}"  # Uncomment to expose PostgreSQL
     networks:
       - m3u-network
     depends_on:
-      - m3u-proxy
+      m3u-proxy:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:${APP_PORT:-36400}/up"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
 
   m3u-proxy:
-    image: sparkison/m3u-proxy:latest
+    image: sparkison/m3u-proxy:dev
     container_name: m3u-proxy
     environment:
-      - API_TOKEN=${M3U_PROXY_TOKEN:-your-secure-token-here}
+      # API Authentication Token (must match M3U_PROXY_TOKEN above)
+      - API_TOKEN=${M3U_PROXY_TOKEN:-changeme}
+      - PORT=${M3U_PROXY_PORT:-38085}
+
+      # Redis Configuration (for stream pooling)
       - REDIS_ENABLED=true
-      - REDIS_URL=redis://redis:6379/0
+      - REDIS_PORT=${REDIS_PORT:-6379}
+      - REDIS_HOST=${REDIS_HOST:-redis}
+      - REDIS_DB=6 # 1-5 used by m3u-editor, so use 6 for m3u-proxy
       - ENABLE_REDIS_POOLING=true
+      
+      # Logging
       - LOG_LEVEL=INFO
+
+      # Public URL for re-writing HLS stream URLs
+      # Set this to the public URL of your m3u-editor instance
+      # Replace `m3u-editor` with your actual domain or LAN IP if needed so it is accessible to clients
+      # NOTE: Make sure to add the `/m3u-proxy`
+      - PUBLIC_URL=${M3U_PROXY_PUBLIC_URL:-http://localhost:36400/m3u-proxy}  # Change to your public URL if needed
+      
+      # Note: ROOT_PATH=/m3u-proxy is now the default, no need to set it explicitly
+      # Only set ROOT_PATH= (empty) if you need to use the root path instead
+      
+      # Optional: Additional configuration
+      # - REDIS_POOL_MAX_CONNECTIONS=50
+      # - STREAM_TIMEOUT=300
+      # - CLEANUP_INTERVAL=60
     restart: unless-stopped
+    # Don't expose port externally - only accessible via internal network
+    # ports:
+    #   - "${PROXY_PORT:-38085}:${PROXY_PORT:-38085}"  # Uncomment only if you need direct external access
     networks:
       - m3u-network
+    depends_on:
+      redis:
+        condition: service_healthy
     devices:
       - /dev/dri:/dev/dri
-    depends_on:
-      - redis
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:${PROXY_PORT:-38085}/health?api_token=${M3U_PROXY_TOKEN:-changeme}"]
+      interval: 30s
+      timeout: 2s
+      retries: 12
+      start_period: 10s
+    
+    # Optional: Resource limits
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '2.0'
+    #       memory: 2G
+    #     reservations:
+    #       cpus: '0.5'
+    #       memory: 512M
 
   redis:
     image: redis:alpine3.22
-    container_name: m3u-proxy-redis
-    restart: unless-stopped
-    networks:
-      - m3u-network
+    container_name: m3u-redis
     volumes:
       - redis-data:/data
-
+    restart: unless-stopped
+    command: redis-server --port ${REDIS_PORT:-6379} --appendonly no --save "" --maxmemory 256mb --maxmemory-policy allkeys-lru
+    networks:
+      - m3u-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "${REDIS_PORT:-6379}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    
+    # Optional: Resource limits
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '1.0'
+    #       memory: 512M
+    #     reservations:
+    #       cpus: '0.25'
+    #       memory: 128M
 networks:
   m3u-network:
     driver: bridge
 
 volumes:
   pgdata:
+    driver: local
   redis-data:
+    driver: local
 ```
 
 **Key Benefits:**
@@ -104,55 +197,7 @@ volumes:
 - ✅ Independent scaling and management
 - ✅ Separate logging and monitoring
 
-### Option 2: External Proxy without Redis
-
-If you don't need advanced pooling features:
-
-```yaml
-services:
-  m3u-editor:
-    image: sparkison/m3u-editor:latest
-    container_name: m3u-editor
-    environment:
-      - TZ=Etc/UTC
-      - APP_URL=http://localhost
-      # ... (PostgreSQL settings same as above)
-      # M3U Proxy settings (external, no Redis)
-      - M3U_PROXY_ENABLED=false # Disable embedded instance
-      - M3U_PROXY_URL=http://m3u-proxy:8085
-      - M3U_PROXY_TOKEN=${M3U_PROXY_TOKEN:-your-secure-token-here}
-    volumes:
-      - ./data:/var/www/config
-      - pgdata:/var/lib/postgresql/data
-    restart: unless-stopped
-    ports:
-      - 36400:36400
-    networks:
-      - m3u-network
-    depends_on:
-      - m3u-proxy
-
-  m3u-proxy:
-    image: sparkison/m3u-proxy:latest
-    container_name: m3u-proxy
-    environment:
-      - API_TOKEN=${M3U_PROXY_TOKEN:-your-secure-token-here}
-      - LOG_LEVEL=INFO
-    restart: unless-stopped
-    networks:
-      - m3u-network
-    devices:
-      - /dev/dri:/dev/dri
-
-networks:
-  m3u-network:
-    driver: bridge
-
-volumes:
-  pgdata:
-```
-
-### Option 3: Embedded Proxy (Legacy)
+### Option 2: Embedded Proxy (Legacy)
 
 For simple setups or development only:
 

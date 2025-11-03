@@ -41,7 +41,7 @@ export SUPERVISOR_PHP_USER="root"
 export APP_URL="${APP_URL:-http://localhost}"
 export APP_PORT="${APP_PORT:-36400}" # Default 36400
 
-# Set M3U_PROXY_URL based on mode
+# Set proxy reverse proxy target and token based on mode
 if [ "${M3U_PROXY_ENABLED}" = "true" ]; then
     # Embedded mode - proxy through nginx to localhost
     export M3U_PROXY_NGINX_TARGET="127.0.0.1:${M3U_PROXY_PORT}"
