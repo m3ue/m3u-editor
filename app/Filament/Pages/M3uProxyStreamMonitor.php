@@ -186,7 +186,7 @@ class M3uProxyStreamMonitor extends Page
             }
 
             // Calculate uptime
-            $startedAt = Carbon::parse($stream['created_at']);
+            $startedAt = Carbon::parse($stream['created_at'], 'UTC');
             $uptime = $startedAt->diffForHumans(null, true);
 
             // Format bytes transferred
@@ -198,13 +198,10 @@ class M3uProxyStreamMonitor extends Page
                 ? round(($stream['total_bytes_served'] * 8) / $durationSeconds / 1000, 2)
                 : 0;
 
-            // Format buffer size
-            $bufferSize = 'N/A'; // m3u-proxy may not expose this
-
             // Normalize clients
             $clients = array_map(function ($client) {
-                $connectedAt = Carbon::parse($client['created_at']);
-                $lastAccess = Carbon::parse($client['last_access']);
+                $connectedAt = Carbon::parse($client['created_at'], 'UTC');
+                $lastAccess = Carbon::parse($client['last_access'], 'UTC');
 
                 // Client is considered active if:
                 // 1. is_connected is true (from API), OR
@@ -231,7 +228,6 @@ class M3uProxyStreamMonitor extends Page
                 'bandwidth_kbps' => $bandwidthKbps,
                 'bytes_transferred' => $bytesTransferred,
                 'uptime' => $uptime,
-                'buffer_size' => $bufferSize,
                 'started_at' => $startedAt->format('Y-m-d H:i:s'),
                 'process_running' => $stream['is_active'] && $stream['client_count'] > 0,
                 'model' => $model,
