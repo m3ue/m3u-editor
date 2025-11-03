@@ -12,10 +12,10 @@ return [
     'm3u_proxy_token' => env('M3U_PROXY_TOKEN'), // API token for authenticating with the proxy service
     'm3u_proxy_public_url' => env('M3U_PROXY_PUBLIC_URL'), // Public URL for the proxy (auto-set in start-container)
 
+    'url_override' => env('PROXY_URL_OVERRIDE', null),
 
     /* Deprecated Proxy Settings - use M3U_PROXY_* env vars instead */
 
-    'url_override' => env('PROXY_URL_OVERRIDE', null),
     'proxy_format' => env('PROXY_FORMAT', 'mpts'), // 'mpts' or 'hls'
     'ffmpeg_path' => env('PROXY_FFMPEG_PATH', null),
     'ffprobe_path' => env('PROXY_FFPROBE_PATH', null),

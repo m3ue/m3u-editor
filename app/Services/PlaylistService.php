@@ -13,6 +13,7 @@ use Exception;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 class PlaylistService
 {
@@ -23,18 +24,24 @@ class PlaylistService
      */
     public static function getBaseUrl($path = '')
     {
-        // Manually construct base URL to ensure port is included if set
-        // @TODO: should we use the `PROXY_URL_OVERRIDE` env variable if set?
-        $port = null;
-        if (config('app.port') && !str_contains(config('app.url'), 'https://')) {
-            // Check if using HTTPS
-            $port = config('app.port');
+        // Normalize path
+        if (empty($path)) {
+            $path = null;
         }
-        $url = rtrim(url('/'), '/') . ($port ? ':' . $port : '');
-        if ($path) {
-            $url .= '/' . ltrim($path, '/');
+
+        // Check if override URL is set in config
+        $urlOverride = config('proxy.url_override');
+        if ($urlOverride) {
+            return rtrim($urlOverride, '/') . ($path ? '/' . ltrim($path, '/') : '');
         }
-        return $url;
+
+        // Manually construct base URL to ensure port is included (if not using HTTPS)
+        $url = rtrim(config('app.url'), '/');
+        $port = config('app.port');
+        if (!Str::contains($url, 'https') && $port) {
+            $url .= ':' . $port;
+        }
+        return $url . ($path ? '/' . ltrim($path, '/') : '');
     }
 
     /**
