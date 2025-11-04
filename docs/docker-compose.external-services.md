@@ -30,7 +30,7 @@ This is a comprehensive production setup with **ALL services externalized** into
 ## Services Included
 
 1. **PostgreSQL** (`postgres`) - External database container
-   - PostgreSQL 16 Alpine
+   - PostgreSQL 17 Alpine
    - Persistent data volume
    - Health checks configured
 
@@ -88,7 +88,8 @@ nano .env
 ```
 
 **Important**: Make sure `APP_URL` and `M3U_PROXY_PUBLIC_URL` include the correct port!
-- `APP_URL=http://localhost:8080`
+- `APP_URL=http://localhost`
+- `APP_PORT=8080`
 - `M3U_PROXY_PUBLIC_URL=http://localhost:8080/m3u-proxy`
 
 ### 3. Start Services
@@ -298,15 +299,6 @@ docker run --rm -v m3u-editor_redis-data:/data -v $(pwd):/backup alpine tar czf 
 ```
 
 ## Troubleshooting
-
-### Quick Troubleshooting
-
-Run the automated troubleshooting script:
-```bash
-./troubleshoot-external-services.sh
-```
-
-This will check service health, connectivity, and common issues.
 
 ### M3U Editor Container is Unhealthy
 
