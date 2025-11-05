@@ -8,6 +8,7 @@ use Illuminate\Http\RedirectResponse;
 use App\Enums\ChannelLogoType;
 use App\Enums\PlaylistChannelId;
 use App\Facades\PlaylistFacade;
+use App\Facades\ProxyFacade;
 use App\Models\Channel;
 use App\Models\CustomPlaylist;
 use App\Models\Epg;
@@ -385,6 +386,7 @@ class XtreamApiController extends Controller
             return response()->json(['error' => 'Unauthorized'], 401);
         }
 
+        $baseUrl = ProxyFacade::getBaseUrl();
         $action = $request->input('action', 'panel');
         if (
             $action === 'panel' ||
@@ -434,18 +436,18 @@ class XtreamApiController extends Controller
                 'allowed_output_formats' => $outputFormats,
             ];
 
-            $scheme = $request->getScheme();
-            $host = $request->getHost();
-            $currentPort = $request->getPort();
-            $baseUrl = $scheme . '://' . $host;
-            $httpsPort = ($scheme === 'https') ? (string)$currentPort : "";
+            $parsedUrl = parse_url($baseUrl);
+            $scheme = $parsedUrl['scheme'] ?? 'http';
+            $host = $parsedUrl['host'];
+            $port = isset($parsedUrl['port']) ? ':' . $parsedUrl['port'] : '';
+            $httpsPort = ($scheme === 'https') ? (string)$port : "";
 
             $serverInfo = [
                 'xui' => false, // Assuming this is not an XUI panel
                 'version' => null, // Placeholder version, update as needed
                 'revision' => null, // No revision info available
                 'url' => $baseUrl,
-                'port' => (string)$currentPort,
+                'port' => (string)$port,
                 'https_port' => $httpsPort,
                 'server_protocol' => $scheme,
                 'rtmp_port' => "", // RTMP not available currently
@@ -503,7 +505,7 @@ class XtreamApiController extends Controller
             if ($enabledChannels instanceof Collection) {
                 $channelNumber = $playlist->auto_channel_increment ? $playlist->channel_start - 1 : 0;
                 foreach ($enabledChannels as $index => $channel) {
-                    $streamIcon = url('/placeholder.png');
+                    $streamIcon = $baseUrl . '/placeholder.png';
                     if ($channel->logo) {
                         // Logo override takes precedence
                         $streamIcon = $channel->logo;
@@ -511,7 +513,7 @@ class XtreamApiController extends Controller
                         $streamIcon = $channel->epgChannel->icon;
                     } elseif ($channel->logo_type === ChannelLogoType::Channel && ($channel->logo || $channel->logo_internal)) {
                         $logo = $channel->logo ?? $channel->logo_internal ?? '';
-                        $streamIcon = filter_var($logo, FILTER_VALIDATE_URL) ? $logo : url($logo);
+                        $streamIcon = filter_var($logo, FILTER_VALIDATE_URL) ? $logo : $baseUrl . "/$logo";
                     }
                     if ($playlist->enable_logo_proxy) {
                         $streamIcon = LogoProxyController::generateProxyUrl($streamIcon);
@@ -583,7 +585,7 @@ class XtreamApiController extends Controller
                         'tv_archive_duration' => $channel->shift ?? 0,
                         'custom_sid' => '',
                         'thumbnail' => '',
-                        'direct_source' => url("/live/{$username}/{$password}/" . $channel->id . "." . $extension),
+                        'direct_source' => $baseUrl . "/live/{$username}/{$password}/" . $channel->id . "." . $extension,
                     ];
                 }
             }
@@ -630,7 +632,7 @@ class XtreamApiController extends Controller
             $vodStreams = [];
             if ($enabledVodChannels instanceof Collection) {
                 foreach ($enabledVodChannels as $index => $channel) {
-                    $streamIcon = url('/placeholder.png');
+                    $streamIcon = $baseUrl . '/placeholder.png';
                     if ($channel->logo) {
                         // Logo override takes precedence
                         $streamIcon = $channel->logo;
@@ -638,7 +640,7 @@ class XtreamApiController extends Controller
                         $streamIcon = $channel->epgChannel->icon;
                     } elseif ($channel->logo_type === ChannelLogoType::Channel && ($channel->logo || $channel->logo_internal)) {
                         $logo = $channel->logo ?? $channel->logo_internal ?? '';
-                        $streamIcon = filter_var($logo, FILTER_VALIDATE_URL) ? $logo : url($logo);
+                        $streamIcon = filter_var($logo, FILTER_VALIDATE_URL) ? $logo : $baseUrl . "/$logo";
                     }
                     if ($playlist->enable_logo_proxy) {
                         $streamIcon = LogoProxyController::generateProxyUrl($streamIcon);
@@ -685,7 +687,7 @@ class XtreamApiController extends Controller
                         'tmdb_id' => (int)$tmdb,
                         'container_extension' => $channel->container_extension ?? 'mkv',
                         'custom_sid' => '',
-                        'direct_source' => url("/movie/{$username}/{$password}/" . $channel->id . "." . $extension),
+                        'direct_source' => $baseUrl . "/movie/{$username}/{$password}/" . $channel->id . "." . $extension,
                     ];
                 }
             }
@@ -753,7 +755,7 @@ class XtreamApiController extends Controller
                         'num' => $index + 1,
                         'name' => $seriesItem->name,
                         'series_id' => (int)$seriesItem->id,
-                        'cover' => $seriesItem->cover ? (filter_var($seriesItem->cover, FILTER_VALIDATE_URL) ? $seriesItem->cover : url($seriesItem->cover)) : url('/placeholder.png'),
+                        'cover' => $seriesItem->cover ? (filter_var($seriesItem->cover, FILTER_VALIDATE_URL) ? $seriesItem->cover : $baseUrl . "/$seriesItem->cover") : $baseUrl . '/placeholder.png',
                         'plot' => $seriesItem->plot ?? '',
                         'cast' => $seriesItem->cast ?? '',
                         'director' => $seriesItem->director ?? '',
@@ -801,7 +803,7 @@ class XtreamApiController extends Controller
                 $seriesItem->load('seasons.episodes', 'category');
             }
 
-            $cover = $seriesItem->cover ? (filter_var($seriesItem->cover, FILTER_VALIDATE_URL) ? $seriesItem->cover : url($seriesItem->cover)) : url('/placeholder.png');
+            $cover = $seriesItem->cover ? (filter_var($seriesItem->cover, FILTER_VALIDATE_URL) ? $seriesItem->cover : $baseUrl . "/$seriesItem->cover") : $baseUrl . '/placeholder.png';
             $backdropPaths = $seriesItem->backdrop_path ?? [];
             if ($playlist->enable_logo_proxy) {
                 $cover = LogoProxyController::generateProxyUrl($cover);
@@ -885,9 +887,9 @@ class XtreamApiController extends Controller
                                 ]),
                                 'added' => $episode->added,
                                 'season' => $episode->season,
-                                'custom_sid' => $espisode->custom_sid ?? '',
+                                'custom_sid' => $episode->custom_sid ?? '',
                                 'stream_id' => $episode->id,
-                                'direct_source' => url("/series/{$username}/{$password}/" . $episode->id . ".{$containerExtension}")
+                                'direct_source' => $baseUrl . "/series/{$username}/{$password}/" . $episode->id . ".{$containerExtension}"
                             ];
                         }
                     }
@@ -1141,7 +1143,7 @@ class XtreamApiController extends Controller
                 'category_ids' => ($channel->group_id ? [$channel->group_id] : []),
                 'container_extension' => $extension,
                 'custom_sid' => $movieData['custom_sid'] ?? '',
-                'direct_source' => url("/movie/{$username}/{$password}/" . $channel->id . '.' . $extension),
+                'direct_source' => $baseUrl . "/movie/{$username}/{$password}/" . $channel->id . '.' . $extension,
             ];
 
             return response()->json([

@@ -78,9 +78,12 @@ class PlaylistGenerateController extends Controller
         }
         $logoProxyEnabled = $playlist->enable_logo_proxy;
 
+        // Get the base URL
+        $baseUrl = ProxyFacade::getBaseUrl();
+
         // Get all active channels
         return response()->stream(
-            function () use ($playlist, $proxyEnabled, $logoProxyEnabled, $type, $usedAuth) {
+            function () use ($baseUrl, $playlist, $proxyEnabled, $logoProxyEnabled, $type, $usedAuth) {
                 // Get all active channels
                 $channels = $playlist->channels()
                     ->leftJoin('groups', 'channels.group_id', '=', 'groups.id')
@@ -156,7 +159,7 @@ class PlaylistGenerateController extends Controller
                         $icon = $channel->logo ?? $channel->logo_internal ?? '';
                     }
                     if (empty($icon)) {
-                        $icon = url('/placeholder.png');
+                        $icon = $baseUrl . '/placeholder.png';
                     }
 
                     // Get the extension from the source URL
@@ -180,7 +183,7 @@ class PlaylistGenerateController extends Controller
                             $urlPath = '/movie';
                             $extension = $channel->container_extension ?? 'mkv';
                         }
-                        $url = url("{$urlPath}/{$username}/{$password}/" . $channel->id . "." . $extension);
+                        $url = $baseUrl . "/{$urlPath}/{$username}/{$password}/" . $channel->id . "." . $extension;
                     } else if ($proxyEnabled) {
                         // Get the proxy URL
                         $url = ProxyFacade::getProxyUrlForChannel(
@@ -258,7 +261,7 @@ class PlaylistGenerateController extends Controller
                             }
                             if (!(config('app.disable_m3u_xtream_format') ?? false)) {
                                 $containerExtension = $episode->container_extension ?? 'mp4';
-                                $url = url("/series/{$username}/{$password}/" . $episode->id . ".{$containerExtension}");
+                                $url = $baseUrl . "/series/{$username}/{$password}/" . $episode->id . ".{$containerExtension}";
                             } else if ($proxyEnabled) {
                                 // Get the proxy URL
                                 $url = ProxyFacade::getProxyUrlForEpisode(
@@ -403,13 +406,14 @@ class PlaylistGenerateController extends Controller
 
         return response()->json($channels->transform(function (Channel $channel) use ($username, $password, $idChannelBy, $autoIncrement, &$channelNumber, $playlist) {
             $sourceUrl = $channel->url_custom ?? $channel->url;
+            $baseUrl = ProxyFacade::getBaseUrl();
             $extension = pathinfo($sourceUrl, PATHINFO_EXTENSION);
             $urlPath = '/live';
             if ($channel->is_vod) {
                 $urlPath = '/movie';
                 $extension = $channel->container_extension ?? 'mkv';
             }
-            $url = rtrim(url("{$urlPath}/{$username}/{$password}/" . $channel->id . "." . $extension), '.');
+            $url = rtrim($baseUrl . "/{$urlPath}/{$username}/{$password}/" . $channel->id . "." . $extension, '.');
             $channelNo = $channel->channel;
             if (!$channelNo && $autoIncrement) {
                 $channelNo = ++$channelNumber;
@@ -470,17 +474,8 @@ class PlaylistGenerateController extends Controller
             : $playlist->streams;
         $tunerCount = max($tunerCount, 1); // Ensure at least 1 tuner
         $deviceId = substr($uuid, 0, 8);
-        $proxyOverrideUrl = config('proxy.url_override');
-        if (!empty($proxyOverrideUrl)) {
-            $parsedUrl = parse_url($proxyOverrideUrl);
-            $scheme = $parsedUrl['scheme'] ?? 'http';
-            $host = $parsedUrl['host'];
-            $port = isset($parsedUrl['port']) ? ':' . $parsedUrl['port'] : '';
-            $base = "{$scheme}://{$host}{$port}";
-            $baseUrl = "$base/$uuid/hdhr";
-        } else {
-            $baseUrl = url("/{$uuid}/hdhr");
-        }
+        $baseUrl = ProxyFacade::getBaseUrl();
+        $baseUrl = $baseUrl . "/{$uuid}/hdhr";
         return [
             'DeviceID' => $deviceId,
             'FriendlyName' => "{$playlist->name} HDHomeRun",

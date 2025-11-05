@@ -118,7 +118,8 @@ class Channel extends Model
         }
         $profile = $profileId ? StreamProfile::find($profileId) : null;
 
-        // Always proxy the internal proxy so we can attempt to transcode the stream for better compatibility
+        // Always proxy the internal player so we can attempt to transcode the stream for better compatibility
+        // This also prevents CORS and mixed-content issues
         $url = route('m3u-proxy.channel.player', ['id' => $this->id]);
 
         // Determine the channel format based on URL or container extension
