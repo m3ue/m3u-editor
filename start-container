@@ -448,6 +448,9 @@ fi
 echo "💾 Running migrations..."
 php artisan migrate --force
 
+echo "🔄 Resetting any stuck sync processes..."
+php artisan app:reset-sync-process
+
 # Ensure composer dir is writable
 [ ! -d /.composer ] && mkdir /.composer
 chmod -R ugo+rw /.composer

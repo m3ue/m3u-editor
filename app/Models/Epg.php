@@ -29,6 +29,7 @@ class Epg extends Model
         'uploads' => 'array',
         'status' => Status::class,
         'processing' => 'boolean',
+        'processing_started_at' => 'datetime',
         'is_cached' => 'boolean',
         'cache_meta' => 'array',
         'source_type' => EpgSourceType::class,

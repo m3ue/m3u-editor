@@ -114,7 +114,7 @@ class EpgCacheService
             $stats = $this->parseAndSaveEpgDataSinglePass($epg, $epgFilePath, $totalChannels, $totalProgrammes);
             Log::debug("Processed {$stats['channels']} channels and {$stats['programmes']} programmes across {$stats['date_count']} dates");
 
-                        // Save metadata
+            // Save metadata
             $metadata = [
                 'cache_created' => time(),
                 'cache_version' => self::CACHE_VERSION,
@@ -156,7 +156,7 @@ class EpgCacheService
     {
         $reader = new XMLReader();
         $reader->open('compress.zlib://' . $filePath);
-        
+
         $channelCount = 0;
         $programmeCount = 0;
         $channelBatchSize = 5000; // Larger batch for fewer writes
@@ -237,7 +237,7 @@ class EpgCacheService
                     }
 
                     $date = $startDateTime->format('Y-m-d');
-                    
+
                     // Track date range
                     if ($dateRangeTracker['min_date'] === null || $date < $dateRangeTracker['min_date']) {
                         $dateRangeTracker['min_date'] = $date;
@@ -336,7 +336,7 @@ class EpgCacheService
                             : 99;
                         $epg->update(['cache_progress' => $progress]);
                         $lastProgressUpdate = $totalProcessed;
-                        
+
                         // Garbage collection less frequently
                         if (function_exists('gc_collect_cycles')) {
                             gc_collect_cycles();
@@ -356,7 +356,6 @@ class EpgCacheService
                     fclose($handle);
                 }
             }
-
         } finally {
             $reader->close();
         }
@@ -385,7 +384,7 @@ class EpgCacheService
 
         // Check if file already exists to determine if this is truly the first write
         $fileExists = file_exists($fullPath);
-        
+
         if (!$fileExists) {
             // First write - create new file
             file_put_contents($fullPath, json_encode($channelBatch, JSON_UNESCAPED_UNICODE), LOCK_EX);
@@ -410,7 +409,7 @@ class EpgCacheService
     private function directAppendProgrammeOptimized(Epg $epg, string $date, string $channelId, array $programme, array &$fileHandles): void
     {
         $filename = "programmes-{$date}.jsonl";
-        
+
         // Reuse file handle if already open
         if (!isset($fileHandles[$date])) {
             $programmesPath = $this->getCacheFilePath($epg, $filename);
@@ -436,7 +435,7 @@ class EpgCacheService
 
         $line = json_encode($record, JSON_UNESCAPED_UNICODE) . "\n";
         fwrite($fileHandles[$date], $line);
-        
+
         // Close handles if we have too many open (prevent "too many open files" error)
         if (count($fileHandles) > 50) {
             foreach ($fileHandles as $d => $handle) {

@@ -32,7 +32,7 @@ class SyncListener
             if ($playlist->auto_merge_channels_enabled && $playlist->status === Status::Completed) {
                 $this->handleAutoMergeChannels($playlist);
             }
-            
+
             // Handle post-processes
             $playlist->postProcesses()->where([
                 ['event', 'synced'],
@@ -110,7 +110,12 @@ class SyncListener
     private function postProcessEpg(Epg $epg)
     {
         // Update status to Processing (so UI components will continue to refresh) and dispatch cache job
-        $epg->update(['status' => Status::Processing]);
+        // Note: processing_started_at and processing_phase will be set by GenerateEpgCache job
+        $epg->update([
+            'status' => Status::Processing,
+            'processing_started_at' => null,
+            'processing_phase' => null,
+        ]);
 
         // Dispatch cache generation job
         dispatch(new GenerateEpgCache($epg->uuid, notify: true));

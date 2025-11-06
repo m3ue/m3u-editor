@@ -74,6 +74,8 @@ class ProcessEpgImport implements ShouldQueue
         $this->epg->update([
             'processing' => true,
             'status' => Status::Processing,
+            'processing_started_at' => now(),
+            'processing_phase' => 'import',
             'errors' => null,
             'progress' => 0,
         ]);
@@ -116,6 +118,8 @@ class ProcessEpgImport implements ShouldQueue
                         'errors' => $error,
                         'progress' => 100,
                         'processing' => false,
+                        'processing_started_at' => null,
+                        'processing_phase' => null,
                     ]);
 
                     // Fire the epg synced event
@@ -385,6 +389,8 @@ class ProcessEpgImport implements ShouldQueue
                             'errors' => $error,
                             'progress' => 100,
                             'processing' => false,
+                            'processing_started_at' => null,
+                            'processing_phase' => null,
                         ]);
                         event(new SyncCompleted($epg));
                     })->dispatch();
@@ -412,6 +418,8 @@ class ProcessEpgImport implements ShouldQueue
                     'errors' => $error,
                     'progress' => 100,
                     'processing' => false,
+                    'processing_started_at' => null,
+                    'processing_phase' => null,
                 ]);
 
                 // Fire the epg synced event
@@ -440,6 +448,8 @@ class ProcessEpgImport implements ShouldQueue
                 'errors' => $e->getMessage(),
                 'progress' => 100,
                 'processing' => false,
+                'processing_started_at' => null,
+                'processing_phase' => null,
             ]);
 
             // Fire the epg synced event

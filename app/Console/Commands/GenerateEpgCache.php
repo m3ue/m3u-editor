@@ -49,7 +49,7 @@ class GenerateEpgCache extends Command
         $duration = microtime(true) - $start;
 
         if ($result) {
-            $this->info('Cache generated successfully in '.round($duration, 2).' seconds');
+            $this->info('Cache generated successfully in ' . round($duration, 2) . ' seconds');
 
             return 0;
         } else {
