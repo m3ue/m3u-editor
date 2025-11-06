@@ -88,6 +88,9 @@ class PlaylistGenerateController extends Controller
                 $channels = $playlist->channels()
                     ->leftJoin('groups', 'channels.group_id', '=', 'groups.id')
                     ->where('channels.enabled', true)
+                    ->when(!$playlist->include_vod_in_m3u, function ($q) {
+                        $q->where('channels.is_vod', false);
+                    })
                     ->with(['epgChannel', 'tags', 'group'])
                     ->orderBy('groups.sort_order') // Primary sort
                     ->orderBy('channels.sort') // Secondary sort
@@ -109,13 +112,7 @@ class PlaylistGenerateController extends Controller
                 echo "#EXTM3U\n";
                 $channelNumber = $playlist->auto_channel_increment ? $playlist->channel_start - 1 : 0;
                 $idChannelBy = $playlist->id_channel_by;
-                $includeVod = $playlist->include_vod_in_m3u;
                 foreach ($channels as $channel) {
-                    // See if channel is VOD
-                    if ($channel->is_vod && !$includeVod) {
-                        continue;
-                    }
-
                     // Get the title and name
                     $title = $channel->title_custom ?? $channel->title;
                     $name = $channel->name_custom ?? $channel->name;
@@ -393,6 +390,9 @@ class PlaylistGenerateController extends Controller
         $channels = $playlist->channels()
             ->leftJoin('groups', 'channels.group_id', '=', 'groups.id')
             ->where('channels.enabled', true)
+            ->when(!$playlist->include_vod_in_m3u, function ($q) {
+                $q->where('channels.is_vod', false);
+            })
             ->with(['epgChannel', 'tags', 'group'])
             ->orderBy('groups.sort_order') // Primary sort
             ->orderBy('channels.sort') // Secondary sort
