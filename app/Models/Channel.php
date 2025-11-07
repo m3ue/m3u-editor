@@ -257,11 +257,32 @@ class Channel extends Model
                 return false;
             }
             $movieData = $xtream->getVodInfo($this->source_id);
-            $this->update([
+            $releaseDate = $movieData['info']['release_date'] ?? null;
+            $releaseDateAlt = $movieData['info']['releasedate'] ?? null;
+            $year = $this->year;
+            if (!$releaseDate && $releaseDateAlt) {
+                // Make sure base release_date is always set
+                $movieData['info']['release_date'] = $releaseDateAlt;
+            }
+            if ($releaseDate || $releaseDateAlt) {
+                // If either data is set, and year is not set, update it
+                $dateToParse = $releaseDate ?? $releaseDateAlt;
+                $year = null;
+                try {
+                    $date = new \DateTime($dateToParse);
+                    $year = (int) $date->format('Y');
+                } catch (\Exception $e) {
+                    Log::warning("Unable to parse release date \"{$dateToParse}\" for VOD {$this->id}");
+                }
+            }
+            $update = [
+                'year' => $year,
                 'info' => $movieData['info'] ?? null,
                 'movie_data' => $movieData['movie_data'] ?? null,
                 'last_metadata_fetch' => now(),
-            ]);
+            ];
+
+            $this->update($update);
 
             return true;
         } catch (\Exception $e) {
