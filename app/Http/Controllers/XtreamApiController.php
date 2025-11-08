@@ -794,7 +794,7 @@ class XtreamApiController extends Controller
             // Check if series metadata has been fetched, and if so how recently
             if (!$seriesItem->last_metadata_fetch || $seriesItem->last_metadata_fetch < now()->subDays(1)) {
                 // Either no metadata, or stale metadata
-                $results = $seriesItem->fetchMetadata();
+                $results = $seriesItem->fetchMetadata(sync: false);
                 if ($results === false) {
                     return response()->json(['error' => 'Failed to fetch series metadata'], 500);
                 }
