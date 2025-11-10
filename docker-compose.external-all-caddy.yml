@@ -1,0 +1,292 @@
+# M3U Editor with ALL External Services (Caddy Edition)
+# This is a full production setup with separate containers for all services
+#
+# Features:
+# - External PostgreSQL database container
+# - External Caddy reverse proxy container (alternative to Nginx)
+# - External m3u-proxy container for streaming
+# - External Redis container for stream pooling and caching
+# - All m3u-editor internal services DISABLED
+# - Secure token-based authentication
+# - Resource limits and health checks
+#
+# Setup:
+# 1. Copy this file to your project directory as docker-compose.yml
+# 2. Create a .env file with the variables below (or set in environment section)
+# 3. Run: docker-compose up -d
+# 4. Access m3u-editor at http://localhost:8080 (or your configured port)
+#
+# Required Environment Variables (create .env file):
+# M3U_PROXY_TOKEN=<generate with: openssl rand -hex 32>
+# PG_PASSWORD=<generate with: openssl rand -base64 32>
+# APP_URL=http://localhost:8080  # or your domain
+
+services:
+  # PostgreSQL Database - External Service
+  postgres:
+    image: postgres:17-alpine
+    container_name: m3u-postgres
+    environment:
+      - POSTGRES_DB=${PG_DATABASE:-m3ue}
+      - POSTGRES_USER=${PG_USER:-m3ue}
+      - POSTGRES_PASSWORD=${PG_PASSWORD:-changeme}
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    networks:
+      - m3u-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-m3ue} -d ${PG_DATABASE:-m3ue}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    # Optional: Expose PostgreSQL port (uncomment if needed for external access)
+    # ports:
+    #   - "${PG_PORT:-5432}:5432"
+
+    # Optional: Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+
+  # Redis Cache & Stream Pooling - External Service
+  redis:
+    image: redis:alpine3.22
+    container_name: m3u-redis
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+    command: redis-server --port ${REDIS_PORT:-6379} --appendonly no --save "" --maxmemory 256mb --maxmemory-policy allkeys-lru
+    networks:
+      - m3u-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "${REDIS_PORT:-6379}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    # Optional: Expose Redis port (uncomment if needed for external access)
+    # ports:
+    #   - "${REDIS_PORT:-6379}:6379"
+
+    # Optional: Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+  # M3U Proxy - External Streaming Service
+  m3u-proxy:
+    build:
+      context: ../m3u-proxy
+      dockerfile: Dockerfile
+      args:
+        GIT_BRANCH: ${GIT_BRANCH:-local}
+        GIT_COMMIT: ${GIT_COMMIT:-local}
+        GIT_TAG: ${GIT_TAG:-local}
+    image: sparkison/m3u-proxy:${IMAGE_TAG:-latest}
+    container_name: m3u-proxy
+    environment:
+      # API Authentication Token (must match M3U_PROXY_TOKEN in m3u-editor)
+      - API_TOKEN=${M3U_PROXY_TOKEN:-changeme}
+      - PORT=${M3U_PROXY_PORT:-38085}
+
+      # Redis Configuration (for stream pooling)
+      - REDIS_ENABLED=true
+      - REDIS_PORT=${REDIS_PORT:-6379}
+      - REDIS_HOST=m3u-redis
+      - REDIS_DB=6 # 1-5 used by m3u-editor, so use 6 for m3u-proxy
+      - ENABLE_REDIS_POOLING=true
+
+      # Logging
+      - LOG_LEVEL=INFO
+
+      # Public URL for re-writing HLS stream URLs
+      # Set this to the public URL of your m3u-editor instance
+      # Replace with your actual domain or LAN IP so it is accessible to clients
+      # NOTE: Make sure to add the `/m3u-proxy` path
+      - PUBLIC_URL=${M3U_PROXY_PUBLIC_URL:-http://localhost/m3u-proxy}  # Change to your public URL if needed
+
+      # Note: ROOT_PATH=/m3u-proxy is now the default, no need to set it explicitly
+      # Only set ROOT_PATH= (empty) if you need to use the root path instead
+
+      # Optional: Additional configuration
+      # - REDIS_POOL_MAX_CONNECTIONS=50
+      # - STREAM_TIMEOUT=300
+      # - CLEANUP_INTERVAL=60
+    restart: unless-stopped
+    # Don't expose port externally - only accessible via internal network and nginx
+    # ports:
+    #   - "${M3U_PROXY_PORT:-38085}:${M3U_PROXY_PORT:-38085}"  # Uncomment only if you need direct external access
+    networks:
+      - m3u-network
+    depends_on:
+      redis:
+        condition: service_healthy
+    # devices:
+    #   - /dev/dri:/dev/dri
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:${M3U_PROXY_PORT:-38085}/health?api_token=${M3U_PROXY_TOKEN:-changeme}"]
+      interval: 30s
+      timeout: 2s
+      retries: 12
+      start_period: 10s
+
+    # Optional: Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # M3U Editor Application - All Internal Services Disabled
+  m3u-editor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+      args:
+        GIT_BRANCH: ${GIT_BRANCH:-local}
+        GIT_COMMIT: ${GIT_COMMIT:-local}
+        GIT_TAG: ${GIT_TAG:-local}
+    image: sparkison/m3u-editor:${IMAGE_TAG:-latest}
+    container_name: m3u-editor
+    environment:
+      # Timezone
+      - TZ=Etc/UTC
+
+      # Application URL (change to your domain or IP)
+      # This should match your Caddy reverse proxy setup
+      - APP_URL=${APP_URL:-http://localhost}
+      - APP_PORT=${APP_PORT:-8080}
+
+      # Web Server Configuration - DISABLE embedded NGINX
+      - NGINX_ENABLED=false # Disable embedded NGINX, using external Caddy service
+      - FPMPORT=9000 # FPM port for external Caddy to connect to
+
+      # Postgres Configuration - DISABLE embedded Postgres
+      - ENABLE_POSTGRES=false # Disable embedded Postgres, using external postgres service
+
+      # Database Connection (m3u-editor) - Connect to external postgres service
+      - DB_CONNECTION=pgsql
+      - DB_HOST=m3u-postgres # Hostname of external postgres container
+      - DB_PORT=5432
+      - DB_DATABASE=${PG_DATABASE:-m3ue}
+      - DB_USERNAME=${PG_USER:-m3ue}
+      - DB_PASSWORD=${PG_PASSWORD:-changeme}
+
+      # Redis configuration - DISABLE embedded Redis, use external service
+      - REDIS_ENABLED=false # Disable embedded Redis, using external redis service
+      - REDIS_SERVER_PORT=${REDIS_PORT:-6379}
+      - REDIS_HOST=redis # Hostname of external redis container
+
+      # M3U Proxy Configuration - DISABLE embedded, use external service
+      - M3U_PROXY_ENABLED=false # Disable embedded and use external m3u-proxy
+      - M3U_PROXY_PORT=${M3U_PROXY_PORT:-38085}
+      - M3U_PROXY_HOST=m3u-proxy # Internal network hostname of m3u-proxy container
+      # Public URL for m3u-proxy (used for rewriting stream URLs)
+      - M3U_PROXY_PUBLIC_URL=${M3U_PROXY_PUBLIC_URL:-http://localhost:8080/m3u-proxy}
+      - M3U_PROXY_TOKEN=${M3U_PROXY_TOKEN:-changeme}
+    volumes:
+      # Persistent configuration data
+      - ./data:/var/www/config
+      # Share public directory with caddy for static file serving
+      - app-public:/var/www/html/public
+    restart: unless-stopped
+    # Don't expose port externally - only accessible via caddy
+    # Expose FPM port 9000 to caddy via internal network only
+    networks:
+      - m3u-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      m3u-proxy:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "php-fpm-healthcheck || nc -z 127.0.0.1 9000 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
+
+    # Optional: Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # Caddy Reverse Proxy - External Web Server
+  caddy:
+    image: caddy:2-alpine
+    container_name: m3u-caddy
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Share public directory from m3u-editor container for static file serving
+      - app-public:/var/www/html/public:ro
+      # Caddy data for certificates and other persistent data
+      - caddy-data:/data
+      - caddy-config:/config
+      # - ./data:/var/www/config:ro # For serving config files if needed
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-36400}:80"  # HTTP
+      # - "${CADDY_SSL_PORT:-443}:443"  # HTTPS (uncomment and configure SSL)
+    networks:
+      - m3u-network
+    depends_on:
+      m3u-editor:
+        condition: service_healthy
+      m3u-proxy:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+    # Optional: Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 64M
+
+networks:
+  m3u-network:
+    driver: bridge
+
+volumes:
+  postgres-data:
+    driver: local
+  redis-data:
+    driver: local
+  app-public:
+    driver: local
+  caddy-data:
+    driver: local
+  caddy-config:
+    driver: local

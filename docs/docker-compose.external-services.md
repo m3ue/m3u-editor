@@ -6,7 +6,7 @@ This is a comprehensive production setup with **ALL services externalized** into
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                        Nginx                            │
+│                    Nginx/Caddy                          │
 │                  (Reverse Proxy)                        │
 │                    Port: 80/443                         │
 └──────────────┬────────────────────┬─────────────────────┘

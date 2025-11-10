@@ -32,10 +32,16 @@ Check out the docs: [m3u editor docs](https://sparkison.github.io/m3u-editor-doc
 
 | Use Case                    | File                                                    | Description                                                                                            |
 | --------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| **All-in-One Deployment**   | [docker-compose.aio.yml](./docker-compose.aio.yml) | A simple, all-in-one solution — everything runs in a single container for quick setup. Hardware acceleration is not supported in this setup.  |
-| **Modular Deployment**      | [docker-compose.proxy.yml](./docker-compose.proxy.yml)         | ⭐ Recommended! Separate containers for **m3u-editor**, **m3u-proxy** (_the external proxy setup is required for hardware acceleration_), and **Redis** — perfect if you want more granular control (_Postgres and NGINX can be easily added as a seperate container as well_). |
+| **Modular Deployment**      | [docker-compose.proxy.yml](./docker-compose.proxy.yml)         | ⭐⭐ Recommended! Separate containers for **m3u-editor**, **m3u-proxy** (_the external proxy setup is required for hardware acceleration_), and **Redis** — perfect if you want more granular control (_Postgres and NGINX can be easily added as a seperate container as well_). |
 | **Modular + VPN** | [docker-compose.proxy-vpn](./docker-compose.proxy-vpn.yml) | Example of modular deployment using Gluetun VPN.          |
-| **Fully Modular** | [docker-compose.external-all](./docker-compose.external-all.yml) | Example of fully modular deployment. See [External Services Setup](./docs/docker-compose.external-services.md) for full details and examples          |
+| **All-in-One Deployment**   | [docker-compose.aio.yml](./docker-compose.aio.yml) | A simple, all-in-one solution — everything runs in a single container for quick setup (_hardware acceleration is not supported in this setup_).  |
+
+### 🔥 Advanced docker setup
+
+| Use Case                    | File                                                    | Description                                                                                            |
+| --------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| **Fully Modular (Nginx)** | [docker-compose.external-all.yml](./docker-compose.external-all.yml) | Example of fully modular deployment with Nginx. See [External Services Setup](./docs/docker-compose.external-services.md) for full details and examples          |
+| **Fully Modular (Caddy)** | [docker-compose.external-all-caddy.yml](./docker-compose.external-all-caddy.yml) | Example of fully modular deployment with Caddy (alternative to Nginx). Includes automatic HTTPS support.          |
 
 View more in our [getting started](https://sparkison.github.io/m3u-editor-docs/docs/about/getting-started/) docs to get up and running in minutes! 🥳
 

@@ -1,0 +1,134 @@
+# Caddyfile for M3U Editor with external services
+# This config proxies requests to:
+# - m3u-editor PHP-FPM (port 9000) for the main application
+# - m3u-proxy (port 38085) for streaming endpoints
+
+{
+    # Global options
+    auto_https off
+    admin off
+    log {
+        output stdout
+        format console
+        level INFO
+    }
+}
+
+# Main server block
+:80 {
+    # Root directory for static files
+    root * /var/www/html/public
+
+    # Encode responses
+    encode gzip zstd
+
+    # Security headers
+    header {
+        X-Frame-Options "SAMEORIGIN"
+        X-Content-Type-Options "nosniff"
+        X-XSS-Protection "1; mode=block"
+        -Server
+    }
+
+    # Logging
+    log {
+        output stdout
+        format console
+    }
+
+    # Health check endpoint
+    @health {
+        path /health
+    }
+    handle @health {
+        respond "healthy" 200
+    }
+
+    # M3U Proxy endpoints - Route to external m3u-proxy service
+    # Match /m3u-proxy/* paths (not /m3u-proxy-stream-monitor which should go to PHP)
+    @m3u_proxy {
+        path /m3u-proxy/*
+    }
+    handle @m3u_proxy {
+        # Remove /m3u-proxy prefix when forwarding to proxy
+        uri strip_prefix /m3u-proxy
+        
+        reverse_proxy m3u-proxy:38085 {
+            # Headers for streaming
+            header_up Host {host}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+            
+            # Disable buffering for streaming
+            flush_interval -1
+            
+            # Timeouts for streaming
+            transport http {
+                read_timeout 300s
+                write_timeout 300s
+                dial_timeout 10s
+            }
+        }
+    }
+
+    # WebSocket reverse proxy for Reverb
+    # Reverb listens for WebSocket connections at /app and API requests at /apps
+    @websocket_app {
+        path /app /app/*
+    }
+    handle @websocket_app {
+        reverse_proxy m3u-editor:36800 {
+            header_up Host {host}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+
+    @websocket_apps {
+        path /apps /apps/*
+    }
+    handle @websocket_apps {
+        reverse_proxy m3u-editor:36800 {
+            header_up Host {host}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+
+    # Deny access to sensitive files
+    @dotfiles {
+        path /.*
+        not path /.well-known/*
+    }
+    handle @dotfiles {
+        respond 403
+    }
+
+    # PHP-FPM handling for Laravel
+    # This must come after specific route handlers
+    php_fastcgi m3u-editor:9000 {
+        root /var/www/html/public
+        # Increase timeout for long-running requests
+        read_timeout 300s
+        write_timeout 300s
+    }
+
+    # Enable file serving for static assets
+    file_server
+}
+
+# Optional: HTTPS configuration
+# Uncomment and configure for production with SSL
+# https://your-domain.com {
+#     # TLS certificate paths (if using manual certificates)
+#     # tls /path/to/cert.pem /path/to/key.pem
+#     
+#     # Or use automatic HTTPS with Let's Encrypt (default)
+#     # tls your-email@example.com
+#     
+#     # Include all the configuration from above
+#     # ...
+# }
