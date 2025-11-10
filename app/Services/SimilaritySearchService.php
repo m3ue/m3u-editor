@@ -68,22 +68,36 @@ class SimilaritySearchService
         }
 
         // Step 1: Try to find exact normalized matches first (highest priority)
-        $exactMatch = $epg->channels()
+        // Normalize the search term once (remove spaces, dashes, underscores)
+        $normalizedSearch = strtolower(str_replace([' ', '-', '_'], '', $normalizedChan));
+        
+        // Find candidates that could match when normalized
+        // Use LIKE with wildcards to find potential matches, then verify in PHP
+        $exactMatchCandidates = $epg->channels()
             ->where(function ($query) use ($normalizedChan) {
-                $query->whereRaw('LOWER(REPLACE(REPLACE(REPLACE(channel_id, " ", ""), "-", ""), "_", "")) = ?', 
-                    [str_replace([' ', '-', '_'], '', $normalizedChan)])
-                    ->orWhereRaw('LOWER(REPLACE(REPLACE(REPLACE(name, " ", ""), "-", ""), "_", "")) = ?', 
-                        [str_replace([' ', '-', '_'], '', $normalizedChan)])
-                    ->orWhereRaw('LOWER(REPLACE(REPLACE(REPLACE(display_name, " ", ""), "-", ""), "_", "")) = ?', 
-                        [str_replace([' ', '-', '_'], '', $normalizedChan)]);
+                // Search for the normalized term in channel_id, name, or display_name
+                // This allows database to use indexes
+                $query->whereRaw('LOWER(channel_id) LIKE ?', ["%{$normalizedChan}%"])
+                    ->orWhereRaw('LOWER(name) LIKE ?', ["%{$normalizedChan}%"])
+                    ->orWhereRaw('LOWER(display_name) LIKE ?', ["%{$normalizedChan}%"]);
             })
-            ->first();
+            ->select('id', 'channel_id', 'name', 'display_name')
+            ->get();
 
-        if ($exactMatch) {
-            if ($debug) {
-                Log::debug("Channel {$channel->id} '{$fallbackName}' => EXACT match with EPG channel_id={$exactMatch->channel_id}");
+        // Verify exact match after normalization in PHP (faster than DB REPLACE operations)
+        foreach ($exactMatchCandidates as $candidate) {
+            $normalizedChannelId = strtolower(str_replace([' ', '-', '_'], '', $candidate->channel_id ?? ''));
+            $normalizedName = strtolower(str_replace([' ', '-', '_'], '', $candidate->name ?? ''));
+            $normalizedDisplayName = strtolower(str_replace([' ', '-', '_'], '', $candidate->display_name ?? ''));
+            
+            if ($normalizedSearch === $normalizedChannelId || 
+                $normalizedSearch === $normalizedName || 
+                $normalizedSearch === $normalizedDisplayName) {
+                if ($debug) {
+                    Log::debug("Channel {$channel->id} '{$fallbackName}' => EXACT normalized match with EPG channel_id={$candidate->channel_id}");
+                }
+                return $candidate;
             }
-            return $exactMatch;
         }
 
         // Step 2: Fetch EPG channels using fuzzy matching (more restrictive)

@@ -219,18 +219,21 @@ class MapPlaylistChannelsToEpg implements ShouldQueue
                     $search2 = strtolower(trim($name));
                     $search3 = strtolower(trim($title));
                     
-                    if (!empty($search1) || !empty($search2) || !empty($search3)) {
+                    // Build search terms array (only non-empty values)
+                    $searchTerms = array_filter([$search1, $search2, $search3], fn($term) => !empty($term));
+                    
+                    if (!empty($searchTerms)) {
                         $epgChannel = $epg->channels()
                             ->where('channel_id', '!=', '')
-                            ->where(function ($sub) use ($search1, $search2, $search3) {
-                                if (!empty($search1)) {
-                                    $sub->whereRaw('LOWER(channel_id) = ?', [$search1]);
-                                }
-                                if (!empty($search2)) {
-                                    $sub->orWhereRaw('LOWER(channel_id) = ?', [$search2]);
-                                }
-                                if (!empty($search3)) {
-                                    $sub->orWhereRaw('LOWER(channel_id) = ?', [$search3]);
+                            ->where(function ($query) use ($searchTerms) {
+                                $first = true;
+                                foreach ($searchTerms as $term) {
+                                    if ($first) {
+                                        $query->whereRaw('LOWER(channel_id) = ?', [$term]);
+                                        $first = false;
+                                    } else {
+                                        $query->orWhereRaw('LOWER(channel_id) = ?', [$term]);
+                                    }
                                 }
                             })
                             ->select('id', 'channel_id', 'name', 'display_name')
@@ -238,20 +241,19 @@ class MapPlaylistChannelsToEpg implements ShouldQueue
                     }
 
                     // Step 2: Try exact match on name/display_name if no channel_id match
-                    if (!$epgChannel && (!empty($search1) || !empty($search2) || !empty($search3))) {
+                    if (!$epgChannel && !empty($searchTerms)) {
                         $epgChannel = $epg->channels()
-                            ->where(function ($sub) use ($search1, $search2, $search3) {
-                                if (!empty($search1)) {
-                                    $sub->whereRaw('LOWER(name) = ?', [$search1])
-                                        ->orWhereRaw('LOWER(display_name) = ?', [$search1]);
-                                }
-                                if (!empty($search2)) {
-                                    $sub->orWhereRaw('LOWER(name) = ?', [$search2])
-                                        ->orWhereRaw('LOWER(display_name) = ?', [$search2]);
-                                }
-                                if (!empty($search3)) {
-                                    $sub->orWhereRaw('LOWER(name) = ?', [$search3])
-                                        ->orWhereRaw('LOWER(display_name) = ?', [$search3]);
+                            ->where(function ($query) use ($searchTerms) {
+                                $first = true;
+                                foreach ($searchTerms as $term) {
+                                    if ($first) {
+                                        $query->whereRaw('LOWER(name) = ?', [$term])
+                                            ->orWhereRaw('LOWER(display_name) = ?', [$term]);
+                                        $first = false;
+                                    } else {
+                                        $query->orWhereRaw('LOWER(name) = ?', [$term])
+                                            ->orWhereRaw('LOWER(display_name) = ?', [$term]);
+                                    }
                                 }
                             })
                             ->select('id', 'channel_id', 'name', 'display_name')

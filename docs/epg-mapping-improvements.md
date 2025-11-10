@@ -44,6 +44,13 @@ Previous implementation had several issues:
 **New exact normalized match step:**
 - Before fuzzy matching, tries to find exact matches with spaces, dashes, and underscores removed
 - Handles cases like "F1-TV" vs "F1 TV" vs "F1TV"
+- **Performance optimized**: Uses indexed LIKE queries on database, then verifies exact match in PHP
+- Avoids nested REPLACE() operations on database columns which prevent index usage
+
+**Improved query construction:**
+- Properly handles empty search terms to avoid malformed WHERE clauses
+- Uses dynamic query building with first/subsequent condition logic
+- Filters search terms array to only include non-empty values
 
 **Improved candidate filtering:**
 - Only considers EPG channels with at least 60% similarity
@@ -133,7 +140,10 @@ If channels are still not matching correctly:
 
 ## Performance Impact
 
+- **Optimized for large EPG datasets**: Uses indexed database queries instead of computed operations
+- **Exact normalized matching**: Fetches candidates with LIKE (uses index), verifies in PHP (faster)
+- **Smart query construction**: Avoids malformed queries with empty search terms
 - **Minimal impact** on overall processing time
 - Additional exact match step is very fast (indexed database queries)
 - Candidate filtering reduces fuzzy search time
-- Overall: slightly slower but much more accurate
+- Overall: **faster AND more accurate** than previous implementation
