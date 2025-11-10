@@ -36,16 +36,42 @@ class SimilaritySearchService
         "movies"
     ];
 
+    // Quality indicators to optionally remove (when setting is enabled)
+    private $qualityIndicators = [
+        "hd",
+        "fhd",
+        "uhd",
+        "4k",
+        "8k",
+        "sd",
+        "720p",
+        "1080p",
+        "1080i",
+        "2160p",
+        "hdraw",
+        "sdraw",
+        "hevc",
+        "h264",
+        "h265"
+    ];
+
+    // Whether to remove quality indicators during normalization
+    private $removeQualityIndicators = false;
+
     /**
      * Find the best matching EPG channel for a given channel.
      * 
      * @param Channel $channel
      * @param Epg $epg
+     * @param bool $removeQualityIndicators Whether to remove quality indicators during matching
      * 
      * @return EpgChannel|null
      */
-    public function findMatchingEpgChannel($channel, $epg = null): ?EpgChannel
+    public function findMatchingEpgChannel($channel, $epg = null, $removeQualityIndicators = false): ?EpgChannel
     {
+        // Set the instance variable for use in normalizeChannelName
+        $this->removeQualityIndicators = $removeQualityIndicators;
+        
         $debug = false; // config('app.debug');
         $regionCode = $epg->preferred_local ? strtolower($epg->preferred_local) : null;
         $title = $channel->title_custom ?? $channel->title;
@@ -265,9 +291,16 @@ class SimilaritySearchService
         $name = preg_replace('/\[.*?\]|\(.*?\)/', '', $name);
         // Remove special characters
         $name = preg_replace('/[^\w\s]/', '', $name);
+        
         // Remove stop words
         $tokens = explode(' ', $name);
         $tokens = array_diff($tokens, $this->stopWords);
+        
+        // Optionally remove quality indicators
+        if ($this->removeQualityIndicators) {
+            $tokens = array_diff($tokens, $this->qualityIndicators);
+        }
+        
         return trim(implode(' ', $tokens));
     }
 

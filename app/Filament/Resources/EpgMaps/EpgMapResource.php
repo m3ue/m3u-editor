@@ -276,6 +276,12 @@ class EpgMapResource extends Resource
                         ->live()
                         ->default(false)
                         ->helperText('When enabled, channel attributes will be cleaned based on regex pattern instead of prefix before matching.'),
+                    Toggle::make('settings.remove_quality_indicators')
+                        ->label('Remove quality indicators')
+                        ->columnSpanFull()
+                        ->inline(true)
+                        ->default(false)
+                        ->helperText('When enabled, quality indicators (HD, FHD, UHD, 4K, 720p, 1080p, etc.) will be removed during fuzzy matching. Disable this if channels have similar names but different quality levels (e.g., "Sport HD" vs "Sport FHD").'),
                     TagsInput::make('settings.exclude_prefixes')
                         ->label(fn(Get $get) => !$get('settings.use_regex') ? 'Channel prefixes to remove before matching' : 'Regex patterns to remove before matching')
                         ->helperText('Press [tab] or [return] to add item. Leave empty to disable.')

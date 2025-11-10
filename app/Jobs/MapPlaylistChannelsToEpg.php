@@ -265,7 +265,9 @@ class MapPlaylistChannelsToEpg implements ShouldQueue
                         // Only run similarity search if the channel name has enough content
                         $channelNameForSearch = trim($title ?: $name);
                         if (strlen($channelNameForSearch) >= 3) {
-                            $epgChannel = $this->similaritySearch->findMatchingEpgChannel($channel, $epg);
+                            // Pass the remove_quality_indicators setting to the similarity search
+                            $removeQualityIndicators = $settings['remove_quality_indicators'] ?? false;
+                            $epgChannel = $this->similaritySearch->findMatchingEpgChannel($channel, $epg, $removeQualityIndicators);
                         }
                     }
 
