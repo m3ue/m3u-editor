@@ -97,7 +97,7 @@ public function findMatchingEpgChannel($channel, $epg = null): ?EpgChannel
 - If not in channel_id, should match via name/display_name
 - Falls back to normalized exact match (ignoring spaces/dashes)
 
-**For similar names (e.g., "RTL HDraw" vs "AT: RTL HD+"):**
+**For similar names (e.g., "RTL HD" vs "AT: RTL HD+"):**
 - Will match if core channel name is similar enough (>50% after normalization)
 - Quality indicators (HD, FHD, etc.) are now preserved for better differentiation
 - Prefix/suffix differences are handled more intelligently
