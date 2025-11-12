@@ -40,6 +40,8 @@ Previous implementation had several issues:
 - `upperFuzzyThreshold`: 70 → 50 (better filtering)
 - `embedSimThreshold`: 0.65 → 0.75 (stricter similarity requirement)
 - Added `minChannelLength`: 3 (minimum length for matching)
+- **Stop words reduced**: Removed "hd", "uhd", "fhd", "1080p", etc. from stop words to preserve quality indicators
+- **Minimum similarity**: 60% → 50% for better recall with similar channels
 
 **New exact normalized match step:**
 - Before fuzzy matching, tries to find exact matches with spaces, dashes, and underscores removed
@@ -53,10 +55,12 @@ Previous implementation had several issues:
 - Filters search terms array to only include non-empty values
 
 **Improved candidate filtering:**
-- Only considers EPG channels with at least 60% similarity
-- Uses first 5 characters for initial filtering (more restrictive)
+- Considers EPG channels with at least 50% similarity (adjusted for better recall)
+- Uses both normalized and original names for matching (dual-strategy)
+- Compares with both normalized and less-normalized versions for accuracy
 - Tracks similarity percentage in addition to Levenshtein distance
-- Requires 70% minimum similarity for accepting best match
+- Requires 60% minimum similarity for accepting best match (balanced precision/recall)
+- Preserves quality indicators (HD, FHD, UHD, resolutions) that differentiate channels
 
 **Better decision making:**
 - Stores all candidates with metadata (score, similarity %, region bonus)
@@ -93,12 +97,14 @@ public function findMatchingEpgChannel($channel, $epg = null): ?EpgChannel
 - If not in channel_id, should match via name/display_name
 - Falls back to normalized exact match (ignoring spaces/dashes)
 
-**For similar names (e.g., "RTL HD" vs "RTLup HD"):**
-- Will NOT match unless similarity is very high (>70%)
-- Prevents false positives with partially similar names
+**For similar names (e.g., "RTL HD" vs "AT: RTL HD+"):**
+- Will match if core channel name is similar enough (>50% after normalization)
+- Quality indicators (HD, FHD, etc.) are now preserved for better differentiation
+- Prefix/suffix differences are handled more intelligently
 
-**For fuzzy matches (e.g., "ProSieben MAXX HDraw" vs "ProSieben MAXX HDraw Cable"):**
-- Will match if similarity is high enough (>70%)
+**For fuzzy matches (e.g., "ProSieben MAXX HDraw" vs "ProSieben MAXX HD"):**
+- Will match if similarity is high enough (>60% for best match)
+- Uses both normalized and original names for best accuracy
 - Region codes provide bonus for local channels
 - Cosine similarity provides additional verification
 
