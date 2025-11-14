@@ -37,3 +37,11 @@ config/database
 config/logs
 config/env
 data/
+
+# Analysis and summary reports - never commit these
+*_ANALYSIS.md
+*_SUMMARY.md
+*_FIXES.md
+*ANALYSIS*.md
+*SUMMARY*.md
+*FIXES*.md
