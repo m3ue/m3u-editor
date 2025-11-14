@@ -96,14 +96,13 @@ class SimilaritySearchService
      * @param  int  $exactMatchDistance  Maximum distance for exact matches
      */
     public function findMatchingEpgChannel(
-        $channel, 
-        $epg = null, 
+        $channel,
+        $epg = null,
         $removeQualityIndicators = false,
         $similarityThreshold = 70,
         $fuzzyMaxDistance = 25,
         $exactMatchDistance = 8
-    ): ?EpgChannel
-    {
+    ): ?EpgChannel {
         // Set the instance variables
         $this->removeQualityIndicators = $removeQualityIndicators;
         $this->upperFuzzyThreshold = $fuzzyMaxDistance;
@@ -111,7 +110,7 @@ class SimilaritySearchService
 
         $debug = false; // config('app.debug');
         $regionCode = $epg->preferred_local ? mb_strtolower($epg->preferred_local, 'UTF-8') : null;
-        
+
         // Sanitize UTF-8 encoding immediately to prevent PostgreSQL errors
         $title = $this->sanitizeUtf8($channel->title_custom ?? $channel->title);
         $name = $this->sanitizeUtf8($channel->name_custom ?? $channel->name);
@@ -149,9 +148,11 @@ class SimilaritySearchService
             $normalizedName = mb_strtolower(str_replace([' ', '-', '_'], '', $candidate->name ?? ''), 'UTF-8');
             $normalizedDisplayName = mb_strtolower(str_replace([' ', '-', '_'], '', $candidate->display_name ?? ''), 'UTF-8');
 
-            if ($normalizedSearch === $normalizedChannelId ||
+            if (
+                $normalizedSearch === $normalizedChannelId ||
                 $normalizedSearch === $normalizedName ||
-                $normalizedSearch === $normalizedDisplayName) {
+                $normalizedSearch === $normalizedDisplayName
+            ) {
                 if ($debug) {
                     Log::debug("Channel {$channel->id} '{$fallbackName}' => EXACT normalized match with EPG channel_id={$candidate->channel_id}");
                 }
@@ -337,11 +338,11 @@ class SimilaritySearchService
             return '';
         }
         $name = mb_strtolower($name, 'UTF-8');
-        
+
         // Remove brackets and parentheses CONTENT but keep the channel name intact
         $name = preg_replace('/\[.*?\]/', '', $name);
         $name = preg_replace('/\(.*?\)/', '', $name);
-        
+
         // Only remove truly special characters, but keep: ², ³, +, numbers
         // This preserves HDraw², FHD+, etc.
         $name = preg_replace('/[^\w\s²³\+\-]/', '', $name);

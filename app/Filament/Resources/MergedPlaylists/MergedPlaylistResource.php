@@ -359,6 +359,10 @@ class MergedPlaylistResource extends Resource
                                 ->searchable()
                                 ->preload()
                                 ->nullable()
+                                ->hintIcon(
+                                    'heroicon-m-question-mark-circle',
+                                    tooltip: 'Time seeking is not supported when transcoding VOD or Series streams. This is a limitation of live-transcoding. Leave empty to allow time seeking.'
+                                )
                                 ->helperText('Select a transcoding profile to apply to VOD and Series streams from this playlist. Leave empty for direct stream proxying.')
                                 ->placeholder('Leave empty for direct stream proxying'),
                         ])->hidden(fn(Get $get): bool => ! $get('enable_proxy')),

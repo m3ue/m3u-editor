@@ -66,13 +66,13 @@ class MapPlaylistChannelsToEpg implements ShouldQueue
         // Remove invalid UTF-8 sequences
         // mb_convert_encoding with 'UTF-8' to 'UTF-8' forces re-encoding and drops invalid bytes
         $sanitized = mb_convert_encoding($value, 'UTF-8', 'UTF-8');
-        
+
         // Alternative: Use iconv with //IGNORE to skip invalid characters
         // $sanitized = iconv('UTF-8', 'UTF-8//IGNORE', $value);
-        
+
         // Remove any remaining control characters except newlines, tabs, and carriage returns
         $sanitized = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/u', '', $sanitized);
-        
+
         return $sanitized;
     }
 
@@ -238,18 +238,18 @@ class MapPlaylistChannelsToEpg implements ShouldQueue
 
                     // Get the EPG channel (check for direct match first with improved logic)
                     $epgChannel = null;
-                    
+
                     // Get matching priority setting
                     $prioritizeNameMatch = $settings['prioritize_name_match'] ?? true;
-                    
+
                     // Prepare search terms
                     $search1 = mb_strtolower(trim($streamId), 'UTF-8');
                     $search2 = mb_strtolower(trim($name), 'UTF-8');
                     $search3 = mb_strtolower(trim($title), 'UTF-8');
-                    
+
                     // Build search terms array (only non-empty values)
                     $searchTerms = array_filter([$search1, $search2, $search3], fn($term) => !empty($term));
-                    
+
                     if ($prioritizeNameMatch) {
                         // Step 1: Try exact match on name/display_name FIRST (highest priority - most specific)
                         if (!empty($searchTerms)) {
@@ -339,10 +339,10 @@ class MapPlaylistChannelsToEpg implements ShouldQueue
                             $similarityThreshold = $settings['similarity_threshold'] ?? 70;
                             $fuzzyMaxDistance = $settings['fuzzy_max_distance'] ?? 25;
                             $exactMatchDistance = $settings['exact_match_distance'] ?? 8;
-                            
+
                             $epgChannel = $this->similaritySearch->findMatchingEpgChannel(
-                                $channel, 
-                                $epg, 
+                                $channel,
+                                $epg,
                                 $removeQualityIndicators,
                                 $similarityThreshold,
                                 $fuzzyMaxDistance,
