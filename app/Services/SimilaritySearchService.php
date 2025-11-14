@@ -15,11 +15,11 @@ class SimilaritySearchService
     private const ORIGINAL_SEARCH_PREFIX_LENGTH = 10;
 
     // Configurable parameters
-    private $bestFuzzyThreshold = 15;      // Reduced from 40 for stricter exact matches
+    private $bestFuzzyThreshold = 8;       // Stricter threshold for exact matches (reduced from 15)
 
-    private $upperFuzzyThreshold = 50;     // Reduced from 70 for better filtering
+    private $upperFuzzyThreshold = 25;     // Much stricter - only allow very similar names (reduced from 50)
 
-    private $embedSimThreshold = 0.75;     // Increased from 0.65 for stricter similarity
+    private $embedSimThreshold = 0.80;     // Higher similarity required (increased from 0.75)
 
     private $minChannelLength = 3;         // Minimum length to consider for matching
 
@@ -65,26 +65,60 @@ class SimilaritySearchService
     private $removeQualityIndicators = false;
 
     /**
+     * Sanitizes UTF-8 encoding in strings to prevent PostgreSQL errors.
+     *
+     * @param  string|null  $value
+     * @return string|null
+     */
+    private function sanitizeUtf8(?string $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        // Convert to valid UTF-8, removing invalid sequences
+        $sanitized = mb_convert_encoding($value, 'UTF-8', 'UTF-8');
+
+        // Remove control characters that can cause issues
+        $sanitized = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/u', '', $sanitized);
+
+        return $sanitized;
+    }
+
+    /**
      * Find the best matching EPG channel for a given channel.
      *
      * @param  Channel  $channel
      * @param  Epg  $epg
      * @param  bool  $removeQualityIndicators  Whether to remove quality indicators during matching
+     * @param  int  $similarityThreshold  Minimum similarity percentage (0-100)
+     * @param  int  $fuzzyMaxDistance  Maximum Levenshtein distance for fuzzy matching
+     * @param  int  $exactMatchDistance  Maximum distance for exact matches
      */
-    public function findMatchingEpgChannel($channel, $epg = null, $removeQualityIndicators = false): ?EpgChannel
+    public function findMatchingEpgChannel(
+        $channel, 
+        $epg = null, 
+        $removeQualityIndicators = false,
+        $similarityThreshold = 70,
+        $fuzzyMaxDistance = 25,
+        $exactMatchDistance = 8
+    ): ?EpgChannel
     {
-        // Set the instance variable for use in normalizeChannelName
+        // Set the instance variables
         $this->removeQualityIndicators = $removeQualityIndicators;
+        $this->upperFuzzyThreshold = $fuzzyMaxDistance;
+        $this->bestFuzzyThreshold = $exactMatchDistance;
 
-    $debug = false; // config('app.debug');
-    $regionCode = $epg->preferred_local ? mb_strtolower($epg->preferred_local, 'UTF-8') : null;
-    $title = $channel->title_custom ?? $channel->title;
-    $name = $channel->name_custom ?? $channel->name;
-    $fallbackName = trim($title ?: $name);
-    // Use normalizeChannelName which is now Unicode-aware
-    $normalizedChan = $this->normalizeChannelName($fallbackName);
+        $debug = false; // config('app.debug');
+        $regionCode = $epg->preferred_local ? mb_strtolower($epg->preferred_local, 'UTF-8') : null;
+        
+        // Sanitize UTF-8 encoding immediately to prevent PostgreSQL errors
+        $title = $this->sanitizeUtf8($channel->title_custom ?? $channel->title);
+        $name = $this->sanitizeUtf8($channel->name_custom ?? $channel->name);
+        $fallbackName = trim($title ?: $name);
+        $normalizedChan = $this->normalizeChannelName($fallbackName);
 
-    if (! $normalizedChan || mb_strlen($normalizedChan, 'UTF-8') < $this->minChannelLength) {
+        if (! $normalizedChan || strlen($normalizedChan) < $this->minChannelLength) {
             if ($debug) {
                 Log::debug("Channel {$channel->id} '{$fallbackName}' => empty or too short after normalization, skipping");
             }
@@ -94,7 +128,7 @@ class SimilaritySearchService
 
         // Step 1: Try to find exact normalized matches first (highest priority)
         // Normalize the search term once (remove spaces, dashes, underscores)
-    $normalizedSearch = mb_strtolower(str_replace([' ', '-', '_'], '', $normalizedChan), 'UTF-8');
+        $normalizedSearch = mb_strtolower(str_replace([' ', '-', '_'], '', $normalizedChan), 'UTF-8');
 
         // Find candidates that could match when normalized
         // Use LIKE with wildcards to find potential matches, then verify in PHP
@@ -220,9 +254,10 @@ class SimilaritySearchService
             }
         }
 
-        // Filter out poor matches - require at least 50% similarity (lowered from 60% for better recall)
-        $candidates = array_filter($candidates, function ($candidate) {
-            return $candidate['similarity'] >= 50;
+        // Filter out poor matches - use configurable similarity threshold
+        // This prevents false positives like "Spiegel TV HD" matching "Spiegel Geschichte SD"
+        $candidates = array_filter($candidates, function ($candidate) use ($similarityThreshold) {
+            return $candidate['similarity'] >= $similarityThreshold;
         });
 
         // Sort candidates by score (lower is better), then by similarity (higher is better)
@@ -301,6 +336,15 @@ class SimilaritySearchService
         if (! $name) {
             return '';
         }
+        $name = mb_strtolower($name, 'UTF-8');
+        
+        // Remove brackets and parentheses CONTENT but keep the channel name intact
+        $name = preg_replace('/\[.*?\]/', '', $name);
+        $name = preg_replace('/\(.*?\)/', '', $name);
+        
+        // Only remove truly special characters, but keep: ², ³, +, numbers
+        // This preserves HDraw², FHD+, etc.
+        $name = preg_replace('/[^\w\s²³\+\-]/', '', $name);
 
         // Work with UTF-8 and lowercase properly
         $name = mb_strtolower($name, 'UTF-8');

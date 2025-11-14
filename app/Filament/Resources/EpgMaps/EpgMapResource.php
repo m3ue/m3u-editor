@@ -285,6 +285,44 @@ class EpgMapResource extends Resource
                         ->inline(true)
                         ->default(false)
                         ->helperText('When enabled, quality indicators (HD, FHD, UHD, 4K, 720p, 1080p, etc.) will be removed during fuzzy matching. Disable this if channels have similar names but different quality levels (e.g., "Sport HD" vs "Sport FHD").'),
+                    
+                    Toggle::make('settings.prioritize_name_match')
+                        ->label('Prioritize name/display name matching')
+                        ->columnSpanFull()
+                        ->inline(true)
+                        ->default(true)
+                        ->helperText('When enabled, exact matches on channel name/display name will be prioritized over channel_id matches. Enable this if your EPG has duplicate channel_ids for different quality versions (e.g., DasErsteHD for "Das Erste HDraw", "Das Erste HDraw²", etc.). Disable if your EPG uses unique channel_ids.'),
+                    
+                    Fieldset::make('Matching Thresholds')
+                        ->schema([
+                            Forms\Components\TextInput::make('settings.similarity_threshold')
+                                ->label('Minimum Similarity (%)')
+                                ->numeric()
+                                ->default(70)
+                                ->minValue(0)
+                                ->maxValue(100)
+                                ->suffix('%')
+                                ->helperText('Minimum similarity percentage required for a match (0-100). Higher = stricter matching. Default: 70%'),
+                            
+                            Forms\Components\TextInput::make('settings.fuzzy_max_distance')
+                                ->label('Maximum Fuzzy Distance')
+                                ->numeric()
+                                ->default(25)
+                                ->minValue(0)
+                                ->maxValue(100)
+                                ->helperText('Maximum Levenshtein distance allowed for fuzzy matching. Lower = stricter matching. Default: 25'),
+                            
+                            Forms\Components\TextInput::make('settings.exact_match_distance')
+                                ->label('Exact Match Distance')
+                                ->numeric()
+                                ->default(8)
+                                ->minValue(0)
+                                ->maxValue(50)
+                                ->helperText('Maximum distance for exact matches. Lower = stricter exact matching. Default: 8'),
+                        ])
+                        ->columns(3)
+                        ->columnSpanFull(),
+                    
                     TagsInput::make('settings.exclude_prefixes')
                         ->label(fn(Get $get) => !$get('settings.use_regex') ? 'Channel prefixes to remove before matching' : 'Regex patterns to remove before matching')
                         ->helperText('Press [tab] or [return] to add item. Leave empty to disable.')

@@ -52,6 +52,31 @@ class MapPlaylistChannelsToEpg implements ShouldQueue
     }
 
     /**
+     * Sanitize a string to ensure valid UTF-8 encoding for PostgreSQL.
+     * 
+     * @param string|null $value
+     * @return string|null
+     */
+    private function sanitizeUtf8(?string $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        // Remove invalid UTF-8 sequences
+        // mb_convert_encoding with 'UTF-8' to 'UTF-8' forces re-encoding and drops invalid bytes
+        $sanitized = mb_convert_encoding($value, 'UTF-8', 'UTF-8');
+        
+        // Alternative: Use iconv with //IGNORE to skip invalid characters
+        // $sanitized = iconv('UTF-8', 'UTF-8//IGNORE', $value);
+        
+        // Remove any remaining control characters except newlines, tabs, and carriage returns
+        $sanitized = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/u', '', $sanitized);
+        
+        return $sanitized;
+    }
+
+    /**
      * Execute the job.
      */
     public function handle(): void
@@ -172,10 +197,10 @@ class MapPlaylistChannelsToEpg implements ShouldQueue
                 $useRegex = $settings['use_regex'] ?? false;
                 foreach ($channels->cursor() as $channel) {
 
-                    // Get the title and stream id
-                    $streamId = trim($channel->stream_id_custom ?? $channel->stream_id);
-                    $name = trim($channel->name_custom ?? $channel->name);
-                    $title = trim($channel->title_custom ?? $channel->title);
+                    // Get the title and stream id - sanitize UTF-8 immediately
+                    $streamId = $this->sanitizeUtf8(trim($channel->stream_id_custom ?? $channel->stream_id));
+                    $name = $this->sanitizeUtf8(trim($channel->name_custom ?? $channel->name));
+                    $title = $this->sanitizeUtf8(trim($channel->title_custom ?? $channel->title));
 
                     // Get cleaned title and stream id
                     if (!empty($patterns)) {
@@ -214,8 +239,10 @@ class MapPlaylistChannelsToEpg implements ShouldQueue
                     // Get the EPG channel (check for direct match first with improved logic)
                     $epgChannel = null;
                     
-                    // Step 1: Try exact match on channel_id (highest priority)
-                    // Use multibyte-safe lowercasing to avoid corrupting UTF-8 sequences
+                    // Get matching priority setting
+                    $prioritizeNameMatch = $settings['prioritize_name_match'] ?? true;
+                    
+                    // Prepare search terms
                     $search1 = mb_strtolower(trim($streamId), 'UTF-8');
                     $search2 = mb_strtolower(trim($name), 'UTF-8');
                     $search3 = mb_strtolower(trim($title), 'UTF-8');
@@ -223,42 +250,83 @@ class MapPlaylistChannelsToEpg implements ShouldQueue
                     // Build search terms array (only non-empty values)
                     $searchTerms = array_filter([$search1, $search2, $search3], fn($term) => !empty($term));
                     
-                    if (!empty($searchTerms)) {
-                        $epgChannel = $epg->channels()
-                            ->where('channel_id', '!=', '')
-                            ->where(function ($query) use ($searchTerms) {
-                                $first = true;
-                                foreach ($searchTerms as $term) {
-                                    if ($first) {
-                                        $query->whereRaw('LOWER(channel_id) = ?', [$term]);
-                                        $first = false;
-                                    } else {
-                                        $query->orWhereRaw('LOWER(channel_id) = ?', [$term]);
+                    if ($prioritizeNameMatch) {
+                        // Step 1: Try exact match on name/display_name FIRST (highest priority - most specific)
+                        if (!empty($searchTerms)) {
+                            $epgChannel = $epg->channels()
+                                ->where(function ($query) use ($searchTerms) {
+                                    $first = true;
+                                    foreach ($searchTerms as $term) {
+                                        if ($first) {
+                                            $query->whereRaw('LOWER(name) = ?', [$term])
+                                                ->orWhereRaw('LOWER(display_name) = ?', [$term]);
+                                            $first = false;
+                                        } else {
+                                            $query->orWhereRaw('LOWER(name) = ?', [$term])
+                                                ->orWhereRaw('LOWER(display_name) = ?', [$term]);
+                                        }
                                     }
-                                }
-                            })
-                            ->select('id', 'channel_id', 'name', 'display_name')
-                            ->first();
-                    }
+                                })
+                                ->select('id', 'channel_id', 'name', 'display_name')
+                                ->first();
+                        }
 
-                    // Step 2: Try exact match on name/display_name if no channel_id match
-                    if (!$epgChannel && !empty($searchTerms)) {
-                        $epgChannel = $epg->channels()
-                            ->where(function ($query) use ($searchTerms) {
-                                $first = true;
-                                foreach ($searchTerms as $term) {
-                                    if ($first) {
-                                        $query->whereRaw('LOWER(name) = ?', [$term])
-                                            ->orWhereRaw('LOWER(display_name) = ?', [$term]);
-                                        $first = false;
-                                    } else {
-                                        $query->orWhereRaw('LOWER(name) = ?', [$term])
-                                            ->orWhereRaw('LOWER(display_name) = ?', [$term]);
+                        // Step 2: Try exact match on channel_id if no name/display_name match
+                        if (!$epgChannel && !empty($searchTerms)) {
+                            $epgChannel = $epg->channels()
+                                ->where('channel_id', '!=', '')
+                                ->where(function ($query) use ($searchTerms) {
+                                    $first = true;
+                                    foreach ($searchTerms as $term) {
+                                        if ($first) {
+                                            $query->whereRaw('LOWER(channel_id) = ?', [$term]);
+                                            $first = false;
+                                        } else {
+                                            $query->orWhereRaw('LOWER(channel_id) = ?', [$term]);
+                                        }
                                     }
-                                }
-                            })
-                            ->select('id', 'channel_id', 'name', 'display_name')
-                            ->first();
+                                })
+                                ->select('id', 'channel_id', 'name', 'display_name')
+                                ->first();
+                        }
+                    } else {
+                        // Original behavior: Try channel_id first, then name/display_name
+                        if (!empty($searchTerms)) {
+                            $epgChannel = $epg->channels()
+                                ->where('channel_id', '!=', '')
+                                ->where(function ($query) use ($searchTerms) {
+                                    $first = true;
+                                    foreach ($searchTerms as $term) {
+                                        if ($first) {
+                                            $query->whereRaw('LOWER(channel_id) = ?', [$term]);
+                                            $first = false;
+                                        } else {
+                                            $query->orWhereRaw('LOWER(channel_id) = ?', [$term]);
+                                        }
+                                    }
+                                })
+                                ->select('id', 'channel_id', 'name', 'display_name')
+                                ->first();
+                        }
+
+                        if (!$epgChannel && !empty($searchTerms)) {
+                            $epgChannel = $epg->channels()
+                                ->where(function ($query) use ($searchTerms) {
+                                    $first = true;
+                                    foreach ($searchTerms as $term) {
+                                        if ($first) {
+                                            $query->whereRaw('LOWER(name) = ?', [$term])
+                                                ->orWhereRaw('LOWER(display_name) = ?', [$term]);
+                                            $first = false;
+                                        } else {
+                                            $query->orWhereRaw('LOWER(name) = ?', [$term])
+                                                ->orWhereRaw('LOWER(display_name) = ?', [$term]);
+                                        }
+                                    }
+                                })
+                                ->select('id', 'channel_id', 'name', 'display_name')
+                                ->first();
+                        }
                     }
 
                     // Step 3: If no exact match, attempt a similarity search (only for channels with significant content)
@@ -266,9 +334,20 @@ class MapPlaylistChannelsToEpg implements ShouldQueue
                         // Only run similarity search if the channel name has enough content
                         $channelNameForSearch = trim($title ?: $name);
                         if (strlen($channelNameForSearch) >= 3) {
-                            // Pass the remove_quality_indicators setting to the similarity search
+                            // Pass the settings to the similarity search
                             $removeQualityIndicators = $settings['remove_quality_indicators'] ?? false;
-                            $epgChannel = $this->similaritySearch->findMatchingEpgChannel($channel, $epg, $removeQualityIndicators);
+                            $similarityThreshold = $settings['similarity_threshold'] ?? 70;
+                            $fuzzyMaxDistance = $settings['fuzzy_max_distance'] ?? 25;
+                            $exactMatchDistance = $settings['exact_match_distance'] ?? 8;
+                            
+                            $epgChannel = $this->similaritySearch->findMatchingEpgChannel(
+                                $channel, 
+                                $epg, 
+                                $removeQualityIndicators,
+                                $similarityThreshold,
+                                $fuzzyMaxDistance,
+                                $exactMatchDistance
+                            );
                         }
                     }
 
@@ -276,9 +355,9 @@ class MapPlaylistChannelsToEpg implements ShouldQueue
                     if ($epgChannel) {
                         $mappedCount++;
                         yield [
-                            'title' => $channel->title,
-                            'name' => $channel->name,
-                            'group_internal' => $channel->group_internal,
+                            'title' => $this->sanitizeUtf8($channel->title),
+                            'name' => $this->sanitizeUtf8($channel->name),
+                            'group_internal' => $this->sanitizeUtf8($channel->group_internal),
                             'user_id' => $channel->user_id,
                             'playlist_id' => $channel->playlist_id,
                             'source_id' => $channel->source_id,

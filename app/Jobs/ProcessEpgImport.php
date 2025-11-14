@@ -44,6 +44,27 @@ class ProcessEpgImport implements ShouldQueue
     public $timeout = 60 * 10;
 
     /**
+     * Sanitize UTF-8 string to remove invalid sequences
+     *
+     * @param string|null $value
+     * @return string|null
+     */
+    private function sanitizeUtf8(?string $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        // Convert to UTF-8, replacing invalid sequences
+        $sanitized = mb_convert_encoding($value, 'UTF-8', 'UTF-8');
+
+        // Remove control characters except newlines and tabs
+        $sanitized = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/u', '', $sanitized);
+
+        return $sanitized;
+    }
+
+    /**
      * Create a new job instance.
      * 
      * @param Epg $epg
@@ -300,17 +321,18 @@ class ProcessEpgImport implements ShouldQueue
                                 if ($innerReader->nodeType == XMLReader::ELEMENT) {
                                     switch ($innerReader->name) {
                                         case 'channel':
-                                            $elementData['channel_id'] = $channelId;
+                                            $elementData['channel_id'] = $this->sanitizeUtf8($channelId);
                                             break;
                                         case 'display-name':
                                             if (!$elementData['display_name']) {
                                                 // Only use the first display-name element (could be multiple)
-                                                $elementData['name'] = Str::limit(trim($innerReader->readString()), 255);
-                                                $elementData['display_name'] = trim($innerReader->readString());
+                                                $rawDisplayName = trim($innerReader->readString());
+                                                $elementData['name'] = $this->sanitizeUtf8(Str::limit($rawDisplayName, 255));
+                                                $elementData['display_name'] = $this->sanitizeUtf8($rawDisplayName);
                                                 $elementData['lang'] = trim($innerReader->getAttribute('lang'));
                                             } else {
                                                 // If we already have a display name, add to additional display names
-                                                $additionalDisplayNames[] = trim($innerReader->readString());
+                                                $additionalDisplayNames[] = $this->sanitizeUtf8(trim($innerReader->readString()));
                                             }
                                             break;
                                         case 'icon':
