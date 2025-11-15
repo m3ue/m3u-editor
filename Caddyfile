@@ -62,8 +62,7 @@
             # ✅ FIX: Preserve X-Forwarded-Proto from upstream reverse proxy
             # Caddy automatically preserves incoming headers, but we ensure it's set
             # If not present from upstream, use current scheme
-            header_up X-Forwarded-Proto {header.X-Forwarded-Proto}
-            header_up >X-Forwarded-Proto {scheme}
+            header_up X-Forwarded-Proto {header.X-Forwarded-Proto:$scheme}
 
             # Also preserve other HTTPS detection headers for universal support
             header_up X-Forwarded-Ssl {header.X-Forwarded-Ssl}
