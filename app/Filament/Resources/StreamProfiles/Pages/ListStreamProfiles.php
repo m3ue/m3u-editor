@@ -33,10 +33,11 @@ class ListStreamProfiles extends ListRecords
                         [
                             'user_id' => auth()->id(),
                             'name' => 'Default HLS Profile',
-                            'description' => 'Optimized for live streaming with low latency and better buffering. Compatible with reverse proxy + SSL.',
-                            'args' => '-fflags +genpts+discardcorrupt+igndts -i {input_url} -c:v libx264 -preset faster -crf {crf|23} -maxrate {maxrate|2500k} -bufsize {bufsize|5000k} -c:a aac -b:a {audio_bitrate|192k} -hls_time 2 -hls_list_size 30 -hls_flags program_date_time -hls_segment_filename segment_%03d.ts -f hls {output_args|index.m3u8}',
+                            'description' => 'Optimized for live streaming with low latency and better buffering.',
+                            'args' => '-fflags +genpts+discardcorrupt+igndts -i {input_url} -c:v libx264 -preset faster -crf {crf|23} -maxrate {maxrate|2500k} -bufsize {bufsize|5000k} -c:a aac -b:a {audio_bitrate|192k} -hls_time 2 -hls_list_size 30 -hls_flags program_date_time -f hls {output_args|index.m3u8}',
                             'format' => 'm3u8',
                         ],
+
                     ];
                     foreach ($defaultProfiles as $index => $defaultProfile) {
                         StreamProfile::query()->create($defaultProfile);
