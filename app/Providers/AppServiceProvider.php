@@ -69,6 +69,13 @@ class AppServiceProvider extends ServiceProvider
         // Disable mass assignment protection (security handled by Filament)
         Model::unguard();
 
+        // When running in console (e.g. queued jobs, Artisan commands), there is
+        // no HTTP request context for URL generation. Force the root URL,
+        // including the configured port, so route()/url() use the correct base.
+        if (app()->runningInConsole()) {
+            $this->configureConsoleBaseUrl();
+        }
+
         // ✅ DYNAMIC HTTPS DETECTION: Detect actual protocol from request headers
         // This allows the app to work correctly with both HTTP and HTTPS access
         // when behind a reverse proxy with SSL termination
@@ -137,6 +144,29 @@ class AppServiceProvider extends ServiceProvider
             // Ensure HTTPS server variable is off
             request()->server->set('HTTPS', 'off');
         }
+    }
+
+    /**
+     * Configure a sensible base URL for console/CLI contexts where there is
+     * no incoming HTTP request. This ensures that route() and url() include
+     * the correct host and port when generating absolute URLs (e.g. for
+     * Schedules Direct artwork proxies written into EPG files).
+     */
+    private function configureConsoleBaseUrl(): void
+    {
+        $baseUrl = rtrim((string) config('app.url'), '/');
+        if ($baseUrl === '') {
+            return;
+        }
+
+        $configuredPort = config('app.port');
+        $hasPortInUrl = parse_url($baseUrl, PHP_URL_PORT) !== null;
+
+        if ($configuredPort && ! $hasPortInUrl) {
+            $baseUrl .= ':' . $configuredPort;
+        }
+
+        URL::forceRootUrl($baseUrl);
     }
 
     /**
