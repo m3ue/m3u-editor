@@ -295,7 +295,12 @@ class EpgGenerateController extends Controller
                                 // Program artwork images (NEW)
                                 if (!empty($programme['images'] ?? null) && is_array($programme['images'])) {
                                     foreach ($programme['images'] as $image) {
-                                        $url = htmlspecialchars($image['url'], ENT_XML1);
+                                        $rawUrl = $image['url'] ?? '';
+                                        $proxiedUrl = $proxyEnabled && $rawUrl
+                                            ? LogoProxyController::generateProxyUrl($rawUrl)
+                                            : $rawUrl;
+
+                                        $url = htmlspecialchars($proxiedUrl, ENT_XML1);
                                         $type = htmlspecialchars($image['type'], ENT_XML1);
                                         $width = htmlspecialchars($image['width'], ENT_XML1);
                                         $height = htmlspecialchars($image['height'], ENT_XML1);
