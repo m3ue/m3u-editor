@@ -843,9 +843,7 @@ class M3uProxyService
                 if (isset($data['stream_id'])) {
                     Log::info('Created transcoded stream on m3u-proxy', [
                         'stream_id' => $data['stream_id'],
-                        'profile' => $profile->getProfileIdentifier(),
                         'format' => $profile->format,
-                        'url' => $url,
                         'payload' => $payload,
                     ]);
 
