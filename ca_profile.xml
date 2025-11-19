@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Maintainer>
+  <Icon>https://raw.githubusercontent.com/sparkison/m3u-editor/refs/heads/master/public/logo.png</Icon>
+  <Profile>
+    Official m3u editor application maintained by sparkison.
+    Full featured IPTV playlist editor and proxy server.
+  </Profile>
+  <DonateLink>https://ko-fi.com/sparkison</DonateLink>
+  <DonateText>If you like my work please consider Donating.</DonateText>
+  <Discord>https://discord.gg/rS3abJ5dz7</Discord>
+</Maintainer>
