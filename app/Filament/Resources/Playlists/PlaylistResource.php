@@ -889,7 +889,7 @@ class PlaylistResource extends Resource
             ]);
     }
 
-    public static function getFormSections($creating = false): array
+    public static function getFormSections($creating = false, $includeAuth = false): array
     {
         // Define the form fields for each section
         $nameFields = [
@@ -1490,120 +1490,124 @@ class PlaylistResource extends Resource
                 ]),
         ];
 
-        // Return sections and fields
-        return [
-            'Name' => $nameFields,
-            'Type' => $typeFields,
-            'Scheduling' => $schedulingFields,
-            'Processing' => $processingFields,
-            'Output' => $outputFields,
+        $authFields = [
+            Select::make('assigned_auth_ids')
+                ->label('Assigned Auths')
+                ->multiple()
+                ->options(function ($record) {
+                    $options = [];
+
+                    // Get currently assigned auths for this playlist
+                    if ($record) {
+                        $currentAuths = $record->playlistAuths()->get();
+                        foreach ($currentAuths as $auth) {
+                            $options[$auth->id] = $auth->name . ' (currently assigned)';
+                        }
+                    }
+
+                    // Get unassigned auths
+                    $unassignedAuths = PlaylistAuth::where('user_id', auth()->id())
+                        ->whereDoesntHave('assignedPlaylist')
+                        ->get();
+
+                    foreach ($unassignedAuths as $auth) {
+                        $options[$auth->id] = $auth->name;
+                    }
+
+                    return $options;
+                })
+                ->searchable()
+                ->nullable()
+                ->placeholder('Select auths or leave empty')
+                ->default(function ($record) {
+                    if ($record) {
+                        return $record->playlistAuths()->pluck('playlist_auths.id')->toArray();
+                    }
+
+                    return [];
+                })
+                ->afterStateHydrated(function ($component, $state, $record) {
+                    if ($record) {
+                        $currentAuthIds = $record->playlistAuths()->pluck('playlist_auths.id')->toArray();
+                        $component->state($currentAuthIds);
+                    }
+                })
+                ->hintIcon(
+                    'heroicon-m-question-mark-circle',
+                    tooltip: 'Only unassigned auths are available. Each auth can only be assigned to one playlist at a time. You will also be able to access the Xtream API using any assigned auths.'
+                )
+                ->helperText('Simple authentication for playlist access.')
+                ->afterStateUpdated(function ($state, $record) {
+                    if (! $record) {
+                        return;
+                    }
+
+                    $currentAuthIds = $record->playlistAuths()->pluck('playlist_auths.id')->toArray();
+                    $newAuthIds = $state ? (is_array($state) ? $state : [$state]) : [];
+
+                    // Find auths to remove (currently assigned but not in new selection)
+                    $authsToRemove = array_diff($currentAuthIds, $newAuthIds);
+                    foreach ($authsToRemove as $authId) {
+                        $auth = PlaylistAuth::find($authId);
+                        if ($auth) {
+                            $auth->clearAssignment();
+                        }
+                    }
+
+                    // Find auths to add (in new selection but not currently assigned)
+                    $authsToAdd = array_diff($newAuthIds, $currentAuthIds);
+                    foreach ($authsToAdd as $authId) {
+                        $auth = PlaylistAuth::find($authId);
+                        if ($auth) {
+                            $auth->assignTo($record);
+                        }
+                    }
+                })->dehydrated(false), // Don't save this field directly
         ];
+
+        $sections = ['Name' => $nameFields];
+        if ($includeAuth) {
+            $sections['Auth'] = $authFields;
+        }
+        $sections['Type'] = $typeFields;
+        $sections['Scheduling'] = $schedulingFields;
+        $sections['Processing'] = $processingFields;
+        $sections['Output'] = $outputFields;
+
+        // Return sections and fields
+        return $sections;
     }
 
     public static function getForm(): array
     {
         $tabs = [];
-        foreach (self::getFormSections(creating: false) as $section => $fields) {
+        foreach (collect(self::getFormSections(creating: false, includeAuth: true)) as $section => $fields) {
             if ($section === 'Name') {
                 $section = 'General';
             }
+
+            // Determine icon for section
+            $icon = match (strtolower($section)) {
+                'general' => 'heroicon-m-cog',
+                'auth' => 'heroicon-m-key',
+                'type' => 'heroicon-m-document-text',
+                'scheduling' => 'heroicon-m-calendar',
+                'processing' => 'heroicon-m-rectangle-stack',
+                'output' => 'heroicon-m-arrow-up-right',
+                default => null,
+            };
+
             if (! in_array($section, ['Processing', 'Output'])) {
                 // Wrap the fields in a section
                 $fields = [
                     Section::make($section)
+                        ->icon($icon)
                         ->schema($fields),
                 ];
-
-                // If general section, add AUTH management
-                if ($section === 'General') {
-                    $fields[] = Grid::make()
-                        ->columns(2)
-                        ->columnSpanFull()
-                        ->schema([
-                            Section::make('Auth')
-                                ->compact()
-                                ->description('Add and manage authentication.')
-                                ->columnSpanFull()
-                                ->schema([
-                                    Select::make('assigned_auth_ids')
-                                        ->label('Assigned Auths')
-                                        ->multiple()
-                                        ->options(function ($record) {
-                                            $options = [];
-
-                                            // Get currently assigned auths for this playlist
-                                            if ($record) {
-                                                $currentAuths = $record->playlistAuths()->get();
-                                                foreach ($currentAuths as $auth) {
-                                                    $options[$auth->id] = $auth->name . ' (currently assigned)';
-                                                }
-                                            }
-
-                                            // Get unassigned auths
-                                            $unassignedAuths = PlaylistAuth::where('user_id', auth()->id())
-                                                ->whereDoesntHave('assignedPlaylist')
-                                                ->get();
-
-                                            foreach ($unassignedAuths as $auth) {
-                                                $options[$auth->id] = $auth->name;
-                                            }
-
-                                            return $options;
-                                        })
-                                        ->searchable()
-                                        ->nullable()
-                                        ->placeholder('Select auths or leave empty')
-                                        ->default(function ($record) {
-                                            if ($record) {
-                                                return $record->playlistAuths()->pluck('playlist_auths.id')->toArray();
-                                            }
-
-                                            return [];
-                                        })
-                                        ->afterStateHydrated(function ($component, $state, $record) {
-                                            if ($record) {
-                                                $currentAuthIds = $record->playlistAuths()->pluck('playlist_auths.id')->toArray();
-                                                $component->state($currentAuthIds);
-                                            }
-                                        })
-                                        ->hintIcon(
-                                            'heroicon-m-question-mark-circle',
-                                            tooltip: 'Only unassigned auths are available. Each auth can only be assigned to one playlist at a time. You will also be able to access the Xtream API using any assigned auths.'
-                                        )
-                                        ->helperText('Simple authentication for playlist access.')
-                                        ->afterStateUpdated(function ($state, $record) {
-                                            if (! $record) {
-                                                return;
-                                            }
-
-                                            $currentAuthIds = $record->playlistAuths()->pluck('playlist_auths.id')->toArray();
-                                            $newAuthIds = $state ? (is_array($state) ? $state : [$state]) : [];
-
-                                            // Find auths to remove (currently assigned but not in new selection)
-                                            $authsToRemove = array_diff($currentAuthIds, $newAuthIds);
-                                            foreach ($authsToRemove as $authId) {
-                                                $auth = PlaylistAuth::find($authId);
-                                                if ($auth) {
-                                                    $auth->clearAssignment();
-                                                }
-                                            }
-
-                                            // Find auths to add (in new selection but not currently assigned)
-                                            $authsToAdd = array_diff($newAuthIds, $currentAuthIds);
-                                            foreach ($authsToAdd as $authId) {
-                                                $auth = PlaylistAuth::find($authId);
-                                                if ($auth) {
-                                                    $auth->assignTo($record);
-                                                }
-                                            }
-                                        })
-                                        ->dehydrated(false), // Don't save this field directly
-                                ]),
-                        ]);
-                }
             }
 
             $tabs[] = Tab::make($section)
+                ->icon($icon)
                 ->schema($fields);
         }
 
