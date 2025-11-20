@@ -37,6 +37,7 @@ config/database
 config/logs
 config/env
 data/
+.DS_Store
 
 # Analysis and summary reports - never commit these
 *_ANALYSIS.md
