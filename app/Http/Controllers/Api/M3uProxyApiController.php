@@ -24,17 +24,27 @@ class M3uProxyApiController extends Controller
      * 
      * @param  Request  $request
      * @param  int  $id
-     * @param  Playlist|MergedPlaylist|CustomPlaylist|PlaylistAlias|null  $playlist
+     * @param  string|null  $uuid  Optional playlist UUID for context
      * 
      * @return \Illuminate\Http\RedirectResponse
      */
-    public function channel(Request $request, $id, $playlist = null)
+    public function channel(Request $request, $id, $uuid = null)
     {
         $channel = Channel::query()->with([
             'playlist',
             'customPlaylist'
         ])->findOrFail($id);
-        $playlist = $playlist ?? $channel->getEffectivePlaylist();
+
+        // If UUID provided, resolve that specific playlist (e.g., merged playlist)
+        // Otherwise fall back to the channel's effective playlist
+        if ($uuid) {
+            $playlist = PlaylistFacade::resolvePlaylistByUuid($uuid);
+            if (!$playlist) {
+                return response()->json(['error' => 'Playlist not found'], 404);
+            }
+        } else {
+            $playlist = $channel->getEffectivePlaylist();
+        }
 
         // Load the stream profile relationships explicitly after getting the effective playlist
         // This ensures the relationship constraints are properly applied
@@ -62,16 +72,26 @@ class M3uProxyApiController extends Controller
      * 
      * @param  Request  $request
      * @param  int  $id
-     * @param  Playlist|MergedPlaylist|CustomPlaylist|PlaylistAlias|null  $playlist
+     * @param  string|null  $uuid  Optional playlist UUID for context
      * 
      * @return \Illuminate\Http\RedirectResponse
      */
-    public function episode(Request $request, $id, $playlist = null)
+    public function episode(Request $request, $id, $uuid = null)
     {
         $episode = Episode::query()->with([
             'playlist'
         ])->findOrFail($id);
-        $playlist = $playlist ?? $episode->playlist;
+
+        // If UUID provided, resolve that specific playlist (e.g., merged playlist)
+        // Otherwise fall back to the episode's playlist
+        if ($uuid) {
+            $playlist = PlaylistFacade::resolvePlaylistByUuid($uuid);
+            if (!$playlist) {
+                return response()->json(['error' => 'Playlist not found'], 404);
+            }
+        } else {
+            $playlist = $episode->playlist;
+        }
 
         // Load the stream profile relationships explicitly after getting the playlist
         if ($playlist) {

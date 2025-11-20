@@ -43,21 +43,31 @@ class ProxyService
      * Get the proxy URL for a channel
      *
      * @param string|int $id
+     * @param string|null $playlistUuid Optional playlist UUID for context (e.g., merged playlists)
      * @return string
      */
-    public function getProxyUrlForChannel($id)
+    public function getProxyUrlForChannel($id, $playlistUuid = null)
     {
-        return $this->baseUrl . '/api/m3u-proxy/channel/' . $id;
+        $url = $this->baseUrl . '/api/m3u-proxy/channel/' . $id;
+        if ($playlistUuid) {
+            $url .= '/' . $playlistUuid;
+        }
+        return $url;
     }
 
     /**
      * Get the proxy URL for an episode
      *
      * @param string|int $id
+     * @param string|null $playlistUuid Optional playlist UUID for context (e.g., merged playlists)
      * @return string
      */
-    public function getProxyUrlForEpisode($id)
+    public function getProxyUrlForEpisode($id, $playlistUuid = null)
     {
-        return $this->baseUrl . '/api/m3u-proxy/episode/' . $id;
+        $url = $this->baseUrl . '/api/m3u-proxy/episode/' . $id;
+        if ($playlistUuid) {
+            $url .= '/' . $playlistUuid;
+        }
+        return $url;
     }
 }

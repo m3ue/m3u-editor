@@ -189,8 +189,10 @@ class PlaylistGenerateController extends Controller
                         $url = $baseUrl . "/{$urlPath}/{$username}/{$password}/" . $channel->id . "." . $extension;
                     } else if ($proxyEnabled) {
                         // Get the proxy URL
+                        // Pass the playlist UUID for merged/custom playlists so the correct context is used
                         $url = ProxyFacade::getProxyUrlForChannel(
                             $channel->id,
+                            $playlist->uuid
                         );
                     }
                     $url = rtrim($url, '.');
@@ -267,8 +269,10 @@ class PlaylistGenerateController extends Controller
                                 $url = $baseUrl . "/series/{$username}/{$password}/" . $episode->id . ".{$containerExtension}";
                             } else if ($proxyEnabled) {
                                 // Get the proxy URL
+                                // Pass the playlist UUID for merged/custom playlists so the correct context is used
                                 $url = ProxyFacade::getProxyUrlForEpisode(
                                     $episode->id,
+                                    $playlist->uuid
                                 );
                             }
                             $url = rtrim($url, '.');
