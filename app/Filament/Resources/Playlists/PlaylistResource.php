@@ -52,6 +52,7 @@ use Filament\Forms\Components\TagsInput;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Forms\Components\ToggleButtons;
+use Filament\Forms\Components\Placeholder;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Fieldset;
@@ -61,6 +62,7 @@ use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Tabs;
 use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Schemas\Components\Utilities\Get;
+use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Components\Wizard\Step;
 use Filament\Schemas\Schema;
 use Filament\Tables;
@@ -1187,6 +1189,19 @@ class PlaylistResource extends Resource
                                         ->modalSubmitActionLabel('Confirm selection')
                                         ->button(),
                                 )
+                                ->hintAction(
+                                    Action::make('clear_groups')
+                                        ->label('Clear all')
+                                        ->icon('heroicon-o-x-mark')
+                                        ->color('danger')
+                                        ->action(function (Set $set) {
+                                            $set('import_prefs.selected_groups', []);
+                                        })
+                                        ->requiresConfirmation()
+                                        ->modalHeading('Clear selection')
+                                        ->modalDescription('Are you sure you want to clear all selected groups?')
+                                        ->modalSubmitActionLabel('Clear')
+                                )
                                 ->getOptionLabelFromRecordUsing(fn($record) => $record->name)
                                 ->getOptionLabelsUsing(function (array $values, $record): array {
                                     // Values are IDs, return id => name pairs
@@ -1254,6 +1269,19 @@ class PlaylistResource extends Resource
                                         ->modalHeading('Search categories')
                                         ->modalSubmitActionLabel('Confirm selection')
                                         ->button(),
+                                )
+                                ->hintAction(
+                                    Action::make('clear_categories')
+                                        ->label('Clear all')
+                                        ->icon('heroicon-o-x-mark')
+                                        ->color('danger')
+                                        ->action(function (Set $set) {
+                                            $set('import_prefs.selected_categories', []);
+                                        })
+                                        ->requiresConfirmation()
+                                        ->modalHeading('Clear selection')
+                                        ->modalDescription('Are you sure you want to clear all selected categories?')
+                                        ->modalSubmitActionLabel('Clear')
                                 )
                                 ->getOptionLabelFromRecordUsing(fn($record) => $record->name)
                                 ->getOptionLabelsUsing(function (array $values, $record): array {
