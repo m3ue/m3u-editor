@@ -227,6 +227,34 @@ class PlaylistAlias extends Model
     }
 
     /**
+     * Get the alias credentials (username/password) as an object instead of array.
+     *
+     * This normalises the alias authentication format so that controllers and
+     * services can safely access:
+     *
+     *      $auth->username
+     *      $auth->password
+     *
+     * regardless of whether the credentials originally came from PlaylistAlias
+     * (array) or PlaylistAuth (Eloquent model / object).
+     *
+     * @return object|null
+     */
+    public function getAuthObjectAttribute()
+    {
+        // No alias-level credentials defined → no auth object
+        if (!$this->username || !$this->password) {
+            return null;
+        }
+
+        // Return credentials as a simple object, not an array
+        return (object)[
+            'username' => $this->username,
+            'password' => $this->password,
+        ];
+    }
+    
+    /**
      * Fetch the Xtream status for this alias
      */
     public function xtreamStatus(): Attribute
