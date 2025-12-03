@@ -166,6 +166,7 @@ class RunPostProcess implements ShouldQueue
                 $post = ((bool)$metadata['post']) ?? false;
                 $method = $post ? 'post' : 'get';
                 $url = $metadata['path'];
+                $jsonBody = (bool)($metadata['json_body'] ?? false);
                 $queryVars = [];
                 $vars = $metadata['post_vars'] ?? [];
                 foreach ($vars as $var) {
@@ -181,10 +182,44 @@ class RunPostProcess implements ShouldQueue
                     $queryVars[$var['variable_name']] = $value;
                 }
 
-                // Make the request
-                $response = Http::withHeaders([
+                // Build custom headers
+                $headers = [
                     'Accept' => 'application/json',
-                ])->throw()->$method($url, $queryVars);
+                ];
+                $customHeaders = $metadata['headers'] ?? [];
+                foreach ($customHeaders as $header) {
+                    $headers[$header['header_name']] = $header['header_value'];
+                }
+
+                // Check if we have a raw JSON body to send
+                $rawJson = $metadata['raw_json'] ?? null;
+                if ($post && $jsonBody && !empty($rawJson)) {
+                    // Replace placeholders in raw JSON with actual values
+                    $jsonContent = $this->replacePlaceholders($rawJson, $modelType);
+                    $headers['Content-Type'] = 'application/json';
+                    
+                    // Make the request with raw JSON body
+                    $response = Http::withHeaders($headers)
+                        ->withBody($jsonContent, 'application/json')
+                        ->throw()
+                        ->post($url);
+                } elseif ($post && !empty($queryVars)) {
+                    // Send variables as form data or JSON based on jsonBody setting
+                    if ($jsonBody) {
+                        $headers['Content-Type'] = 'application/json';
+                    }
+                    $response = Http::withHeaders($headers)
+                        ->throw()
+                        ->post($url, $queryVars);
+                } elseif ($post) {
+                    // POST request without body (e.g., for triggering actions)
+                    $response = Http::withHeaders($headers)
+                        ->throw()
+                        ->post($url);
+                } else {
+                    // GET request with query parameters
+                    $response = Http::withHeaders($headers)->throw()->get($url, $queryVars);
+                }
 
                 // If results ok, log the results
                 if ($response->ok()) {
@@ -408,5 +443,39 @@ class RunPostProcess implements ShouldQueue
             'removed_channel_names' => $this->model->removed_channel_names ?? null,
             default => null,
         };
+    }
+
+    /**
+     * Replace placeholders in a string with actual model values
+     * Placeholders are in the format {{field_name}}
+     */
+    protected function replacePlaceholders(string $content, string $modelType): string
+    {
+        // Define available placeholders and their values
+        $placeholders = [
+            'id' => $this->model->id,
+            'uuid' => $this->model->uuid,
+            'name' => $this->model->name,
+            'url' => $modelType === Epg::class
+                ? route('epg.file', ['uuid' => $this->model->uuid])
+                : PlaylistFacade::getUrls($this->model)['m3u'],
+            'status' => $this->model->status?->value ?? $this->model->status ?? '',
+            'time' => $this->model->sync_time ?? '',
+            'added_groups' => $this->model->added_groups ?? 0,
+            'removed_groups' => $this->model->removed_groups ?? 0,
+            'added_channels' => $this->model->added_channels ?? 0,
+            'removed_channels' => $this->model->removed_channels ?? 0,
+            'added_group_names' => $this->model->added_group_names ?? '',
+            'removed_group_names' => $this->model->removed_group_names ?? '',
+            'added_channel_names' => $this->model->added_channel_names ?? '',
+            'removed_channel_names' => $this->model->removed_channel_names ?? '',
+        ];
+
+        // Replace all placeholders
+        foreach ($placeholders as $key => $value) {
+            $content = str_replace('{{' . $key . '}}', $value, $content);
+        }
+
+        return $content;
     }
 }

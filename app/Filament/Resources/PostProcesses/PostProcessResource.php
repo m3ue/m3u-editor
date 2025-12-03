@@ -234,7 +234,37 @@ class PostProcessResource extends Resource
                             true => 'primary',
                         ])
                         ->default(false)
+                        ->live()
                         ->helperText('Send as GET or POST request.'),
+                    Toggle::make('metadata.json_body')
+                        ->label('Send as JSON body')
+                        ->default(false)
+                        ->helperText('When enabled, variables will be sent as a JSON body instead of form data. Only applies to POST requests.')
+                        ->hidden(fn(Get $get) => !$get('metadata.post')),
+                    Repeater::make('metadata.headers')
+                        ->label('Custom Headers')
+                        ->schema([
+                            TextInput::make('header_name')
+                                ->label('Header name')
+                                ->placeholder('X-Emby-Token')
+                                ->helperText('Name of the HTTP header.')
+                                ->datalist([
+                                    'X-Emby-Token',
+                                    'X-Api-Key',
+                                    'Authorization',
+                                    'X-Custom-Header',
+                                ])
+                                ->required(),
+                            TextInput::make('header_value')
+                                ->label('Header value')
+                                ->placeholder('your-api-key-here')
+                                ->helperText('Value for this header.')
+                                ->required(),
+                        ])
+                        ->columns(2)
+                        ->columnSpanFull()
+                        ->collapsed()
+                        ->addActionLabel('Add header'),
                     Repeater::make('metadata.post_vars')
                         ->label('GET/POST variables')
                         ->schema([
@@ -276,6 +306,13 @@ class PostProcessResource extends Resource
                         ->columns(2)
                         ->columnSpanFull()
                         ->addActionLabel('Add GET/POST variable'),
+                    Textarea::make('metadata.raw_json')
+                        ->label('Custom JSON Body')
+                        ->placeholder('{"key": "value", "playlist": "{{name}}", "uuid": "{{uuid}}"}')
+                        ->helperText('Custom JSON body to send. Use {{variable}} placeholders for dynamic values (e.g., {{name}}, {{uuid}}, {{url}}). This overrides the variables above when provided.')
+                        ->columnSpanFull()
+                        ->rows(4)
+                        ->hidden(fn(Get $get) => !$get('metadata.post') || !$get('metadata.json_body')),
                 ])->hidden(fn(Get $get) => $get('metadata.local') !== 'url'),
             Fieldset::make('Script Options')
                 ->schema([
