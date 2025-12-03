@@ -199,7 +199,6 @@ class RunPostProcess implements ShouldQueue
                     // Use withBody with empty string to avoid Laravel sending []
                     $response = Http::withHeaders($headers)
                         ->withBody('', 'text/plain')
-                        ->throw()
                         ->post($url);
                 } elseif ($post && $jsonBody && !empty($rawJson)) {
                     // Replace placeholders in raw JSON with actual values
@@ -209,7 +208,6 @@ class RunPostProcess implements ShouldQueue
                     // Make the request with raw JSON body
                     $response = Http::withHeaders($headers)
                         ->withBody($jsonContent, 'application/json')
-                        ->throw()
                         ->post($url);
                 } elseif ($post && !empty($queryVars)) {
                     // Send variables as form data or JSON based on jsonBody setting
@@ -217,22 +215,21 @@ class RunPostProcess implements ShouldQueue
                         $headers['Content-Type'] = 'application/json';
                     }
                     $response = Http::withHeaders($headers)
-                        ->throw()
                         ->post($url, $queryVars);
                 } elseif ($post) {
                     // POST request with empty variables (sends as form data)
                     $response = Http::withHeaders($headers)
-                        ->throw()
                         ->post($url, $queryVars);
                 } else {
                     // GET request with query parameters
-                    $response = Http::withHeaders($headers)->throw()->get($url, $queryVars);
+                    $response = Http::withHeaders($headers)->get($url, $queryVars);
                 }
 
                 // If results ok, log the results
-                if ($response->ok()) {
+                if ($response->successful()) {
                     $title = "Post processing for \"$name\" completed successfully";
-                    $body = $response->body() ?? '';
+                    $responseBody = $response->body();
+                    $body = !empty($responseBody) ? $responseBody : "Request completed successfully (HTTP {$response->status()})";
                     PostProcessLog::create([
                         'name' => $name,
                         'type' => $postProcess->event,
@@ -248,7 +245,8 @@ class RunPostProcess implements ShouldQueue
                         ->sendToDatabase($user);
                 } else {
                     $title = "Error running post processing for \"$name\"";
-                    $body = $response->body() ?? '';
+                    $responseBody = $response->body();
+                    $body = !empty($responseBody) ? $responseBody : "Request failed (HTTP {$response->status()})";
                     PostProcessLog::create([
                         'name' => $name,
                         'type' => $postProcess->event,
