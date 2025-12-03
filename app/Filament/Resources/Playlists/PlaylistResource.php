@@ -1310,7 +1310,7 @@ class PlaylistResource extends Resource
                                 ->dehydrateStateUsing(function ($state, $record) {
                                     // Convert IDs back to names for storage
                                     if (is_array($state) && !empty($state)) {
-                                        return Category::where('playlist_id', $record?->id)
+                                        return SourceCategory::where('playlist_id', $record?->id)
                                             ->whereIn('id', $state)
                                             ->pluck('name')
                                             ->unique()
