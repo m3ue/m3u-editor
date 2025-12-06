@@ -470,7 +470,7 @@ class M3uProxyService
         $failovers = $this->usingResolver()
             ? $channel->failoverChannels()->count() > 0
             : $channel->failoverChannels()
-            ->select(['channels.id', 'channels.url', 'channels.url_custom'])->get()
+            ->select(['channels.id', 'channels.url', 'channels.url_custom', 'channels.playlist_id', 'channels.custom_playlist_id'])->get()
             ->map(function ($ch) {
                 $playlist = $ch->getEffectivePlaylist();
                 if (! $playlist) {
