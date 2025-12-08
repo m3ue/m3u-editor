@@ -66,6 +66,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Str;
 use Spatie\Tags\Tag;
 use App\Traits\HasUserFiltering;
+use Filament\Support\Enums\Width;
 
 class ChannelResource extends Resource
 {
@@ -558,6 +559,7 @@ class ChannelResource extends Resource
                     ->requiresConfirmation()
                     ->icon('heroicon-o-link')
                     ->modalIcon('heroicon-o-link')
+                    ->modalWidth(Width::FourExtraLarge)
                     ->modalDescription('Map the selected EPG to the selected channel(s).')
                     ->modalSubmitActionLabel('Map now'),
                 BulkAction::make('preferred_logo')

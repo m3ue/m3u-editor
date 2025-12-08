@@ -32,6 +32,7 @@ class MapPlaylistChannelsToEpgChunk implements ShouldQueue
     public function __construct(
         public array $channelIds,
         public int $epgId,
+        public int $epgMapId,
         public array $settings,
         public string $batchNo,
         public int $totalChannels,
@@ -52,14 +53,15 @@ class MapPlaylistChannelsToEpgChunk implements ShouldQueue
         }
 
         // Fetch the map
-        $map = EpgMap::where('uuid', $this->batchNo)->first();
+        $map = EpgMap::find($this->epgMapId);
         if (!$map) {
-            Log::error("EPG Map not found for batch: {$this->batchNo}");
+            Log::error("EPG Map not found for ID: {$this->epgMapId}");
             return;
         }
 
         // Fetch the channels
         $channels = Channel::whereIn('id', $this->channelIds);
+        dump($channels->get());
 
         // Process each channel
         $patterns = $this->settings['exclude_prefixes'] ?? [];
@@ -110,7 +112,7 @@ class MapPlaylistChannelsToEpgChunk implements ShouldQueue
             $epgChannel = null;
 
             // Get matching priority setting
-            $prioritizeNameMatch = $this->settings['prioritize_name_match'] ?? true;
+            $prioritizeNameMatch = $this->settings['prioritize_name_match'] ?? false;
 
             // Prepare search terms
             $search1 = mb_strtolower(trim($streamId), 'UTF-8');

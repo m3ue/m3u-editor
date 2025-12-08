@@ -107,7 +107,7 @@ class MapPlaylistChannelsToEpg implements ShouldQueue
                     ->where('is_vod', false)
                     ->whereNotNull('epg_channel_id')
                     ->count();
-                $channels = Channel::whereIn('id', $channels->pluck('id'))
+                $channels = Channel::whereIn('id', $this->channels)
                     ->where('is_vod', false)
                     ->when(!$this->force, function ($query) {
                         $query->where('epg_channel_id', null);
@@ -170,6 +170,7 @@ class MapPlaylistChannelsToEpg implements ShouldQueue
                 $jobs[] = new MapPlaylistChannelsToEpgChunk(
                     channelIds: $chunk,
                     epgId: $epg->id,
+                    epgMapId: $map->id,
                     settings: $settings,
                     batchNo: $batchNo,
                     totalChannels: $channelCount

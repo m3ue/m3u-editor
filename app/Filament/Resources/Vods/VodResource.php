@@ -67,6 +67,7 @@ use Illuminate\Support\HtmlString;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use App\Traits\HasUserFiltering;
+use Filament\Support\Enums\Width;
 
 class VodResource extends Resource
 {
@@ -688,6 +689,7 @@ class VodResource extends Resource
                     ->requiresConfirmation()
                     ->icon('heroicon-o-link')
                     ->modalIcon('heroicon-o-link')
+                    ->modalWidth(Width::FourExtraLarge)
                     ->modalDescription('Map the selected EPG to the selected channel(s).')
                     ->modalSubmitActionLabel('Map now'),
                 BulkAction::make('preferred_logo')
