@@ -216,7 +216,7 @@ class ListSeries extends ListRecords
     protected function getTableQuery(): ?Builder
     {
         return static::getResource()::getEloquentQuery()
-            ->where('user_id', auth()->id());
+            ->where('series.user_id', auth()->id());
     }
 
     public function getTabs(): array
