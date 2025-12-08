@@ -30,6 +30,7 @@ class ImportProgress extends Widget
             'processing' => $isProcessing,
             'progress' => round($record->progress ?? 100, 2), // default to complete if no record
             'seriesProgress' => round($record->series_progress ?? 100, 2), // default to complete if no record
+            'vodProgress' => round($record->vod_progress ?? 100, 2), // default to complete if no record
         ];
     }
 }

@@ -39,7 +39,7 @@ class ProcessM3uImportSeries implements ShouldQueue
     {
         if (!$this->force) {
             // Don't update if currently processing
-            if ($this->playlist->processing) {
+            if ($this->playlist->isProcessingSeries()) {
                 return;
             }
 
@@ -56,7 +56,10 @@ class ProcessM3uImportSeries implements ShouldQueue
 
         // Update the playlist status to processing
         $this->playlist->update([
-            'processing' => true,
+            'processing' => [
+                ...$this->playlist->processing ?? [],
+                'series_processing' => true,
+            ],
             'status' => Status::Processing,
             'errors' => null,
             'series_progress' => 0,
@@ -104,7 +107,10 @@ class ProcessM3uImportSeries implements ShouldQueue
                         'synced' => now(),
                         'errors' => $error,
                         'series_progress' => 100,
-                        'processing' => false,
+                        'processing' => [
+                            ...$playlist->processing ?? [],
+                            'series_processing' => false,
+                        ],
                     ]);
 
                     // Fire the playlist synced event
@@ -114,7 +120,10 @@ class ProcessM3uImportSeries implements ShouldQueue
             // Update the playlist status to error
             $error = Str::limit($e->getMessage(), 255);
             $this->playlist->update([
-                'processing' => false,
+                'processing' => [
+                    ...$this->playlist->processing ?? [],
+                    'series_processing' => false,
+                ],
                 'status' => Status::Failed,
                 'errors' => $error,
                 'series_progress' => 0,

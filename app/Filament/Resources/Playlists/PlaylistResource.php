@@ -287,12 +287,35 @@ class PlaylistResource extends Resource
                                 ->duration(10000)
                                 ->send();
                         })
-                        ->disabled(fn($record): bool => $record->processing === true)
+                        ->disabled(fn($record): bool => $record->isProcessing())
                         ->requiresConfirmation()
                         ->icon('heroicon-o-arrow-path')
                         ->modalIcon('heroicon-o-arrow-path')
                         ->modalDescription('Process playlist now?')
                         ->modalSubmitActionLabel('Yes, process now'),
+                    Action::make('reset_processing')
+                        ->label('Reset Processing State')
+                        ->icon('heroicon-o-arrow-path')
+                        ->color('warning')
+                        ->requiresConfirmation()
+                        ->modalHeading('Reset Processing State')
+                        ->modalDescription('This will clear any stuck processing locks and allow new syncs to run. Use this if syncs appear stuck.')
+                        ->modalSubmitActionLabel('Reset')
+                        ->action(function (Playlist $record) {
+                            // Clear processing flag
+                            $record->update([
+                                'live_processing' => false,
+                                'vod_processing' => false,
+                                'series_processing' => false,
+                            ]);
+
+                            Notification::make()
+                                ->success()
+                                ->title('Processing state reset')
+                                ->body('The playlist is no longer processing. You can now run new syncs.')
+                                ->send();
+                        })
+                        ->visible(fn(Playlist $record) => $record->isProcessing()),
                     Action::make('process_series')
                         ->label('Fetch Series Metadata')
                         ->icon('heroicon-o-arrow-down-tray')
@@ -311,7 +334,7 @@ class PlaylistResource extends Resource
                                 ->duration(10000)
                                 ->send();
                         })
-                        ->disabled(fn($record): bool => $record->processing === true)
+                        ->disabled(fn($record): bool => $record->isProcessing())
                         ->hidden(fn($record): bool => ! $record->xtream)
                         ->requiresConfirmation()
                         ->icon('heroicon-o-arrow-down-tray')
@@ -336,51 +359,13 @@ class PlaylistResource extends Resource
                                 ->duration(10000)
                                 ->send();
                         })
-                        ->disabled(fn($record): bool => $record->processing === true)
+                        ->disabled(fn($record): bool => $record->isProcessing())
                         ->hidden(fn($record): bool => ! $record->xtream)
                         ->requiresConfirmation()
                         ->icon('heroicon-o-arrow-down-tray')
                         ->modalIcon('heroicon-o-arrow-down-tray')
                         ->modalDescription('Fetch VOD metadata for this playlist now? Only enabled VOD channels will be included.')
                         ->modalSubmitActionLabel('Yes, process now'),
-                    Action::make('reset_processing')
-                        ->label('Reset Processing State')
-                        ->icon('heroicon-o-arrow-path')
-                        ->color('warning')
-                        ->requiresConfirmation()
-                        ->modalHeading('Reset Processing State')
-                        ->modalDescription('This will clear any stuck processing locks and allow new syncs to run. Use this if syncs appear stuck.')
-                        ->modalSubmitActionLabel('Reset')
-                        ->action(function (Playlist $record) {
-                            // Clear processing flag
-                            $record->processing = false;
-
-                            // Clear Emby syncing flags if they exist
-                            if ($record->emby_config) {
-                                $embyConfig = $record->emby_config;
-
-                                if (isset($embyConfig['vod'])) {
-                                    $embyConfig['vod']['syncing'] = false;
-                                    unset($embyConfig['vod']['sync_started_at']);
-                                }
-
-                                if (isset($embyConfig['series'])) {
-                                    $embyConfig['series']['syncing'] = false;
-                                    unset($embyConfig['series']['sync_started_at']);
-                                }
-
-                                $record->emby_config = $embyConfig;
-                            }
-
-                            $record->save();
-
-                            Notification::make()
-                                ->success()
-                                ->title('Processing state reset')
-                                ->body('The playlist is no longer processing. You can now run new syncs.')
-                                ->send();
-                        })
-                        ->visible(fn(Playlist $record) => $record->processing === true),
                     Action::make('Download M3U')
                         ->label('Download M3U')
                         ->icon('heroicon-o-arrow-down-tray')
@@ -537,9 +522,14 @@ class PlaylistResource extends Resource
                         ->action(function ($record) {
                             $record->update([
                                 'status' => Status::Pending,
-                                'processing' => false,
+                                'processing' => [
+                                    'live_processing' => false,
+                                    'vod_processing' => false,
+                                    'series_processing' => false,
+                                ],
                                 'progress' => 0,
                                 'series_progress' => 0,
+                                'vod_progress' => 0,
                                 'channels' => 0,
                                 'synced' => null,
                                 'errors' => null,
@@ -611,9 +601,14 @@ class PlaylistResource extends Resource
                             foreach ($records as $record) {
                                 $record->update([
                                     'status' => Status::Pending,
-                                    'processing' => false,
+                                    'processing' => [
+                                        'live_processing' => false,
+                                        'vod_processing' => false,
+                                        'series_processing' => false,
+                                    ],
                                     'progress' => 0,
                                     'series_progress' => 0,
+                                    'vod_progress' => 0,
                                     'channels' => 0,
                                     'synced' => null,
                                     'errors' => null,
@@ -680,7 +675,7 @@ class PlaylistResource extends Resource
                             ->duration(10000)
                             ->send();
                     })
-                    ->disabled(fn($record): bool => $record->processing === true)
+                    ->disabled(fn($record): bool => $record->isProcessing())
                     ->requiresConfirmation()
                     ->icon('heroicon-o-arrow-path')
                     ->modalIcon('heroicon-o-arrow-path')
@@ -704,7 +699,7 @@ class PlaylistResource extends Resource
                             ->duration(10000)
                             ->send();
                     })
-                    ->disabled(fn($record): bool => $record->processing === true)
+                    ->disabled(fn($record): bool => $record->isProcessingSeries())
                     ->hidden(fn($record): bool => ! $record->xtream)
                     ->requiresConfirmation()
                     ->icon('heroicon-o-arrow-down-tray')
@@ -729,7 +724,7 @@ class PlaylistResource extends Resource
                             ->duration(10000)
                             ->send();
                     })
-                    ->disabled(fn($record): bool => $record->processing === true)
+                    ->disabled(fn($record): bool => $record->isProcessingVod())
                     ->hidden(fn($record): bool => ! $record->xtream)
                     ->requiresConfirmation()
                     ->icon('heroicon-o-arrow-down-tray')
@@ -746,26 +741,11 @@ class PlaylistResource extends Resource
                     ->modalSubmitActionLabel('Reset')
                     ->action(function ($record) {
                         // Clear processing flag
-                        $record->processing = false;
-
-                        // Clear Emby syncing flags if they exist
-                        if ($record->emby_config) {
-                            $embyConfig = $record->emby_config;
-
-                            if (isset($embyConfig['vod'])) {
-                                $embyConfig['vod']['syncing'] = false;
-                                unset($embyConfig['vod']['sync_started_at']);
-                            }
-
-                            if (isset($embyConfig['series'])) {
-                                $embyConfig['series']['syncing'] = false;
-                                unset($embyConfig['series']['sync_started_at']);
-                            }
-
-                            $record->emby_config = $embyConfig;
-                        }
-
-                        $record->save();
+                        $record->update([
+                            'live_processing' => false,
+                            'vod_processing' => false,
+                            'series_processing' => false,
+                        ]);
 
                         Notification::make()
                             ->success()
@@ -773,7 +753,7 @@ class PlaylistResource extends Resource
                             ->body('The playlist is no longer processing. You can now run new syncs.')
                             ->send();
                     })
-                    ->visible(fn($record) => $record->processing === true),
+                    ->visible(fn($record) => $record->isProcessing()),
                 Action::make('Download M3U')
                     ->label('Download M3U')
                     ->icon('heroicon-o-arrow-down-tray')
@@ -816,9 +796,14 @@ class PlaylistResource extends Resource
                     ->action(function ($record) {
                         $record->update([
                             'status' => Status::Pending,
-                            'processing' => false,
+                            'processing' => [
+                                'live_processing' => false,
+                                'vod_processing' => false,
+                                'series_processing' => false,
+                            ],
                             'progress' => 0,
                             'series_progress' => 0,
+                            'vod_progress' => 0,
                             'channels' => 0,
                             'synced' => null,
                             'errors' => null,

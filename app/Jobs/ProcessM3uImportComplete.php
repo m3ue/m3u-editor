@@ -162,7 +162,11 @@ class ProcessM3uImportComplete implements ShouldQueue
                         $playlist->update([
                             'status' => Status::Failed,
                             'errors' => $message,
-                            'processing' => false,
+                            'processing' => [
+                                ...$playlist->processing ?? [],
+                                'live_processing' => false,
+                                'vod_processing' => false,
+                            ]
                         ]);
 
                         // Cleanup the any new groups/channels
@@ -291,7 +295,11 @@ class ProcessM3uImportComplete implements ShouldQueue
             'errors' => null,
             'sync_time' => $completedIn,
             'progress' => 100,
-            'processing' => false
+            'processing' => [
+                ...$playlist->processing ?? [],
+                'live_processing' => false,
+                'vod_processing' => false,
+            ]
         ]);
 
         // Send notification

@@ -115,7 +115,7 @@ class ProcessM3uImport implements ShouldQueue
     {
         if (!$this->force) {
             // Don't update if currently processing
-            if ($this->playlist->processing) {
+            if ($this->playlist->isProcessing()) {
                 return;
             }
 
@@ -127,11 +127,16 @@ class ProcessM3uImport implements ShouldQueue
 
         // Update the playlist status to processing
         $this->playlist->update([
-            'processing' => true,
+            'processing' => [
+                ...$this->playlist->processing ?? [],
+                'live_processing' => true,
+                'vod_processing' => true,
+            ],
             'status' => Status::Processing,
             'errors' => null,
             'progress' => 0,
             'series_progress' => 0,
+            'vod_progress' => 0,
         ]);
 
         // Determine if using Xtream API or M3U+
@@ -170,7 +175,11 @@ class ProcessM3uImport implements ShouldQueue
             'synced' => now(),
             'errors' => $error,
             'progress' => 100,
-            'processing' => false,
+            'processing' => [
+                ...$this->playlist->processing ?? [],
+                'live_processing' => false,
+                'vod_processing' => false,
+            ]
         ]);
 
         // Fire the playlist synced event
@@ -504,7 +513,11 @@ class ProcessM3uImport implements ShouldQueue
                 'synced' => now(),
                 'errors' => $e->getMessage(),
                 'progress' => 100,
-                'processing' => false,
+                'processing' => [
+                    ...$this->playlist->processing ?? [],
+                    'live_processing' => false,
+                    'vod_processing' => false,
+                ]
             ]);
 
             // Fire the playlist synced event
@@ -806,7 +819,11 @@ class ProcessM3uImport implements ShouldQueue
                     'synced' => now(),
                     'errors' => $error,
                     'progress' => 100,
-                    'processing' => false,
+                    'processing' => [
+                        ...$playlist->processing ?? [],
+                        'live_processing' => false,
+                        'vod_processing' => false,
+                    ]
                 ]);
 
                 // Fire the playlist synced event
@@ -835,7 +852,11 @@ class ProcessM3uImport implements ShouldQueue
                 'synced' => now(),
                 'errors' => $e->getMessage(),
                 'progress' => 100,
-                'processing' => false,
+                'processing' => [
+                    ...$this->playlist->processing ?? [],
+                    'live_processing' => false,
+                    'vod_processing' => false,
+                ]
             ]);
 
             // Fire the playlist synced event
@@ -1011,7 +1032,11 @@ class ProcessM3uImport implements ShouldQueue
                 'errors' => null,
                 'sync_time' => $completedIn,
                 'progress' => 100,
-                'processing' => false,
+                'processing' => [
+                    ...$playlist->processing ?? [],
+                    'live_processing' => false,
+                    'vod_processing' => false,
+                ]
             ]);
 
             // Send notification
@@ -1112,7 +1137,11 @@ class ProcessM3uImport implements ShouldQueue
                     'synced' => now(),
                     'errors' => $error,
                     'progress' => 100,
-                    'processing' => false,
+                    'processing' => [
+                        ...$playlist->processing ?? [],
+                        'live_processing' => false,
+                        'vod_processing' => false,
+                    ]
                 ]);
                 event(new SyncCompleted($playlist));
             })->dispatch();

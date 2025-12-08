@@ -54,11 +54,16 @@ class ResetSyncProcess extends Command
                 dispatch(new ProcessM3uImport($playlist, force: true));
             } else {
                 $playlist->update([
-                    'processing' => false,
+                    'processing' => [
+                        ...$playlist->processing ?? [],
+                        'live_processing' => false,
+                        'vod_processing' => false,
+                    ],
                     'status' => Status::Pending,
                     'errors' => null,
                     'progress' => 0,
                     'series_progress' => 0,
+                    'vod_progress' => 0,
                 ]);
             }
 

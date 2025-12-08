@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Enums\Status;
 use Exception;
 use App\Models\Channel;
 use App\Models\Playlist;
@@ -59,8 +60,11 @@ class ProcessVodChannels implements ShouldQueue
         // Update the playlist status to processing
         if (!$this->channel) {
             $playlist->update([
-                'processing' => true,
-                'status' => 'processing',
+                'processing' => [
+                    ...$playlist->processing ?? [],
+                    'vod_processing' => true,
+                ],
+                'status' => Status::Processing,
                 'errors' => null,
             ]);
         }
@@ -104,8 +108,11 @@ class ProcessVodChannels implements ShouldQueue
                 // Update the playlist with the error
                 if ($this->updateProgress) {
                     $playlist->update([
-                        'processing' => false,
-                        'status' => 'failed',
+                        'processing' => [
+                            ...$playlist->processing ?? [],
+                            'vod_processing' => false,
+                        ],
+                        'status' => Status::Failed,
                         'errors' => 'Failed to process VOD data for channel ID ' . $channel->id . ': ' . $e->getMessage(),
                     ]);
                 }
@@ -125,9 +132,12 @@ class ProcessVodChannels implements ShouldQueue
         if (!$this->channel) {
             if ($this->updateProgress) {
                 $playlist->update([
-                    'processing' => false,
+                    'processing' => [
+                        ...$playlist->processing ?? [],
+                        'vod_processing' => false,
+                    ],
                     'progress' => 100,
-                    'status' => 'completed',
+                    'status' => Status::Completed,
                     'errors' => null,
                 ]);
             }

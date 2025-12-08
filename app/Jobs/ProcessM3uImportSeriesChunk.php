@@ -72,7 +72,10 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
                 ->broadcast($playlist->user)
                 ->sendToDatabase($playlist->user);
             $playlist->update([
-                'processing' => true,
+                'processing' => [
+                    ...$playlist->processing ?? [],
+                    'series_processing' => true,
+                ],
                 'status' => Status::Processing,
                 'errors' => null,
                 'series_progress' => 0,
