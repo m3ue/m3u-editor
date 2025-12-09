@@ -17,7 +17,7 @@ class ListGroups extends ListRecords
 {
     protected static string $resource = GroupResource::class;
 
-    protected ?string $subheading = 'Manage channel groups.';
+    protected ?string $subheading = 'Manage live groups.';
 
     protected function getHeaderActions(): array
     {

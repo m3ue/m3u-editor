@@ -48,7 +48,7 @@ class GroupResource extends Resource
 
     protected static ?string $recordTitleAttribute = 'name';
 
-    protected static ?string $label = 'Group';
+    protected static ?string $label = 'Live Group';
     protected static ?string $pluralLabel = 'Groups';
 
     public static function getGloballySearchableAttributes(): array
@@ -56,7 +56,7 @@ class GroupResource extends Resource
         return ['name', 'name_internal'];
     }
 
-    protected static string | \UnitEnum | null $navigationGroup = 'Live';
+    protected static string | \UnitEnum | null $navigationGroup = 'Live Channels';
 
     public static function getNavigationSort(): ?int
     {

@@ -17,7 +17,7 @@ class ListVodGroups extends ListRecords
 {
     protected static string $resource = VodGroupResource::class;
 
-    protected ?string $subheading = 'Manage channel groups.';
+    protected ?string $subheading = 'Manage VOD groups.';
 
     protected function getHeaderActions(): array
     {

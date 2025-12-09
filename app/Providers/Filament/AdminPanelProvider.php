@@ -94,13 +94,13 @@ class AdminPanelProvider extends PanelProvider
             ])
             ->navigationGroups([
                 NavigationGroup::make('Playlist')
-                    ->icon('heroicon-m-play'),
-                NavigationGroup::make('Live')
-                    ->icon('heroicon-m-film'),
-                NavigationGroup::make('VOD')
+                    ->icon('heroicon-m-play-pause'),
+                NavigationGroup::make('Live Channels')
+                    ->icon('heroicon-m-tv'),
+                NavigationGroup::make('VOD Channels')
                     ->icon('heroicon-m-film'),
                 NavigationGroup::make('Series')
-                    ->icon('heroicon-m-video-camera'),
+                    ->icon('heroicon-m-play'),
                 NavigationGroup::make('EPG')
                     ->icon('heroicon-m-calendar-days'),
                 NavigationGroup::make('Proxy')

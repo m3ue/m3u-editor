@@ -108,7 +108,7 @@ class VodResource extends Resource
         return $query;
     }
 
-    protected static string|\UnitEnum|null $navigationGroup = 'VOD';
+    protected static string|\UnitEnum|null $navigationGroup = 'VOD Channels';
 
     protected static ?string $navigationLabel = 'Channels';
 

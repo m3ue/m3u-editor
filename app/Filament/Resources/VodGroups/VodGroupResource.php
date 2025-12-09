@@ -48,7 +48,7 @@ class VodGroupResource extends Resource
 
     protected static ?string $recordTitleAttribute = 'name';
 
-    protected static ?string $label = 'Group';
+    protected static ?string $label = 'VOD Group';
     protected static ?string $pluralLabel = 'Groups';
 
     public static function getGloballySearchableAttributes(): array
@@ -56,7 +56,7 @@ class VodGroupResource extends Resource
         return ['name', 'name_internal'];
     }
 
-    protected static string | \UnitEnum | null $navigationGroup = 'VOD';
+    protected static string | \UnitEnum | null $navigationGroup = 'VOD Channels';
 
     public static function getNavigationSort(): ?int
     {
