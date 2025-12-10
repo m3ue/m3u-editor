@@ -5,7 +5,7 @@ return [
     // If M3U_PROXY_ENABLED=false/null, uses external proxy service at M3U_PROXY_URL
     // If M3U_PROXY_ENABLED=true, uses embedded proxy via nginx reverse proxy
     'embedded_proxy_enabled' => env('M3U_PROXY_ENABLED', true), // true = embedded service, false/null = external service
-    'external_proxy_enabled' => !env('M3U_PROXY_ENABLED', false), // opposite of above for convenience
+    'external_proxy_enabled' => ! env('M3U_PROXY_ENABLED', false), // opposite of above for convenience
     // 'm3u_proxy_url' => env('M3U_PROXY_URL'), // Auto-set in start-container based on mode
     'm3u_proxy_host' => env('M3U_PROXY_HOST', 'localhost'), // Host for proxy (embedded and external)
     'm3u_proxy_port' => env('M3U_PROXY_PORT', 8085), // Port for proxy (embedded and external)
@@ -13,6 +13,7 @@ return [
     'm3u_proxy_public_url' => env('M3U_PROXY_PUBLIC_URL'), // Public URL for the proxy (auto-set in start-container)
 
     'url_override' => env('PROXY_URL_OVERRIDE', null),
+    'url_override_include_logos' => env('PROXY_URL_OVERRIDE_INCLUDE_LOGOS', true),
     'resolver_url' => env('M3U_PROXY_FAILOVER_RESOLVER_URL', null),
 
     /* Deprecated Proxy Settings - use M3U_PROXY_* env vars instead */
