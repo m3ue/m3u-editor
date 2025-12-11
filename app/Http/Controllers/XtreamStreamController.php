@@ -196,7 +196,6 @@ class XtreamStreamController extends Controller
         list($playlist, $channel) = $this->findAuthenticatedPlaylistAndStreamModel($username, $password, $streamId, 'live');
         if ($channel instanceof Channel) {
             if ($playlist->enable_proxy) {
-                $request->merge(['username' => $username]);
                 return app()->call('App\\Http\\Controllers\\Api\\M3uProxyApiController@channel', [
                     'id'   => $streamId,
                     'uuid' => $playlist->uuid,
@@ -218,7 +217,6 @@ class XtreamStreamController extends Controller
         list($playlist, $channel) = $this->findAuthenticatedPlaylistAndStreamModel($username, $password, $streamId, 'vod');
         if ($channel instanceof Channel) {
             if ($playlist->enable_proxy) {
-                $request->merge(['username' => $username]);
                 return app()->call('App\\Http\\Controllers\\Api\\M3uProxyApiController@channel', [
                     'id'   => $streamId,
                     'uuid' => $playlist->uuid,
@@ -240,7 +238,6 @@ class XtreamStreamController extends Controller
         list($playlist, $episode) = $this->findAuthenticatedPlaylistAndStreamModel($username, $password, $streamId, 'episode');
         if ($episode instanceof Episode) {
             if ($playlist->enable_proxy) {
-                $request->merge(['username' => $username]);
                 return app()->call('App\\Http\\Controllers\\Api\\M3uProxyApiController@episode', [
                     'id'   => $streamId,
                     'uuid' => $playlist->uuid,
@@ -294,7 +291,6 @@ class XtreamStreamController extends Controller
         $request->merge([
             'timeshift_duration' => $duration,
             'timeshift_date' => $date,
-            'username' => $username,
         ]);
 
         if ($playlist->enable_proxy) {
