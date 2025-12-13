@@ -93,8 +93,12 @@ class EpisodesRelationManager extends RelationManager
                             ->limit(100)
                             ->size('xs')
                             ->color('gray')
-                            ->tooltip(fn($record) => $record->info['plot'] ?? null)
+                            ->tooltip(fn ($record) => $record->plot ?? $record->info['plot'] ?? null)
                             ->getStateUsing(function ($record) {
+                                // Check the dedicated plot column first, then fall back to info.plot
+                                if (!empty($record->plot)) {
+                                    return $record->plot;
+                                }
                                 $info = $record->info ?? [];
                                 return $info['plot'] ?? null;
                             })

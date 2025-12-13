@@ -103,6 +103,8 @@ class AdminPanelProvider extends PanelProvider
                     ->icon('heroicon-m-play'),
                 NavigationGroup::make('EPG')
                     ->icon('heroicon-m-calendar-days'),
+                NavigationGroup::make('Integrations')
+                    ->icon('heroicon-m-server-stack'),
                 NavigationGroup::make('Proxy')
                     ->icon('heroicon-m-arrows-right-left'),
                 NavigationGroup::make('Tools')
