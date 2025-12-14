@@ -326,6 +326,7 @@ class SyncMediaServer implements ShouldQueue
                 'year' => $movie['ProductionYear'] ?? null,
                 'rating' => $movie['CommunityRating'] ?? null,
                 'info' => $info,
+                'last_metadata_fetch' => now(), // Mark metadata as fetched so Xtream API doesn't try to fetch again
             ]
         );
     }
@@ -415,6 +416,7 @@ class SyncMediaServer implements ShouldQueue
                 'genre' => implode(', ', $genres),
                 'release_date' => $seriesData['ProductionYear'] ?? null,
                 'rating' => $seriesData['CommunityRating'] ?? null,
+                'last_metadata_fetch' => now(), // Mark metadata as fetched so Xtream API doesn't try to fetch again
                 'metadata' => [
                     'media_server_id' => $seriesId,
                     'media_server_type' => $integration->type,

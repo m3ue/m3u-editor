@@ -116,7 +116,7 @@ class XtreamApiController extends Controller
      * @param string $uuid The UUID of the playlist (required path parameter)
      * @param Request $request The HTTP request containing query parameters:
      *   - username (string, required): User's Xtream API username
-     *   - password (string, required): User's Xtream API password 
+     *   - password (string, required): User's Xtream API password
      *   - action (string, optional): Defaults to 'panel'. Determines the API action
      *   - category_id (string, optional): Filter results by category ID (required for get_series, optional for get_live_streams and get_vod_streams)
      *   - series_id (int, optional): Series ID (required for get_series_info action)
@@ -1147,10 +1147,13 @@ class XtreamApiController extends Controller
                 'direct_source' => $baseUrl . "/movie/{$urlSafeUser}/{$urlSafePass}/" . $channel->id . '.' . $extension,
             ];
 
-            return response()->json([
+            // Return response with metadata at BOTH root level (for compatibility with buggy players
+            // like Another IPTV Player that read from root) AND in standard 'info'/'movie_data' objects
+            // (for properly implemented Xtream API clients)
+            return response()->json(array_merge($defaultInfo, [
                 'info' => $defaultInfo,
                 'movie_data' => $defaultMovieData,
-            ]);
+            ]));
         } else if ($action === 'get_short_epg') {
             $streamId = $request->input('stream_id');
             $limit = $request->input('limit');
