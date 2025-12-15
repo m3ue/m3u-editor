@@ -195,3 +195,17 @@ Route::get('/schedules-direct/{epg}/image/{imageHash}', [
     \App\Http\Controllers\SchedulesDirectImageProxyController::class,
     'proxyImage',
 ])->name('schedules-direct.image.proxy');
+
+/*
+ * Media Server (Emby/Jellyfin) proxy routes
+ * These hide the API key from external clients
+ */
+Route::get('/media-server/{integrationId}/image/{itemId}/{imageType?}', [
+    \App\Http\Controllers\MediaServerProxyController::class,
+    'proxyImage',
+])->name('media-server.image.proxy');
+
+Route::get('/media-server/{integrationId}/stream/{itemId}.{container}', [
+    \App\Http\Controllers\MediaServerProxyController::class,
+    'proxyStream',
+])->name('media-server.stream.proxy');

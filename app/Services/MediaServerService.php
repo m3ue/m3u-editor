@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Http\Controllers\MediaServerProxyController;
 use App\Models\MediaServerIntegration;
 use Exception;
 use Illuminate\Http\Client\PendingRequest;
@@ -233,7 +234,7 @@ class MediaServerService
     }
 
     /**
-     * Get the direct play/stream URL for an item.
+     * Get the proxy stream URL for an item (hides API key from clients).
      *
      * @param string $itemId The media server's item ID
      * @param string $container The container format (e.g., 'mp4', 'mkv', 'ts')
@@ -241,18 +242,51 @@ class MediaServerService
      */
     public function getStreamUrl(string $itemId, string $container = 'ts'): string
     {
-        // Direct stream URL - no transcoding, pass-through
+        // Use proxy URL to hide API key from external clients
+        return MediaServerProxyController::generateStreamProxyUrl(
+            $this->integration->id,
+            $itemId,
+            $container
+        );
+    }
+
+    /**
+     * Get the direct stream URL for an item (internal use only - contains API key).
+     *
+     * @param string $itemId The media server's item ID
+     * @param string $container The container format (e.g., 'mp4', 'mkv', 'ts')
+     * @return string
+     */
+    public function getDirectStreamUrl(string $itemId, string $container = 'ts'): string
+    {
         return "{$this->baseUrl}/Videos/{$itemId}/stream.{$container}?static=true&api_key={$this->apiKey}";
     }
 
     /**
-     * Get the primary image URL for an item.
+     * Get the proxy image URL for an item (hides API key from clients).
      *
      * @param string $itemId The media server's item ID
      * @param string $imageType Image type: 'Primary', 'Backdrop', 'Logo', etc.
      * @return string
      */
     public function getImageUrl(string $itemId, string $imageType = 'Primary'): string
+    {
+        // Use proxy URL to hide API key from external clients
+        return MediaServerProxyController::generateImageProxyUrl(
+            $this->integration->id,
+            $itemId,
+            $imageType
+        );
+    }
+
+    /**
+     * Get the direct image URL for an item (internal use only - contains API key).
+     *
+     * @param string $itemId The media server's item ID
+     * @param string $imageType Image type: 'Primary', 'Backdrop', 'Logo', etc.
+     * @return string
+     */
+    public function getDirectImageUrl(string $itemId, string $imageType = 'Primary'): string
     {
         return "{$this->baseUrl}/Items/{$itemId}/Images/{$imageType}?api_key={$this->apiKey}";
     }
