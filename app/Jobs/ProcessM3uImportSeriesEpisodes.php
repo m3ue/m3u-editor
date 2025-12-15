@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Models\Series;
 use App\Models\User;
 use App\Settings\GeneralSettings;
+use App\Traits\ProviderRequestDelay;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -12,6 +13,7 @@ use Illuminate\Foundation\Queue\Queueable;
 class ProcessM3uImportSeriesEpisodes implements ShouldQueue
 {
     use Queueable;
+    use ProviderRequestDelay;
 
     // Don't retry the job on failure
     public $tries = 1;
@@ -84,11 +86,14 @@ class ProcessM3uImportSeriesEpisodes implements ShouldQueue
         // Get the playlist
         $playlist = $series->playlist;
 
-        // Process the series
-        $results = $series->fetchMetadata(
-            refresh: $this->overwrite_existing,
-            sync: $this->sync_stream_files
-        );
+        // Use provider throttling to limit concurrent requests and apply delay
+        $results = $this->withProviderThrottling(function () use ($series) {
+            return $series->fetchMetadata(
+                refresh: $this->overwrite_existing,
+                sync: $this->sync_stream_files
+            );
+        });
+
         if ($this->notify && $results !== false) {
             // Check if the playlist has .strm file sync enabled
             $sync_settings = $series->sync_settings;

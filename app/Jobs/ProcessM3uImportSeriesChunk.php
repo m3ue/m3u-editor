@@ -104,13 +104,12 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
             return; // skip if no base url or credentials
         }
 
-        // Get the series streams for this category
+        // Get the series streams for this category with provider throttling
         $seriesStreamsUrl = "$baseUrl/player_api.php?username=$user&password=$password&action=get_series&category_id={$sourceCategoryId}";
-        $this->applyProviderRequestDelay();
-        $seriesStreamsResponse = Http::withUserAgent($userAgent)
+        $seriesStreamsResponse = $this->withProviderThrottling(fn () => Http::withUserAgent($userAgent)
             ->withOptions(['verify' => $verify])
             ->timeout(60) // set timeout to 1 minute
-            ->throw()->get($seriesStreamsUrl);
+            ->throw()->get($seriesStreamsUrl));
         if (!$seriesStreamsResponse->ok()) {
             return; // skip this category if there's an error
         }

@@ -212,12 +212,11 @@ class ProcessEpgImport implements ShouldQueue
                 if (Storage::disk('local')->exists($epg->file_path)) {
                     Storage::disk('local')->delete($epg->file_path);
                 }
-                $this->applyProviderRequestDelay();
-                $response = Http::withUserAgent($userAgent)
+                $response = $this->withProviderThrottling(fn () => Http::withUserAgent($userAgent)
                     ->sink($filePath)
                     ->withOptions(['verify' => $verify])
                     ->timeout(60 * 5) // set timeout to five minutes
-                    ->throw()->get($url->toString());
+                    ->throw()->get($url->toString()));
 
                 if ($response->ok() && Storage::disk('local')->exists($epg->file_path)) {
                     // Update the file path

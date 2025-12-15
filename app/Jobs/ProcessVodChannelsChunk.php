@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Enums\Status;
 use App\Models\Playlist;
 use App\Services\XtreamService;
+use App\Traits\ProviderRequestDelay;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -13,6 +14,7 @@ use Illuminate\Support\Facades\Log;
 class ProcessVodChannelsChunk implements ShouldQueue
 {
     use Queueable;
+    use ProviderRequestDelay;
 
     // Don't retry the job on failure
     public $tries = 1;
@@ -61,7 +63,8 @@ class ProcessVodChannelsChunk implements ShouldQueue
 
         foreach ($channels as $index => $channel) {
             try {
-                $channel->fetchMetadata($xtream);
+                // Use provider throttling to limit concurrent requests and apply delay
+                $this->withProviderThrottling(fn () => $channel->fetchMetadata($xtream));
             } catch (\Exception $e) {
                 // Log the error and continue processing other channels
                 Log::error('Failed to process VOD data for channel ID ' . $channel->id . ' in chunk ' . $this->chunkIndex . ': ' . $e->getMessage());
@@ -88,7 +91,7 @@ class ProcessVodChannelsChunk implements ShouldQueue
                 $playlist->update(['vod_progress' => $overallProgress]);
             }
 
-            usleep(100000); // Throttle processing to avoid overwhelming the Xtream API
+            // Note: Provider throttling is now handled by withProviderThrottling() above
         }
 
         // Update progress after this chunk is complete
