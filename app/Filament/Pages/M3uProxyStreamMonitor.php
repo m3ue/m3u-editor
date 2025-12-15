@@ -286,6 +286,15 @@ class M3uProxyStreamMonitor extends Page
                 'segments_served' => $stream['total_segments_served'],
                 'transcoding' => $transcoding,
                 'transcoding_format' => $transcodingFormat,
+                // Failover details
+                'failover_urls' => $stream['failover_urls'] ?? [],
+                'failover_resolver_url' => $stream['failover_resolver_url'] ?? null,
+                'current_failover_index' => $stream['current_failover_index'] ?? 0,
+                'failover_attempts' => $stream['failover_attempts'] ?? 0,
+                'last_failover_time' => isset($stream['last_failover_time']) 
+                    ? Carbon::parse($stream['last_failover_time'], 'UTC')->format('Y-m-d H:i:s')
+                    : null,
+                'using_failover' => ($stream['current_failover_index'] ?? 0) > 0 || ($stream['failover_attempts'] ?? 0) > 0,
             ];
         }
 

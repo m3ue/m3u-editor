@@ -168,6 +168,17 @@ echo $totalBandwidth > 1000 ? round($totalBandwidth / 1000, 1) . ' Mbps' : $tota
                                             {{ $stream['transcoding_format'] ?? 'N/A' }}
                                         </span>
                                     @endif
+                                    @if($stream['using_failover'])
+                                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-orange-100 dark:bg-orange-900 text-orange-800 dark:text-orange-200">
+                                            <x-heroicon-s-arrow-path class="w-3 h-3 mr-1" />
+                                            Failover Active
+                                        </span>
+                                    @elseif($stream['has_failover'])
+                                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200">
+                                            <x-heroicon-s-shield-check class="w-3 h-3 mr-1" />
+                                            Failover Ready
+                                        </span>
+                                    @endif
                                     <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium {{ 
                                         $stream['status'] === 'active' ? 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200' :
             ($stream['status'] === 'idle' ? 'bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200' : 'bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200') 
@@ -280,6 +291,98 @@ echo $totalBandwidth > 1000 ? round($totalBandwidth / 1000, 1) . ' Mbps' : $tota
                                         </div>
                                     </div>
                                 </div>
+                                
+                                @if($stream['has_failover'])
+                                    <!-- Failover Information Section -->
+                                    <div class="mt-4 pt-4 border-t dark:border-gray-700">
+                                        <h4 class="text-sm font-semibold text-gray-900 dark:text-white mb-3 flex items-center">
+                                            <x-heroicon-s-arrow-path class="w-4 h-4 mr-2 {{ $stream['using_failover'] ? 'text-orange-500' : 'text-gray-400' }}" />
+                                            Failover Status
+                                        </h4>
+                                        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                            <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-3">
+                                                <div class="text-xs text-gray-500 dark:text-gray-400">Failover Attempts</div>
+                                                <div class="text-lg font-semibold {{ $stream['failover_attempts'] > 0 ? 'text-orange-600 dark:text-orange-400' : 'text-gray-900 dark:text-white' }}">
+                                                    {{ $stream['failover_attempts'] }}
+                                                </div>
+                                            </div>
+                                            <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-3">
+                                                <div class="text-xs text-gray-500 dark:text-gray-400">Current Source</div>
+                                                <div class="text-lg font-semibold text-gray-900 dark:text-white">
+                                                    @if($stream['failover_resolver_url'])
+                                                        Dynamic
+                                                    @elseif($stream['current_failover_index'] > 0)
+                                                        Backup #{{ $stream['current_failover_index'] }}
+                                                    @else
+                                                        Primary
+                                                    @endif
+                                                </div>
+                                            </div>
+                                            <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-3">
+                                                <div class="text-xs text-gray-500 dark:text-gray-400">Available Backups</div>
+                                                <div class="text-lg font-semibold text-gray-900 dark:text-white">
+                                                    @if($stream['failover_resolver_url'])
+                                                        <span class="text-sm">Dynamic Resolver</span>
+                                                    @else
+                                                        {{ count($stream['failover_urls']) }}
+                                                    @endif
+                                                </div>
+                                            </div>
+                                            <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-3">
+                                                <div class="text-xs text-gray-500 dark:text-gray-400">Last Failover</div>
+                                                <div class="text-sm font-semibold text-gray-900 dark:text-white">
+                                                    {{ $stream['last_failover_time'] ?? 'Never' }}
+                                                </div>
+                                            </div>
+                                        </div>
+                                        
+                                        @if($stream['using_failover'])
+                                            <div class="mt-3 p-3 bg-orange-50 dark:bg-orange-900/20 rounded-lg border border-orange-200 dark:border-orange-800">
+                                                <div class="flex items-start">
+                                                    <x-heroicon-s-exclamation-triangle class="w-5 h-5 text-orange-500 mt-0.5 mr-2 flex-shrink-0" />
+                                                    <div>
+                                                        <p class="text-sm font-medium text-orange-800 dark:text-orange-200">
+                                                            Stream is using a failover source
+                                                        </p>
+                                                        <p class="text-xs text-orange-600 dark:text-orange-300 mt-1">
+                                                            Original URL: <span class="font-mono">{{ Str::limit($stream['source_url'], 60) }}</span>
+                                                        </p>
+                                                        @if($stream['current_url'] && $stream['current_url'] !== $stream['source_url'])
+                                                            <p class="text-xs text-orange-600 dark:text-orange-300">
+                                                                Current URL: <span class="font-mono">{{ Str::limit($stream['current_url'], 60) }}</span>
+                                                            </p>
+                                                        @endif
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        @endif
+                                        
+                                        @if(!empty($stream['failover_urls']))
+                                            <div class="mt-3">
+                                                <details class="text-sm">
+                                                    <summary class="cursor-pointer text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white">
+                                                        Show failover URLs ({{ count($stream['failover_urls']) }})
+                                                    </summary>
+                                                    <ul class="mt-2 space-y-1 ml-4">
+                                                        @foreach($stream['failover_urls'] as $index => $url)
+                                                            <li class="font-mono text-xs text-gray-500 dark:text-gray-400 flex items-center">
+                                                                <span class="inline-flex items-center justify-center w-5 h-5 mr-2 rounded-full text-xs {{ $stream['current_failover_index'] === $index + 1 ? 'bg-orange-100 dark:bg-orange-900 text-orange-800 dark:text-orange-200' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400' }}">
+                                                                    {{ $index + 1 }}
+                                                                </span>
+                                                                <span class="{{ $stream['current_failover_index'] === $index + 1 ? 'text-orange-600 dark:text-orange-400 font-medium' : '' }}">
+                                                                    {{ Str::limit($url, 70) }}
+                                                                </span>
+                                                                @if($stream['current_failover_index'] === $index + 1)
+                                                                    <span class="ml-2 text-orange-500">(active)</span>
+                                                                @endif
+                                                            </li>
+                                                        @endforeach
+                                                    </ul>
+                                                </details>
+                                            </div>
+                                        @endif
+                                    </div>
+                                @endif
                             </div>
                         </div>
                     </x-filament::card>
