@@ -6,6 +6,7 @@ use App\Enums\Status;
 use App\Models\Channel;
 use App\Models\Playlist;
 use App\Services\XtreamService;
+use App\Traits\ProviderRequestDelay;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -16,6 +17,7 @@ use Throwable;
 class ProcessVodChannels implements ShouldQueue
 {
     use Queueable;
+    use ProviderRequestDelay;
 
     // Don't retry the job on failure
     public $tries = 1;
@@ -77,7 +79,8 @@ class ProcessVodChannels implements ShouldQueue
         }
 
         try {
-            $this->channel->fetchMetadata($xtream);
+            // Use provider throttling to limit concurrent requests and apply delay
+            $this->withProviderThrottling(fn () => $this->channel->fetchMetadata($xtream));
             Log::info('Completed processing VOD data for channel ID ' . $this->channel->id);
             Notification::make()
                 ->title('VOD Channel Processed')

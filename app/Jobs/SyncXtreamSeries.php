@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Models\Playlist;
 use App\Services\XtreamService;
+use App\Traits\ProviderRequestDelay;
 use Illuminate\Support\Str;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -11,6 +12,7 @@ use Illuminate\Foundation\Queue\Queueable;
 class SyncXtreamSeries implements ShouldQueue
 {
     use Queueable;
+    use ProviderRequestDelay;
 
     /**
      * Create a new job instance.
@@ -61,9 +63,10 @@ class SyncXtreamSeries implements ShouldQueue
 
         if ($this->importAll) {
             // If importAll is true, we need to import all series from the category
-            $this->series = collect($xtream->getSeries($this->catId))
+            // Use provider throttling to limit concurrent requests and apply delay
+            $this->series = $this->withProviderThrottling(fn () => collect($xtream->getSeries($this->catId))
                 ->pluck('series_id')
-                ->toArray();
+                ->toArray());
         }
         foreach ($this->series as $seriesId) {
             // Check if the series exists for the playlist
@@ -71,8 +74,8 @@ class SyncXtreamSeries implements ShouldQueue
                 ->where('source_series_id', $seriesId)
                 ->first();
             if (!$playlistSeries) {
-                // Get the series info from the API
-                $seriesInfo = $xtream->getSeriesInfo($seriesId)['info'];
+                // Get the series info from the API with provider throttling
+                $seriesInfo = $this->withProviderThrottling(fn () => $xtream->getSeriesInfo($seriesId)['info']);
 
                 // Create new series
                 $playlistSeries = $playlist->series()->create([
