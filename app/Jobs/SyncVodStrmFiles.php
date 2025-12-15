@@ -46,6 +46,8 @@ class SyncVodStrmFiles implements ShouldQueue
                 'clean_special_chars' => $settings->vod_stream_file_sync_clean_special_chars ?? false,
                 'remove_consecutive_chars' => $settings->vod_stream_file_sync_remove_consecutive_chars ?? false,
                 'replace_char' => $settings->vod_stream_file_sync_replace_char ?? 'space',
+                'name_filter_enabled' => $settings->vod_stream_file_sync_name_filter_enabled ?? false,
+                'name_filter_patterns' => $settings->vod_stream_file_sync_name_filter_patterns ?? [],
             ];
 
             // Setup our channels to sync
@@ -94,11 +96,27 @@ class SyncVodStrmFiles implements ShouldQueue
                 $tmdbIdFormat = $sync_settings['tmdb_id_format'] ?? 'square';
                 $removeConsecutiveChars = $sync_settings['remove_consecutive_chars'] ?? false;
 
+                // Get name filtering settings
+                $nameFilterEnabled = $sync_settings['name_filter_enabled'] ?? false;
+                $nameFilterPatterns = $sync_settings['name_filter_patterns'] ?? [];
+
+                // Helper function to apply name filtering
+                $applyNameFilter = function ($name) use ($nameFilterEnabled, $nameFilterPatterns) {
+                    if (! $nameFilterEnabled || empty($nameFilterPatterns)) {
+                        return $name;
+                    }
+                    foreach ($nameFilterPatterns as $pattern) {
+                        $name = str_replace($pattern, '', $name);
+                    }
+                    return trim($name);
+                };
+
                 // Create the group folder if enabled
                 if (in_array('group', $pathStructure)) {
+                    $groupName = $applyNameFilter($channel->group);
                     $group = $cleanSpecialChars
-                        ? PlaylistService::makeFilesystemSafe($channel->group, $replaceChar)
-                        : PlaylistService::makeFilesystemSafe($channel->group);
+                        ? PlaylistService::makeFilesystemSafe($groupName, $replaceChar)
+                        : PlaylistService::makeFilesystemSafe($groupName);
                     $groupPath = $path . '/' . $group;
                     if (! is_dir($groupPath)) {
                         mkdir($groupPath, 0777, true);
@@ -106,8 +124,9 @@ class SyncVodStrmFiles implements ShouldQueue
                     $path = $groupPath;
                 }
 
-                // Build the filename
+                // Build the filename (apply name filtering to title)
                 $title = $channel->title_custom ?? $channel->title;
+                $title = $applyNameFilter($title);
                 $fileName = $title;
 
                 // Create the VOD Title folder if enabled

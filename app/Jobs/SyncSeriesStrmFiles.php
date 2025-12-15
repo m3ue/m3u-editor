@@ -95,6 +95,8 @@ class SyncSeriesStrmFiles implements ShouldQueue
                 'clean_special_chars' => $settings->stream_file_sync_clean_special_chars ?? false,
                 'remove_consecutive_chars' => $settings->stream_file_sync_remove_consecutive_chars ?? false,
                 'replace_char' => $settings->stream_file_sync_replace_char ?? 'space',
+                'name_filter_enabled' => $settings->stream_file_sync_name_filter_enabled ?? false,
+                'name_filter_patterns' => $settings->stream_file_sync_name_filter_patterns ?? [],
             ];
 
             // Merge global settings with series specific settings
@@ -153,12 +155,29 @@ class SyncSeriesStrmFiles implements ShouldQueue
             $replaceChar = $sync_settings['replace_char'] ?? 'space';
             $cleanSpecialChars = $sync_settings['clean_special_chars'] ?? false;
 
+            // Get name filtering settings
+            $nameFilterEnabled = $sync_settings['name_filter_enabled'] ?? false;
+            $nameFilterPatterns = $sync_settings['name_filter_patterns'] ?? [];
+
+            // Helper function to apply name filtering
+            $applyNameFilter = function ($name) use ($nameFilterEnabled, $nameFilterPatterns) {
+                if (! $nameFilterEnabled || empty($nameFilterPatterns)) {
+                    return $name;
+                }
+                foreach ($nameFilterPatterns as $pattern) {
+                    $name = str_replace($pattern, '', $name);
+                }
+                return trim($name);
+            };
+
             // See if the category is enabled, if not, skip, else create the folder
             if (in_array('category', $pathStructure)) {
                 // Create the category folder
                 // Remove any special characters from the category name
                 $category = $series->category;
                 $catName = $category->name ?? $category->name_internal ?? 'Uncategorized';
+                // Apply name filtering
+                $catName = $applyNameFilter($catName);
                 $cleanName = $cleanSpecialChars
                     ? PlaylistService::makeFilesystemSafe($catName, $replaceChar)
                     : PlaylistService::makeFilesystemSafe($catName);
@@ -172,9 +191,10 @@ class SyncSeriesStrmFiles implements ShouldQueue
             if (in_array('series', $pathStructure)) {
                 // Create the series folder
                 // Remove any special characters from the series name
+                $seriesName = $applyNameFilter($series->name);
                 $cleanName = $cleanSpecialChars
-                    ? PlaylistService::makeFilesystemSafe($series->name, $replaceChar)
-                    : PlaylistService::makeFilesystemSafe($series->name);
+                    ? PlaylistService::makeFilesystemSafe($seriesName, $replaceChar)
+                    : PlaylistService::makeFilesystemSafe($seriesName);
                 $path .= '/' . $cleanName;
                 if (! is_dir($path)) {
                     mkdir($path, 0777, true);
@@ -193,8 +213,9 @@ class SyncSeriesStrmFiles implements ShouldQueue
                 $num = str_pad($ep->episode_num, 2, '0', STR_PAD_LEFT);
                 $prefx = 'S' . str_pad($season, 2, '0', STR_PAD_LEFT) . "E{$num}";
 
-                // Build the base filename
-                $fileName = "{$prefx} - {$ep->title}";
+                // Build the base filename (apply name filtering to episode title)
+                $episodeTitle = $applyNameFilter($ep->title);
+                $fileName = "{$prefx} - {$episodeTitle}";
 
                 // Add metadata to filename
                 if (in_array('year', $filenameMetadata) && ! empty($series->release_date)) {

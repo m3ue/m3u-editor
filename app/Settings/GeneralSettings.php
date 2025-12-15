@@ -64,6 +64,11 @@ class GeneralSettings extends Settings
     public ?string $stream_file_sync_replace_char = 'space';
 
 
+    // Stream file sync name filtering options
+    public ?bool $stream_file_sync_name_filter_enabled = false;
+    public ?array $stream_file_sync_name_filter_patterns = null;
+
+
     // VOD stream file sync options
     public ?bool $vod_stream_file_sync_enabled = false;
     public ?bool $vod_stream_file_sync_include_series = false;
@@ -82,6 +87,11 @@ class GeneralSettings extends Settings
     public ?bool $vod_stream_file_sync_clean_special_chars = true;
     public ?bool $vod_stream_file_sync_remove_consecutive_chars = true;
     public ?string $vod_stream_file_sync_replace_char = 'space';
+
+
+    // VOD stream file sync name filtering options
+    public ?bool $vod_stream_file_sync_name_filter_enabled = false;
+    public ?array $vod_stream_file_sync_name_filter_patterns = null;
 
 
     // Video player proxy options
