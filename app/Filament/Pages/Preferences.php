@@ -739,22 +739,43 @@ class Preferences extends SettingsPage
                                                 $pathStructure = $get('vod_stream_file_sync_path_structure') ?? [];
                                                 $filenameMetadata = $get('vod_stream_file_sync_filename_metadata') ?? [];
                                                 $tmdbIdFormat = $get('vod_stream_file_sync_tmdb_id_format') ?? 'square';
+                                                $replaceChar = $get('vod_stream_file_sync_replace_char') ?? ' ';
+                                                $titleFolderEnabled = in_array('title', $pathStructure);
 
                                                 // Build path preview
                                                 $preview = 'Preview: ' . $path;
 
                                                 if (in_array('group', $pathStructure)) {
-                                                    $preview .= '/' . $vodExample->group;
+                                                    $groupName = $vodExample->group->name ?? $vodExample->group ?? 'Uncategorized';
+                                                    $preview .= '/' . PlaylistService::makeFilesystemSafe($groupName, $replaceChar);
                                                 }
-                                                if (in_array('title', $pathStructure)) {
-                                                    $preview .= '/' . PlaylistService::makeFilesystemSafe($vodExample->title, $get('vod_stream_file_sync_replace_char') ?? ' ');
+                                                if ($titleFolderEnabled) {
+                                                    $titleFolder = PlaylistService::makeFilesystemSafe($vodExample->title, $replaceChar);
+                                                    // Add year to folder if available
+                                                    if (! empty($vodExample->year) && strpos($titleFolder, "({$vodExample->year})") === false) {
+                                                        $titleFolder .= " ({$vodExample->year})";
+                                                    }
+                                                    // Add TMDB ID to folder for Trash Guides compatibility
+                                                    $tmdbId = $vodExample->info['tmdb_id'] ?? $vodExample->movie_data['tmdb_id'] ?? null;
+                                                    if (! empty($tmdbId)) {
+                                                        $titleFolder .= " {tmdb-{$tmdbId}}";
+                                                    }
+                                                    $preview .= '/' . $titleFolder;
                                                 }
 
                                                 // Build filename preview
-                                                $filename = PlaylistService::makeFilesystemSafe($vodExample->title, $get('vod_stream_file_sync_replace_char') ?? ' ');
+                                                $filename = PlaylistService::makeFilesystemSafe($vodExample->title, $replaceChar);
 
-                                                // Add metadata to filename (year might already be in title, but we'll add others)
-                                                if (in_array('tmdb_id', $filenameMetadata) && ! empty($vodExample->info['tmdb_id'])) {
+                                                // Add year to filename
+                                                if (in_array('year', $filenameMetadata) && ! empty($vodExample->year)) {
+                                                    if (strpos($filename, "({$vodExample->year})") === false) {
+                                                        $filename .= " ({$vodExample->year})";
+                                                    }
+                                                }
+
+                                                // Only add TMDB ID to filename if title folder is NOT enabled
+                                                // (If title folder exists, TMDB ID is already in the folder name)
+                                                if (in_array('tmdb_id', $filenameMetadata) && ! $titleFolderEnabled && ! empty($vodExample->info['tmdb_id'])) {
                                                     $bracket = $tmdbIdFormat === 'curly' ? ['{', '}'] : ['[', ']'];
                                                     $filename .= " {$bracket[0]}tmdb-{$vodExample->info['tmdb_id']}{$bracket[1]}";
                                                 }

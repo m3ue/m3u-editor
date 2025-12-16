@@ -189,12 +189,34 @@ class SyncSeriesStrmFiles implements ShouldQueue
 
             // See if the series is enabled, if not, skip, else create the folder
             if (in_array('series', $pathStructure)) {
-                // Create the series folder
+                // Create the series folder with Trash Guides format support
                 // Remove any special characters from the series name
                 $seriesName = $applyNameFilter($series->name);
+                $seriesFolder = $seriesName;
+
+                // Add year to folder name if available
+                if (! empty($series->release_date)) {
+                    $year = substr($series->release_date, 0, 4);
+                    if (strpos($seriesFolder, "({$year})") === false) {
+                        $seriesFolder .= " ({$year})";
+                    }
+                }
+
+                // Add TVDB/TMDB ID to folder name for Trash Guides compatibility
+                $tvdbId = $series->metadata['tvdb_id'] ?? $series->metadata['tvdb'] ?? null;
+                $tmdbId = $series->metadata['tmdb_id'] ?? $series->metadata['tmdb'] ?? null;
+                $imdbId = $series->metadata['imdb_id'] ?? $series->metadata['imdb'] ?? null;
+                if (! empty($tvdbId)) {
+                    $seriesFolder .= " {tvdb-{$tvdbId}}";
+                } elseif (! empty($tmdbId)) {
+                    $seriesFolder .= " {tmdb-{$tmdbId}}";
+                } elseif (! empty($imdbId)) {
+                    $seriesFolder .= " {imdb-{$imdbId}}";
+                }
+
                 $cleanName = $cleanSpecialChars
-                    ? PlaylistService::makeFilesystemSafe($seriesName, $replaceChar)
-                    : PlaylistService::makeFilesystemSafe($seriesName);
+                    ? PlaylistService::makeFilesystemSafe($seriesFolder, $replaceChar)
+                    : PlaylistService::makeFilesystemSafe($seriesFolder);
                 $path .= '/' . $cleanName;
                 if (! is_dir($path)) {
                     mkdir($path, 0777, true);

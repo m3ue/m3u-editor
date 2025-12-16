@@ -113,7 +113,8 @@ class SyncVodStrmFiles implements ShouldQueue
 
                 // Create the group folder if enabled
                 if (in_array('group', $pathStructure)) {
-                    $groupName = $applyNameFilter($channel->group);
+                    $groupName = $channel->group->name ?? $channel->group->name_internal ?? 'Uncategorized';
+                    $groupName = $applyNameFilter($groupName);
                     $group = $cleanSpecialChars
                         ? PlaylistService::makeFilesystemSafe($groupName, $replaceChar)
                         : PlaylistService::makeFilesystemSafe($groupName);
@@ -129,12 +130,28 @@ class SyncVodStrmFiles implements ShouldQueue
                 $title = $applyNameFilter($title);
                 $fileName = $title;
 
-                // Create the VOD Title folder if enabled
-                if (in_array('title', $pathStructure)) {
-                    $title = $cleanSpecialChars
-                        ? PlaylistService::makeFilesystemSafe($title, $replaceChar)
-                        : PlaylistService::makeFilesystemSafe($title);
-                    $titlePath = $path . '/' . $title;
+                // Track if title folder is created (for TMDB ID placement logic)
+                $titleFolderCreated = in_array('title', $pathStructure);
+
+                // Create the VOD Title folder if enabled (with Trash Guides format support)
+                if ($titleFolderCreated) {
+                    $titleFolder = $title;
+
+                    // Add year to folder name if available
+                    if (! empty($channel->year) && strpos($titleFolder, "({$channel->year})") === false) {
+                        $titleFolder .= " ({$channel->year})";
+                    }
+
+                    // Add TMDB ID to folder name for Trash Guides compatibility
+                    $tmdbId = $channel->info['tmdb_id'] ?? $channel->movie_data['tmdb_id'] ?? null;
+                    if (! empty($tmdbId)) {
+                        $titleFolder .= " {tmdb-{$tmdbId}}";
+                    }
+
+                    $titleFolder = $cleanSpecialChars
+                        ? PlaylistService::makeFilesystemSafe($titleFolder, $replaceChar)
+                        : PlaylistService::makeFilesystemSafe($titleFolder);
+                    $titlePath = $path . '/' . $titleFolder;
                     if (! is_dir($titlePath)) {
                         mkdir($titlePath, 0777, true);
                     }
@@ -149,7 +166,9 @@ class SyncVodStrmFiles implements ShouldQueue
                     }
                 }
 
-                if (in_array('tmdb_id', $filenameMetadata)) {
+                // Only add TMDB ID to filename if title folder is NOT created
+                // (If title folder exists, TMDB ID is already in the folder name)
+                if (in_array('tmdb_id', $filenameMetadata) && ! $titleFolderCreated) {
                     $tmdbId = $channel->info['tmdb_id'] ?? $channel->movie_data['tmdb_id'] ?? null;
                     if (! empty($tmdbId)) {
                         $bracket = $tmdbIdFormat === 'curly' ? ['{', '}'] : ['[', ']'];
