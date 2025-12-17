@@ -37,7 +37,7 @@ class ProcessM3uImportVod implements ShouldQueue
         }
 
         // Sync stream files, if enabled
-        if ($playlist->sync_stream_files_on_import) {
+        if ($playlist->auto_sync_vod_stream_files) {
             // Process stream file syncing
             dispatch(new SyncVodStrmFiles(
                 playlist: $playlist

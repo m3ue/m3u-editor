@@ -53,6 +53,7 @@ class SyncVodStrmFiles implements ShouldQueue
             // Setup our channels to sync
             $channels = $this->channels ?? collect();
             if ($this->channel) {
+                $this->channel->load('group');
                 $channels->push($this->channel);
             } elseif ($this->playlist) {
                 $channels = $this->playlist->channels()
@@ -61,6 +62,7 @@ class SyncVodStrmFiles implements ShouldQueue
                         ['enabled', true],
                         ['source_id', '!=', null],
                     ])
+                    ->with('group')
                     ->get();
             }
 
@@ -113,13 +115,15 @@ class SyncVodStrmFiles implements ShouldQueue
 
                 // Create the group folder if enabled
                 if (in_array('group', $pathStructure)) {
-                    $group = $channel->group;
-                    $groupName = $group?->name ?? $group?->name_internal ?? 'Uncategorized';
+                    // Note: $channel->group is a string column (not a relation) containing the group name
+                    // Use the group column value directly, or fall back to the related Group model
+                    $groupModel = $channel->getRelation('group');
+                    $groupName = $channel->group ?? $groupModel?->name ?? $groupModel?->name_internal ?? 'Uncategorized';
                     $groupName = $applyNameFilter($groupName);
-                    $group = $cleanSpecialChars
+                    $groupFolder = $cleanSpecialChars
                         ? PlaylistService::makeFilesystemSafe($groupName, $replaceChar)
                         : PlaylistService::makeFilesystemSafe($groupName);
-                    $groupPath = $path . '/' . $group;
+                    $groupPath = $path . '/' . $groupFolder;
                     if (! is_dir($groupPath)) {
                         mkdir($groupPath, 0777, true);
                     }
