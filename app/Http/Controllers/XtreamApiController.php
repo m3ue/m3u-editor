@@ -1027,11 +1027,15 @@ class XtreamApiController extends Controller
                             ->whereIn('taggable_id', $channelIds);
                     })->get();
 
-                foreach ($tags as $tag) {
+                // Sort tags by order_column
+                $sortedTags = $tags->sortBy('order_column')->values();
+
+                foreach ($sortedTags as $tag) {
                     $liveCategories[] = [
                         'category_id' => (string)$tag->id, // Use tag ID instead of name
                         'category_name' => $tag->name,
                         'parent_id' => 0,
+                        'sort_order' => $tag->order_column ?? 999999,
                     ];
                 }
 
@@ -1050,7 +1054,7 @@ class XtreamApiController extends Controller
                             ->from('channels')
                             ->whereIn('id', $channelsWithoutTags)
                             ->whereNotNull('group_id');
-                    })->get();
+                    })->orderBy('sort_order')->get();
 
                     foreach ($fallbackGroups as $group) {
                         // Avoid duplicate category_ids
@@ -1060,10 +1064,22 @@ class XtreamApiController extends Controller
                                 'category_id' => (string)$group->id,
                                 'category_name' => $group->name,
                                 'parent_id' => 0,
+                                'sort_order' => $group->sort_order ?? 999999,
                             ];
                         }
                     }
                 }
+
+                // Sort all categories by sort_order to ensure proper ordering
+                usort($liveCategories, function ($a, $b) {
+                    return ($a['sort_order'] ?? 999999) <=> ($b['sort_order'] ?? 999999);
+                });
+
+                // Remove sort_order from output
+                $liveCategories = array_map(function ($cat) {
+                    unset($cat['sort_order']);
+                    return $cat;
+                }, $liveCategories);
             } else {
                 // For regular Playlist and MergedPlaylist, use the groups() relationship
                 $groups = $playlist->groups()
@@ -1111,11 +1127,15 @@ class XtreamApiController extends Controller
                             ->whereIn('taggable_id', $channelIds);
                     })->get();
 
-                foreach ($tags as $tag) {
+                // Sort tags by order_column
+                $sortedTags = $tags->sortBy('order_column')->values();
+
+                foreach ($sortedTags as $tag) {
                     $vodCategories[] = [
                         'category_id' => (string)$tag->id, // Use tag ID instead of name
                         'category_name' => $tag->name,
                         'parent_id' => 0,
+                        'sort_order' => $tag->order_column ?? 999999,
                     ];
                 }
 
@@ -1134,7 +1154,7 @@ class XtreamApiController extends Controller
                             ->from('channels')
                             ->whereIn('id', $channelsWithoutTags)
                             ->whereNotNull('group_id');
-                    })->get();
+                    })->orderBy('sort_order')->get();
 
                     foreach ($fallbackGroups as $group) {
                         // Avoid duplicate category_ids
@@ -1144,10 +1164,22 @@ class XtreamApiController extends Controller
                                 'category_id' => (string)$group->id,
                                 'category_name' => $group->name,
                                 'parent_id' => 0,
+                                'sort_order' => $group->sort_order ?? 999999,
                             ];
                         }
                     }
                 }
+
+                // Sort all categories by sort_order to ensure proper ordering
+                usort($vodCategories, function ($a, $b) {
+                    return ($a['sort_order'] ?? 999999) <=> ($b['sort_order'] ?? 999999);
+                });
+
+                // Remove sort_order from output
+                $vodCategories = array_map(function ($cat) {
+                    unset($cat['sort_order']);
+                    return $cat;
+                }, $vodCategories);
             } else {
                 // For regular Playlist and MergedPlaylist, use the groups() relationship
                 $vodGroups = $playlist->groups()
@@ -1195,11 +1227,15 @@ class XtreamApiController extends Controller
                             ->whereIn('taggable_id', $seriesIds);
                     })->get();
 
-                foreach ($tags as $tag) {
+                // Sort tags by order_column
+                $sortedTags = $tags->sortBy('order_column')->values();
+
+                foreach ($sortedTags as $tag) {
                     $seriesCategories[] = [
                         'category_id' => (string)$tag->id, // Use tag ID instead of name
                         'category_name' => $tag->name,
                         'parent_id' => 0,
+                        'sort_order' => $tag->order_column ?? 999999,
                     ];
                 }
 
@@ -1218,7 +1254,7 @@ class XtreamApiController extends Controller
                             ->from('series')
                             ->whereIn('id', $seriesWithoutTags)
                             ->whereNotNull('category_id');
-                    })->get();
+                    })->orderBy('sort_order')->get();
 
                     foreach ($fallbackCategories as $category) {
                         // Avoid duplicate category_ids
@@ -1228,10 +1264,22 @@ class XtreamApiController extends Controller
                                 'category_id' => (string)$category->id,
                                 'category_name' => $category->name,
                                 'parent_id' => 0,
+                                'sort_order' => $category->sort_order ?? 999999,
                             ];
                         }
                     }
                 }
+
+                // Sort all categories by sort_order to ensure proper ordering
+                usort($seriesCategories, function ($a, $b) {
+                    return ($a['sort_order'] ?? 999999) <=> ($b['sort_order'] ?? 999999);
+                });
+
+                // Remove sort_order from output
+                $seriesCategories = array_map(function ($cat) {
+                    unset($cat['sort_order']);
+                    return $cat;
+                }, $seriesCategories);
             } else {
                 // Get categories from series only
                 $categories = $playlist->series()
