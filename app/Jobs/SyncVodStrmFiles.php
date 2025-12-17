@@ -221,6 +221,14 @@ class SyncVodStrmFiles implements ShouldQueue
                     $pathOptions
                 );
             }
+
+            // Clean up orphaned files for disabled/deleted channels
+            if ($this->playlist) {
+                StrmFileMapping::cleanupOrphaned(
+                    Channel::class,
+                    $global_sync_settings['sync_location'] ?? ''
+                );
+            }
         } catch (\Exception $e) {
             // Log the exception or handle it as needed
             Log::error('Error syncing VOD .strm files: ' . $e->getMessage());

@@ -13,15 +13,17 @@ return new class extends Migration
     {
         Schema::create('strm_file_mappings', function (Blueprint $table) {
             $table->id();
-            $table->morphs('syncable'); // Can be Channel (VOD) or Series
+            $table->morphs('syncable'); // Can be Channel (VOD) or SeriesEpisode
             $table->string('sync_location', 500); // Base sync location
             $table->string('current_path', 1000); // Full path to the .strm file
             $table->string('current_url', 1000)->nullable(); // URL stored in the file
             $table->json('path_options')->nullable(); // Naming options used to generate path
             $table->timestamps();
-            
-            // Index for quick lookups
-            $table->index(['syncable_type', 'syncable_id', 'sync_location']);
+
+            // Index for quick lookups by syncable
+            $table->index(['syncable_type', 'syncable_id', 'sync_location'], 'strm_syncable_location_idx');
+            // Index for path lookups and comparisons
+            $table->index('current_path', 'strm_current_path_idx');
         });
     }
 

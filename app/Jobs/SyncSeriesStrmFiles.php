@@ -298,6 +298,12 @@ class SyncSeriesStrmFiles implements ShouldQueue
                 );
             }
 
+            // Clean up orphaned files for disabled/deleted episodes
+            StrmFileMapping::cleanupOrphaned(
+                SeriesEpisode::class,
+                $syncLocation
+            );
+
             // Notify the user
             if ($this->notify) {
                 Notification::make()
