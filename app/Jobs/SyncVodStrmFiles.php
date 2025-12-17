@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Facades\ProxyFacade;
 use App\Models\Channel;
 use App\Models\Playlist;
+use App\Models\StrmFileMapping;
 use App\Services\PlaylistService;
 use App\Settings\GeneralSettings;
 use Filament\Notifications\Notification;
@@ -71,8 +72,9 @@ class SyncVodStrmFiles implements ShouldQueue
                     continue;
                 }
 
-                // Get the path info
-                $path = rtrim($sync_settings['sync_location'], '/');
+                // Get the path info - store original sync location for tracking
+                $syncLocation = rtrim($sync_settings['sync_location'], '/');
+                $path = $syncLocation;
                 if (! is_dir($path)) {
                     if ($this->notify) {
                         Notification::make()
@@ -120,9 +122,6 @@ class SyncVodStrmFiles implements ShouldQueue
                         ? PlaylistService::makeFilesystemSafe($groupName, $replaceChar)
                         : PlaylistService::makeFilesystemSafe($groupName);
                     $groupPath = $path . '/' . $group;
-                    if (! is_dir($groupPath)) {
-                        mkdir($groupPath, 0777, true);
-                    }
                     $path = $groupPath;
                 }
 
@@ -156,6 +155,7 @@ class SyncVodStrmFiles implements ShouldQueue
                     if (! is_dir($titlePath)) {
                         mkdir($titlePath, 0777, true);
                     }
+
                     $path = $titlePath;
                 }
 
@@ -197,16 +197,35 @@ class SyncVodStrmFiles implements ShouldQueue
                 $url = rtrim("/movie/{$playlist->user->name}/{$playlist->uuid}/" . $channel->id . "." . $extension, '.');
                 $url = PlaylistService::getBaseUrl($url);
 
-                // Check if the file already exists
-                if (file_exists($filePath)) {
-                    // If the file exists, check if the URL is the same
-                    $currentUrl = file_get_contents($filePath);
-                    if ($currentUrl === $url) {
-                        // Skip if the URL is the same
-                        continue;
-                    }
-                }
-                file_put_contents($filePath, $url);
+                // Build path options for tracking changes
+                $pathOptions = [
+                    'path_structure' => $pathStructure,
+                    'filename_metadata' => $filenameMetadata,
+                    'tmdb_id_format' => $tmdbIdFormat,
+                    'clean_special_chars' => $cleanSpecialChars,
+                    'replace_char' => $replaceChar,
+                    'remove_consecutive_chars' => $removeConsecutiveChars,
+                    'name_filter_enabled' => $nameFilterEnabled,
+                    'name_filter_patterns' => $nameFilterPatterns,
+                ];
+
+                // Use intelligent sync - handles create, rename, and URL updates
+                StrmFileMapping::syncFile(
+                    $channel,
+                    $syncLocation,
+                    $filePath,
+                    $url,
+                    $pathOptions
+                );
+            }
+
+            // Clean up orphaned files for disabled/deleted channels
+            // Run cleanup whenever we're syncing with a valid sync location
+            if ($syncLocation = $global_sync_settings['sync_location'] ?? null) {
+                StrmFileMapping::cleanupOrphaned(
+                    Channel::class,
+                    $syncLocation
+                );
             }
         } catch (\Exception $e) {
             // Log the exception or handle it as needed

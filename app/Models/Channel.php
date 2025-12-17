@@ -15,6 +15,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasManyThrough;
+use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Spatie\Tags\HasTags;
@@ -93,6 +94,14 @@ class Channel extends Model
     public function failovers()
     {
         return $this->hasMany(ChannelFailover::class, 'channel_id');
+    }
+
+    /**
+     * Get all STRM file mappings for this channel
+     */
+    public function strmFileMappings(): MorphMany
+    {
+        return $this->morphMany(StrmFileMapping::class, 'syncable');
     }
 
     public function failoverChannels(): HasManyThrough
