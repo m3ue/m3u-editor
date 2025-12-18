@@ -585,16 +585,16 @@ class TmdbService
     {
         $key = 'tmdb-api-rate-limit';
 
-        // Simple rate limiting using cache
-        $attempts = Cache::get($key, 0);
+        // Use Laravel's rate limiter to enforce a per-second limit.
+        if (RateLimiter::tooManyAttempts($key, $this->rateLimit)) {
+            $secondsUntilAvailable = RateLimiter::availableIn($key);
 
-        if ($attempts >= $this->rateLimit) {
-            // Wait for 1 second before continuing
-            usleep(1000000); // 1 second
-            Cache::put($key, 0, now()->addSeconds(1));
-        } else {
-            Cache::put($key, $attempts + 1, now()->addSeconds(1));
+            if ($secondsUntilAvailable > 0) {
+                usleep($secondsUntilAvailable * 1000000);
+            }
         }
+
+        RateLimiter::hit($key, 1);
     }
 
     /**
