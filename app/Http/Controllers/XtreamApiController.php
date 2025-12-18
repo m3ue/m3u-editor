@@ -389,6 +389,14 @@ class XtreamApiController extends Controller
         $urlSafePass = urlencode($password);
         $urlSafeUser = urlencode($username);
 
+        // Check if Custom Playlist (or Custom Playlist via Alias) as we handle these differently
+        $isCustomPlaylist = $playlist instanceof CustomPlaylist || ($playlist instanceof PlaylistAlias && $playlist->custom_playlist_id);
+        $tagUuid = $playlist->uuid; // Default to Playlist UUID
+        if ($isCustomPlaylist && $playlist instanceof PlaylistAlias) {
+            $playlist->load('customPlaylist');
+            $tagUuid = $playlist->customPlaylist->uuid; // PlaylistAlias case, get the attached CustomPlaylist UUID
+        }
+
         $baseUrl = ProxyFacade::getBaseUrl();
         $action = $request->input('action', 'panel');
         if (
@@ -474,18 +482,17 @@ class XtreamApiController extends Controller
 
             // Apply category filtering if category_id is provided
             if ($categoryId && $categoryId !== 'all') {
-                if ($playlist instanceof CustomPlaylist || ($playlist instanceof PlaylistAlias && $playlist->custom_playlist_id)) {
-                    // For CustomPlaylist, filter by tag ID or group_id
-                    $channelsQuery->where(function ($query) use ($categoryId, $playlist) {
+                if ($isCustomPlaylist) {
+                    $channelsQuery->where(function ($query) use ($categoryId, $tagUuid) {
                         // Channels with custom tags matching the category ID
-                        $query->whereHas('tags', function ($tagQuery) use ($categoryId, $playlist) {
-                            $tagQuery->where('type', $playlist->uuid)
+                        $query->whereHas('tags', function ($tagQuery) use ($categoryId, $tagUuid) {
+                            $tagQuery->where('type', $tagUuid)
                                 ->where('id', $categoryId);
                         })
                             // OR channels without custom tags but with matching group_id
-                            ->orWhere(function ($subQuery) use ($categoryId, $playlist) {
-                                $subQuery->whereDoesntHave('tags', function ($tagQuery) use ($playlist) {
-                                    $tagQuery->where('type', $playlist->uuid);
+                            ->orWhere(function ($subQuery) use ($categoryId, $tagUuid) {
+                                $subQuery->whereDoesntHave('tags', function ($tagQuery) use ($tagUuid) {
+                                    $tagQuery->where('type', $tagUuid);
                                 })->where('group_id', $categoryId);
                             });
                     });
@@ -496,8 +503,6 @@ class XtreamApiController extends Controller
             }
 
             $proxyEnabled = $playlist->enable_proxy;
-            $isCustomPlaylist = $playlist instanceof CustomPlaylist || ($playlist instanceof PlaylistAlias && $playlist->custom_playlist_id);
-            $playlistUuid = $playlist->uuid;
 
             $enabledChannels = $channelsQuery
                 ->orderBy('groups.sort_order')
@@ -508,10 +513,10 @@ class XtreamApiController extends Controller
 
             // For custom playlists, re-sort by custom group order (if assigned), falling back to original group order
             if ($isCustomPlaylist && $enabledChannels->isNotEmpty()) {
-                $enabledChannels = $enabledChannels->sort(function ($a, $b) use ($playlistUuid) {
+                $enabledChannels = $enabledChannels->sort(function ($a, $b) use ($tagUuid) {
                     // Get custom tag order for both channels
-                    $aTag = $a->tags->where('type', $playlistUuid)->first();
-                    $bTag = $b->tags->where('type', $playlistUuid)->first();
+                    $aTag = $a->tags->where('type', $tagUuid)->first();
+                    $bTag = $b->tags->where('type', $tagUuid)->first();
 
                     $aOrder = $aTag ? ($aTag->order_column ?? 999999) : ($a->group->sort_order ?? 999999);
                     $bOrder = $bTag ? ($bTag->order_column ?? 999999) : ($b->group->sort_order ?? 999999);
@@ -560,14 +565,8 @@ class XtreamApiController extends Controller
 
                     // Determine category_id based on playlist type
                     $channelCategoryId = 'all';
-                    if ($playlist instanceof CustomPlaylist || ($playlist instanceof PlaylistAlias && $playlist->custom_playlist_id)) {
-                        // For CustomPlaylist, prioritize custom tags over group_id
-                        if ($playlist instanceof PlaylistAlias) {
-                            $uuid = $playlist->customPlaylist->uuid ?? null;
-                        } else {
-                            $uuid = $playlist->uuid;
-                        }
-                        $customGroup = $channel->tags()->where('type', $uuid)->first();
+                    if ($isCustomPlaylist) {
+                        $customGroup = $channel->tags()->where('type', $tagUuid)->first();
                         if ($customGroup) {
                             $channelCategoryId = (string)$customGroup->id; // Use tag ID
                         } elseif ($channel->group_id) {
@@ -641,18 +640,18 @@ class XtreamApiController extends Controller
 
             // Apply category filtering if category_id is provided
             if ($categoryId && $categoryId !== 'all') {
-                if ($playlist instanceof CustomPlaylist || ($playlist instanceof PlaylistAlias && $playlist->custom_playlist_id)) {
+                if ($isCustomPlaylist) {
                     // For CustomPlaylist, filter by tag ID or group_id
-                    $channelsQuery->where(function ($query) use ($categoryId, $playlist) {
+                    $channelsQuery->where(function ($query) use ($categoryId, $tagUuid) {
                         // Channels with custom tags matching the category ID
-                        $query->whereHas('tags', function ($tagQuery) use ($categoryId, $playlist) {
-                            $tagQuery->where('type', $playlist->uuid)
+                        $query->whereHas('tags', function ($tagQuery) use ($categoryId, $tagUuid) {
+                            $tagQuery->where('type', $tagUuid)
                                 ->where('id', $categoryId);
                         })
                             // OR channels without custom tags but with matching group_id
-                            ->orWhere(function ($subQuery) use ($categoryId, $playlist) {
-                                $subQuery->whereDoesntHave('tags', function ($tagQuery) use ($playlist) {
-                                    $tagQuery->where('type', $playlist->uuid);
+                            ->orWhere(function ($subQuery) use ($categoryId, $tagUuid) {
+                                $subQuery->whereDoesntHave('tags', function ($tagQuery) use ($tagUuid) {
+                                    $tagQuery->where('type', $tagUuid);
                                 })->where('group_id', $categoryId);
                             });
                     });
@@ -661,9 +660,6 @@ class XtreamApiController extends Controller
                     $channelsQuery->where('group_id', $categoryId);
                 }
             }
-
-            $isCustomPlaylist = $playlist instanceof CustomPlaylist || ($playlist instanceof PlaylistAlias && $playlist->custom_playlist_id);
-            $playlistUuid = $playlist->uuid;
 
             $enabledVodChannels = $channelsQuery
                 ->orderBy('groups.sort_order')
@@ -674,10 +670,10 @@ class XtreamApiController extends Controller
 
             // For custom playlists, re-sort by custom group order (if assigned), falling back to original group order
             if ($isCustomPlaylist && $enabledVodChannels->isNotEmpty()) {
-                $enabledVodChannels = $enabledVodChannels->sort(function ($a, $b) use ($playlistUuid) {
+                $enabledVodChannels = $enabledVodChannels->sort(function ($a, $b) use ($tagUuid) {
                     // Get custom tag order for both channels
-                    $aTag = $a->tags->where('type', $playlistUuid)->first();
-                    $bTag = $b->tags->where('type', $playlistUuid)->first();
+                    $aTag = $a->tags->where('type', $tagUuid)->first();
+                    $bTag = $b->tags->where('type', $tagUuid)->first();
 
                     $aOrder = $aTag ? ($aTag->order_column ?? 999999) : ($a->group->sort_order ?? 999999);
                     $bOrder = $bTag ? ($bTag->order_column ?? 999999) : ($b->group->sort_order ?? 999999);
@@ -725,14 +721,9 @@ class XtreamApiController extends Controller
 
                     // Determine category_id based on playlist type
                     $channelCategoryId = 'all';
-                    if ($playlist instanceof CustomPlaylist || ($playlist instanceof PlaylistAlias && $playlist->custom_playlist_id)) {
+                    if ($isCustomPlaylist) {
                         // For CustomPlaylist, prioritize custom tags over group_id
-                        if ($playlist instanceof PlaylistAlias) {
-                            $uuid = $playlist->customPlaylist->uuid ?? null;
-                        } else {
-                            $uuid = $playlist->uuid;
-                        }
-                        $customGroup = $channel->tags()->where('type', $uuid)->first();
+                        $customGroup = $channel->tags()->where('type', $tagUuid)->first();
                         if ($customGroup) {
                             $channelCategoryId = (string)$customGroup->id; // Use tag ID
                         } elseif ($channel->group_id) {
@@ -771,8 +762,6 @@ class XtreamApiController extends Controller
             return response()->json($vodStreams);
         } else if ($action === 'get_series') {
             $categoryId = $request->input('category_id');
-            $isCustomPlaylist = $playlist instanceof CustomPlaylist || ($playlist instanceof PlaylistAlias && $playlist->custom_playlist_id);
-            $playlistUuid = $playlist->uuid;
 
             $seriesQuery = $playlist->series()
                 ->where('series.enabled', true)
@@ -782,16 +771,16 @@ class XtreamApiController extends Controller
             if ($categoryId && $categoryId !== 'all') {
                 if ($isCustomPlaylist) {
                     // For CustomPlaylist, filter by tag ID or group_id
-                    $seriesQuery->where(function ($query) use ($categoryId, $playlistUuid) {
+                    $seriesQuery->where(function ($query) use ($categoryId, $tagUuid) {
                         // Channels with custom tags matching the category ID
-                        $query->whereHas('tags', function ($tagQuery) use ($categoryId, $playlistUuid) {
-                            $tagQuery->where('type', $playlistUuid . '-category')
+                        $query->whereHas('tags', function ($tagQuery) use ($categoryId, $tagUuid) {
+                            $tagQuery->where('type', $tagUuid . '-category')
                                 ->where('id', $categoryId);
                         })
                             // OR channels without custom tags but with matching group_id
-                            ->orWhere(function ($subQuery) use ($categoryId, $playlistUuid) {
-                                $subQuery->whereDoesntHave('tags', function ($tagQuery) use ($playlistUuid) {
-                                    $tagQuery->where('type', $playlistUuid . '-category');
+                            ->orWhere(function ($subQuery) use ($categoryId, $tagUuid) {
+                                $subQuery->whereDoesntHave('tags', function ($tagQuery) use ($tagUuid) {
+                                    $tagQuery->where('type', $tagUuid . '-category');
                                 })->where('category_id', $categoryId);
                             });
                     });
@@ -805,7 +794,7 @@ class XtreamApiController extends Controller
 
             // For custom playlists, re-sort by custom category order (if assigned), falling back to original category order
             if ($isCustomPlaylist && $enabledSeries->isNotEmpty()) {
-                $categoryTagType = $playlistUuid . '-category';
+                $categoryTagType = $tagUuid . '-category';
                 $enabledSeries = $enabledSeries->sort(function ($a, $b) use ($categoryTagType) {
                     // Get custom tag order for both series
                     $aTag = $a->tags->where('type', $categoryTagType)->first();
@@ -838,7 +827,7 @@ class XtreamApiController extends Controller
                     $seriesCategoryId = 'all';
                     if ($isCustomPlaylist) {
                         // For CustomPlaylist, prioritize custom tags over category_id
-                        $customCat = $seriesItem->tags->where('type', $playlistUuid . '-category')->first();
+                        $customCat = $seriesItem->tags->where('type', $tagUuid . '-category')->first();
                         if ($customCat) {
                             $seriesCategoryId = (string)$customCat->id; // Use tag ID
                         } elseif ($seriesItem->category_id) {
@@ -1011,7 +1000,7 @@ class XtreamApiController extends Controller
         } else if ($action === 'get_live_categories') {
             $liveCategories = [];
 
-            if ($playlist instanceof CustomPlaylist || ($playlist instanceof PlaylistAlias && $playlist->custom_playlist_id)) {
+            if ($isCustomPlaylist) {
                 // For CustomPlaylist, get unique tags (groups) from channels with live content
                 $channelIds = $playlist->channels()
                     ->where('enabled', true)
@@ -1041,8 +1030,8 @@ class XtreamApiController extends Controller
 
                 // Also get original groups for channels without custom tags (fallback)
                 $channelsWithTags = Channel::whereIn('id', $channelIds)
-                    ->whereHas('tags', function ($query) use ($playlist) {
-                        $query->where('type', $playlist->uuid);
+                    ->whereHas('tags', function ($query) use ($tagUuid) {
+                        $query->where('type', $tagUuid);
                     })
                     ->pluck('id');
 
@@ -1111,7 +1100,7 @@ class XtreamApiController extends Controller
         } else if ($action === 'get_vod_categories') {
             $vodCategories = [];
 
-            if ($playlist instanceof CustomPlaylist || ($playlist instanceof PlaylistAlias && $playlist->custom_playlist_id)) {
+            if ($isCustomPlaylist) {
                 // For CustomPlaylist, get unique tags (groups) from channels with VOD content
                 $channelIds = $playlist->channels()
                     ->where('enabled', true)
@@ -1141,8 +1130,8 @@ class XtreamApiController extends Controller
 
                 // Also get original groups for channels without custom tags (fallback)
                 $channelsWithTags = Channel::whereIn('id', $channelIds)
-                    ->whereHas('tags', function ($query) use ($playlist) {
-                        $query->where('type', $playlist->uuid);
+                    ->whereHas('tags', function ($query) use ($tagUuid) {
+                        $query->where('type', $tagUuid);
                     })
                     ->pluck('id');
 
@@ -1212,7 +1201,7 @@ class XtreamApiController extends Controller
         } else if ($action === 'get_series_categories') {
             $seriesCategories = [];
 
-            if ($playlist instanceof CustomPlaylist || ($playlist instanceof PlaylistAlias && $playlist->custom_playlist_id)) {
+            if ($isCustomPlaylist) {
                 // For CustomPlaylist, get unique tags (categories) from series
                 $seriesIds = $playlist->series()
                     ->where('enabled', true)
@@ -1241,8 +1230,8 @@ class XtreamApiController extends Controller
 
                 // Also get original categories for series without custom tags (fallback)
                 $seriesWithTags = Series::whereIn('id', $seriesIds)
-                    ->whereHas('tags', function ($query) use ($playlist) {
-                        $query->where('type', $playlist->uuid . '-category');
+                    ->whereHas('tags', function ($query) use ($tagUuid) {
+                        $query->where('type', $tagUuid . '-category');
                     })
                     ->pluck('id');
 
