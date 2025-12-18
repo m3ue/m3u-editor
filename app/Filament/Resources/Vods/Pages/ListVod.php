@@ -222,18 +222,18 @@ class ListVod extends ListRecords
                             return;
                         }
 
-                        $playlist = Playlist::find($data['playlist'] ?? null);
+                        $playlistId = $data['playlist'] ?? null;
+                        $playlist = Playlist::find($playlistId);
                         if (!$playlist) {
                             return;
                         }
 
-                        $vodIds = $playlist->channels()
+                        $vodCount = $playlist->channels()
                             ->where('is_vod', true)
                             ->where('enabled', true)
-                            ->pluck('id')
-                            ->toArray();
+                            ->count();
 
-                        if (empty($vodIds)) {
+                        if ($vodCount === 0) {
                             Notification::make()
                                 ->warning()
                                 ->title('No VOD channels found')
@@ -244,15 +244,19 @@ class ListVod extends ListRecords
 
                         app('Illuminate\Contracts\Bus\Dispatcher')
                             ->dispatch(new FetchTmdbIds(
-                                vodChannelIds: $vodIds,
+                                vodChannelIds: null,
                                 seriesIds: null,
+                                vodPlaylistId: $playlistId,
+                                seriesPlaylistId: null,
+                                allVodPlaylists: false,
+                                allSeriesPlaylists: false,
                                 overwriteExisting: $data['overwrite_existing'] ?? false,
                                 user: auth()->user(),
                             ));
 
                         Notification::make()
                             ->success()
-                            ->title("Fetching TMDB IDs for " . count($vodIds) . " VOD channel(s)")
+                            ->title("Fetching TMDB IDs for {$vodCount} VOD channel(s)")
                             ->body('The TMDB ID lookup has been started. You will be notified when it is complete.')
                             ->duration(10000)
                             ->send();

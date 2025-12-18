@@ -135,16 +135,20 @@ class ListSeries extends ListRecords
                             return;
                         }
 
+                        $allPlaylists = $data['all_playlists'] ?? false;
+                        $playlistId = $data['playlist'] ?? null;
+
+                        // Validate that we'll find series
                         $query = Series::where('user_id', auth()->id())
                             ->where('enabled', true);
 
-                        if (!($data['all_playlists'] ?? false) && !empty($data['playlist'])) {
-                            $query->where('playlist_id', $data['playlist']);
+                        if (!$allPlaylists && $playlistId) {
+                            $query->where('playlist_id', $playlistId);
                         }
 
-                        $seriesIds = $query->pluck('id')->toArray();
+                        $seriesCount = $query->count();
 
-                        if (empty($seriesIds)) {
+                        if ($seriesCount === 0) {
                             Notification::make()
                                 ->warning()
                                 ->title('No series found')
@@ -156,14 +160,18 @@ class ListSeries extends ListRecords
                         app('Illuminate\Contracts\Bus\Dispatcher')
                             ->dispatch(new FetchTmdbIds(
                                 vodChannelIds: null,
-                                seriesIds: $seriesIds,
+                                seriesIds: null,
+                                vodPlaylistId: null,
+                                seriesPlaylistId: $allPlaylists ? null : $playlistId,
+                                allVodPlaylists: false,
+                                allSeriesPlaylists: $allPlaylists,
                                 overwriteExisting: $data['overwrite_existing'] ?? false,
                                 user: auth()->user(),
                             ));
 
                         Notification::make()
                             ->success()
-                            ->title("Fetching TMDB/TVDB IDs for " . count($seriesIds) . " series")
+                            ->title("Fetching TMDB/TVDB IDs for {$seriesCount} series")
                             ->body('The TMDB ID lookup has been started. You will be notified when it is complete.')
                             ->duration(10000)
                             ->send();

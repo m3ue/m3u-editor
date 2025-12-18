@@ -32,17 +32,26 @@ class FetchTmdbIds implements ShouldQueue
     /**
      * Create a new job instance.
      *
-     * @param Collection|array|null $vodChannelIds VOD channel IDs to process
-     * @param Collection|array|null $seriesIds Series IDs to process
+     * @param Collection|array|null $vodChannelIds VOD channel IDs to process (legacy support)
+     * @param Collection|array|null $seriesIds Series IDs to process (legacy support)
+     * @param int|null $vodPlaylistId Playlist ID for VOD channels
+     * @param int|null $seriesPlaylistId Playlist ID for series
+     * @param bool $allVodPlaylists Process all VOD from all user playlists
+     * @param bool $allSeriesPlaylists Process all series from all user playlists
      * @param bool $overwriteExisting Whether to overwrite existing IDs
      * @param User|null $user The user to notify upon completion
      */
     public function __construct(
         public Collection|array|null $vodChannelIds = null,
         public Collection|array|null $seriesIds = null,
+        public ?int $vodPlaylistId = null,
+        public ?int $seriesPlaylistId = null,
+        public bool $allVodPlaylists = false,
+        public bool $allSeriesPlaylists = false,
         public bool $overwriteExisting = false,
         public ?User $user = null,
     ) {
+        // Legacy support: convert Collections to arrays
         if ($this->vodChannelIds instanceof Collection) {
             $this->vodChannelIds = $this->vodChannelIds->toArray();
         }
@@ -62,13 +71,13 @@ class FetchTmdbIds implements ShouldQueue
             return;
         }
 
-        // Process VOD channels
-        if (!empty($this->vodChannelIds)) {
+        // Process VOD channels (new playlist-based or legacy ID-based)
+        if ($this->vodPlaylistId || $this->allVodPlaylists || !empty($this->vodChannelIds)) {
             $this->processVodChannels($tmdb);
         }
 
-        // Process Series
-        if (!empty($this->seriesIds)) {
+        // Process Series (new playlist-based or legacy ID-based)
+        if ($this->seriesPlaylistId || $this->allSeriesPlaylists || !empty($this->seriesIds)) {
             $this->processSeries($tmdb);
         }
 
@@ -81,11 +90,25 @@ class FetchTmdbIds implements ShouldQueue
      */
     protected function processVodChannels(TmdbService $tmdb): void
     {
-        $channels = Channel::whereIn('id', $this->vodChannelIds)
-            ->where('is_vod', true)
-            ->get();
+        $query = Channel::where('is_vod', true);
 
-        foreach ($channels as $channel) {
+        // Use playlist-based filtering if provided
+        if ($this->vodPlaylistId) {
+            $query->where('playlist_id', $this->vodPlaylistId)
+                ->where('enabled', true);
+        } elseif ($this->allVodPlaylists && $this->user) {
+            $query->whereHas('playlist', function ($q) {
+                $q->where('user_id', $this->user->id);
+            })->where('enabled', true);
+        } elseif (!empty($this->vodChannelIds)) {
+            // Legacy: direct ID array support
+            $query->whereIn('id', $this->vodChannelIds);
+        } else {
+            return; // No criteria specified
+        }
+
+        // Use cursor for memory-efficient iteration
+        foreach ($query->cursor() as $channel) {
             try {
                 $this->processVodChannel($tmdb, $channel);
             } catch (\Exception $e) {
@@ -178,9 +201,24 @@ class FetchTmdbIds implements ShouldQueue
      */
     protected function processSeries(TmdbService $tmdb): void
     {
-        $seriesList = Series::whereIn('id', $this->seriesIds)->get();
+        $query = Series::query();
 
-        foreach ($seriesList as $series) {
+        // Use playlist-based filtering if provided
+        if ($this->seriesPlaylistId) {
+            $query->where('playlist_id', $this->seriesPlaylistId)
+                ->where('enabled', true);
+        } elseif ($this->allSeriesPlaylists && $this->user) {
+            $query->where('user_id', $this->user->id)
+                ->where('enabled', true);
+        } elseif (!empty($this->seriesIds)) {
+            // Legacy: direct ID array support
+            $query->whereIn('id', $this->seriesIds);
+        } else {
+            return; // No criteria specified
+        }
+
+        // Use cursor for memory-efficient iteration
+        foreach ($query->cursor() as $series) {
             try {
                 $this->processSingleSeries($tmdb, $series);
             } catch (\Exception $e) {
@@ -325,8 +363,10 @@ class FetchTmdbIds implements ShouldQueue
     {
         Log::error('FetchTmdbIds job failed', [
             'error' => $exception->getMessage(),
-            'vod_count' => count($this->vodChannelIds ?? []),
-            'series_count' => count($this->seriesIds ?? []),
+            'vod_playlist_id' => $this->vodPlaylistId,
+            'series_playlist_id' => $this->seriesPlaylistId,
+            'all_vod_playlists' => $this->allVodPlaylists,
+            'all_series_playlists' => $this->allSeriesPlaylists,
         ]);
 
         $this->notifyUser(
