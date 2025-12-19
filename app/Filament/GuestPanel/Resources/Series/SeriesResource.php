@@ -27,7 +27,6 @@ class SeriesResource extends Resource
     use HasPlaylist;
 
     protected static ?string $model = Series::class;
-    protected static string|BackedEnum|null $navigationIcon = 'heroicon-s-play';
     protected static ?string $slug = 'series';
 
     public static function getNavigationBadge(): ?string

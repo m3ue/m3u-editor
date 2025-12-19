@@ -30,7 +30,6 @@ class VodResource extends Resource
     use HasPlaylist;
 
     protected static ?string $model = Channel::class;
-    protected static string|BackedEnum|null $navigationIcon = 'heroicon-s-film';
     protected static ?string $navigationLabel = 'VOD';
     protected static ?string $slug = 'vod';
 
