@@ -29,36 +29,39 @@ class PlaylistAlias extends Model
         'strict_live_ts' => 'boolean',
     ];
 
-    public function getXtreamConfigs(): array
+    /**
+     * Get the xtream_config attribute as a normalized array of configs.
+     */
+    protected function xtreamConfig(): Attribute
     {
-        $raw = $this->xtream_config;
+        return Attribute::make(
+            get: function (string $value) {
+                $raw = json_decode($value, true);
 
-        // Legacy format: single config object stored as array with 'url' key.
-        if (is_array($raw) && array_key_exists('url', $raw)) {
-            return [$raw];
-        }
-
-        // New format: list of configs.
-        if (is_array($raw)) {
-            $configs = [];
-            foreach ($raw as $index => $item) {
-                if (is_array($item) && !empty($item['url'])) {
-                    if (!array_key_exists('sort', $item)) {
-                        $item['sort'] = $index + 1;
-                    }
-                    $configs[] = $item;
+                // Legacy format: single config object stored as array with 'url' key.
+                if (is_array($raw) && array_key_exists('url', $raw)) {
+                    return [$raw];
                 }
-            }
-            return collect($configs)->sortBy('sort')->values()->toArray();
-        }
 
-        return [];
+                // New format: list of configs.
+                if (is_array($raw)) {
+                    $configs = [];
+                    foreach ($raw as $index => $item) {
+                        if (is_array($item) && !empty($item['url'])) {
+                            $configs[] = $item;
+                        }
+                    }
+                    return $configs;
+                }
+
+                return [];
+            },
+        );
     }
 
     public function getPrimaryXtreamConfig(): ?array
     {
-        $configs = $this->getXtreamConfigs();
-        return $configs[0] ?? null;
+        return $this->xtream_config[0] ?? null;
     }
 
     public function findXtreamConfigByUrl(?string $url): ?array
@@ -70,7 +73,7 @@ class PlaylistAlias extends Model
         // Normalize URL for comparison
         $needle = rtrim(strtolower((string) $url), '/');
 
-        foreach ($this->getXtreamConfigs() as $cfg) {
+        foreach ($this->xtream_config as $cfg) {
             // Normalize config URL
             $cfgUrl = rtrim((string) strtolower($cfg['url'] ?? ''), '/');
 

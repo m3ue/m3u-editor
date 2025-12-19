@@ -186,6 +186,7 @@ class CustomPlaylist extends Model
                     'url' => $url ? rtrim($url, '/') : null,
                 ];
             })
+            ->filter(fn($config) => $config['url'] !== null)
             ->toArray();
     }
 }

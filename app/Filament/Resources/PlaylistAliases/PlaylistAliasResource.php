@@ -274,8 +274,8 @@ class PlaylistAliasResource extends Resource
                                 $set('custom_playlist_id', null);
                                 $set('group', null);
                                 $set('group_id', null);
-                                // Reset to single config format when switching to standard playlist
-                                self::resetXtreamConfigForPlaylist($set, $state);
+                                // Reset to single-provider config when switching to standard playlist
+                                self::initializeXtreamConfigForPlaylist($set, $state);
                             }
                         })
                         ->requiredWithout('custom_playlist_id')
@@ -307,125 +307,37 @@ class PlaylistAliasResource extends Resource
                         ->rules(['exists:custom_playlists,id'])
                 ]),
 
-            // Single Provider Config (for standard Playlists)
             Schemas\Components\Fieldset::make('Provider Credentials')
-                ->columns(2)
-                ->hidden(fn(Get $get): bool => (bool) $get('custom_playlist_id'))
+                ->columnSpanFull()
                 ->schema([
-                    Forms\Components\TextInput::make('xtream_config.url')
-                        ->label('Xtream API URL')
-                        ->live()
-                        ->helperText(text: 'Enter the full URL using <url>:<port> format - without trailing slash (/).')
-                        ->prefixIcon('heroicon-m-globe-alt')
-                        ->maxLength(4000)
-                        ->url()
-                        ->columnSpan(2)
-                        ->required(),
-                    Forms\Components\TextInput::make('xtream_config.username')
-                        ->label('Xtream API Username')
-                        ->live()
-                        ->required()
-                        ->columnSpan(1),
-                    Forms\Components\TextInput::make('xtream_config.password')
-                        ->label('Xtream API Password')
-                        ->live()
-                        ->required()
-                        ->columnSpan(1)
-                        ->password()
-                        ->revealable(),
-                ]),
-
-            // Multi-Provider Config (for Custom Playlists)
-            Schemas\Components\Fieldset::make('Provider Credentials')
-                ->columns(2)
-                ->hidden(fn(Get $get): bool => ! (bool) $get('custom_playlist_id'))
-                ->schema([
-                    Forms\Components\Hidden::make('xtream_config_count')
-                        ->dehydrated(false)
-                        ->afterStateHydrated(function (Get $get, Set $set, $state, ?PlaylistAlias $record) {
-                            // Only process when editing with a custom_playlist_id
-                            if (! $get('custom_playlist_id')) {
-                                return;
-                            }
-
-                            // Get the source playlists to determine expected count
-                            $customPlaylist = CustomPlaylist::find($get('custom_playlist_id'));
-                            $sourcePlaylists = $customPlaylist?->getSourcePlaylistsForAlias() ?? [];
-                            $expectedCount = max(1, count($sourcePlaylists));
-
-                            $raw = $record?->xtream_config ?? $get('xtream_config');
-                            $configs = self::normalizeXtreamConfigs($raw);
-
-                            // Ensure we have configs for all source playlists
-                            while (count($configs) < $expectedCount) {
-                                $index = count($configs);
-                                $configs[] = [
-                                    'url' => $sourcePlaylists[$index]['url'] ?? '',
-                                    'username' => '',
-                                    'password' => '',
-                                ];
-                            }
-
-                            $set('xtream_config', $configs);
-                            $set('xtream_config_count', count($configs));
-                        }),
-
-                    Tabs::make('xtream_config_tabs')
-                        ->contained(false)
-                        ->columnSpan(2)
-                        ->tabs(function (Get $get) {
-                            // Get source playlists for tab labels and count
-                            $sourcePlaylistInfo = [];
-                            if ($customPlaylistId = $get('custom_playlist_id')) {
-                                $customPlaylist = CustomPlaylist::find($customPlaylistId);
-                                if ($customPlaylist) {
-                                    $sourcePlaylistInfo = $customPlaylist->getSourcePlaylistsForAlias();
-                                }
-                            }
-
-                            $count = max(1, count($sourcePlaylistInfo));
-
-                            $tabs = [];
-                            for ($i = 0; $i < $count; $i++) {
-                                $tabLabel = "Provider " . ($i + 1);
-                                $tabs[] = Tab::make($tabLabel)
-                                    ->columns(4)
-                                    ->schema([
-                                        Forms\Components\Select::make("xtream_config.{$i}.sort")
-                                            ->label('Priority')
-                                            ->options(range(1, $count))
-                                            ->default($i + 1)
-                                            ->columnSpan(1)
-                                            ->required(),
-                                        Forms\Components\TextInput::make("xtream_config.{$i}.url")
-                                            ->label('Xtream API URL')
-                                            ->live()
-                                            ->hintIcon(
-                                                'heroicon-m-question-mark-circle',
-                                                tooltip: 'The URL will be used to match the provider for credential swap. If a URL in the source playlist matches this URL, the credentials will be swapped with the ones defined here.'
-                                            )
-                                            ->helperText(text: 'Enter the full URL using <url>:<port> format - without trailing slash (/).')
-                                            ->prefixIcon('heroicon-m-globe-alt')
-                                            ->maxLength(255)
-                                            ->url()
-                                            ->columnSpan(3)
-                                            ->required(),
-                                        Forms\Components\TextInput::make("xtream_config.{$i}.username")
-                                            ->label('Xtream API Username')
-                                            ->live()
-                                            ->required()
-                                            ->columnSpan(2),
-                                        Forms\Components\TextInput::make("xtream_config.{$i}.password")
-                                            ->label('Xtream API Password')
-                                            ->live()
-                                            ->required()
-                                            ->columnSpan(2)
-                                            ->password()
-                                            ->revealable(),
-                                    ]);
-                            }
-                            return $tabs;
-                        }),
+                    Forms\Components\Repeater::make('xtream_config')
+                        ->label('Credentials')
+                        ->columns(2)
+                        ->defaultItems(0)
+                        ->maxItems(fn($get) => $get('custom_playlist_id') ? null : 1)
+                        ->schema([
+                            Forms\Components\TextInput::make('url')
+                                ->label('Xtream API URL')
+                                ->live()
+                                ->hintIcon(
+                                    'heroicon-m-question-mark-circle',
+                                    tooltip: 'The URL will be used to match the provider for credential swap. If a URL in the source playlist matches this URL, the credentials will be swapped with the ones defined here.'
+                                )
+                                ->helperText(text: 'Enter the full URL using <url>:<port> format - without trailing slash (/).')
+                                ->prefixIcon('heroicon-m-globe-alt')
+                                ->maxLength(4000)
+                                ->url()
+                                ->columnSpan(2)
+                                ->required(),
+                            Forms\Components\TextInput::make('username')
+                                ->label('Xtream API Username')
+                                ->required(),
+                            Forms\Components\TextInput::make('password')
+                                ->label('Xtream API Password')
+                                ->required()
+                                ->password()
+                                ->revealable(),
+                        ])->columnSpanFull(),
                 ]),
 
             Schemas\Components\Fieldset::make('Proxy Options')
@@ -557,35 +469,11 @@ class PlaylistAliasResource extends Resource
         ];
     }
 
-    /**
-     * Normalize xtream_config to an array of configs.
-     * Handles both legacy single-config format and new multi-config format.
-     */
-    protected static function normalizeXtreamConfigs(mixed $raw): array
-    {
-        // Legacy format: single config object stored as array with 'url' key.
-        if (is_array($raw) && array_key_exists('url', $raw)) {
-            return [$raw];
-        }
-
-        // New format: list of configs.
-        if (is_array($raw)) {
-            $configs = [];
-            foreach ($raw as $item) {
-                if (is_array($item) && array_key_exists('url', $item)) {
-                    $configs[] = $item;
-                }
-            }
-            return $configs;
-        }
-
-        return [];
-    }
 
     /**
      * Reset xtream_config to single-config format when switching to a standard Playlist.
      */
-    protected static function resetXtreamConfigForPlaylist(Set $set, ?int $playlistId): void
+    protected static function initializeXtreamConfigForPlaylist(Set $set, ?int $playlistId): void
     {
         if (!$playlistId) {
             return;
@@ -593,17 +481,19 @@ class PlaylistAliasResource extends Resource
 
         $playlist = Playlist::find($playlistId);
         if (!$playlist) {
+            $set('xtream_config', [[]]);
             return;
         }
 
         // Pre-fill with the playlist's existing xtream config URL if available
         $xtreamConfig = $playlist->xtream_config ?? [];
         $set('xtream_config', [
-            'url' => $xtreamConfig['url'] ?? '',
-            'username' => '',
-            'password' => '',
+            [
+                'url' => $xtreamConfig['url'] ?? '',
+                'username' => '',
+                'password' => '',
+            ]
         ]);
-        $set('xtream_config_count', 1);
     }
 
     /**
@@ -625,7 +515,6 @@ class PlaylistAliasResource extends Resource
 
         if (empty($sourcePlaylists)) {
             $set('xtream_config', [[]]);
-            $set('xtream_config_count', 1);
             return;
         }
 
@@ -640,7 +529,6 @@ class PlaylistAliasResource extends Resource
         }
 
         $count = count($configs);
-        $set('xtream_config', array_slice($configs, 0, $count));
-        $set('xtream_config_count', $count);
+        $set('xtream_config', $configs);
     }
 }
