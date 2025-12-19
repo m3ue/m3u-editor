@@ -66,14 +66,14 @@ class TmdbService
 
         try {
             $normalizedTitle = $this->normalizeTitle($title);
-            
+
             Log::debug('TMDB searching movie', [
                 'original' => $title,
                 'normalized' => $normalizedTitle,
                 'year' => $year,
                 'language' => $this->language,
             ]);
-            
+
             $params = [
                 'api_key' => $this->apiKey,
                 'query' => $normalizedTitle,
@@ -103,14 +103,14 @@ class TmdbService
                     Log::debug('TMDB: No results with year, retrying without year', ['title' => $normalizedTitle]);
                     return $this->searchMovie($title, null, $tryFallback);
                 }
-                
+
                 // Try removing subtitle after " - " (common in German titles)
                 if ($tryFallback && str_contains($normalizedTitle, ' - ')) {
                     $mainTitle = trim(explode(' - ', $normalizedTitle)[0]);
                     Log::debug('TMDB: No results, trying without subtitle', ['main_title' => $mainTitle]);
                     return $this->searchMovieSimple($mainTitle, TmdbService::extractYearFromTitle($title));
                 }
-                
+
                 // Try fallback: search with different language
                 if ($tryFallback && $this->language !== 'en-US') {
                     Log::debug('TMDB: No results with language, trying with en-US fallback', ['title' => $normalizedTitle]);
@@ -120,11 +120,11 @@ class TmdbService
                     $this->language = $originalLanguage;
                     return $result;
                 }
-                
+
                 Log::debug('TMDB: No results found', ['title' => $normalizedTitle]);
                 return null;
             }
-            
+
             Log::debug('TMDB search results', [
                 'title' => $normalizedTitle,
                 'count' => count($results),
@@ -146,7 +146,7 @@ class TmdbService
                     'confidence' => $match['_confidence'] ?? 0,
                 ];
             }
-            
+
             // No good match - try fallback strategies
             if ($tryFallback) {
                 // Strategy 1: Remove subtitle after " - " and search again
@@ -158,7 +158,7 @@ class TmdbService
                         return $fallbackResult;
                     }
                 }
-                
+
                 // Strategy 2: Remove suffix after " : "
                 if (str_contains($normalizedTitle, ': ')) {
                     $mainTitle = trim(explode(': ', $normalizedTitle)[0]);
@@ -168,7 +168,7 @@ class TmdbService
                         return $fallbackResult;
                     }
                 }
-                
+
                 // Strategy 3: Take first result if year matches exactly
                 if (!empty($results) && $year) {
                     foreach ($results as $result) {
@@ -189,7 +189,7 @@ class TmdbService
                         }
                     }
                 }
-                
+
                 // Strategy 4: Try different language
                 $fallbackLang = $this->language === 'en-US' ? 'de-DE' : 'en-US';
                 Log::debug('TMDB: Trying with fallback language', [
@@ -202,7 +202,7 @@ class TmdbService
                 $this->language = $originalLanguage;
                 return $result;
             }
-            
+
             return null;
         } catch (\Exception $e) {
             Log::error('TMDB movie search error', [
@@ -436,7 +436,7 @@ class TmdbService
             // Calculate title similarity using normalized search title
             $normalizedResult = $this->normalizeForComparison($resultTitle);
             $similarity = $this->calculateSimilarity($normalizedSearch, $normalizedResult);
-            
+
             // Also check original title if available (for non-English results)
             if (isset($result['original_title']) && $result['original_title'] !== $resultTitle) {
                 $normalizedOriginal = $this->normalizeForComparison($result['original_title']);
@@ -528,30 +528,30 @@ class TmdbService
     {
         // Remove special bullet/marker characters: ●, •, ★, etc. and everything after them
         $title = preg_replace('/\s*[●•★☆■□▪▫►▶◄◀→←↑↓✓✔✗✘].*$/u', '', $title);
-        
+
         // Remove audio format info in parentheses: "(Dolby Atmos)", "(DTS-HD)", etc.
         $title = preg_replace('/\s*\((?:Dolby\s*)?(?:Atmos|Vision|DTS(?:-HD)?|TrueHD|Digital|HDR|HDR10\+?|Directors?\s*Cut)\)/i', '', $title);
-        
+
         // Remove brackets with technical info: [4K], [UHD], [DE], etc.
         $title = preg_replace('/\s*\[[^\]]*\]/i', '', $title);
-        
+
         // Remove year in parentheses from title (will be used as separate param)
         $title = preg_replace('/\s*\(\d{4}\)\s*/', '', $title);
-        
+
         // Remove quality suffixes anywhere in the title (with slash, space, or hyphen)
         // Matches: 4K/UHD, 4KUHD, 4K UHD, 4K-UHD, UHD, HD, FHD, 720p, 1080p, 2160p, etc.
         $title = preg_replace('/\s*[-\/\s]*(4K\s*[\/\-]?\s*U?HD|UHD|FHD|HD|SD|720p|1080p|2160p|4K|REMUX|BluRay|Blu-Ray|BDRip|WEBRip|WEB-DL|HDRip|HDTV|DVDRip)/i', '', $title);
-        
+
         // Remove language tags: DE, EN, GER, ENG, German, English, Multi, etc.
         $title = preg_replace('/\s*[-\s]*(DE|EN|GER|ENG|German|English|Deutsch|Multi|Dual|Audio)\s*$/i', '', $title);
-        
+
         // Remove year at end of title (will be extracted separately): "Atlas 2024" -> "Atlas"
         $title = preg_replace('/\s+\d{4}\s*$/', '', $title);
-        
+
         // Remove leading/trailing special characters and whitespace
         $title = preg_replace('/^[\s\-:●•]+/', '', $title);
         $title = preg_replace('/[\s\-:●•]+$/', '', $title);
-        
+
         // Normalize multiple spaces to single space
         $title = preg_replace('/\s+/', ' ', $title);
 

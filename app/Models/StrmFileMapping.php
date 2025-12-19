@@ -76,10 +76,20 @@ class StrmFileMapping extends Model
 
         // Case 3: URL changed - update the file content
         if ($mapping->current_url !== $url) {
-            return self::updateFileUrl($mapping, $url);
+            return self::updateFileUrl($mapping, $url, $pathOptions);
         }
 
-        // Case 4: Nothing changed - ensure path_options stay in sync
+        // Case 4: File missing from disk - recreate it
+        if (! @file_exists($mapping->current_path)) {
+            Log::info('STRM Sync: File missing from disk, recreating', ['path' => $mapping->current_path]);
+            $directory = dirname($mapping->current_path);
+            if (! is_dir($directory)) {
+                @mkdir($directory, 0755, true);
+            }
+            @file_put_contents($mapping->current_path, $url, LOCK_EX);
+        }
+
+        // Case 5: Nothing changed - ensure path_options stay in sync
         if ($mapping->path_options != $pathOptions) {
             $mapping->path_options = $pathOptions;
             $mapping->save();
@@ -225,7 +235,7 @@ class StrmFileMapping extends Model
     /**
      * Update the URL in an existing .strm file
      */
-    protected static function updateFileUrl(self $mapping, string $url): self
+    protected static function updateFileUrl(self $mapping, string $url, array $pathOptions = []): self
     {
         try {
             if (@file_exists($mapping->current_path)) {
@@ -254,7 +264,10 @@ class StrmFileMapping extends Model
                 Log::debug('STRM Sync: Recreated file with new URL', ['path' => $mapping->current_path]);
             }
 
-            $mapping->update(['current_url' => $url]);
+            $mapping->update([
+                'current_url' => $url,
+                'path_options' => $pathOptions,
+            ]);
 
             return $mapping;
         } catch (Throwable $e) {

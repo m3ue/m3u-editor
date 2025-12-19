@@ -2,6 +2,9 @@
 
 namespace App\Services;
 
+/**
+ * Service to retrieve Git information from various sources.
+ */
 class GitInfoService
 {
     /**

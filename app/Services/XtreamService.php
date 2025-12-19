@@ -7,6 +7,9 @@ use App\Models\Playlist;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 
+/**
+ * Service to interact with Xtream Codes API for IPTV services.
+ */
 class XtreamService
 {
     protected string $server;

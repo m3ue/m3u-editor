@@ -5,6 +5,9 @@ namespace App\Services;
 use App\Enums\ChannelLogoType;
 use App\Http\Controllers\LogoProxyController;
 
+/**
+ * Service to handle logo URL retrieval and proxying.
+ */
 class LogoService
 {
     /**

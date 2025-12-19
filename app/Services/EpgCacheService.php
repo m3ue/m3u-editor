@@ -24,6 +24,9 @@ use Filament\Notifications\Notification;
 use Filament\Tables;
 use XMLReader;
 
+/**
+ * Service to handle EPG caching operations
+ */
 class EpgCacheService
 {
     private const CACHE_VERSION = 'v1';

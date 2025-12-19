@@ -4,6 +4,9 @@ namespace App\Services;
 
 use App\Settings\GeneralSettings;
 
+/**
+ * Service to handle proxy URL generation for channels and episodes.
+ */
 class ProxyService
 {
     /**

@@ -10,6 +10,9 @@ use App\Models\PlaylistProfile;
 use App\Models\CustomPlaylist;
 use App\Models\MergedPlaylist;
 
+/**
+ * Service to handle playlist URL retrieval and alias management.
+ */
 class PlaylistUrlService
 {
     /**

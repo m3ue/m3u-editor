@@ -9,6 +9,9 @@ use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
+/**
+ * Service to handle similarity search between channels and EPG channels.
+ */
 class SimilaritySearchService
 {
     // Constant for original search prefix length

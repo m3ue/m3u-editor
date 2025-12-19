@@ -12,6 +12,9 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use JsonMachine\Items;
 
+/**
+ * Service to interact with the Schedules Direct API for EPG data.
+ */
 class SchedulesDirectService
 {
     private const BASE_URL = 'https://json.schedulesdirect.org/20141201';

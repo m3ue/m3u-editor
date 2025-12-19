@@ -6,7 +6,6 @@ use App\Models\Channel;
 use App\Models\Series;
 use App\Models\User;
 use App\Services\TmdbService;
-use App\Settings\GeneralSettings;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;

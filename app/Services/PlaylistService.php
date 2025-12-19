@@ -15,6 +15,9 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
+/**
+ * Service to handle playlist-related operations.
+ */
 class PlaylistService
 {
     /**
