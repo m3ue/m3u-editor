@@ -76,7 +76,7 @@ class StrmFileMapping extends Model
 
         // Case 3: URL changed - update the file content
         if ($mapping->current_url !== $url) {
-            return self::updateFileUrl($mapping, $url);
+            return self::updateFileUrl($mapping, $url, $pathOptions);
         }
 
         // Case 4: Nothing changed - ensure path_options stay in sync
@@ -225,7 +225,7 @@ class StrmFileMapping extends Model
     /**
      * Update the URL in an existing .strm file
      */
-    protected static function updateFileUrl(self $mapping, string $url): self
+    protected static function updateFileUrl(self $mapping, string $url, array $pathOptions = []): self
     {
         try {
             if (@file_exists($mapping->current_path)) {
@@ -254,7 +254,10 @@ class StrmFileMapping extends Model
                 Log::debug('STRM Sync: Recreated file with new URL', ['path' => $mapping->current_path]);
             }
 
-            $mapping->update(['current_url' => $url]);
+            $mapping->update([
+                'current_url' => $url,
+                'path_options' => $pathOptions,
+            ]);
 
             return $mapping;
         } catch (Throwable $e) {
