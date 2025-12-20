@@ -185,8 +185,7 @@ return [
             'queue' => ['default', 'import', 'file_sync'],
             'balance' => 'auto',
             'autoScalingStrategy' => 'time',
-            // Set maxProcesses to 1 if using SQLite to avoid database locks
-            'maxProcesses' => env('DB_CONNECTION', 'sqlite') === 'sqlite' ? 1 : 12,
+            'maxProcesses' => env('DB_CONNECTION', 'sqlite') === 'pgsql' ? 10 : 1,
             'maxTime' => 0,
             'maxJobs' => 0,
             'memory' => 512, // MB
