@@ -1209,7 +1209,10 @@ class PlaylistResource extends Resource
                                 ->label('Password')
                                 ->password()
                                 ->revealable()
-                                ->required()
+                                ->required(fn ($record) => $record === null) // Only required for new profiles
+                                ->dehydrated(fn ($state, $record) => filled($state) || $record === null) // Only save if filled or new
+                                ->dehydrateStateUsing(fn ($state, $record) => filled($state) ? $state : $record?->password)
+                                ->placeholder(fn ($record) => $record?->password ? '••••••••' : null)
                                 ->live(onBlur: true)
                                 ->columnSpan(1),
                             TextInput::make('max_streams')
@@ -1248,7 +1251,14 @@ class PlaylistResource extends Resource
                                     $allItems = $component->getState();
                                     $profileData = $allItems[$itemKey] ?? null;
 
-                                    if (! $profileData || empty($profileData['username']) || empty($profileData['password'])) {
+                                    // If password is empty, try to get it from the existing database record
+                                    $password = $profileData['password'] ?? null;
+                                    if (empty($password) && ! empty($profileData['id'])) {
+                                        $existingProfile = PlaylistProfile::find($profileData['id']);
+                                        $password = $existingProfile?->password;
+                                    }
+
+                                    if (! $profileData || empty($profileData['username']) || empty($password)) {
                                         Notification::make()
                                             ->title('Missing Credentials')
                                             ->body('Please enter username and password first.')
@@ -1273,7 +1283,7 @@ class PlaylistResource extends Resource
                                     $testConfig = [
                                         'url' => $baseUrl,
                                         'username' => $profileData['username'],
-                                        'password' => $profileData['password'],
+                                        'password' => $password,
                                     ];
 
                                     $result = ProfileService::testCredentials($testConfig);
@@ -1322,11 +1332,17 @@ class PlaylistResource extends Resource
 
                             return $data;
                         })
-                        ->mutateRelationshipDataBeforeSaveUsing(function (array $data, Get $get, $livewire): array {
-                            $record = $livewire->getRecord();
+                        ->mutateRelationshipDataBeforeSaveUsing(function (array $data, Get $get, $livewire, $record): array {
+                            $playlist = $livewire->getRecord();
+                            
+                            // If password is empty but we have an existing record, preserve the old password
+                            if (empty($data['password']) && $record instanceof PlaylistProfile) {
+                                $data['password'] = $record->password;
+                            }
+                            
                             // Auto-test credentials and update max_streams if still at default
                             if (($data['max_streams'] ?? 1) <= 1 && ! empty($data['username']) && ! empty($data['password'])) {
-                                $baseUrl = $record->xtream_config['url'] ?? $record->xtream_config['server'] ?? null;
+                                $baseUrl = $playlist->xtream_config['url'] ?? $playlist->xtream_config['server'] ?? null;
                                 if ($baseUrl) {
                                     $testConfig = [
                                         'url' => $baseUrl,
