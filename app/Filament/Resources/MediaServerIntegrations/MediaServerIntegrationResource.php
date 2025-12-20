@@ -46,8 +46,6 @@ class MediaServerIntegrationResource extends Resource
 
     protected static ?string $recordTitleAttribute = 'name';
 
-    protected static string|BackedEnum|null $navigationIcon = Heroicon::ServerStack;
-
     protected static ?string $navigationLabel = 'Media Servers';
 
     protected static ?string $modelLabel = 'Media Server';
