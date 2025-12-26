@@ -56,7 +56,7 @@ class GroupResource extends Resource
         return ['name', 'name_internal'];
     }
 
-    protected static string | \UnitEnum | null $navigationGroup = 'Live Channels';
+    protected static string|\UnitEnum|null $navigationGroup = 'Live Channels';
 
     public static function getNavigationSort(): ?int
     {
@@ -281,6 +281,53 @@ class GroupResource extends Resource
 
                     DeleteAction::make()
                         ->hidden(fn($record) => !$record->custom),
+                    Action::make('recount')
+                        ->label('Recount Channels')
+                        ->icon('heroicon-o-hashtag')
+                        ->form([
+                            TextInput::make('start')
+                                ->label('Start Number')
+                                ->numeric()
+                                ->default(1)
+                                ->required(),
+                        ])
+                        ->action(function (Group $record, array $data): void {
+                            $start = (int) $data['start'];
+                            $channels = $record->channels()->orderBy('sort')->get();
+                            foreach ($channels as $channel) {
+                                $channel->update(['channel' => $start++]);
+                            }
+                        })
+                        ->after(function () {
+                            Notification::make()
+                                ->success()
+                                ->title('Channels Recounted')
+                                ->body('The channels in this group have been recounted.')
+                                ->send();
+                        })
+                        ->requiresConfirmation()
+                        ->modalIcon('heroicon-o-hashtag')
+                        ->modalDescription('Recount all channels in this group sequentially?'),
+                    Action::make('sort_alpha')
+                        ->label('Sort Alpha')
+                        ->icon('heroicon-o-bars-arrow-down')
+                        ->action(function (Group $record): void {
+                            $channels = $record->channels()->orderBy('name')->get();
+                            $sort = 1;
+                            foreach ($channels as $channel) {
+                                $channel->update(['sort' => $sort++]);
+                            }
+                        })
+                        ->after(function () {
+                            Notification::make()
+                                ->success()
+                                ->title('Channels Sorted')
+                                ->body('The channels in this group have been sorted alphabetically.')
+                                ->send();
+                        })
+                        ->requiresConfirmation()
+                        ->modalIcon('heroicon-o-bars-arrow-down')
+                        ->modalDescription('Sort all channels in this group alphabetically? This will update the sort order.'),
                 ])->button()->hiddenLabel()->size('sm'),
             ], position: RecordActionsPosition::BeforeCells)
             ->toolbarActions([
