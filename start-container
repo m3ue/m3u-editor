@@ -4,10 +4,11 @@
 export PUID="${PUID:-1000}" # NOT CURRENTLY USED...
 export PGID="${PGID:-1000}" # NOT CURRENTLY USED...
 
-# Set Redis server port
+# Set Redis server host, port and password
 export REDIS_ENABLED="${REDIS_ENABLED:-true}"
 export REDIS_HOST="${REDIS_HOST:-localhost}"
 export REDIS_SERVER_PORT="${REDIS_SERVER_PORT:-36790}" # Default 36790
+export REDIS_PASSWORD="${REDIS_PASSWORD}" # May be set later if empty
 
 # Run NGINX/FPM as root
 export NGINX_ENABLED="${NGINX_ENABLED:-true}"
@@ -81,6 +82,23 @@ if [ "${M3U_PROXY_ENABLED}" = "true" ] && [[ "$M3U_PROXY_HOST" != "localhost" ]]
   echo "⚠️  WARNING: Embedded mode enabled but M3U_PROXY_HOST is not localhost"
   echo "    Current value: ${M3U_PROXY_HOST}"
   echo "    For AIO/embedded mode, M3U_PROXY_HOST should be 'localhost' or '127.0.0.1'"
+fi
+
+# Setup Redis password
+# Default to M3U_PROXY_TOKEN if not set
+# Generate Redis password if not set (for external connections)
+if [ "${REDIS_ENABLED}" = "true" ]; then
+    if [ -z "$REDIS_PASSWORD" ]; then
+        if [ -z "$M3U_PROXY_TOKEN" ]; then
+            export REDIS_PASSWORD=$(openssl rand -hex 24)
+            echo "🔑 Generated random Redis password: $REDIS_PASSWORD"
+        else
+            export REDIS_PASSWORD="$M3U_PROXY_TOKEN"
+            echo "🔑 Using M3U_PROXY_TOKEN as Redis password"
+        fi
+    else
+        echo "🔑 Using provided Redis password."
+    fi
 fi
 
 # Configure HLS segment storage (persistent location)
@@ -189,6 +207,9 @@ if [ -f /etc/nginx/nginx.tmpl ]; then
 fi
 if [ -f /etc/redis/redis.tmpl ]; then
     envsubst '${REDIS_SERVER_PORT}' < /etc/redis/redis.tmpl > /etc/redis/redis.conf
+    if [ -n "$REDIS_PASSWORD" ]; then
+        echo "requirepass ${REDIS_PASSWORD}" >> /etc/redis/redis.conf
+    fi
 fi
 if [ -f /etc/nginx/conf.d/laravel.tmpl ]; then
     # If app url contains https, don't show port
