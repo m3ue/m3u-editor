@@ -193,6 +193,11 @@ class PlaylistGenerateController extends Controller
                             break;
                     }
 
+                    // If no TVG ID still, fallback to the channel source ID or internal ID as a last resort
+                    if (empty($tvgId)) {
+                        $tvgId = $channel->source_id ?? $channel->id;
+                    }
+
                     // Get the icon
                     $icon = '';
                     if ($channel->logo) {

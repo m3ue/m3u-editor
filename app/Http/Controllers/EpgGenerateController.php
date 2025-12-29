@@ -130,6 +130,11 @@ class EpgGenerateController extends Controller
                     break;
             }
 
+            // If no TVG ID still, fallback to the channel source ID or internal ID as a last resort
+            if (empty($tvgId)) {
+                $tvgId = $channel->source_id ?? $channel->id;
+            }
+
             // Make sure TVG ID only contains characters and numbers
             $tvgId = preg_replace(config('dev.tvgid.regex'), '', $tvgId);
 
