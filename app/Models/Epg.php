@@ -169,7 +169,7 @@ class Epg extends Model
     /**
      * Get CustomPlaylists linked to channels that map to this EPG.
      */
-    public function getCustomPlaylists(): Collection
+    public function getCustomPlaylists(): SupportCollection|Collection
     {
         $idsFromChannel = CustomPlaylist::join('channels', 'channels.custom_playlist_id', '=', 'custom_playlists.id')
             ->join('epg_channels', 'epg_channels.id', '=', 'channels.epg_channel_id')
@@ -190,7 +190,7 @@ class Epg extends Model
     /**
      * Get MergedPlaylists that include playlists which have channels mapped to this EPG.
      */
-    public function getMergedPlaylists(): SupportCollection
+    public function getMergedPlaylists(): SupportCollection|Collection
     {
         $ids = MergedPlaylist::join('merged_playlist_playlist', 'merged_playlist_playlist.merged_playlist_id', '=', 'merged_playlists.id')
             ->join('playlists', 'playlists.id', '=', 'merged_playlist_playlist.playlist_id')
@@ -208,7 +208,7 @@ class Epg extends Model
     /**
      * Get PlaylistAliases for playlists that have channels mapped to this EPG.
      */
-    public function getPlaylistAliases(): Collection
+    public function getPlaylistAliases(): SupportCollection|Collection
     {
         $ids = PlaylistAlias::join('playlists', 'playlists.id', '=', 'playlist_aliases.playlist_id')
             ->join('channels', 'channels.playlist_id', '=', 'playlists.id')
