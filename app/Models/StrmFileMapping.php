@@ -563,7 +563,7 @@ class StrmFileMapping extends Model
                     ->orWhere("{$table}.enabled", false);
             })
             ->select('strm_file_mappings.*')
-            ->get();
+            ->cursor(); // Use cursor for memory efficiency iteration over large datasets
 
         foreach ($orphanedMappings as $mapping) {
             $mapping->deleteFile();
