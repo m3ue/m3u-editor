@@ -760,9 +760,6 @@ class ProcessM3uImport implements ShouldQueue
                             $channel['title'] = $channel['stream_id'] ?? $channel['name'];
                         }
 
-                        // Set the source ID based on our composite index
-                        $channel['source_id'] = md5($channel['title'] . $channel['name'] . $channel['group_internal']);
-
                         // Get the channel group and determine if the channel should be included
                         $channelGroup = explode(';', $channel['group']);
                         if (count($channelGroup) > 0) {
@@ -780,6 +777,9 @@ class ProcessM3uImport implements ShouldQueue
                                     $this->maxItemsHit = true;
                                     continue;
                                 }
+
+                                // Set the source ID based on our composite index
+                                $channel['source_id'] = md5($channel['title'] . $channel['name'] . $chGroup);
 
                                 // Update group name to the singular name and return the channel
                                 $channel['group'] = $chGroup;
@@ -812,6 +812,9 @@ class ProcessM3uImport implements ShouldQueue
                                 $this->maxItemsHit = true;
                                 continue;
                             }
+
+                            // Set the source ID based on our composite index
+                            $channel['source_id'] = md5($channel['title'] . $channel['name'] . $channel['group']);
 
                             // Set channel number, if auto sort is enabled
                             if ($autoSort) {

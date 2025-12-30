@@ -537,7 +537,12 @@ class PlaylistService
         $xtreamTimeshiftPresent = $request->filled('timeshift_duration') && $request->filled('timeshift_date');
 
         // Use the portal/provider timezone (DST-aware). Prefer per-playlist; last resort UTC.
-        $providerTz = $playlist?->server_timezone ?? 'Etc/UTC';
+        $providerTz = $playlist?->server_timezone ?? null;
+
+        // If no provider timezone set, attempt to get it from the Xtream config
+        if (!$providerTz) {
+            $providerTz = $playlist?->xtream_status['server_info']['timezone'] ?? 'Etc/UTC';
+        }
 
         /* ── Timeshift SETUP (TiviMate → portal format) ───────────────────── */
         if ($utcPresent && !$xtreamTimeshiftPresent) {

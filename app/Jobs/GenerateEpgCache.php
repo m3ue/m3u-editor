@@ -63,6 +63,12 @@ class GenerateEpgCache implements ShouldQueue
                 'processing_started_at' => null,
                 'processing_phase' => null,
             ]);
+
+            // Clear out any related EPG file caches
+            foreach ($epg->getAllPlaylists() as $playlist) {
+                EpgCacheService::clearPlaylistEpgCacheFile($playlist);
+            }
+
             if ($this->notify) {
                 $msg = "Cache generated successfully in " . round($duration, 2) . " seconds";
                 Notification::make()

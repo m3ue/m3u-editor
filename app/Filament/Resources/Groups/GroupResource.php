@@ -56,7 +56,7 @@ class GroupResource extends Resource
         return ['name', 'name_internal'];
     }
 
-    protected static string | \UnitEnum | null $navigationGroup = 'Live Channels';
+    protected static string|\UnitEnum|null $navigationGroup = 'Live Channels';
 
     public static function getNavigationSort(): ?int
     {
@@ -240,6 +240,57 @@ class GroupResource extends Resource
                         ->modalDescription('Move the group channels to the another group.')
                         ->modalSubmitActionLabel('Move now'),
 
+                    Action::make('recount')
+                        ->label('Recount Channels')
+                        ->icon('heroicon-o-hashtag')
+                        ->schema([
+                            TextInput::make('start')
+                                ->label('Start Number')
+                                ->numeric()
+                                ->default(1)
+                                ->required(),
+                        ])
+                        ->action(function (Group $record, array $data): void {
+                            $start = (int) $data['start'];
+                            $channels = $record->channels()->orderBy('sort')->cursor();
+                            foreach ($channels as $channel) {
+                                $channel->update(['channel' => $start++]);
+                            }
+                        })
+                        ->after(function () {
+                            Notification::make()
+                                ->success()
+                                ->title('Channels Recounted')
+                                ->body('The channels in this group have been recounted.')
+                                ->send();
+                        })
+                        ->requiresConfirmation()
+                        ->modalIcon('heroicon-o-hashtag')
+                        ->modalDescription('Recount all channels in this group sequentially?'),
+                    Action::make('sort_alpha')
+                        ->label('Sort Alpha')
+                        ->icon('heroicon-o-bars-arrow-down')
+                        ->action(function (Group $record): void {
+                            // Sort by title_custom (if present) then title, matching the UI column sort
+                            $channels = $record->channels()
+                                ->orderByRaw('COALESCE(title_custom, title) ASC')
+                                ->cursor();
+                            $sort = 1;
+                            foreach ($channels as $channel) {
+                                $channel->update(['sort' => $sort++]);
+                            }
+                        })
+                        ->after(function () {
+                            Notification::make()
+                                ->success()
+                                ->title('Channels Sorted')
+                                ->body('The channels in this group have been sorted alphabetically.')
+                                ->send();
+                        })
+                        ->requiresConfirmation()
+                        ->modalIcon('heroicon-o-bars-arrow-down')
+                        ->modalDescription('Sort all channels in this group alphabetically? This will update the sort order.'),
+
                     Action::make('enable')
                         ->label('Enable group channels')
                         ->action(function ($record): void {
@@ -278,7 +329,6 @@ class GroupResource extends Resource
                         ->modalIcon('heroicon-o-x-circle')
                         ->modalDescription('Disable group channels now?')
                         ->modalSubmitActionLabel('Yes, disable now'),
-
                     DeleteAction::make()
                         ->hidden(fn($record) => !$record->custom),
                 ])->button()->hiddenLabel()->size('sm'),
@@ -478,6 +528,41 @@ class GroupResource extends Resource
                         ->modalIcon('heroicon-o-x-circle')
                         ->modalDescription('Disable the selected group(s) now?')
                         ->modalSubmitActionLabel('Yes, disable now'),
+                    BulkAction::make('recount_channels')
+                        ->label('Recount Channels')
+                        ->icon('heroicon-o-hashtag')
+                        ->form([
+                            TextInput::make('start')
+                                ->label('Start Number')
+                                ->numeric()
+                                ->default(1)
+                                ->required(),
+                        ])
+                        ->action(function (Collection $records, array $data): void {
+                            // Sort the selected groups by their sort_order to ensure sequential processing
+                            // that matches the visual order in the table (assuming table is sorted by sort_order)
+                            $sortedRecords = $records->sortBy('sort_order');
+                            $start = (int) $data['start'];
+
+                            foreach ($sortedRecords as $record) {
+                                // Get channels for this group ordered by their current sort
+                                $channels = $record->channels()->orderBy('sort')->get();
+                                foreach ($channels as $channel) {
+                                    $channel->update(['channel' => $start++]);
+                                }
+                            }
+                        })
+                        ->after(function () {
+                            Notification::make()
+                                ->success()
+                                ->title('Channels Recounted')
+                                ->body('The channels in the selected groups have been recounted sequentially.')
+                                ->send();
+                        })
+                        ->deselectRecordsAfterCompletion()
+                        ->requiresConfirmation()
+                        ->modalIcon('heroicon-o-hashtag')
+                        ->modalDescription('Recount channels across selected groups? This will renumber channels sequentially starting from the top-most selected group down to the bottom-most.'),
                 ]),
             ]);
     }

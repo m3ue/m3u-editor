@@ -88,15 +88,7 @@ class EpgGenerateController extends Controller
         // Set up the channels
         $epgChannels = [];
         $dummyEpgChannels = [];
-        $channels = $playlist->channels()
-            ->where('enabled', true)
-            ->when(!$playlist->include_vod_in_m3u, function ($q) {
-                $q->where('channels.is_vod', false);
-            })
-            ->orderBy('sort')
-            ->orderBy('channel')
-            ->orderBy('title')
-            ->cursor();
+        $channels = PlaylistGenerateController::getChannelQuery($playlist);
 
         // Get playlist settings
         $channelNumber = $playlist->auto_channel_increment ? $playlist->channel_start - 1 : 0;
@@ -107,7 +99,7 @@ class EpgGenerateController extends Controller
         $logoProxyEnabled = $playlist->enable_logo_proxy;
 
         // Generate `<channel>` tags for each channel
-        foreach ($channels as $channel) {
+        foreach ($channels->cursor() as $channel) {
             // Get/set the channel number
             $channelNo = $channel->channel;
             if (!$channelNo && ($playlist->auto_channel_increment || $idChannelBy === PlaylistChannelId::ChannelId)) {
@@ -117,7 +109,7 @@ class EpgGenerateController extends Controller
             // Get the `tvg-id` based on the playlist setting
             switch ($idChannelBy) {
                 case PlaylistChannelId::ChannelId:
-                    $tvgId = $channelNo;
+                    $tvgId = $channel->id;
                     break;
                 case PlaylistChannelId::Name:
                     $tvgId = $channel->name_custom ?? $channel->name;
@@ -128,6 +120,11 @@ class EpgGenerateController extends Controller
                 default:
                     $tvgId = $channel->stream_id_custom ?? $channel->stream_id;
                     break;
+            }
+
+            // If no TVG ID still, fallback to the channel source ID or internal ID as a last resort
+            if (empty($tvgId)) {
+                $tvgId = $channel->source_id ?? $channel->id;
             }
 
             // Make sure TVG ID only contains characters and numbers

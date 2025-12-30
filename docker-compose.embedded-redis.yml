@@ -1,23 +1,3 @@
-# M3U Editor with External M3U Proxy and Redis
-# This is the recommended production setup for optimal performance
-#
-# Features:
-# - PostgreSQL database for data persistence
-# - External m3u-proxy container for streaming
-# - Redis for stream pooling and caching
-# - Secure token-based authentication
-#
-# Setup:
-# 1. Copy this file to your project directory as docker-compose.yml
-# 2. Create a .env file with the variables below (or set in environment section)
-# 3. Run: docker-compose up -d
-# 4. Access m3u-editor at http://localhost:36400
-#
-# Required Environment Variables (create .env file):
-# M3U_PROXY_TOKEN=<generate with: openssl rand -hex 32>
-# PG_PASSWORD=<generate with: openssl rand -base64 32>
-# APP_URL=http://localhost  # or your domain
-
 services:
   m3u-editor:
     image: sparkison/m3u-editor:${IMAGE_TAG:-latest}
@@ -40,6 +20,10 @@ services:
       - PG_USER=${PG_USER:-m3ue}
       - PG_PASSWORD=${PG_PASSWORD:-changeme}
       - PG_PORT=${PG_PORT:-5432}
+
+      # Xtream API Endpoint Configuration
+      - XTREAM_ONLY_ENABLED=true # Set to true to enable Xtream API endpoint
+      - XTREAM_PORT=${XTREAM_PORT:-36401} # Port for Xtream API
       
       # Database Connection (m3u-editor)
       - DB_CONNECTION=pgsql
@@ -50,10 +34,8 @@ services:
       - DB_PASSWORD=${PG_PASSWORD:-changeme}
 
       # Redis configuration
-      - REDIS_ENABLED=false # Disable embedded Redis
+      - REDIS_ENABLED=true # Use embedded Redis
       - REDIS_SERVER_PORT=${REDIS_PORT:-6379}
-      - REDIS_HOST=${REDIS_HOST:-redis}
-      - REDIS_PASSWORD=${REDIS_PASSWORD:-changeme}
       
       # M3U Proxy Configuration (External)
       - M3U_PROXY_ENABLED=false # Disable embedded and use external m3u-proxy
@@ -69,14 +51,10 @@ services:
     restart: unless-stopped
     ports:
       - "${APP_PORT:-36400}:${APP_PORT:-36400}"  # Main application port
+      - "${XTREAM_PORT:-36401}:${XTREAM_PORT:-36401}"  # Xtream API endpoint (when XTREAM_ONLY_ENABLED=true)
       # - "${PG_PORT:-5432}:${PG_PORT:-5432}"  # Uncomment to expose PostgreSQL
     networks:
       - m3u-network
-    depends_on:
-      m3u-proxy:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://127.0.0.1:${APP_PORT:-36400}/up"]
       interval: 30s
@@ -95,14 +73,13 @@ services:
       # Redis Configuration (for stream pooling)
       - REDIS_ENABLED=true
       - REDIS_PORT=${REDIS_PORT:-6379}
-      - REDIS_HOST=${REDIS_HOST:-redis}
-      - REDIS_PASSWORD=${REDIS_PASSWORD:-changeme}
+      - REDIS_HOST=m3u-editor # Connect to m3u-editor's embedded Redis instance
       - REDIS_DB=6 # 1-5 used by m3u-editor, so use 6 for m3u-proxy
       - ENABLE_REDIS_POOLING=true
       
       # Logging
       - LOG_LEVEL=INFO
-      
+
       # Note: ROOT_PATH=/m3u-proxy is now the default, no need to set it explicitly
       # Only set ROOT_PATH= (empty) if you need to use the root path instead
       
@@ -117,7 +94,7 @@ services:
     networks:
       - m3u-network
     depends_on:
-      redis:
+      m3u-editor:
         condition: service_healthy
     #devices:
     #  - /dev/dri:/dev/dri
@@ -138,37 +115,10 @@ services:
     #       cpus: '0.5'
     #       memory: 512M
 
-  redis:
-    image: redis:alpine3.22
-    container_name: m3u-redis
-    volumes:
-      - redis-data:/data
-    restart: unless-stopped
-    command: redis-server --port ${REDIS_PORT:-6379} --requirepass ${REDIS_PASSWORD:-changeme} --appendonly no --save "" --maxmemory 256mb --maxmemory-policy allkeys-lru
-    networks:
-      - m3u-network
-    healthcheck:
-      test: ["CMD", "redis-cli", "-p", "${REDIS_PORT:-6379}", "-a", "${REDIS_PASSWORD:-changeme}", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
-    
-    # Optional: Resource limits
-    # deploy:
-    #   resources:
-    #     limits:
-    #       cpus: '1.0'
-    #       memory: 512M
-    #     reservations:
-    #       cpus: '0.25'
-    #       memory: 128M
 networks:
   m3u-network:
     driver: bridge
 
 volumes:
   pgdata:
-    driver: local
-  redis-data:
     driver: local

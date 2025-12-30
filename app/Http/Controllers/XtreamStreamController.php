@@ -194,14 +194,31 @@ class XtreamStreamController extends Controller
     {
         $format = $format ?? 'ts'; // Default to 'ts' if no format provided
         list($playlist, $channel) = $this->findAuthenticatedPlaylistAndStreamModel($username, $password, $streamId, 'live');
+
         if ($channel instanceof Channel) {
             if ($playlist->enable_proxy) {
+                // Timeshift handled in proxy controller (if needed)
                 return app()->call('App\\Http\\Controllers\\Api\\M3uProxyApiController@channel', [
                     'id'   => $streamId,
                     'uuid' => $playlist->uuid,
                 ]);
             } else {
-                return Redirect::to(PlaylistUrlService::getChannelUrl($channel, $playlist));
+                // Check if this is a timeshift request
+                // TiviMate sends utc/lutc as UNIX epochs (UTC). We only convert TZ + format.
+                $utcPresent = $request->filled('utc');
+
+                // Xtream API sends timeshift_duration (minutes) and timeshift_date (YYYY-MM-DD:HH-MM-SS)
+                $xtreamTimeshiftPresent = $request->filled('timeshift_duration') && $request->filled('timeshift_date');
+
+                // Get the base stream URL
+                $streamUrl = PlaylistUrlService::getChannelUrl($channel, $playlist);
+                if ($utcPresent || $xtreamTimeshiftPresent) {
+                    // Timeshift stream request
+                    $streamUrl = PlaylistService::generateTimeshiftUrl($request, $streamUrl, $playlist);
+                }
+
+                // Regular live stream request, redirect to the stream URL
+                return Redirect::to($streamUrl);
             }
         }
 

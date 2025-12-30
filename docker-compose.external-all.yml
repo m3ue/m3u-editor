@@ -63,11 +63,11 @@ services:
     volumes:
       - redis-data:/data
     restart: unless-stopped
-    command: redis-server --port ${REDIS_PORT:-6379} --appendonly no --save "" --maxmemory 256mb --maxmemory-policy allkeys-lru
+    command: redis-server --port ${REDIS_PORT:-6379} --requirepass ${REDIS_PASSWORD:-changeme} --appendonly no --save "" --maxmemory 256mb --maxmemory-policy allkeys-lru
     networks:
       - m3u-network
     healthcheck:
-      test: ["CMD", "redis-cli", "-p", "${REDIS_PORT:-6379}", "ping"]
+      test: ["CMD", "redis-cli", "-p", "${REDIS_PORT:-6379}", "-a", "${REDIS_PASSWORD:-changeme}", "ping"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -99,6 +99,7 @@ services:
       - REDIS_ENABLED=true
       - REDIS_PORT=${REDIS_PORT:-6379}
       - REDIS_HOST=m3u-redis
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-changeme}
       - REDIS_DB=6 # 1-5 used by m3u-editor, so use 6 for m3u-proxy
       - ENABLE_REDIS_POOLING=true
 
@@ -172,6 +173,7 @@ services:
       - REDIS_ENABLED=false # Disable embedded Redis, using external redis service
       - REDIS_SERVER_PORT=${REDIS_PORT:-6379}
       - REDIS_HOST=redis # Hostname of external redis container
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-changeme}
 
       # M3U Proxy Configuration - DISABLE embedded, use external service
       - M3U_PROXY_ENABLED=false # Disable embedded and use external m3u-proxy

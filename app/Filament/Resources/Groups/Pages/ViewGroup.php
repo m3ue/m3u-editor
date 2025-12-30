@@ -13,6 +13,7 @@ use App\Models\CustomPlaylist;
 use App\Models\Group;
 use Filament\Actions;
 use Filament\Forms;
+use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
 
@@ -110,6 +111,58 @@ class ViewGroup extends ViewRecord
                     ->modalIcon('heroicon-o-arrows-right-left')
                     ->modalDescription('Move the group channels to the another group.')
                     ->modalSubmitActionLabel('Move now'),
+
+                Action::make('recount')
+                    ->label('Recount Channels')
+                    ->icon('heroicon-o-hashtag')
+                    ->schema([
+                        TextInput::make('start')
+                            ->label('Start Number')
+                            ->numeric()
+                            ->default(1)
+                            ->required(),
+                    ])
+                    ->action(function (Group $record, array $data): void {
+                        $start = (int) $data['start'];
+                        $channels = $record->channels()->orderBy('sort')->cursor();
+                        foreach ($channels as $channel) {
+                            $channel->update(['channel' => $start++]);
+                        }
+                    })
+                    ->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title('Channels Recounted')
+                            ->body('The channels in this group have been recounted.')
+                            ->send();
+                    })
+                    ->requiresConfirmation()
+                    ->modalIcon('heroicon-o-hashtag')
+                    ->modalDescription('Recount all channels in this group sequentially?'),
+                Action::make('sort_alpha')
+                    ->label('Sort Alpha')
+                    ->icon('heroicon-o-bars-arrow-down')
+                    ->action(function (Group $record): void {
+                        // Sort by title_custom (if present) then title, matching the UI column sort
+                        $channels = $record->channels()
+                            ->orderByRaw('COALESCE(title_custom, title) ASC')
+                            ->cursor();
+                        $sort = 1;
+                        foreach ($channels as $channel) {
+                            $channel->update(['sort' => $sort++]);
+                        }
+                    })
+                    ->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title('Channels Sorted')
+                            ->body('The channels in this group have been sorted alphabetically.')
+                            ->send();
+                    })
+                    ->requiresConfirmation()
+                    ->modalIcon('heroicon-o-bars-arrow-down')
+                    ->modalDescription('Sort all channels in this group alphabetically? This will update the sort order.'),
+
 
                 Action::make('enable')
                     ->label('Enable group channels')

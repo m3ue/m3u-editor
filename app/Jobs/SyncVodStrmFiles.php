@@ -2,7 +2,6 @@
 
 namespace App\Jobs;
 
-use App\Facades\ProxyFacade;
 use App\Models\Channel;
 use App\Models\Playlist;
 use App\Models\StrmFileMapping;
@@ -68,6 +67,19 @@ class SyncVodStrmFiles implements ShouldQueue
                     ->get();
             }
 
+            // PERFORMANCE OPTIMIZATION: Bulk load all existing mappings for these channels
+            // This reduces N queries (one per channel) to 1 query for all channels
+            $syncLocation = rtrim($global_sync_settings['sync_location'] ?? '', '/');
+            $mappingCache = null;
+            if ($channels->count() > 1 && ! empty($syncLocation)) {
+                $channelIds = $channels->pluck('id')->toArray();
+                $mappingCache = StrmFileMapping::bulkLoadForSyncables(
+                    Channel::class,
+                    $channelIds,
+                    $syncLocation
+                );
+            }
+
             // Loop through each channel and sync
             foreach ($channels as $channel) {
                 $sync_settings = array_merge($global_sync_settings, $channel->sync_settings ?? []);
@@ -120,6 +132,7 @@ class SyncVodStrmFiles implements ShouldQueue
                     foreach ($nameFilterPatterns as $pattern) {
                         $name = str_replace($pattern, '', $name);
                     }
+
                     return trim($name);
                 };
 
@@ -236,7 +249,7 @@ class SyncVodStrmFiles implements ShouldQueue
                 // Generate the url
                 $playlist = $this->playlist ?? $channel->getEffectivePlaylist();
                 $extension = $channel->container_extension ?? 'mkv';
-                $url = rtrim("/movie/{$playlist->user->name}/{$playlist->uuid}/" . $channel->id . "." . $extension, '.');
+                $url = rtrim("/movie/{$playlist->user->name}/{$playlist->uuid}/" . $channel->id . '.' . $extension, '.');
                 $url = PlaylistService::getBaseUrl($url);
 
                 // Build path options for tracking changes
@@ -251,13 +264,14 @@ class SyncVodStrmFiles implements ShouldQueue
                     'name_filter_patterns' => $nameFilterPatterns,
                 ];
 
-                // Use intelligent sync - handles create, rename, and URL updates
-                StrmFileMapping::syncFile(
+                // Use intelligent sync with pre-loaded cache - handles create, rename, and URL updates
+                StrmFileMapping::syncFileWithCache(
                     $channel,
                     $syncLocation,
                     $filePath,
                     $url,
-                    $pathOptions
+                    $pathOptions,
+                    $mappingCache
                 );
             }
 
@@ -268,6 +282,9 @@ class SyncVodStrmFiles implements ShouldQueue
                     Channel::class,
                     $syncLocation
                 );
+
+                // Clean up empty directories after orphaned cleanup
+                StrmFileMapping::cleanupEmptyDirectoriesInLocation($syncLocation);
             }
         } catch (\Exception $e) {
             // Log the exception or handle it as needed

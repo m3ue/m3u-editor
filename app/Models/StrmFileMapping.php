@@ -46,6 +46,99 @@ class StrmFileMapping extends Model
     }
 
     /**
+     * Bulk load all mappings for a given syncable type and IDs.
+     * Returns a keyed collection: [syncable_id => StrmFileMapping]
+     *
+     * This dramatically improves performance when syncing many items
+     * by reducing N queries to 1 query.
+     *
+     * @param  string  $syncableType  The model class name (e.g., Episode::class)
+     * @param  array  $syncableIds  Array of syncable IDs to load
+     * @param  string  $syncLocation  Base sync location path
+     * @return \Illuminate\Support\Collection<int, self>
+     */
+    public static function bulkLoadForSyncables(
+        string $syncableType,
+        array $syncableIds,
+        string $syncLocation
+    ): \Illuminate\Support\Collection {
+        if (empty($syncableIds)) {
+            return collect();
+        }
+
+        return self::where('syncable_type', $syncableType)
+            ->whereIn('syncable_id', $syncableIds)
+            ->where('sync_location', $syncLocation)
+            ->get()
+            ->keyBy('syncable_id');
+    }
+
+    /**
+     * Sync the .strm file with a pre-loaded mapping cache.
+     * Use this when processing many items to avoid N+1 queries.
+     *
+     * @param  Model  $syncable  The model being synced (Channel, Episode, etc.)
+     * @param  string  $syncLocation  Base sync location path
+     * @param  string  $expectedPath  The expected full path for the .strm file
+     * @param  string  $url  The URL to store in the .strm file
+     * @param  array  $pathOptions  The options used to generate the path
+     * @param  \Illuminate\Support\Collection|null  $mappingCache  Pre-loaded mappings keyed by syncable_id
+     * @return self The mapping record
+     */
+    public static function syncFileWithCache(
+        Model $syncable,
+        string $syncLocation,
+        string $expectedPath,
+        string $url,
+        array $pathOptions = [],
+        ?\Illuminate\Support\Collection $mappingCache = null
+    ): self {
+        // Try to get mapping from cache first, fall back to DB query
+        $mapping = null;
+        if ($mappingCache !== null) {
+            $mapping = $mappingCache->get($syncable->id);
+        }
+
+        // If not in cache (or no cache provided), query the DB
+        if ($mapping === null && $mappingCache === null) {
+            $mapping = self::findForSyncable($syncable, $syncLocation);
+        }
+
+        // Case 1: No existing mapping - create new file
+        if (! $mapping) {
+            return self::createNewFile($syncable, $syncLocation, $expectedPath, $url, $pathOptions);
+        }
+
+        // Case 2: Path changed - rename the file
+        if ($mapping->current_path !== $expectedPath) {
+            return self::renameFile($mapping, $expectedPath, $url, $pathOptions);
+        }
+
+        // Case 3: URL changed - update the file content
+        if ($mapping->current_url !== $url) {
+            return self::updateFileUrl($mapping, $url, $pathOptions);
+        }
+
+        // Case 4: File missing from disk - recreate it
+        if (! @file_exists($mapping->current_path)) {
+            Log::info('STRM Sync: File missing from disk, recreating', ['path' => $mapping->current_path]);
+            $directory = dirname($mapping->current_path);
+            if (! is_dir($directory)) {
+                @mkdir($directory, 0755, true);
+            }
+            @file_put_contents($mapping->current_path, $url, LOCK_EX);
+        }
+
+        // Case 5: Nothing changed - ensure path_options stay in sync
+        if ($mapping->path_options != $pathOptions) {
+            $mapping->path_options = $pathOptions;
+            $mapping->save();
+        }
+
+        return $mapping;
+    }
+
+    /**
      * Sync the .strm file - handles create, rename, and URL updates
      *
      * @param  Model  $syncable  The model being synced (Channel, Episode, etc.)
@@ -404,6 +497,7 @@ class StrmFileMapping extends Model
                     'path' => $path,
                     'sync_location' => $root,
                 ]);
+
                 continue;
             }
 
@@ -412,6 +506,7 @@ class StrmFileMapping extends Model
             if (! is_dir($directory)) {
                 if (! @mkdir($directory, 0755, true)) {
                     Log::warning('STRM Sync: Failed to create directory while restoring', ['directory' => $directory]);
+
                     continue;
                 }
                 Log::debug('STRM Sync: Created directory during restore', ['directory' => $directory]);
@@ -431,6 +526,7 @@ class StrmFileMapping extends Model
             if ($shouldWrite) {
                 if (@file_put_contents($path, $mapping->current_url, LOCK_EX) === false) {
                     Log::warning('STRM Sync: Failed to write file during restore', ['path' => $path]);
+
                     continue;
                 }
                 Log::info('STRM Sync: Restored file from mapping', ['path' => $path]);
@@ -442,26 +538,70 @@ class StrmFileMapping extends Model
     }
 
     /**
-     * Delete all mappings and files for syncables that no longer exist or are disabled
+     * Delete all mappings and files for syncables that no longer exist or are disabled.
+     * Uses a single LEFT JOIN query instead of loading each syncable individually (N+1 prevention).
      */
     public static function cleanupOrphaned(string $syncableType, string $syncLocation): int
     {
         $count = 0;
 
-        self::where('syncable_type', $syncableType)
-            ->where('sync_location', $syncLocation)
-            ->chunk(100, function ($mappings) use (&$count) {
-                foreach ($mappings as $mapping) {
-                    // Check if the syncable still exists and is enabled
-                    $syncable = $mapping->syncable;
-                    if (! $syncable || ! ($syncable->enabled ?? true)) {
-                        $mapping->deleteFile();
-                        $count++;
-                    }
-                }
-            });
+        // Determine the table name from the syncable type
+        $modelInstance = new $syncableType;
+        $table = $modelInstance->getTable();
+
+        // Use LEFT JOIN to find orphaned mappings in a single query
+        // This is MUCH more efficient than loading each syncable individually
+        $orphanedMappings = self::query()
+            ->where('strm_file_mappings.syncable_type', $syncableType)
+            ->where('strm_file_mappings.sync_location', $syncLocation)
+            ->leftJoin($table, function ($join) use ($table) {
+                $join->on('strm_file_mappings.syncable_id', '=', "{$table}.id");
+            })
+            ->where(function ($query) use ($table) {
+                // Orphaned if: syncable doesn't exist OR syncable is disabled
+                $query->whereNull("{$table}.id")
+                    ->orWhere("{$table}.enabled", false);
+            })
+            ->select('strm_file_mappings.*')
+            ->cursor(); // Use cursor for memory efficiency iteration over large datasets
+
+        foreach ($orphanedMappings as $mapping) {
+            $mapping->deleteFile();
+            $count++;
+        }
 
         return $count;
+    }
+
+    /**
+     * Clean up all empty directories within a sync location.
+     * Uses depth-first traversal to remove empty directories from bottom up.
+     */
+    public static function cleanupEmptyDirectoriesInLocation(string $syncLocation): void
+    {
+        $realSyncLocation = realpath(rtrim($syncLocation, '/'));
+        if ($realSyncLocation === false || !is_dir($realSyncLocation)) {
+            return;
+        }
+
+        // Use RecursiveIteratorIterator to traverse directories depth-first (children before parents)
+        try {
+            $iterator = new \RecursiveIteratorIterator(
+                new \RecursiveDirectoryIterator($realSyncLocation, \RecursiveDirectoryIterator::SKIP_DOTS),
+                \RecursiveIteratorIterator::CHILD_FIRST
+            );
+
+            foreach ($iterator as $file) {
+                if ($file->isDir() && self::isDirectoryEmpty($file->getRealPath())) {
+                    @rmdir($file->getRealPath());
+                }
+            }
+        } catch (Throwable $e) {
+            Log::debug('STRM Sync: Exception during bulk directory cleanup', [
+                'sync_location' => $syncLocation,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     /**
