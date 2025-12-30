@@ -218,8 +218,6 @@ class StrmFileMapping extends Model
                 throw new RuntimeException("STRM Sync: Failed to write file: {$path}");
             }
 
-            Log::debug('STRM Sync: Created new file', ['path' => $path]);
-
             // Create and return the mapping
             return self::create([
                 'syncable_type' => get_class($syncable),
