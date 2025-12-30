@@ -199,27 +199,8 @@ class PlaylistGenerateController extends Controller
                     $url = rtrim($url, '.');
 
                     // Make sure TVG ID only contains characters and numbers
-                    // NOTE: Relaxed regex or removed it might be better if we want to allow dashes, but user asked for unique IDs.
-                    // The original code stripped special chars. If we use basename (e.g. 'US_CN_...'), it might get stripped.
-                    // Let's keep the strip but be aware it might reduce uniqueness if handled poorly.
-                    // Actually, if we dedupe BEFORE stripping, stripping might re-introduce dupes.
-                    // Dedupe should happen AFTER stripping? Or should we dedupe the FINAL id?
-                    // Let's dedupe the FINAL ID.
-    
                     $tvgId = preg_replace(config('dev.tvgid.regex'), '', $tvgId);
 
-                    // Deduplicate TVG ID
-                    $originalTvgId = $tvgId;
-                    $idCount = 2;
-                    while (isset($usedTvgIds[$tvgId])) {
-                        $tvgId = "$originalTvgId.$idCount";
-                        $idCount++;
-                    }
-                    $usedTvgIds[$tvgId] = true;
-
-                    // RE-PLANNING IN MID-FLIGHT:
-                    // I will include the regex strip in the replacement block and do deduplication AFTER it.
-    
                     // Output the channel
                     $extInf = "#EXTINF:-1";
                     if ($channel->catchup) {
@@ -260,8 +241,8 @@ class PlaylistGenerateController extends Controller
                         ->with([
                             'category',
                             'episodes' => function ($q) {
-                            $q->where('episodes.enabled', true);
-                        }
+                                $q->where('episodes.enabled', true);
+                            }
                         ])
                         ->orderBy('sort')
                         ->get();
@@ -504,7 +485,7 @@ class PlaylistGenerateController extends Controller
     {
         // Return the HDHR device info
         $uuid = $playlist->uuid;
-        $tunerCount = (int) $playlist->streams === 0
+        $tunerCount = (int)$playlist->streams === 0
             ? ($xtreamStatus['user_info']['max_connections'] ?? $playlist->streams ?? 1)
             : $playlist->streams;
         $tunerCount = max($tunerCount, 1); // Ensure at least 1 tuner
