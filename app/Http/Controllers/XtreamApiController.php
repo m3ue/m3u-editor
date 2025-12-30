@@ -588,7 +588,7 @@ class XtreamApiController extends Controller
                     // Get the TVG ID
                     switch ($idChannelBy) {
                         case PlaylistChannelId::ChannelId:
-                            $tvgId = $channelNo;
+                            $tvgId = $channel->id;
                             break;
                         case PlaylistChannelId::Name:
                             $tvgId = $channel->name_custom ?? $channel->name;
@@ -600,6 +600,14 @@ class XtreamApiController extends Controller
                             $tvgId = $channel->stream_id_custom ?? $channel->stream_id;
                             break;
                     }
+
+                    // If no TVG ID still, fallback to the channel source ID or internal ID as a last resort
+                    if (empty($tvgId)) {
+                        $tvgId = $channel->source_id ?? $channel->id;
+                    }
+
+                    // Make sure TVG ID only contains characters and numbers
+                    $tvgId = preg_replace(config('dev.tvgid.regex'), '', $tvgId);
 
                     // Get the file extension from the URL
                     $url = $channel->url_custom ?? $channel->url;

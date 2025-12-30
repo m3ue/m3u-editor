@@ -87,59 +87,13 @@ class PlaylistGenerateController extends Controller
         // Get the base URL
         $baseUrl = ProxyFacade::getBaseUrl();
 
+        // Build the channel query
+        $channels = self::getChannelQuery($playlist);
+        $cursor = $channels->cursor();
+
         // Get all active channels
         return response()->stream(
-            function () use ($baseUrl, $playlist, $proxyEnabled, $logoProxyEnabled, $type, $usedAuth) {
-                // Get all active channels
-                $channels = $playlist->channels()
-                    ->leftJoin('groups', 'channels.group_id', '=', 'groups.id')
-                    ->where('channels.enabled', true)
-                    ->when(!$playlist->include_vod_in_m3u, function ($q) {
-                        $q->where('channels.is_vod', false);
-                    })
-                    ->with(['epgChannel', 'tags', 'group'])
-                    ->orderBy('groups.sort_order') // Primary sort
-                    ->orderBy('channels.sort') // Secondary sort
-                    ->orderBy('channels.channel')
-                    ->orderBy('channels.title')
-                    ->select('channels.*')
-                    ->get();
-
-                // For custom playlists, re-sort by custom group order (if assigned), falling back to original group order
-                if ($type === 'custom' && $channels->isNotEmpty()) {
-                    $playlistUuid = $playlist->uuid;
-                    $channels = $channels->sort(function ($a, $b) use ($playlistUuid) {
-                        // Get custom tag order for both channels
-                        $aTag = $a->tags->where('type', $playlistUuid)->first();
-                        $bTag = $b->tags->where('type', $playlistUuid)->first();
-
-                        $aOrder = $aTag ? ($aTag->order_column ?? 999999) : ($a->group->sort_order ?? 999999);
-                        $bOrder = $bTag ? ($bTag->order_column ?? 999999) : ($b->group->sort_order ?? 999999);
-
-                        // Primary sort by group/tag order
-                        if ($aOrder !== $bOrder) {
-                            return $aOrder <=> $bOrder;
-                        }
-
-                        // Secondary sort by channel sort
-                        $aSort = $a->sort ?? 999999;
-                        $bSort = $b->sort ?? 999999;
-                        if ($aSort !== $bSort) {
-                            return $aSort <=> $bSort;
-                        }
-
-                        // Tertiary sort by channel number
-                        $aCh = $a->channel ?? '';
-                        $bCh = $b->channel ?? '';
-                        if ($aCh !== $bCh) {
-                            return $aCh <=> $bCh;
-                        }
-
-                        // Final sort by title
-                        return ($a->title ?? '') <=> ($b->title ?? '');
-                    })->values();
-                }
-
+            function () use ($cursor, $baseUrl, $playlist, $proxyEnabled, $logoProxyEnabled, $type, $usedAuth) {
                 // Set the auth details
                 if ($usedAuth) {
                     $username = urlencode($usedAuth->username);
@@ -154,12 +108,14 @@ class PlaylistGenerateController extends Controller
                 echo "#EXTM3U x-tvg-url=\"$epgUrl\" \n";
                 $channelNumber = $playlist->auto_channel_increment ? $playlist->channel_start - 1 : 0;
                 $idChannelBy = $playlist->id_channel_by;
-                foreach ($channels as $channel) {
+                foreach ($cursor as $channel) {
                     // Get the title and name
                     $title = $channel->title_custom ?? $channel->title;
                     $name = $channel->name_custom ?? $channel->name;
                     $url = PlaylistUrlService::getChannelUrl($channel, $playlist);
-                    $epgData = $channel->epgChannel ?? null;
+                    // Use selected EPG fields (avoids N+1 query for epgChannel relation)
+                    $epgIcon = $channel->epg_icon ?? null;
+                    $epgIconCustom = $channel->epg_icon_custom ?? null;
                     $channelNo = $channel->channel;
                     $timeshift = $channel->shift ?? 0;
                     $stationId = $channel->station_id ?? '';
@@ -169,18 +125,16 @@ class PlaylistGenerateController extends Controller
                         $channelNo = ++$channelNumber;
                     }
                     if ($type === 'custom') {
-                        $customGroup = $channel->tags
-                            ->where('type', $playlist->uuid)
-                            ->first();
-                        if ($customGroup) {
-                            $group = $customGroup->getAttributeValue('name');
+                        // We selected the custom tag name as `custom_group_name` when building the query
+                        if (!empty($channel->custom_group_name)) {
+                            $group = $channel->custom_group_name;
                         }
                     }
 
                     // Get the TVG ID
                     switch ($idChannelBy) {
                         case PlaylistChannelId::ChannelId:
-                            $tvgId = $channelNo;
+                            $tvgId = $channel->id;
                             break;
                         case PlaylistChannelId::Name:
                             $tvgId = $channel->name_custom ?? $channel->name;
@@ -203,8 +157,8 @@ class PlaylistGenerateController extends Controller
                     if ($channel->logo) {
                         // Logo override takes precedence
                         $icon = $channel->logo;
-                    } elseif ($channel->logo_type === ChannelLogoType::Epg && $epgData) {
-                        $icon = $epgData->icon ?? '';
+                    } elseif ($channel->logo_type === ChannelLogoType::Epg && ($epgIconCustom || $epgIcon)) {
+                        $icon = $epgIconCustom ?? $epgIcon ?? '';
                     } elseif ($channel->logo_type === ChannelLogoType::Channel) {
                         $icon = $channel->logo ?? $channel->logo_internal ?? '';
                     }
@@ -327,7 +281,7 @@ class PlaylistGenerateController extends Controller
                             // Get the TVG ID
                             switch ($idChannelBy) {
                                 case PlaylistChannelId::ChannelId:
-                                    $tvgId = $channelNo;
+                                    $tvgId = $channel->id;
                                     break;
                                 case PlaylistChannelId::Name:
                                     $tvgId = $name;
@@ -443,20 +397,8 @@ class PlaylistGenerateController extends Controller
             return response()->json(['Error' => 'Playlist Not Found'], 404);
         }
 
-        // Get all active channels
-        $channels = $playlist->channels()
-            ->leftJoin('groups', 'channels.group_id', '=', 'groups.id')
-            ->where('channels.enabled', true)
-            ->when(!$playlist->include_vod_in_m3u, function ($q) {
-                $q->where('channels.is_vod', false);
-            })
-            ->with(['epgChannel', 'tags', 'group'])
-            ->orderBy('groups.sort_order') // Primary sort
-            ->orderBy('channels.sort') // Secondary sort
-            ->orderBy('channels.channel')
-            ->orderBy('channels.title')
-            ->select('channels.*')
-            ->get();
+        // Build the channel query
+        $channels = self::getChannelQuery($playlist);
 
         // Set the auth details
         $username = $playlist->user->name;
@@ -467,63 +409,65 @@ class PlaylistGenerateController extends Controller
         $autoIncrement = $playlist->auto_channel_increment;
         $channelNumber = $autoIncrement ? $playlist->channel_start - 1 : 0;
 
-        return response()->json($channels->transform(function (Channel $channel) use ($username, $password, $idChannelBy, $autoIncrement, &$channelNumber, $playlist) {
-            $sourceUrl = $channel->url_custom ?? $channel->url;
-            $baseUrl = ProxyFacade::getBaseUrl();
-            $extension = pathinfo($sourceUrl, PATHINFO_EXTENSION);
-            $urlPath = 'live';
-            if ($channel->is_vod) {
-                $urlPath = 'movie';
-                $extension = $channel->container_extension ?? 'mkv';
-            }
-            $url = rtrim($baseUrl . "/{$urlPath}/{$username}/{$password}/" . $channel->id . "." . $extension, '.');
-            $channelNo = $channel->channel;
-            if (!$channelNo && $autoIncrement) {
-                $channelNo = ++$channelNumber;
-            }
-            // Get the TVG ID
-            switch ($idChannelBy) {
-                case PlaylistChannelId::ChannelId:
-                    $tvgId = $channelNo;
-                    break;
-                case PlaylistChannelId::Name:
-                    $tvgId = $channel->name_custom ?? $channel->name;
-                    break;
-                case PlaylistChannelId::Title:
-                    $tvgId = $channel->title_custom ?? $channel->title;
-                    break;
-                default:
-                    $tvgId = $channel->stream_id_custom ?? $channel->stream_id;
-                    break;
-            }
+        // Stream the JSON response to avoid loading all channels into memory.
+        $cursor = $channels->cursor();
+        $headers = [
+            'Content-Type' => 'application/json',
+        ];
 
-            // If no TVG ID still, fallback to the channel source ID or internal ID as a last resort
-            if (empty($tvgId)) {
-                $tvgId = $channel->source_id ?? $channel->id;
+        return response()->stream(function () use ($cursor, $username, $password, $idChannelBy, $autoIncrement, &$channelNumber, $playlist) {
+            $first = true;
+            echo '[';
+            foreach ($cursor as $channel) {
+                $sourceUrl = $channel->url_custom ?? $channel->url;
+                $baseUrl = ProxyFacade::getBaseUrl();
+                $extension = pathinfo($sourceUrl, PATHINFO_EXTENSION);
+                $urlPath = 'live';
+                if ($channel->is_vod) {
+                    $urlPath = 'movie';
+                    $extension = $channel->container_extension ?? 'mkv';
+                }
+                $url = rtrim($baseUrl . "/{$urlPath}/{$username}/{$password}/" . $channel->id . "." . $extension, '.');
+                $channelNo = $channel->channel;
+                if (!$channelNo && $autoIncrement) {
+                    $channelNo = ++$channelNumber;
+                }
+
+                // Get the TVG ID
+                switch ($idChannelBy) {
+                    case PlaylistChannelId::ChannelId:
+                        $tvgId = $channel->id;
+                        break;
+                    case PlaylistChannelId::Name:
+                        $tvgId = $channel->name_custom ?? $channel->name;
+                        break;
+                    case PlaylistChannelId::Title:
+                        $tvgId = $channel->title_custom ?? $channel->title;
+                        break;
+                    default:
+                        $tvgId = $channel->stream_id_custom ?? $channel->stream_id;
+                        break;
+                }
+
+                if (empty($tvgId)) {
+                    $tvgId = $channel->source_id ?? $channel->id;
+                }
+                $tvgId = preg_replace(config('dev.tvgid.regex'), '', $tvgId);
+
+                $item = [
+                    'GuideNumber' => (string)$tvgId,
+                    'GuideName' => $channel->title_custom ?? $channel->title,
+                    'URL' => $url,
+                ];
+
+                if (!$first) {
+                    echo ',';
+                }
+                echo json_encode($item);
+                $first = false;
             }
-
-            // Make sure TVG ID only contains characters and numbers
-            $tvgId = preg_replace(config('dev.tvgid.regex'), '', $tvgId);
-
-            return [
-                'GuideNumber' => (string)$tvgId,
-                'GuideName' => $channel->title_custom ?? $channel->title,
-                'URL' => $url,
-            ];
-
-            // Example of more detailed response
-            //            return [
-            //                'GuideNumber' => $channel->channel_number ?? $streamId, // Channel number (e.g., "100")
-            //                'GuideName'   => $channel->title_custom ?? $channel->title, // Channel name
-            //                'URL'         => $url, // Stream URL
-            //                'HD'          => $is_hd ? 1 : 0, // HD flag
-            //                'VideoCodec'  => 'H264', // Set based on your stream format
-            //                'AudioCodec'  => 'AAC', // Set based on your stream format
-            //                'Favorite'    => $favorite ? 1 : 0, // Favorite flag
-            //                'DRM'         => 0, // Assuming no DRM
-            //                'Streaming'   => 'direct', // Direct stream or transcoding
-            //            ];
-        }));
+            echo ']';
+        }, 200, $headers);
     }
 
     public function hdhrLineupStatus(string $uuid)
@@ -559,5 +503,60 @@ class PlaylistGenerateController extends Controller
             'LineupURL' => "$baseUrl/lineup.json",
             'TunerCount' => $tunerCount,
         ];
+    }
+
+    /**
+     * Build the base query for channels for a playlist.
+     *
+     * @param Playlist $playlist
+     * @return mixed
+     */
+    public static function getChannelQuery($playlist): mixed
+    {
+        // Build the base query for channels. We'll use cursor() to stream
+        // results rather than loading all channels into memory.
+        $playlistUuid = $playlist->uuid;
+        $query = $playlist->channels()
+            ->leftJoin('groups', 'channels.group_id', '=', 'groups.id')
+            ->where('channels.enabled', true)
+            ->when(!$playlist->include_vod_in_m3u, function ($q) {
+                $q->where('channels.is_vod', false);
+            })
+            // Select the channel columns and also pull through group name and (for custom)
+            // the custom tag name/order so we can order in SQL and avoid a PHP-side resort.
+            ->selectRaw('channels.*')
+            ->selectRaw('groups.name as group_name')
+            ->selectRaw('groups.sort_order as group_sort_order');
+
+        // Join EPG channel data to avoid N+1 queries and select common fields
+        $query->leftJoin('epg_channels', 'channels.epg_channel_id', '=', 'epg_channels.id')
+            ->selectRaw('epg_channels.icon as epg_icon')
+            ->selectRaw('epg_channels.icon_custom as epg_icon_custom')
+            ->selectRaw('epg_channels.channel_id as epg_channel_id');
+
+        // If custom playlist, left join tags (aliased) for this playlist to use its order_column
+        if ($playlist instanceof CustomPlaylist) {
+            $query->leftJoin('tags as custom_tags', function ($join) use ($playlistUuid) {
+                $join->on('custom_tags.channel_id', '=', 'channels.id')
+                    ->where('custom_tags.type', $playlistUuid);
+            });
+
+            // Order by custom tag order when present, otherwise fall back to group sort_order
+            $query->orderByRaw('COALESCE(custom_tags.order_column, groups.sort_order)')
+                ->orderBy('channels.sort')
+                ->orderBy('channels.channel')
+                ->orderBy('channels.title');
+
+            // Include the custom tag name/order in the selected columns so it is available
+            $query->selectRaw('custom_tags.name as custom_group_name')
+                ->selectRaw('custom_tags.order_column as custom_order');
+        } else {
+            // Standard ordering for non-custom playlists
+            $query->orderBy('groups.sort_order')
+                ->orderBy('channels.sort')
+                ->orderBy('channels.channel')
+                ->orderBy('channels.title');
+        }
+        return $query;
     }
 }
