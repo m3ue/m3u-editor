@@ -12,8 +12,12 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('media_server_integrations', function (Blueprint $table) {
-            $table->boolean('auto_sync')->default(true)->after('import_series');
-            $table->string('sync_interval')->default('0 */6 * * *')->after('auto_sync'); // Default: every 6 hours
+            if (! Schema::hasColumn('media_server_integrations', 'auto_sync')) {
+                $table->boolean('auto_sync')->default(true)->after('import_series');
+            }
+            if (! Schema::hasColumn('media_server_integrations', 'sync_interval')) {
+                $table->string('sync_interval')->default('0 */6 * * *')->after('auto_sync'); // Default: every 6 hours
+            }
         });
     }
 
