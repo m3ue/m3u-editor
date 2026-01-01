@@ -9,6 +9,7 @@ use App\Traits\ProviderRequestDelay;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Support\Facades\Log;
 
 class ProcessM3uImportSeriesEpisodes implements ShouldQueue
 {
@@ -17,6 +18,12 @@ class ProcessM3uImportSeriesEpisodes implements ShouldQueue
 
     // Don't retry the job on failure
     public $tries = 1;
+
+    /**
+     * Batch size for processing series.
+     * Each batch is dispatched as a separate job to prevent timeouts.
+     */
+    public const BATCH_SIZE = 100;
 
     /**
      * Create a new job instance.
@@ -29,6 +36,9 @@ class ProcessM3uImportSeriesEpisodes implements ShouldQueue
         public bool $overwrite_existing = false,
         public ?int $user_id = null,
         public ?bool $sync_stream_files = true,
+        public ?int $batchOffset = null,  // For batch processing: starting offset
+        public ?int $totalBatches = null, // For tracking progress
+        public ?int $currentBatch = null, // Current batch number (1-indexed)
     ) {}
 
     /**
@@ -45,51 +55,159 @@ class ProcessM3uImportSeriesEpisodes implements ShouldQueue
         ];
 
         if ($series) {
+            // Single series processing
             $this->fetchMetadataForSeries($series, $global_sync_settings);
+        } elseif ($this->batchOffset !== null) {
+            // Batch processing mode - process a specific batch
+            $this->processBatch($settings, $global_sync_settings);
         } else {
-            // Disable notifications for bulk processing
-            $this->notify = false;
+            // Initial dispatch - calculate batches and dispatch them
+            $this->dispatchBatches($settings);
+        }
+    }
 
-            // Process all series in chunks
-            // In bulk mode, don't dispatch individual sync jobs - we do ONE at the end
-            Series::query()
-                ->where([
-                    ['enabled', true],
-                    ['user_id', $this->user_id],
-                ])
-                ->when($this->playlist_id, function ($query) {
-                    $query->where('playlist_id', $this->playlist_id);
-                })
+    /**
+     * Calculate total series count and dispatch batch jobs.
+     * This prevents one giant job from running for hours.
+     */
+    private function dispatchBatches(GeneralSettings $settings): void
+    {
+        // Count total series to process
+        $totalCount = Series::query()
+            ->where([
+                ['enabled', true],
+                ['user_id', $this->user_id],
+            ])
+            ->when($this->playlist_id, function ($query) {
+                $query->where('playlist_id', $this->playlist_id);
+            })
+            ->count();
+
+        if ($totalCount === 0) {
+            Log::info('Series Sync: No series to process');
+
+            return;
+        }
+
+        $totalBatches = (int) ceil($totalCount / self::BATCH_SIZE);
+
+        Log::info('Series Sync: Dispatching batch jobs', [
+            'total_series' => $totalCount,
+            'batch_size' => self::BATCH_SIZE,
+            'total_batches' => $totalBatches,
+            'user_id' => $this->user_id,
+            'playlist_id' => $this->playlist_id,
+        ]);
+
+        // Dispatch batch jobs
+        for ($batch = 0; $batch < $totalBatches; $batch++) {
+            $offset = $batch * self::BATCH_SIZE;
+
+            dispatch(new self(
+                playlistSeries: null,
+                notify: false,
+                all_playlists: $this->all_playlists,
+                playlist_id: $this->playlist_id,
+                overwrite_existing: $this->overwrite_existing,
+                user_id: $this->user_id,
+                sync_stream_files: $this->sync_stream_files,
+                batchOffset: $offset,
+                totalBatches: $totalBatches,
+                currentBatch: $batch + 1,
+            ));
+        }
+
+        // Dispatch the STRM sync job at the end (will be queued after all batch jobs)
+        $global_sync_settings = [
+            'enabled' => $settings->stream_file_sync_enabled ?? false,
+        ];
+
+        if ($global_sync_settings['enabled'] && $this->sync_stream_files) {
+            dispatch(new SyncSeriesStrmFiles(
+                series: null,
+                notify: true,
+                all_playlists: $this->all_playlists,
+                playlist_id: $this->playlist_id,
+                user_id: $this->user_id,
+            ));
+        }
+
+        // Notify user that batches were dispatched
+        if ($this->user_id) {
+            $user = User::find($this->user_id);
+            if ($user) {
+                Notification::make()
+                    ->info()
+                    ->title('Series Sync Started')
+                    ->body("Processing {$totalCount} series in {$totalBatches} batches...")
+                    ->broadcast($user)
+                    ->sendToDatabase($user);
+            }
+        }
+    }
+
+    /**
+     * Process a specific batch of series.
+     */
+    private function processBatch(GeneralSettings $settings, array $global_sync_settings): void
+    {
+        $startTime = microtime(true);
+        $processedCount = 0;
+
+        Log::info("Series Sync: Processing batch {$this->currentBatch}/{$this->totalBatches}", [
+            'offset' => $this->batchOffset,
+            'batch_size' => self::BATCH_SIZE,
+        ]);
+
+        // Get series IDs for this batch (using offset/limit instead of chunkById)
+        $seriesIds = Series::query()
+            ->where([
+                ['enabled', true],
+                ['user_id', $this->user_id],
+            ])
+            ->when($this->playlist_id, function ($query) {
+                $query->where('playlist_id', $this->playlist_id);
+            })
+            ->orderBy('id')
+            ->skip($this->batchOffset)
+            ->take(self::BATCH_SIZE)
+            ->pluck('id')
+            ->toArray();
+
+        // Process in smaller chunks for memory management
+        foreach (array_chunk($seriesIds, 10) as $chunkIds) {
+            $seriesChunk = Series::query()
+                ->whereIn('id', $chunkIds)
                 ->with(['playlist'])
-                ->chunkById(50, function ($seriesChunk) use ($global_sync_settings) {
-                    foreach ($seriesChunk as $series) {
-                        // Pass dispatchSync: false to prevent per-series job dispatch
-                        $this->fetchMetadataForSeries($series, $global_sync_settings, dispatchSync: false);
-                    }
-                });
+                ->get();
 
-            // Dispatch ONE bulk sync job at the end instead of per-series
-            if ($global_sync_settings['enabled'] && $this->sync_stream_files) {
-                dispatch(new SyncSeriesStrmFiles(
-                    series: null,
-                    notify: false,
-                    all_playlists: $this->all_playlists,
-                    playlist_id: $this->playlist_id,
-                    user_id: $this->user_id,
-                ));
+            foreach ($seriesChunk as $series) {
+                // Pass dispatchSync: false to prevent per-series job dispatch
+                $this->fetchMetadataForSeries($series, $global_sync_settings, dispatchSync: false);
+                $processedCount++;
             }
 
-            // Notify the user we're done!
-            if ($this->user_id) {
-                $user = User::find($this->user_id);
-                if ($user) {
-                    Notification::make()
-                        ->success()
-                        ->title('Series Sync Completed')
-                        ->body('Series sync completed successfully for all series.')
-                        ->broadcast($user)
-                        ->sendToDatabase($user);
-                }
+            // Clear memory after each mini-chunk
+            unset($seriesChunk);
+            gc_collect_cycles();
+        }
+
+        $duration = round(microtime(true) - $startTime, 2);
+        Log::info("Series Sync: Batch {$this->currentBatch}/{$this->totalBatches} completed", [
+            'processed' => $processedCount,
+            'duration_seconds' => $duration,
+        ]);
+
+        // On last batch, notify user
+        if ($this->currentBatch === $this->totalBatches && $this->user_id) {
+            $user = User::find($this->user_id);
+            if ($user) {
+                Notification::make()
+                    ->success()
+                    ->title('Series Metadata Sync Completed')
+                    ->body("All {$this->totalBatches} batches processed successfully.")
+                    ->broadcast($user)
+                    ->sendToDatabase($user);
             }
         }
     }

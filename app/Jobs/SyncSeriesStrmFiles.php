@@ -23,6 +23,12 @@ class SyncSeriesStrmFiles implements ShouldQueue
     protected array $processedSyncLocations = [];
 
     /**
+     * Batch size for processing series STRM files.
+     * Smaller batches = less memory but more jobs.
+     */
+    public const BATCH_SIZE = 50;
+
+    /**
      * Create a new job instance.
      */
     public function __construct(
@@ -31,6 +37,10 @@ class SyncSeriesStrmFiles implements ShouldQueue
         public bool $all_playlists = false,
         public ?int $playlist_id = null,
         public ?int $user_id = null,
+        public ?int $batchOffset = null,  // For batch processing
+        public ?int $totalBatches = null,
+        public ?int $currentBatch = null,
+        public bool $isCleanupJob = false, // Special flag for final cleanup
     ) {
         // Run file synces on the dedicated queue
         $this->onQueue('file_sync');
@@ -51,62 +61,161 @@ class SyncSeriesStrmFiles implements ShouldQueue
 
             // For single series sync, cleanup immediately
             $this->performCleanup();
+        } elseif ($this->isCleanupJob) {
+            // Special cleanup job - runs after all batch jobs
+            $this->performGlobalCleanup($settings);
+        } elseif ($this->batchOffset !== null) {
+            // Batch processing mode
+            $this->processBatch($settings);
         } else {
-            // Disable notifications for bulk processing
-            $this->notify = false;
+            // Initial dispatch - calculate and dispatch batches
+            $this->dispatchBatches($settings);
+        }
+    }
 
-            Log::info('STRM Sync: Starting bulk series sync', [
-                'user_id' => $this->user_id,
-                'playlist_id' => $this->playlist_id,
-            ]);
+    /**
+     * Dispatch batch jobs for processing series STRM files.
+     */
+    private function dispatchBatches(GeneralSettings $settings): void
+    {
+        $totalCount = Series::query()
+            ->where([
+                ['enabled', true],
+                ['user_id', $this->user_id],
+            ])
+            ->when($this->playlist_id, function ($query) {
+                $query->where('playlist_id', $this->playlist_id);
+            })
+            ->count();
 
-            $processedCount = 0;
-            $startTime = microtime(true);
+        if ($totalCount === 0) {
+            Log::info('STRM Sync: No series to process');
 
-            // Process all series in chunks
-            Series::query()
-                ->where([
-                    ['enabled', true],
-                    ['user_id', $this->user_id],
-                ])
-                ->when($this->playlist_id, function ($query) {
-                    $query->where('playlist_id', $this->playlist_id);
-                })
+            return;
+        }
+
+        $totalBatches = (int) ceil($totalCount / self::BATCH_SIZE);
+
+        Log::info('STRM Sync: Dispatching batch jobs', [
+            'total_series' => $totalCount,
+            'batch_size' => self::BATCH_SIZE,
+            'total_batches' => $totalBatches,
+        ]);
+
+        // Dispatch batch jobs
+        for ($batch = 0; $batch < $totalBatches; $batch++) {
+            $offset = $batch * self::BATCH_SIZE;
+
+            dispatch(new self(
+                series: null,
+                notify: false,
+                all_playlists: $this->all_playlists,
+                playlist_id: $this->playlist_id,
+                user_id: $this->user_id,
+                batchOffset: $offset,
+                totalBatches: $totalBatches,
+                currentBatch: $batch + 1,
+            ));
+        }
+
+        // Dispatch cleanup job at the end (queued after all batch jobs)
+        dispatch(new self(
+            series: null,
+            notify: $this->notify,
+            all_playlists: $this->all_playlists,
+            playlist_id: $this->playlist_id,
+            user_id: $this->user_id,
+            isCleanupJob: true,
+        ));
+    }
+
+    /**
+     * Process a specific batch of series.
+     */
+    private function processBatch(GeneralSettings $settings): void
+    {
+        $startTime = microtime(true);
+        $processedCount = 0;
+
+        Log::debug("STRM Sync: Processing batch {$this->currentBatch}/{$this->totalBatches}", [
+            'offset' => $this->batchOffset,
+        ]);
+
+        // Get series IDs for this batch
+        $seriesIds = Series::query()
+            ->where([
+                ['enabled', true],
+                ['user_id', $this->user_id],
+            ])
+            ->when($this->playlist_id, function ($query) {
+                $query->where('playlist_id', $this->playlist_id);
+            })
+            ->orderBy('id')
+            ->skip($this->batchOffset)
+            ->take(self::BATCH_SIZE)
+            ->pluck('id')
+            ->toArray();
+
+        // Process in smaller chunks for memory
+        foreach (array_chunk($seriesIds, 10) as $chunkIds) {
+            $seriesChunk = Series::query()
+                ->whereIn('id', $chunkIds)
                 ->with(['enabled_episodes', 'playlist', 'user', 'category'])
-                ->chunkById(100, function ($seriesChunk) use ($settings, &$processedCount) {
-                    foreach ($seriesChunk as $series) {
-                        $this->fetchMetadataForSeries($series, $settings, skipCleanup: true);
-                        $processedCount++;
-                    }
+                ->get();
 
-                    // Log progress every 100 series
-                    Log::debug('STRM Sync: Processed chunk', ['processed' => $processedCount]);
-                });
+            foreach ($seriesChunk as $series) {
+                $this->fetchMetadataForSeries($series, $settings, skipCleanup: true);
+                $processedCount++;
+            }
 
-            // Perform cleanup ONCE at the end for all sync locations
-            $cleanupStart = microtime(true);
-            $this->performCleanup();
-            $cleanupDuration = round(microtime(true) - $cleanupStart, 2);
+            // Memory cleanup
+            unset($seriesChunk);
+            gc_collect_cycles();
+        }
 
-            $totalDuration = round(microtime(true) - $startTime, 2);
-            Log::info('STRM Sync: Bulk sync completed', [
-                'series_processed' => $processedCount,
-                'sync_locations' => count($this->processedSyncLocations),
-                'cleanup_duration_seconds' => $cleanupDuration,
-                'total_duration_seconds' => $totalDuration,
-            ]);
+        $duration = round(microtime(true) - $startTime, 2);
+        Log::debug("STRM Sync: Batch {$this->currentBatch}/{$this->totalBatches} completed in {$duration}s", [
+            'processed' => $processedCount,
+        ]);
+    }
 
-            // Notify the user we're done!
-            if ($this->user_id) {
-                $user = User::find($this->user_id);
-                if ($user) {
-                    Notification::make()
-                        ->success()
-                        ->title('Sync .strm files for series completed')
-                        ->body("Sync completed for {$processedCount} series in {$totalDuration}s.")
-                        ->broadcast($user)
-                        ->sendToDatabase($user);
-                }
+    /**
+     * Perform global cleanup after all batches complete.
+     */
+    private function performGlobalCleanup(GeneralSettings $settings): void
+    {
+        $startTime = microtime(true);
+
+        Log::info('STRM Sync: Starting global cleanup');
+
+        // Get all unique sync locations for this user/playlist
+        $syncLocations = StrmFileMapping::query()
+            ->where('syncable_type', Episode::class)
+            ->distinct()
+            ->pluck('sync_location')
+            ->toArray();
+
+        foreach ($syncLocations as $syncLocation) {
+            StrmFileMapping::cleanupOrphaned(Episode::class, $syncLocation);
+            StrmFileMapping::cleanupEmptyDirectoriesInLocation($syncLocation);
+        }
+
+        $duration = round(microtime(true) - $startTime, 2);
+        Log::info('STRM Sync: Global cleanup completed', [
+            'sync_locations' => count($syncLocations),
+            'duration_seconds' => $duration,
+        ]);
+
+        // Notify user
+        if ($this->notify && $this->user_id) {
+            $user = User::find($this->user_id);
+            if ($user) {
+                Notification::make()
+                    ->success()
+                    ->title('STRM File Sync Completed')
+                    ->body('All series STRM files have been synced.')
+                    ->broadcast($user)
+                    ->sendToDatabase($user);
             }
         }
     }
@@ -132,9 +241,9 @@ class SyncSeriesStrmFiles implements ShouldQueue
     /**
      * Process a single series and sync its STRM files.
      *
-     * @param Series $series The series to process
-     * @param GeneralSettings $settings Application settings
-     * @param bool $skipCleanup If true, skip cleanup (for bulk mode where cleanup happens at end)
+     * @param  Series  $series  The series to process
+     * @param  GeneralSettings  $settings  Application settings
+     * @param  bool  $skipCleanup  If true, skip cleanup (for bulk mode where cleanup happens at end)
      */
     private function fetchMetadataForSeries(Series $series, $settings, bool $skipCleanup = false): void
     {
@@ -143,7 +252,7 @@ class SyncSeriesStrmFiles implements ShouldQueue
         }
 
         // Only load relations if not already loaded (bulk mode pre-loads them)
-        if (!$series->relationLoaded('enabled_episodes')) {
+        if (! $series->relationLoaded('enabled_episodes')) {
             $series->load('enabled_episodes', 'playlist', 'user', 'category');
         }
 
@@ -270,7 +379,7 @@ class SyncSeriesStrmFiles implements ShouldQueue
                 $cleanName = $cleanSpecialChars
                     ? PlaylistService::makeFilesystemSafe($catName, $replaceChar)
                     : PlaylistService::makeFilesystemSafe($catName);
-                $path .= '/' . $cleanName;
+                $path .= '/'.$cleanName;
             }
 
             // See if the series is enabled, if not, skip, else create the folder
@@ -305,7 +414,7 @@ class SyncSeriesStrmFiles implements ShouldQueue
                 $cleanName = $cleanSpecialChars
                     ? PlaylistService::makeFilesystemSafe($seriesFolder, $replaceChar)
                     : PlaylistService::makeFilesystemSafe($seriesFolder);
-                $path .= '/' . $cleanName;
+                $path .= '/'.$cleanName;
             }
 
             // Get filename metadata settings
@@ -317,7 +426,7 @@ class SyncSeriesStrmFiles implements ShouldQueue
                 // Setup episode prefix
                 $season = $ep->season;
                 $num = str_pad($ep->episode_num, 2, '0', STR_PAD_LEFT);
-                $prefx = 'S' . str_pad($season, 2, '0', STR_PAD_LEFT) . "E{$num}";
+                $prefx = 'S'.str_pad($season, 2, '0', STR_PAD_LEFT)."E{$num}";
 
                 // Build the base filename (apply name filtering to episode title)
                 $episodeTitle = $applyNameFilter($ep->title);
@@ -345,22 +454,22 @@ class SyncSeriesStrmFiles implements ShouldQueue
                 // Remove consecutive replacement characters if enabled
                 if ($removeConsecutiveChars && $replaceChar !== 'remove') {
                     $char = $replaceChar === 'space' ? ' ' : ($replaceChar === 'dash' ? '-' : ($replaceChar === 'underscore' ? '_' : '.'));
-                    $fileName = preg_replace('/' . preg_quote($char, '/') . '{2,}/', $char, $fileName);
+                    $fileName = preg_replace('/'.preg_quote($char, '/').'{2,}/', $char, $fileName);
                 }
 
                 $fileName = "{$fileName}.strm";
 
                 // Build the season folder path
                 if (in_array('season', $pathStructure)) {
-                    $seasonPath = $path . '/Season ' . str_pad($season, 2, '0', STR_PAD_LEFT);
-                    $filePath = $seasonPath . '/' . $fileName;
+                    $seasonPath = $path.'/Season '.str_pad($season, 2, '0', STR_PAD_LEFT);
+                    $filePath = $seasonPath.'/'.$fileName;
                 } else {
-                    $filePath = $path . '/' . $fileName;
+                    $filePath = $path.'/'.$fileName;
                 }
 
                 // Generate the url
                 $containerExtension = $ep->container_extension ?? 'mp4';
-                $url = rtrim("/series/{$playlist->user->name}/{$playlist->uuid}/" . $ep->id . '.' . $containerExtension, '.');
+                $url = rtrim("/series/{$playlist->user->name}/{$playlist->uuid}/".$ep->id.'.'.$containerExtension, '.');
                 $url = PlaylistService::getBaseUrl($url);
 
                 // Build path options for tracking changes
@@ -388,7 +497,7 @@ class SyncSeriesStrmFiles implements ShouldQueue
 
             // Track this sync location for deferred cleanup (bulk mode)
             // or immediate cleanup (single series mode)
-            if (!in_array($syncLocation, $this->processedSyncLocations)) {
+            if (! in_array($syncLocation, $this->processedSyncLocations)) {
                 $this->processedSyncLocations[] = $syncLocation;
             }
 
