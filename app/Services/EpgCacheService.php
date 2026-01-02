@@ -7,6 +7,7 @@ use Generator;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
+use App\Enums\Status;
 use App\Facades\PlaylistFacade;
 use App\Models\CustomPlaylist;
 use App\Models\Epg;
