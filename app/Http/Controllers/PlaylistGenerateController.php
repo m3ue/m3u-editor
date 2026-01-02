@@ -126,8 +126,10 @@ class PlaylistGenerateController extends Controller
                     }
                     if ($type === 'custom') {
                         // We selected the custom tag name as `custom_group_name` when building the query
+                        // It's a JSON field with translations, so decode and extract the 'en' locale
                         if (!empty($channel->custom_group_name)) {
-                            $group = $channel->custom_group_name;
+                            $groupName = json_decode($channel->custom_group_name, true);
+                            $group = $groupName['en'] ?? $groupName[array_key_first($groupName)] ?? '';
                         }
                     }
 
@@ -541,7 +543,7 @@ class PlaylistGenerateController extends Controller
                 $join->on('channels.id', '=', 'taggables.taggable_id')
                     ->where('taggables.taggable_type', '=', Channel::class);
             });
-            
+
             $query->leftJoin('tags as custom_tags', function ($join) use ($playlistUuid) {
                 $join->on('taggables.tag_id', '=', 'custom_tags.id')
                     ->where('custom_tags.type', '=', $playlistUuid);
@@ -553,7 +555,9 @@ class PlaylistGenerateController extends Controller
                 ->orderBy('channels.channel')
                 ->orderBy('channels.title');
 
-            // Include the custom tag name/order in the selected columns so it is available
+            // Include the custom tag name/order in the selected columns
+            // Note: custom_tags.name is a JSON field with translations like {"en":"Name"}
+            // We'll decode it in PHP to extract the locale-specific value
             $query->selectRaw('custom_tags.name as custom_group_name')
                 ->selectRaw('custom_tags.order_column as custom_order');
         } else {
