@@ -6,7 +6,7 @@ return [
     'dev_version' => '0.8.26-dev',
     'experimental_version' => '0.8.27-exp',
     'repo' => 'sparkison/m3u-editor',
-    'docs_url' => 'https://sparkison.github.io/m3u-editor-docs',
+    'docs_url' => 'https://m3ue.sparkison.dev',
     'donate' => 'https://buymeacoffee.com/shparkison',
     'discord_url' => 'https://discord.gg/rS3abJ5dz7',
     'paypal' => 'https://www.paypal.com/donate/?hosted_button_id=ULJRPVWJNBSSG',
