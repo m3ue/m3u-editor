@@ -410,6 +410,7 @@ class NfoService
 
     /**
      * Start XML document
+     * Note: standalone="yes" is used for maximum compatibility with media servers
      */
     private function startXml(string $rootElement): string
     {
@@ -426,6 +427,10 @@ class NfoService
 
     /**
      * Create an XML element with optional attributes
+     * 
+     * Note: Arrays are intentionally skipped and return empty string.
+     * Callers should iterate over array values and call this method for each item.
+     * See generateSeriesNfo() and generateMovieNfo() for examples of handling arrays (genres, cast, etc.)
      */
     private function xmlElement(string $name, mixed $value, array $attributes = [], int $indentLevel = 1): string
     {
@@ -433,11 +438,12 @@ class NfoService
             return '';
         }
 
-        // Skip arrays - they should be handled separately
+        // Skip arrays - they should be handled separately by the caller
         if (is_array($value)) {
             return '';
         }
 
+        // Standardized 4-space indentation per level
         $indent = str_repeat('    ', $indentLevel);
         $attrs = '';
         foreach ($attributes as $attrName => $attrValue) {
@@ -454,6 +460,7 @@ class NfoService
 
     /**
      * Write content to file
+     * Optimized to skip writing if the existing file has identical content.
      */
     private function writeFile(string $path, string $content): bool
     {
@@ -468,6 +475,15 @@ class NfoService
                 }
             }
 
+            // Optimization: Skip write if content is identical to reduce disk I/O
+            if (file_exists($path)) {
+                $existingContent = @file_get_contents($path);
+                if ($existingContent === $content) {
+                    // Content unchanged, skip write
+                    return true;
+                }
+            }
+
             $result = file_put_contents($path, $content);
 
             if ($result === false) {
@@ -477,7 +493,7 @@ class NfoService
             }
 
             return true;
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             Log::error("NfoService: Error writing file: {$path} - {$e->getMessage()}");
 
             return false;
