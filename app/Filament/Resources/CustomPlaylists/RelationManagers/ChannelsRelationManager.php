@@ -8,7 +8,6 @@ use Filament\Actions\AttachAction;
 use Filament\Actions\BulkAction;
 use Filament\Actions\CreateAction;
 use Filament\Actions\DetachAction;
-use Filament\Actions\DetachBulkAction;
 use Filament\Forms;
 use Filament\Forms\Components\Select;
 use Filament\Notifications\Notification;
@@ -24,9 +23,7 @@ use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
-use Spatie\Tags\Tag;
 
 class ChannelsRelationManager extends RelationManager
 {
@@ -81,19 +78,19 @@ class ChannelsRelationManager extends RelationManager
                     switch ($driver) {
                         case 'pgsql':
                             // PostgreSQL uses ->> operator for JSON
-                            $query->whereRaw('LOWER(tags.name->>\'$\') LIKE ?', ['%' . strtolower($search) . '%']);
+                            $query->whereRaw('LOWER(tags.name->>\'$\') LIKE ?', ['%'.strtolower($search).'%']);
                             break;
                         case 'mysql':
                             // MySQL uses JSON_EXTRACT
-                            $query->whereRaw('LOWER(JSON_EXTRACT(tags.name, "$")) LIKE ?', ['%' . strtolower($search) . '%']);
+                            $query->whereRaw('LOWER(JSON_EXTRACT(tags.name, "$")) LIKE ?', ['%'.strtolower($search).'%']);
                             break;
                         case 'sqlite':
                             // SQLite uses json_extract
-                            $query->whereRaw('LOWER(json_extract(tags.name, "$")) LIKE ?', ['%' . strtolower($search) . '%']);
+                            $query->whereRaw('LOWER(json_extract(tags.name, "$")) LIKE ?', ['%'.strtolower($search).'%']);
                             break;
                         default:
                             // Fallback - try to search the JSON as text
-                            $query->where(DB::raw('LOWER(CAST(tags.name AS TEXT))'), 'LIKE', '%' . strtolower($search) . '%');
+                            $query->where(DB::raw('LOWER(CAST(tags.name AS TEXT))'), 'LIKE', '%'.strtolower($search).'%');
                             break;
                     }
                 });
@@ -158,7 +155,7 @@ class ChannelsRelationManager extends RelationManager
                         return $ownerRecord->tags()
                             ->where('type', $ownerRecord->uuid)
                             ->get()
-                            ->mapWithKeys(fn($tag) => [$tag->getAttributeValue('name') => $tag->getAttributeValue('name')])
+                            ->mapWithKeys(fn ($tag) => [$tag->getAttributeValue('name') => $tag->getAttributeValue('name')])
                             ->toArray();
                     })
                     ->query(function (Builder $query, array $data) use ($ownerRecord): Builder {
@@ -184,13 +181,13 @@ class ChannelsRelationManager extends RelationManager
                     ->schema(ChannelResource::getForm(customPlaylist: $ownerRecord))
                     ->modalHeading('New Custom Channel')
                     ->modalDescription('NOTE: Custom channels need to be associated with a Playlist or Custom Playlist.')
-                    ->using(fn(array $data, string $model): Model => ChannelResource::createCustomChannel(
+                    ->using(fn (array $data, string $model): Model => ChannelResource::createCustomChannel(
                         data: $data,
                         model: $model,
                     ))
                     ->slideOver(),
                 AttachAction::make()
-                    ->schema(fn(AttachAction $action): array => [
+                    ->schema(fn (AttachAction $action): array => [
                         $action
                             ->getRecordSelect()
                             ->getSearchResultsUsing(function (string $search) {
@@ -255,7 +252,7 @@ class ChannelsRelationManager extends RelationManager
                 BulkAction::make('detach')
                     ->label('Detach Selected')
                     ->action(function (Collection $records) use ($ownerRecord): void {
-                        $tags =  $ownerRecord->groupTags()->get();
+                        $tags = $ownerRecord->groupTags()->get();
                         foreach ($records as $record) {
                             $record->detachTags($tags);
                         }
@@ -281,7 +278,7 @@ class ChannelsRelationManager extends RelationManager
                             ->label('Select group')
                             ->options(
                                 $ownerRecord->groupTags()->get()
-                                    ->map(fn($name) => [
+                                    ->map(fn ($name) => [
                                         'id' => $name->getAttributeValue('name'),
                                         'name' => $name->getAttributeValue('name'),
                                     ])->pluck('id', 'name')
@@ -311,15 +308,14 @@ class ChannelsRelationManager extends RelationManager
             ]);
     }
 
-
     public function getTabs(): array
     {
         // Lets group the tabs by Custom Playlist tags
         $ownerRecord = $this->ownerRecord;
         $tags = $ownerRecord->tags()->where('type', $ownerRecord->uuid)->get();
         $tabs = $tags->map(
-            fn($tag) => Tab::make($tag->name)
-                ->modifyQueryUsing(fn($query) => $query->where('is_vod', false)->whereHas('tags', function ($tagQuery) use ($tag) {
+            fn ($tag) => Tab::make($tag->name)
+                ->modifyQueryUsing(fn ($query) => $query->where('is_vod', false)->whereHas('tags', function ($tagQuery) use ($tag) {
                     $tagQuery->where('type', $tag->type)
                         ->where('name->en', $tag->name);
                 }))
@@ -330,19 +326,20 @@ class ChannelsRelationManager extends RelationManager
         array_unshift(
             $tabs,
             Tab::make('All')
-                ->modifyQueryUsing(fn($query) => $query->where('is_vod', false))
+                ->modifyQueryUsing(fn ($query) => $query->where('is_vod', false))
                 ->badge($ownerRecord->channels()->where('is_vod', false)->count())
         );
         array_push(
             $tabs,
             Tab::make('Uncategorized')
-                ->modifyQueryUsing(fn($query) => $query->where('is_vod', false)->whereDoesntHave('tags', function ($tagQuery) use ($ownerRecord) {
+                ->modifyQueryUsing(fn ($query) => $query->where('is_vod', false)->whereDoesntHave('tags', function ($tagQuery) use ($ownerRecord) {
                     $tagQuery->where('type', $ownerRecord->uuid);
                 }))
                 ->badge($ownerRecord->channels()->where('is_vod', false)->whereDoesntHave('tags', function ($tagQuery) use ($ownerRecord) {
                     $tagQuery->where('type', $ownerRecord->uuid);
                 })->count())
         );
+
         return $tabs;
     }
 }

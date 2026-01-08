@@ -2,21 +2,15 @@
 
 namespace App\Models;
 
-use App\Enums\Status;
 use App\Enums\EpgSourceType;
-use App\Services\EpgCacheService;
+use App\Enums\Status;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
-use Illuminate\Database\Eloquent\Collection;
-use App\Models\Playlist;
-use App\Models\CustomPlaylist;
-use App\Models\MergedPlaylist;
-use App\Models\PlaylistAlias;
 use Illuminate\Support\Collection as SupportCollection;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
 
 class Epg extends Model
@@ -82,7 +76,7 @@ class Epg extends Model
 
     public function getCachedEpgMetaAttribute()
     {
-        if (!$this->is_cached || empty($this->cache_meta)) {
+        if (! $this->is_cached || empty($this->cache_meta)) {
             return [
                 'min_date' => null,
                 'max_date' => null,
@@ -91,6 +85,7 @@ class Epg extends Model
         }
         $range = $this->cache_meta['programme_date_range'] ?? null;
         $version = $this->cache_meta['cache_version'] ?? null;
+
         return [
             'min_date' => $range['min_date'] ?? null,
             'max_date' => $range['max_date'] ?? null,
@@ -112,12 +107,12 @@ class Epg extends Model
 
     public function hasSchedulesDirectCredentials(): bool
     {
-        return !empty($this->sd_username) && !empty($this->sd_password);
+        return ! empty($this->sd_username) && ! empty($this->sd_password);
     }
 
     public function hasSchedulesDirectLineup(): bool
     {
-        return !empty($this->sd_lineup_id);
+        return ! empty($this->sd_lineup_id);
     }
 
     public function user(): BelongsTo
@@ -149,7 +144,7 @@ class Epg extends Model
         $all = $playlists->concat($customs)->concat($merged)->concat($aliases);
 
         return $all->unique(function ($item) {
-            return $item->getTable() . '-' . $item->id;
+            return $item->getTable().'-'.$item->id;
         })->values();
     }
 

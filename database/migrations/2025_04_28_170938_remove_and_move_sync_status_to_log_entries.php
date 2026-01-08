@@ -4,7 +4,6 @@ use App\Models\PlaylistSyncStatus;
 use App\Models\PlaylistSyncStatusLog;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
@@ -16,7 +15,7 @@ return new class extends Migration
     {
         /*
          * Get the existing column data and create separate log entries...
-         * 
+         *
          * 1. Get the existing column data
          * 2. Create separate log entries
          * 3. Remove the old columns
@@ -95,7 +94,7 @@ return new class extends Migration
                 'deleted_groups',
                 'added_groups',
                 'deleted_channels',
-                'added_channels'
+                'added_channels',
             ]);
         });
     }

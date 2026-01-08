@@ -13,8 +13,6 @@ class CustomPlaylistCreated
 
     /**
      * Create a new event instance.
-     * 
-     * @param CustomPlaylist $playlist
      */
     public function __construct(
         public CustomPlaylist $playlist

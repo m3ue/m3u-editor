@@ -2,10 +2,9 @@
 
 namespace App\Filament\Resources\Series\Pages;
 
-use Filament\Resources\Pages\CreateRecord\Concerns\HasWizard;
 use App\Filament\Resources\Series\SeriesResource;
-use Filament\Actions;
 use Filament\Resources\Pages\CreateRecord;
+use Filament\Resources\Pages\CreateRecord\Concerns\HasWizard;
 
 class CreateSeries extends CreateRecord
 {

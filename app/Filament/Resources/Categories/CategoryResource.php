@@ -2,42 +2,37 @@
 
 namespace App\Filament\Resources\Categories;
 
-use Filament\Schemas\Schema;
-use Filament\Forms\Components\TextInput;
-use Filament\Tables\Columns\TextInputColumn;
-use Filament\Tables\Columns\TextColumn;
-use Filament\Tables\Filters\SelectFilter;
-use Filament\Actions\BulkActionGroup;
-use Filament\Actions\ViewAction;
-use Filament\Actions\Action;
-use Filament\Forms\Components\Select;
-use Filament\Schemas\Components\Utilities\Set;
-use Filament\Schemas\Components\Utilities\Get;
-use App\Jobs\ProcessM3uImportSeriesEpisodes;
-use App\Jobs\SyncSeriesStrmFiles;
-use Filament\Tables\Enums\RecordActionsPosition;
-use Filament\Actions\BulkAction;
-use App\Filament\Resources\Categories\RelationManagers\SeriesRelationManager;
 use App\Filament\Resources\Categories\Pages\ListCategories;
 use App\Filament\Resources\Categories\Pages\ViewCategory;
-use Filament\Schemas\Components\Section;
-use Filament\Infolists\Components\TextEntry;
+use App\Filament\Resources\Categories\RelationManagers\SeriesRelationManager;
 use App\Filament\Resources\CategoryResource\Pages;
-use App\Filament\Resources\CategoryResource\RelationManagers;
 use App\Filament\Resources\Playlists\PlaylistResource;
+use App\Jobs\ProcessM3uImportSeriesEpisodes;
+use App\Jobs\SyncSeriesStrmFiles;
 use App\Models\Category;
 use App\Models\CustomPlaylist;
-use Filament\Forms;
-use Filament\Infolists;
+use App\Traits\HasUserFiltering;
+use Filament\Actions\Action;
+use Filament\Actions\BulkAction;
+use Filament\Actions\BulkActionGroup;
+use Filament\Actions\ViewAction;
+use Filament\Forms\Components\Select;
+use Filament\Forms\Components\TextInput;
+use Filament\Infolists\Components\TextEntry;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
-use Filament\Tables;
+use Filament\Schemas\Components\Section;
+use Filament\Schemas\Components\Utilities\Get;
+use Filament\Schemas\Components\Utilities\Set;
+use Filament\Schemas\Schema;
+use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Columns\TextInputColumn;
 use Filament\Tables\Columns\ToggleColumn;
+use Filament\Tables\Enums\RecordActionsPosition;
+use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
-use Illuminate\Database\Eloquent\SoftDeletingScope;
-use App\Traits\HasUserFiltering;
 
 class CategoryResource extends Resource
 {
@@ -58,7 +53,7 @@ class CategoryResource extends Resource
             ->where('user_id', auth()->id());
     }
 
-    protected static string | \UnitEnum | null $navigationGroup = 'Series';
+    protected static string|\UnitEnum|null $navigationGroup = 'Series';
 
     public static function getNavigationSort(): ?int
     {
@@ -92,7 +87,7 @@ class CategoryResource extends Resource
                 TextInputColumn::make('name')
                     ->label('Name')
                     ->rules(['min:0', 'max:255'])
-                    ->placeholder(fn($record) => $record->name_internal)
+                    ->placeholder(fn ($record) => $record->name_internal)
                     ->searchable()
                     ->sortable(query: function (Builder $query, string $direction): Builder {
                         return $query
@@ -111,7 +106,7 @@ class CategoryResource extends Resource
                     ->sortable(),
                 TextColumn::make('series_count')
                     ->label('Series')
-                    ->description(fn(Category $record): string => "Enabled: {$record->enabled_series_count}")
+                    ->description(fn (Category $record): string => "Enabled: {$record->enabled_series_count}")
                     ->toggleable()
                     ->sortable(),
                 TextColumn::make('created_at')
@@ -150,12 +145,13 @@ class CategoryResource extends Resource
                                 ->searchable(),
                             Select::make('category')
                                 ->label('Custom Category')
-                                ->disabled(fn(Get $get) => !$get('playlist'))
-                                ->helperText(fn(Get $get) => !$get('playlist') ? 'Select a custom playlist first.' : 'Select the category you would like to assign to the selected series to.')
+                                ->disabled(fn (Get $get) => ! $get('playlist'))
+                                ->helperText(fn (Get $get) => ! $get('playlist') ? 'Select a custom playlist first.' : 'Select the category you would like to assign to the selected series to.')
                                 ->options(function ($get) {
                                     $customList = CustomPlaylist::find($get('playlist'));
+
                                     return $customList ? $customList->categoryTags()->get()
-                                        ->mapWithKeys(fn($tag) => [$tag->getAttributeValue('name') => $tag->getAttributeValue('name')])
+                                        ->mapWithKeys(fn ($tag) => [$tag->getAttributeValue('name') => $tag->getAttributeValue('name')])
                                         ->toArray() : [];
                                 })
                                 ->searchable(),
@@ -190,7 +186,7 @@ class CategoryResource extends Resource
                                 ->live()
                                 ->label('Category')
                                 ->helperText('Select the category you would like to move the series to.')
-                                ->options(fn(Get $get, $record) => Category::where(['user_id' => auth()->id(), 'playlist_id' => $record->playlist_id])->get(['name', 'id'])->pluck('name', 'id'))
+                                ->options(fn (Get $get, $record) => Category::where(['user_id' => auth()->id(), 'playlist_id' => $record->playlist_id])->get(['name', 'id'])->pluck('name', 'id'))
                                 ->searchable(),
                         ])
                         ->action(function ($record, array $data): void {
@@ -312,12 +308,13 @@ class CategoryResource extends Resource
                                 ->searchable(),
                             Select::make('category')
                                 ->label('Custom Category')
-                                ->disabled(fn(Get $get) => !$get('playlist'))
-                                ->helperText(fn(Get $get) => !$get('playlist') ? 'Select a custom playlist first.' : 'Select the category you would like to assign to the selected series to.')
+                                ->disabled(fn (Get $get) => ! $get('playlist'))
+                                ->helperText(fn (Get $get) => ! $get('playlist') ? 'Select a custom playlist first.' : 'Select the category you would like to assign to the selected series to.')
                                 ->options(function ($get) {
                                     $customList = CustomPlaylist::find($get('playlist'));
+
                                     return $customList ? $customList->categoryTags()->get()
-                                        ->mapWithKeys(fn($tag) => [$tag->getAttributeValue('name') => $tag->getAttributeValue('name')])
+                                        ->mapWithKeys(fn ($tag) => [$tag->getAttributeValue('name') => $tag->getAttributeValue('name')])
                                         ->toArray() : [];
                                 })
                                 ->searchable(),
@@ -360,13 +357,13 @@ class CategoryResource extends Resource
                                 ->label('Category')
                                 ->helperText('Select the category you would like to move the series to.')
                                 ->options(
-                                    fn() => Category::query()
+                                    fn () => Category::query()
                                         ->with(['playlist'])
                                         ->where(['user_id' => auth()->id()])
                                         ->get(['name', 'id', 'playlist_id'])
-                                        ->transform(fn($category) => [
+                                        ->transform(fn ($category) => [
                                             'id' => $category->id,
-                                            'name' => $category->name . ' (' . $category->playlist->name . ')',
+                                            'name' => $category->name.' ('.$category->playlist->name.')',
                                         ])->pluck('name', 'id')
                                 )->searchable(),
                         ])
@@ -383,6 +380,7 @@ class CategoryResource extends Resource
                                         ->body("Cannot move \"{$category->name}\" to \"{$record->name}\" as they belong to different playlists.")
                                         ->persistent()
                                         ->send();
+
                                     continue;
                                 }
                                 $record->series()->update([
@@ -563,9 +561,9 @@ class CategoryResource extends Resource
                             ->badge(),
                         TextEntry::make('playlist.name')
                             ->label('Playlist')
-                            //->badge(),
-                            ->url(fn($record) => PlaylistResource::getUrl('edit', ['record' => $record->playlist_id])),
-                    ])
+                            // ->badge(),
+                            ->url(fn ($record) => PlaylistResource::getUrl('edit', ['record' => $record->playlist_id])),
+                    ]),
             ]);
     }
 }

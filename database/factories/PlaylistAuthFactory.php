@@ -2,10 +2,9 @@
 
 namespace Database\Factories;
 
-use Illuminate\Database\Eloquent\Factories\Factory;
-use Illuminate\Support\Str;
 use App\Models\PlaylistAuth;
 use App\Models\User;
+use Illuminate\Database\Eloquent\Factories\Factory;
 
 class PlaylistAuthFactory extends Factory
 {

@@ -2,11 +2,10 @@
 
 namespace Database\Factories;
 
-use Illuminate\Database\Eloquent\Factories\Factory;
-use Illuminate\Support\Str;
 use App\Models\Epg;
 use App\Models\EpgMap;
 use App\Models\User;
+use Illuminate\Database\Eloquent\Factories\Factory;
 
 class EpgMapFactory extends Factory
 {
@@ -26,7 +25,7 @@ class EpgMapFactory extends Factory
             'name' => fake()->name(),
             'uuid' => fake()->uuid(),
             'errors' => fake()->text(),
-            'status' => fake()->randomElement(["pending","processing","completed","failed"]),
+            'status' => fake()->randomElement(['pending', 'processing', 'completed', 'failed']),
             'processing' => fake()->boolean(),
             'progress' => fake()->randomFloat(0, 0, 9999999999.),
             'sync_time' => fake()->dateTime(),

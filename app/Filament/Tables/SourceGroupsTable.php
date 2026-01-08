@@ -3,7 +3,6 @@
 namespace App\Filament\Tables;
 
 use App\Models\SourceGroup;
-use Filament\Tables;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
@@ -13,7 +12,7 @@ class SourceGroupsTable
     public static function configure(Table $table): Table
     {
         return $table
-            ->query(fn(): Builder => SourceGroup::query())
+            ->query(fn (): Builder => SourceGroup::query())
             ->modifyQueryUsing(function (Builder $query) use ($table): Builder {
                 $arguments = $table->getArguments();
 

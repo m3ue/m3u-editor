@@ -2,19 +2,17 @@
 
 namespace App\Filament\Resources\VodGroups\Pages;
 
-use Filament\Actions\ActionGroup;
-use Filament\Actions\Action;
-use Filament\Forms\Components\Select;
-use Filament\Schemas\Components\Utilities\Set;
-use Filament\Schemas\Components\Utilities\Get;
-use Filament\Actions\DeleteAction;
 use App\Filament\Resources\VodGroups\VodGroupResource;
 use App\Models\CustomPlaylist;
 use App\Models\Group;
-use Filament\Actions;
-use Filament\Forms;
+use Filament\Actions\Action;
+use Filament\Actions\ActionGroup;
+use Filament\Actions\DeleteAction;
+use Filament\Forms\Components\Select;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
+use Filament\Schemas\Components\Utilities\Get;
+use Filament\Schemas\Components\Utilities\Set;
 
 class ViewVodGroup extends ViewRecord
 {
@@ -41,12 +39,13 @@ class ViewVodGroup extends ViewRecord
                             ->searchable(),
                         Select::make('category')
                             ->label('Custom Group')
-                            ->disabled(fn(Get $get) => !$get('playlist'))
-                            ->helperText(fn(Get $get) => !$get('playlist') ? 'Select a custom playlist first.' : 'Select the group you would like to assign to the channels to.')
+                            ->disabled(fn (Get $get) => ! $get('playlist'))
+                            ->helperText(fn (Get $get) => ! $get('playlist') ? 'Select a custom playlist first.' : 'Select the group you would like to assign to the channels to.')
                             ->options(function ($get) {
                                 $customList = CustomPlaylist::find($get('playlist'));
+
                                 return $customList ? $customList->groupTags()->get()
-                                    ->mapWithKeys(fn($tag) => [$tag->getAttributeValue('name') => $tag->getAttributeValue('name')])
+                                    ->mapWithKeys(fn ($tag) => [$tag->getAttributeValue('name') => $tag->getAttributeValue('name')])
                                     ->toArray() : [];
                             })
                             ->searchable(),
@@ -84,10 +83,10 @@ class ViewVodGroup extends ViewRecord
                             ->live()
                             ->label('Group')
                             ->helperText('Select the group you would like to move the channels to.')
-                            ->options(fn(Get $get, $record) => Group::where([
+                            ->options(fn (Get $get, $record) => Group::where([
                                 'type' => 'vod',
                                 'user_id' => auth()->id(),
-                                'playlist_id' => $record->playlist_id
+                                'playlist_id' => $record->playlist_id,
                             ])->get(['name', 'id'])->pluck('name', 'id'))
                             ->searchable(),
                     ])
@@ -153,7 +152,7 @@ class ViewVodGroup extends ViewRecord
                     ->modalSubmitActionLabel('Yes, disable now'),
 
                 DeleteAction::make()
-                    ->hidden(fn($record) => !$record->custom),
+                    ->hidden(fn ($record) => ! $record->custom),
             ])->button()->label('Actions'),
         ];
     }

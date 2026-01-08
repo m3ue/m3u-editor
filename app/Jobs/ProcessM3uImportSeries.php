@@ -2,23 +2,22 @@
 
 namespace App\Jobs;
 
-use Exception;
 use App\Enums\Status;
 use App\Events\SyncCompleted;
 use App\Models\Playlist;
+use Exception;
 use Filament\Notifications\Notification;
-use Illuminate\Support\Str;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
-use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Log;
-use Throwable;
+use Illuminate\Support\Str;
 
 class ProcessM3uImportSeries implements ShouldQueue
 {
     use Queueable;
 
     public $tries = 1;
+
     public $timeout = 60 * 60 * 1; // 1 hour
 
     /**
@@ -26,9 +25,9 @@ class ProcessM3uImportSeries implements ShouldQueue
      */
     public function __construct(
         public Playlist $playlist,
-        public ?bool    $force = false,
-        public ?bool    $isNew = false,
-        public ?string  $batchNo = null,
+        public ?bool $force = false,
+        public ?bool $isNew = false,
+        public ?string $batchNo = null,
 
     ) {}
 
@@ -37,20 +36,20 @@ class ProcessM3uImportSeries implements ShouldQueue
      */
     public function handle(): void
     {
-        if (!$this->force) {
+        if (! $this->force) {
             // Don't update if currently processing
             if ($this->playlist->isProcessingSeries()) {
                 return;
             }
 
             // Check if auto sync is enabled, or the playlist hasn't been synced yet
-            if (!$this->playlist->auto_sync && $this->playlist->synced) {
+            if (! $this->playlist->auto_sync && $this->playlist->synced) {
                 return;
             }
         }
 
         // Set the batch number
-        if (!$this->batchNo) {
+        if (! $this->batchNo) {
             $this->batchNo = Str::orderedUuid()->toString();
         }
 

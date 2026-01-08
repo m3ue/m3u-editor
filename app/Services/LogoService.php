@@ -15,7 +15,7 @@ class LogoService
      */
     public static function getChannelLogoUrl($channel): string
     {
-        if (!$channel) {
+        if (! $channel) {
             return url('/placeholder.png');
         }
 
@@ -49,7 +49,7 @@ class LogoService
         }
 
         // If it's already a local URL, return as-is
-        if (!filter_var($logoUrl, FILTER_VALIDATE_URL) || str_starts_with($logoUrl, url('/'))) {
+        if (! filter_var($logoUrl, FILTER_VALIDATE_URL) || str_starts_with($logoUrl, url('/'))) {
             return $logoUrl;
         }
 
@@ -67,14 +67,14 @@ class LogoService
      */
     public static function getSeriesLogoUrl($series): string
     {
-        if (!$series || empty($series->cover)) {
+        if (! $series || empty($series->cover)) {
             return url('/placeholder.png');
         }
 
         $logoUrl = $series->cover;
 
         // If it's already a local URL, return as-is
-        if (!filter_var($logoUrl, FILTER_VALIDATE_URL) || str_starts_with($logoUrl, url('/'))) {
+        if (! filter_var($logoUrl, FILTER_VALIDATE_URL) || str_starts_with($logoUrl, url('/'))) {
             return $logoUrl;
         }
 
@@ -89,14 +89,14 @@ class LogoService
      */
     public static function getEpisodeLogoUrl($episode): string
     {
-        if (!$episode || empty($episode->info)) {
+        if (! $episode || empty($episode->info)) {
             return url('/episode-placeholder.png');
         }
 
         $logoUrl = $episode->info['movie_image'] ?? $episode->info['cover_big'] ?? '';
 
         // If it's already a local URL, return as-is
-        if (!filter_var($logoUrl, FILTER_VALIDATE_URL) || str_starts_with($logoUrl, url('/'))) {
+        if (! filter_var($logoUrl, FILTER_VALIDATE_URL) || str_starts_with($logoUrl, url('/'))) {
             return $logoUrl;
         }
 
@@ -111,14 +111,14 @@ class LogoService
      */
     public static function getEpgChannelLogoUrl($epgChannel): string
     {
-        if (!$epgChannel || empty($epgChannel->icon)) {
+        if (! $epgChannel || empty($epgChannel->icon)) {
             return url('/placeholder.png');
         }
 
         $logoUrl = $epgChannel->icon;
 
         // If it's already a local URL, return as-is
-        if (!filter_var($logoUrl, FILTER_VALIDATE_URL) || str_starts_with($logoUrl, url('/'))) {
+        if (! filter_var($logoUrl, FILTER_VALIDATE_URL) || str_starts_with($logoUrl, url('/'))) {
             return $logoUrl;
         }
 

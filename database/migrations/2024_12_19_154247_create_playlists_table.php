@@ -18,7 +18,7 @@ return new class extends Migration
             $table->string('name');
             $table->uuid('uuid');
             $table->string('url')->nullable();
-            $table->enum('status', ["pending","processing","completed","failed"])->default('pending');
+            $table->enum('status', ['pending', 'processing', 'completed', 'failed'])->default('pending');
             $table->string('prefix')->nullable();
             $table->unsignedInteger('channels')->default(0);
             $table->dateTime('synced')->nullable();

@@ -3,12 +3,11 @@
 namespace App\Traits;
 
 use Cron\CronExpression;
-use Illuminate\Support\Carbon;
 use Illuminate\Console\Scheduling\ManagesFrequencies;
+use Illuminate\Support\Carbon;
 
 trait Schedulable
 {
-
     use ManagesFrequencies;
 
     // Info: https://crontab.guru/

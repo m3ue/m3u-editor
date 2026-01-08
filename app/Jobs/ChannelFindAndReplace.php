@@ -6,8 +6,8 @@ use App\Models\Channel;
 use App\Models\User;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
-use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\DB;
 
 class ChannelFindAndReplace implements ShouldQueue
@@ -54,16 +54,16 @@ class ChannelFindAndReplace implements ShouldQueue
                 // Most will use the same name appended with `_custom`
                 // e.g. `name_custom` for `name`
                 // or `title_custom` for `title`
-                $customColumn = $this->column . '_custom';
+                $customColumn = $this->column.'_custom';
         }
         $updated = 0;
 
         // Process channels in chunks for better performance
-        if (!$this->channels) {
+        if (! $this->channels) {
             // Use chunking to process large datasets efficiently
             Channel::query()
                 ->where('user_id', $this->user_id)
-                ->when(!$this->all_playlists && $this->playlist_id, fn($query) => $query->where('playlist_id', $this->playlist_id))
+                ->when(! $this->all_playlists && $this->playlist_id, fn ($query) => $query->where('playlist_id', $this->playlist_id))
                 ->chunkById(1000, function ($channels) use ($customColumn, &$updated) {
                     $updated += $this->processChannelChunk($channels, $customColumn);
                 });
@@ -129,11 +129,11 @@ class ChannelFindAndReplace implements ShouldQueue
             if ($this->use_regex) {
                 // Escape existing delimiters in user input
                 $delimiter = '/';
-                $pattern = str_replace($delimiter, '\\' . $delimiter, $find);
-                $finalPattern = $delimiter . $pattern . $delimiter . 'ui';
+                $pattern = str_replace($delimiter, '\\'.$delimiter, $find);
+                $finalPattern = $delimiter.$pattern.$delimiter.'ui';
 
                 // Check if the find string is in the value to modify
-                if (!preg_match($finalPattern, $valueToModify)) {
+                if (! preg_match($finalPattern, $valueToModify)) {
                     continue;
                 }
 
@@ -141,7 +141,7 @@ class ChannelFindAndReplace implements ShouldQueue
                 $newValue = preg_replace($finalPattern, $replace, $valueToModify);
             } else {
                 // Check if the find string is in the value to modify
-                if (!stristr($valueToModify, $find)) {
+                if (! stristr($valueToModify, $find)) {
                     continue;
                 }
 
@@ -154,7 +154,7 @@ class ChannelFindAndReplace implements ShouldQueue
             }
         }
 
-        if (!empty($updatesMap)) {
+        if (! empty($updatesMap)) {
             return $this->performBatchUpdate($updatesMap, $customColumn);
         }
 
@@ -176,7 +176,7 @@ class ChannelFindAndReplace implements ShouldQueue
                 // SQLite JSON update using json_set
                 $cases = [];
                 foreach ($updatesMap as $id => $value) {
-                    $cases[] = "WHEN {$id} THEN json_set(COALESCE(info, '{}'), '$.{$jsonKey}', " . DB::connection()->getPdo()->quote($value) . ")";
+                    $cases[] = "WHEN {$id} THEN json_set(COALESCE(info, '{}'), '$.{$jsonKey}', ".DB::connection()->getPdo()->quote($value).')';
                 }
                 $caseStatement = implode(' ', $cases);
 
@@ -184,13 +184,13 @@ class ChannelFindAndReplace implements ShouldQueue
                     UPDATE channels 
                     SET info = CASE id {$caseStatement} END,
                         updated_at = ?
-                    WHERE id IN (" . implode(',', $ids) . ")
-                ", [now()]);
+                    WHERE id IN (".implode(',', $ids).')
+                ', [now()]);
             } elseif ($driver === 'pgsql') {
                 // PostgreSQL JSON update using jsonb_set
                 $cases = [];
                 foreach ($updatesMap as $id => $value) {
-                    $cases[] = "WHEN {$id} THEN jsonb_set(COALESCE(info, '{}'), '{" . $jsonKey . "}', " . DB::connection()->getPdo()->quote(json_encode($value)) . ")";
+                    $cases[] = "WHEN {$id} THEN jsonb_set(COALESCE(info, '{}'), '{".$jsonKey."}', ".DB::connection()->getPdo()->quote(json_encode($value)).')';
                 }
                 $caseStatement = implode(' ', $cases);
 
@@ -198,13 +198,13 @@ class ChannelFindAndReplace implements ShouldQueue
                     UPDATE channels 
                     SET info = CASE id {$caseStatement} END,
                         updated_at = ?
-                    WHERE id IN (" . implode(',', $ids) . ")
-                ", [now()]);
+                    WHERE id IN (".implode(',', $ids).')
+                ', [now()]);
             } else {
                 // MySQL/MariaDB JSON update using JSON_SET
                 $cases = [];
                 foreach ($updatesMap as $id => $value) {
-                    $cases[] = "WHEN {$id} THEN JSON_SET(COALESCE(info, '{}'), '$.{$jsonKey}', " . DB::connection()->getPdo()->quote($value) . ")";
+                    $cases[] = "WHEN {$id} THEN JSON_SET(COALESCE(info, '{}'), '$.{$jsonKey}', ".DB::connection()->getPdo()->quote($value).')';
                 }
                 $caseStatement = implode(' ', $cases);
 
@@ -212,14 +212,14 @@ class ChannelFindAndReplace implements ShouldQueue
                     UPDATE channels 
                     SET info = CASE id {$caseStatement} END,
                         updated_at = ?
-                    WHERE id IN (" . implode(',', $ids) . ")
-                ", [now()]);
+                    WHERE id IN (".implode(',', $ids).')
+                ', [now()]);
             }
         } else {
             // Regular column update
             $cases = [];
             foreach ($updatesMap as $id => $value) {
-                $cases[] = "WHEN {$id} THEN " . DB::connection()->getPdo()->quote($value);
+                $cases[] = "WHEN {$id} THEN ".DB::connection()->getPdo()->quote($value);
             }
             $caseStatement = implode(' ', $cases);
 
@@ -227,8 +227,8 @@ class ChannelFindAndReplace implements ShouldQueue
                 UPDATE channels 
                 SET {$customColumn} = CASE id {$caseStatement} END,
                     updated_at = ?
-                WHERE id IN (" . implode(',', $ids) . ")
-            ", [now()]);
+                WHERE id IN (".implode(',', $ids).')
+            ', [now()]);
         }
 
         return count($updatesMap);

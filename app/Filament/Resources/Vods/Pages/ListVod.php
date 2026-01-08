@@ -2,49 +2,39 @@
 
 namespace App\Filament\Resources\Vods\Pages;
 
-use Filament\Actions\CreateAction;
-use Filament\Actions\ActionGroup;
-use Filament\Actions\Action;
-use Filament\Forms\Components\Select;
-use Filament\Forms\Components\Repeater;
-use Filament\Forms\Components\Toggle;
-use Filament\Forms\Components\Placeholder;
-use App\Jobs\MergeChannels;
-use App\Jobs\UnmergeChannels;
-use App\Jobs\MapPlaylistChannelsToEpg;
-use App\Jobs\FetchTmdbIds;
-use Filament\Schemas\Components\Utilities\Get;
-use Filament\Forms\Components\TextInput;
-use App\Jobs\ChannelFindAndReplace;
-use App\Jobs\ChannelFindAndReplaceReset;
-use Filament\Actions\ImportAction;
-use Filament\Actions\ExportAction;
-use Filament\Schemas\Components\Tabs\Tab;
 use App\Filament\Exports\ChannelExporter;
 use App\Filament\Imports\ChannelImporter;
-use App\Filament\Resources\Vods\VodResource;
 use App\Filament\Resources\EpgMaps\EpgMapResource;
+use App\Filament\Resources\Vods\VodResource;
+use App\Jobs\ChannelFindAndReplace;
+use App\Jobs\ChannelFindAndReplaceReset;
+use App\Jobs\FetchTmdbIds;
+use App\Jobs\MapPlaylistChannelsToEpg;
+use App\Jobs\MergeChannels;
 use App\Jobs\ProcessVodChannels;
 use App\Jobs\SyncVodStrmFiles;
+use App\Jobs\UnmergeChannels;
 use App\Models\Channel;
-use App\Models\Epg;
 use App\Models\Playlist;
 use App\Models\Series;
 use App\Services\TmdbService;
 use App\Settings\GeneralSettings;
-use Filament\Actions;
-use Filament\Forms;
-use Filament\Infolists\Components\TextEntry;
+use Filament\Actions\Action;
+use Filament\Actions\ActionGroup;
+use Filament\Actions\CreateAction;
+use Filament\Actions\ExportAction;
+use Filament\Actions\ImportAction;
+use Filament\Forms\Components\Repeater;
+use Filament\Forms\Components\Select;
+use Filament\Forms\Components\TextInput;
+use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ListRecords;
+use Filament\Schemas\Components\Tabs\Tab;
+use Filament\Schemas\Components\Utilities\Get;
 use Filament\Support\Enums\Width;
-use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
-use Hydrat\TableLayoutToggle\Concerns\HasToggleableTable;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Str;
 
 class ListVod extends ListRecords
 {
@@ -66,7 +56,7 @@ class ListVod extends ListRecords
                 ->label('Create Custom Channel')
                 ->modalHeading('New Custom Channel')
                 ->modalDescription('NOTE: Custom channels need to be associated with a Playlist or Custom Playlist.')
-                ->using(fn(array $data, string $model): Model => VodResource::createCustomChannel(
+                ->using(fn (array $data, string $model): Model => VodResource::createCustomChannel(
                     data: $data,
                     model: $model,
                 ))
@@ -188,7 +178,7 @@ class ListVod extends ListRecords
                     ->after(function () {
                         Notification::make()
                             ->success()
-                            ->title("Fetching VOD metadata for playlist")
+                            ->title('Fetching VOD metadata for playlist')
                             ->body('The VOD metadata fetching and processing has been started. You will be notified when it is complete.')
                             ->duration(10000)
                             ->send();
@@ -222,12 +212,13 @@ class ListVod extends ListRecords
                                 ->body('Please configure your TMDB API key in Settings > TMDB before using this feature.')
                                 ->duration(10000)
                                 ->send();
+
                             return;
                         }
 
                         $playlistId = $data['playlist'] ?? null;
                         $playlist = Playlist::find($playlistId);
-                        if (!$playlist) {
+                        if (! $playlist) {
                             return;
                         }
 
@@ -242,6 +233,7 @@ class ListVod extends ListRecords
                                 ->title('No VOD channels found')
                                 ->body('No enabled VOD channels found in the selected playlist.')
                                 ->send();
+
                             return;
                         }
 
@@ -304,7 +296,7 @@ class ListVod extends ListRecords
                     ->action(function (array $data): void {
                         app('Illuminate\Contracts\Bus\Dispatcher')
                             ->dispatch(new MapPlaylistChannelsToEpg(
-                                epg: (int)$data['epg_id'],
+                                epg: (int) $data['epg_id'],
                                 playlist: $data['playlist_id'],
                                 force: $data['override'],
                                 recurring: $data['recurring'],
@@ -338,7 +330,7 @@ class ListVod extends ListRecords
                             ->required()
                             ->helperText('Select the playlist you would like to apply changes to.')
                             ->options(Playlist::where(['user_id' => auth()->id()])->get(['name', 'id'])->pluck('name', 'id'))
-                            ->hidden(fn(Get $get) => $get('all_playlists') === true)
+                            ->hidden(fn (Get $get) => $get('all_playlists') === true)
                             ->searchable(),
                         Toggle::make('use_regex')
                             ->label('Use Regex')
@@ -357,20 +349,20 @@ class ListVod extends ListRecords
                             ->required()
                             ->columnSpan(1),
                         TextInput::make('find_replace')
-                            ->label(fn(Get $get) =>  !$get('use_regex') ? 'String to replace' : 'Pattern to replace')
+                            ->label(fn (Get $get) => ! $get('use_regex') ? 'String to replace' : 'Pattern to replace')
                             ->required()
                             ->placeholder(
-                                fn(Get $get) => $get('use_regex')
+                                fn (Get $get) => $get('use_regex')
                                     ? '^(US- |UK- |CA- )'
                                     : 'US -'
                             )->helperText(
-                                fn(Get $get) => !$get('use_regex')
+                                fn (Get $get) => ! $get('use_regex')
                                     ? 'This is the string you want to find and replace.'
                                     : 'This is the regex pattern you want to find. Make sure to use valid regex syntax.'
                             ),
                         TextInput::make('replace_with')
                             ->label('Replace with (optional)')
-                            ->placeholder('Leave empty to remove')
+                            ->placeholder('Leave empty to remove'),
 
                     ])
                     ->action(function (array $data): void {
@@ -411,7 +403,7 @@ class ListVod extends ListRecords
                             ->label('Playlist')
                             ->helperText('Select the playlist you would like to apply the reset to.')
                             ->options(Playlist::where(['user_id' => auth()->id()])->get(['name', 'id'])->pluck('name', 'id'))
-                            ->hidden(fn(Get $get) => $get('all_playlists') === true)
+                            ->hidden(fn (Get $get) => $get('all_playlists') === true)
                             ->searchable(),
                         Select::make('column')
                             ->label('Column to reset')
@@ -470,7 +462,7 @@ class ListVod extends ListRecords
                         //     ->when($options['enabled'], function ($query, $enabled) {
                         //         return $query->where('enabled', $enabled);
                         //     });
-                    })
+                    }),
             ])->button()->label('Actions'),
         ];
     }
@@ -518,21 +510,21 @@ class ListVod extends ListRecords
             'enabled' => Tab::make('Enabled')
                 // ->icon('heroicon-m-check')
                 ->badgeColor('success')
-                ->modifyQueryUsing(fn($query) => $query->where('enabled', true))
+                ->modifyQueryUsing(fn ($query) => $query->where('enabled', true))
                 ->badge($enabledCount),
             'disabled' => Tab::make('Disabled')
                 // ->icon('heroicon-m-x-mark')
                 ->badgeColor('danger')
-                ->modifyQueryUsing(fn($query) => $query->where('enabled', false))
+                ->modifyQueryUsing(fn ($query) => $query->where('enabled', false))
                 ->badge($disabledCount),
             'failover' => Tab::make('Failover')
                 // ->icon('heroicon-m-x-mark')
                 ->badgeColor('info')
-                ->modifyQueryUsing(fn($query) => $query->whereHas('failovers'))
+                ->modifyQueryUsing(fn ($query) => $query->whereHas('failovers'))
                 ->badge($withFailoverCount),
             'custom' => Tab::make('Custom')
                 // ->icon('heroicon-m-x-mark')
-                ->modifyQueryUsing(fn($query) => $query->where('is_custom', true))
+                ->modifyQueryUsing(fn ($query) => $query->where('is_custom', true))
                 ->badge($customCount),
         ];
     }
@@ -622,7 +614,7 @@ class ListVod extends ListRecords
             Notification::make()
                 ->danger()
                 ->title('Error')
-                ->body('An error occurred: ' . $e->getMessage())
+                ->body('An error occurred: '.$e->getMessage())
                 ->send();
         }
     }

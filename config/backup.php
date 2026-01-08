@@ -16,7 +16,7 @@ return [
                  */
                 'include' => [
                     base_path('storage/app/private/epg'),
-                    base_path('storage/app/private/playlist')
+                    base_path('storage/app/private/playlist'),
                 ],
 
                 /*
@@ -77,7 +77,7 @@ return [
              * For a complete list of available customization options, see https://github.com/spatie/db-dumper
              */
             'databases' => [
-                env('DB_CONNECTION', 'sqlite')
+                env('DB_CONNECTION', 'sqlite'),
             ],
         ],
 

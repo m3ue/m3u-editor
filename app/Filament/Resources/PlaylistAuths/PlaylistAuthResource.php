@@ -2,34 +2,33 @@
 
 namespace App\Filament\Resources\PlaylistAuths;
 
-use Filament\Schemas\Schema;
-use Filament\Tables\Columns\TextColumn;
-use Filament\Tables\Columns\ToggleColumn;
-use Filament\Actions\ActionGroup;
-use Filament\Actions\EditAction;
-use Filament\Actions\DeleteAction;
-use Filament\Tables\Enums\RecordActionsPosition;
-use Filament\Actions\BulkActionGroup;
-use Filament\Actions\DeleteBulkAction;
-use App\Filament\Resources\PlaylistAuths\Pages\ListPlaylistAuths;
-use Filament\Forms\Components\TextInput;
-use Filament\Forms\Components\Toggle;
-use Filament\Schemas\Components\Grid;
-use Filament\Forms\Components\Select;
-use App\Models\Playlist;
-use App\Models\CustomPlaylist;
-use App\Models\MergedPlaylist;
-use Illuminate\Support\Facades\Auth;
 use App\Filament\Resources\PlaylistAuthResource\Pages;
 use App\Filament\Resources\PlaylistAuthResource\RelationManagers;
+use App\Filament\Resources\PlaylistAuths\Pages\ListPlaylistAuths;
+use App\Models\CustomPlaylist;
+use App\Models\MergedPlaylist;
+use App\Models\Playlist;
 use App\Models\PlaylistAuth;
+use App\Traits\HasUserFiltering;
+use Filament\Actions\ActionGroup;
+use Filament\Actions\BulkActionGroup;
+use Filament\Actions\DeleteAction;
+use Filament\Actions\DeleteBulkAction;
+use Filament\Actions\EditAction;
 use Filament\Forms;
-use Filament\Forms\Get;
+use Filament\Forms\Components\Select;
+use Filament\Forms\Components\TextInput;
+use Filament\Forms\Components\Toggle;
 use Filament\Resources\Resource;
+use Filament\Schemas\Components\Grid;
+use Filament\Schemas\Schema;
 use Filament\Tables;
+use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Columns\ToggleColumn;
+use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
-use App\Traits\HasUserFiltering;
+use Illuminate\Support\Facades\Auth;
 
 class PlaylistAuthResource extends Resource
 {
@@ -38,7 +37,8 @@ class PlaylistAuthResource extends Resource
     protected static ?string $model = PlaylistAuth::class;
 
     protected static ?string $recordTitleAttribute = 'name';
-    protected static string | \UnitEnum | null $navigationGroup = 'Playlist';
+
+    protected static string|\UnitEnum|null $navigationGroup = 'Playlist';
 
     public static function getGloballySearchableAttributes(): array
     {
@@ -171,8 +171,8 @@ class PlaylistAuthResource extends Resource
                                         MergedPlaylist::class => 'Merged Playlist',
                                         default => 'Unknown'
                                     };
-                                    $key = get_class($assignedModel) . '|' . $assignedModel->id;
-                                    $options[$key] = $assignedModel->name . " ({$type}) - Currently Assigned";
+                                    $key = get_class($assignedModel).'|'.$assignedModel->id;
+                                    $options[$key] = $assignedModel->name." ({$type}) - Currently Assigned";
                                 }
                             }
 
@@ -182,27 +182,27 @@ class PlaylistAuthResource extends Resource
                             // Standard Playlists
                             $playlists = Playlist::where('user_id', $userId)->get();
                             foreach ($playlists as $playlist) {
-                                $key = Playlist::class . '|' . $playlist->id;
-                                if (!isset($options[$key])) {
-                                    $options[$key] = $playlist->name . ' (Playlist)';
+                                $key = Playlist::class.'|'.$playlist->id;
+                                if (! isset($options[$key])) {
+                                    $options[$key] = $playlist->name.' (Playlist)';
                                 }
                             }
 
                             // Custom Playlists
                             $customPlaylists = CustomPlaylist::where('user_id', $userId)->get();
                             foreach ($customPlaylists as $playlist) {
-                                $key = CustomPlaylist::class . '|' . $playlist->id;
-                                if (!isset($options[$key])) {
-                                    $options[$key] = $playlist->name . ' (Custom Playlist)';
+                                $key = CustomPlaylist::class.'|'.$playlist->id;
+                                if (! isset($options[$key])) {
+                                    $options[$key] = $playlist->name.' (Custom Playlist)';
                                 }
                             }
 
                             // Merged Playlists
                             $mergedPlaylists = MergedPlaylist::where('user_id', $userId)->get();
                             foreach ($mergedPlaylists as $playlist) {
-                                $key = MergedPlaylist::class . '|' . $playlist->id;
-                                if (!isset($options[$key])) {
-                                    $options[$key] = $playlist->name . ' (Merged Playlist)';
+                                $key = MergedPlaylist::class.'|'.$playlist->id;
+                                if (! isset($options[$key])) {
+                                    $options[$key] = $playlist->name.' (Merged Playlist)';
                                 }
                             }
 
@@ -216,22 +216,25 @@ class PlaylistAuthResource extends Resource
                             if ($record && $record->isAssigned()) {
                                 $assignedModel = $record->getAssignedModel();
                                 if ($assignedModel) {
-                                    return get_class($assignedModel) . '|' . $assignedModel->id;
+                                    return get_class($assignedModel).'|'.$assignedModel->id;
                                 }
                             }
+
                             return null;
                         })
                         ->afterStateHydrated(function ($component, $state, $record) {
                             if ($record && $record->isAssigned()) {
                                 $assignedModel = $record->getAssignedModel();
                                 if ($assignedModel) {
-                                    $value = get_class($assignedModel) . '|' . $assignedModel->id;
+                                    $value = get_class($assignedModel).'|'.$assignedModel->id;
                                     $component->state($value);
                                 }
                             }
                         })
                         ->afterStateUpdated(function ($state, $record) {
-                            if (!$record) return;
+                            if (! $record) {
+                                return;
+                            }
 
                             if ($state) {
                                 // Parse the selection (format: "ModelClass|ID")

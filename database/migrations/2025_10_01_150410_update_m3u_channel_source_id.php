@@ -2,8 +2,6 @@
 
 use App\Models\Playlist;
 use Illuminate\Database\Migrations\Migration;
-use Illuminate\Database\Schema\Blueprint;
-use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
@@ -14,10 +12,10 @@ return new class extends Migration
     {
         Playlist::where('xtream', false)->cursor()->each(function (Playlist $playlist) {
             // Update source_id for channels in non-Xtream playlists
-            $playlist->channels()->cursor()->each(function ($channel) use ($playlist) {
-                // Need to remove the Playlist ID as we don't need it for uniqueness, 
+            $playlist->channels()->cursor()->each(function ($channel) {
+                // Need to remove the Playlist ID as we don't need it for uniqueness,
                 // and it's preventing comparing the same streams from other playlists.
-                $channel->source_id = md5($channel->title . $channel->name . $channel->group_internal);
+                $channel->source_id = md5($channel->title.$channel->name.$channel->group_internal);
                 $channel->save();
             });
         });

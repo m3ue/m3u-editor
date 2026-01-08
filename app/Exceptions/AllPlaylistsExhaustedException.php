@@ -2,10 +2,10 @@
 
 namespace App\Exceptions;
 
+use Exception;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
-use Illuminate\Http\JsonResponse;
-use Exception;
 
 class AllPlaylistsExhaustedException extends Exception
 {
@@ -24,7 +24,7 @@ class AllPlaylistsExhaustedException extends Exception
     /**
      * Render the exception into an HTTP response.
      *
-     * @param Request $request
+     * @param  Request  $request
      * @return Response|JsonResponse
      */
     public function render($request)

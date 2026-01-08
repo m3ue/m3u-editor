@@ -2,38 +2,34 @@
 
 namespace App\Filament\Resources\EpgMaps;
 
-use Filament\Schemas\Schema;
-use Filament\Tables\Columns\TextColumn;
-use Filament\Tables\Columns\ToggleColumn;
-use Filament\Actions\DeleteAction;
-use Filament\Actions\EditAction;
-use Filament\Actions\Action;
-use Filament\Tables\Enums\RecordActionsPosition;
-use Filament\Actions\BulkActionGroup;
-use Filament\Actions\BulkAction;
-use Filament\Actions\DeleteBulkAction;
-use App\Filament\Resources\EpgMaps\Pages\ListEpgMaps;
-use Filament\Forms\Components\Select;
-use Filament\Forms\Components\Toggle;
-use Filament\Schemas\Components\Fieldset;
-use Filament\Forms\Components\TagsInput;
-use Filament\Schemas\Components\Utilities\Get;
 use App\Enums\Status;
 use App\Filament\Resources\EpgMapResource\Pages;
-use App\Filament\Resources\EpgMapResource\RelationManagers;
+use App\Filament\Resources\EpgMaps\Pages\ListEpgMaps;
 use App\Jobs\MapPlaylistChannelsToEpg;
 use App\Models\Epg;
 use App\Models\EpgMap;
 use App\Models\Playlist;
+use App\Traits\HasUserFiltering;
+use Filament\Actions\Action;
+use Filament\Actions\BulkAction;
+use Filament\Actions\BulkActionGroup;
+use Filament\Actions\DeleteAction;
+use Filament\Actions\DeleteBulkAction;
+use Filament\Actions\EditAction;
 use Filament\Forms;
+use Filament\Forms\Components\Select;
+use Filament\Forms\Components\TagsInput;
+use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
-use Filament\Tables;
+use Filament\Schemas\Components\Fieldset;
+use Filament\Schemas\Components\Utilities\Get;
+use Filament\Schemas\Schema;
+use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Columns\ToggleColumn;
+use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Table;
-use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Database\Eloquent\SoftDeletingScope;
 use RyanChandler\FilamentProgressColumn\ProgressColumn;
-use App\Traits\HasUserFiltering;
 
 class EpgMapResource extends Resource
 {
@@ -42,9 +38,10 @@ class EpgMapResource extends Resource
     protected static ?string $model = EpgMap::class;
 
     protected static ?string $label = 'EPG Map';
+
     protected static ?string $pluralLabel = 'EPG Maps';
 
-    protected static string | \UnitEnum | null $navigationGroup = 'EPG';
+    protected static string|\UnitEnum|null $navigationGroup = 'EPG';
 
     public static function getNavigationSort(): ?int
     {
@@ -69,10 +66,10 @@ class EpgMapResource extends Resource
                     ->sortable()
                     ->badge()
                     ->toggleable()
-                    ->color(fn(Status $state) => $state->getColor()),
+                    ->color(fn (Status $state) => $state->getColor()),
                 ProgressColumn::make('progress')
                     ->sortable()
-                    ->poll(fn($record) => $record->status === Status::Processing || $record->status === Status::Pending ? '3s' : null)
+                    ->poll(fn ($record) => $record->status === Status::Processing || $record->status === Status::Pending ? '3s' : null)
                     ->toggleable(),
                 TextColumn::make('total_channel_count')
                     ->label('Total Channels')
@@ -96,17 +93,17 @@ class EpgMapResource extends Resource
                     ->sortable(),
                 ToggleColumn::make('override')
                     ->toggleable()
-                    ->tooltip((fn(EpgMap $record) => $record->playlist_id !== null ? 'Override existing EPG mappings' : 'Not available for custom channel mappings'))
-                    ->disabled((fn(EpgMap $record) => $record->playlist_id === null))
+                    ->tooltip((fn (EpgMap $record) => $record->playlist_id !== null ? 'Override existing EPG mappings' : 'Not available for custom channel mappings'))
+                    ->disabled((fn (EpgMap $record) => $record->playlist_id === null))
                     ->sortable(),
                 ToggleColumn::make('recurring')
                     ->toggleable()
-                    ->tooltip((fn(EpgMap $record) => $record->playlist_id !== null ? 'Run again on EPG sync' : 'Not available for custom channel mappings'))
-                    ->disabled((fn(EpgMap $record) => $record->playlist_id === null))
+                    ->tooltip((fn (EpgMap $record) => $record->playlist_id !== null ? 'Run again on EPG sync' : 'Not available for custom channel mappings'))
+                    ->disabled((fn (EpgMap $record) => $record->playlist_id === null))
                     ->sortable(),
                 TextColumn::make('sync_time')
                     ->label('Sync Time')
-                    ->formatStateUsing(fn(string $state): string => gmdate('H:i:s', (int)$state))
+                    ->formatStateUsing(fn (string $state): string => gmdate('H:i:s', (int) $state))
                     ->toggleable()
                     ->sortable(),
                 TextColumn::make('mapped_at')
@@ -153,7 +150,7 @@ class EpgMapResource extends Resource
                             ->duration(10000)
                             ->send();
                     })
-                    ->hidden(fn($record) => $record->status === Status::Processing || $record->status === Status::Pending)
+                    ->hidden(fn ($record) => $record->status === Status::Processing || $record->status === Status::Pending)
                     ->tooltip('Manually trigger this EPG mapping to run again. This will not modify the "Recurring" setting.'),
                 Action::make('restart')
                     ->label('Restart Now')
@@ -183,7 +180,7 @@ class EpgMapResource extends Resource
                             ->duration(10000)
                             ->send();
                     })
-                    ->hidden(fn($record) => ! ($record->status === Status::Processing || $record->status === Status::Pending))
+                    ->hidden(fn ($record) => ! ($record->status === Status::Processing || $record->status === Status::Pending))
                     ->tooltip('Restart existing mapping process.'),
             ], position: RecordActionsPosition::BeforeCells)
             ->toolbarActions([
@@ -251,14 +248,14 @@ class EpgMapResource extends Resource
                 ->label('EPG')
                 ->helperText('Select the EPG you would like to map from.')
                 ->options(Epg::where(['user_id' => auth()->id()])->get(['name', 'id'])->pluck('name', 'id'))
-                ->hidden(!$showEpg)
+                ->hidden(! $showEpg)
                 ->searchable(),
             Select::make('playlist_id')
                 ->required()
                 ->label('Playlist')
                 ->helperText('Select the playlist you would like to map to.')
                 ->options(Playlist::where(['user_id' => auth()->id()])->get(['name', 'id'])->pluck('name', 'id'))
-                ->hidden(!$showPlaylist)
+                ->hidden(! $showPlaylist)
                 ->searchable(),
             Toggle::make('override')
                 ->label('Overwrite')
@@ -324,7 +321,7 @@ class EpgMapResource extends Resource
                         ->columnSpanFull(),
 
                     TagsInput::make('settings.exclude_prefixes')
-                        ->label(fn(Get $get) => !$get('settings.use_regex') ? 'Channel prefixes to remove before matching' : 'Regex patterns to remove before matching')
+                        ->label(fn (Get $get) => ! $get('settings.use_regex') ? 'Channel prefixes to remove before matching' : 'Regex patterns to remove before matching')
                         ->helperText('Press [tab] or [return] to add item. Leave empty to disable.')
                         ->columnSpanFull()
                         ->suggestions([
@@ -334,7 +331,7 @@ class EpgMapResource extends Resource
                             '^(US|UK|CA): ',
                             '\s*(FHD|HD)\s*',
                             '\s+(FHD|HD).*$',
-                            '\[.*\]'
+                            '\[.*\]',
                         ])
                         ->splitKeys(['Tab', 'Return']),
                 ]),

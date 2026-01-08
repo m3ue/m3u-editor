@@ -3,29 +3,24 @@
 namespace App\Http\Controllers;
 
 use App\Facades\PlaylistFacade;
-use Illuminate\Http\JsonResponse;
 use App\Jobs\ProcessM3uImport;
-use App\Models\Channel;
-use App\Models\CustomPlaylist;
-use App\Models\MergedPlaylist;
 use App\Models\Playlist;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class PlaylistController extends Controller
 {
     /**
-     *
      * Sync the selected Playlist.
      *
      * Use the `uuid` parameter to select the playlist to refresh.
      * You can find the playlist UUID by using the `User > Get your Playlists` endpoint.
      *
-     * @param Request $request
-     * @param string $uuid
      *
      * @return JsonResponse
      *
      * @unauthenticated
+     *
      * @response array{message: "Playlist is currently being synced..."}
      */
     public function refreshPlaylist(Request $request, string $uuid)
@@ -37,7 +32,7 @@ class PlaylistController extends Controller
 
         // Fetch the playlist
         $playlist = PlaylistFacade::resolvePlaylistByUuid($uuid);
-        if (!$playlist) {
+        if (! $playlist) {
             return response()->json(['Error' => 'Playlist Not Found'], 404);
         }
 

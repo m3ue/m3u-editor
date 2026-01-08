@@ -2,9 +2,9 @@
 
 namespace App\Jobs;
 
-use Exception;
 use App\Models\Job;
 use App\Models\User;
+use Exception;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -59,12 +59,12 @@ class RestoreBackup implements ShouldQueue
                 $message = "Backup restored successfully - restored: \"$this->backupPath\"";
                 Notification::make()
                     ->success()
-                    ->title("Backup restored successfully")
+                    ->title('Backup restored successfully')
                     ->body($message)
                     ->broadcast($user);
                 Notification::make()
                     ->success()
-                    ->title("Backup restored successfully")
+                    ->title('Backup restored successfully')
                     ->body($message)
                     ->sendToDatabase($user);
             }
@@ -78,12 +78,12 @@ class RestoreBackup implements ShouldQueue
                 $message = "Backup restore (\"$this->backupPath\") failed: {$e->getMessage()}";
                 Notification::make()
                     ->danger()
-                    ->title("Backup restore failed")
+                    ->title('Backup restore failed')
                     ->body($message)
                     ->broadcast($user);
                 Notification::make()
                     ->danger()
-                    ->title("Backup restore failed")
+                    ->title('Backup restore failed')
                     ->body($message)
                     ->sendToDatabase($user);
             }

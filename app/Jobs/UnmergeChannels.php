@@ -4,13 +4,12 @@ namespace App\Jobs;
 
 use App\Models\Channel;
 use App\Models\ChannelFailover;
+use Filament\Notifications\Notification;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
-use Illuminate\Support\Collection;
-use Filament\Notifications\Notification;
 
 class UnmergeChannels implements ShouldQueue
 {

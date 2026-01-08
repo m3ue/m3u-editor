@@ -37,7 +37,7 @@ class MapPlaylistChannelsToEpgChunk implements ShouldQueue
         public string $batchNo,
         public int $totalChannels,
     ) {
-        $this->similaritySearch = new SimilaritySearchService();
+        $this->similaritySearch = new SimilaritySearchService;
     }
 
     /**
@@ -47,15 +47,17 @@ class MapPlaylistChannelsToEpgChunk implements ShouldQueue
     {
         // Fetch the EPG
         $epg = Epg::find($this->epgId);
-        if (!$epg) {
+        if (! $epg) {
             Log::error("EPG not found: {$this->epgId}");
+
             return;
         }
 
         // Fetch the map
         $map = EpgMap::find($this->epgMapId);
-        if (!$map) {
+        if (! $map) {
             Log::error("EPG Map not found for ID: {$this->epgMapId}");
+
             return;
         }
 
@@ -74,13 +76,13 @@ class MapPlaylistChannelsToEpgChunk implements ShouldQueue
             $title = $this->sanitizeUtf8(trim($channel->title_custom ?? $channel->title));
 
             // Get cleaned title and stream id
-            if (!empty($patterns)) {
+            if (! empty($patterns)) {
                 foreach ($patterns as $pattern) {
                     if ($useRegex) {
                         // Escape existing delimiters in user input
                         $delimiter = '/';
-                        $escapedPattern = str_replace($delimiter, '\\' . $delimiter, $pattern);
-                        $finalPattern = $delimiter . $escapedPattern . $delimiter . 'u';
+                        $escapedPattern = str_replace($delimiter, '\\'.$delimiter, $pattern);
+                        $finalPattern = $delimiter.$escapedPattern.$delimiter.'u';
 
                         // Use regex to remove the prefix
                         if (preg_match($finalPattern, $streamId, $matches)) {
@@ -119,11 +121,11 @@ class MapPlaylistChannelsToEpgChunk implements ShouldQueue
             $search3 = mb_strtolower(trim($title), 'UTF-8');
 
             // Build search terms array (only non-empty values)
-            $searchTerms = array_filter([$search1, $search2, $search3], fn($term) => !empty($term));
+            $searchTerms = array_filter([$search1, $search2, $search3], fn ($term) => ! empty($term));
 
             if ($prioritizeNameMatch) {
                 // Step 1: Try exact match on name/display_name FIRST (highest priority - most specific)
-                if (!empty($searchTerms)) {
+                if (! empty($searchTerms)) {
                     $epgChannel = $epg->channels()
                         ->where(function ($query) use ($searchTerms) {
                             $first = true;
@@ -143,7 +145,7 @@ class MapPlaylistChannelsToEpgChunk implements ShouldQueue
                 }
 
                 // Step 2: Try exact match on channel_id if no name/display_name match
-                if (!$epgChannel && !empty($searchTerms)) {
+                if (! $epgChannel && ! empty($searchTerms)) {
                     $epgChannel = $epg->channels()
                         ->where('channel_id', '!=', '')
                         ->where(function ($query) use ($searchTerms) {
@@ -162,7 +164,7 @@ class MapPlaylistChannelsToEpgChunk implements ShouldQueue
                 }
             } else {
                 // Original behavior: Try channel_id first, then name/display_name
-                if (!empty($searchTerms)) {
+                if (! empty($searchTerms)) {
                     $epgChannel = $epg->channels()
                         ->where('channel_id', '!=', '')
                         ->where(function ($query) use ($searchTerms) {
@@ -180,7 +182,7 @@ class MapPlaylistChannelsToEpgChunk implements ShouldQueue
                         ->first();
                 }
 
-                if (!$epgChannel && !empty($searchTerms)) {
+                if (! $epgChannel && ! empty($searchTerms)) {
                     $epgChannel = $epg->channels()
                         ->where(function ($query) use ($searchTerms) {
                             $first = true;
@@ -201,7 +203,7 @@ class MapPlaylistChannelsToEpgChunk implements ShouldQueue
             }
 
             // Step 3: If no exact match, attempt a similarity search (only for channels with significant content)
-            if (!$epgChannel) {
+            if (! $epgChannel) {
                 // Only run similarity search if the channel name has enough content
                 $channelNameForSearch = trim($title ?: $name);
                 if (strlen($channelNameForSearch) >= 3) {
@@ -237,7 +239,7 @@ class MapPlaylistChannelsToEpgChunk implements ShouldQueue
         }
 
         // Store the mapped channels in Job records for the next stage
-        if (!empty($mappedChannels)) {
+        if (! empty($mappedChannels)) {
             // Store in chunks of 50
             foreach (array_chunk($mappedChannels, 50) as $chunk) {
                 Job::create([
@@ -246,7 +248,7 @@ class MapPlaylistChannelsToEpgChunk implements ShouldQueue
                     'payload' => $chunk,
                     'variables' => [
                         'epgId' => $epg->id,
-                    ]
+                    ],
                 ]);
             }
         }
@@ -258,9 +260,6 @@ class MapPlaylistChannelsToEpgChunk implements ShouldQueue
 
     /**
      * Sanitize a string to ensure valid UTF-8 encoding for PostgreSQL.
-     * 
-     * @param string|null $value
-     * @return string|null
      */
     private function sanitizeUtf8(?string $value): ?string
     {

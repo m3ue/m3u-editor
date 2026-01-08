@@ -6,7 +6,6 @@ use App\Filament\Resources\EpgChannels\EpgChannelResource;
 use App\Jobs\EpgChannelFindAndReplace;
 use App\Jobs\EpgChannelFindAndReplaceReset;
 use App\Models\Epg;
-use Filament\Actions;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Forms\Components\Select;
@@ -38,7 +37,7 @@ class ListEpgChannels extends ListRecords
                             ->required()
                             ->helperText('Select the EPG you would like to apply changes to.')
                             ->options(Epg::where(['user_id' => auth()->id()])->get(['name', 'id'])->pluck('name', 'id'))
-                            ->hidden(fn(Get $get) => $get('all_epgs') === true)
+                            ->hidden(fn (Get $get) => $get('all_epgs') === true)
                             ->searchable(),
                         Toggle::make('use_regex')
                             ->label('Use Regex')
@@ -56,20 +55,20 @@ class ListEpgChannels extends ListRecords
                             ->required()
                             ->columnSpan(1),
                         TextInput::make('find_replace')
-                            ->label(fn(Get $get) =>  !$get('use_regex') ? 'String to replace' : 'Pattern to replace')
+                            ->label(fn (Get $get) => ! $get('use_regex') ? 'String to replace' : 'Pattern to replace')
                             ->required()
                             ->placeholder(
-                                fn(Get $get) => $get('use_regex')
+                                fn (Get $get) => $get('use_regex')
                                     ? '^(US- |UK- |CA- )'
                                     : 'US -'
                             )->helperText(
-                                fn(Get $get) => !$get('use_regex')
+                                fn (Get $get) => ! $get('use_regex')
                                     ? 'This is the string you want to find and replace.'
                                     : 'This is the regex pattern you want to find. Make sure to use valid regex syntax.'
                             ),
                         TextInput::make('replace_with')
                             ->label('Replace with (optional)')
-                            ->placeholder('Leave empty to remove')
+                            ->placeholder('Leave empty to remove'),
 
                     ])
                     ->action(function (array $data): void {
@@ -110,7 +109,7 @@ class ListEpgChannels extends ListRecords
                             ->label('EPG')
                             ->helperText('Select the EPG you would like to apply the reset to.')
                             ->options(Epg::where(['user_id' => auth()->id()])->get(['name', 'id'])->pluck('name', 'id'))
-                            ->hidden(fn(Get $get) => $get('all_epgs') === true)
+                            ->hidden(fn (Get $get) => $get('all_epgs') === true)
                             ->searchable(),
                         Select::make('column')
                             ->label('Column to reset')
@@ -144,7 +143,7 @@ class ListEpgChannels extends ListRecords
                     ->modalIcon('heroicon-o-arrow-uturn-left')
                     ->modalDescription('Reset Find & Replace results back to EPG defaults. This will remove any custom values set in the selected column.')
                     ->modalSubmitActionLabel('Reset now'),
-            ])->button()->label('Actions')
+            ])->button()->label('Actions'),
         ];
     }
 

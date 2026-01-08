@@ -14,7 +14,7 @@ return new class extends Migration
     public function up(): void
     {
         // Make sure the column does not already exist
-        if (!Schema::hasColumn('channels', 'source_id')) {
+        if (! Schema::hasColumn('channels', 'source_id')) {
             Schema::table('channels', function (Blueprint $table) {
                 $table->string('source_id')->nullable()->after('stream_id');
             });

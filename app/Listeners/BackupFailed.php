@@ -4,8 +4,8 @@ namespace App\Listeners;
 
 use App\Models\User;
 use Filament\Notifications\Notification;
-use Spatie\Backup\Events\BackupHasFailed;
 use Illuminate\Contracts\Queue\ShouldQueue;
+use Spatie\Backup\Events\BackupHasFailed;
 
 class BackupFailed implements ShouldQueue
 {
@@ -20,12 +20,12 @@ class BackupFailed implements ShouldQueue
             $message = "Backup failed, error: \"{$exception->getMessage()}\"";
             Notification::make()
                 ->danger()
-                ->title("Backup failed")
+                ->title('Backup failed')
                 ->body($message)
                 ->broadcast($user);
             Notification::make()
                 ->danger()
-                ->title("Backup failed")
+                ->title('Backup failed')
                 ->body($message)
                 ->sendToDatabase($user);
         }

@@ -2,17 +2,15 @@
 
 namespace App\Filament\Auth;
 
-use Filament\Schemas\Schema;
-use Filament\Schemas\Components\Component;
 use Filament\Forms\Components\TextInput;
+use Filament\Schemas\Components\Component;
+use Filament\Schemas\Schema;
 use Illuminate\Validation\ValidationException;
 
 class Login extends \Filament\Auth\Pages\Login
 {
     /**
      * Get the form fields for the component.
-     *
-     * @param \Filament\Schemas\Schema $schema
      */
     public function form(Schema $schema): Schema
     {
@@ -28,8 +26,6 @@ class Login extends \Filament\Auth\Pages\Login
 
     /**
      * Get the login form component.
-     *
-     * @return \Filament\Schemas\Components\Component
      */
     protected function getLoginFormComponent(): Component
     {
@@ -43,15 +39,14 @@ class Login extends \Filament\Auth\Pages\Login
 
     /**
      * Login using either username or email address.
-     * 
-     * @return array
      */
     protected function getCredentialsFromFormData(array $data): array
     {
         $login_type = filter_var($data['login'], FILTER_VALIDATE_EMAIL) ? 'email' : 'name';
+
         return [
             $login_type => $data['login'],
-            'password'  => $data['password'],
+            'password' => $data['password'],
         ];
     }
 

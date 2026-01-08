@@ -27,23 +27,24 @@ class FixStreamProfileTemplate extends Command
     public function handle(): int
     {
         $profileId = $this->argument('id');
-        
+
         $profile = StreamProfile::find($profileId);
-        
-        if (!$profile) {
+
+        if (! $profile) {
             $this->error("Stream profile with ID {$profileId} not found");
+
             return self::FAILURE;
         }
 
-        $this->info("Current profile:");
+        $this->info('Current profile:');
         $this->line("  ID: {$profile->id}");
         $this->line("  Name: {$profile->name}");
         $this->line("  Format: {$profile->format}");
-        $this->line("  Args: " . ($profile->args ?: '(empty)'));
+        $this->line('  Args: '.($profile->args ?: '(empty)'));
 
-        if (!empty($profile->args)) {
-            $this->warn("Profile already has an FFmpeg template. Overwrite?");
-            if (!$this->confirm('Continue?')) {
+        if (! empty($profile->args)) {
+            $this->warn('Profile already has an FFmpeg template. Overwrite?');
+            if (! $this->confirm('Continue?')) {
                 return self::SUCCESS;
             }
         }
@@ -58,10 +59,9 @@ class FixStreamProfileTemplate extends Command
         $profile->args = $template;
         $profile->save();
 
-        $this->info("✅ Profile updated successfully!");
+        $this->info('✅ Profile updated successfully!');
         $this->line("  New template: {$template}");
 
         return self::SUCCESS;
     }
 }
-

@@ -6,8 +6,8 @@ use App\Enums\Status;
 use App\Jobs\GenerateEpgCache;
 use App\Jobs\ProcessEpgImport;
 use App\Jobs\ProcessM3uImport;
-use App\Models\Playlist;
 use App\Models\Epg;
+use App\Models\Playlist;
 use Filament\Notifications\Notification;
 use Illuminate\Console\Command;
 
@@ -37,6 +37,7 @@ class ResetSyncProcess extends Command
 
         if ($hungPlaylists->count() === 0 && $hungEpgs->count() === 0) {
             $this->info('✅ No stuck Playlists or EPGs found.');
+
             return Command::SUCCESS;
         }
 
@@ -71,8 +72,8 @@ class ResetSyncProcess extends Command
             Notification::make()
                 ->warning()
                 ->title("Playlist Sync Reset: \"{$playlist->name}\"")
-                ->body("The Playlist sync appeared to be stuck and has been reset."
-                    . ($playlist->auto_sync ? " A new sync has been started automatically." : " Please manually restart the sync if needed."))
+                ->body('The Playlist sync appeared to be stuck and has been reset.'
+                    .($playlist->auto_sync ? ' A new sync has been started automatically.' : ' Please manually restart the sync if needed.'))
                 ->broadcast($playlist->user)
                 ->sendToDatabase($playlist->user);
         }
@@ -94,7 +95,7 @@ class ResetSyncProcess extends Command
                         'processing_started_at' => null,
                         'processing_phase' => null,
                         'is_cached' => false,
-                        'errors' => "Cache generation appeared to hang and was reset.",
+                        'errors' => 'Cache generation appeared to hang and was reset.',
                     ]);
                 }
             } else {
@@ -108,7 +109,7 @@ class ResetSyncProcess extends Command
                         'processing' => false,
                         'processing_started_at' => null,
                         'processing_phase' => null,
-                        'errors' => "Import appeared to hang and was reset. Please try syncing again.",
+                        'errors' => 'Import appeared to hang and was reset. Please try syncing again.',
                         'progress' => 100,
                     ]);
                 }
@@ -118,8 +119,8 @@ class ResetSyncProcess extends Command
             Notification::make()
                 ->warning()
                 ->title("EPG Processing Reset: \"{$epg->name}\"")
-                ->body("The EPG appeared to be stuck in {$phase} phase and has been reset. " .
-                    ($epg->auto_sync ? "A new sync has been started automatically." : "Please manually restart the sync if needed."))
+                ->body("The EPG appeared to be stuck in {$phase} phase and has been reset. ".
+                    ($epg->auto_sync ? 'A new sync has been started automatically.' : 'Please manually restart the sync if needed.'))
                 ->broadcast($epg->user)
                 ->sendToDatabase($epg->user);
         }

@@ -10,7 +10,7 @@ return new class extends Migration
     {
         Schema::create('playlist_aliases', function (Blueprint $table) {
             $table->id();
-            
+
             $table->foreignId('playlist_id')->nullable()->constrained()->nullOnDelete();
             $table->foreignId('custom_playlist_id')->nullable()->constrained()->nullOnDelete();
             $table->foreignId('user_id')->constrained()->cascadeOnDelete();

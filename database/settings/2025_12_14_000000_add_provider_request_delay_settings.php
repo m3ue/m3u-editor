@@ -6,13 +6,13 @@ return new class extends SettingsMigration
 {
     public function up(): void
     {
-        if (!$this->migrator->exists('general.enable_provider_request_delay')) {
+        if (! $this->migrator->exists('general.enable_provider_request_delay')) {
             $this->migrator->add('general.enable_provider_request_delay', false);
         }
-        if (!$this->migrator->exists('general.provider_request_delay_ms')) {
+        if (! $this->migrator->exists('general.provider_request_delay_ms')) {
             $this->migrator->add('general.provider_request_delay_ms', 500);
         }
-        if (!$this->migrator->exists('general.provider_max_concurrent_requests')) {
+        if (! $this->migrator->exists('general.provider_max_concurrent_requests')) {
             $this->migrator->add('general.provider_max_concurrent_requests', 2);
         }
     }

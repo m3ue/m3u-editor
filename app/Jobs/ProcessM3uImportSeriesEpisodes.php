@@ -99,6 +99,7 @@ class ProcessM3uImportSeriesEpisodes implements ShouldQueue
 
         if ($totalCount === 0) {
             Log::info('Series Sync: No series to process');
+
             return;
         }
 

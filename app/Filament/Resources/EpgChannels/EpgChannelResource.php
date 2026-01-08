@@ -2,34 +2,30 @@
 
 namespace App\Filament\Resources\EpgChannels;
 
-use Filament\Schemas\Schema;
-use Filament\Tables\Columns\ImageColumn;
-use Filament\Tables\Columns\TextInputColumn;
-use Filament\Tables\Columns\TextColumn;
-use Filament\Tables\Filters\SelectFilter;
-use Filament\Actions\EditAction;
-use Filament\Tables\Enums\RecordActionsPosition;
-use App\Filament\Resources\EpgChannels\Pages\ListEpgChannels;
-use Filament\Forms\Components\TextInput;
 use App\Filament\Resources\EpgChannelResource\Pages;
-use App\Filament\Resources\EpgChannelResource\RelationManagers;
+use App\Filament\Resources\EpgChannels\Pages\ListEpgChannels;
 use App\Jobs\EpgChannelFindAndReplace;
 use App\Jobs\EpgChannelFindAndReplaceReset;
 use App\Models\EpgChannel;
+use App\Traits\HasUserFiltering;
 use Filament\Actions\BulkAction;
 use Filament\Actions\BulkActionGroup;
-use Filament\Forms;
+use Filament\Actions\EditAction;
 use Filament\Forms\Components\Select;
+use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Utilities\Get;
+use Filament\Schemas\Schema;
 use Filament\Tables;
+use Filament\Tables\Columns\ImageColumn;
+use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Columns\TextInputColumn;
+use Filament\Tables\Enums\RecordActionsPosition;
+use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
-use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Database\Eloquent\SoftDeletingScope;
 use Illuminate\Database\Eloquent\Collection;
-use App\Traits\HasUserFiltering;
 
 class EpgChannelResource extends Resource
 {
@@ -45,9 +41,10 @@ class EpgChannelResource extends Resource
     }
 
     protected static ?string $label = 'EPG Channel';
+
     protected static ?string $pluralLabel = 'EPG Channels';
 
-    protected static string | \UnitEnum | null $navigationGroup = 'EPG';
+    protected static string|\UnitEnum|null $navigationGroup = 'EPG';
 
     public static function getNavigationSort(): ?int
     {
@@ -80,23 +77,23 @@ class EpgChannelResource extends Resource
                     ->label('Logo')
                     ->checkFileExistence(false)
                     ->size('inherit', 'inherit')
-                    ->extraImgAttributes(fn($record): array => [
+                    ->extraImgAttributes(fn ($record): array => [
                         'style' => 'height:2.5rem; width:auto; border-radius:4px;', // Live channel style
                     ])
-                    ->getStateUsing(fn($record) => $record->icon_custom ?? $record->icon)
+                    ->getStateUsing(fn ($record) => $record->icon_custom ?? $record->icon)
                     ->toggleable(),
                 TextInputColumn::make('display_name_custom')
                     ->label('Display Name')
                     ->rules(['min:0', 'max:255'])
-                    ->tooltip(fn($record) => $record->display_name)
-                    ->placeholder(fn($record) => $record->display_name)
+                    ->tooltip(fn ($record) => $record->display_name)
+                    ->placeholder(fn ($record) => $record->display_name)
                     ->searchable()
                     ->toggleable(),
                 TextInputColumn::make('name_custom')
                     ->label('Name')
                     ->rules(['min:0', 'max:255'])
-                    ->tooltip(fn($record) => $record->name)
-                    ->placeholder(fn($record) => $record->name)
+                    ->tooltip(fn ($record) => $record->name)
+                    ->placeholder(fn ($record) => $record->name)
                     ->searchable()
                     ->toggleable(),
                 TextColumn::make('lang')
@@ -129,7 +126,7 @@ class EpgChannelResource extends Resource
             ->filters([
                 SelectFilter::make('epg')
                     ->relationship('epg', 'name')
-                    ->hidden(fn() => $relationId)
+                    ->hidden(fn () => $relationId)
                     ->multiple()
                     ->preload()
                     ->searchable(),
@@ -161,20 +158,20 @@ class EpgChannelResource extends Resource
                                 ->required()
                                 ->columnSpan(1),
                             TextInput::make('find_replace')
-                                ->label(fn(Get $get) =>  !$get('use_regex') ? 'String to replace' : 'Pattern to replace')
+                                ->label(fn (Get $get) => ! $get('use_regex') ? 'String to replace' : 'Pattern to replace')
                                 ->required()
                                 ->placeholder(
-                                    fn(Get $get) => $get('use_regex')
+                                    fn (Get $get) => $get('use_regex')
                                         ? '^(US- |UK- |CA- )'
                                         : 'US -'
                                 )->helperText(
-                                    fn(Get $get) => !$get('use_regex')
+                                    fn (Get $get) => ! $get('use_regex')
                                         ? 'This is the string you want to find and replace.'
                                         : 'This is the regex pattern you want to find. Make sure to use valid regex syntax.'
                                 ),
                             TextInput::make('replace_with')
                                 ->label('Replace with (optional)')
-                                ->placeholder('Leave empty to remove')
+                                ->placeholder('Leave empty to remove'),
 
                         ])
                         ->action(function (Collection $records, array $data): void {
@@ -261,19 +258,19 @@ class EpgChannelResource extends Resource
                 ->label('Icon')
                 ->columnSpan(1)
                 ->prefixIcon('heroicon-m-globe-alt')
-                ->placeholder(fn($record) => $record?->icon)
-                ->helperText("Leave empty to use provider icon.")
+                ->placeholder(fn ($record) => $record?->icon)
+                ->helperText('Leave empty to use provider icon.')
                 ->type('url'),
             TextInput::make('display_name_custom')
                 ->label('Display Name')
                 ->columnSpan(1)
-                ->placeholder(fn($record) => $record?->display_name)
-                ->helperText("Leave empty to use provider display name."),
+                ->placeholder(fn ($record) => $record?->display_name)
+                ->helperText('Leave empty to use provider display name.'),
             TextInput::make('name_custom')
                 ->label('Name')
                 ->columnSpan(2)
-                ->placeholder(fn($record) => $record?->name)
-                ->helperText("Leave empty to use provider name."),
+                ->placeholder(fn ($record) => $record?->name)
+                ->helperText('Leave empty to use provider name.'),
         ];
     }
 }

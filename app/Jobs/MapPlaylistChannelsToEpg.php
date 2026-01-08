@@ -3,18 +3,18 @@
 namespace App\Jobs;
 
 use App\Enums\Status;
-use Throwable;
-use Exception;
 use App\Models\Channel;
 use App\Models\Epg;
 use App\Models\EpgMap;
 use App\Models\Playlist;
+use Exception;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Throwable;
 
 class MapPlaylistChannelsToEpg implements ShouldQueue
 {
@@ -32,12 +32,12 @@ class MapPlaylistChannelsToEpg implements ShouldQueue
      * Create a new job instance.
      */
     public function __construct(
-        public int    $epg,
-        public ?int   $playlist = null,
+        public int $epg,
+        public ?int $playlist = null,
         public ?array $channels = null,
-        public ?bool  $force = false,
-        public ?bool  $recurring = false,
-        public ?int   $epgMapId = null,
+        public ?bool $force = false,
+        public ?bool $recurring = false,
+        public ?int $epgMapId = null,
         public ?array $settings = null,
     ) {}
 
@@ -52,15 +52,16 @@ class MapPlaylistChannelsToEpg implements ShouldQueue
 
         // Fetch the EPG
         $epg = Epg::find($this->epg);
-        if (!$epg) {
-            $error = "Unable to map to the selected EPG, it no longer exists. Please select a different EPG and try again.";
+        if (! $epg) {
+            $error = 'Unable to map to the selected EPG, it no longer exists. Please select a different EPG and try again.';
             Log::error("Error processing EPG mapping: {$error}");
+
             return;
         }
 
         // Create the record
         $playlist = $this->playlist ? Playlist::find($this->playlist) : null;
-        $subtext = $playlist ? ' -> ' . $playlist->name . ' mapping' : ' custom channel mapping';
+        $subtext = $playlist ? ' -> '.$playlist->name.' mapping' : ' custom channel mapping';
         if ($this->epgMapId) {
             // Fetch and update existing map record
             $map = EpgMap::find($this->epgMapId);
@@ -81,7 +82,7 @@ class MapPlaylistChannelsToEpg implements ShouldQueue
             }
         } else {
             $map = EpgMap::create([
-                'name' => $epg->name . $subtext,
+                'name' => $epg->name.$subtext,
                 'epg_id' => $epg->id,
                 'playlist_id' => $playlist ? $playlist->id : null,
                 'user_id' => $epg->user_id,
@@ -109,10 +110,10 @@ class MapPlaylistChannelsToEpg implements ShouldQueue
                     ->count();
                 $channels = Channel::whereIn('id', $this->channels)
                     ->where('is_vod', false)
-                    ->when(!$this->force, function ($query) {
+                    ->when(! $this->force, function ($query) {
                         $query->where('epg_channel_id', null);
                     });
-            } else if ($playlist) {
+            } elseif ($playlist) {
                 $totalChannelCount = $playlist->channels()->where('is_vod', false)->count();
                 $mappedCount = $playlist->channels()
                     ->where('is_vod', false)
@@ -120,12 +121,12 @@ class MapPlaylistChannelsToEpg implements ShouldQueue
                     ->count();
                 $channels = $playlist->channels()
                     ->where('is_vod', false)
-                    ->when(!$this->force, function ($query) {
+                    ->when(! $this->force, function ($query) {
                         $query->where('epg_channel_id', null);
                     });
             } else {
                 // Error, somehow ended up here without a playlist or channels
-                $error = "No channels or playlist specified for EPG mapping.";
+                $error = 'No channels or playlist specified for EPG mapping.';
                 Log::error("Error processing EPG mapping: {$error}");
                 $map->update([
                     'status' => Status::Failed,

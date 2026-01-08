@@ -2,10 +2,9 @@
 
 namespace App\Filament\Resources\PostProcesses\Pages;
 
-use App\Filament\Resources\PostProcesses\Pages\EditPostProcess;
-use Filament\Actions\CreateAction;
 use App\Filament\Resources\PostProcesses\PostProcessResource;
 use Filament\Actions;
+use Filament\Actions\CreateAction;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ListRecords;
 use Illuminate\Database\Eloquent\Builder;
@@ -24,6 +23,7 @@ class ListPostProcesses extends ListRecords
             CreateAction::make()
                 ->using(function (array $data, string $model): Model {
                     $data['user_id'] = auth()->id();
+
                     return $model::create($data);
                 })
                 ->slideOver()
@@ -32,7 +32,7 @@ class ListPostProcesses extends ListRecords
                         ->success()
                         ->title('Post Process created')
                         ->body('You can now assign Playlists or EPGs.'),
-                )->successRedirectUrl(fn($record): string => EditPostProcess::getUrl(['record' => $record])),
+                )->successRedirectUrl(fn ($record): string => EditPostProcess::getUrl(['record' => $record])),
 
         ];
     }

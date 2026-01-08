@@ -6,7 +6,6 @@ use App\Models\Epg;
 use App\Models\Job;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
-use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Log;
 
 class MapEpgToChannelsBatch implements ShouldQueue
@@ -35,8 +34,9 @@ class MapEpgToChannelsBatch implements ShouldQueue
     {
         // Fetch the EPG
         $epg = Epg::find($this->epgId);
-        if (!$epg) {
+        if (! $epg) {
             Log::error("EPG not found: {$this->epgId}");
+
             return;
         }
 
@@ -46,6 +46,7 @@ class MapEpgToChannelsBatch implements ShouldQueue
         if ($batchCount === 0) {
             // No jobs to process (no channels were mapped)
             Log::info("No mapped channels found for batch: {$this->batchNo}");
+
             return;
         }
 

@@ -19,31 +19,31 @@ return new class extends Migration
             $table->string('source_url', 2048);
             $table->enum('format', ['ts', 'hls'])->default('ts');
             $table->enum('status', ['starting', 'active', 'stopping', 'stopped', 'error'])->default('starting');
-            
+
             // Process information
             $table->unsignedInteger('process_id')->nullable();
             $table->string('buffer_path')->nullable();
             $table->unsignedBigInteger('buffer_size')->default(0);
-            
+
             // Client tracking
             $table->unsignedInteger('client_count')->default(0);
             $table->timestamp('last_client_activity')->nullable();
-            
+
             // Stream metadata
             $table->jsonb('stream_info')->nullable();
             $table->jsonb('ffmpeg_options')->nullable();
-            
+
             // Performance metrics
             $table->unsignedBigInteger('bytes_transferred')->default(0);
             $table->unsignedInteger('bandwidth_kbps')->default(0);
             $table->timestamp('health_check_at')->nullable();
             $table->string('health_status')->default('unknown');
-            
+
             // Timestamps
             $table->timestamp('started_at')->nullable();
             $table->timestamp('stopped_at')->nullable();
             $table->timestamps();
-            
+
             // Indexes for performance
             $table->index(['status', 'started_at']);
             $table->index(['format', 'status']);
@@ -61,10 +61,10 @@ return new class extends Migration
             $table->unsignedBigInteger('bytes_received')->default(0);
             $table->enum('status', ['connected', 'disconnected'])->default('connected');
             $table->timestamps();
-            
+
             // Foreign key constraint
             $table->foreign('stream_id')->references('stream_id')->on('shared_streams')->cascadeOnDelete();
-            
+
             // Indexes
             $table->index(['stream_id', 'status']);
             $table->index('last_activity_at');
@@ -80,10 +80,10 @@ return new class extends Migration
             $table->unsignedBigInteger('buffer_size');
             $table->jsonb('performance_metrics')->nullable();
             $table->timestamps();
-            
+
             // Foreign key constraint
             $table->foreign('stream_id')->references('stream_id')->on('shared_streams')->cascadeOnDelete();
-            
+
             // Indexes for time-series data
             $table->index(['stream_id', 'recorded_at']);
             $table->index('recorded_at');

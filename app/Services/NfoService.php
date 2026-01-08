@@ -11,10 +11,10 @@ class NfoService
 {
     /**
      * Generate a tvshow.nfo file for a series (Kodi/Emby/Jellyfin format)
-     * 
-     * @param Series $series The series to generate NFO for
-     * @param string $path Directory path where tvshow.nfo should be written
-     * @param \App\Models\StrmFileMapping|null $mapping Optional mapping to check/update hash
+     *
+     * @param  Series  $series  The series to generate NFO for
+     * @param  string  $path  Directory path where tvshow.nfo should be written
+     * @param  \App\Models\StrmFileMapping|null  $mapping  Optional mapping to check/update hash
      * @return bool Success status
      */
     public function generateSeriesNfo(Series $series, string $path, $mapping = null): bool
@@ -30,97 +30,97 @@ class NfoService
             // Build the NFO XML
             $xml = $this->startXml('tvshow');
 
-        // Basic info
-        $xml .= $this->xmlElement('title', $series->name);
-        $xml .= $this->xmlElement('originaltitle', $series->name);
-        $xml .= $this->xmlElement('sorttitle', $series->name);
+            // Basic info
+            $xml .= $this->xmlElement('title', $series->name);
+            $xml .= $this->xmlElement('originaltitle', $series->name);
+            $xml .= $this->xmlElement('sorttitle', $series->name);
 
-        // Plot/Overview
-        if (! empty($metadata['plot']) && is_string($metadata['plot'])) {
-            $xml .= $this->xmlElement('plot', $metadata['plot']);
-            $xml .= $this->xmlElement('outline', $metadata['plot']);
-        }
+            // Plot/Overview
+            if (! empty($metadata['plot']) && is_string($metadata['plot'])) {
+                $xml .= $this->xmlElement('plot', $metadata['plot']);
+                $xml .= $this->xmlElement('outline', $metadata['plot']);
+            }
 
-        // Year and dates
-        if (! empty($series->release_date) && is_string($series->release_date)) {
-            $year = substr($series->release_date, 0, 4);
-            $xml .= $this->xmlElement('year', $year);
-            $xml .= $this->xmlElement('premiered', $series->release_date);
-        }
+            // Year and dates
+            if (! empty($series->release_date) && is_string($series->release_date)) {
+                $year = substr($series->release_date, 0, 4);
+                $xml .= $this->xmlElement('year', $year);
+                $xml .= $this->xmlElement('premiered', $series->release_date);
+            }
 
-        // Rating
-        if (! empty($metadata['vote_average']) && is_scalar($metadata['vote_average'])) {
-            $xml .= $this->xmlElement('rating', $metadata['vote_average']);
-        }
-        if (! empty($metadata['vote_count']) && is_scalar($metadata['vote_count'])) {
-            $xml .= $this->xmlElement('votes', $metadata['vote_count']);
-        }
+            // Rating
+            if (! empty($metadata['vote_average']) && is_scalar($metadata['vote_average'])) {
+                $xml .= $this->xmlElement('rating', $metadata['vote_average']);
+            }
+            if (! empty($metadata['vote_count']) && is_scalar($metadata['vote_count'])) {
+                $xml .= $this->xmlElement('votes', $metadata['vote_count']);
+            }
 
-        // Status
-        if (! empty($metadata['status']) && is_string($metadata['status'])) {
-            $xml .= $this->xmlElement('status', $metadata['status']);
-        }
+            // Status
+            if (! empty($metadata['status']) && is_string($metadata['status'])) {
+                $xml .= $this->xmlElement('status', $metadata['status']);
+            }
 
-        // Genres
-        if (! empty($metadata['genres']) && is_array($metadata['genres'])) {
-            foreach ($metadata['genres'] as $genre) {
-                $genreName = is_array($genre) ? ($genre['name'] ?? '') : $genre;
-                if (! empty($genreName)) {
-                    $xml .= $this->xmlElement('genre', $genreName);
+            // Genres
+            if (! empty($metadata['genres']) && is_array($metadata['genres'])) {
+                foreach ($metadata['genres'] as $genre) {
+                    $genreName = is_array($genre) ? ($genre['name'] ?? '') : $genre;
+                    if (! empty($genreName)) {
+                        $xml .= $this->xmlElement('genre', $genreName);
+                    }
                 }
             }
-        }
 
-        // Studio/Network
-        if (! empty($metadata['networks']) && is_array($metadata['networks'])) {
-            foreach ($metadata['networks'] as $network) {
-                $networkName = is_array($network) ? ($network['name'] ?? '') : $network;
-                if (! empty($networkName)) {
-                    $xml .= $this->xmlElement('studio', $networkName);
+            // Studio/Network
+            if (! empty($metadata['networks']) && is_array($metadata['networks'])) {
+                foreach ($metadata['networks'] as $network) {
+                    $networkName = is_array($network) ? ($network['name'] ?? '') : $network;
+                    if (! empty($networkName)) {
+                        $xml .= $this->xmlElement('studio', $networkName);
+                    }
                 }
             }
-        }
 
-        // Poster
-        if (! empty($metadata['poster_path'])) {
-            $posterUrl = 'https://image.tmdb.org/t/p/original' . $metadata['poster_path'];
-            $xml .= $this->xmlElement('thumb', $posterUrl, ['aspect' => 'poster']);
-        }
-
-        // Backdrop
-        if (! empty($metadata['backdrop_path'])) {
-            $backdropUrl = 'https://image.tmdb.org/t/p/original' . $metadata['backdrop_path'];
-            $xml .= $this->xmlElement('fanart', $backdropUrl);
-        }
-
-        // Unique IDs (important for scrapers)
-        if (! empty($tmdbId)) {
-            $xml .= $this->xmlElement('uniqueid', $tmdbId, ['type' => 'tmdb', 'default' => 'true']);
-            $xml .= $this->xmlElement('tmdbid', $tmdbId);
-        }
-        if (! empty($tvdbId)) {
-            $xml .= $this->xmlElement('uniqueid', $tvdbId, ['type' => 'tvdb']);
-            $xml .= $this->xmlElement('tvdbid', $tvdbId);
-        }
-        if (! empty($imdbId)) {
-            $xml .= $this->xmlElement('uniqueid', $imdbId, ['type' => 'imdb']);
-            $xml .= $this->xmlElement('imdbid', $imdbId);
-        }
-
-        $xml .= $this->endXml('tvshow');
-
-        // Ensure directory exists
-        if (! is_dir($path)) {
-            if (! @mkdir($path, 0755, true)) {
-                Log::error("NfoService: Failed to create directory: {$path}");
-
-                return false;
+            // Poster
+            if (! empty($metadata['poster_path'])) {
+                $posterUrl = 'https://image.tmdb.org/t/p/original'.$metadata['poster_path'];
+                $xml .= $this->xmlElement('thumb', $posterUrl, ['aspect' => 'poster']);
             }
-        }
 
-        $filePath = rtrim($path, '/') . '/tvshow.nfo';
+            // Backdrop
+            if (! empty($metadata['backdrop_path'])) {
+                $backdropUrl = 'https://image.tmdb.org/t/p/original'.$metadata['backdrop_path'];
+                $xml .= $this->xmlElement('fanart', $backdropUrl);
+            }
 
-        return $this->writeFileWithHash($filePath, $xml, $mapping);
+            // Unique IDs (important for scrapers)
+            if (! empty($tmdbId)) {
+                $xml .= $this->xmlElement('uniqueid', $tmdbId, ['type' => 'tmdb', 'default' => 'true']);
+                $xml .= $this->xmlElement('tmdbid', $tmdbId);
+            }
+            if (! empty($tvdbId)) {
+                $xml .= $this->xmlElement('uniqueid', $tvdbId, ['type' => 'tvdb']);
+                $xml .= $this->xmlElement('tvdbid', $tvdbId);
+            }
+            if (! empty($imdbId)) {
+                $xml .= $this->xmlElement('uniqueid', $imdbId, ['type' => 'imdb']);
+                $xml .= $this->xmlElement('imdbid', $imdbId);
+            }
+
+            $xml .= $this->endXml('tvshow');
+
+            // Ensure directory exists
+            if (! is_dir($path)) {
+                if (! @mkdir($path, 0755, true)) {
+                    Log::error("NfoService: Failed to create directory: {$path}");
+
+                    return false;
+                }
+            }
+
+            $filePath = rtrim($path, '/').'/tvshow.nfo';
+
+            return $this->writeFileWithHash($filePath, $xml, $mapping);
         } catch (\Throwable $e) {
             Log::error("NfoService: Error generating series NFO for {$series->name}: {$e->getMessage()}");
 
@@ -130,90 +130,90 @@ class NfoService
 
     /**
      * Generate an episode.nfo file for a series episode
-     * 
-     * @param Episode $episode The episode to generate NFO for
-     * @param Series $series The parent series
-     * @param string $filePath Path to the .strm file (will be converted to .nfo)
-     * @param \App\Models\StrmFileMapping|null $mapping Optional mapping to check/update hash
+     *
+     * @param  Episode  $episode  The episode to generate NFO for
+     * @param  Series  $series  The parent series
+     * @param  string  $filePath  Path to the .strm file (will be converted to .nfo)
+     * @param  \App\Models\StrmFileMapping|null  $mapping  Optional mapping to check/update hash
      * @return bool Success status
      */
     public function generateEpisodeNfo(Episode $episode, Series $series, string $filePath, $mapping = null): bool
     {
         try {
-        $info = $episode->info ?? [];
-        $metadata = $series->metadata ?? [];
+            $info = $episode->info ?? [];
+            $metadata = $series->metadata ?? [];
 
-        // Get IDs
-        $tmdbId = $info['tmdb_id'] ?? $info['tmdb'] ?? $metadata['tmdb_id'] ?? $metadata['tmdb'] ?? null;
-        $tvdbId = $metadata['tvdb_id'] ?? $metadata['tvdb'] ?? null;
-        $imdbId = $metadata['imdb_id'] ?? $metadata['imdb'] ?? null;
+            // Get IDs
+            $tmdbId = $info['tmdb_id'] ?? $info['tmdb'] ?? $metadata['tmdb_id'] ?? $metadata['tmdb'] ?? null;
+            $tvdbId = $metadata['tvdb_id'] ?? $metadata['tvdb'] ?? null;
+            $imdbId = $metadata['imdb_id'] ?? $metadata['imdb'] ?? null;
 
-        // Build the NFO XML
-        $xml = $this->startXml('episodedetails');
+            // Build the NFO XML
+            $xml = $this->startXml('episodedetails');
 
-        // Basic info
-        $xml .= $this->xmlElement('title', $episode->title);
-        $xml .= $this->xmlElement('showtitle', $series->name);
+            // Basic info
+            $xml .= $this->xmlElement('title', $episode->title);
+            $xml .= $this->xmlElement('showtitle', $series->name);
 
-        // Season and Episode
-        $xml .= $this->xmlElement('season', $episode->season);
-        $xml .= $this->xmlElement('episode', $episode->episode_num);
+            // Season and Episode
+            $xml .= $this->xmlElement('season', $episode->season);
+            $xml .= $this->xmlElement('episode', $episode->episode_num);
 
-        // Plot
-        if (! empty($info['plot'])) {
-            $xml .= $this->xmlElement('plot', $info['plot']);
-        }
+            // Plot
+            if (! empty($info['plot'])) {
+                $xml .= $this->xmlElement('plot', $info['plot']);
+            }
 
-        // Air date
-        if (! empty($info['air_date'])) {
-            $xml .= $this->xmlElement('aired', $info['air_date']);
-        } elseif (! empty($info['releasedate'])) {
-            $xml .= $this->xmlElement('aired', $info['releasedate']);
-        }
+            // Air date
+            if (! empty($info['air_date'])) {
+                $xml .= $this->xmlElement('aired', $info['air_date']);
+            } elseif (! empty($info['releasedate'])) {
+                $xml .= $this->xmlElement('aired', $info['releasedate']);
+            }
 
-        // Rating
-        if (! empty($info['vote_average'])) {
-            $xml .= $this->xmlElement('rating', $info['vote_average']);
-        } elseif (! empty($info['rating'])) {
-            $xml .= $this->xmlElement('rating', $info['rating']);
-        }
+            // Rating
+            if (! empty($info['vote_average'])) {
+                $xml .= $this->xmlElement('rating', $info['vote_average']);
+            } elseif (! empty($info['rating'])) {
+                $xml .= $this->xmlElement('rating', $info['rating']);
+            }
 
-        // Runtime (in minutes)
-        if (! empty($info['runtime'])) {
-            $xml .= $this->xmlElement('runtime', $info['runtime']);
-        } elseif (! empty($info['duration_secs'])) {
-            $xml .= $this->xmlElement('runtime', round($info['duration_secs'] / 60));
-        } elseif (! empty($episode->duration_secs)) {
-            $xml .= $this->xmlElement('runtime', round($episode->duration_secs / 60));
-        }
+            // Runtime (in minutes)
+            if (! empty($info['runtime'])) {
+                $xml .= $this->xmlElement('runtime', $info['runtime']);
+            } elseif (! empty($info['duration_secs'])) {
+                $xml .= $this->xmlElement('runtime', round($info['duration_secs'] / 60));
+            } elseif (! empty($episode->duration_secs)) {
+                $xml .= $this->xmlElement('runtime', round($episode->duration_secs / 60));
+            }
 
-        // Thumbnail/Still
-        if (! empty($info['still_path'])) {
-            $thumbUrl = 'https://image.tmdb.org/t/p/original' . $info['still_path'];
-            $xml .= $this->xmlElement('thumb', $thumbUrl);
-        } elseif (! empty($info['movie_image'])) {
-            $xml .= $this->xmlElement('thumb', $info['movie_image']);
-        }
+            // Thumbnail/Still
+            if (! empty($info['still_path'])) {
+                $thumbUrl = 'https://image.tmdb.org/t/p/original'.$info['still_path'];
+                $xml .= $this->xmlElement('thumb', $thumbUrl);
+            } elseif (! empty($info['movie_image'])) {
+                $xml .= $this->xmlElement('thumb', $info['movie_image']);
+            }
 
-        // Unique IDs
-        if (! empty($info['tmdb_episode_id'])) {
-            $xml .= $this->xmlElement('uniqueid', $info['tmdb_episode_id'], ['type' => 'tmdb', 'default' => 'true']);
-        } elseif (! empty($tmdbId)) {
-            $xml .= $this->xmlElement('uniqueid', $tmdbId, ['type' => 'tmdb', 'default' => 'true']);
-        }
-        if (! empty($tvdbId)) {
-            $xml .= $this->xmlElement('uniqueid', $tvdbId, ['type' => 'tvdb']);
-        }
-        if (! empty($imdbId)) {
-            $xml .= $this->xmlElement('uniqueid', $imdbId, ['type' => 'imdb']);
-        }
+            // Unique IDs
+            if (! empty($info['tmdb_episode_id'])) {
+                $xml .= $this->xmlElement('uniqueid', $info['tmdb_episode_id'], ['type' => 'tmdb', 'default' => 'true']);
+            } elseif (! empty($tmdbId)) {
+                $xml .= $this->xmlElement('uniqueid', $tmdbId, ['type' => 'tmdb', 'default' => 'true']);
+            }
+            if (! empty($tvdbId)) {
+                $xml .= $this->xmlElement('uniqueid', $tvdbId, ['type' => 'tvdb']);
+            }
+            if (! empty($imdbId)) {
+                $xml .= $this->xmlElement('uniqueid', $imdbId, ['type' => 'imdb']);
+            }
 
-        $xml .= $this->endXml('episodedetails');
+            $xml .= $this->endXml('episodedetails');
 
-        // Change extension from .strm to .nfo
-        $nfoPath = preg_replace('/\.strm$/i', '.nfo', $filePath);
+            // Change extension from .strm to .nfo
+            $nfoPath = preg_replace('/\.strm$/i', '.nfo', $filePath);
 
-        return $this->writeFileWithHash($nfoPath, $xml, $mapping);
+            return $this->writeFileWithHash($nfoPath, $xml, $mapping);
         } catch (\Throwable $e) {
             Log::error("NfoService: Error generating episode NFO for {$episode->title}: {$e->getMessage()}");
 
@@ -223,10 +223,10 @@ class NfoService
 
     /**
      * Generate a movie.nfo file for a VOD (Kodi/Emby/Jellyfin format)
-     * 
-     * @param Channel $channel The channel/movie to generate NFO for
-     * @param string $filePath Path to the .strm file (will be converted to .nfo)
-     * @param \App\Models\StrmFileMapping|null $mapping Optional mapping to check/update hash
+     *
+     * @param  Channel  $channel  The channel/movie to generate NFO for
+     * @param  string  $filePath  Path to the .strm file (will be converted to .nfo)
+     * @param  \App\Models\StrmFileMapping|null  $mapping  Optional mapping to check/update hash
      * @return bool Success status
      */
     public function generateMovieNfo(Channel $channel, string $filePath, $mapping = null): bool
@@ -240,147 +240,147 @@ class NfoService
             $imdbId = $this->getScalarValue($info['imdb_id'] ?? $info['imdb'] ?? $movieData['imdb_id'] ?? $movieData['imdb'] ?? null);
 
             // Build the NFO XML
-        $xml = $this->startXml('movie');
+            $xml = $this->startXml('movie');
 
-        // Basic info
-        $title = $channel->title_custom ?? $channel->title;
-        $xml .= $this->xmlElement('title', $title);
-        $xml .= $this->xmlElement('originaltitle', $title);
-        $xml .= $this->xmlElement('sorttitle', $title);
+            // Basic info
+            $title = $channel->title_custom ?? $channel->title;
+            $xml .= $this->xmlElement('title', $title);
+            $xml .= $this->xmlElement('originaltitle', $title);
+            $xml .= $this->xmlElement('sorttitle', $title);
 
-        // Plot/Overview
-        $plot = $info['plot'] ?? $movieData['plot'] ?? $movieData['description'] ?? null;
-        if (! empty($plot)) {
-            $xml .= $this->xmlElement('plot', $plot);
-            $xml .= $this->xmlElement('outline', mb_substr($plot, 0, 300));
-        }
-
-        // Year
-        $year = $channel->year ?? $info['year'] ?? $movieData['releasedate'] ?? null;
-        if (! empty($year)) {
-            // Extract year if it's a full date
-            if (strlen($year) > 4) {
-                $year = substr($year, 0, 4);
+            // Plot/Overview
+            $plot = $info['plot'] ?? $movieData['plot'] ?? $movieData['description'] ?? null;
+            if (! empty($plot)) {
+                $xml .= $this->xmlElement('plot', $plot);
+                $xml .= $this->xmlElement('outline', mb_substr($plot, 0, 300));
             }
-            $xml .= $this->xmlElement('year', $year);
-        }
 
-        // Rating
-        $rating = $info['vote_average'] ?? $info['rating'] ?? $movieData['rating'] ?? $movieData['rating_5based'] ?? null;
-        if (! empty($rating)) {
-            // Convert 5-based rating to 10-based if needed
-            if (is_numeric($rating) && $rating <= 5 && isset($movieData['rating_5based'])) {
-                $rating = $rating * 2;
-            }
-            $xml .= $this->xmlElement('rating', $rating);
-        }
-
-        // Runtime (in minutes)
-        $runtime = $info['runtime'] ?? $movieData['duration_secs'] ?? null;
-        if (! empty($runtime)) {
-            // Convert seconds to minutes if > 300 (assume it's in seconds)
-            if ($runtime > 300) {
-                $runtime = round($runtime / 60);
-            }
-            $xml .= $this->xmlElement('runtime', $runtime);
-        }
-
-        // Genres
-        $genres = $info['genres'] ?? $movieData['genre'] ?? null;
-        if (! empty($genres)) {
-            if (is_string($genres)) {
-                // Split by comma if it's a string
-                $genreList = array_map('trim', explode(',', $genres));
-            } else {
-                $genreList = $genres;
-            }
-            foreach ($genreList as $genre) {
-                $genreName = is_array($genre) ? ($genre['name'] ?? '') : $genre;
-                if (! empty($genreName)) {
-                    $xml .= $this->xmlElement('genre', $genreName);
+            // Year
+            $year = $channel->year ?? $info['year'] ?? $movieData['releasedate'] ?? null;
+            if (! empty($year)) {
+                // Extract year if it's a full date
+                if (strlen($year) > 4) {
+                    $year = substr($year, 0, 4);
                 }
+                $xml .= $this->xmlElement('year', $year);
             }
-        }
 
-        // Director
-        $director = $info['director'] ?? $movieData['director'] ?? null;
-        if (! empty($director)) {
-            $xml .= $this->xmlElement('director', $director);
-        }
-
-        // Cast
-        $cast = $info['cast'] ?? $movieData['cast'] ?? null;
-        if (! empty($cast)) {
-            if (is_string($cast)) {
-                $castList = array_map('trim', explode(',', $cast));
-            } else {
-                $castList = $cast;
-            }
-            foreach ($castList as $actor) {
-                $actorName = is_array($actor) ? ($actor['name'] ?? '') : $actor;
-                if (! empty($actorName)) {
-                    $xml .= "    <actor>\n";
-                    $xml .= $this->xmlElement('name', $actorName, [], 2);
-                    if (is_array($actor) && ! empty($actor['character'])) {
-                        $xml .= $this->xmlElement('role', $actor['character'], [], 2);
-                    }
-                    if (is_array($actor) && ! empty($actor['profile_path'])) {
-                        $xml .= $this->xmlElement('thumb', 'https://image.tmdb.org/t/p/w185' . $actor['profile_path'], [], 2);
-                    }
-                    $xml .= "    </actor>\n";
+            // Rating
+            $rating = $info['vote_average'] ?? $info['rating'] ?? $movieData['rating'] ?? $movieData['rating_5based'] ?? null;
+            if (! empty($rating)) {
+                // Convert 5-based rating to 10-based if needed
+                if (is_numeric($rating) && $rating <= 5 && isset($movieData['rating_5based'])) {
+                    $rating = $rating * 2;
                 }
+                $xml .= $this->xmlElement('rating', $rating);
             }
-        }
 
-        // Poster
-        $poster = $info['poster_path'] ?? $movieData['cover_big'] ?? $movieData['movie_image'] ?? null;
-        if (! empty($poster)) {
-            $posterUrl = str_starts_with($poster, 'http')
-                ? $poster
-                : 'https://image.tmdb.org/t/p/original' . $poster;
-            $xml .= $this->xmlElement('thumb', $posterUrl, ['aspect' => 'poster']);
-        }
+            // Runtime (in minutes)
+            $runtime = $info['runtime'] ?? $movieData['duration_secs'] ?? null;
+            if (! empty($runtime)) {
+                // Convert seconds to minutes if > 300 (assume it's in seconds)
+                if ($runtime > 300) {
+                    $runtime = round($runtime / 60);
+                }
+                $xml .= $this->xmlElement('runtime', $runtime);
+            }
 
-        // Backdrop
-        $backdrop = $info['backdrop_path'] ?? $movieData['backdrop_path'] ?? null;
-        if (! empty($backdrop)) {
-            $backdropUrl = str_starts_with($backdrop, 'http')
-                ? $backdrop
-                : 'https://image.tmdb.org/t/p/original' . $backdrop;
-            $xml .= $this->xmlElement('fanart', $backdropUrl);
-        }
-
-        // Country
-        $country = $info['production_countries'] ?? $movieData['country'] ?? null;
-        if (! empty($country)) {
-            if (is_array($country)) {
-                foreach ($country as $c) {
-                    $countryName = is_array($c) ? ($c['name'] ?? $c['iso_3166_1'] ?? '') : $c;
-                    if (! empty($countryName)) {
-                        $xml .= $this->xmlElement('country', $countryName);
+            // Genres
+            $genres = $info['genres'] ?? $movieData['genre'] ?? null;
+            if (! empty($genres)) {
+                if (is_string($genres)) {
+                    // Split by comma if it's a string
+                    $genreList = array_map('trim', explode(',', $genres));
+                } else {
+                    $genreList = $genres;
+                }
+                foreach ($genreList as $genre) {
+                    $genreName = is_array($genre) ? ($genre['name'] ?? '') : $genre;
+                    if (! empty($genreName)) {
+                        $xml .= $this->xmlElement('genre', $genreName);
                     }
                 }
-            } else {
-                $xml .= $this->xmlElement('country', $country);
             }
-        }
 
-        // Unique IDs (important for scrapers)
-        if (! empty($tmdbId)) {
-            $xml .= $this->xmlElement('uniqueid', $tmdbId, ['type' => 'tmdb', 'default' => 'true']);
-            $xml .= $this->xmlElement('tmdbid', $tmdbId);
-        }
-        if (! empty($imdbId)) {
-            $xml .= $this->xmlElement('uniqueid', $imdbId, ['type' => 'imdb']);
-            $xml .= $this->xmlElement('imdbid', $imdbId);
-        }
+            // Director
+            $director = $info['director'] ?? $movieData['director'] ?? null;
+            if (! empty($director)) {
+                $xml .= $this->xmlElement('director', $director);
+            }
 
-        $xml .= $this->endXml('movie');
+            // Cast
+            $cast = $info['cast'] ?? $movieData['cast'] ?? null;
+            if (! empty($cast)) {
+                if (is_string($cast)) {
+                    $castList = array_map('trim', explode(',', $cast));
+                } else {
+                    $castList = $cast;
+                }
+                foreach ($castList as $actor) {
+                    $actorName = is_array($actor) ? ($actor['name'] ?? '') : $actor;
+                    if (! empty($actorName)) {
+                        $xml .= "    <actor>\n";
+                        $xml .= $this->xmlElement('name', $actorName, [], 2);
+                        if (is_array($actor) && ! empty($actor['character'])) {
+                            $xml .= $this->xmlElement('role', $actor['character'], [], 2);
+                        }
+                        if (is_array($actor) && ! empty($actor['profile_path'])) {
+                            $xml .= $this->xmlElement('thumb', 'https://image.tmdb.org/t/p/w185'.$actor['profile_path'], [], 2);
+                        }
+                        $xml .= "    </actor>\n";
+                    }
+                }
+            }
 
-        // Change extension from .strm to .nfo
-        $nfoPath = preg_replace('/\.strm$/i', '.nfo', $filePath);
+            // Poster
+            $poster = $info['poster_path'] ?? $movieData['cover_big'] ?? $movieData['movie_image'] ?? null;
+            if (! empty($poster)) {
+                $posterUrl = str_starts_with($poster, 'http')
+                    ? $poster
+                    : 'https://image.tmdb.org/t/p/original'.$poster;
+                $xml .= $this->xmlElement('thumb', $posterUrl, ['aspect' => 'poster']);
+            }
 
-        return $this->writeFileWithHash($nfoPath, $xml, $mapping);
+            // Backdrop
+            $backdrop = $info['backdrop_path'] ?? $movieData['backdrop_path'] ?? null;
+            if (! empty($backdrop)) {
+                $backdropUrl = str_starts_with($backdrop, 'http')
+                    ? $backdrop
+                    : 'https://image.tmdb.org/t/p/original'.$backdrop;
+                $xml .= $this->xmlElement('fanart', $backdropUrl);
+            }
+
+            // Country
+            $country = $info['production_countries'] ?? $movieData['country'] ?? null;
+            if (! empty($country)) {
+                if (is_array($country)) {
+                    foreach ($country as $c) {
+                        $countryName = is_array($c) ? ($c['name'] ?? $c['iso_3166_1'] ?? '') : $c;
+                        if (! empty($countryName)) {
+                            $xml .= $this->xmlElement('country', $countryName);
+                        }
+                    }
+                } else {
+                    $xml .= $this->xmlElement('country', $country);
+                }
+            }
+
+            // Unique IDs (important for scrapers)
+            if (! empty($tmdbId)) {
+                $xml .= $this->xmlElement('uniqueid', $tmdbId, ['type' => 'tmdb', 'default' => 'true']);
+                $xml .= $this->xmlElement('tmdbid', $tmdbId);
+            }
+            if (! empty($imdbId)) {
+                $xml .= $this->xmlElement('uniqueid', $imdbId, ['type' => 'imdb']);
+                $xml .= $this->xmlElement('imdbid', $imdbId);
+            }
+
+            $xml .= $this->endXml('movie');
+
+            // Change extension from .strm to .nfo
+            $nfoPath = preg_replace('/\.strm$/i', '.nfo', $filePath);
+
+            return $this->writeFileWithHash($nfoPath, $xml, $mapping);
         } catch (\Throwable $e) {
             Log::error("NfoService: Error generating movie NFO for {$channel->title}: {$e->getMessage()}");
 
@@ -415,7 +415,7 @@ class NfoService
      */
     public function deleteSeriesNfo(string $seriesPath): bool
     {
-        $nfoPath = rtrim($seriesPath, '/') . '/tvshow.nfo';
+        $nfoPath = rtrim($seriesPath, '/').'/tvshow.nfo';
 
         if (file_exists($nfoPath)) {
             return @unlink($nfoPath);
@@ -443,7 +443,7 @@ class NfoService
 
     /**
      * Create an XML element with optional attributes
-     * 
+     *
      * Note: Arrays are intentionally skipped and return empty string.
      * Callers should iterate over array values and call this method for each item.
      * See generateSeriesNfo() and generateMovieNfo() for examples of handling arrays (genres, cast, etc.)
@@ -466,7 +466,7 @@ class NfoService
             if (is_array($attrValue)) {
                 continue;
             }
-            $attrs .= " {$attrName}=\"" . htmlspecialchars((string) $attrValue, ENT_XML1, 'UTF-8') . '"';
+            $attrs .= " {$attrName}=\"".htmlspecialchars((string) $attrValue, ENT_XML1, 'UTF-8').'"';
         }
 
         $escapedValue = htmlspecialchars((string) $value, ENT_XML1, 'UTF-8');
@@ -477,10 +477,10 @@ class NfoService
     /**
      * Write content to file with hash-based optimization.
      * Computes hash of content and compares to stored hash to avoid file reads.
-     * 
-     * @param string $path Full path to write the file
-     * @param string $content Content to write
-     * @param \App\Models\StrmFileMapping|null $mapping Optional mapping to check/update hash
+     *
+     * @param  string  $path  Full path to write the file
+     * @param  string  $content  Content to write
+     * @param  \App\Models\StrmFileMapping|null  $mapping  Optional mapping to check/update hash
      * @return bool Success status
      */
     private function writeFileWithHash(string $path, string $content, $mapping = null): bool
@@ -491,6 +491,7 @@ class NfoService
             if (! is_dir($dir)) {
                 if (! @mkdir($dir, 0755, true)) {
                     Log::error("NfoService: Failed to create directory: {$dir}");
+
                     return false;
                 }
             }
@@ -507,7 +508,7 @@ class NfoService
 
             // Fallback: If no mapping or hash doesn't match, check file directly
             // This handles cases where hash tracking is new or was reset
-            if (!$mapping && file_exists($path)) {
+            if (! $mapping && file_exists($path)) {
                 $existingContent = @file_get_contents($path);
                 if ($existingContent === $content) {
                     // Content unchanged, but update hash for future optimization
@@ -515,6 +516,7 @@ class NfoService
                         $mapping->nfo_hash = $newHash;
                         $mapping->save();
                     }
+
                     return true;
                 }
             }
@@ -524,6 +526,7 @@ class NfoService
 
             if ($result === false) {
                 Log::error("NfoService: Failed to write file: {$path}");
+
                 return false;
             }
 
@@ -536,6 +539,7 @@ class NfoService
             return true;
         } catch (\Throwable $e) {
             Log::error("NfoService: Error writing file: {$path} - {$e->getMessage()}");
+
             return false;
         }
     }
@@ -543,7 +547,7 @@ class NfoService
     /**
      * Write content to file
      * Optimized to skip writing if the existing file has identical content.
-     * 
+     *
      * @deprecated Use writeFileWithHash() for better performance with hash tracking
      */
     private function writeFile(string $path, string $content): bool

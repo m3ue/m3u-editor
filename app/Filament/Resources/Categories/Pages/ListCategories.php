@@ -4,7 +4,6 @@ namespace App\Filament\Resources\Categories\Pages;
 
 use App\Filament\Resources\Categories\CategoryResource;
 use App\Models\Playlist;
-use Filament\Actions;
 use Filament\Resources\Pages\ListRecords;
 use Filament\Schemas\Components\Tabs\Tab;
 use Illuminate\Database\Eloquent\Builder;
@@ -46,10 +45,10 @@ class ListCategories extends ListRecords
             ->get();
 
         // Return tabs
-        return $playlists->mapWithKeys(fn($playlist) => [
+        return $playlists->mapWithKeys(fn ($playlist) => [
             $playlist->id => Tab::make($playlist->name)
-                ->modifyQueryUsing(fn($query) => $query->where('playlist_id', $playlist->id))
-                ->badge($playlist->categories()->count())
+                ->modifyQueryUsing(fn ($query) => $query->where('playlist_id', $playlist->id))
+                ->badge($playlist->categories()->count()),
         ])->toArray();
     }
 }

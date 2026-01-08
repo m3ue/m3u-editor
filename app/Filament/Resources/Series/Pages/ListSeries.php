@@ -2,25 +2,22 @@
 
 namespace App\Filament\Resources\Series\Pages;
 
-use Filament\Actions\Action;
-use App\Jobs\SyncXtreamSeries;
 use App\Filament\Resources\Series\SeriesResource;
 use App\Jobs\FetchTmdbIds;
 use App\Jobs\ProcessM3uImportSeriesEpisodes;
 use App\Jobs\SeriesFindAndReplace;
 use App\Jobs\SyncSeriesStrmFiles;
+use App\Jobs\SyncXtreamSeries;
 use App\Models\Channel;
 use App\Models\Playlist;
 use App\Models\Series;
 use App\Services\TmdbService;
 use App\Settings\GeneralSettings;
-use Filament\Actions;
+use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
-use Filament\Forms\Components\Placeholder;
-use Filament\Infolists\Components\TextEntry;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ListRecords;
 use Filament\Schemas\Components\Tabs\Tab;
@@ -81,7 +78,7 @@ class ListSeries extends ListRecords
                             ->required()
                             ->helperText('Select the Playlist you would like to fetch Series metadata for.')
                             ->options(Playlist::where(['user_id' => auth()->id()])->get(['name', 'id'])->pluck('name', 'id'))
-                            ->hidden(fn(Get $get) => $get('all_playlists') === true)
+                            ->hidden(fn (Get $get) => $get('all_playlists') === true)
                             ->searchable(),
                     ])
                     ->action(function ($data) {
@@ -123,7 +120,7 @@ class ListSeries extends ListRecords
                             ->required()
                             ->helperText('Select the Playlist you would like to fetch TMDB IDs for.')
                             ->options(Playlist::where(['user_id' => auth()->id()])->get(['name', 'id'])->pluck('name', 'id'))
-                            ->hidden(fn(Get $get) => $get('all_playlists') === true)
+                            ->hidden(fn (Get $get) => $get('all_playlists') === true)
                             ->searchable(),
                     ])
                     ->action(function ($data) {
@@ -135,6 +132,7 @@ class ListSeries extends ListRecords
                                 ->body('Please configure your TMDB API key in Settings > TMDB before using this feature.')
                                 ->duration(10000)
                                 ->send();
+
                             return;
                         }
 
@@ -145,7 +143,7 @@ class ListSeries extends ListRecords
                         $query = Series::where('user_id', auth()->id())
                             ->where('enabled', true);
 
-                        if (!$allPlaylists && $playlistId) {
+                        if (! $allPlaylists && $playlistId) {
                             $query->where('playlist_id', $playlistId);
                         }
 
@@ -157,6 +155,7 @@ class ListSeries extends ListRecords
                                 ->title('No series found')
                                 ->body('No enabled series found matching the criteria.')
                                 ->send();
+
                             return;
                         }
 
@@ -196,7 +195,7 @@ class ListSeries extends ListRecords
                             ->required()
                             ->helperText('Select the Playlist you would like to sync Series stream files for.')
                             ->options(Playlist::where(['user_id' => auth()->id()])->get(['name', 'id'])->pluck('name', 'id'))
-                            ->hidden(fn(Get $get) => $get('all_playlists') === true)
+                            ->hidden(fn (Get $get) => $get('all_playlists') === true)
                             ->searchable(),
                     ])
                     ->action(function ($data) {
@@ -232,7 +231,7 @@ class ListSeries extends ListRecords
                             ->required()
                             ->helperText('Select the Series you would like to apply changes to.')
                             ->options(Series::where(['user_id' => auth()->id()])->get(['name', 'id'])->pluck('name', 'id'))
-                            ->hidden(fn(Get $get) => $get('all_series') === true)
+                            ->hidden(fn (Get $get) => $get('all_series') === true)
                             ->searchable(),
                         Toggle::make('use_regex')
                             ->label('Use Regex')
@@ -250,20 +249,20 @@ class ListSeries extends ListRecords
                             ->required()
                             ->columnSpan(1),
                         TextInput::make('find_replace')
-                            ->label(fn(Get $get) =>  !$get('use_regex') ? 'String to replace' : 'Pattern to replace')
+                            ->label(fn (Get $get) => ! $get('use_regex') ? 'String to replace' : 'Pattern to replace')
                             ->required()
                             ->placeholder(
-                                fn(Get $get) => $get('use_regex')
+                                fn (Get $get) => $get('use_regex')
                                     ? '^(US- |UK- |CA- )'
                                     : 'US -'
                             )->helperText(
-                                fn(Get $get) => !$get('use_regex')
+                                fn (Get $get) => ! $get('use_regex')
                                     ? 'This is the string you want to find and replace.'
                                     : 'This is the regex pattern you want to find. Make sure to use valid regex syntax.'
                             ),
                         TextInput::make('replace_with')
                             ->label('Replace with (optional)')
-                            ->placeholder('Leave empty to remove')
+                            ->placeholder('Leave empty to remove'),
                     ])
                     ->action(function (array $data): void {
                         app('Illuminate\Contracts\Bus\Dispatcher')
@@ -288,8 +287,8 @@ class ListSeries extends ListRecords
                     ->color('gray')
                     ->modalIcon('heroicon-o-magnifying-glass')
                     ->modalDescription('Select what you would like to find and replace in your channels list.')
-                    ->modalSubmitActionLabel('Replace now')
-            ])->button()->label('Actions')
+                    ->modalSubmitActionLabel('Replace now'),
+            ])->button()->label('Actions'),
         ];
     }
 
@@ -335,12 +334,12 @@ class ListSeries extends ListRecords
             'enabled' => Tab::make('Enabled')
                 // ->icon('heroicon-m-check')
                 ->badgeColor('success')
-                ->modifyQueryUsing(fn($query) => $query->where('enabled', true))
+                ->modifyQueryUsing(fn ($query) => $query->where('enabled', true))
                 ->badge($enabledCount),
             'disabled' => Tab::make('Disabled')
                 // ->icon('heroicon-m-x-mark')
                 ->badgeColor('danger')
-                ->modifyQueryUsing(fn($query) => $query->where('enabled', false))
+                ->modifyQueryUsing(fn ($query) => $query->where('enabled', false))
                 ->badge($disabledCount),
         ];
     }
@@ -430,7 +429,7 @@ class ListSeries extends ListRecords
             Notification::make()
                 ->danger()
                 ->title('Error')
-                ->body('An error occurred: ' . $e->getMessage())
+                ->body('An error occurred: '.$e->getMessage())
                 ->send();
         }
     }

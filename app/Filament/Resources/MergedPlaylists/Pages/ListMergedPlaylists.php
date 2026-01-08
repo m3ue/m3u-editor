@@ -2,10 +2,8 @@
 
 namespace App\Filament\Resources\MergedPlaylists\Pages;
 
-use App\Filament\Resources\MergedPlaylists\Pages\EditMergedPlaylist;
-use Filament\Actions\CreateAction;
 use App\Filament\Resources\MergedPlaylists\MergedPlaylistResource;
-use Filament\Actions;
+use Filament\Actions\CreateAction;
 use Filament\Resources\Pages\ListRecords;
 
 class ListMergedPlaylists extends ListRecords
@@ -17,7 +15,7 @@ class ListMergedPlaylists extends ListRecords
         return [
             CreateAction::make()
                 ->slideOver()
-                ->successRedirectUrl(fn($record): string => EditMergedPlaylist::getUrl(['record' => $record])),
+                ->successRedirectUrl(fn ($record): string => EditMergedPlaylist::getUrl(['record' => $record])),
 
         ];
     }

@@ -6,8 +6,8 @@ use App\Models\EpgChannel;
 use App\Models\User;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
-use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\DB;
 
 class EpgChannelFindAndReplace implements ShouldQueue
@@ -37,14 +37,14 @@ class EpgChannelFindAndReplace implements ShouldQueue
     {
         // Clock the time
         $start = now();
-        $customColumn = $this->column . '_custom';
+        $customColumn = $this->column.'_custom';
         $updated = 0;
 
         // Process channels in chunks for better performance
-        if (!$this->channels) {
+        if (! $this->channels) {
             // Use chunking to process large datasets efficiently
             EpgChannel::query()
-                ->when(!$this->all_epgs && $this->epg_id, fn($query) => $query->where('epg_id', $this->epg_id))
+                ->when(! $this->all_epgs && $this->epg_id, fn ($query) => $query->where('epg_id', $this->epg_id))
                 ->chunkById(1000, function ($channels) use ($customColumn, &$updated) {
                     $updated += $this->processChannelChunk($channels, $customColumn);
                 });
@@ -102,11 +102,11 @@ class EpgChannelFindAndReplace implements ShouldQueue
             if ($this->use_regex) {
                 // Escape existing delimiters in user input
                 $delimiter = '/';
-                $pattern = str_replace($delimiter, '\\' . $delimiter, $find);
-                $finalPattern = $delimiter . $pattern . $delimiter . 'ui';
+                $pattern = str_replace($delimiter, '\\'.$delimiter, $find);
+                $finalPattern = $delimiter.$pattern.$delimiter.'ui';
 
                 // Check if the find string is in the value to modify
-                if (!preg_match($finalPattern, $valueToModify)) {
+                if (! preg_match($finalPattern, $valueToModify)) {
                     continue;
                 }
 
@@ -114,7 +114,7 @@ class EpgChannelFindAndReplace implements ShouldQueue
                 $newValue = preg_replace($finalPattern, $replace, $valueToModify);
             } else {
                 // Check if the find string is in the value to modify
-                if (!stristr($valueToModify, $find)) {
+                if (! stristr($valueToModify, $find)) {
                     continue;
                 }
 
@@ -128,13 +128,13 @@ class EpgChannelFindAndReplace implements ShouldQueue
         }
 
         // Perform batch update if we have changes
-        if (!empty($updatesMap)) {
+        if (! empty($updatesMap)) {
             // Build the update cases for batch update
             $cases = [];
             $ids = array_keys($updatesMap);
 
             foreach ($updatesMap as $id => $value) {
-                $cases[] = "WHEN {$id} THEN " . DB::connection()->getPdo()->quote($value);
+                $cases[] = "WHEN {$id} THEN ".DB::connection()->getPdo()->quote($value);
             }
 
             $caseStatement = implode(' ', $cases);
@@ -144,8 +144,8 @@ class EpgChannelFindAndReplace implements ShouldQueue
                 UPDATE epg_channels 
                 SET {$customColumn} = CASE id {$caseStatement} END,
                     updated_at = ?
-                WHERE id IN (" . implode(',', $ids) . ")
-            ", [now()]);
+                WHERE id IN (".implode(',', $ids).')
+            ', [now()]);
 
             return count($updatesMap);
         }

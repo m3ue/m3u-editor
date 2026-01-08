@@ -7,8 +7,6 @@ use App\Events\EpgDeleted;
 use App\Events\EpgUpdated;
 use App\Jobs\ProcessEpgImport;
 use App\Jobs\RunPostProcess;
-use Illuminate\Contracts\Queue\ShouldQueue;
-use Illuminate\Queue\InteractsWithQueue;
 
 class EpgListener
 {

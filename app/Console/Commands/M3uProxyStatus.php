@@ -2,7 +2,6 @@
 
 namespace App\Console\Commands;
 
-use App\Services\M3uProxyService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Http;
 use Symfony\Component\Process\Process;
@@ -33,7 +32,7 @@ class M3uProxyStatus extends Command
         $usingExternalProxy = config('proxy.external_proxy_enabled', false);
         $proxyUrl = config('proxy.m3u_proxy_host', 'localhost');
         if ($port = config('proxy.m3u_proxy_port')) {
-            $proxyUrl .= ':' . $port;
+            $proxyUrl .= ':'.$port;
         }
 
         $this->info('🔍 Checking m3u-proxy status...');
@@ -69,7 +68,7 @@ class M3uProxyStatus extends Command
                 ->withHeaders($apiToken ? [
                     'X-API-Token' => $apiToken,
                 ] : [])
-                ->get($proxyUrl . '/health');
+                ->get($proxyUrl.'/health');
 
             if ($response->successful()) {
                 $data = $response->json();
@@ -84,10 +83,10 @@ class M3uProxyStatus extends Command
                     ]
                 );
             } else {
-                $this->error('❌ API returned status: ' . $response->status());
+                $this->error('❌ API returned status: '.$response->status());
             }
         } catch (\Exception $e) {
-            $this->error('❌ Failed to connect to m3u-proxy API: ' . $e->getMessage());
+            $this->error('❌ Failed to connect to m3u-proxy API: '.$e->getMessage());
             $this->newLine();
 
             if (! $usingExternalProxy) {
@@ -98,7 +97,7 @@ class M3uProxyStatus extends Command
 
             return self::FAILURE;
         }
-        
+
         return self::SUCCESS;
     }
 

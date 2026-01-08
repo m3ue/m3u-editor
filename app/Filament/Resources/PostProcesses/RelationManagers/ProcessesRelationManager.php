@@ -2,24 +2,20 @@
 
 namespace App\Filament\Resources\PostProcesses\RelationManagers;
 
-use Filament\Schemas\Schema;
-use Filament\Forms\Components\Select;
-use Filament\Forms\Components\TextInput;
-use Filament\Tables\Columns\TextColumn;
-use Filament\Actions\CreateAction;
-use Filament\Actions\DeleteAction;
-use Filament\Tables\Enums\RecordActionsPosition;
-use Filament\Actions\BulkActionGroup;
-use Filament\Actions\DeleteBulkAction;
 use App\Models\Epg;
 use App\Models\Playlist;
 use App\Tables\Columns\PivotNameColumn;
-use Filament\Forms;
+use Filament\Actions\BulkActionGroup;
+use Filament\Actions\CreateAction;
+use Filament\Actions\DeleteAction;
+use Filament\Actions\DeleteBulkAction;
+use Filament\Forms\Components\Select;
+use Filament\Forms\Components\TextInput;
 use Filament\Resources\RelationManagers\RelationManager;
-use Filament\Tables;
+use Filament\Schemas\Schema;
+use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Table;
-use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Database\Eloquent\SoftDeletingScope;
 
 class ProcessesRelationManager extends RelationManager
 {
@@ -50,14 +46,14 @@ class ProcessesRelationManager extends RelationManager
                     ->label('Playlist')
                     ->helperText('Select the Playlist you would like to assign this post process to.')
                     ->options(Playlist::where(['user_id' => auth()->id()])->get(['name', 'id'])->pluck('name', 'id'))
-                    ->hidden(fn($get) => $get('processable_type') !== Playlist::class)
+                    ->hidden(fn ($get) => $get('processable_type') !== Playlist::class)
                     ->searchable(),
                 Select::make('processable_id')
                     ->required()
                     ->label('EPG')
                     ->helperText('Select the EPG you would like to assign this post process to.')
                     ->options(Epg::where(['user_id' => auth()->id()])->get(['name', 'id'])->pluck('name', 'id'))
-                    ->hidden(fn($get) => $get('processable_type') !== Epg::class)
+                    ->hidden(fn ($get) => $get('processable_type') !== Epg::class)
                     ->searchable(),
 
                 // @TODO: Add a select for the type of Event
@@ -65,7 +61,7 @@ class ProcessesRelationManager extends RelationManager
                 TextInput::make('post_process_id')
                     ->label('Post Process ID')
                     ->default($this->ownerRecord->id)
-                    ->hidden()
+                    ->hidden(),
             ]);
     }
 

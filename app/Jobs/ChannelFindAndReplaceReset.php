@@ -6,8 +6,8 @@ use App\Models\Channel;
 use App\Models\User;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
-use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\DB;
 
 class ChannelFindAndReplaceReset implements ShouldQueue
@@ -45,16 +45,16 @@ class ChannelFindAndReplaceReset implements ShouldQueue
                 // Most will use the same name appended with `_custom`
                 // e.g. `name_custom` for `name`
                 // or `title_custom` for `title`
-                $customColumn = $this->column . '_custom';
+                $customColumn = $this->column.'_custom';
         }
         $totalUpdated = 0;
 
         // Process channels in chunks for better performance
-        if (!$this->channels) {
+        if (! $this->channels) {
             // Use chunking to process large datasets efficiently
             Channel::query()
                 ->where('user_id', $this->user_id)
-                ->when(!$this->all_playlists && $this->playlist_id, fn($query) => $query->where('playlist_id', $this->playlist_id))
+                ->when(! $this->all_playlists && $this->playlist_id, fn ($query) => $query->where('playlist_id', $this->playlist_id))
                 ->whereNotNull($customColumn) // Only get channels that have custom values to reset
                 ->chunkById(1000, function ($channels) use ($customColumn, &$totalUpdated) {
                     // Get IDs of channels to update
@@ -66,7 +66,7 @@ class ChannelFindAndReplaceReset implements ShouldQueue
                             ->whereIn('id', $channelIds)
                             ->update([
                                 $customColumn => null,
-                                'updated_at' => now()
+                                'updated_at' => now(),
                             ]);
 
                         $totalUpdated += $updated;
@@ -75,7 +75,7 @@ class ChannelFindAndReplaceReset implements ShouldQueue
         } else {
             // Process the provided collection in chunks
             $this->channels
-                ->filter(fn($channel) => $channel->{$customColumn} !== null) // Only channels with custom values
+                ->filter(fn ($channel) => $channel->{$customColumn} !== null) // Only channels with custom values
                 ->chunk(1000)
                 ->each(function ($chunk) use ($customColumn, &$totalUpdated) {
                     $channelIds = $chunk->pluck('id')->toArray();
@@ -86,7 +86,7 @@ class ChannelFindAndReplaceReset implements ShouldQueue
                             ->whereIn('id', $channelIds)
                             ->update([
                                 $customColumn => null,
-                                'updated_at' => now()
+                                'updated_at' => now(),
                             ]);
 
                         $totalUpdated += $updated;

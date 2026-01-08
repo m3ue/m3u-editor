@@ -32,15 +32,15 @@ Route::get('/s/{shortUrlKey}/{path?}', function (Request $request, string $short
     if ($path) {
         $parsed = parse_url($response->getTargetUrl());
 
-        $base = ($parsed['scheme'] ?? '') . '://' . ($parsed['host'] ?? '');
+        $base = ($parsed['scheme'] ?? '').'://'.($parsed['host'] ?? '');
         if (isset($parsed['port'])) {
-            $base .= ':' . $parsed['port'];
+            $base .= ':'.$parsed['port'];
         }
         $base .= $parsed['path'] ?? '';
-        $base = rtrim($base, '/') . '/' . ltrim($path, '/');
+        $base = rtrim($base, '/').'/'.ltrim($path, '/');
 
         if (! empty($parsed['query'])) {
-            $base .= '?' . $parsed['query'];
+            $base .= '?'.$parsed['query'];
         }
 
         return redirect($base, $response->getStatusCode());
@@ -48,7 +48,6 @@ Route::get('/s/{shortUrlKey}/{path?}', function (Request $request, string $short
 
     return $response;
 })->where('path', '.*');
-
 
 /*
  * Logo proxy route - cache and serve remote logos
@@ -60,7 +59,6 @@ Route::get('/logo-proxy/{encodedUrl}', [LogoProxyController::class, 'serveLogo']
 /*
  * Playlist/EPG output routes
  */
-
 
 // Generate M3U playlist from the playlist configuration
 Route::get('/{uuid}/playlist.m3u', PlaylistGenerateController::class)
@@ -87,7 +85,6 @@ Route::get('/{uuid}/epg.xml.gz', [EpgGenerateController::class, 'compressed'])
 Route::get('epgs/{uuid}/epg.xml', EpgFileController::class)
     ->name('epg.file');
 
-
 /*
  * DEBUG routes
  */
@@ -107,7 +104,6 @@ Route::get('/phpinfo', function () {
     }
 });
 
-
 /*
  * Proxy routes (redirects to m3u-proxy API)
  */
@@ -125,7 +121,6 @@ Route::get('/shared/stream/{encodedId}.{format?}', function (string $encodedId) 
 
     return redirect()->route('m3u-proxy.channel', ['id' => $id]);
 })->name('shared.stream.channel');
-
 
 /*
  * API routes
@@ -163,7 +158,6 @@ Route::group(['prefix' => 'epg'], function () {
     Route::get('{uuid}/sync', [\App\Http\Controllers\EpgController::class, 'refreshEpg'])
         ->name('api.epg.sync');
 });
-
 
 /*
  * Xtream API endpoints at root

@@ -7,7 +7,6 @@ use App\Enums\PlaylistSourceType;
 use App\Enums\Status;
 use App\Services\XtreamService;
 use App\Traits\ShortUrlTrait;
-use AshAllenDesign\ShortURL\Models\ShortURL;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -241,7 +240,7 @@ class Playlist extends Model
                 'type' => 'primary',
                 'id' => $this->id,
                 'config' => $this->xtream_config,
-                'priority' => -1 // Primary always has highest priority
+                'priority' => -1, // Primary always has highest priority
             ];
         }
 
@@ -252,7 +251,7 @@ class Playlist extends Model
                     'type' => 'alias',
                     'id' => $alias->id,
                     'config' => $alias->xtream_config,
-                    'priority' => $alias->priority
+                    'priority' => $alias->priority,
                 ];
             }
         }
@@ -276,14 +275,16 @@ class Playlist extends Model
                                 5, // cache for 5 seconds
                                 function () use ($xtream) {
                                     $userInfo = $xtream->userInfo(timeout: 3);
+
                                     return $userInfo ?: [];
                                 }
                             );
                         }
                     } catch (\Exception $e) {
-                        Log::error('Failed to fetch metadata for Xtream playlist ' . $this->id, ['exception' => $e]);
+                        Log::error('Failed to fetch metadata for Xtream playlist '.$this->id, ['exception' => $e]);
                     }
                 }
+
                 return is_string($results)
                     ? json_decode($results, true)
                     : $results;

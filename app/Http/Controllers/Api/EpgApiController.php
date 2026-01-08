@@ -5,14 +5,12 @@ namespace App\Http\Controllers\Api;
 use App\Enums\ChannelLogoType;
 use App\Enums\PlaylistChannelId;
 use App\Facades\PlaylistFacade;
-use App\Facades\ProxyFacade;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\LogoProxyController;
 use App\Models\Epg;
 use App\Models\Playlist;
 use App\Models\StreamProfile;
 use App\Services\EpgCacheService;
-use App\Services\PlaylistUrlService;
 use App\Settings\GeneralSettings;
 use Carbon\Carbon;
 use Exception;
@@ -67,8 +65,8 @@ class EpgApiController extends Controller
                     $search = Str::lower($search);
 
                     return $queryBuilder->where(function ($query) use ($search) {
-                        $query->whereRaw('LOWER(name) LIKE ?', ['%' . $search . '%'])
-                            ->orWhereRaw('LOWER(display_name) LIKE ?', ['%' . $search . '%']);
+                        $query->whereRaw('LOWER(name) LIKE ?', ['%'.$search.'%'])
+                            ->orWhereRaw('LOWER(display_name) LIKE ?', ['%'.$search.'%']);
                     });
                 })
                 ->limit($perPage)
@@ -112,8 +110,8 @@ class EpgApiController extends Controller
                 $search = Str::lower($search);
 
                 return $queryBuilder->where(function ($query) use ($search) {
-                    $query->whereRaw('LOWER(name) LIKE ?', ['%' . $search . '%'])
-                        ->orWhereRaw('LOWER(display_name) LIKE ?', ['%' . $search . '%']);
+                    $query->whereRaw('LOWER(name) LIKE ?', ['%'.$search.'%'])
+                        ->orWhereRaw('LOWER(display_name) LIKE ?', ['%'.$search.'%']);
                 });
             })->count();
             $pagination = [
@@ -149,7 +147,7 @@ class EpgApiController extends Controller
             Log::error("Error retrieving EPG data for {$epg->name}: {$e->getMessage()}");
 
             return response()->json([
-                'error' => 'Failed to retrieve EPG data: ' . $e->getMessage(),
+                'error' => 'Failed to retrieve EPG data: '.$e->getMessage(),
             ], 500);
         }
     }
@@ -208,10 +206,10 @@ class EpgApiController extends Controller
                     $search = Str::lower($search);
 
                     return $queryBuilder->where(function ($query) use ($search) {
-                        $query->whereRaw('LOWER(channels.name) LIKE ?', ['%' . $search . '%'])
-                            ->orWhereRaw('LOWER(channels.name_custom) LIKE ?', ['%' . $search . '%'])
-                            ->orWhereRaw('LOWER(channels.title) LIKE ?', ['%' . $search . '%'])
-                            ->orWhereRaw('LOWER(channels.title_custom) LIKE ?', ['%' . $search . '%']);
+                        $query->whereRaw('LOWER(channels.name) LIKE ?', ['%'.$search.'%'])
+                            ->orWhereRaw('LOWER(channels.name_custom) LIKE ?', ['%'.$search.'%'])
+                            ->orWhereRaw('LOWER(channels.title) LIKE ?', ['%'.$search.'%'])
+                            ->orWhereRaw('LOWER(channels.title_custom) LIKE ?', ['%'.$search.'%']);
                     });
                 })
                 ->limit($perPage)
@@ -388,10 +386,10 @@ class EpgApiController extends Controller
                 $search = Str::lower($search);
 
                 return $queryBuilder->where(function ($query) use ($search) {
-                    $query->whereRaw('LOWER(channels.name) LIKE ?', ['%' . $search . '%'])
-                        ->orWhereRaw('LOWER(channels.name_custom) LIKE ?', ['%' . $search . '%'])
-                        ->orWhereRaw('LOWER(channels.title) LIKE ?', ['%' . $search . '%'])
-                        ->orWhereRaw('LOWER(channels.title_custom) LIKE ?', ['%' . $search . '%']);
+                    $query->whereRaw('LOWER(channels.name) LIKE ?', ['%'.$search.'%'])
+                        ->orWhereRaw('LOWER(channels.name_custom) LIKE ?', ['%'.$search.'%'])
+                        ->orWhereRaw('LOWER(channels.title) LIKE ?', ['%'.$search.'%'])
+                        ->orWhereRaw('LOWER(channels.title_custom) LIKE ?', ['%'.$search.'%']);
                 });
             })->when(! $vod, function ($query) {
                 return $query->where('channels.is_vod', false);
@@ -403,7 +401,7 @@ class EpgApiController extends Controller
             $programmes = [];
             $epgIds = array_unique($epgIds);
 
-            Log::debug('Processing EPG data for ' . count($epgIds) . ' unique EPGs');
+            Log::debug('Processing EPG data for '.count($epgIds).' unique EPGs');
             foreach ($epgIds as $epgId) {
                 try {
                     $epg = Epg::find($epgId);
@@ -502,7 +500,7 @@ class EpgApiController extends Controller
 
             // Generate dummy EPG programmes if enabled
             if (count($dummyEpgChannels) > 0) {
-                Log::debug('Generating dummy EPG for ' . count($dummyEpgChannels) . ' channels');
+                Log::debug('Generating dummy EPG for '.count($dummyEpgChannels).' channels');
 
                 foreach ($dummyEpgChannels as $dummyEpgChannel) {
                     $playlistChannelId = $dummyEpgChannel['playlist_channel_id'];
@@ -579,14 +577,14 @@ class EpgApiController extends Controller
                 'cache_info' => [
                     'cached' => true,
                     'epg_count' => count($epgIds),
-                    'channels_with_epg' => count(array_filter($playlistChannelData, fn($ch) => $ch['has_epg'])),
+                    'channels_with_epg' => count(array_filter($playlistChannelData, fn ($ch) => $ch['has_epg'])),
                 ],
             ]);
         } catch (Exception $e) {
             Log::error("Error retrieving EPG data for playlist {$playlist->name}: {$e->getMessage()}");
 
             return response()->json([
-                'error' => 'Failed to retrieve EPG data: ' . $e->getMessage(),
+                'error' => 'Failed to retrieve EPG data: '.$e->getMessage(),
             ], 500);
         }
     }
@@ -594,7 +592,6 @@ class EpgApiController extends Controller
     /**
      * Parse and validate date range from request
      *
-     * @param  Request  $request
      * @return array{start: string, end: string} Array with 'start' and 'end' date strings in Y-m-d format
      */
     private function parseDateRange(Request $request): array

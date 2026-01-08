@@ -2,16 +2,14 @@
 
 namespace App\Traits;
 
-use Illuminate\Database\Eloquent\Model;
 use AshAllenDesign\ShortURL\Classes\Builder;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 
 trait ShortUrlTrait
 {
     /**
      * Generate a short URL.
-     *
-     * @return Model
      */
     public function generateShortUrl(): Model
     {
@@ -41,8 +39,6 @@ trait ShortUrlTrait
 
     /**
      * Remove short URLs.
-     *
-     * @return Model
      */
     public function removeShortUrls(): Model
     {

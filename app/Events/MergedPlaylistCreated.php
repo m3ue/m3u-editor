@@ -13,8 +13,6 @@ class MergedPlaylistCreated
 
     /**
      * Create a new event instance.
-     * 
-     * @param MergedPlaylist $playlist
      */
     public function __construct(
         public MergedPlaylist $playlist

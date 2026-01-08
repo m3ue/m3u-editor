@@ -2,8 +2,8 @@
 
 namespace App\Providers;
 
-use Exception;
 use App\Facades\GitInfo;
+use Exception;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\ServiceProvider;
@@ -35,8 +35,10 @@ class VersionServiceProvider extends ServiceProvider
         $remoteVersion = self::getRemoteVersion();
         if ($remoteVersion) {
             $installedVersion = self::getVersion();
+
             return version_compare($installedVersion, $remoteVersion, '<');
         }
+
         return false;
     }
 
@@ -52,6 +54,7 @@ class VersionServiceProvider extends ServiceProvider
             default:
                 $version = config('dev.version');
         }
+
         return $version;
     }
 
@@ -66,7 +69,7 @@ class VersionServiceProvider extends ServiceProvider
         if ($remoteVersion === null || $refresh) {
             $remoteVersion = '';
             try {
-                $response = Http::get('https://raw.githubusercontent.com/sparkison/m3u-editor/refs/heads/' . self::$branch . '/config/dev.php');
+                $response = Http::get('https://raw.githubusercontent.com/sparkison/m3u-editor/refs/heads/'.self::$branch.'/config/dev.php');
                 if ($response->ok()) {
                     $results = $response->body();
                     switch (self::$branch) {
@@ -79,7 +82,7 @@ class VersionServiceProvider extends ServiceProvider
                         default:
                             preg_match("/'version'\s*=>\s*'([^']+)'/", $results, $matches);
                     }
-                    if (!empty($matches[1])) {
+                    if (! empty($matches[1])) {
                         $remoteVersion = $matches[1];
                         Cache::put(self::$cacheKey, $remoteVersion, 60 * 5);
                     }
@@ -88,6 +91,7 @@ class VersionServiceProvider extends ServiceProvider
                 // Ignore
             }
         }
+
         return $remoteVersion;
     }
 }

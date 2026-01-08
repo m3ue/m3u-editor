@@ -6,7 +6,6 @@ use App\Facades\PlaylistFacade;
 use App\Models\Channel;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Redis;
 
 /**
  * @tags Channels
@@ -256,6 +255,7 @@ class ChannelController extends Controller
                     'error' => 'Unable to retrieve stream statistics',
                 ];
             }
+
             return [
                 'channel_id' => $channel->id,
                 'title' => $channel->title_custom ?? $channel->title,

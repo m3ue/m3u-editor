@@ -2,11 +2,9 @@
 
 namespace App\Filament\Resources\VodGroups\Pages;
 
-use Filament\Actions\CreateAction;
 use App\Filament\Resources\VodGroups\VodGroupResource;
-use App\Models\Group;
 use App\Models\Playlist;
-use Filament\Actions;
+use Filament\Actions\CreateAction;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ListRecords;
 use Filament\Schemas\Components\Tabs\Tab;
@@ -35,7 +33,7 @@ class ListVodGroups extends ListRecords
                         ->success()
                         ->title('Group created')
                         ->body('You can now assign channels to this group from the Channels section.'),
-                )->slideOver()
+                )->slideOver(),
         ];
     }
 
@@ -66,13 +64,13 @@ class ListVodGroups extends ListRecords
             ->get();
 
         // Return tabs
-        return $playlists->mapWithKeys(fn($playlist) => [
+        return $playlists->mapWithKeys(fn ($playlist) => [
             $playlist->id => Tab::make($playlist->name)
-                ->modifyQueryUsing(fn($query) => $query->where([
+                ->modifyQueryUsing(fn ($query) => $query->where([
                     ['playlist_id', $playlist->id],
-                    ['type', 'vod']
+                    ['type', 'vod'],
                 ]))
-                ->badge($playlist->vodGroups()->count())
+                ->badge($playlist->vodGroups()->count()),
         ])->toArray();
     }
 }

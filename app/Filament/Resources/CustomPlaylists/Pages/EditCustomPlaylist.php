@@ -2,10 +2,9 @@
 
 namespace App\Filament\Resources\CustomPlaylists\Pages;
 
-use Filament\Actions\DeleteAction;
 use App\Filament\Resources\CustomPlaylists\CustomPlaylistResource;
 use App\Services\EpgCacheService;
-use Filament\Actions;
+use Filament\Actions\DeleteAction;
 use Filament\Actions\ViewAction;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\EditRecord;
@@ -43,6 +42,6 @@ class EditCustomPlaylist extends EditRecord
         }
 
         // Close the modal
-        $this->dispatch('close-modal', id: 'epg-url-modal-' . $this->record->getKey());
+        $this->dispatch('close-modal', id: 'epg-url-modal-'.$this->record->getKey());
     }
 }

@@ -19,8 +19,8 @@ return new class extends Migration
             $table->foreignId('user_id')->constrained()->cascadeOnDelete()->cascadeOnUpdate();
             $table->foreignId('playlist_id')->constrained()->cascadeOnDelete()->cascadeOnUpdate();
             $table->foreignId('playlist_sync_status_id')->constrained()->cascadeOnDelete()->cascadeOnUpdate();
-            $table->enum('type', ["group","channel","unknown"])->default('unknown');
-            $table->enum('status', ["added","removed","unknown"])->default('unknown');
+            $table->enum('type', ['group', 'channel', 'unknown'])->default('unknown');
+            $table->enum('status', ['added', 'removed', 'unknown'])->default('unknown');
             $table->json('meta');
             $table->timestamps();
         });

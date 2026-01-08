@@ -50,10 +50,10 @@ class StreamProfile extends Model
      * The 'args' field can store either:
      * 1. A full FFmpeg argument template string (e.g., "-c:v libx264 -preset faster...")
      * 2. JSON-encoded key-value pairs for predefined profile overrides
-     * 
+     *
      * This method attempts to parse as JSON first, falls back to empty array.
-     * 
-     * @param array $additionalVars Optional additional variables to merge
+     *
+     * @param  array  $additionalVars  Optional additional variables to merge
      * @return array Template variables as associative array
      */
     public function getTemplateVariables(array $additionalVars = []): array
@@ -74,7 +74,7 @@ class StreamProfile extends Model
     /**
      * Get the profile identifier for API usage.
      * Returns either custom args template or predefined profile name.
-     * 
+     *
      * @return string Profile template or name for m3u-proxy API
      */
     public function getProfileIdentifier(): string

@@ -2,8 +2,6 @@
 
 namespace App\Filament\GuestPanel\Pages\Concerns;
 
-use App\Facades\PlaylistFacade;
-
 trait HasPlaylist
 {
     protected static function getCurrentUuid(): ?string
@@ -11,6 +9,7 @@ trait HasPlaylist
         $referer = request()->header('referer');
         $refererSegment2 = $referer ? (explode('/', parse_url($referer, PHP_URL_PATH))[3] ?? null) : null;
         $uuid = request()->route('uuid') ?? request()->attributes->get('playlist_uuid') ?? $refererSegment2;
+
         return $uuid;
     }
 }

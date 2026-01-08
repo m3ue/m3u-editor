@@ -2,8 +2,8 @@
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
-use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
@@ -17,7 +17,7 @@ return new class extends Migration
         $duplicateIds = DB::table('authenticatables as a1')
             ->join('authenticatables as a2', function ($join) {
                 $join->on('a1.playlist_auth_id', '=', 'a2.playlist_auth_id')
-                     ->whereColumn('a1.id', '<', 'a2.id');
+                    ->whereColumn('a1.id', '<', 'a2.id');
             })
             ->pluck('a1.id');
 

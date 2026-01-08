@@ -3,8 +3,6 @@
 namespace App\Listeners;
 
 use App\Events\StreamingStopped;
-use Illuminate\Contracts\Queue\ShouldQueue;
-use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Support\Facades\Log;
 
 class StreamingStopListener
@@ -14,7 +12,7 @@ class StreamingStopListener
      */
     public function handle(StreamingStopped $event): void
     {
-        Log::channel('ffmpeg')->info('StreamingStopped event fired for playlist: ' . $event->playlistId);
+        Log::channel('ffmpeg')->info('StreamingStopped event fired for playlist: '.$event->playlistId);
 
         // Additional logic can be added here if needed...
     }

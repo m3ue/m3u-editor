@@ -28,6 +28,7 @@ class ListPlaylistSyncStatuses extends ListRecords
     public function getTitle(): string
     {
         $playlist = $this->getParentRecord();
+
         return "Sync Logs for {$playlist->name}";
     }
 

@@ -2,7 +2,6 @@
 
 namespace App\Filament\GuestPanel\Resources\Series\Pages;
 
-use App\Facades\PlaylistFacade;
 use App\Filament\GuestPanel\Pages\Concerns\HasPlaylist;
 use App\Filament\GuestPanel\Resources\Series\SeriesResource;
 use Filament\Actions;
@@ -49,7 +48,7 @@ class ViewSeries extends ViewRecord
                         TextEntry::make('plot')
                             ->label('Description')
                             ->columnSpanFull(),
-                    ])
+                    ]),
             ]);
     }
 }

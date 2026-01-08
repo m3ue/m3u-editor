@@ -51,7 +51,7 @@ class ProcessM3uImportChunk implements ShouldQueue
             $groupName = $job->variables['groupName'];
             foreach ($job->payload as $channel) {
                 // Make sure name is set
-                if (!isset($channel['name'])) {
+                if (! isset($channel['name'])) {
                     continue;
                 }
 
@@ -65,7 +65,7 @@ class ProcessM3uImportChunk implements ShouldQueue
 
             // Deduplicate the channels
             $bulk = collect($bulk)
-                ->unique(fn($item) => $item['source_id'] . $item['playlist_id'])
+                ->unique(fn ($item) => $item['source_id'].$item['playlist_id'])
                 ->toArray();
 
             // Upsert the channels

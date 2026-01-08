@@ -2,25 +2,23 @@
 
 namespace App\Filament\Resources\PlaylistAuths\RelationManagers;
 
-use Filament\Schemas\Schema;
-use Filament\Forms\Components\Select;
-use Filament\Forms\Components\TextInput;
-use Filament\Tables\Columns\TextColumn;
-use Filament\Actions\CreateAction;
-use Illuminate\Database\Eloquent\Model;
-use Filament\Actions\DeleteAction;
-use Filament\Tables\Enums\RecordActionsPosition;
-use Filament\Actions\BulkActionGroup;
-use Filament\Actions\DeleteBulkAction;
 use App\Models\CustomPlaylist;
 use App\Models\MergedPlaylist;
 use App\Models\Playlist;
 use App\Tables\Columns\PivotNameColumn;
 use App\Tables\Columns\PlaylistUrlColumn;
-use Filament\Forms;
+use Filament\Actions\BulkActionGroup;
+use Filament\Actions\CreateAction;
+use Filament\Actions\DeleteAction;
+use Filament\Actions\DeleteBulkAction;
+use Filament\Forms\Components\Select;
+use Filament\Forms\Components\TextInput;
 use Filament\Resources\RelationManagers\RelationManager;
-use Filament\Tables;
+use Filament\Schemas\Schema;
+use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Model;
 
 class PlaylistsRelationManager extends RelationManager
 {
@@ -29,7 +27,7 @@ class PlaylistsRelationManager extends RelationManager
     protected static ?string $title = 'Assigned to';
 
     protected $listeners = ['refreshRelation' => '$refresh'];
-    
+
     public function form(Schema $schema): Schema
     {
         return $schema
@@ -52,27 +50,27 @@ class PlaylistsRelationManager extends RelationManager
                     ->label('Playlist')
                     ->helperText('Select the playlist you would like to assign this auth to.')
                     ->options(Playlist::where(['user_id' => auth()->id()])->get(['name', 'id'])->pluck('name', 'id'))
-                    ->hidden(fn($get) => $get('authenticatable_type') !== Playlist::class)
+                    ->hidden(fn ($get) => $get('authenticatable_type') !== Playlist::class)
                     ->searchable(),
                 Select::make('authenticatable_id')
                     ->required()
                     ->label('Custom Playlist')
                     ->helperText('Select the playlist you would like to assign this auth to.')
                     ->options(CustomPlaylist::where(['user_id' => auth()->id()])->get(['name', 'id'])->pluck('name', 'id'))
-                    ->hidden(fn($get) => $get('authenticatable_type') !== CustomPlaylist::class)
+                    ->hidden(fn ($get) => $get('authenticatable_type') !== CustomPlaylist::class)
                     ->searchable(),
                 Select::make('authenticatable_id')
                     ->required()
                     ->label('Merged Playlist')
                     ->helperText('Select the playlist you would like to assign this auth to.')
                     ->options(MergedPlaylist::where(['user_id' => auth()->id()])->get(['name', 'id'])->pluck('name', 'id'))
-                    ->hidden(fn($get) => $get('authenticatable_type') !== MergedPlaylist::class)
+                    ->hidden(fn ($get) => $get('authenticatable_type') !== MergedPlaylist::class)
                     ->searchable(),
 
                 TextInput::make('playlist_auth_id')
                     ->label('Playlist Auth ID')
                     ->default($this->ownerRecord->id)
-                    ->hidden()
+                    ->hidden(),
             ]);
     }
 
@@ -100,15 +98,15 @@ class PlaylistsRelationManager extends RelationManager
                     ->modalHeading('Assign Auth to Playlist')
                     ->using(function (array $data): Model {
                         $playlistAuth = $this->ownerRecord;
-                        
+
                         // Get the model to assign to
                         $modelClass = $data['authenticatable_type'];
                         $modelId = $data['authenticatable_id'];
                         $model = $modelClass::findOrFail($modelId);
-                        
+
                         // Use the assignTo method to ensure single assignment
                         $playlistAuth->assignTo($model);
-                        
+
                         // Return the created pivot record for Filament
                         return $playlistAuth->assignedPlaylist;
                     }),

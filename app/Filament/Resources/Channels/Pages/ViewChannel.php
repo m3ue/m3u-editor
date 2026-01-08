@@ -2,11 +2,9 @@
 
 namespace App\Filament\Resources\Channels\Pages;
 
-use Filament\Schemas\Schema;
 use App\Filament\Resources\Channels\ChannelResource;
-use Filament\Actions;
-use Filament\Infolists;
 use Filament\Resources\Pages\ViewRecord;
+use Filament\Schemas\Schema;
 
 class ViewChannel extends ViewRecord
 {

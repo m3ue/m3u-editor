@@ -2,16 +2,10 @@
 
 namespace App\Filament\Resources\Categories\RelationManagers;
 
-use Filament\Schemas\Schema;
 use App\Filament\Resources\Series\SeriesResource;
-use App\Filament\Resources\Series\Pages\ListSeries;
-use Filament\Forms;
-use Filament\Infolists\Infolist;
 use Filament\Resources\RelationManagers\RelationManager;
-use Filament\Tables;
+use Filament\Schemas\Schema;
 use Filament\Tables\Table;
-use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Database\Eloquent\SoftDeletingScope;
 use Hydrat\TableLayoutToggle\Concerns\HasToggleableTable;
 
 class SeriesRelationManager extends RelationManager
@@ -38,6 +32,7 @@ class SeriesRelationManager extends RelationManager
         $table = $table->reorderRecordsTriggerAction(function ($action) {
             return $action->button()->label('Sort');
         })->defaultSort('sort', 'asc')->reorderable('sort');
+
         return SeriesResource::setupTable($table, $this->ownerRecord->id);
     }
 }

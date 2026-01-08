@@ -2,8 +2,8 @@
 
 namespace App\Livewire;
 
-use Livewire\Component;
 use Illuminate\Database\Eloquent\Model;
+use Livewire\Component;
 
 class XtreamApiInfo extends Component
 {

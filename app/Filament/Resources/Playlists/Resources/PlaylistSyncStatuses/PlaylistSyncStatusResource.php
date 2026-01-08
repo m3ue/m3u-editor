@@ -4,23 +4,20 @@ namespace App\Filament\Resources\Playlists\Resources\PlaylistSyncStatuses;
 
 use App\Filament\Resources\Playlists\PlaylistResource;
 use App\Models\PlaylistSyncStatus;
-use BackedEnum;
 use Filament\Actions;
-use Filament\Forms;
 use Filament\Infolists;
-use Filament\Resources\Resource;
 use Filament\Resources\ParentResourceRegistration;
-use Filament\Schemas\Schema;
+use Filament\Resources\Resource;
 use Filament\Schemas\Components\Section;
-use Filament\Support\Icons\Heroicon;
-use Filament\Tables;
-use Filament\Tables\Table;
+use Filament\Schemas\Schema;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Enums\RecordActionsPosition;
+use Filament\Tables\Table;
 
 class PlaylistSyncStatusResource extends Resource
 {
     protected static ?string $model = PlaylistSyncStatus::class;
+
     protected static ?string $parentResource = PlaylistResource::class;
 
     public static function getParentResourceRegistration(): ?ParentResourceRegistration

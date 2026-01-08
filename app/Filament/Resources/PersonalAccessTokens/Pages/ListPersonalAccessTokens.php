@@ -48,7 +48,7 @@ class ListPersonalAccessTokens extends ListRecords
                 ->iconPosition('after')
                 ->color('gray')
                 ->url('/docs/api')
-                ->openUrlInNewTab(true)
+                ->openUrlInNewTab(true),
         ];
     }
 

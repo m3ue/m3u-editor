@@ -40,7 +40,7 @@ class UpdateM3uProxy extends Command
         $proxyPath = '/opt/m3u-proxy';
 
         if (! is_dir($proxyPath)) {
-            $this->error('❌ m3u-proxy directory not found at ' . $proxyPath);
+            $this->error('❌ m3u-proxy directory not found at '.$proxyPath);
             $this->info('💡 This command only works inside the Docker container.');
 
             return self::FAILURE;
@@ -94,7 +94,7 @@ class UpdateM3uProxy extends Command
 
         $this->newLine();
         $this->info('✅ m3u-proxy updated successfully!');
-        $this->info('📝 Updated from commit ' . substr($currentCommit, 0, 7) . ' to ' . substr($newCommit, 0, 7));
+        $this->info('📝 Updated from commit '.substr($currentCommit, 0, 7).' to '.substr($newCommit, 0, 7));
 
         if ($this->option('restart')) {
             $this->info('🔄 Restarting m3u-proxy service...');

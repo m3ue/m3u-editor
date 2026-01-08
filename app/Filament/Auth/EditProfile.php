@@ -2,9 +2,9 @@
 
 namespace App\Filament\Auth;
 
-use Filament\Schemas\Schema;
-use Filament\Schemas\Components\Section;
 use Filament\Forms;
+use Filament\Schemas\Components\Section;
+use Filament\Schemas\Schema;
 
 class EditProfile extends \Filament\Auth\Pages\EditProfile
 {
@@ -25,7 +25,7 @@ class EditProfile extends \Filament\Auth\Pages\EditProfile
                         $this->getPasswordFormComponent()
                             ->helperText('Leave blank to keep the current password'),
                         $this->getPasswordConfirmationFormComponent(),
-                    ])
+                    ]),
             ]);
     }
 }

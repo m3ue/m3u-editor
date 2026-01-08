@@ -21,24 +21,28 @@ class FetchTmdbIds implements ShouldQueue
     use Queueable;
 
     public $tries = 1;
+
     public $timeout = 60 * 30; // 30 minutes max for batch processing
 
     protected int $foundCount = 0;
+
     protected int $notFoundCount = 0;
+
     protected int $skippedCount = 0;
+
     protected int $errorCount = 0;
 
     /**
      * Create a new job instance.
      *
-     * @param Collection|array|null $vodChannelIds VOD channel IDs to process (legacy support)
-     * @param Collection|array|null $seriesIds Series IDs to process (legacy support)
-     * @param int|null $vodPlaylistId Playlist ID for VOD channels
-     * @param int|null $seriesPlaylistId Playlist ID for series
-     * @param bool $allVodPlaylists Process all VOD from all user playlists
-     * @param bool $allSeriesPlaylists Process all series from all user playlists
-     * @param bool $overwriteExisting Whether to overwrite existing IDs
-     * @param User|null $user The user to notify upon completion
+     * @param  Collection|array|null  $vodChannelIds  VOD channel IDs to process (legacy support)
+     * @param  Collection|array|null  $seriesIds  Series IDs to process (legacy support)
+     * @param  int|null  $vodPlaylistId  Playlist ID for VOD channels
+     * @param  int|null  $seriesPlaylistId  Playlist ID for series
+     * @param  bool  $allVodPlaylists  Process all VOD from all user playlists
+     * @param  bool  $allSeriesPlaylists  Process all series from all user playlists
+     * @param  bool  $overwriteExisting  Whether to overwrite existing IDs
+     * @param  User|null  $user  The user to notify upon completion
      */
     public function __construct(
         public Collection|array|null $vodChannelIds = null,
@@ -64,19 +68,20 @@ class FetchTmdbIds implements ShouldQueue
      */
     public function handle(TmdbService $tmdb): void
     {
-        if (!$tmdb->isConfigured()) {
+        if (! $tmdb->isConfigured()) {
             Log::warning('FetchTmdbIds: TMDB API key not configured');
             $this->notifyUser('TMDB Lookup Failed', 'TMDB API key is not configured. Please add your API key in Settings.', 'danger');
+
             return;
         }
 
         // Process VOD channels (new playlist-based or legacy ID-based)
-        if ($this->vodPlaylistId || $this->allVodPlaylists || !empty($this->vodChannelIds)) {
+        if ($this->vodPlaylistId || $this->allVodPlaylists || ! empty($this->vodChannelIds)) {
             $this->processVodChannels($tmdb);
         }
 
         // Process Series (new playlist-based or legacy ID-based)
-        if ($this->seriesPlaylistId || $this->allSeriesPlaylists || !empty($this->seriesIds)) {
+        if ($this->seriesPlaylistId || $this->allSeriesPlaylists || ! empty($this->seriesIds)) {
             $this->processSeries($tmdb);
         }
 
@@ -100,7 +105,7 @@ class FetchTmdbIds implements ShouldQueue
             $query->whereHas('playlist', function ($q) {
                 $q->where('user_id', $this->user->id);
             })->where('enabled', true);
-        } elseif (!empty($this->vodChannelIds)) {
+        } elseif (! empty($this->vodChannelIds)) {
             // Legacy: direct ID array support
             $query->whereIn('id', $this->vodChannelIds)
                 ->where('user_id', $this->user?->id);
@@ -128,8 +133,9 @@ class FetchTmdbIds implements ShouldQueue
     protected function processVodChannel(TmdbService $tmdb, Channel $channel): void
     {
         // Check if already has TMDB ID in the dedicated column
-        if ($channel->tmdb_id && !$this->overwriteExisting) {
+        if ($channel->tmdb_id && ! $this->overwriteExisting) {
             $this->skippedCount++;
+
             return;
         }
 
@@ -139,9 +145,10 @@ class FetchTmdbIds implements ShouldQueue
             ?? null;
 
         // If legacy ID exists and we're not overwriting, migrate it to the column and skip
-        if ($legacyTmdbId && !$this->overwriteExisting) {
+        if ($legacyTmdbId && ! $this->overwriteExisting) {
             $channel->update(['tmdb_id' => $legacyTmdbId]);
             $this->skippedCount++;
+
             return;
         }
 
@@ -153,6 +160,7 @@ class FetchTmdbIds implements ShouldQueue
 
         if (empty($title)) {
             $this->skippedCount++;
+
             return;
         }
 
@@ -165,14 +173,14 @@ class FetchTmdbIds implements ShouldQueue
                 'tmdb_id' => $result['tmdb_id'],
             ];
 
-            if (!empty($result['imdb_id'])) {
+            if (! empty($result['imdb_id'])) {
                 $updateData['imdb_id'] = $result['imdb_id'];
             }
 
             // Also update legacy info field for backward compatibility
             $info = $channel->info ?? [];
             $info['tmdb_id'] = $result['tmdb_id'];
-            if (!empty($result['imdb_id'])) {
+            if (! empty($result['imdb_id'])) {
                 $info['imdb_id'] = $result['imdb_id'];
             }
             $updateData['info'] = $info;
@@ -212,7 +220,7 @@ class FetchTmdbIds implements ShouldQueue
         } elseif ($this->allSeriesPlaylists && $this->user) {
             $query->where('user_id', $this->user->id)
                 ->where('enabled', true);
-        } elseif (!empty($this->seriesIds)) {
+        } elseif (! empty($this->seriesIds)) {
             // Legacy: direct ID array support
             $query->whereIn('id', $this->seriesIds)
                 ->where('user_id', $this->user?->id);
@@ -244,7 +252,7 @@ class FetchTmdbIds implements ShouldQueue
         $existingTvdbId = $series->tvdb_id ?? $series->metadata['tvdb_id'] ?? null;
         $existingTmdbId = $series->tmdb_id ?? $series->metadata['tmdb_id'] ?? null;
 
-        if (($existingTvdbId || $existingTmdbId) && !$this->overwriteExisting) {
+        if (($existingTvdbId || $existingTmdbId) && ! $this->overwriteExisting) {
             Log::debug('FetchTmdbIds: Skipping series (already has IDs)', [
                 'series_id' => $series->id,
                 'name' => $series->name,
@@ -253,6 +261,7 @@ class FetchTmdbIds implements ShouldQueue
                 'overwrite_existing' => $this->overwriteExisting,
             ]);
             $this->skippedCount++;
+
             return;
         }
 
@@ -264,7 +273,7 @@ class FetchTmdbIds implements ShouldQueue
             $year = (int) substr($series->release_date, 0, 4);
         }
 
-        if (!$year) {
+        if (! $year) {
             $year = TmdbService::extractYearFromTitle($name);
         }
 
@@ -273,6 +282,7 @@ class FetchTmdbIds implements ShouldQueue
                 'series_id' => $series->id,
             ]);
             $this->skippedCount++;
+
             return;
         }
 
@@ -293,20 +303,20 @@ class FetchTmdbIds implements ShouldQueue
                 'tmdb_id' => $result['tmdb_id'],
             ];
 
-            if (!empty($result['tvdb_id'])) {
+            if (! empty($result['tvdb_id'])) {
                 $updateData['tvdb_id'] = $result['tvdb_id'];
             }
-            if (!empty($result['imdb_id'])) {
+            if (! empty($result['imdb_id'])) {
                 $updateData['imdb_id'] = $result['imdb_id'];
             }
 
             // Also update legacy metadata field for backward compatibility
             $metadata = $series->metadata ?? [];
             $metadata['tmdb_id'] = $result['tmdb_id'];
-            if (!empty($result['tvdb_id'])) {
+            if (! empty($result['tvdb_id'])) {
                 $metadata['tvdb_id'] = $result['tvdb_id'];
             }
-            if (!empty($result['imdb_id'])) {
+            if (! empty($result['imdb_id'])) {
                 $metadata['imdb_id'] = $result['imdb_id'];
             }
             $updateData['metadata'] = $metadata;
@@ -361,7 +371,7 @@ class FetchTmdbIds implements ShouldQueue
      */
     protected function notifyUser(string $title, string $body, string $type = 'success'): void
     {
-        if (!$this->user) {
+        if (! $this->user) {
             return;
         }
 
@@ -396,7 +406,7 @@ class FetchTmdbIds implements ShouldQueue
 
         $this->notifyUser(
             'TMDB ID Lookup Failed',
-            'An error occurred while fetching TMDB IDs: ' . $exception->getMessage(),
+            'An error occurred while fetching TMDB IDs: '.$exception->getMessage(),
             'danger'
         );
     }

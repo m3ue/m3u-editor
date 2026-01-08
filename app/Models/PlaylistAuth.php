@@ -2,7 +2,6 @@
 
 namespace App\Models;
 
-use InvalidArgumentException;
 use App\Pivots\PlaylistAuthPivot;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -10,6 +9,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Validation\ValidationException;
+use InvalidArgumentException;
 
 class PlaylistAuth extends Model
 {
@@ -57,6 +57,7 @@ class PlaylistAuth extends Model
     public function playlist()
     {
         $pivot = $this->assignedPlaylist;
+
         return $pivot ? $pivot->authenticatable : null;
     }
 
@@ -66,7 +67,7 @@ class PlaylistAuth extends Model
      */
     public function assignTo(Model $model): void
     {
-        if (!in_array(get_class($model), [Playlist::class, CustomPlaylist::class, MergedPlaylist::class])) {
+        if (! in_array(get_class($model), [Playlist::class, CustomPlaylist::class, MergedPlaylist::class])) {
             throw new InvalidArgumentException('PlaylistAuth can only be assigned to Playlist, CustomPlaylist, or MergedPlaylist models');
         }
 
@@ -95,6 +96,7 @@ class PlaylistAuth extends Model
     public function getAssignedModel(): ?Model
     {
         $pivot = $this->assignedPlaylist;
+
         return $pivot ? $pivot->authenticatable : null;
     }
 
@@ -112,6 +114,7 @@ class PlaylistAuth extends Model
     public function getAssignedModelNameAttribute(): ?string
     {
         $model = $this->getAssignedModel();
+
         return $model ? $model->name : '';
     }
 
@@ -122,7 +125,7 @@ class PlaylistAuth extends Model
     {
         if ($relation === 'playlists') {
             if ($this->playlists()->exists()) {
-                throw new ValidationException("A PlaylistAuth can only be assigned to one model at a time.");
+                throw new ValidationException('A PlaylistAuth can only be assigned to one model at a time.');
             }
         }
 

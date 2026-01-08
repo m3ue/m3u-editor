@@ -24,7 +24,7 @@ class StrmFileMappingFactory extends Factory
             'syncable_type' => Channel::class,
             'syncable_id' => fn (array $attributes) => Channel::factory()->create()->id,
             'sync_location' => '/tmp/strm-test',
-            'current_path' => '/tmp/strm-test/' . $this->faker->word() . '.strm',
+            'current_path' => '/tmp/strm-test/'.$this->faker->word().'.strm',
             'current_url' => $this->faker->url(),
             'path_options' => [
                 'use_group_folders' => true,

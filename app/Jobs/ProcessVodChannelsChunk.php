@@ -2,7 +2,6 @@
 
 namespace App\Jobs;
 
-use App\Enums\Status;
 use App\Models\Playlist;
 use App\Services\XtreamService;
 use App\Traits\ProviderRequestDelay;
@@ -13,8 +12,8 @@ use Illuminate\Support\Facades\Log;
 
 class ProcessVodChannelsChunk implements ShouldQueue
 {
-    use Queueable;
     use ProviderRequestDelay;
+    use Queueable;
 
     // Don't retry the job on failure
     public $tries = 1;
@@ -49,8 +48,9 @@ class ProcessVodChannelsChunk implements ShouldQueue
             playlist: $playlist,
             retryLimit: 5
         );
-        if (!$xtream) {
-            Log::error('Xtream service initialization failed for playlist ID ' . $playlist->id . ' in VOD chunk ' . $this->chunkIndex);
+        if (! $xtream) {
+            Log::error('Xtream service initialization failed for playlist ID '.$playlist->id.' in VOD chunk '.$this->chunkIndex);
+
             return;
         }
 
@@ -67,12 +67,12 @@ class ProcessVodChannelsChunk implements ShouldQueue
                 $this->withProviderThrottling(fn () => $channel->fetchMetadata($xtream));
             } catch (\Exception $e) {
                 // Log the error and continue processing other channels
-                Log::error('Failed to process VOD data for channel ID ' . $channel->id . ' in chunk ' . $this->chunkIndex . ': ' . $e->getMessage());
+                Log::error('Failed to process VOD data for channel ID '.$channel->id.' in chunk '.$this->chunkIndex.': '.$e->getMessage());
 
                 // Notify user about the specific error but continue processing
                 Notification::make()
                     ->title('VOD Processing Warning')
-                    ->body('Failed to process VOD data for channel: ' . $channel->name . '. Continuing with remaining channels.')
+                    ->body('Failed to process VOD data for channel: '.$channel->name.'. Continuing with remaining channels.')
                     ->warning()
                     ->broadcast($playlist->user)
                     ->sendToDatabase($playlist->user);
@@ -100,6 +100,6 @@ class ProcessVodChannelsChunk implements ShouldQueue
 
         $playlist->update(['vod_progress' => $chunkCompleteProgress]);
 
-        Log::info('Completed VOD chunk ' . ($this->chunkIndex + 1) . ' of ' . $this->totalChunks . ' for playlist ID ' . $playlist->id);
+        Log::info('Completed VOD chunk '.($this->chunkIndex + 1).' of '.$this->totalChunks.' for playlist ID '.$playlist->id);
     }
 }

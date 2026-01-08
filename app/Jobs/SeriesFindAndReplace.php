@@ -6,8 +6,8 @@ use App\Models\Series;
 use App\Models\User;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
-use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\DB;
 
 class SeriesFindAndReplace implements ShouldQueue
@@ -40,11 +40,11 @@ class SeriesFindAndReplace implements ShouldQueue
         $updated = 0;
 
         // Process channels in chunks for better performance
-        if (!$this->series) {
+        if (! $this->series) {
             // Use chunking to process large datasets efficiently
             Series::query()
                 ->where('user_id', $this->user_id)
-                ->when(!$this->all_series && $this->series_id, fn($query) => $query->where('id', $this->series_id))
+                ->when(! $this->all_series && $this->series_id, fn ($query) => $query->where('id', $this->series_id))
                 ->chunkById(1000, function ($series) use (&$updated) {
                     $updated += $this->processSeriesChunk($series);
                 });
@@ -101,11 +101,11 @@ class SeriesFindAndReplace implements ShouldQueue
             if ($this->use_regex) {
                 // Escape existing delimiters in user input
                 $delimiter = '/';
-                $pattern = str_replace($delimiter, '\\' . $delimiter, $find);
-                $finalPattern = $delimiter . $pattern . $delimiter . 'ui';
+                $pattern = str_replace($delimiter, '\\'.$delimiter, $find);
+                $finalPattern = $delimiter.$pattern.$delimiter.'ui';
 
                 // Check if the find string is in the value to modify
-                if (!preg_match($finalPattern, $valueToModify)) {
+                if (! preg_match($finalPattern, $valueToModify)) {
                     continue;
                 }
 
@@ -113,7 +113,7 @@ class SeriesFindAndReplace implements ShouldQueue
                 $newValue = preg_replace($finalPattern, $replace, $valueToModify);
             } else {
                 // Check if the find string is in the value to modify
-                if (!stristr($valueToModify, $find)) {
+                if (! stristr($valueToModify, $find)) {
                     continue;
                 }
 
@@ -127,13 +127,13 @@ class SeriesFindAndReplace implements ShouldQueue
         }
 
         // Perform batch update if we have changes
-        if (!empty($updatesMap)) {
+        if (! empty($updatesMap)) {
             // Build the update cases for batch update
             $cases = [];
             $ids = array_keys($updatesMap);
 
             foreach ($updatesMap as $id => $value) {
-                $cases[] = "WHEN {$id} THEN " . DB::connection()->getPdo()->quote($value);
+                $cases[] = "WHEN {$id} THEN ".DB::connection()->getPdo()->quote($value);
             }
 
             $caseStatement = implode(' ', $cases);
@@ -143,8 +143,8 @@ class SeriesFindAndReplace implements ShouldQueue
                 UPDATE series 
                 SET {$this->column} = CASE id {$caseStatement} END,
                     updated_at = ?
-                WHERE id IN (" . implode(',', $ids) . ")
-            ", [now()]);
+                WHERE id IN (".implode(',', $ids).')
+            ', [now()]);
 
             return count($updatesMap);
         }

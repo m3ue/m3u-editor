@@ -2,12 +2,11 @@
 
 namespace Database\Factories;
 
-use Illuminate\Database\Eloquent\Factories\Factory;
-use Illuminate\Support\Str;
 use App\Models\Playlist;
 use App\Models\PlaylistSyncStatus;
 use App\Models\PlaylistSyncStatusLog;
 use App\Models\User;
+use Illuminate\Database\Eloquent\Factories\Factory;
 
 class PlaylistSyncStatusLogFactory extends Factory
 {
@@ -28,8 +27,8 @@ class PlaylistSyncStatusLogFactory extends Factory
             'user_id' => User::factory(),
             'playlist_id' => Playlist::factory(),
             'playlist_sync_status_id' => PlaylistSyncStatus::factory(),
-            'type' => fake()->randomElement(["group","channel","unknown"]),
-            'status' => fake()->randomElement(["added","removed","unknown"]),
+            'type' => fake()->randomElement(['group', 'channel', 'unknown']),
+            'status' => fake()->randomElement(['added', 'removed', 'unknown']),
             'meta' => '{}',
         ];
     }

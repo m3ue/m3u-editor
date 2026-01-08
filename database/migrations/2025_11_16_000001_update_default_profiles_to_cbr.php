@@ -7,7 +7,7 @@ return new class extends Migration
 {
     /**
      * Run the migrations.
-     * 
+     *
      * Updates existing default stream profiles from CRF mode to CBR mode
      * to prevent VBV underflow errors during live streaming.
      */
@@ -36,7 +36,7 @@ return new class extends Migration
 
     /**
      * Reverse the migrations.
-     * 
+     *
      * Reverts default profiles back to CRF mode (not recommended).
      */
     public function down(): void
@@ -62,4 +62,3 @@ return new class extends Migration
             ]);
     }
 };
-

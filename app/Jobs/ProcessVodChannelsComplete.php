@@ -44,7 +44,7 @@ class ProcessVodChannelsComplete implements ShouldQueue
 
         $message = "VOD sync completed successfully for playlist \"{$this->playlist->name}\".";
 
-        Log::info('Completed processing VOD channels for playlist ID ' . $this->playlist->id);
+        Log::info('Completed processing VOD channels for playlist ID '.$this->playlist->id);
 
         Notification::make()
             ->success()

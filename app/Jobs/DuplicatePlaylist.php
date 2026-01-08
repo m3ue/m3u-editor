@@ -2,8 +2,8 @@
 
 namespace App\Jobs;
 
-use Exception;
 use App\Models\Playlist;
+use Exception;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -44,9 +44,9 @@ class DuplicatePlaylist implements ShouldQueue
                 'name',
                 'uuid',
                 'short_urls_enabled',
-                'short_urls'
+                'short_urls',
             ]);
-            $newPlaylist->name = $this->name ?? $playlist->name . ' (Copy)';
+            $newPlaylist->name = $this->name ?? $playlist->name.' (Copy)';
             $newPlaylist->uuid = Str::orderedUuid()->toString();
             $newPlaylist->created_at = $now;
             $newPlaylist->updated_at = $now;

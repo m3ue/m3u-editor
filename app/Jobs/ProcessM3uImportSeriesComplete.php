@@ -22,7 +22,7 @@ class ProcessM3uImportSeriesComplete implements ShouldQueue
      */
     public function __construct(
         public Playlist $playlist,
-        public string   $batchNo,
+        public string $batchNo,
     ) {}
 
     /**

@@ -18,7 +18,7 @@ return new class extends Migration
             $table->string('name');
             $table->uuid('uuid');
             $table->longText('errors')->nullable();
-            $table->enum('status', ["pending","processing","completed","failed"])->default('pending');
+            $table->enum('status', ['pending', 'processing', 'completed', 'failed'])->default('pending');
             $table->boolean('processing')->default(false);
             $table->float('progress')->default('0');
             $table->float('sync_time')->nullable();

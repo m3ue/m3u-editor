@@ -2,10 +2,8 @@
 
 namespace App\Filament\Resources\CustomPlaylists\Pages;
 
-use App\Filament\Resources\CustomPlaylists\Pages\EditCustomPlaylist;
-use Filament\Actions\CreateAction;
 use App\Filament\Resources\CustomPlaylists\CustomPlaylistResource;
-use Filament\Actions;
+use Filament\Actions\CreateAction;
 use Filament\Resources\Pages\ListRecords;
 
 class ListCustomPlaylists extends ListRecords
@@ -19,7 +17,7 @@ class ListCustomPlaylists extends ListRecords
         return [
             CreateAction::make()
                 ->slideOver()
-                ->successRedirectUrl(fn($record): string => EditCustomPlaylist::getUrl(['record' => $record])),
+                ->successRedirectUrl(fn ($record): string => EditCustomPlaylist::getUrl(['record' => $record])),
         ];
     }
 }
