@@ -2,11 +2,43 @@ name: Experimental
 on:
   push:
     branches: [experimental]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-experimental
+  cancel-in-progress: false
+
+env:
+  REGISTRY_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/m3u-editor
 
 jobs:
-  push-amd64:
-    name: Publish experimental m3u-editor Docker image (amd64)
+  # Extract version from config/dev.php
+  get-version:
+    name: Get Version
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract experimental version from config
+        id: version
+        run: |
+          VERSION=$(grep -oP "'experimental_version'\s*=>\s*'\K[^']+" config/dev.php | sed 's/-exp$//')
+          if [ -z "$VERSION" ]; then
+            echo "::error::Could not extract experimental_version from config/dev.php"
+            exit 1
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "📦 Experimental version: $VERSION"
+
+  push-amd64:
+    name: Build & Push (amd64)
+    runs-on: ubuntu-latest
+    needs: [get-version]
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -21,22 +53,30 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build and push amd64
-        uses: docker/build-push-action@v5
+        id: build
+        uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64
           push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/m3u-editor:experimental-amd64
+          tags: |
+            ${{ env.REGISTRY_IMAGE }}:experimental-amd64
+            ${{ env.REGISTRY_IMAGE }}:experimental-${{ needs.get-version.outputs.version }}-amd64
           build-args: |
             GIT_BRANCH=${{ github.ref_name }}
             GIT_COMMIT=${{ github.sha }}
             GIT_TAG=${{ github.ref_type == 'tag' && github.ref_name || '' }}
+          cache-from: type=gha,scope=experimental-amd64
+          cache-to: type=gha,mode=max,scope=experimental-amd64
           provenance: false
           sbom: false
 
   push-arm64:
-    name: Publish experimental m3u-editor Docker image (arm64)
+    name: Build & Push (arm64)
     runs-on: ubuntu-22.04-arm
+    needs: [get-version]
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -51,30 +91,29 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build and push arm64
-        uses: docker/build-push-action@v5
+        id: build
+        uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/arm64
           push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/m3u-editor:experimental-arm64
+          tags: |
+            ${{ env.REGISTRY_IMAGE }}:experimental-arm64
+            ${{ env.REGISTRY_IMAGE }}:experimental-${{ needs.get-version.outputs.version }}-arm64
           build-args: |
             GIT_BRANCH=${{ github.ref_name }}
             GIT_COMMIT=${{ github.sha }}
             GIT_TAG=${{ github.ref_type == 'tag' && github.ref_name || '' }}
+          cache-from: type=gha,scope=experimental-arm64
+          cache-to: type=gha,mode=max,scope=experimental-arm64
           provenance: false
           sbom: false
 
   push-manifest:
-    name: Push Docker Manifest for experimental
+    name: Create Multi-arch Manifest
     runs-on: ubuntu-latest
-    needs: [push-amd64, push-arm64]
+    needs: [get-version, push-amd64, push-arm64]
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -84,11 +123,46 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Create manifest list
+      - name: Create and push experimental manifest
         run: |
-          docker manifest create ${{ secrets.DOCKERHUB_USERNAME }}/m3u-editor:experimental \
-            ${{ secrets.DOCKERHUB_USERNAME }}/m3u-editor:experimental-amd64 \
-            ${{ secrets.DOCKERHUB_USERNAME }}/m3u-editor:experimental-arm64
+          docker buildx imagetools create -t ${{ env.REGISTRY_IMAGE }}:experimental \
+            ${{ env.REGISTRY_IMAGE }}:experimental-amd64 \
+            ${{ env.REGISTRY_IMAGE }}:experimental-arm64
 
-      - name: Push manifest list
-        run: docker manifest push ${{ secrets.DOCKERHUB_USERNAME }}/m3u-editor:experimental
+      - name: Create and push versioned manifest
+        run: |
+          docker buildx imagetools create -t ${{ env.REGISTRY_IMAGE }}:experimental-${{ needs.get-version.outputs.version }} \
+            ${{ env.REGISTRY_IMAGE }}:experimental-${{ needs.get-version.outputs.version }}-amd64 \
+            ${{ env.REGISTRY_IMAGE }}:experimental-${{ needs.get-version.outputs.version }}-arm64
+
+      - name: Inspect manifests
+        run: |
+          echo "📦 Experimental (latest) manifest:"
+          docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:experimental
+          echo ""
+          echo "📦 Versioned manifest (experimental-${{ needs.get-version.outputs.version }}):"
+          docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:experimental-${{ needs.get-version.outputs.version }}
+
+      - name: Summary
+        run: |
+          echo "## 🐳 Docker Images Published" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Tag | Description |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|-------------|" >> $GITHUB_STEP_SUMMARY
+          echo "| \`${{ env.REGISTRY_IMAGE }}:experimental\` | Latest experimental build |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`${{ env.REGISTRY_IMAGE }}:experimental-${{ needs.get-version.outputs.version }}\` | Pinned version |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+
+  notify-failure:
+    name: Notify on Failure
+    runs-on: ubuntu-latest
+    needs: [push-amd64, push-arm64, push-manifest]
+    if: failure()
+    steps:
+      - name: Report failure
+        run: |
+          echo "::error::Experimental deployment failed! Check the workflow logs."
+          echo "Failed job: ${{ github.workflow }}"
+          echo "Commit: ${{ github.sha }}"
+          echo "Branch: ${{ github.ref_name }}"

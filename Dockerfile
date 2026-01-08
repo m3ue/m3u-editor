@@ -11,72 +11,114 @@ ARG M3U_PROXY_REPO=https://github.com/sparkison/m3u-proxy.git
 ARG M3U_PROXY_BRANCH=main
 
 ########################################
-# Composer builder — installs PHP dependencies
+# Stage 1: Composer builder - installs PHP dependencies
 ########################################
-FROM composer:2 AS composer
+FROM composer:2 AS composer_builder
 WORKDIR /app
 
-# Copy composer metadata first for better caching
+# Copy composer metadata first for better layer caching
 COPY composer.json composer.lock ./
-# Copy everything else to ensure autoload generation is correct
-COPY . /app
 
-# Some composer platform requirements (ext-intl, ext-pcntl) are provided by
-# the runtime image. To keep the composer stage portable across different
-# composer base images (alpine/debian) we skip compiling extensions here and
-# let the runtime image provide them. Run composer with ignored platform requirements
-RUN composer install --no-dev --no-interaction --no-progress -o --prefer-dist --ignore-platform-reqs
+# Install dependencies first (cached if composer files unchanged)
+# Some platform requirements (ext-intl, ext-pcntl) are provided by the runtime image
+RUN composer install --no-dev --no-interaction --no-progress -o --prefer-dist --ignore-platform-reqs --no-scripts --no-autoloader
+
+# Copy application code for autoload generation
+COPY app/ ./app/
+COPY bootstrap/ ./bootstrap/
+COPY config/ ./config/
+COPY database/ ./database/
+COPY routes/ ./routes/
+COPY artisan ./
+
+# Generate optimized autoloader
+RUN composer dump-autoload --no-dev --optimize --classmap-authoritative
 
 ########################################
-# Node builder — builds frontend assets
+# Stage 2: Node builder - builds frontend assets
 ########################################
 FROM node:18-alpine AS node_builder
 WORKDIR /app
 
-# Copy only the files required for npm install to leverage Docker cache
+# Set production environment for optimized builds
+ENV NODE_ENV=production
+
+# Copy package files first for better layer caching
 COPY package.json package-lock.json ./
-RUN npm ci --silent
+RUN npm ci --silent --omit=dev
 
-# Copy the rest of the app
-COPY . ./
+# Copy only files needed for the build
+COPY vite.config.js postcss.config.js ./
+COPY resources/ ./resources/
+COPY public/ ./public/
 
-# Copy vendor built by the composer stage so Vite can resolve vendor CSS files
-COPY --from=composer /app/vendor /app/vendor
+# Copy vendor built by composer stage for Vite to resolve vendor CSS
+COPY --from=composer_builder /app/vendor ./vendor
 
 # Run the frontend build (Vite)
-RUN npm run build
+RUN npm run build && \
+    # Clean up node_modules after build - not needed in final image
+    rm -rf node_modules
 
 ########################################
-# Nginx-only image (serves static assets, proxies to php-fpm)
+# Stage 3: m3u-proxy builder - prepares Python proxy service
 ########################################
+FROM python:3.12-alpine AS proxy_builder
 
-# Main runtime image
-FROM alpine:3.21.3 as runtime
+# Re-declare ARGs for this stage
+ARG M3U_PROXY_REPO=https://github.com/sparkison/m3u-proxy.git
+ARG M3U_PROXY_BRANCH=main
+
+WORKDIR /opt/m3u-proxy
+
+# Install git for cloning
+RUN apk add --no-cache git
+
+# Clone and setup m3u-proxy
+RUN echo "Cloning m3u-proxy from: ${M3U_PROXY_REPO} (branch: ${M3U_PROXY_BRANCH})" && \
+    git clone -b ${M3U_PROXY_BRANCH} ${M3U_PROXY_REPO} . && \
+    # Remove .git to reduce image size
+    rm -rf .git
+
+# Create virtual environment and install dependencies
+RUN python3 -m venv .venv && \
+    .venv/bin/pip install --no-cache-dir --upgrade pip && \
+    .venv/bin/pip install --no-cache-dir -r requirements.txt
+
+########################################
+# Stage 4: Runtime image
+########################################
+FROM alpine:3.21.3 AS runtime
+
+# Labels for image metadata
+LABEL org.opencontainers.image.title="m3u-editor" \
+      org.opencontainers.image.description="M3U Editor - IPTV playlist management" \
+      org.opencontainers.image.vendor="sparkison" \
+      org.opencontainers.image.licenses="MIT"
+
 WORKDIR /var/www/html
 
-# Re-declare ARG in this stage so they're available here
+# Re-declare ARGs in this stage so they're available
 ARG GIT_BRANCH
 ARG GIT_COMMIT
 ARG GIT_TAG
-# Allow customization of m3u-proxy repository and branch
-# Default: upstream sparkison/m3u-proxy (master branch)
-# Override: --build-arg M3U_PROXY_REPO=https://github.com/yourusername/m3u-proxy.git
-#           --build-arg M3U_PROXY_BRANCH=dev
-ARG M3U_PROXY_REPO=https://github.com/sparkison/m3u-proxy.git
-ARG M3U_PROXY_BRANCH=master
 
-# Set environment variables for git information
-ENV GIT_BRANCH=${GIT_BRANCH}
-ENV GIT_COMMIT=${GIT_COMMIT}
-ENV GIT_TAG=${GIT_TAG}
+# Set environment variables
+ENV GIT_BRANCH=${GIT_BRANCH} \
+    GIT_COMMIT=${GIT_COMMIT} \
+    GIT_TAG=${GIT_TAG} \
+    WWWGROUP="m3ue" \
+    WWWUSER="m3ue" \
+    # PHP/Laravel production settings
+    APP_ENV=production \
+    LOG_CHANNEL=stderr
 
-ENV WWWGROUP="m3ue"
-ENV WWWUSER="m3ue"
-
-# Install basic packages and FFmpeg 8.0 from Alpine edge
+# Add Alpine edge repositories and install ALL system packages in a single layer
+# This maximizes layer caching and reduces image size
 RUN echo "@edge https://dl-cdn.alpinelinux.org/alpine/edge/main" >> /etc/apk/repositories && \
     echo "@edge https://dl-cdn.alpinelinux.org/alpine/edge/community" >> /etc/apk/repositories && \
-    apk update && apk --no-cache add \
+    apk update && apk add --no-cache \
+    # Core utilities
     coreutils \
     openssl \
     supervisor \
@@ -88,55 +130,40 @@ RUN echo "@edge https://dl-cdn.alpinelinux.org/alpine/edge/main" >> /etc/apk/rep
     curl-dev \
     sqlite \
     ca-certificates \
-    nodejs \
-    npm \
-    redis \
-    git \
     bash \
     tzdata \
+    # Node.js runtime (for Reverb/websockets if needed)
+    nodejs \
+    npm \
+    # Redis server
+    redis \
     # FFmpeg 8.0 from Alpine edge
     ffmpeg@edge \
-    # nginx + php-fpm
+    # Nginx web server
     nginx \
+    # PostgreSQL server & client
+    postgresql \
+    postgresql-client \
+    postgresql-contrib \
+    # Python runtime (for m3u-proxy)
+    python3 \
+    # PHP 8.4 and all required extensions
     php84-cli \
     php84-fpm \
     php84-posix \
     php84-openssl \
-    php84-dev
-
-# Install PostgreSQL server & client
-RUN apk update && apk add --no-cache \
-    postgresql \
-    postgresql-client \
-    postgresql-contrib
-
-# Install CRON
-RUN touch crontab.tmp \
-    && echo '* * * * * cd /var/www/html && /usr/bin/php artisan schedule:run >> /dev/null 2>&1' > crontab.tmp \
-    && crontab crontab.tmp \
-    && rm -rf crontab.tmp
-
-# Install Redis config
-COPY ./docker/8.4/redis.conf /etc/redis/redis.tmpl
-RUN chmod 0644 /etc/redis/redis.tmpl
-
-# Clone and setup m3u-proxy (Python-based proxy service)
-# Uses build args M3U_PROXY_REPO and M3U_PROXY_BRANCH for flexibility
-# Default: sparkison/m3u-proxy (master)
-# Override at build time: --build-arg M3U_PROXY_REPO=https://github.com/hektyc/m3u-proxy.git --build-arg M3U_PROXY_BRANCH=dev
-RUN apk add --no-cache python3 py3-pip && \
-    echo "Cloning m3u-proxy from: ${M3U_PROXY_REPO} (branch: ${M3U_PROXY_BRANCH})" && \
-    git clone -b ${M3U_PROXY_BRANCH} ${M3U_PROXY_REPO} /opt/m3u-proxy && \
-    cd /opt/m3u-proxy && \
-    python3 -m venv .venv && \
-    .venv/bin/pip install --no-cache-dir -r requirements.txt
-
-# Install and configure PHP extensions (adjust as needed)
-RUN apk --no-cache add \
-    php84-sqlite3 php84-gd php84-curl \
-    php84-intl php84-imap php84-mbstring \
-    php84-xml php84-zip php84-bcmath php84-soap \
-    php84-xmlreader php84-xmlwriter \
+    php84-sqlite3 \
+    php84-gd \
+    php84-curl \
+    php84-intl \
+    php84-imap \
+    php84-mbstring \
+    php84-xml \
+    php84-zip \
+    php84-bcmath \
+    php84-soap \
+    php84-xmlreader \
+    php84-xmlwriter \
     php84-iconv \
     php84-ldap \
     php84-tokenizer \
@@ -149,40 +176,49 @@ RUN apk --no-cache add \
     php84-pecl-igbinary \
     php84-pecl-imagick \
     php84-pecl-redis \
-    php84-pcntl \
-    && ln -s /usr/bin/php84 /usr/bin/php
+    php84-pcntl && \
+    # Create PHP symlink
+    ln -s /usr/bin/php84 /usr/bin/php && \
+    # Clean up apk cache
+    rm -rf /var/cache/apk/*
 
-COPY ./docker/8.4/php.ini /etc/php84/conf.d/99-m3ue.ini
+# Create user and group early for proper file ownership
+RUN addgroup ${WWWGROUP} && \
+    adduser -h /var/www/html -s /bin/bash -G ${WWWGROUP} -D ${WWWUSER}
 
-# Configure supervisord
-RUN touch /var/run/supervisord.pid \
-    && mkdir -p /etc/supervisor.d/conf.d \
-    && mkdir -p /var/log/supervisor \
-    && touch /var/log/supervisor/supervisord.log
+# Setup cron for Laravel scheduler
+RUN echo '* * * * * cd /var/www/html && /usr/bin/php artisan schedule:run >> /dev/null 2>&1' | crontab -
 
-COPY ./docker/8.4/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+# Create required directories with proper ownership
+RUN mkdir -p \
+    /etc/supervisor.d/conf.d \
+    /var/log/supervisor \
+    /var/lib/postgresql \
+    /run/postgresql && \
+    touch /var/run/supervisord.pid \
+    /var/log/supervisor/supervisord.log && \
+    chown -R ${WWWUSER}:${WWWGROUP} \
+    /var/lib/nginx \
+    /var/lib/postgresql \
+    /run/postgresql
 
-# Copy or create an nginx.conf if needed
-COPY ./docker/8.4/nginx/nginx.conf /etc/nginx/nginx.tmpl
-COPY ./docker/8.4/nginx/laravel.conf /etc/nginx/conf.d/laravel.tmpl
-COPY ./docker/8.4/nginx/xtream.conf /etc/nginx/conf.d/xtream.tmpl
+# Copy configuration files (these change less frequently)
+COPY --chown=${WWWUSER}:${WWWGROUP} ./docker/8.4/redis.conf /etc/redis/redis.tmpl
+COPY --chown=root:root ./docker/8.4/php.ini /etc/php84/conf.d/99-m3ue.ini
+COPY --chown=root:root ./docker/8.4/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+COPY --chown=root:root ./docker/8.4/nginx/nginx.conf /etc/nginx/nginx.tmpl
+COPY --chown=root:root ./docker/8.4/nginx/laravel.conf /etc/nginx/conf.d/laravel.tmpl
+COPY --chown=root:root ./docker/8.4/nginx/xtream.conf /etc/nginx/conf.d/xtream.tmpl
+COPY --chown=root:root ./docker/8.4/www.conf /etc/php84/php-fpm.d/www.tmpl
 
-# Configure PHP-FPM
-COPY ./docker/8.4/www.conf /etc/php84/php-fpm.d/www.tmpl
+# Copy container startup script
+COPY --chmod=755 start-container /usr/local/bin/start-container
 
-# Configure container startup script
-COPY start-container /usr/local/bin/start-container
-RUN chmod +x /usr/local/bin/start-container
+# Copy m3u-proxy from builder stage
+COPY --from=proxy_builder --chown=${WWWUSER}:${WWWGROUP} /opt/m3u-proxy /opt/m3u-proxy
 
-# Pull app code
-# RUN git clone https://github.com/sparkison/m3u-editor.git /tmp/m3u-editor \
-#     && mv /tmp/m3u-editor/* /var/www/html \
-#     && mv /tmp/m3u-editor/.git /var/www/html/.git \
-#     && mv /tmp/m3u-editor/.env.example /var/www/html/.env.example \
-#     && rm -rf /tmp/m3u-editor
-
-# Copy application code
-COPY . /var/www/html
+# Copy application code (changes more frequently)
+COPY --chown=${WWWUSER}:${WWWGROUP} . /var/www/html
 
 # Create git info file
 RUN echo "GIT_BRANCH=${GIT_BRANCH}" > /var/www/html/.git-info && \
@@ -190,31 +226,27 @@ RUN echo "GIT_BRANCH=${GIT_BRANCH}" > /var/www/html/.git-info && \
     echo "GIT_TAG=${GIT_TAG}" >> /var/www/html/.git-info && \
     echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> /var/www/html/.git-info
 
-# Copy only the composer-installed vendor directory from the composer stage.
-# Avoid copying the whole /app directory because the composer stage may
-# generate bootstrap/cache files (package discovery) that reference dev-only
-# providers (like beyondcode/laravel-dump-server). Copying the full /app
-# can accidentally include those cached files while the runtime vendor
-# doesn't include dev dependencies (composer install --no-dev), causing
-# "Class ... not found" errors at boot. Copying only vendor prevents that.
-COPY --from=composer /app/vendor /var/www/html/vendor
+# Copy build artifacts from builder stages (overwrite source files)
+# Vendor directory from composer builder
+COPY --from=composer_builder --chown=${WWWUSER}:${WWWGROUP} /app/vendor /var/www/html/vendor
 
-# Copy built frontend assets from node builder
-COPY --from=node_builder /app/public/build /var/www/html/public/build
+# Built frontend assets from node builder
+COPY --from=node_builder --chown=${WWWUSER}:${WWWGROUP} /app/public/build /var/www/html/public/build
 
-# Setup user, group and permissions
-RUN addgroup $WWWGROUP \
-    && adduser -h /var/www/html -s /bin/bash -G $WWWGROUP -D $WWWUSER
-
-# Create alias for `php artisan` command
-RUN echo -e '#!/bin/bash\n php artisan app:"$@"' > /usr/bin/m3ue && \
+# Create artisan command alias
+RUN echo -e '#!/bin/bash\nphp artisan app:"$@"' > /usr/bin/m3ue && \
     chmod +x /usr/bin/m3ue
 
-RUN chown -R $WWWUSER:$WWWGROUP /var/www/html
-RUN chown -R $WWWUSER:$WWWGROUP /var/lib/nginx
+# Ensure proper permissions for storage and cache directories
+RUN chown -R ${WWWUSER}:${WWWGROUP} /var/www/html && \
+    chmod -R 775 /var/www/html/storage /var/www/html/bootstrap/cache 2>/dev/null || true
 
-RUN mkdir -p /var/lib/postgresql && chown -R $WWWUSER:$WWWGROUP /var/lib/postgresql
-RUN mkdir -p /run/postgresql && chown -R $WWWUSER:$WWWGROUP /run/postgresql
+# Expose ports
+EXPOSE 80 443 8080 6001
+
+# Health check for the application
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost/up || exit 1
 
 # Final entrypoint
 ENTRYPOINT ["start-container"]

@@ -2,11 +2,50 @@ name: Release
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to build (e.g., v1.0.0)'
+        required: true
+        type: string
+
+concurrency:
+  group: deploy-release
+  cancel-in-progress: false
+
+env:
+  REGISTRY_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/m3u-editor
 
 jobs:
-  release-amd64:
-    name: Publish m3u-editor Docker image (amd64)
+  # Validate release before building
+  validate:
+    name: Validate Release
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.tag }}"
+          else
+            VERSION="${{ github.event.release.tag_name }}"
+          fi
+          # Remove 'v' prefix if present for Docker tags
+          VERSION="${VERSION#v}"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Building version: $VERSION"
+
+  release-amd64:
+    name: Build & Push (amd64)
+    runs-on: ubuntu-latest
+    needs: [validate]
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -24,13 +63,14 @@ jobs:
         id: meta-amd64
         uses: docker/metadata-action@v5
         with:
-          images: ${{ secrets.DOCKERHUB_USERNAME }}/m3u-editor
+          images: ${{ env.REGISTRY_IMAGE }}
           tags: |
             type=semver,pattern={{version}},suffix=-amd64
             type=raw,value=latest,suffix=-amd64
 
       - name: Build and push amd64
-        uses: docker/build-push-action@v5
+        id: build
+        uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64
@@ -41,14 +81,17 @@ jobs:
             GIT_BRANCH=${{ github.ref_name }}
             GIT_COMMIT=${{ github.sha }}
             GIT_TAG=${{ github.ref_type == 'tag' && github.ref_name || '' }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=release-amd64
+          cache-to: type=gha,mode=max,scope=release-amd64
           provenance: false
           sbom: false
 
   release-arm64:
-    name: Publish m3u-editor Docker image (arm64)
+    name: Build & Push (arm64)
     runs-on: ubuntu-22.04-arm
+    needs: [validate]
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -66,13 +109,14 @@ jobs:
         id: meta-arm64
         uses: docker/metadata-action@v5
         with:
-          images: ${{ secrets.DOCKERHUB_USERNAME }}/m3u-editor
+          images: ${{ env.REGISTRY_IMAGE }}
           tags: |
             type=semver,pattern={{version}},suffix=-arm64
             type=raw,value=latest,suffix=-arm64
 
       - name: Build and push arm64
-        uses: docker/build-push-action@v5
+        id: build
+        uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/arm64
@@ -83,22 +127,16 @@ jobs:
             GIT_BRANCH=${{ github.ref_name }}
             GIT_COMMIT=${{ github.sha }}
             GIT_TAG=${{ github.ref_type == 'tag' && github.ref_name || '' }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=release-arm64
+          cache-to: type=gha,mode=max,scope=release-arm64
           provenance: false
           sbom: false
 
   push-manifest:
-    name: Push Docker Manifest for release
+    name: Create Multi-arch Manifest
     runs-on: ubuntu-latest
-    needs: [release-amd64, release-arm64]
+    needs: [validate, release-amd64, release-arm64]
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -108,26 +146,53 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Extract metadata (tags, labels) for manifest
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ secrets.DOCKERHUB_USERNAME }}/m3u-editor
-          tags: |
-            type=semver,pattern={{version}}
-            type=raw,value=latest
-            # The 'latest' tag for the manifest will combine 'latest-amd64' and 'latest-arm64'
-
-      - name: Create and push semver manifest list
+      - name: Create and push version manifest
         run: |
-          docker manifest create ${{ secrets.DOCKERHUB_USERNAME }}/m3u-editor:${{ steps.meta.outputs.version }} \
-            ${{ secrets.DOCKERHUB_USERNAME }}/m3u-editor:${{ steps.meta.outputs.version }}-amd64 \
-            ${{ secrets.DOCKERHUB_USERNAME }}/m3u-editor:${{ steps.meta.outputs.version }}-arm64
-          docker manifest push ${{ secrets.DOCKERHUB_USERNAME }}/m3u-editor:${{ steps.meta.outputs.version }}
+          docker buildx imagetools create -t ${{ env.REGISTRY_IMAGE }}:${{ needs.validate.outputs.version }} \
+            ${{ env.REGISTRY_IMAGE }}:${{ needs.validate.outputs.version }}-amd64 \
+            ${{ env.REGISTRY_IMAGE }}:${{ needs.validate.outputs.version }}-arm64
 
-      - name: Create and push latest manifest list
+      - name: Create and push latest manifest
         run: |
-          docker manifest create ${{ secrets.DOCKERHUB_USERNAME }}/m3u-editor:latest \
-            ${{ secrets.DOCKERHUB_USERNAME }}/m3u-editor:latest-amd64 \
-            ${{ secrets.DOCKERHUB_USERNAME }}/m3u-editor:latest-arm64
-          docker manifest push ${{ secrets.DOCKERHUB_USERNAME }}/m3u-editor:latest
+          docker buildx imagetools create -t ${{ env.REGISTRY_IMAGE }}:latest \
+            ${{ env.REGISTRY_IMAGE }}:latest-amd64 \
+            ${{ env.REGISTRY_IMAGE }}:latest-arm64
+
+      - name: Inspect manifests
+        run: |
+          echo "=== Version Manifest ==="
+          docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:${{ needs.validate.outputs.version }}
+          echo ""
+          echo "=== Latest Manifest ==="
+          docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:latest
+
+  notify-success:
+    name: Release Complete
+    runs-on: ubuntu-latest
+    needs: [validate, push-manifest]
+    steps:
+      - name: Release summary
+        run: |
+          echo "## 🚀 Release Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** ${{ needs.validate.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Docker Images" >> $GITHUB_STEP_SUMMARY
+          echo "- \`${{ env.REGISTRY_IMAGE }}:${{ needs.validate.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`${{ env.REGISTRY_IMAGE }}:latest\`" >> $GITHUB_STEP_SUMMARY
+
+  notify-failure:
+    name: Notify on Failure
+    runs-on: ubuntu-latest
+    needs: [release-amd64, release-arm64, push-manifest]
+    if: failure()
+    steps:
+      - name: Report failure
+        run: |
+          echo "::error::Release deployment failed!"
+          echo "## ❌ Release Failed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Workflow:** ${{ github.workflow }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Ref:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
