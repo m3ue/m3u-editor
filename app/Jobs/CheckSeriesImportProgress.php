@@ -83,8 +83,8 @@ class CheckSeriesImportProgress implements ShouldQueue
                     $minutes = floor($duration / 60);
                     $seconds = $duration % 60;
                     $timeStr = $minutes > 0
-                        ? "{$minutes} minute(s) and " . round($seconds, 0) . " second(s)"
-                        : round($seconds, 1) . " second(s)";
+                        ? "{$minutes} minute(s) and ".round($seconds, 0).' second(s)'
+                        : round($seconds, 1).' second(s)';
 
                     Notification::make()
                         ->success()

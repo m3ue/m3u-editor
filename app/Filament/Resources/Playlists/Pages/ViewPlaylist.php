@@ -2,16 +2,12 @@
 
 namespace App\Filament\Resources\Playlists\Pages;
 
-use App\Filament\Resources\Playlists\Widgets\ImportProgress;
-use Filament\Actions\EditAction;
-use Filament\Actions\Action;
-use Filament\Schemas\Schema;
 use App\Filament\Resources\Playlists\PlaylistResource;
-use App\Filament\Resources\PlaylistResource\Widgets;
-use App\Models\Playlist;
-use Filament\Actions;
-use Filament\Notifications\Notification;
+use App\Filament\Resources\Playlists\Widgets\ImportProgress;
+use Filament\Actions\Action;
+use Filament\Actions\EditAction;
 use Filament\Resources\Pages\ViewRecord;
+use Filament\Schemas\Schema;
 
 class ViewPlaylist extends ViewRecord
 {
@@ -20,7 +16,7 @@ class ViewPlaylist extends ViewRecord
     public function getVisibleHeaderWidgets(): array
     {
         return [
-            ImportProgress::class
+            ImportProgress::class,
         ];
     }
 
@@ -41,7 +37,7 @@ class ViewPlaylist extends ViewRecord
                 ->url(function (): string {
                     return "/playlists/{$this->getRecord()->id}/playlist-sync-statuses";
                 }),
-            //...PlaylistResource::getHeaderActions()
+            // ...PlaylistResource::getHeaderActions()
         ];
     }
 
@@ -49,6 +45,7 @@ class ViewPlaylist extends ViewRecord
     {
         $record = $this->getRecord();
         $record->loadCount('enabled_channels');
+
         return PlaylistResource::infolist($schema);
     }
 }

@@ -2,60 +2,47 @@
 
 namespace App\Filament\Resources\CustomPlaylists;
 
-use Illuminate\Support\Facades\Auth;
-use Filament\Schemas\Schema;
-use Filament\Tables\Columns\TextColumn;
-use Filament\Tables\Columns\ToggleColumn;
-use Filament\Actions\ActionGroup;
-use Filament\Actions\EditAction;
-use Filament\Actions\Action;
-use Filament\Actions\DeleteAction;
-use Filament\Tables\Enums\RecordActionsPosition;
-use Filament\Actions\BulkActionGroup;
-use Filament\Actions\DeleteBulkAction;
+use App\Facades\PlaylistFacade;
+use App\Filament\Resources\CustomPlaylistResource\Pages;
+use App\Filament\Resources\CustomPlaylists\Pages\EditCustomPlaylist;
+use App\Filament\Resources\CustomPlaylists\Pages\ListCustomPlaylists;
+use App\Filament\Resources\CustomPlaylists\Pages\ViewCustomPlaylist;
+use App\Filament\Resources\CustomPlaylists\RelationManagers\CategoriesRelationManager;
 use App\Filament\Resources\CustomPlaylists\RelationManagers\ChannelsRelationManager;
-use App\Filament\Resources\CustomPlaylists\RelationManagers\VodRelationManager;
 use App\Filament\Resources\CustomPlaylists\RelationManagers\GroupsRelationManager;
 use App\Filament\Resources\CustomPlaylists\RelationManagers\SeriesRelationManager;
-use App\Filament\Resources\CustomPlaylists\RelationManagers\CategoriesRelationManager;
-use App\Filament\Resources\CustomPlaylists\Pages\ListCustomPlaylists;
-use App\Filament\Resources\CustomPlaylists\Pages\EditCustomPlaylist;
-use Filament\Schemas\Components\Grid;
-use Filament\Forms\Components\TextInput;
-use Filament\Forms\Components\Toggle;
-use Illuminate\Validation\Rule;
-use Filament\Schemas\Components\Section;
-use Filament\Schemas\Components\Utilities\Get;
-use Filament\Forms\Components\Select;
-use Filament\Schemas\Components\Tabs;
-use Filament\Schemas\Components\Tabs\Tab;
-use App\Models\PlaylistAuth;
-use App\Filament\Resources\CustomPlaylistResource\Pages;
-use App\Filament\Resources\CustomPlaylistResource\RelationManagers;
-use App\Forms\Components\PlaylistEpgUrl;
-use App\Forms\Components\PlaylistM3uUrl;
-use App\Forms\Components\MediaFlowProxyUrl;
+use App\Filament\Resources\CustomPlaylists\RelationManagers\VodRelationManager;
 use App\Models\CustomPlaylist;
-use Filament\Forms;
-use Filament\Resources\Resource;
-use Filament\Tables;
-use Filament\Tables\Table;
-use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Database\Eloquent\SoftDeletingScope;
-use App\Facades\PlaylistFacade;
-use App\Filament\Resources\CustomPlaylists\Pages\ViewCustomPlaylist;
-use App\Forms\Components\XtreamApiInfo;
-use App\Models\SharedStream;
+use App\Models\PlaylistAuth;
 use App\Models\StreamProfile;
 use App\Services\EpgCacheService;
 use App\Services\M3uProxyService;
-use App\Services\ProxyService;
+use App\Traits\HasUserFiltering;
+use Filament\Actions\Action;
+use Filament\Actions\ActionGroup;
+use Filament\Actions\BulkActionGroup;
+use Filament\Actions\DeleteAction;
+use Filament\Actions\DeleteBulkAction;
+use Filament\Actions\EditAction;
 use Filament\Actions\ViewAction;
 use Filament\Forms\Components\Repeater;
-use Filament\Forms\FormsComponent;
+use Filament\Forms\Components\Select;
+use Filament\Forms\Components\TextInput;
+use Filament\Forms\Components\Toggle;
+use Filament\Resources\Resource;
 use Filament\Schemas\Components\Fieldset;
-use Illuminate\Support\Facades\Redis;
-use App\Traits\HasUserFiltering;
+use Filament\Schemas\Components\Grid;
+use Filament\Schemas\Components\Section;
+use Filament\Schemas\Components\Tabs;
+use Filament\Schemas\Components\Tabs\Tab;
+use Filament\Schemas\Components\Utilities\Get;
+use Filament\Schemas\Schema;
+use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Columns\ToggleColumn;
+use Filament\Tables\Enums\RecordActionsPosition;
+use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Validation\Rule;
 
 class CustomPlaylistResource extends Resource
 {
@@ -70,7 +57,7 @@ class CustomPlaylistResource extends Resource
         return ['name'];
     }
 
-    protected static string | \UnitEnum | null $navigationGroup = 'Playlist';
+    protected static string|\UnitEnum|null $navigationGroup = 'Playlist';
 
     public static function getNavigationSort(): ?int
     {
@@ -80,6 +67,7 @@ class CustomPlaylistResource extends Resource
     public static function form(Schema $schema): Schema
     {
         $isCreating = $schema->getOperation() === 'create';
+
         return $schema
             ->components(self::getForm($isCreating));
     }
@@ -106,23 +94,23 @@ class CustomPlaylistResource extends Resource
                 TextColumn::make('available_streams')
                     ->label('Streams')
                     ->toggleable()
-                    ->formatStateUsing(fn(int $state): string => $state === 0 ? '∞' : (string)$state)
+                    ->formatStateUsing(fn (int $state): string => $state === 0 ? '∞' : (string) $state)
                     ->tooltip('Total streams available for this playlist (∞ indicates no limit)')
-                    ->description(fn(CustomPlaylist $record): string => "Active: " . M3uProxyService::getPlaylistActiveStreamsCount($record))
+                    ->description(fn (CustomPlaylist $record): string => 'Active: '.M3uProxyService::getPlaylistActiveStreamsCount($record))
                     ->sortable(),
                 TextColumn::make('live_channels_count')
                     ->label('Live')
-                    ->description(fn(CustomPlaylist $record): string => "Enabled: {$record->enabled_live_channels_count}")
+                    ->description(fn (CustomPlaylist $record): string => "Enabled: {$record->enabled_live_channels_count}")
                     ->toggleable()
                     ->sortable(),
                 TextColumn::make('vod_channels_count')
                     ->label('VOD')
-                    ->description(fn(CustomPlaylist $record): string => "Enabled: {$record->enabled_vod_channels_count}")
+                    ->description(fn (CustomPlaylist $record): string => "Enabled: {$record->enabled_vod_channels_count}")
                     ->toggleable()
                     ->sortable(),
                 TextColumn::make('series_count')
                     ->label('Series')
-                    ->description(fn(CustomPlaylist $record): string => "Enabled: {$record->enabled_series_count}")
+                    ->description(fn (CustomPlaylist $record): string => "Enabled: {$record->enabled_series_count}")
                     ->toggleable()
                     ->sortable(),
                 ToggleColumn::make('enable_proxy')
@@ -147,18 +135,18 @@ class CustomPlaylistResource extends Resource
                     Action::make('Download M3U')
                         ->label('Download M3U')
                         ->icon('heroicon-o-arrow-down-tray')
-                        ->url(fn($record) => PlaylistFacade::getUrls($record)['m3u'])
+                        ->url(fn ($record) => PlaylistFacade::getUrls($record)['m3u'])
                         ->openUrlInNewTab(),
                     EpgCacheService::getEpgTableAction(),
                     Action::make('HDHomeRun URL')
                         ->label('HDHomeRun URL')
                         ->icon('heroicon-o-arrow-top-right-on-square')
-                        ->url(fn($record) => PlaylistFacade::getUrls($record)['hdhr'])
+                        ->url(fn ($record) => PlaylistFacade::getUrls($record)['hdhr'])
                         ->openUrlInNewTab(),
                     Action::make('Public URL')
                         ->label('Public URL')
                         ->icon('heroicon-o-arrow-top-right-on-square')
-                        ->url(fn($record) => '/playlist/v/' . $record->uuid)
+                        ->url(fn ($record) => '/playlist/v/'.$record->uuid)
                         ->openUrlInNewTab(),
                     DeleteAction::make(),
                 ])->button()->hiddenLabel()->size('sm'),
@@ -243,7 +231,7 @@ class CustomPlaylistResource extends Resource
                             'heroicon-m-exclamation-triangle',
                             tooltip: 'Be careful changing this value as this will change the URLs for the Playlist, its EPG, and HDHR.'
                         )
-                        ->hidden(fn($get): bool => !$get('edit_uuid'))
+                        ->hidden(fn ($get): bool => ! $get('edit_uuid'))
                         ->required(),
                 ])->hiddenOn('create'),
         ];
@@ -267,7 +255,7 @@ class CustomPlaylistResource extends Resource
                         ->columnSpan(1)
                         ->rules(['min:1'])
                         ->type('number')
-                        ->hidden(fn(Get $get): bool => !$get('auto_channel_increment'))
+                        ->hidden(fn (Get $get): bool => ! $get('auto_channel_increment'))
                         ->required(),
                 ]),
             Section::make('EPG Output')
@@ -302,7 +290,7 @@ class CustomPlaylistResource extends Resource
                         ->rules(['min:1'])
                         ->type('number')
                         ->default(120)
-                        ->hidden(fn(Get $get): bool => !$get('dummy_epg'))
+                        ->hidden(fn (Get $get): bool => ! $get('dummy_epg'))
                         ->required(),
                 ]),
             Section::make('Streaming Output')
@@ -314,16 +302,16 @@ class CustomPlaylistResource extends Resource
                 ->schema([
                     Toggle::make('enable_proxy')
                         ->label('Enable Stream Proxy')
-                        ->hint(fn(Get $get): string => $get('enable_proxy') ? 'Proxied' : 'Not proxied')
-                        ->hintIcon(fn(Get $get): string => !$get('enable_proxy') ? 'heroicon-m-lock-open' : 'heroicon-m-lock-closed')
+                        ->hint(fn (Get $get): string => $get('enable_proxy') ? 'Proxied' : 'Not proxied')
+                        ->hintIcon(fn (Get $get): string => ! $get('enable_proxy') ? 'heroicon-m-lock-open' : 'heroicon-m-lock-closed')
                         ->live()
                         ->helperText('When enabled, all streams will be proxied through the application. This allows for better compatibility with various clients and enables features such as stream limiting and output format selection.')
                         ->inline(false)
                         ->default(false),
                     Toggle::make('enable_logo_proxy')
                         ->label('Enable Logo Proxy')
-                        ->hint(fn(Get $get): string => $get('enable_logo_proxy') ? 'Proxied' : 'Not proxied')
-                        ->hintIcon(fn(Get $get): string => !$get('enable_logo_proxy') ? 'heroicon-m-lock-open' : 'heroicon-m-lock-closed')
+                        ->hint(fn (Get $get): string => $get('enable_logo_proxy') ? 'Proxied' : 'Not proxied')
+                        ->hintIcon(fn (Get $get): string => ! $get('enable_logo_proxy') ? 'heroicon-m-lock-open' : 'heroicon-m-lock-closed')
                         ->live()
                         ->helperText('When enabled, channel logos will be proxied through the application. Logos will be cached for up to 30 days to reduce bandwidth and speed up loading times.')
                         ->inline(false)
@@ -349,12 +337,12 @@ class CustomPlaylistResource extends Resource
                         ->type('number')
                         ->default(0) // Default to 0 streams (for unlimted)
                         ->required()
-                        ->hidden(fn(Get $get): bool => !$get('enable_proxy')),
+                        ->hidden(fn (Get $get): bool => ! $get('enable_proxy')),
                     TextInput::make('server_timezone')
                         ->label('Provider Timezone')
                         ->helperText('The portal/provider timezone (DST-aware). Needed to correctly use timeshift functionality when playlist proxy is enabled.')
                         ->placeholder('Etc/UTC')
-                        ->hidden(fn(Get $get): bool => !$get('enable_proxy')),
+                        ->hidden(fn (Get $get): bool => ! $get('enable_proxy')),
                     Toggle::make('strict_live_ts')
                         ->label('Enable Strict Live TS Handling')
                         ->hintAction(
@@ -369,7 +357,7 @@ class CustomPlaylistResource extends Resource
                         ->helperText('Enhanced stability for live MPEG-TS streams with PVR clients like Kodi and HDHomeRun (only used when not using transcoding profiles).')
                         ->inline(false)
                         ->default(false)
-                        ->hidden(fn(Get $get): bool => ! $get('enable_proxy')),
+                        ->hidden(fn (Get $get): bool => ! $get('enable_proxy')),
 
                     Fieldset::make('Transcoding Settings (optional)')
                         ->columnSpanFull()
@@ -400,7 +388,7 @@ class CustomPlaylistResource extends Resource
                                 )
                                 ->helperText('Select a transcoding profile to apply to VOD and Series streams from this playlist. Leave empty for direct stream proxying.')
                                 ->placeholder('Leave empty for direct stream proxying'),
-                        ])->hidden(fn(Get $get): bool => ! $get('enable_proxy')),
+                        ])->hidden(fn (Get $get): bool => ! $get('enable_proxy')),
 
                     Fieldset::make('HTTP Headers (optional)')
                         ->columnSpanFull()
@@ -420,16 +408,17 @@ class CustomPlaylistResource extends Resource
                                         ->label('Value')
                                         ->required()
                                         ->placeholder('e.g. Bearer abc123'),
-                                ])
-                        ])->hidden(fn(Get $get): bool => !$get('enable_proxy'))
-                ])
+                                ]),
+                        ])->hidden(fn (Get $get): bool => ! $get('enable_proxy')),
+                ]),
         ];
+
         return [
             Grid::make()
                 ->hiddenOn(['edit']) // hide this field on the edit form
                 ->schema([
                     ...$schema,
-                    ...$outputScheme
+                    ...$outputScheme,
                 ])
                 ->columns(2),
             Grid::make()
@@ -455,7 +444,7 @@ class CustomPlaylistResource extends Resource
                                         ->schema([
                                             ...$schema,
 
-                                        ])
+                                        ]),
                                 ]),
 
                             Tab::make('Auth')
@@ -478,7 +467,7 @@ class CustomPlaylistResource extends Resource
                                                     if ($record) {
                                                         $currentAuths = $record->playlistAuths()->get();
                                                         foreach ($currentAuths as $auth) {
-                                                            $options[$auth->id] = $auth->name . ' (currently assigned)';
+                                                            $options[$auth->id] = $auth->name.' (currently assigned)';
                                                         }
                                                     }
 
@@ -500,6 +489,7 @@ class CustomPlaylistResource extends Resource
                                                     if ($record) {
                                                         return $record->playlistAuths()->pluck('playlist_auths.id')->toArray();
                                                     }
+
                                                     return [];
                                                 })
                                                 ->afterStateHydrated(function ($component, $state, $record) {
@@ -510,7 +500,9 @@ class CustomPlaylistResource extends Resource
                                                 })
                                                 ->helperText('Only unassigned auths are available. Each auth can only be assigned to one playlist at a time.')
                                                 ->afterStateUpdated(function ($state, $record) {
-                                                    if (!$record) return;
+                                                    if (! $record) {
+                                                        return;
+                                                    }
 
                                                     $currentAuthIds = $record->playlistAuths()->pluck('playlist_auths.id')->toArray();
                                                     $newAuthIds = $state ? (is_array($state) ? $state : [$state]) : [];
@@ -534,7 +526,7 @@ class CustomPlaylistResource extends Resource
                                                     }
                                                 })
                                                 ->dehydrated(false), // Don't save this field directly
-                                        ])
+                                        ]),
                                 ]),
                             Tab::make('Output')
                                 ->icon('heroicon-m-arrow-up-right')

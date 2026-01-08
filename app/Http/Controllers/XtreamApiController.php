@@ -2,9 +2,6 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\PlaylistAuth;
-use Illuminate\Http\Response;
-use Illuminate\Http\RedirectResponse;
 use App\Enums\ChannelLogoType;
 use App\Enums\PlaylistChannelId;
 use App\Facades\PlaylistFacade;
@@ -15,15 +12,15 @@ use App\Models\Epg;
 use App\Models\MergedPlaylist;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
+use App\Models\PlaylistAuth;
 use App\Models\Series;
-use App\Models\SharedStream;
 use App\Services\EpgCacheService;
 use App\Services\M3uProxyService;
-use App\Services\XtreamService;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Collection;
-use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Redirect;
 use Spatie\Tags\Tag;
@@ -113,16 +110,16 @@ class XtreamApiController extends Controller
      * `active_cons`, `created_at`, `max_connections`, `allowed_output_formats`.
      *
      *
-     * @param string $uuid The UUID of the playlist (required path parameter)
-     * @param Request $request The HTTP request containing query parameters:
-     *   - username (string, required): User's Xtream API username
-     *   - password (string, required): User's Xtream API password 
-     *   - action (string, optional): Defaults to 'panel'. Determines the API action
-     *   - category_id (string, optional): Filter results by category ID (required for get_series, optional for get_live_streams and get_vod_streams)
-     *   - series_id (int, optional): Series ID (required for get_series_info action)
-     *   - vod_id (int, optional): VOD/Movie ID (required for get_vod_info action)
-     *   - stream_id (int, optional): Channel/Stream ID (required for get_short_epg and get_simple_data_table actions)
-     *   - limit (int, optional): Number of EPG programmes to return for get_short_epg (default=4)
+     * @param  string  $uuid  The UUID of the playlist (required path parameter)
+     * @param  Request  $request  The HTTP request containing query parameters:
+     *                            - username (string, required): User's Xtream API username
+     *                            - password (string, required): User's Xtream API password
+     *                            - action (string, optional): Defaults to 'panel'. Determines the API action
+     *                            - category_id (string, optional): Filter results by category ID (required for get_series, optional for get_live_streams and get_vod_streams)
+     *                            - series_id (int, optional): Series ID (required for get_series_info action)
+     *                            - vod_id (int, optional): VOD/Movie ID (required for get_vod_info action)
+     *                            - stream_id (int, optional): Channel/Stream ID (required for get_short_epg and get_simple_data_table actions)
+     *                            - limit (int, optional): Number of EPG programmes to return for get_short_epg (default=4)
      *
      * @response 200 scenario="Panel action response" {
      *   "user_info": {
@@ -149,7 +146,6 @@ class XtreamApiController extends Controller
      *     "time_now": "2025-06-20 12:00:00"
      *   }
      * }
-     *
      * @response 200 scenario="Live streams response" [
      *   {
      *     "num": 1,
@@ -165,7 +161,6 @@ class XtreamApiController extends Controller
      *     "tv_archive_duration": 24
      *   }
      * ]
-     *
      * @response 200 scenario="VOD streams response" [
      *   {
      *     "num": 1,
@@ -185,7 +180,6 @@ class XtreamApiController extends Controller
      *     "direct_source": ""
      *   }
      * ]
-     *
      * @response 200 scenario="Series response" [
      *   {
      *     "num": 1,
@@ -206,7 +200,6 @@ class XtreamApiController extends Controller
      *     "category_id": "2"
      *   }
      * ]
-     *
      * @response 200 scenario="Series info response" {
      *   "info": {
      *     "name": "Breaking Bad",
@@ -254,7 +247,6 @@ class XtreamApiController extends Controller
      *     "1": []
      *   }
      * }
-     *
      * @response 200 scenario="Live categories response" [
      *   {
      *     "category_id": "1",
@@ -267,7 +259,6 @@ class XtreamApiController extends Controller
      *     "parent_id": 0
      *   }
      * ]
-     *
      * @response 200 scenario="VOD categories response" [
      *   {
      *     "category_id": "1",
@@ -280,7 +271,6 @@ class XtreamApiController extends Controller
      *     "parent_id": 0
      *   }
      * ]
-     *
      * @response 200 scenario="Series categories response" [
      *   {
      *     "category_id": "1",
@@ -293,7 +283,6 @@ class XtreamApiController extends Controller
      *     "parent_id": 0
      *   }
      * ]
-     *
      * @response 200 scenario="Short EPG response" {
      *   "epg_listings": [
      *     {
@@ -326,7 +315,6 @@ class XtreamApiController extends Controller
      *     }
      *   ]
      * }
-     *
      * @response 200 scenario="Simple date table response" {
      *   "epg_listings": [
      *     {
@@ -345,7 +333,6 @@ class XtreamApiController extends Controller
      *     }
      *   ]
      * }
-     *
      * @response 200 scenario="Account info response" {
      *   "username": "test_user",
      *   "password": "test_pass",
@@ -359,7 +346,6 @@ class XtreamApiController extends Controller
      *   "max_connections": "2",
      *   "allowed_output_formats": ["m3u8", "ts"]
      * }
-     *
      * @response 400 scenario="Bad Request" {"error": "Invalid action"}
      * @response 400 scenario="Missing category_id for get_series" {"error": "category_id parameter is required for get_series action"}
      * @response 400 scenario="Missing series_id for get_series_info" {"error": "series_id parameter is required for get_series_info action"}
@@ -379,10 +365,10 @@ class XtreamApiController extends Controller
             'username' => 'required|string',
             'password' => 'required|string',
         ]);
-        list($playlist, $authMethod, $username, $password) = $this->authenticate($request);
+        [$playlist, $authMethod, $username, $password] = $this->authenticate($request);
 
         // If no authentication method worked, return error
-        if (!$playlist || $authMethod === 'none') {
+        if (! $playlist || $authMethod === 'none') {
             return response()->json(['error' => 'Unauthorized'], 401);
         }
 
@@ -412,10 +398,10 @@ class XtreamApiController extends Controller
                 $expires = $xtreamStatus['user_info']['exp_date']
                     ? $xtreamStatus['user_info']['exp_date']
                     : $now->copy()->startOfYear()->addYears(1)->timestamp;
-                $streams = (int)$playlist->streams === 0
+                $streams = (int) $playlist->streams === 0
                     ? ($xtreamStatus['user_info']['max_connections'] ?? $playlist->streams ?? 1)
                     : $playlist->streams;
-                $activeConnections = (int)($xtreamStatus['user_info']['active_cons'] ?? 0);
+                $activeConnections = (int) ($xtreamStatus['user_info']['active_cons'] ?? 0);
             } else {
                 $expires = $now->copy()->startOfYear()->addYears(1)->timestamp;
                 $streams = $playlist->streams ?? 1;
@@ -438,11 +424,11 @@ class XtreamApiController extends Controller
                 'message' => '',
                 'auth' => 1, // Authenticated successfully
                 'status' => 'Active', // No inactive playlists should reach this point
-                'exp_date' => (string)$expires,
+                'exp_date' => (string) $expires,
                 'is_trial' => '0', // Trial accounts not supported
-                'active_cons' => (string)$activeConnections,
-                'created_at' => (string)($playlist->user ? $playlist->user->created_at->timestamp : $now->timestamp),
-                'max_connections' => (string)$streams,
+                'active_cons' => (string) $activeConnections,
+                'created_at' => (string) ($playlist->user ? $playlist->user->created_at->timestamp : $now->timestamp),
+                'max_connections' => (string) $streams,
                 'allowed_output_formats' => $outputFormats,
             ];
 
@@ -450,11 +436,11 @@ class XtreamApiController extends Controller
             $parsedUrl = parse_url($baseUrl);
             $scheme = $parsedUrl['scheme'] ?? 'http';
             $host = $parsedUrl['host'];
-            $port = isset($parsedUrl['port']) ? (string)$parsedUrl['port'] : '80';
+            $port = isset($parsedUrl['port']) ? (string) $parsedUrl['port'] : '80';
 
             $serverInfo = [
                 'url' => $host,
-                'port' => (string)$port, // Should be 80 for HTTP, otherwise use the specified port (e.g.: 36400
+                'port' => (string) $port, // Should be 80 for HTTP, otherwise use the specified port (e.g.: 36400
                 'https_port' => '443', // Should always be 443 for HTTPS
                 'server_protocol' => $scheme,
                 'rtmp_port' => '8001', // RTMP not available currently, we'll just return the default RTMP port
@@ -468,9 +454,9 @@ class XtreamApiController extends Controller
 
             return response()->json([
                 'user_info' => $userInfo,
-                'server_info' => $serverInfo
+                'server_info' => $serverInfo,
             ]);
-        } else if ($action === 'get_live_streams') {
+        } elseif ($action === 'get_live_streams') {
             $categoryId = $request->input('category_id');
 
             $channelsQuery = $playlist->channels()
@@ -549,7 +535,7 @@ class XtreamApiController extends Controller
             if ($enabledChannels instanceof Collection) {
                 $channelNumber = $playlist->auto_channel_increment ? $playlist->channel_start - 1 : 0;
                 foreach ($enabledChannels as $index => $channel) {
-                    $streamIcon = $baseUrl . '/placeholder.png';
+                    $streamIcon = $baseUrl.'/placeholder.png';
                     if ($channel->logo) {
                         // Logo override takes precedence
                         $streamIcon = $channel->logo;
@@ -557,7 +543,7 @@ class XtreamApiController extends Controller
                         $streamIcon = $channel->epgChannel->icon;
                     } elseif ($channel->logo_type === ChannelLogoType::Channel && ($channel->logo || $channel->logo_internal)) {
                         $logo = $channel->logo ?? $channel->logo_internal ?? '';
-                        $streamIcon = filter_var($logo, FILTER_VALIDATE_URL) ? $logo : $baseUrl . "/$logo";
+                        $streamIcon = filter_var($logo, FILTER_VALIDATE_URL) ? $logo : $baseUrl."/$logo";
                     }
                     if ($playlist->enable_logo_proxy) {
                         $streamIcon = LogoProxyController::generateProxyUrl($streamIcon);
@@ -568,20 +554,20 @@ class XtreamApiController extends Controller
                     if ($isCustomPlaylist) {
                         $customGroup = $channel->tags()->where('type', $tagUuid)->first();
                         if ($customGroup) {
-                            $channelCategoryId = (string)$customGroup->id; // Use tag ID
+                            $channelCategoryId = (string) $customGroup->id; // Use tag ID
                         } elseif ($channel->group_id) {
-                            $channelCategoryId = (string)$channel->group_id; // Use group_id
+                            $channelCategoryId = (string) $channel->group_id; // Use group_id
                         }
                     } else {
                         // For regular playlists, use group_id
                         if ($channel->group_id) {
-                            $channelCategoryId = (string)$channel->group_id;
+                            $channelCategoryId = (string) $channel->group_id;
                         }
                     }
 
                     $idChannelBy = $playlist->id_channel_by;
                     $channelNo = $channel->channel;
-                    if (!$channelNo && $playlist->auto_channel_increment) {
+                    if (! $channelNo && $playlist->auto_channel_increment) {
                         $channelNo = ++$channelNumber;
                     }
 
@@ -624,19 +610,20 @@ class XtreamApiController extends Controller
                         'stream_id' => $channel->id,
                         'stream_icon' => $streamIcon,
                         'epg_channel_id' => $tvgId,
-                        'added' => (string)$channel->created_at->timestamp,
+                        'added' => (string) $channel->created_at->timestamp,
                         'category_id' => $channelCategoryId,
                         'category_ids' => [(int) $channelCategoryId],
                         'tv_archive' => $channel->catchup ? 1 : 0,
                         'tv_archive_duration' => $channel->shift ?? 0,
                         'custom_sid' => '',
                         'thumbnail' => '',
-                        'direct_source' => '' // $baseUrl . "/live/{$urlSafeUser}/{$urlSafePass}/" . $channel->id . "." . $extension,
+                        'direct_source' => '', // $baseUrl . "/live/{$urlSafeUser}/{$urlSafePass}/" . $channel->id . "." . $extension,
                     ];
                 }
             }
+
             return response()->json($liveStreams);
-        } else if ($action === 'get_vod_streams') {
+        } elseif ($action === 'get_vod_streams') {
             $categoryId = $request->input('category_id');
 
             $channelsQuery = $playlist->channels()
@@ -713,7 +700,7 @@ class XtreamApiController extends Controller
             $vodStreams = [];
             if ($enabledVodChannels instanceof Collection) {
                 foreach ($enabledVodChannels as $index => $channel) {
-                    $streamIcon = $baseUrl . '/placeholder.png';
+                    $streamIcon = $baseUrl.'/placeholder.png';
                     if ($channel->logo) {
                         // Logo override takes precedence
                         $streamIcon = $channel->logo;
@@ -721,7 +708,7 @@ class XtreamApiController extends Controller
                         $streamIcon = $channel->epgChannel->icon;
                     } elseif ($channel->logo_type === ChannelLogoType::Channel && ($channel->logo || $channel->logo_internal)) {
                         $logo = $channel->logo ?? $channel->logo_internal ?? '';
-                        $streamIcon = filter_var($logo, FILTER_VALIDATE_URL) ? $logo : $baseUrl . "/$logo";
+                        $streamIcon = filter_var($logo, FILTER_VALIDATE_URL) ? $logo : $baseUrl."/$logo";
                     }
                     if ($playlist->enable_logo_proxy) {
                         $streamIcon = LogoProxyController::generateProxyUrl($streamIcon);
@@ -733,14 +720,14 @@ class XtreamApiController extends Controller
                         // For CustomPlaylist, prioritize custom tags over group_id
                         $customGroup = $channel->tags()->where('type', $tagUuid)->first();
                         if ($customGroup) {
-                            $channelCategoryId = (string)$customGroup->id; // Use tag ID
+                            $channelCategoryId = (string) $customGroup->id; // Use tag ID
                         } elseif ($channel->group_id) {
-                            $channelCategoryId = (string)$channel->group_id; // Use group_id
+                            $channelCategoryId = (string) $channel->group_id; // Use group_id
                         }
                     } else {
                         // For regular playlists, use group_id
                         if ($channel->group_id) {
-                            $channelCategoryId = (string)$channel->group_id;
+                            $channelCategoryId = (string) $channel->group_id;
                         }
                     }
 
@@ -756,19 +743,20 @@ class XtreamApiController extends Controller
                         'stream_icon' => $streamIcon,
                         'rating' => $channel->rating ?? '',
                         'rating_5based' => $channel->rating_5based ?? 0,
-                        'added' => (string)$channel->created_at->timestamp,
+                        'added' => (string) $channel->created_at->timestamp,
                         'category_id' => $channelCategoryId,
                         'category_ids' => [(int) $channelCategoryId],
-                        'tmdb' => (string)$tmdb,
-                        'tmdb_id' => (int)$tmdb,
+                        'tmdb' => (string) $tmdb,
+                        'tmdb_id' => (int) $tmdb,
                         'container_extension' => $channel->container_extension ?? 'mkv',
                         'custom_sid' => '',
-                        'direct_source' => '' // $baseUrl . "/movie/{$urlSafeUser}/{$urlSafePass}/" . $channel->id . "." . $extension,
+                        'direct_source' => '', // $baseUrl . "/movie/{$urlSafeUser}/{$urlSafePass}/" . $channel->id . "." . $extension,
                     ];
                 }
             }
+
             return response()->json($vodStreams);
-        } else if ($action === 'get_series') {
+        } elseif ($action === 'get_series') {
             $categoryId = $request->input('category_id');
 
             $seriesQuery = $playlist->series()
@@ -782,13 +770,13 @@ class XtreamApiController extends Controller
                     $seriesQuery->where(function ($query) use ($categoryId, $tagUuid) {
                         // Channels with custom tags matching the category ID
                         $query->whereHas('tags', function ($tagQuery) use ($categoryId, $tagUuid) {
-                            $tagQuery->where('type', $tagUuid . '-category')
+                            $tagQuery->where('type', $tagUuid.'-category')
                                 ->where('id', $categoryId);
                         })
                             // OR channels without custom tags but with matching group_id
                             ->orWhere(function ($subQuery) use ($categoryId, $tagUuid) {
                                 $subQuery->whereDoesntHave('tags', function ($tagQuery) use ($tagUuid) {
-                                    $tagQuery->where('type', $tagUuid . '-category');
+                                    $tagQuery->where('type', $tagUuid.'-category');
                                 })->where('category_id', $categoryId);
                             });
                     });
@@ -802,7 +790,7 @@ class XtreamApiController extends Controller
 
             // For custom playlists, re-sort by custom category order (if assigned), falling back to original category order
             if ($isCustomPlaylist && $enabledSeries->isNotEmpty()) {
-                $categoryTagType = $tagUuid . '-category';
+                $categoryTagType = $tagUuid.'-category';
                 $enabledSeries = $enabledSeries->sort(function ($a, $b) use ($categoryTagType) {
                     // Get custom tag order for both series
                     $aTag = $a->tags->where('type', $categoryTagType)->first();
@@ -835,16 +823,16 @@ class XtreamApiController extends Controller
                     $seriesCategoryId = 'all';
                     if ($isCustomPlaylist) {
                         // For CustomPlaylist, prioritize custom tags over category_id
-                        $customCat = $seriesItem->tags->where('type', $tagUuid . '-category')->first();
+                        $customCat = $seriesItem->tags->where('type', $tagUuid.'-category')->first();
                         if ($customCat) {
-                            $seriesCategoryId = (string)$customCat->id; // Use tag ID
+                            $seriesCategoryId = (string) $customCat->id; // Use tag ID
                         } elseif ($seriesItem->category_id) {
-                            $seriesCategoryId = (string)$seriesItem->category_id; // Use category_id
+                            $seriesCategoryId = (string) $seriesItem->category_id; // Use category_id
                         }
                     } else {
                         // For regular playlists, use category_id
                         if ($seriesItem->category_id) {
-                            $seriesCategoryId = (string)$seriesItem->category_id;
+                            $seriesCategoryId = (string) $seriesItem->category_id;
                         }
                     }
 
@@ -854,30 +842,31 @@ class XtreamApiController extends Controller
                     $seriesList[] = [
                         'num' => $index + 1,
                         'name' => $seriesItem->name,
-                        'series_id' => (int)$seriesItem->id,
-                        'cover' => $seriesItem->cover ? (filter_var($seriesItem->cover, FILTER_VALIDATE_URL) ? $seriesItem->cover : $baseUrl . "/$seriesItem->cover") : $baseUrl . '/placeholder.png',
+                        'series_id' => (int) $seriesItem->id,
+                        'cover' => $seriesItem->cover ? (filter_var($seriesItem->cover, FILTER_VALIDATE_URL) ? $seriesItem->cover : $baseUrl."/$seriesItem->cover") : $baseUrl.'/placeholder.png',
                         'plot' => $seriesItem->plot ?? '',
                         'cast' => $seriesItem->cast ?? '',
                         'director' => $seriesItem->director ?? '',
                         'genre' => $seriesItem->genre ?? '',
                         'releaseDate' => $seriesItem->release_date ?? '',
-                        'last_modified' => (string)($lastModified),
-                        'rating' => (string)($seriesItem->rating ?? 0),
+                        'last_modified' => (string) ($lastModified),
+                        'rating' => (string) ($seriesItem->rating ?? 0),
                         'rating_5based' => round((floatval($seriesItem->rating ?? 0)) / 2, 1),
                         'backdrop_path' => $seriesItem->backdrop_path ?? [],
-                        'tmdb' => (string)$tmdb,
-                        'tmdb_id' => (int)($tmdb ?: 0),
+                        'tmdb' => (string) $tmdb,
+                        'tmdb_id' => (int) ($tmdb ?: 0),
                         'youtube_trailer' => $seriesItem->youtube_trailer ?? '',
-                        'episode_run_time' => (string)($seriesItem->episode_run_time ?? 0),
+                        'episode_run_time' => (string) ($seriesItem->episode_run_time ?? 0),
                         'category_id' => $seriesCategoryId,
                     ];
                 }
             }
+
             return response()->json($seriesList);
-        } else if ($action === 'get_series_info') {
+        } elseif ($action === 'get_series_info') {
             $seriesId = $request->input('series_id');
 
-            if (!$seriesId) {
+            if (! $seriesId) {
                 return response()->json(['error' => 'series_id parameter is required for get_series_info action'], 400);
             }
 
@@ -887,12 +876,12 @@ class XtreamApiController extends Controller
                 ->with(['seasons.episodes', 'category'])
                 ->first();
 
-            if (!$seriesItem) {
+            if (! $seriesItem) {
                 return response()->json(['error' => 'Series not found or not enabled'], 404);
             }
 
             // Check if series metadata has been fetched, and if so how recently
-            if (!$seriesItem->last_metadata_fetch || $seriesItem->last_metadata_fetch < now()->subDays(1)) {
+            if (! $seriesItem->last_metadata_fetch || $seriesItem->last_metadata_fetch < now()->subDays(1)) {
                 // Either no metadata, or stale metadata
                 $results = $seriesItem->fetchMetadata(sync: false);
                 if ($results === false) {
@@ -903,11 +892,11 @@ class XtreamApiController extends Controller
                 $seriesItem->load('seasons.episodes', 'category');
             }
 
-            $cover = $seriesItem->cover ? (filter_var($seriesItem->cover, FILTER_VALIDATE_URL) ? $seriesItem->cover : $baseUrl . "/$seriesItem->cover") : $baseUrl . '/placeholder.png';
+            $cover = $seriesItem->cover ? (filter_var($seriesItem->cover, FILTER_VALIDATE_URL) ? $seriesItem->cover : $baseUrl."/$seriesItem->cover") : $baseUrl.'/placeholder.png';
             $backdropPaths = $seriesItem->backdrop_path ?? [];
             if ($playlist->enable_logo_proxy) {
                 $cover = LogoProxyController::generateProxyUrl($cover);
-                $backdropPaths = array_map(fn($path) => LogoProxyController::generateProxyUrl($path), $backdropPaths);
+                $backdropPaths = array_map(fn ($path) => LogoProxyController::generateProxyUrl($path), $backdropPaths);
             }
 
             $now = Carbon::now();
@@ -922,15 +911,15 @@ class XtreamApiController extends Controller
                 'director' => $seriesItem->director ?? '',
                 'genre' => $seriesItem->genre ?? '',
                 'releaseDate' => $seriesItem->release_date ?? '',
-                'last_modified' => (string)($lastModified),
-                'rating' => (string)($seriesItem->rating ?? 0),
+                'last_modified' => (string) ($lastModified),
+                'rating' => (string) ($seriesItem->rating ?? 0),
                 'rating_5based' => round((floatval($seriesItem->rating ?? 0)) / 2, 1),
                 'backdrop_path' => $backdropPaths,
-                'tmdb' => (string)$tmdb,
-                'tmdb_id' => (int)($tmdb ?: 0),
+                'tmdb' => (string) $tmdb,
+                'tmdb_id' => (int) ($tmdb ?: 0),
                 'youtube_trailer' => $seriesItem->youtube_trailer ?? '',
-                'episode_run_time' => (string)($seriesItem->episode_run_time ?? 0),
-                'category_id' => (string)($seriesItem->category_id ?? ($seriesItem->category ? $seriesItem->category->id : 'all')),
+                'episode_run_time' => (string) ($seriesItem->episode_run_time ?? 0),
+                'category_id' => (string) ($seriesItem->category_id ?? ($seriesItem->category ? $seriesItem->category->id : 'all')),
             ];
 
             $seasons = [];
@@ -954,10 +943,10 @@ class XtreamApiController extends Controller
                         'air_date' => $season->metadata['air_date'] ?? '',
                         'cover' => $seasonCover,
                         'cover_tmdb' => $tmdbCover,
-                        'season_number' => (int)$seasonNumber,
+                        'season_number' => (int) $seasonNumber,
                         'cover_big' => $coverBig,
                         'releaseDate' => $season->metadata['release_date'] ?? $season->metadata['releaseDate'] ?? $season->metadata['air_date'] ?? '',
-                        'duration' => (string)($season->metadata['duration'] ?? 0),
+                        'duration' => (string) ($season->metadata['duration'] ?? 0),
                     ];
                     $seasonEpisodes = [];
                     if ($season->episodes && $season->episodes->isNotEmpty()) {
@@ -976,7 +965,7 @@ class XtreamApiController extends Controller
                             }
 
                             $seasonEpisodes[] = [
-                                'id' => (string)$episode->id,
+                                'id' => (string) $episode->id,
                                 'episode_num' => $episode->episode_num,
                                 'title' => $episode->title ?? "Episode {$episode->episode_num}",
                                 'container_extension' => $containerExtension,
@@ -988,11 +977,11 @@ class XtreamApiController extends Controller
                                 'season' => $episode->season,
                                 'custom_sid' => $episode->custom_sid ?? '',
                                 'stream_id' => $episode->id,
-                                'direct_source' => '' // $baseUrl . "/series/{$urlSafeUser}/{$urlSafePass}/" . $episode->id . ".{$containerExtension}"
+                                'direct_source' => '', // $baseUrl . "/series/{$urlSafeUser}/{$urlSafePass}/" . $episode->id . ".{$containerExtension}"
                             ];
                         }
                     }
-                    if (!empty($seasonEpisodes)) {
+                    if (! empty($seasonEpisodes)) {
                         $episodesBySeason[$seasonNumber] = $seasonEpisodes;
                     }
                 }
@@ -1001,9 +990,9 @@ class XtreamApiController extends Controller
             return response()->json([
                 'info' => $seriesInfo,
                 'episodes' => $episodesBySeason,
-                'seasons' => $seasons
+                'seasons' => $seasons,
             ]);
-        } else if ($action === 'get_live_categories') {
+        } elseif ($action === 'get_live_categories') {
             $liveCategories = [];
 
             if ($isCustomPlaylist) {
@@ -1027,7 +1016,7 @@ class XtreamApiController extends Controller
 
                 foreach ($sortedTags as $tag) {
                     $liveCategories[] = [
-                        'category_id' => (string)$tag->id, // Use tag ID instead of name
+                        'category_id' => (string) $tag->id, // Use tag ID instead of name
                         'category_name' => $tag->name,
                         'parent_id' => 0,
                         'sort_order' => $tag->order_column ?? 999999,
@@ -1054,9 +1043,9 @@ class XtreamApiController extends Controller
                     foreach ($fallbackGroups as $group) {
                         // Avoid duplicate category_ids
                         $existingIds = array_column($liveCategories, 'category_id');
-                        if (!in_array((string)$group->id, $existingIds)) {
+                        if (! in_array((string) $group->id, $existingIds)) {
                             $liveCategories[] = [
-                                'category_id' => (string)$group->id,
+                                'category_id' => (string) $group->id,
                                 'category_name' => $group->name,
                                 'parent_id' => 0,
                                 'sort_order' => $group->sort_order ?? 999999,
@@ -1073,6 +1062,7 @@ class XtreamApiController extends Controller
                 // Remove sort_order from output
                 $liveCategories = array_map(function ($cat) {
                     unset($cat['sort_order']);
+
                     return $cat;
                 }, $liveCategories);
             } else {
@@ -1086,7 +1076,7 @@ class XtreamApiController extends Controller
 
                 foreach ($groups as $group) {
                     $liveCategories[] = [
-                        'category_id' => (string)$group->id,
+                        'category_id' => (string) $group->id,
                         'category_name' => $group->name,
                         'parent_id' => 0,
                     ];
@@ -1103,7 +1093,7 @@ class XtreamApiController extends Controller
             }
 
             return response()->json($liveCategories);
-        } else if ($action === 'get_vod_categories') {
+        } elseif ($action === 'get_vod_categories') {
             $vodCategories = [];
 
             if ($isCustomPlaylist) {
@@ -1127,7 +1117,7 @@ class XtreamApiController extends Controller
 
                 foreach ($sortedTags as $tag) {
                     $vodCategories[] = [
-                        'category_id' => (string)$tag->id, // Use tag ID instead of name
+                        'category_id' => (string) $tag->id, // Use tag ID instead of name
                         'category_name' => $tag->name,
                         'parent_id' => 0,
                         'sort_order' => $tag->order_column ?? 999999,
@@ -1154,9 +1144,9 @@ class XtreamApiController extends Controller
                     foreach ($fallbackGroups as $group) {
                         // Avoid duplicate category_ids
                         $existingIds = array_column($vodCategories, 'category_id');
-                        if (!in_array((string)$group->id, $existingIds)) {
+                        if (! in_array((string) $group->id, $existingIds)) {
                             $vodCategories[] = [
-                                'category_id' => (string)$group->id,
+                                'category_id' => (string) $group->id,
                                 'category_name' => $group->name,
                                 'parent_id' => 0,
                                 'sort_order' => $group->sort_order ?? 999999,
@@ -1173,6 +1163,7 @@ class XtreamApiController extends Controller
                 // Remove sort_order from output
                 $vodCategories = array_map(function ($cat) {
                     unset($cat['sort_order']);
+
                     return $cat;
                 }, $vodCategories);
             } else {
@@ -1187,7 +1178,7 @@ class XtreamApiController extends Controller
 
                 foreach ($vodGroups as $group) {
                     $vodCategories[] = [
-                        'category_id' => (string)$group->id,
+                        'category_id' => (string) $group->id,
                         'category_name' => $group->name,
                         'parent_id' => 0,
                     ];
@@ -1204,7 +1195,7 @@ class XtreamApiController extends Controller
             }
 
             return response()->json($vodCategories);
-        } else if ($action === 'get_series_categories') {
+        } elseif ($action === 'get_series_categories') {
             $seriesCategories = [];
 
             if ($isCustomPlaylist) {
@@ -1227,7 +1218,7 @@ class XtreamApiController extends Controller
 
                 foreach ($sortedTags as $tag) {
                     $seriesCategories[] = [
-                        'category_id' => (string)$tag->id, // Use tag ID instead of name
+                        'category_id' => (string) $tag->id, // Use tag ID instead of name
                         'category_name' => $tag->name,
                         'parent_id' => 0,
                         'sort_order' => $tag->order_column ?? 999999,
@@ -1237,7 +1228,7 @@ class XtreamApiController extends Controller
                 // Also get original categories for series without custom tags (fallback)
                 $seriesWithTags = Series::whereIn('id', $seriesIds)
                     ->whereHas('tags', function ($query) use ($tagUuid) {
-                        $query->where('type', $tagUuid . '-category');
+                        $query->where('type', $tagUuid.'-category');
                     })
                     ->pluck('id');
 
@@ -1254,9 +1245,9 @@ class XtreamApiController extends Controller
                     foreach ($fallbackCategories as $category) {
                         // Avoid duplicate category_ids
                         $existingIds = array_column($seriesCategories, 'category_id');
-                        if (!in_array((string)$category->id, $existingIds)) {
+                        if (! in_array((string) $category->id, $existingIds)) {
                             $seriesCategories[] = [
-                                'category_id' => (string)$category->id,
+                                'category_id' => (string) $category->id,
                                 'category_name' => $category->name,
                                 'parent_id' => 0,
                                 'sort_order' => $category->sort_order ?? 999999,
@@ -1273,6 +1264,7 @@ class XtreamApiController extends Controller
                 // Remove sort_order from output
                 $seriesCategories = array_map(function ($cat) {
                     unset($cat['sort_order']);
+
                     return $cat;
                 }, $seriesCategories);
             } else {
@@ -1287,7 +1279,7 @@ class XtreamApiController extends Controller
 
                 foreach ($categories as $category) {
                     $seriesCategories[] = [
-                        'category_id' => (string)$category->id,
+                        'category_id' => (string) $category->id,
                         'category_name' => $category->name,
                         'parent_id' => 0,
                     ];
@@ -1304,7 +1296,7 @@ class XtreamApiController extends Controller
             }
 
             return response()->json($seriesCategories);
-        } else if ($action === 'get_vod_info') {
+        } elseif ($action === 'get_vod_info') {
             $channelId = $request->input('vod_id');
 
             // Find the channel
@@ -1314,12 +1306,12 @@ class XtreamApiController extends Controller
                 ->where('is_vod', true)
                 ->first();
 
-            if (!$channel) {
+            if (! $channel) {
                 return response()->json(['error' => 'VOD not found'], 404);
             }
 
             // Check if VOD metadata has been fetched
-            if (!$channel->last_metadata_fetch) {
+            if (! $channel->last_metadata_fetch) {
                 // No metadata, fetch it!
                 $results = $channel->fetchMetadata();
                 if ($results === false) {
@@ -1336,7 +1328,7 @@ class XtreamApiController extends Controller
             if ($playlist->enable_logo_proxy) {
                 $cover = LogoProxyController::generateProxyUrl($cover);
                 $movieImage = LogoProxyController::generateProxyUrl($movieImage);
-                $backdropPaths = array_map(fn($path) => LogoProxyController::generateProxyUrl($path), $backdropPaths);
+                $backdropPaths = array_map(fn ($path) => LogoProxyController::generateProxyUrl($path), $backdropPaths);
             }
 
             // Fill in missing info fields with channel data
@@ -1378,24 +1370,24 @@ class XtreamApiController extends Controller
                 'name' => $movieData['name'] ?? $channel->name,
                 'title' => $movieData['title'] ?? $channel->name,
                 'year' => $movieData['year'] ?? $channel->year,
-                'added' => $movieData['added'] ?? (string)($channel->created_at ? $channel->created_at->timestamp : time()),
-                'category_id' => (string)($channel->group_id ?? ''),
+                'added' => $movieData['added'] ?? (string) ($channel->created_at ? $channel->created_at->timestamp : time()),
+                'category_id' => (string) ($channel->group_id ?? ''),
                 'category_ids' => ($channel->group_id ? [(int) $channel->group_id] : []),
                 'container_extension' => $extension,
                 'custom_sid' => $movieData['custom_sid'] ?? '',
-                'direct_source' => '' // $baseUrl . "/movie/{$urlSafeUser}/{$urlSafePass}/" . $channel->id . '.' . $extension,
+                'direct_source' => '', // $baseUrl . "/movie/{$urlSafeUser}/{$urlSafePass}/" . $channel->id . '.' . $extension,
             ];
 
             return response()->json([
                 'info' => $defaultInfo,
                 'movie_data' => $defaultMovieData,
             ]);
-        } else if ($action === 'get_short_epg') {
+        } elseif ($action === 'get_short_epg') {
             $streamId = $request->input('stream_id');
             $limit = $request->input('limit');
             $limit = (int) ($limit ?? 4);
 
-            if (!$streamId) {
+            if (! $streamId) {
                 return response()->json(['error' => 'stream_id parameter is required for get_short_epg action'], 400);
             }
 
@@ -1406,19 +1398,19 @@ class XtreamApiController extends Controller
                 ->with('epgChannel')
                 ->first();
 
-            if (!$channel) {
+            if (! $channel) {
                 return response()->json(['error' => 'Channel not found'], 404);
             }
 
-            if (!$channel->epgChannel) {
+            if (! $channel->epgChannel) {
                 return response()->json(['epg_listings' => []]);
             }
 
             // Get EPG data using EpgCacheService
-            $cacheService = new EpgCacheService();
+            $cacheService = new EpgCacheService;
             $epg = Epg::find($channel->epgChannel->epg_id);
 
-            if (!$epg || !$epg->is_cached) {
+            if (! $epg || ! $epg->is_cached) {
                 return response()->json(['epg_listings' => []]);
             }
 
@@ -1447,7 +1439,9 @@ class XtreamApiController extends Controller
             $count = 0;
 
             foreach ($allProgrammes as $programme) {
-                if ($count >= $limit) break;
+                if ($count >= $limit) {
+                    break;
+                }
 
                 $startTime = Carbon::parse($programme['start']);
                 $endTime = Carbon::parse($programme['stop']);
@@ -1468,17 +1462,17 @@ class XtreamApiController extends Controller
                         'start_timestamp' => (string) $startTime->timestamp,
                         'stop_timestamp' => (string) $endTime->timestamp,
                         'now_playing' => ($isCurrentProgramme && $isNowPlaying) ? 1 : 0,
-                        'has_archive' => 0
+                        'has_archive' => 0,
                     ];
                     $count++;
                 }
             }
 
             return response()->json(['epg_listings' => $epgListings]);
-        } else if ($action === 'get_simple_data_table') {
+        } elseif ($action === 'get_simple_data_table') {
             $streamId = $request->input('stream_id');
 
-            if (!$streamId) {
+            if (! $streamId) {
                 return response()->json(['error' => 'stream_id parameter is required for get_simple_data_table action'], 400);
             }
 
@@ -1489,19 +1483,19 @@ class XtreamApiController extends Controller
                 ->with('epgChannel')
                 ->first();
 
-            if (!$channel) {
+            if (! $channel) {
                 return response()->json(['error' => 'Channel not found'], 404);
             }
 
-            if (!$channel->epgChannel) {
+            if (! $channel->epgChannel) {
                 return response()->json(['epg_listings' => []]);
             }
 
             // Get EPG data using EpgCacheService
-            $cacheService = new EpgCacheService();
+            $cacheService = new EpgCacheService;
             $epg = Epg::find($channel->epgChannel->epg_id);
 
-            if (!$epg || !$epg->is_cached) {
+            if (! $epg || ! $epg->is_cached) {
                 return response()->json(['epg_listings' => []]);
             }
 
@@ -1533,13 +1527,13 @@ class XtreamApiController extends Controller
                         'start_timestamp' => (string) $startTime->timestamp,
                         'stop_timestamp' => (string) $endTime->timestamp,
                         'now_playing' => ($isCurrentProgramme && $isNowPlaying) ? 1 : 0,
-                        'has_archive' => 0
+                        'has_archive' => 0,
                     ];
                 }
             }
 
             return response()->json(['epg_listings' => $epgListings]);
-        } else if ($action === 'm3u_plus') {
+        } elseif ($action === 'm3u_plus') {
             // For m3u_plus, redirect to the m3u method which handles the request
             return $this->m3u($playlist);
         } else {
@@ -1553,7 +1547,7 @@ class XtreamApiController extends Controller
      * This method handles the M3U playlist request by calling the PlaylistGenerateController
      * with the appropriate playlist UUID.
      *
-     * @param mixed $playlist The authenticated playlist instance.
+     * @param  mixed  $playlist  The authenticated playlist instance.
      * @return Response
      */
     public function m3u($playlist)
@@ -1569,7 +1563,6 @@ class XtreamApiController extends Controller
      * This method handles the EPG request by authenticating the user and redirecting
      * to the appropriate EPG generation URL based on the playlist UUID.
      *
-     * @param Request $request
      * @return RedirectResponse
      */
     public function epg(Request $request)
@@ -1579,10 +1572,10 @@ class XtreamApiController extends Controller
             'username' => 'required|string',
             'password' => 'required|string',
         ]);
-        list($playlist, $authMethod, $username, $password) = $this->authenticate($request);
+        [$playlist, $authMethod, $username, $password] = $this->authenticate($request);
 
         // If no authentication method worked, return error
-        if (!$playlist || $authMethod === 'none') {
+        if (! $playlist || $authMethod === 'none') {
             return response()->json(['error' => 'Unauthorized'], 401);
         }
 
@@ -1596,7 +1589,6 @@ class XtreamApiController extends Controller
      * This method checks for PlaylistAuth credentials first, then falls back to
      * the original authentication method using username and password.
      *
-     * @param Request $request
      * @return array|bool Returns an array with playlist and auth method, or false if authentication fails.
      */
     private function authenticate(Request $request)

@@ -31,18 +31,18 @@ class TmdbSearchResults extends Field
     {
         // Get the ID from the sibling hidden field via the container's state
         $container = $this->getContainer();
-        
+
         // Try series_id first, then vod_id
         $seriesId = $container->getComponent('series_id')?->getState();
         if ($seriesId) {
             return (int) $seriesId;
         }
-        
+
         $vodId = $container->getComponent('vod_id')?->getState();
         if ($vodId) {
             return (int) $vodId;
         }
-        
+
         return null;
     }
 }

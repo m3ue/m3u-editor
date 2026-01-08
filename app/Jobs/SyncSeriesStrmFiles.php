@@ -104,6 +104,7 @@ class SyncSeriesStrmFiles implements ShouldQueue
 
         if ($totalCount === 0) {
             Log::info('STRM Sync: No series to process');
+
             return;
         }
 
@@ -406,7 +407,7 @@ class SyncSeriesStrmFiles implements ShouldQueue
                 $cleanName = $cleanSpecialChars
                     ? PlaylistService::makeFilesystemSafe($catName, $replaceChar)
                     : PlaylistService::makeFilesystemSafe($catName);
-                $path .= '/' . $cleanName;
+                $path .= '/'.$cleanName;
             }
 
             // See if the series is enabled, if not, skip, else create the folder
@@ -446,7 +447,7 @@ class SyncSeriesStrmFiles implements ShouldQueue
                 $cleanName = $cleanSpecialChars
                     ? PlaylistService::makeFilesystemSafe($seriesFolder, $replaceChar)
                     : PlaylistService::makeFilesystemSafe($seriesFolder);
-                $path .= '/' . $cleanName;
+                $path .= '/'.$cleanName;
             }
 
             // Track the series folder path for tvshow.nfo generation
@@ -459,7 +460,7 @@ class SyncSeriesStrmFiles implements ShouldQueue
             // NFO generation setting - instantiate service once if needed
             $generateNfo = $sync_settings['generate_nfo'] ?? false;
             $nfoService = null;
-            
+
             // Early NFO generation for series-level tvshow.nfo
             if ($generateNfo) {
                 $nfoService = app(NfoService::class);
@@ -479,7 +480,7 @@ class SyncSeriesStrmFiles implements ShouldQueue
                 // Setup episode prefix
                 $season = $ep->season;
                 $num = str_pad($ep->episode_num, 2, '0', STR_PAD_LEFT);
-                $prefx = 'S' . str_pad($season, 2, '0', STR_PAD_LEFT) . "E{$num}";
+                $prefx = 'S'.str_pad($season, 2, '0', STR_PAD_LEFT)."E{$num}";
 
                 // Build the base filename (apply name filtering to episode title)
                 $episodeTitle = $applyNameFilter($ep->title);
@@ -509,22 +510,22 @@ class SyncSeriesStrmFiles implements ShouldQueue
                 // Remove consecutive replacement characters if enabled
                 if ($removeConsecutiveChars && $replaceChar !== 'remove') {
                     $char = $replaceChar === 'space' ? ' ' : ($replaceChar === 'dash' ? '-' : ($replaceChar === 'underscore' ? '_' : '.'));
-                    $fileName = preg_replace('/' . preg_quote($char, '/') . '{2,}/', $char, $fileName);
+                    $fileName = preg_replace('/'.preg_quote($char, '/').'{2,}/', $char, $fileName);
                 }
 
                 $fileName = "{$fileName}.strm";
 
                 // Build the season folder path
                 if (in_array('season', $pathStructure)) {
-                    $seasonPath = $path . '/Season ' . str_pad($season, 2, '0', STR_PAD_LEFT);
-                    $filePath = $seasonPath . '/' . $fileName;
+                    $seasonPath = $path.'/Season '.str_pad($season, 2, '0', STR_PAD_LEFT);
+                    $filePath = $seasonPath.'/'.$fileName;
                 } else {
-                    $filePath = $path . '/' . $fileName;
+                    $filePath = $path.'/'.$fileName;
                 }
 
                 // Generate the url (use cached playlist properties to avoid object access in loop)
                 $containerExtension = $ep->container_extension ?? 'mp4';
-                $url = rtrim("/series/{$playlistUser->name}/{$playlistUuid}/" . $ep->id . '.' . $containerExtension, '.');
+                $url = rtrim("/series/{$playlistUser->name}/{$playlistUuid}/".$ep->id.'.'.$containerExtension, '.');
                 $url = PlaylistService::getBaseUrl($url);
 
                 // Build path options for tracking changes

@@ -17,7 +17,7 @@ use Laravel\Sanctum\HasApiTokens;
 class User extends Authenticatable implements FilamentUser, HasAppAuthentication, HasAppAuthenticationRecovery, HasAvatar
 {
     /** @use HasFactory<UserFactory> */
-    use HasFactory, Notifiable, HasApiTokens;
+    use HasApiTokens, HasFactory, Notifiable;
 
     /**
      * The attributes that should be hidden for serialization.
@@ -149,6 +149,7 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
         $uuids = array_merge($uuids, $this->customPlaylists()->select('id', 'user_id', 'uuid')->pluck('uuid')->toArray());
         $uuids = array_merge($uuids, $this->mergedPlaylists()->select('id', 'user_id', 'uuid')->pluck('uuid')->toArray());
         $uuids = array_merge($uuids, $this->playlistAliases()->select('id', 'user_id', 'uuid')->pluck('uuid')->toArray());
+
         return $uuids;
     }
 

@@ -2,10 +2,9 @@
 
 namespace Database\Factories;
 
-use Illuminate\Database\Eloquent\Factories\Factory;
-use Illuminate\Support\Str;
 use App\Models\Epg;
 use App\Models\EpgChannel;
+use Illuminate\Database\Eloquent\Factories\Factory;
 
 class EpgChannelFactory extends Factory
 {

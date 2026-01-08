@@ -2,20 +2,19 @@
 
 namespace App\Filament\Resources\MergedPlaylists\RelationManagers;
 
-use Filament\Schemas\Schema;
-use Filament\Tables\Columns\TextColumn;
-use Filament\Actions\AttachAction;
-use Filament\Actions\DetachAction;
-use Filament\Tables\Enums\RecordActionsPosition;
-use Filament\Actions\BulkActionGroup;
-use Filament\Actions\DetachBulkAction;
 use App\Enums\Status;
+use Filament\Actions\AttachAction;
+use Filament\Actions\BulkActionGroup;
+use Filament\Actions\DetachAction;
+use Filament\Actions\DetachBulkAction;
 use Filament\Forms;
 use Filament\Resources\RelationManagers\RelationManager;
+use Filament\Schemas\Schema;
 use Filament\Tables;
+use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Database\Eloquent\SoftDeletingScope;
 
 class PlaylistsRelationManager extends RelationManager
 {
@@ -49,7 +48,7 @@ class PlaylistsRelationManager extends RelationManager
                 TextColumn::make('status')
                     ->sortable()
                     ->badge()
-                    ->color(fn(Status $state) => $state->getColor()),
+                    ->color(fn (Status $state) => $state->getColor()),
                 TextColumn::make('synced')
                     ->label('Last Synced')
                     ->since()
@@ -63,7 +62,7 @@ class PlaylistsRelationManager extends RelationManager
                     ->preloadRecordSelect()
                     ->recordSelectSearchColumns(['name'])
                     ->recordSelectOptionsQuery(
-                        fn(Builder $query, $livewire) => $query
+                        fn (Builder $query, $livewire) => $query
                             ->select(['id', 'name'])
                             ->where('user_id', $livewire->ownerRecord->user_id)
                             ->orderBy('name')

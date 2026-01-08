@@ -1,7 +1,7 @@
 <?php
 
-use Spatie\LaravelSettings\Migrations\SettingsMigration;
 use Spatie\LaravelSettings\Migrations\SettingsBlueprint;
+use Spatie\LaravelSettings\Migrations\SettingsMigration;
 
 return new class extends SettingsMigration
 {

@@ -3,7 +3,6 @@
 namespace App\Filament\Resources\VodGroups\Pages;
 
 use App\Filament\Resources\VodGroups\VodGroupResource;
-use Filament\Actions;
 use Filament\Resources\Pages\CreateRecord;
 
 class CreateVodGroup extends CreateRecord

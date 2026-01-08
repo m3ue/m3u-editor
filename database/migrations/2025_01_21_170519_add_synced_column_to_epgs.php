@@ -14,7 +14,7 @@ return new class extends Migration
         Schema::table('epgs', function (Blueprint $table) {
             $table->string('import_batch_no')->nullable()->after('url');
             $table->dateTime('synced')->nullable()->after('user_id');
-            
+
         });
     }
 

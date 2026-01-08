@@ -2,20 +2,14 @@
 
 namespace App\Filament\Resources\Playlists\Pages;
 
-use Filament\Actions\ViewAction;
-use App\Enums\Status;
 use App\Filament\Resources\Playlists\PlaylistResource;
 use App\Filament\Resources\Playlists\Widgets\ImportProgress;
-use App\Models\Playlist;
-use Filament\Actions;
-use Filament\Forms;
-use Filament\Notifications\Notification;
+use Filament\Actions\ViewAction;
 use Filament\Resources\Pages\EditRecord;
-use Illuminate\Support\Facades\Redis;
 
 class EditPlaylist extends EditRecord
 {
-    //use EditRecord\Concerns\HasWizard;
+    // use EditRecord\Concerns\HasWizard;
 
     protected static string $resource = PlaylistResource::class;
 
@@ -27,7 +21,7 @@ class EditPlaylist extends EditRecord
     public function getVisibleHeaderWidgets(): array
     {
         return [
-            ImportProgress::class
+            ImportProgress::class,
         ];
     }
 

@@ -9,7 +9,7 @@ return [
     // If M3U_PROXY_ENABLED=true, uses embedded proxy via nginx reverse proxy
     'embedded_proxy_enabled' => env('M3U_PROXY_ENABLED', true), // true = embedded service, false/null = external service
     'external_proxy_enabled' => ! env('M3U_PROXY_ENABLED', false), // opposite of above for convenience
-    
+
     'm3u_proxy_host' => env('M3U_PROXY_HOST', 'localhost'), // Host for proxy (embedded and external)
     'm3u_proxy_port' => env('M3U_PROXY_PORT', 8085), // Port for proxy (embedded and external)
     'm3u_proxy_token' => env('M3U_PROXY_TOKEN'), // API token for authenticating with the proxy service

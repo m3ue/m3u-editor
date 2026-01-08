@@ -2,7 +2,6 @@
 
 namespace App\Filament\GuestPanel\Resources\Vods\Pages;
 
-use App\Facades\PlaylistFacade;
 use App\Filament\GuestPanel\Pages\Concerns\HasPlaylist;
 use App\Filament\GuestPanel\Resources\Vods\VodResource;
 use Filament\Actions;

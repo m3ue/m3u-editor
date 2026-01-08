@@ -2,10 +2,9 @@
 
 namespace Database\Factories;
 
-use Illuminate\Database\Eloquent\Factories\Factory;
-use Illuminate\Support\Str;
 use App\Models\Playlist;
 use App\Models\User;
+use Illuminate\Database\Eloquent\Factories\Factory;
 
 class PlaylistFactory extends Factory
 {
@@ -25,7 +24,7 @@ class PlaylistFactory extends Factory
             'name' => $this->faker->name(),
             'uuid' => $this->faker->uuid(),
             'url' => $this->faker->url(),
-            'status' => $this->faker->randomElement(["pending","processing","completed","failed"]),
+            'status' => $this->faker->randomElement(['pending', 'processing', 'completed', 'failed']),
             'prefix' => $this->faker->word(),
             'channels' => $this->faker->randomNumber(),
             'synced' => $this->faker->dateTime(),

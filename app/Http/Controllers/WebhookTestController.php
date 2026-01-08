@@ -9,10 +9,11 @@ class WebhookTestController extends Controller
     public function __invoke(Request $request)
     {
         $data = $request->all();
+
         return response()->json([
             'message' => 'Webhook received',
             'method' => $request->method(),
-            'data' => $data
+            'data' => $data,
         ]);
     }
 }

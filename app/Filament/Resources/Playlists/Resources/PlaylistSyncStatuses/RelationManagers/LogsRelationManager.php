@@ -2,20 +2,17 @@
 
 namespace App\Filament\Resources\Playlists\Resources\PlaylistSyncStatuses\RelationManagers;
 
-use Filament\Schemas\Schema;
-use Filament\Tables\Columns\Layout\Split;
-use Filament\Tables\Columns\TextColumn;
-use Filament\Tables\Columns\Layout\Panel;
-use Filament\Tables\Columns\Layout\Stack;
-use Filament\Schemas\Components\Tabs\Tab;
 use App\Models\PlaylistSyncStatusLog;
 use App\Tables\Columns\SyncStats;
-use Filament\Forms;
 use Filament\Resources\RelationManagers\RelationManager;
+use Filament\Schemas\Components\Tabs\Tab;
+use Filament\Schemas\Schema;
 use Filament\Tables;
+use Filament\Tables\Columns\Layout\Panel;
+use Filament\Tables\Columns\Layout\Split;
+use Filament\Tables\Columns\Layout\Stack;
+use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
-use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Database\Eloquent\SoftDeletingScope;
 
 class LogsRelationManager extends RelationManager
 {
@@ -64,16 +61,16 @@ class LogsRelationManager extends RelationManager
                             ])
                             ->sortable()
                             ->searchable()
-                            ->toggleable()
-                    ])->grow(false)
+                            ->toggleable(),
+                    ])->grow(false),
                 ])->from('md'),
                 Panel::make([
                     Stack::make([
                         SyncStats::make('meta')
                             ->label('Item Details')
-                            ->searchable()
+                            ->searchable(),
                     ]),
-                ])->collapsible()
+                ])->collapsible(),
             ])
             ->filters([
                 // Tables\Filters\Filter::make('added')
@@ -109,6 +106,7 @@ class LogsRelationManager extends RelationManager
     public function getTabs(): array
     {
         $syncId = $this->getOwnerRecord()->getKey();
+
         return self::setupTabs($syncId);
     }
 
@@ -145,7 +143,7 @@ class LogsRelationManager extends RelationManager
             'added_channels' => Tab::make('Added Channels')
                 ->badge($addedChannels)
                 ->badgeColor('success')
-                ->modifyQueryUsing(fn($query) => $query->where([
+                ->modifyQueryUsing(fn ($query) => $query->where([
                     'playlist_sync_status_id' => $syncId,
                     'type' => 'channel',
                     'status' => 'added',
@@ -153,7 +151,7 @@ class LogsRelationManager extends RelationManager
             'removed_channels' => Tab::make('Removed Channels')
                 ->badge($removedChannels)
                 ->badgeColor('danger')
-                ->modifyQueryUsing(fn($query) => $query->where([
+                ->modifyQueryUsing(fn ($query) => $query->where([
                     'playlist_sync_status_id' => $syncId,
                     'type' => 'channel',
                     'status' => 'removed',
@@ -161,7 +159,7 @@ class LogsRelationManager extends RelationManager
             'added_groups' => Tab::make('Added Groups')
                 ->badge($addedGroups)
                 ->badgeColor('success')
-                ->modifyQueryUsing(fn($query) => $query->where([
+                ->modifyQueryUsing(fn ($query) => $query->where([
                     'playlist_sync_status_id' => $syncId,
                     'type' => 'group',
                     'status' => 'added',
@@ -169,7 +167,7 @@ class LogsRelationManager extends RelationManager
             'removed_groups' => Tab::make('Removed Groups')
                 ->badge($removedGroups)
                 ->badgeColor('danger')
-                ->modifyQueryUsing(fn($query) => $query->where([
+                ->modifyQueryUsing(fn ($query) => $query->where([
                     'playlist_sync_status_id' => $syncId,
                     'type' => 'group',
                     'status' => 'removed',

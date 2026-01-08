@@ -2,9 +2,9 @@
 
 namespace App\Http\Controllers;
 
-use Illuminate\Http\JsonResponse;
 use App\Jobs\ProcessEpgImport;
 use App\Models\Epg;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class EpgController extends Controller
@@ -15,12 +15,11 @@ class EpgController extends Controller
      * Use the `uuid` parameter to select the EPG to refresh.
      * You can find the EPG UUID by using the `User > Get your EPGs` endpoint.
      *
-     * @param Request $request
-     * @param string $uuid
      *
      * @return JsonResponse
      *
      * @unauthenticated
+     *
      * @response array{message: "EPG is currently being synced..."}
      */
     public function refreshEpg(Request $request, string $uuid)

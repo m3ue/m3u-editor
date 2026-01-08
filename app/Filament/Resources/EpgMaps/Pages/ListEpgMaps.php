@@ -2,18 +2,13 @@
 
 namespace App\Filament\Resources\EpgMaps\Pages;
 
-use Filament\Actions\Action;
-use App\Jobs\MapPlaylistChannelsToEpg;
 use App\Filament\Resources\EpgMaps\EpgMapResource;
-use App\Models\Epg;
-use App\Models\Playlist;
-use Filament\Actions;
-use Filament\Forms;
+use App\Jobs\MapPlaylistChannelsToEpg;
+use Filament\Actions\Action;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ListRecords;
 use Filament\Support\Enums\Width;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Database\Eloquent\Collection;
 
 class ListEpgMaps extends ListRecords
 {
@@ -30,7 +25,7 @@ class ListEpgMaps extends ListRecords
                 ->action(function (array $data): void {
                     app('Illuminate\Contracts\Bus\Dispatcher')
                         ->dispatch(new MapPlaylistChannelsToEpg(
-                            epg: (int)$data['epg_id'],
+                            epg: (int) $data['epg_id'],
                             playlist: $data['playlist_id'],
                             force: $data['override'],
                             recurring: $data['recurring'],

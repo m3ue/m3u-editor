@@ -13,11 +13,11 @@ return new class extends SettingsMigration
     public function up(): void
     {
         // Media server URL - compatible with both Emby and Jellyfin
-        if (!$this->migrator->exists('general.emby_server_url')) {
+        if (! $this->migrator->exists('general.emby_server_url')) {
             $this->migrator->add('general.emby_server_url', null);
         }
         // API key for authentication - works with both platforms
-        if (!$this->migrator->exists('general.emby_api_key')) {
+        if (! $this->migrator->exists('general.emby_api_key')) {
             $this->migrator->add('general.emby_api_key', null);
         }
     }

@@ -2,16 +2,14 @@
 
 namespace App\Forms\Components;
 
-use Exception;
 use App\Models\Playlist;
-use App\Models\SharedStream;
 use App\Services\M3uProxyService;
 use App\Services\XtreamService;
 use Carbon\Carbon;
+use Exception;
 use Filament\Forms\Components\Field;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Redis;
 
 class PlaylistInfo extends Field
 {
@@ -22,7 +20,7 @@ class PlaylistInfo extends Field
     public function getStats(): array
     {
         $playlist = Playlist::find($this->getRecord()?->id);
-        if (!$playlist) {
+        if (! $playlist) {
             return [];
         }
 
@@ -43,7 +41,7 @@ class PlaylistInfo extends Field
             $activeStreams = M3uProxyService::getPlaylistActiveStreamsCount($playlist);
             $availableStreams = $playlist->available_streams ?? 0;
             if ($availableStreams === 0) {
-                $availableStreams = "∞";
+                $availableStreams = '∞';
             }
             $stats['active_streams'] = $activeStreams;
             $stats['available_streams'] = $availableStreams;
@@ -52,7 +50,7 @@ class PlaylistInfo extends Field
         }
         if ($playlist->xtream) {
             $xtreamStats = $this->getXtreamStats($playlist);
-            if (!empty($xtreamStats)) {
+            if (! empty($xtreamStats)) {
                 $stats = array_merge($stats, $xtreamStats);
             }
         }
@@ -64,30 +62,31 @@ class PlaylistInfo extends Field
     {
         $cacheKey = "xtream_stats:{$playlist->id}";
         $xtreamInfo = Cache::get($cacheKey, null);
-        if (!$xtreamInfo) {
+        if (! $xtreamInfo) {
             try {
                 // If no cache, initialize XtreamService
                 $xtream = XtreamService::make($playlist);
-                if (!$xtream) {
+                if (! $xtream) {
                     // Try and fetch from the playlist data directly if unable to initialize XtreamService
                     $xtreamInfo = $playlist->xtream_status;
                 } else {
                     // Prefer live data from XtreamService
                     $xtreamInfo = $xtream->userInfo();
                 }
-                if (!$xtreamInfo) {
+                if (! $xtreamInfo) {
                     return [];
                 }
                 Cache::put($cacheKey, $xtreamInfo, now()->addSeconds(10)); // Cache for 10 seconds
             } catch (Exception $e) {
                 // Log the error and return empty array
-                Log::error("Failed to fetch Xtream stats for playlist {$playlist->id}: " . $e->getMessage());
+                Log::error("Failed to fetch Xtream stats for playlist {$playlist->id}: ".$e->getMessage());
+
                 return [];
             }
         }
 
         // If xtream_status is not set in the playlist, update it
-        if (!$playlist->xtream_status) {
+        if (! $playlist->xtream_status) {
             $playlist->update([
                 'xtream_status' => $xtreamInfo,
             ]);
@@ -101,6 +100,7 @@ class PlaylistInfo extends Field
             $expires = Carbon::createFromTimestamp($expires);
             $expiresIn24HoursOrLess = $expires->isToday() || $expires->isTomorrow();
         }
+
         return [
             'xtream_info' => [
                 'active_connections' => "$activeConnections/$maxConnections",
@@ -108,7 +108,7 @@ class PlaylistInfo extends Field
                 'expires' => $expires ? $expires->diffForHumans() : 'N/A',
                 'expires_description' => $expires ? $expires->toDateTimeString() : 'N/A',
                 'expires_in_24_hours_or_less' => $expiresIn24HoursOrLess,
-            ]
+            ],
         ];
     }
 }

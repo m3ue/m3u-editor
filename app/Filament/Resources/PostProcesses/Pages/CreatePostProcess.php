@@ -3,7 +3,6 @@
 namespace App\Filament\Resources\PostProcesses\Pages;
 
 use App\Filament\Resources\PostProcesses\PostProcessResource;
-use Filament\Actions;
 use Filament\Resources\Pages\CreateRecord;
 
 class CreatePostProcess extends CreateRecord
@@ -13,6 +12,7 @@ class CreatePostProcess extends CreateRecord
     protected function mutateFormDataBeforeCreate(array $data): array
     {
         $data['user_id'] = auth()->id();
+
         return $data;
     }
 }

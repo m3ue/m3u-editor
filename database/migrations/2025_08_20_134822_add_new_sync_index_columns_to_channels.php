@@ -19,7 +19,7 @@ return new class extends Migration
                 // Set the source ID based on our composite index
                 // This is a unique identifier for the channel based on its title, name, group, and playlist
                 // This will help us avoid duplicates and ensure we can create a unique index
-                $sourceId = md5($channel->title . $channel->name . $channel->group_internal . $playlist->id);
+                $sourceId = md5($channel->title.$channel->name.$channel->group_internal.$playlist->id);
                 $channel->update(['source_id' => $sourceId]);
             }
         });

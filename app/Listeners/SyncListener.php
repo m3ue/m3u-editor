@@ -2,20 +2,14 @@
 
 namespace App\Listeners;
 
-use Throwable;
-use App\Enums\PlaylistSourceType;
 use App\Enums\Status;
 use App\Events\SyncCompleted;
 use App\Jobs\GenerateEpgCache;
-use App\Jobs\MapPlaylistChannelsToEpg;
 use App\Jobs\MergeChannels;
 use App\Jobs\RunPostProcess;
 use App\Models\Epg;
-use App\Models\EpgMap;
 use Filament\Notifications\Notification;
-use Illuminate\Support\Facades\Bus;
-use Illuminate\Contracts\Queue\ShouldQueue;
-use Illuminate\Queue\InteractsWithQueue;
+use Throwable;
 
 class SyncListener
 {
@@ -89,10 +83,10 @@ class SyncListener
             ));
         } catch (Throwable $e) {
             // Log error and send notification
-            logger()->error('Auto-merge failed for playlist: ' . $playlist->name, [
+            logger()->error('Auto-merge failed for playlist: '.$playlist->name, [
                 'playlist_id' => $playlist->id,
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'trace' => $e->getTraceAsString(),
             ]);
 
             Notification::make()

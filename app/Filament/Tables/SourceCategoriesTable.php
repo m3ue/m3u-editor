@@ -3,7 +3,6 @@
 namespace App\Filament\Tables;
 
 use App\Models\SourceCategory;
-use Filament\Tables;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
@@ -13,7 +12,7 @@ class SourceCategoriesTable
     public static function configure(Table $table): Table
     {
         return $table
-            ->query(fn(): Builder => SourceCategory::query())
+            ->query(fn (): Builder => SourceCategory::query())
             ->modifyQueryUsing(function (Builder $query) use ($table): Builder {
                 $arguments = $table->getArguments();
 

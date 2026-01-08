@@ -9,24 +9,21 @@ use App\Filament\GuestPanel\Resources\Series\RelationManagers\EpisodesRelationMa
 use App\Models\CustomPlaylist;
 use App\Models\Playlist;
 use App\Models\Series;
-use BackedEnum;
 use Filament\Actions;
-use Filament\Forms;
-use Filament\Infolists;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
-use Filament\Support\Icons\Heroicon;
 use Filament\Tables;
 use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Table;
-use Illuminate\Support\Str;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Str;
 
 class SeriesResource extends Resource
 {
     use HasPlaylist;
 
     protected static ?string $model = Series::class;
+
     protected static ?string $slug = 'series';
 
     public static function getNavigationBadge(): ?string
@@ -35,6 +32,7 @@ class SeriesResource extends Resource
         if ($playlist) {
             return (string) $playlist->series()->where('enabled', true)->count();
         }
+
         return '';
     }
 
@@ -49,7 +47,7 @@ class SeriesResource extends Resource
         $parameters['uuid'] = static::getCurrentUuid();
 
         // Default to 'index' if $name is not provided
-        $routeName = static::getRouteBaseName($panel) . '.' . ($name ?? 'index');
+        $routeName = static::getRouteBaseName($panel).'.'.($name ?? 'index');
 
         return route($routeName, $parameters, $isAbsolute);
     }
@@ -62,7 +60,7 @@ class SeriesResource extends Resource
                 ->with('playlist') // Eager load the playlist relationship
                 ->where([
                     ['enabled', true], // Only show enabled series
-                    ['playlist_id', $playlist?->id] // Only show series from the current playlist
+                    ['playlist_id', $playlist?->id], // Only show series from the current playlist
                 ]);
         }
         if ($playlist instanceof CustomPlaylist) {
@@ -73,6 +71,7 @@ class SeriesResource extends Resource
                 })
                 ->where('enabled', true); // Only show enabled series
         }
+
         return parent::getEloquentQuery();
     }
 
@@ -100,16 +99,16 @@ class SeriesResource extends Resource
                     ->width(80)
                     ->height(120)
                     ->checkFileExistence(false)
-                    ->getStateUsing(fn($record) => LogoFacade::getSeriesLogoUrl($record))
+                    ->getStateUsing(fn ($record) => LogoFacade::getSeriesLogoUrl($record))
                     ->searchable(),
                 Tables\Columns\TextColumn::make('name')
                     ->label('Info')
-                    ->description((fn($record) => Str::limit($record->plot, 200)))
+                    ->description((fn ($record) => Str::limit($record->plot, 200)))
                     ->wrap()
                     ->extraAttributes(['style' => 'min-width: 350px;'])
                     ->searchable()
                     ->searchable(query: function (Builder $query, string $search): Builder {
-                        return $query->orWhereRaw('LOWER(series.name) LIKE ?', ['%' . strtolower($search) . '%']);
+                        return $query->orWhereRaw('LOWER(series.name) LIKE ?', ['%'.strtolower($search).'%']);
                     }),
                 Tables\Columns\TextColumn::make('seasons_count')
                     ->label('Seasons')
@@ -131,7 +130,7 @@ class SeriesResource extends Resource
                 Tables\Columns\TextColumn::make('youtube_trailer')
                     ->label('YouTube Trailer')
                     ->placeholder('No trailer ID set.')
-                    ->url(fn($record): string => 'https://www.youtube.com/watch?v=' . $record->youtube_trailer)
+                    ->url(fn ($record): string => 'https://www.youtube.com/watch?v='.$record->youtube_trailer)
                     ->openUrlInNewTab()
                     ->icon('heroicon-s-play'),
                 Tables\Columns\TextColumn::make('release_date')

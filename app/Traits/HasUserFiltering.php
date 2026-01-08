@@ -13,7 +13,7 @@ trait HasUserFiltering
     public static function getEloquentQuery(): Builder
     {
         $query = parent::getEloquentQuery()
-            ->where(static::getModel()::make()->getTable() . '.user_id', auth()->id());
+            ->where(static::getModel()::make()->getTable().'.user_id', auth()->id());
 
         return $query;
     }
@@ -25,7 +25,7 @@ trait HasUserFiltering
     public static function getGlobalSearchEloquentQuery(): Builder
     {
         $query = parent::getGlobalSearchEloquentQuery()
-            ->where(static::getModel()::make()->getTable() . '.user_id', auth()->id());
+            ->where(static::getModel()::make()->getTable().'.user_id', auth()->id());
 
         return $query;
     }

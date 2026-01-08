@@ -7,7 +7,6 @@ use App\Models\Channel;
 use App\Models\Episode;
 use App\Models\StreamProfile;
 use App\Services\M3uProxyService;
-use App\Services\ProxyService;
 use Carbon\Carbon;
 use Exception;
 use Filament\Actions\Action;
@@ -68,9 +67,9 @@ class M3uProxyStreamMonitor extends Page
     {
         $this->streams = $this->getActiveStreams();
 
-        $totalClients = array_sum(array_map(fn($s) => $s['client_count'] ?? 0, $this->streams));
-        $totalBandwidth = array_sum(array_map(fn($s) => $s['bandwidth_kbps'] ?? 0, $this->streams));
-        $activeStreams = count(array_filter($this->streams, fn($s) => $s['status'] === 'active'));
+        $totalClients = array_sum(array_map(fn ($s) => $s['client_count'] ?? 0, $this->streams));
+        $totalBandwidth = array_sum(array_map(fn ($s) => $s['bandwidth_kbps'] ?? 0, $this->streams));
+        $activeStreams = count(array_filter($this->streams, fn ($s) => $s['status'] === 'active'));
 
         $this->globalStats = [
             'total_streams' => count($this->streams),
@@ -291,7 +290,7 @@ class M3uProxyStreamMonitor extends Page
                 'failover_resolver_url' => $stream['failover_resolver_url'] ?? null,
                 'current_failover_index' => $stream['current_failover_index'] ?? 0,
                 'failover_attempts' => $stream['failover_attempts'] ?? 0,
-                'last_failover_time' => isset($stream['last_failover_time']) 
+                'last_failover_time' => isset($stream['last_failover_time'])
                     ? Carbon::parse($stream['last_failover_time'], 'UTC')->format('Y-m-d H:i:s')
                     : null,
                 'using_failover' => ($stream['current_failover_index'] ?? 0) > 0 || ($stream['failover_attempts'] ?? 0) > 0,
@@ -308,7 +307,7 @@ class M3uProxyStreamMonitor extends Page
             return $url;
         }
 
-        return substr($url, 0, $maxLength - 3) . '...';
+        return substr($url, 0, $maxLength - 3).'...';
     }
 
     protected function formatBytes(int $bytes, int $precision = 2): string
@@ -319,7 +318,7 @@ class M3uProxyStreamMonitor extends Page
             $bytes /= 1024;
         }
 
-        return round($bytes, $precision) . ' ' . $units[$i];
+        return round($bytes, $precision).' '.$units[$i];
     }
 
     public function getViewData(): array

@@ -2,43 +2,38 @@
 
 namespace App\Filament\Resources\VodGroups;
 
-use Filament\Schemas\Schema;
-use Filament\Tables\Columns\TextInputColumn;
-use Filament\Tables\Columns\TextColumn;
-use Filament\Tables\Columns\IconColumn;
-use Filament\Tables\Filters\SelectFilter;
-use Filament\Actions\ActionGroup;
-use Filament\Actions\ViewAction;
-use Filament\Actions\Action;
-use Filament\Forms\Components\Select;
-use Filament\Schemas\Components\Utilities\Set;
-use Filament\Schemas\Components\Utilities\Get;
-use Filament\Actions\DeleteAction;
-use Filament\Tables\Enums\RecordActionsPosition;
-use Filament\Actions\BulkActionGroup;
-use Filament\Actions\BulkAction;
-use App\Filament\Resources\VodGroups\RelationManagers\ChannelsRelationManager;
-use App\Filament\Resources\VodGroups\RelationManagers\VodRelationManager;
+use App\Filament\Resources\Playlists\PlaylistResource;
 use App\Filament\Resources\VodGroups\Pages\ListVodGroups;
 use App\Filament\Resources\VodGroups\Pages\ViewVodGroup;
-use Filament\Schemas\Components\Section;
-use Filament\Infolists\Components\TextEntry;
-use Filament\Forms\Components\TextInput;
-use App\Filament\Resources\Playlists\PlaylistResource;
+use App\Filament\Resources\VodGroups\RelationManagers\VodRelationManager;
 use App\Models\CustomPlaylist;
 use App\Models\Group;
 use App\Models\Playlist;
-use Filament\Forms;
-use Filament\Infolists;
+use App\Traits\HasUserFiltering;
+use Filament\Actions\Action;
+use Filament\Actions\ActionGroup;
+use Filament\Actions\BulkAction;
+use Filament\Actions\BulkActionGroup;
+use Filament\Actions\DeleteAction;
+use Filament\Actions\ViewAction;
+use Filament\Forms\Components\Select;
+use Filament\Forms\Components\TextInput;
+use Filament\Infolists\Components\TextEntry;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
-use Filament\Tables;
+use Filament\Schemas\Components\Section;
+use Filament\Schemas\Components\Utilities\Get;
+use Filament\Schemas\Components\Utilities\Set;
+use Filament\Schemas\Schema;
+use Filament\Tables\Columns\IconColumn;
+use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Columns\TextInputColumn;
 use Filament\Tables\Columns\ToggleColumn;
+use Filament\Tables\Enums\RecordActionsPosition;
+use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
-use Illuminate\Database\Eloquent\SoftDeletingScope;
-use App\Traits\HasUserFiltering;
 
 class VodGroupResource extends Resource
 {
@@ -49,6 +44,7 @@ class VodGroupResource extends Resource
     protected static ?string $recordTitleAttribute = 'name';
 
     protected static ?string $label = 'VOD Group';
+
     protected static ?string $pluralLabel = 'Groups';
 
     public static function getGloballySearchableAttributes(): array
@@ -56,7 +52,7 @@ class VodGroupResource extends Resource
         return ['name', 'name_internal'];
     }
 
-    protected static string | \UnitEnum | null $navigationGroup = 'VOD Channels';
+    protected static string|\UnitEnum|null $navigationGroup = 'VOD Channels';
 
     public static function getNavigationSort(): ?int
     {
@@ -92,7 +88,7 @@ class VodGroupResource extends Resource
                 TextInputColumn::make('name')
                     ->label('Name')
                     ->rules(['min:0', 'max:255'])
-                    ->placeholder(fn($record) => $record->name_internal)
+                    ->placeholder(fn ($record) => $record->name_internal)
                     ->searchable()
                     ->sortable(query: function (Builder $query, string $direction): Builder {
                         return $query
@@ -106,15 +102,15 @@ class VodGroupResource extends Resource
                     ->type('number')
                     ->placeholder('Sort Order')
                     ->sortable()
-                    ->tooltip(fn($record) => $record->playlist->auto_sort ? 'Playlist auto-sort enabled; any changes will be overwritten on next sync' : 'Group sort order')
+                    ->tooltip(fn ($record) => $record->playlist->auto_sort ? 'Playlist auto-sort enabled; any changes will be overwritten on next sync' : 'Group sort order')
                     ->toggleable(),
                 ToggleColumn::make('enabled')
                     ->label('Auto Enable')
                     ->toggleable()
                     ->tooltip('Auto enable newly added group channels')
-                    ->tooltip(fn($record) => $record->playlist?->enable_channels ? 'Playlist auto-enable new channels is enabled, all group channels will automatically be enabled on next sync.' : 'Auto enable newly added group channels')
-                    ->disabled(fn($record) => $record->playlist?->enable_channels)
-                    ->getStateUsing(fn($record) => $record->playlist?->enable_channels ? true : $record->enabled)
+                    ->tooltip(fn ($record) => $record->playlist?->enable_channels ? 'Playlist auto-enable new channels is enabled, all group channels will automatically be enabled on next sync.' : 'Auto enable newly added group channels')
+                    ->disabled(fn ($record) => $record->playlist?->enable_channels)
+                    ->getStateUsing(fn ($record) => $record->playlist?->enable_channels ? true : $record->enabled)
                     ->sortable(),
                 TextColumn::make('name_internal')
                     ->label('Default name')
@@ -122,16 +118,16 @@ class VodGroupResource extends Resource
                     ->sortable(),
                 TextColumn::make('vod_channels_count')
                     ->label('VOD Channels')
-                    ->description(fn(Group $record): string => "Enabled: {$record->enabled_vod_channels_count}")
+                    ->description(fn (Group $record): string => "Enabled: {$record->enabled_vod_channels_count}")
                     ->toggleable()
                     ->sortable(),
                 IconColumn::make('custom')
                     ->label('Custom')
-                    ->icon(fn(string $state): string => match ($state) {
+                    ->icon(fn (string $state): string => match ($state) {
                         '1' => 'heroicon-o-check-circle',
                         '0' => 'heroicon-o-minus-circle',
                         '' => 'heroicon-o-minus-circle',
-                    })->color(fn(string $state): string => match ($state) {
+                    })->color(fn (string $state): string => match ($state) {
                         '1' => 'success',
                         '0' => 'danger',
                         '' => 'danger',
@@ -172,12 +168,13 @@ class VodGroupResource extends Resource
                                 ->searchable(),
                             Select::make('category')
                                 ->label('Custom Group')
-                                ->disabled(fn(Get $get) => !$get('playlist'))
-                                ->helperText(fn(Get $get) => !$get('playlist') ? 'Select a custom playlist first.' : 'Select the group you would like to assign to the selected channel(s) to.')
+                                ->disabled(fn (Get $get) => ! $get('playlist'))
+                                ->helperText(fn (Get $get) => ! $get('playlist') ? 'Select a custom playlist first.' : 'Select the group you would like to assign to the selected channel(s) to.')
                                 ->options(function ($get) {
                                     $customList = CustomPlaylist::find($get('playlist'));
+
                                     return $customList ? $customList->groupTags()->get()
-                                        ->mapWithKeys(fn($tag) => [$tag->getAttributeValue('name') => $tag->getAttributeValue('name')])
+                                        ->mapWithKeys(fn ($tag) => [$tag->getAttributeValue('name') => $tag->getAttributeValue('name')])
                                         ->toArray() : [];
                                 })
                                 ->searchable(),
@@ -214,10 +211,10 @@ class VodGroupResource extends Resource
                                 ->live()
                                 ->label('Group')
                                 ->helperText('Select the group you would like to move the channels to.')
-                                ->options(fn(Get $get, $record) => Group::where([
+                                ->options(fn (Get $get, $record) => Group::where([
                                     'type' => 'vod',
                                     'user_id' => auth()->id(),
-                                    'playlist_id' => $record->playlist_id
+                                    'playlist_id' => $record->playlist_id,
                                 ])->get(['name', 'id'])->pluck('name', 'id'))
                                 ->searchable(),
                         ])
@@ -280,7 +277,7 @@ class VodGroupResource extends Resource
                         ->modalSubmitActionLabel('Yes, disable now'),
 
                     DeleteAction::make()
-                        ->hidden(fn($record) => !$record->custom),
+                        ->hidden(fn ($record) => ! $record->custom),
                 ])->button()->hiddenLabel()->size('sm'),
             ], position: RecordActionsPosition::BeforeCells)
             ->toolbarActions([
@@ -302,12 +299,13 @@ class VodGroupResource extends Resource
                                 ->searchable(),
                             Select::make('category')
                                 ->label('Custom Group')
-                                ->disabled(fn(Get $get) => !$get('playlist'))
-                                ->helperText(fn(Get $get) => !$get('playlist') ? 'Select a custom playlist first.' : 'Select the group you would like to assign to the selected channel(s) to.')
+                                ->disabled(fn (Get $get) => ! $get('playlist'))
+                                ->helperText(fn (Get $get) => ! $get('playlist') ? 'Select a custom playlist first.' : 'Select the group you would like to assign to the selected channel(s) to.')
                                 ->options(function ($get) {
                                     $customList = CustomPlaylist::find($get('playlist'));
+
                                     return $customList ? $customList->groupTags()->get()
-                                        ->mapWithKeys(fn($tag) => [$tag->getAttributeValue('name') => $tag->getAttributeValue('name')])
+                                        ->mapWithKeys(fn ($tag) => [$tag->getAttributeValue('name') => $tag->getAttributeValue('name')])
                                         ->toArray() : [];
                                 })
                                 ->searchable(),
@@ -350,13 +348,13 @@ class VodGroupResource extends Resource
                                 ->label('Group')
                                 ->helperText('Select the group you would like to move the channels to.')
                                 ->options(
-                                    fn() => Group::query()
+                                    fn () => Group::query()
                                         ->with(['playlist'])
                                         ->where(['user_id' => auth()->id(), 'type' => 'vod'])
                                         ->get(['name', 'id', 'playlist_id'])
-                                        ->transform(fn($group) => [
+                                        ->transform(fn ($group) => [
                                             'id' => $group->id,
-                                            'name' => $group->name . ' (' . $group->playlist->name . ')',
+                                            'name' => $group->name.' ('.$group->playlist->name.')',
                                         ])->pluck('name', 'id')
                                 )->searchable(),
                         ])
@@ -373,6 +371,7 @@ class VodGroupResource extends Resource
                                         ->body("Cannot move \"{$group->name}\" to \"{$record->name}\" as they belong to different playlists.")
                                         ->persistent()
                                         ->send();
+
                                     continue;
                                 }
                                 $record->channels()->update([
@@ -514,9 +513,9 @@ class VodGroupResource extends Resource
                             ->badge(),
                         TextEntry::make('playlist.name')
                             ->label('Playlist')
-                            //->badge(),
-                            ->url(fn($record) => PlaylistResource::getUrl('edit', ['record' => $record->playlist_id])),
-                    ])
+                            // ->badge(),
+                            ->url(fn ($record) => PlaylistResource::getUrl('edit', ['record' => $record->playlist_id])),
+                    ]),
             ]);
     }
 

@@ -3,17 +3,13 @@
 namespace App\Filament\Resources\StreamProfiles;
 
 use App\Models\StreamProfile;
-use BackedEnum;
 use Filament\Actions;
 use Filament\Actions\Action;
-use Filament\Forms;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
-use Filament\Support\Icons\Heroicon;
-use Filament\Tables;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Table;
@@ -72,7 +68,7 @@ class StreamProfileResource extends Resource
                         'm3u8' => 'HLS (.m3u8)',
                         'flv' => 'FLV (.flv)',
                         'ogg' => 'OGG (.ogg)',
-                        'mp3' => 'MP3 (.mp3)'
+                        'mp3' => 'MP3 (.mp3)',
                     ])
                     ->default('ts')
                     ->required()
@@ -126,8 +122,8 @@ class StreamProfileResource extends Resource
     {
         return [
             'index' => Pages\ListStreamProfiles::route('/'),
-            //'create' => Pages\CreateStreamProfile::route('/create'),
-            //'edit' => Pages\EditStreamProfile::route('/{record}/edit'),
+            // 'create' => Pages\CreateStreamProfile::route('/create'),
+            // 'edit' => Pages\EditStreamProfile::route('/{record}/edit'),
         ];
     }
 }

@@ -3,21 +3,16 @@
 namespace App\Livewire;
 
 use App\Facades\PlaylistFacade;
-use Exception;
 use App\Models\Playlist;
-use App\Models\SharedStream;
 use App\Services\M3uProxyService;
-use App\Services\XtreamService;
 use Carbon\Carbon;
-use Livewire\Component;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Redis;
+use Livewire\Component;
 
 class PlaylistInfo extends Component
 {
     public Model $record;
+
     public bool $isVisible = true;
 
     public function render()
@@ -27,13 +22,13 @@ class PlaylistInfo extends Component
 
     public function toggleVisibility()
     {
-        $this->isVisible = !$this->isVisible;
+        $this->isVisible = ! $this->isVisible;
     }
 
     public function getStats(): array
     {
         $playlist = PlaylistFacade::resolvePlaylistByUuid($this->record->uuid);
-        if (!$playlist) {
+        if (! $playlist) {
             return [];
         }
 
@@ -54,7 +49,7 @@ class PlaylistInfo extends Component
             $activeStreams = M3uProxyService::getPlaylistActiveStreamsCount($playlist);
             $availableStreams = $playlist->available_streams ?? 0;
             if ($availableStreams === 0) {
-                $availableStreams = "∞";
+                $availableStreams = '∞';
             }
             $stats['active_streams'] = $activeStreams;
             $stats['available_streams'] = $availableStreams;
@@ -63,7 +58,7 @@ class PlaylistInfo extends Component
         }
         if ($playlist->xtream) {
             $xtreamStats = $this->getXtreamStats($playlist);
-            if (!empty($xtreamStats)) {
+            if (! empty($xtreamStats)) {
                 $stats = array_merge($stats, $xtreamStats);
             }
         }
@@ -83,6 +78,7 @@ class PlaylistInfo extends Component
             $expires = Carbon::createFromTimestamp($expires);
             $expiresIn24HoursOrLess = $expires->isToday() || $expires->isTomorrow();
         }
+
         return [
             'xtream_info' => [
                 'active_connections' => "$activeConnections/$maxConnections",
@@ -90,7 +86,7 @@ class PlaylistInfo extends Component
                 'expires' => $expires ? $expires->diffForHumans() : 'N/A',
                 'expires_description' => $expires ? $expires->toDateTimeString() : 'N/A',
                 'expires_in_24_hours_or_less' => $expiresIn24HoursOrLess,
-            ]
+            ],
         ];
     }
 }

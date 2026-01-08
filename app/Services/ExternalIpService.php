@@ -37,7 +37,7 @@ class ExternalIpService
                         }
                     }
                 } catch (\Exception $e) {
-                    Log::debug("Failed to get IP from {$service}: " . $e->getMessage());
+                    Log::debug("Failed to get IP from {$service}: ".$e->getMessage());
 
                     continue;
                 }

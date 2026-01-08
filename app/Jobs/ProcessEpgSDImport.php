@@ -49,7 +49,7 @@ class ProcessEpgSDImport implements ShouldQueue
                 ->broadcast($epg->user)
                 ->sendToDatabase($epg->user);
 
-            if (!$this->force) {
+            if (! $this->force) {
                 // If not forcing, check last modified time
                 $lastModified = Storage::disk('local')->exists($epg->file_path)
                     ? Storage::disk('local')->lastModified($epg->file_path)
@@ -58,7 +58,7 @@ class ProcessEpgSDImport implements ShouldQueue
                 if ($lastModified) {
                     $lastModifiedTime = Carbon::createFromTimestamp($lastModified);
                     $lastModifiedTime->addMinutes(10); // Add 10 minutes to last modified time
-                    if (!$lastModifiedTime->isPast()) { // If modified within the last 10 minutes, skip
+                    if (! $lastModifiedTime->isPast()) { // If modified within the last 10 minutes, skip
                         return true;
                     }
                 }
@@ -86,7 +86,7 @@ class ProcessEpgSDImport implements ShouldQueue
             logger()->error("Error processing Schedules Direct Data for EPG \"{$this->epg->name}\"");
 
             // Send notification
-            $error = "Error: " . $e->getMessage();
+            $error = 'Error: '.$e->getMessage();
             Notification::make()
                 ->danger()
                 ->title("Error processing Schedules Direct Data for EPG \"{$this->epg->name}\"")
@@ -98,6 +98,7 @@ class ProcessEpgSDImport implements ShouldQueue
                 ->body($error)
                 ->sendToDatabase($this->epg->user);
         }
+
         return false;
     }
 }

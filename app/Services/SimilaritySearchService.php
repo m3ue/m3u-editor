@@ -69,9 +69,6 @@ class SimilaritySearchService
 
     /**
      * Sanitizes UTF-8 encoding in strings to prevent PostgreSQL errors.
-     *
-     * @param  string|null  $value
-     * @return string|null
      */
     private function sanitizeUtf8(?string $value): ?string
     {
@@ -224,7 +221,7 @@ class SimilaritySearchService
             // Apply region-based bonus (convert to penalty for Levenshtein)
             $regionBonus = 0;
             if ($regionCode) {
-                $haystack = mb_strtolower(($epgChannel->channel_id ?? '') . ' ' . ($epgChannel->name ?? ''), 'UTF-8');
+                $haystack = mb_strtolower(($epgChannel->channel_id ?? '').' '.($epgChannel->name ?? ''), 'UTF-8');
                 if (mb_stripos($haystack, $regionCode, 0, 'UTF-8') !== false) {
                     $finalScore = max(0, $finalScore - 15); // Subtract to improve the match
                     $regionBonus = 15;
@@ -367,7 +364,7 @@ class SimilaritySearchService
 
         // Remove stop words (they are lowercased English tokens)
         $tokens = explode(' ', $name);
-        $tokens = array_filter($tokens, fn($t) => $t !== '');
+        $tokens = array_filter($tokens, fn ($t) => $t !== '');
         $tokens = array_values(array_diff($tokens, $this->stopWords));
 
         // Optionally remove quality indicators

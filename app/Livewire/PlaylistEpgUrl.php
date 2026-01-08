@@ -4,12 +4,13 @@ namespace App\Livewire;
 
 use App\Services\EpgCacheService;
 use Filament\Notifications\Notification;
-use Livewire\Component;
 use Illuminate\Database\Eloquent\Model;
+use Livewire\Component;
 
 class PlaylistEpgUrl extends Component
 {
     public Model $record;
+
     public string $modalId = '';
 
     public function render()
@@ -19,7 +20,7 @@ class PlaylistEpgUrl extends Component
 
     public function mount()
     {
-        $this->modalId = 'epg-url-modal-' . $this->record->getKey();
+        $this->modalId = 'epg-url-modal-'.$this->record->getKey();
     }
 
     public function clearEpgFileCache()

@@ -17,7 +17,7 @@ class SchedulesDirectImageProxyController extends Controller
 
     /**
      * Proxy Schedules Direct program images with authentication
-     * 
+     *
      * Route: /schedules-direct/{epg}/image/{imageHash}
      */
     public function proxyImage(Request $request, string $epgId, string $imageHash)
@@ -25,12 +25,12 @@ class SchedulesDirectImageProxyController extends Controller
         try {
             // Find the EPG
             $epg = Epg::where('uuid', $epgId)->first();
-            if (!$epg) {
+            if (! $epg) {
                 return response()->json(['error' => 'EPG not found'], 404);
             }
 
             // Validate that this EPG uses Schedules Direct
-            if (!$epg->isSchedulesDirect()) {
+            if (! $epg->isSchedulesDirect()) {
                 return response()->json(['error' => 'EPG does not use Schedules Direct'], 400);
             }
 
@@ -44,7 +44,7 @@ class SchedulesDirectImageProxyController extends Controller
             }
 
             // Ensure we have a valid token
-            if (!$epg->hasValidSchedulesDirectToken()) {
+            if (! $epg->hasValidSchedulesDirectToken()) {
                 $this->schedulesDirectService->authenticateFromEpg($epg);
                 $epg->refresh();
             }
@@ -54,7 +54,7 @@ class SchedulesDirectImageProxyController extends Controller
 
             // Fetch the image with authentication
             $response = Http::withHeaders([
-                'User-Agent' => 'm3u-editor/' . config('dev.version'),
+                'User-Agent' => 'm3u-editor/'.config('dev.version'),
                 'token' => $epg->sd_token,
             ])->timeout(30)->get($imageUrl);
 
@@ -94,7 +94,7 @@ class SchedulesDirectImageProxyController extends Controller
 
                 return response()->json([
                     'error' => 'Failed to fetch image from Schedules Direct',
-                    'status' => $response->status()
+                    'status' => $response->status(),
                 ], $response->status());
             }
         } catch (\Exception $e) {
@@ -106,7 +106,7 @@ class SchedulesDirectImageProxyController extends Controller
             ]);
 
             return response()->json([
-                'error' => 'Internal server error while proxying image'
+                'error' => 'Internal server error while proxying image',
             ], 500);
         }
     }

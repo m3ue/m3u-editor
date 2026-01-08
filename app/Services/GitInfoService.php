@@ -90,8 +90,8 @@ class GitInfoService
     {
         $branch = $this->getBranch();
         $tag = $this->getTag();
-        
-        return in_array($branch, ['master', 'main']) || !empty($tag);
+
+        return in_array($branch, ['master', 'main']) || ! empty($tag);
     }
 
     /**
@@ -114,7 +114,7 @@ class GitInfoService
             if (strpos($line, '=') !== false) {
                 [$key, $value] = explode('=', $line, 2);
                 $key = strtolower($key);
-                
+
                 switch ($key) {
                     case 'git_branch':
                         $gitInfo['branch'] = $value ?: null;
@@ -141,7 +141,7 @@ class GitInfoService
     private function getFromGitCommands(): array
     {
         $basePath = base_path();
-        
+
         $branch = trim(shell_exec("cd {$basePath} && git rev-parse --abbrev-ref HEAD 2>/dev/null") ?: '');
         $commit = trim(shell_exec("cd {$basePath} && git rev-parse HEAD 2>/dev/null") ?: '');
         $tag = trim(shell_exec("cd {$basePath} && git describe --tags --exact-match 2>/dev/null") ?: '');

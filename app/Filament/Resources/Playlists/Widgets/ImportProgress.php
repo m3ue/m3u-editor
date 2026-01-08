@@ -26,6 +26,7 @@ class ImportProgress extends Widget
             $record = $record->newQuery()->find($record->getKey());
             $isProcessing = $record->status === Status::Processing || $record->status === Status::Pending;
         }
+
         return [
             'processing' => $isProcessing,
             'progress' => round($record->progress ?? 100, 2), // default to complete if no record

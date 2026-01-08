@@ -6,8 +6,8 @@ use App\Models\EpgChannel;
 use App\Models\User;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
-use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\DB;
 
 class EpgChannelFindAndReplaceReset implements ShouldQueue
@@ -34,14 +34,14 @@ class EpgChannelFindAndReplaceReset implements ShouldQueue
     {
         // Clock the time
         $start = now();
-        $customColumn = $this->column . '_custom';
+        $customColumn = $this->column.'_custom';
         $totalUpdated = 0;
 
         // Process channels in chunks for better performance
-        if (!$this->channels) {
+        if (! $this->channels) {
             // Use chunking to process large datasets efficiently
             EpgChannel::query()
-                ->when(!$this->all_epgs && $this->epg_id, fn($query) => $query->where('epg_id', $this->epg_id))
+                ->when(! $this->all_epgs && $this->epg_id, fn ($query) => $query->where('epg_id', $this->epg_id))
                 ->whereNotNull($customColumn) // Only get channels that have custom values to reset
                 ->chunkById(1000, function ($channels) use ($customColumn, &$totalUpdated) {
                     // Get IDs of channels to update
@@ -53,7 +53,7 @@ class EpgChannelFindAndReplaceReset implements ShouldQueue
                             ->whereIn('id', $channelIds)
                             ->update([
                                 $customColumn => null,
-                                'updated_at' => now()
+                                'updated_at' => now(),
                             ]);
 
                         $totalUpdated += $updated;
@@ -62,7 +62,7 @@ class EpgChannelFindAndReplaceReset implements ShouldQueue
         } else {
             // Process the provided collection in chunks
             $this->channels
-                ->filter(fn($channel) => $channel->{$customColumn} !== null) // Only channels with custom values
+                ->filter(fn ($channel) => $channel->{$customColumn} !== null) // Only channels with custom values
                 ->chunk(1000)
                 ->each(function ($chunk) use ($customColumn, &$totalUpdated) {
                     $channelIds = $chunk->pluck('id')->toArray();
@@ -73,7 +73,7 @@ class EpgChannelFindAndReplaceReset implements ShouldQueue
                             ->whereIn('id', $channelIds)
                             ->update([
                                 $customColumn => null,
-                                'updated_at' => now()
+                                'updated_at' => now(),
                             ]);
 
                         $totalUpdated += $updated;

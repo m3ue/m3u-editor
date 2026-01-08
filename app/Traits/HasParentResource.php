@@ -23,8 +23,8 @@ trait HasParentResource
 
             $this->parent = $parentResource::resolveRecordRouteBinding($parent);
 
-            if (!$this->parent) {
-                throw new ModelNotFoundException();
+            if (! $this->parent) {
+                throw new ModelNotFoundException;
             }
         }
     }
@@ -33,8 +33,8 @@ trait HasParentResource
     {
         $parentResource = static::getResource()::$parentResource;
 
-        if (!isset($parentResource)) {
-            throw new Exception('Parent resource is not set for ' . static::class);
+        if (! isset($parentResource)) {
+            throw new Exception('Parent resource is not set for '.static::class);
         }
 
         return $parentResource;
@@ -70,7 +70,7 @@ trait HasParentResource
         $breadcrumbs = [
             $parentResource::getUrl() => $parentResource::getBreadCrumb(),
             $parentResource::getUrl(name: 'edit', parameters: ['record' => $this->parent]) => $parentResource::getRecordTitle($this->parent),
-            $parentResource::getUrl(name: $this->getChildPageNamePrefix() . '.index', parameters: ['parent' => $this->parent]) => $resource::getBreadCrumb(),
+            $parentResource::getUrl(name: $this->getChildPageNamePrefix().'.index', parameters: ['parent' => $this->parent]) => $resource::getBreadCrumb(),
         ];
 
         if (isset($this->record)) {

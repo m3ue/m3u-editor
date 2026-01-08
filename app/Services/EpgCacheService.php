@@ -2,11 +2,6 @@
 
 namespace App\Services;
 
-use Exception;
-use Generator;
-use Filament\Actions\Action;
-use Filament\Forms\Components\Select;
-use Filament\Forms\Components\TextInput;
 use App\Enums\Status;
 use App\Facades\PlaylistFacade;
 use App\Models\CustomPlaylist;
@@ -15,14 +10,16 @@ use App\Models\MergedPlaylist;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
 use Carbon\Carbon;
-use Illuminate\Support\Facades\Storage;
+use Exception;
+use Filament\Actions\Action;
+use Filament\Forms\Components\Select;
+use Filament\Forms\Components\TextInput;
+use Filament\Notifications\Notification;
+use Generator;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use JsonMachine\Items;
 use JsonMachine\JsonDecoder\ExtJsonDecoder;
-use Filament\Forms;
-use Filament\Actions;
-use Filament\Notifications\Notification;
-use Filament\Tables;
 use XMLReader;
 
 /**
@@ -31,8 +28,11 @@ use XMLReader;
 class EpgCacheService
 {
     private const CACHE_VERSION = 'v1';
+
     private const CHANNELS_FILE = 'channels.json';
+
     private const METADATA_FILE = 'metadata.json';
+
     private const MAX_PROGRAMMES = 10000000; // Safety limit
 
     /**
@@ -40,7 +40,7 @@ class EpgCacheService
      */
     private function getCacheDir(Epg $epg): string
     {
-        return "epg-cache/{$epg->uuid}/" . self::CACHE_VERSION;
+        return "epg-cache/{$epg->uuid}/".self::CACHE_VERSION;
     }
 
     /**
@@ -48,7 +48,7 @@ class EpgCacheService
      */
     private function getCacheFilePath(Epg $epg, string $filename): string
     {
-        return $this->getCacheDir($epg) . '/' . $filename;
+        return $this->getCacheDir($epg).'/'.$filename;
     }
 
     /**
@@ -64,14 +64,14 @@ class EpgCacheService
 
         $metadataPath = $this->getCacheFilePath($epg, self::METADATA_FILE);
 
-        if (!Storage::disk('local')->exists($metadataPath)) {
+        if (! Storage::disk('local')->exists($metadataPath)) {
             return false;
         }
 
         try {
             // Check if EPG file has been modified since cache was created
             $epgFilePath = Storage::disk('local')->path($epg->file_path);
-            if (!file_exists($epgFilePath)) {
+            if (! file_exists($epgFilePath)) {
                 return false;
             }
 
@@ -84,6 +84,7 @@ class EpgCacheService
             return $epgFileModified <= $cacheCreated;
         } catch (Exception $e) {
             Log::warning("Invalid cache metadata for EPG {$epg->uuid}: {$e->getMessage()}");
+
             return false;
         }
     }
@@ -94,8 +95,9 @@ class EpgCacheService
     public function cacheEpgData(Epg $epg): bool
     {
         $epgFilePath = Storage::disk('local')->path($epg->file_path);
-        if (!file_exists($epgFilePath)) {
+        if (! file_exists($epgFilePath)) {
             Log::error("EPG file not found: {$epgFilePath}");
+
             return false;
         }
         try {
@@ -141,10 +143,12 @@ class EpgCacheService
                 'programme_count' => $stats['programmes'],
             ]);
 
-            Log::debug("EPG cache generated successfully", $metadata);
+            Log::debug('EPG cache generated successfully', $metadata);
+
             return true;
         } catch (Exception $e) {
             Log::error("Failed to cache EPG data for {$epg->name}: {$e->getMessage()}");
+
             return false;
         }
     }
@@ -156,8 +160,8 @@ class EpgCacheService
      */
     private function parseAndSaveEpgDataSinglePass(Epg $epg, string $filePath, int $totalChannels, int $totalProgrammes): array
     {
-        $reader = new XMLReader();
-        $reader->open('compress.zlib://' . $filePath);
+        $reader = new XMLReader;
+        $reader->open('compress.zlib://'.$filePath);
 
         $channelCount = 0;
         $programmeCount = 0;
@@ -175,21 +179,21 @@ class EpgCacheService
                 if ($reader->nodeType == XMLReader::ELEMENT && $reader->name === 'channel') {
                     $channelId = trim($reader->getAttribute('id') ?: '');
                     $innerXML = $reader->readOuterXml();
-                    $innerReader = new XMLReader();
+                    $innerReader = new XMLReader;
                     $innerReader->xml($innerXML);
 
                     $channel = [
                         'id' => $channelId,
                         'display_name' => '',
                         'icon' => '',
-                        'lang' => 'en'
+                        'lang' => 'en',
                     ];
 
                     while (@$innerReader->read()) {
                         if ($innerReader->nodeType == XMLReader::ELEMENT) {
                             switch ($innerReader->name) {
                                 case 'display-name':
-                                    if (!$channel['display_name']) {
+                                    if (! $channel['display_name']) {
                                         $channel['display_name'] = trim($innerReader->readString() ?: '');
                                         $channel['lang'] = trim($innerReader->getAttribute('lang') ?: '') ?: 'en';
                                     }
@@ -227,14 +231,14 @@ class EpgCacheService
                     $start = trim($reader->getAttribute('start') ?: '');
                     $stop = trim($reader->getAttribute('stop') ?: '');
 
-                    if (!$channelId || !$start) {
+                    if (! $channelId || ! $start) {
                         continue;
                     }
 
                     $startDateTime = $this->parseXmltvDateTime($start);
                     $stopDateTime = $stop ? $this->parseXmltvDateTime($stop) : null;
 
-                    if (!$startDateTime) {
+                    if (! $startDateTime) {
                         continue;
                     }
 
@@ -249,7 +253,7 @@ class EpgCacheService
                     }
 
                     $innerXML = $reader->readOuterXml();
-                    $innerReader = new XMLReader();
+                    $innerReader = new XMLReader;
                     $innerReader->xml($innerXML);
 
                     $programme = [
@@ -280,12 +284,12 @@ class EpgCacheService
                                     $programme['desc'] = trim($innerReader->readString() ?: '');
                                     break;
                                 case 'category':
-                                    if (!$programme['category']) {
+                                    if (! $programme['category']) {
                                         $programme['category'] = trim($innerReader->readString() ?: '');
                                     }
                                     break;
                                 case 'icon':
-                                    if (!$programme['icon']) {
+                                    if (! $programme['icon']) {
                                         $programme['icon'] = trim($innerReader->getAttribute('src') ?: '');
                                     } else {
                                         $imageUrl = trim($innerReader->getAttribute('src') ?: '');
@@ -348,7 +352,7 @@ class EpgCacheService
             }
 
             // Save any remaining channels
-            if (!empty($channelBatch)) {
+            if (! empty($channelBatch)) {
                 $this->saveChannelBatchOptimized($epg, $channelBatch, $channelCount <= $channelBatchSize);
             }
 
@@ -380,14 +384,14 @@ class EpgCacheService
 
         // Ensure directory exists
         $dir = dirname($fullPath);
-        if (!is_dir($dir)) {
+        if (! is_dir($dir)) {
             mkdir($dir, 0755, true);
         }
 
         // Check if file already exists to determine if this is truly the first write
         $fileExists = file_exists($fullPath);
 
-        if (!$fileExists) {
+        if (! $fileExists) {
             // First write - create new file
             file_put_contents($fullPath, json_encode($channelBatch, JSON_UNESCAPED_UNICODE), LOCK_EX);
         } else {
@@ -413,29 +417,30 @@ class EpgCacheService
         $filename = "programmes-{$date}.jsonl";
 
         // Reuse file handle if already open
-        if (!isset($fileHandles[$date])) {
+        if (! isset($fileHandles[$date])) {
             $programmesPath = $this->getCacheFilePath($epg, $filename);
             $fullPath = Storage::disk('local')->path($programmesPath);
 
             // Ensure directory exists
             $dir = dirname($fullPath);
-            if (!is_dir($dir)) {
+            if (! is_dir($dir)) {
                 mkdir($dir, 0755, true);
             }
 
             $fileHandles[$date] = fopen($fullPath, 'a');
-            if (!$fileHandles[$date]) {
+            if (! $fileHandles[$date]) {
                 Log::error("Failed to open file handle for {$filename}");
+
                 return;
             }
         }
 
         $record = [
             'channel' => $channelId,
-            'programme' => $programme
+            'programme' => $programme,
         ];
 
-        $line = json_encode($record, JSON_UNESCAPED_UNICODE) . "\n";
+        $line = json_encode($record, JSON_UNESCAPED_UNICODE)."\n";
         fwrite($fileHandles[$date], $line);
 
         // Close handles if we have too many open (prevent "too many open files" error)
@@ -478,7 +483,7 @@ class EpgCacheService
         }
 
         // Save remaining channels
-        if (!empty($channelBatch)) {
+        if (! empty($channelBatch)) {
             $this->saveChannelBatch($epg, $channelBatch, $channelCount <= $batchSize);
         }
 
@@ -560,18 +565,18 @@ class EpgCacheService
 
         // Ensure directory exists
         $dir = dirname($fullPath);
-        if (!is_dir($dir)) {
+        if (! is_dir($dir)) {
             mkdir($dir, 0755, true);
         }
 
         // Prepare the programme record with channel info
         $record = [
             'channel' => $channelId,
-            'programme' => $programme
+            'programme' => $programme,
         ];
 
         // Append to file using direct file operations (most memory efficient)
-        $line = json_encode($record, JSON_UNESCAPED_UNICODE) . "\n";
+        $line = json_encode($record, JSON_UNESCAPED_UNICODE)."\n";
 
         try {
             // Use file_put_contents with append flag - minimal memory usage
@@ -586,28 +591,28 @@ class EpgCacheService
      */
     private function parseChannelsStream(string $filePath): Generator
     {
-        $channelReader = new XMLReader();
-        $channelReader->open('compress.zlib://' . $filePath);
+        $channelReader = new XMLReader;
+        $channelReader->open('compress.zlib://'.$filePath);
 
         while (@$channelReader->read()) {
             if ($channelReader->nodeType == XMLReader::ELEMENT && $channelReader->name === 'channel') {
                 $channelId = trim($channelReader->getAttribute('id') ?: '');
                 $innerXML = $channelReader->readOuterXml();
-                $innerReader = new XMLReader();
+                $innerReader = new XMLReader;
                 $innerReader->xml($innerXML);
 
                 $channel = [
                     'id' => $channelId,
                     'display_name' => '',
                     'icon' => '',
-                    'lang' => 'en'
+                    'lang' => 'en',
                 ];
 
                 while (@$innerReader->read()) {
                     if ($innerReader->nodeType == XMLReader::ELEMENT) {
                         switch ($innerReader->name) {
                             case 'display-name':
-                                if (!$channel['display_name']) {
+                                if (! $channel['display_name']) {
                                     $channel['display_name'] = trim($innerReader->readString() ?: '');
                                     $channel['lang'] = trim($innerReader->getAttribute('lang') ?: '') ?: 'en';
                                 }
@@ -633,8 +638,8 @@ class EpgCacheService
      */
     private function parseProgrammesStream(string $filePath): Generator
     {
-        $programReader = new XMLReader();
-        $programReader->open('compress.zlib://' . $filePath);
+        $programReader = new XMLReader;
+        $programReader->open('compress.zlib://'.$filePath);
         $processedCount = 0;
 
         while (@$programReader->read()) {
@@ -651,19 +656,19 @@ class EpgCacheService
                 $start = trim($programReader->getAttribute('start') ?: '');
                 $stop = trim($programReader->getAttribute('stop') ?: '');
 
-                if (!$channelId || !$start) {
+                if (! $channelId || ! $start) {
                     continue;
                 }
 
                 $startDateTime = $this->parseXmltvDateTime($start);
                 $stopDateTime = $stop ? $this->parseXmltvDateTime($stop) : null;
 
-                if (!$startDateTime) {
+                if (! $startDateTime) {
                     continue;
                 }
 
                 $innerXML = $programReader->readOuterXml();
-                $innerReader = new XMLReader();
+                $innerReader = new XMLReader;
                 $innerReader->xml($innerXML);
 
                 $programme = [
@@ -694,12 +699,12 @@ class EpgCacheService
                                 $programme['desc'] = trim($innerReader->readString() ?: '');
                                 break;
                             case 'category':
-                                if (!$programme['category']) {
+                                if (! $programme['category']) {
                                     $programme['category'] = trim($innerReader->readString() ?: '');
                                 }
                                 break;
                             case 'icon':
-                                if (!$programme['icon']) {
+                                if (! $programme['icon']) {
                                     $programme['icon'] = trim($innerReader->getAttribute('src') ?: '');
                                 } else {
                                     // New: Parse additional XMLTV icon tags for program artwork
@@ -796,7 +801,7 @@ class EpgCacheService
     {
         $channelsPath = $this->getCacheFilePath($epg, self::CHANNELS_FILE);
 
-        if (!Storage::disk('local')->exists($channelsPath)) {
+        if (! Storage::disk('local')->exists($channelsPath)) {
             return [
                 'channels' => [],
                 'pagination' => [
@@ -806,7 +811,7 @@ class EpgCacheService
                     'returned_channels' => 0,
                     'has_more' => false,
                     'next_page' => null,
-                ]
+                ],
             ];
         }
 
@@ -852,10 +857,11 @@ class EpgCacheService
                     'returned_channels' => count($channels),
                     'has_more' => $hasMore,
                     'next_page' => $hasMore ? $page + 1 : null,
-                ]
+                ],
             ];
         } catch (Exception $e) {
             Log::error("Error reading cached channels: {$e->getMessage()}");
+
             return [
                 'channels' => [],
                 'pagination' => [
@@ -865,7 +871,7 @@ class EpgCacheService
                     'returned_channels' => 0,
                     'has_more' => false,
                     'next_page' => null,
-                ]
+                ],
             ];
         }
     }
@@ -877,7 +883,7 @@ class EpgCacheService
     {
         $programmesPath = $this->getCacheFilePath($epg, "programmes-{$date}.jsonl");
 
-        if (!Storage::disk('local')->exists($programmesPath)) {
+        if (! Storage::disk('local')->exists($programmesPath)) {
             return [];
         }
 
@@ -889,11 +895,13 @@ class EpgCacheService
             if (($handle = fopen($fullPath, 'r')) !== false) {
                 while (($line = fgets($handle)) !== false) {
                     $line = trim($line);
-                    if (empty($line)) continue;
+                    if (empty($line)) {
+                        continue;
+                    }
 
                     try {
                         $record = json_decode($line, true);
-                        if (!$record || !isset($record['channel']) || !isset($record['programme'])) {
+                        if (! $record || ! isset($record['channel']) || ! isset($record['programme'])) {
                             continue;
                         }
 
@@ -901,16 +909,17 @@ class EpgCacheService
                         $programme = $record['programme'];
 
                         // Filter by channel IDs if provided
-                        if (!empty($channelIds) && !in_array($channelId, $channelIds)) {
+                        if (! empty($channelIds) && ! in_array($channelId, $channelIds)) {
                             continue;
                         }
 
-                        if (!isset($programmes[$channelId])) {
+                        if (! isset($programmes[$channelId])) {
                             $programmes[$channelId] = [];
                         }
                         $programmes[$channelId][] = $programme;
                     } catch (Exception $lineError) {
                         Log::warning("Failed to parse programme line: {$lineError->getMessage()}");
+
                         continue;
                     }
                 }
@@ -920,6 +929,7 @@ class EpgCacheService
             return $programmes;
         } catch (Exception $e) {
             Log::error("Error reading cached programmes for date {$date}: {$e->getMessage()}");
+
             return [];
         }
     }
@@ -938,7 +948,7 @@ class EpgCacheService
 
             // Stream programmes for this date
             foreach ($this->streamCachedProgrammesForDate($epg, $dateStr, $channelIds) as $channelId => $programmes) {
-                if (!isset($allProgrammes[$channelId])) {
+                if (! isset($allProgrammes[$channelId])) {
                     $allProgrammes[$channelId] = [];
                 }
                 $allProgrammes[$channelId] = array_merge($allProgrammes[$channelId], $programmes);
@@ -962,7 +972,7 @@ class EpgCacheService
     private function streamCachedProgrammesForDate(Epg $epg, string $date, array $channelIds = []): Generator
     {
         $programmesPath = $this->getCacheFilePath($epg, "programmes-{$date}.jsonl");
-        if (!Storage::disk('local')->exists($programmesPath)) {
+        if (! Storage::disk('local')->exists($programmesPath)) {
             return;
         }
 
@@ -974,11 +984,13 @@ class EpgCacheService
             if (($handle = fopen($fullPath, 'r')) !== false) {
                 while (($line = fgets($handle)) !== false) {
                     $line = trim($line);
-                    if (empty($line)) continue;
+                    if (empty($line)) {
+                        continue;
+                    }
 
                     try {
                         $record = json_decode($line, true);
-                        if (!$record || !isset($record['channel']) || !isset($record['programme'])) {
+                        if (! $record || ! isset($record['channel']) || ! isset($record['programme'])) {
                             continue;
                         }
 
@@ -986,16 +998,17 @@ class EpgCacheService
                         $programme = $record['programme'];
 
                         // Filter by channel IDs if provided
-                        if (!empty($channelIds) && !in_array($channelId, $channelIds)) {
+                        if (! empty($channelIds) && ! in_array($channelId, $channelIds)) {
                             continue;
                         }
 
-                        if (!isset($channelProgrammes[$channelId])) {
+                        if (! isset($channelProgrammes[$channelId])) {
                             $channelProgrammes[$channelId] = [];
                         }
                         $channelProgrammes[$channelId][] = $programme;
                     } catch (Exception $lineError) {
                         Log::warning("Failed to parse programme line: {$lineError->getMessage()}");
+
                         continue;
                     }
                 }
@@ -1017,14 +1030,16 @@ class EpgCacheService
     public function getCacheMetadata(Epg $epg): ?array
     {
         $metadataPath = $this->getCacheFilePath($epg, self::METADATA_FILE);
-        if (!Storage::disk('local')->exists($metadataPath)) {
+        if (! Storage::disk('local')->exists($metadataPath)) {
             return null;
         }
         try {
             $metadata = json_decode(Storage::disk('local')->get($metadataPath), true);
+
             return $metadata;
         } catch (Exception $e) {
             Log::error("Error reading cache metadata: {$e->getMessage()}");
+
             return null;
         }
     }
@@ -1041,7 +1056,7 @@ class EpgCacheService
             $epg->update([
                 'is_cached' => false,
                 'cache_meta' => null,
-                'cache_progress' => 0
+                'cache_progress' => 0,
             ]);
 
             // Delete cache directory
@@ -1049,9 +1064,11 @@ class EpgCacheService
 
             // Log cache clearing
             Log::debug("Cleared cache for EPG {$epg->name}");
+
             return true;
         } catch (Exception $e) {
             Log::error("Failed to clear cache for EPG {$epg->name}: {$e->getMessage()}");
+
             return false;
         }
     }
@@ -1074,8 +1091,8 @@ class EpgCacheService
                 $dateString = "{$year}-{$month}-{$day} {$hour}:{$minute}:{$second}";
 
                 if (preg_match('/([+-])(\d{2})(\d{2})/', $timezone, $tzMatches)) {
-                    $tzString = $tzMatches[1] . $tzMatches[2] . ':' . $tzMatches[3];
-                    $dateString .= ' ' . $tzString;
+                    $tzString = $tzMatches[1].$tzMatches[2].':'.$tzMatches[3];
+                    $dateString .= ' '.$tzString;
                 }
 
                 return Carbon::parse($dateString);
@@ -1090,19 +1107,20 @@ class EpgCacheService
     /**
      * Get the cache file path for a playlist
      */
-    static function getPlaylistEpgCachePath(
+    public static function getPlaylistEpgCachePath(
         Playlist|MergedPlaylist|CustomPlaylist|PlaylistAlias $playlist,
         bool $compressed = false
     ): string {
         // Need to ensure unique filenames across all playlist types
-        $id = $playlist->getTable() . '-' . $playlist->id;
+        $id = $playlist->getTable().'-'.$playlist->id;
         $filename = "$id-epg";
         if ($compressed) {
             $filename .= '.xml.gz';
         } else {
             $filename .= '.xml';
         }
-        return 'playlist-epg-files/' . $filename;
+
+        return 'playlist-epg-files/'.$filename;
     }
 
     /**
@@ -1125,6 +1143,7 @@ class EpgCacheService
                 $cleared = true;
             }
             Log::debug("Cleared EPG file cache for playlist {$playlist->name}");
+
             return $cleared;
         } catch (Exception $e) {
             Log::error("Failed to clear playlist EPG cache: {$e->getMessage()}");
@@ -1144,6 +1163,7 @@ class EpgCacheService
             ->modalWidth('md')
             ->schema(function ($record) {
                 $urls = PlaylistFacade::getUrls($record);
+
                 return [
                     Select::make('format')
                         ->label('EPG Format')
@@ -1189,7 +1209,7 @@ class EpgCacheService
                         ->default($urls['epg'])
                         ->required()
                         ->disabled()
-                        ->dehydrated(fn(): bool => true),
+                        ->dehydrated(fn (): bool => true),
                 ];
             })
             ->action(function (array $data): void {
@@ -1217,6 +1237,7 @@ class EpgCacheService
             ->modalWidth('md')
             ->schema(function ($record) {
                 $urls = PlaylistFacade::getUrls($record);
+
                 return [
                     Select::make('format')
                         ->label('EPG Format')
@@ -1263,7 +1284,7 @@ class EpgCacheService
                         ->default($urls['epg'])
                         ->required()
                         ->disabled()
-                        ->dehydrated(fn(): bool => true),
+                        ->dehydrated(fn (): bool => true),
                 ];
             })
             ->action(function (array $data): void {

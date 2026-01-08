@@ -2,20 +2,18 @@
 
 namespace App\Jobs;
 
-use Exception;
 use App\Models\Playlist;
+use Exception;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Str;
 
 class CopyPlaylist implements ShouldQueue
 {
     use Queueable;
 
     public $copied = [];
+
     public $failed = [];
 
     /**
@@ -57,15 +55,14 @@ class CopyPlaylist implements ShouldQueue
         Notification::make()
             ->success()
             ->title('Playlist Copied')
-            ->body("\"{$playlist->name}\" has been copied successfully to the following playlists: " . implode(', ', $this->copied))
+            ->body("\"{$playlist->name}\" has been copied successfully to the following playlists: ".implode(', ', $this->copied))
             ->sendToDatabase($playlist->user);
     }
 
     /**
      * Copy the playlist to the given playlist.
-     * 
-     * @param Playlist $copy
-     * @return boolean
+     *
+     * @return bool
      */
     private function copyPlaylistToPlaylist(Playlist $copy)
     {
@@ -77,10 +74,12 @@ class CopyPlaylist implements ShouldQueue
             // ...
 
             $this->copied[] = $copy->name;
+
             return true;
         } catch (Exception $e) {
             // ...
         }
+
         return false;
     }
 }

@@ -12,8 +12,8 @@ class UserController extends Controller
      * Returns an array of your Playlists, including their names and UUIDs.
      * This is useful for calling the Playlist endpoints as a UUID is required.
      *
-     * @param Request $request
      * @return []|\Illuminate\Http\Response
+     *
      * @response array{name: "My Playlist", "uuid": "0eff7923-cbd1-4868-9fed-2e3748ac1100"}
      */
     public function playlists(Request $request)
@@ -27,6 +27,7 @@ class UserController extends Controller
                 ];
             })->toArray();
         }
+
         return abort(401, 'Unauthorized'); // Return 401 if user is not authenticated
     }
 
@@ -36,8 +37,8 @@ class UserController extends Controller
      * Returns an array of your EPGs, including their names and UUIDs.
      * This is useful for calling the EPG endpoints as a UUID is required.
      *
-     * @param Request $request
      * @return []|\Illuminate\Http\Response
+     *
      * @response array{name: "My EPG", "uuid": "0eff7923-cbd1-4868-9fed-2e3748ac1100"}
      */
     public function epgs(Request $request)
@@ -51,6 +52,7 @@ class UserController extends Controller
                 ];
             })->toArray();
         }
+
         return abort(401, 'Unauthorized'); // Return 401 if user is not authenticated
     }
 }

@@ -29,8 +29,7 @@ return [
         /*
          * Description rendered on the home page of the API documentation (`/docs/api`).
          */
-        'description' =>
-        '<h2>Welcome to the m3u editor API!</h2> You will need to use an API token to access the app endpoints.<br/>You can get your token by logging in to the app and visiting the <strong>API Tokens</strong> page.<br/>Make sure to copy and securely store this token for accessing authenticated routes of the API, it will only be shown once.',
+        'description' => '<h2>Welcome to the m3u editor API!</h2> You will need to use an API token to access the app endpoints.<br/>You can get your token by logging in to the app and visiting the <strong>API Tokens</strong> page.<br/>Make sure to copy and securely store this token for accessing authenticated routes of the API, it will only be shown once.',
     ],
 
     /*

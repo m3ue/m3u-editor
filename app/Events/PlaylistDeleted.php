@@ -13,8 +13,6 @@ class PlaylistDeleted
 
     /**
      * Create a new event instance.
-     * 
-     * @param Playlist $playlist
      */
     public function __construct(
         public Playlist $playlist,

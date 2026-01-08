@@ -15,8 +15,8 @@ use JsonMachine\Items;
 
 class ProcessM3uImportSeriesChunk implements ShouldQueue
 {
-    use Queueable;
     use ProviderRequestDelay;
+    use Queueable;
 
     // Don't retry the job on failure
     public $tries = 1;
@@ -53,13 +53,13 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
         $sourceCategoryId = $payload['categoryId'] ?? null;
         $sourceCategoryName = $payload['categoryName'] ?? null;
 
-        if (!$sourceCategoryId || !$playlistId) {
+        if (! $sourceCategoryId || ! $playlistId) {
             return; // skip if no category or playlist
         }
 
         // Get the playlist
         $playlist = Playlist::find($playlistId);
-        if (!$playlist) {
+        if (! $playlist) {
             return; // skip if no playlist found
         }
 
@@ -85,14 +85,14 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
         }
 
         // Setup the user agent and SSL verification
-        $verify = !$playlist->disable_ssl_verification;
+        $verify = ! $playlist->disable_ssl_verification;
         $userAgent = empty($playlist->user_agent)
             ? $this->userAgent
             : $playlist->user_agent;
 
         // Get the Xtream config
         $xtreamConfig = $playlist->xtream_config;
-        if (!$xtreamConfig) {
+        if (! $xtreamConfig) {
             return; // skip if no Xtream config
         }
 
@@ -100,7 +100,7 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
         $baseUrl = $xtreamConfig['url'] ?? '';
         $user = $xtreamConfig['username'] ?? '';
         $password = $xtreamConfig['password'] ?? '';
-        if (!$baseUrl || !$user || !$password) {
+        if (! $baseUrl || ! $user || ! $password) {
             return; // skip if no base url or credentials
         }
 
@@ -110,7 +110,7 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
             ->withOptions(['verify' => $verify])
             ->timeout(60) // set timeout to 1 minute
             ->throw()->get($seriesStreamsUrl));
-        if (!$seriesStreamsResponse->ok()) {
+        if (! $seriesStreamsResponse->ok()) {
             return; // skip this category if there's an error
         }
 
@@ -122,7 +122,7 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
             'playlist_id' => $playlist->id,
             'source_category_id' => $sourceCategoryId,
         ])->first();
-        if (!$category) {
+        if (! $category) {
             $category = Category::create([
                 'name' => $sourceCategoryName,
                 'name_internal' => $sourceCategoryName,
@@ -175,6 +175,6 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
         ]);
 
         // Bulk insert the series in chunks
-        collect($bulk)->chunk(100)->each(fn($chunk) => Series::insert($chunk->toArray()));
+        collect($bulk)->chunk(100)->each(fn ($chunk) => Series::insert($chunk->toArray()));
     }
 }

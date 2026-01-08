@@ -3,8 +3,6 @@
 namespace App\Listeners;
 
 use App\Events\CustomPlaylistCreated;
-use Illuminate\Contracts\Queue\ShouldQueue;
-use Illuminate\Queue\InteractsWithQueue;
 
 class CustomPlaylistListener
 {

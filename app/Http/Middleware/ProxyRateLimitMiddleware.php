@@ -16,12 +16,12 @@ class ProxyRateLimitMiddleware
      */
     public function handle(Request $request, Closure $next): Response
     {
-        $key = 'proxy:' . $request->path();
-        
+        $key = 'proxy:'.$request->path();
+
         // Check if rate limit is exceeded
         if (RateLimiter::tooManyAttempts($key, 20)) {
             $retryAfter = RateLimiter::availableIn($key);
-            
+
             // Delay response to mitigate brute-force
             sleep(min($retryAfter, 5));
 
@@ -34,15 +34,15 @@ class ProxyRateLimitMiddleware
                 'X-RateLimit-Remaining' => 0,
             ]);
         }
-        
+
         // Increment the rate limiter counter
         RateLimiter::hit($key, 60 * 2); // decay in seconds
-        
+
         $remaining = 20 - RateLimiter::attempts($key);
-        
+
         // Continue to the next middleware
         $response = $next($request);
-        
+
         // Add rate limit headers to the response
         return $response->withHeaders([
             'X-RateLimit-Limit' => 20,

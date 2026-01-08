@@ -2,11 +2,10 @@
 
 namespace App\Filament\Resources\Playlists\Pages;
 
-use Filament\Resources\Pages\CreateRecord\Concerns\HasWizard;
 use App\Filament\Resources\Playlists\PlaylistResource;
 use App\Models\PlaylistAuth;
-use Filament\Actions;
 use Filament\Resources\Pages\CreateRecord;
+use Filament\Resources\Pages\CreateRecord\Concerns\HasWizard;
 use Illuminate\Support\Facades\Auth;
 
 class CreatePlaylist extends CreateRecord
@@ -43,9 +42,9 @@ class CreatePlaylist extends CreateRecord
             switch ($data['auth_option']) {
                 case 'existing':
                     // Assign existing auth to the playlist
-                    if (!empty($data['existing_auth_id'])) {
+                    if (! empty($data['existing_auth_id'])) {
                         $auth = PlaylistAuth::find($data['existing_auth_id']);
-                        if ($auth && !$auth->isAssigned()) {
+                        if ($auth && ! $auth->isAssigned()) {
                             $auth->assignTo($this->record);
                         }
                     }
@@ -53,10 +52,10 @@ class CreatePlaylist extends CreateRecord
 
                 case 'create':
                     // Create new auth and assign to playlist
-                    if (!empty($data['auth_username']) && !empty($data['auth_password'])) {
+                    if (! empty($data['auth_username']) && ! empty($data['auth_password'])) {
                         $auth = PlaylistAuth::create([
                             'user_id' => auth()->id(),
-                            'name' => $data['auth_name'] ?: 'Auth for ' . $this->record->name,
+                            'name' => $data['auth_name'] ?: 'Auth for '.$this->record->name,
                             'username' => $data['auth_username'],
                             'password' => $data['auth_password'],
                             'enabled' => true,

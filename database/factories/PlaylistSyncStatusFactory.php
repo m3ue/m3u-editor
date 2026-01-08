@@ -2,11 +2,10 @@
 
 namespace Database\Factories;
 
-use Illuminate\Database\Eloquent\Factories\Factory;
-use Illuminate\Support\Str;
 use App\Models\Playlist;
 use App\Models\PlaylistSyncStatus;
 use App\Models\User;
+use Illuminate\Database\Eloquent\Factories\Factory;
 
 class PlaylistSyncStatusFactory extends Factory
 {

@@ -54,7 +54,7 @@ return new class extends Migration
                 'sd_token_expires_at',
                 'sd_last_sync',
                 'sd_station_ids',
-                'sd_errors'
+                'sd_errors',
             ]);
         });
     }

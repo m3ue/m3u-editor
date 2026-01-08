@@ -41,7 +41,7 @@ class PostProcess extends Model
             ->where('processable_type', '!=', null)
             ->whereHasMorph('processable', [
                 Playlist::class,
-                Epg::class
+                Epg::class,
             ]);
     }
 }

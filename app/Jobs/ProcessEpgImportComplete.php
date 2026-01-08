@@ -22,8 +22,8 @@ class ProcessEpgImportComplete implements ShouldQueue
      * Create a new job instance.
      */
     public function __construct(
-        public int    $userId,
-        public int    $epgId,
+        public int $userId,
+        public int $epgId,
         public string $batchNo,
         public Carbon $start,
     ) {

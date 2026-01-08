@@ -9,7 +9,7 @@ uses(RefreshDatabase::class);
 
 beforeEach(function () {
     // Mock settings with a fake API key
-    $this->settings = new GeneralSettings();
+    $this->settings = new GeneralSettings;
     $this->settings->tmdb_api_key = 'fake-api-key';
     $this->settings->tmdb_language = 'en-US';
     $this->settings->tmdb_rate_limit = 40;
@@ -17,7 +17,7 @@ beforeEach(function () {
 });
 
 it('returns null when API key is not configured', function () {
-    $settings = new GeneralSettings();
+    $settings = new GeneralSettings;
     $settings->tmdb_api_key = null;
 
     $service = new TmdbService($settings);

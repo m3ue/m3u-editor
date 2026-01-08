@@ -2,8 +2,6 @@
 
 use App\Models\Playlist;
 use Illuminate\Database\Migrations\Migration;
-use Illuminate\Database\Schema\Blueprint;
-use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
@@ -16,7 +14,7 @@ return new class extends Migration
         foreach ($xtreamPlaylists as $playlist) {
             $config = $playlist->xtream_config;
             $hasXtreamConfig = is_array($config) && array_key_exists('import_options', $config);
-            if (!$hasXtreamConfig) {
+            if (! $hasXtreamConfig) {
                 continue;
             }
             if (in_array('live', $config['import_options'])) {

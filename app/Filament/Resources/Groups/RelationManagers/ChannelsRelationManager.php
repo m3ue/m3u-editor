@@ -2,16 +2,11 @@
 
 namespace App\Filament\Resources\Groups\RelationManagers;
 
-use Filament\Schemas\Schema;
 use App\Filament\Resources\Channels\ChannelResource;
 use App\Filament\Resources\Channels\Pages\ListChannels;
-use App\Models\Channel;
-use Filament\Forms;
 use Filament\Resources\RelationManagers\RelationManager;
-use Filament\Tables;
+use Filament\Schemas\Schema;
 use Filament\Tables\Table;
-use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Database\Eloquent\SoftDeletingScope;
 use Hydrat\TableLayoutToggle\Concerns\HasToggleableTable;
 
 class ChannelsRelationManager extends RelationManager
@@ -21,9 +16,11 @@ class ChannelsRelationManager extends RelationManager
     protected static string $relationship = 'live_channels';
 
     protected static ?string $label = 'Live Channels';
+
     protected static ?string $pluralLabel = 'Live Channels';
 
     protected static ?string $title = 'Live Channels';
+
     protected static ?string $navigationLabel = 'Live Channels';
 
     protected $listeners = ['refreshRelation' => '$refresh'];
@@ -32,7 +29,7 @@ class ChannelsRelationManager extends RelationManager
     {
         return false;
     }
-    
+
     public function form(Schema $schema): Schema
     {
         return $schema
@@ -49,6 +46,7 @@ class ChannelsRelationManager extends RelationManager
         $table = $table->reorderRecordsTriggerAction(function ($action) {
             return $action->button()->label('Sort');
         })->defaultSort('sort', 'asc')->reorderable('sort');
+
         return ChannelResource::setupTable($table, $this->ownerRecord->id);
     }
 

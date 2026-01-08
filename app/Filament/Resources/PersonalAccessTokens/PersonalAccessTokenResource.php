@@ -3,12 +3,10 @@
 namespace App\Filament\Resources\PersonalAccessTokens;
 
 use App\Models\PersonalAccessToken;
-use BackedEnum;
 use Filament\Actions;
 use Filament\Forms;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
-use Filament\Support\Icons\Heroicon;
 use Filament\Tables;
 use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Table;
@@ -18,10 +16,12 @@ class PersonalAccessTokenResource extends Resource
 {
     protected static ?string $model = PersonalAccessToken::class;
 
-    protected static string | \UnitEnum | null $navigationGroup = 'Tools';
+    protected static string|\UnitEnum|null $navigationGroup = 'Tools';
 
     protected static ?string $navigationLabel = 'API Tokens';
-    protected static ?string $breadcrumb = "API Tokens";
+
+    protected static ?string $breadcrumb = 'API Tokens';
+
     protected static ?string $recordTitleAttribute = 'name';
 
     public static function getGloballySearchableAttributes(): array
@@ -63,13 +63,13 @@ class PersonalAccessTokenResource extends Resource
                     'create' => 'Create',
                     'view' => 'View',
                     'update' => 'Update',
-                    'delete' => 'Delete'
+                    'delete' => 'Delete',
                 ])->default(['create', 'view', 'update']),
             Forms\Components\DatePicker::make('expires_at')
                 ->label('Expiration Date')
                 ->helperText('Select Expiration Date, or leave empty for no expiration')
                 ->minDate(now()->addDays(1))
-                ->maxDate(now()->addYears(10))
+                ->maxDate(now()->addYears(10)),
         ];
     }
 

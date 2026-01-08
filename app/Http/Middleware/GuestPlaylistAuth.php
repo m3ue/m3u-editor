@@ -2,14 +2,13 @@
 
 namespace App\Http\Middleware;
 
-use Closure;
 use App\Facades\PlaylistFacade;
 use App\Filament\GuestPanel\Pages\GuestDashboard;
 use App\Models\Playlist;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Response;
-use Illuminate\Auth\Middleware\Authenticate as Middleware;
+use Closure;
 use Illuminate\Auth\AuthenticationException;
+use Illuminate\Auth\Middleware\Authenticate as Middleware;
+use Illuminate\Http\Request;
 
 class GuestPlaylistAuth extends Middleware
 {
@@ -17,7 +16,6 @@ class GuestPlaylistAuth extends Middleware
      * Handle an incoming request.
      *
      * @param  \Illuminate\Http\Request  $request
-     * @param  \Closure  $next
      * @param  string  ...$guards
      * @return mixed
      *
@@ -34,7 +32,6 @@ class GuestPlaylistAuth extends Middleware
      * Determine if the user is logged in to any of the given guards.
      *
      * @param  \Illuminate\Http\Request  $request
-     * @param  array  $guards
      * @return void
      *
      * @throws \Illuminate\Auth\AuthenticationException
@@ -42,9 +39,9 @@ class GuestPlaylistAuth extends Middleware
     protected function authenticate($request, array $guards)
     {
         $uuid = $request->route('uuid');
-        if (!$uuid) {
+        if (! $uuid) {
             $uuid = $request->cookie('playlist_uuid');
-            if (!$uuid) {
+            if (! $uuid) {
                 throw new AuthenticationException(
                     'Unauthenticated.',
                     $guards,
@@ -53,18 +50,18 @@ class GuestPlaylistAuth extends Middleware
             }
         }
         $playlist = PlaylistFacade::resolvePlaylistByUuid($uuid);
-        if (!$playlist) {
+        if (! $playlist) {
             throw new AuthenticationException(
                 'Invalid playlist unique identifier',
                 $guards,
                 $this->redirectTo($request)
             );
         }
-        if (!$this->checkExistingAuth($uuid)) {
+        if (! $this->checkExistingAuth($uuid)) {
             // Only return 403 if not authenticated and not on the dashboard/landing page
-            if (!in_array($request->route()->getName(), [
+            if (! in_array($request->route()->getName(), [
                 'filament.playlist.home', // Base panel route
-                GuestDashboard::getRouteName() // Redirected here from base route
+                GuestDashboard::getRouteName(), // Redirected here from base route
             ])) {
                 throw new AuthenticationException(
                     'Not authenticated',
@@ -93,10 +90,10 @@ class GuestPlaylistAuth extends Middleware
 
     private function checkExistingAuth($uuid): bool
     {
-        $prefix = $uuid ? base64_encode($uuid) . '_' : '';
+        $prefix = $uuid ? base64_encode($uuid).'_' : '';
         $username = session("{$prefix}guest_auth_username");
         $password = session("{$prefix}guest_auth_password");
-        if (!$username || !$password) {
+        if (! $username || ! $password) {
             return false;
         }
         $result = PlaylistFacade::authenticate($username, $password);
@@ -106,6 +103,7 @@ class GuestPlaylistAuth extends Middleware
             if ($result[0]->uuid !== $uuid) {
                 return false;
             }
+
             return true;
         }
 

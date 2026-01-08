@@ -21,7 +21,7 @@ Route::middleware(['proxy.throttle'])->prefix('m3u-proxy')->group(function () {
     Route::post('failover-resolver', [\App\Http\Controllers\Api\M3uProxyApiController::class, 'resolveFailoverUrl'])
         ->name('m3u-proxy.failover-resolver')
         ->withoutMiddleware('proxy.throttle');
-    
+
     // Player preview routes
     Route::get('channel/{id}/player/{uuid?}', [\App\Http\Controllers\Api\M3uProxyApiController::class, 'channelPlayer'])
         ->name('m3u-proxy.channel.player');

@@ -2,46 +2,37 @@
 
 namespace App\Filament\Resources\CustomPlaylists\RelationManagers;
 
-use Filament\Schemas\Schema;
-use Filament\Tables\Filters\SelectFilter;
-use Filament\Actions\CreateAction;
-use Filament\Actions\AttachAction;
-use Filament\Actions\DetachAction;
-use Filament\Tables\Enums\RecordActionsPosition;
-use Filament\Actions\DetachBulkAction;
-use Filament\Actions\BulkAction;
-use Filament\Forms\Components\Select;
-use App\Enums\ChannelLogoType;
-use App\Filament\Resources\Vods\Pages\ListVod;
 use App\Filament\Resources\Vods\VodResource;
 use App\Models\Channel;
-use App\Models\ChannelFailover;
-use Filament\Forms;
-use Filament\Forms\Get;
+use Filament\Actions\AttachAction;
+use Filament\Actions\BulkAction;
+use Filament\Actions\CreateAction;
+use Filament\Actions\DetachAction;
+use Filament\Forms\Components\Select;
 use Filament\Notifications\Notification;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Components\Tabs\Tab;
-use Filament\Tables;
+use Filament\Schemas\Schema;
+use Filament\Tables\Columns\SpatieTagsColumn;
+use Filament\Tables\Enums\RecordActionsPosition;
+use Filament\Tables\Filters\SelectFilter;
+use Filament\Tables\Grouping\Group;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
-use Illuminate\Database\Eloquent\SoftDeletingScope;
 use Illuminate\Database\Eloquent\Model;
-use Filament\Tables\Columns\SpatieTagsColumn;
-use Filament\Tables\Grouping\Group;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\HtmlString;
-use Spatie\Tags\Tag;
 
 class VodRelationManager extends RelationManager
 {
     protected static string $relationship = 'channels';
 
     protected static ?string $label = 'VOD Channels';
+
     protected static ?string $pluralLabel = 'VOD Channels';
 
     protected static ?string $title = 'VOD Channels';
+
     protected static ?string $navigationLabel = 'VOD Channels';
 
     public function isReadOnly(): bool
@@ -85,19 +76,19 @@ class VodRelationManager extends RelationManager
                     switch ($driver) {
                         case 'pgsql':
                             // PostgreSQL uses ->> operator for JSON
-                            $query->whereRaw('LOWER(tags.name->>\'$\') LIKE ?', ['%' . strtolower($search) . '%']);
+                            $query->whereRaw('LOWER(tags.name->>\'$\') LIKE ?', ['%'.strtolower($search).'%']);
                             break;
                         case 'mysql':
                             // MySQL uses JSON_EXTRACT
-                            $query->whereRaw('LOWER(JSON_EXTRACT(tags.name, "$")) LIKE ?', ['%' . strtolower($search) . '%']);
+                            $query->whereRaw('LOWER(JSON_EXTRACT(tags.name, "$")) LIKE ?', ['%'.strtolower($search).'%']);
                             break;
                         case 'sqlite':
                             // SQLite uses json_extract
-                            $query->whereRaw('LOWER(json_extract(tags.name, "$")) LIKE ?', ['%' . strtolower($search) . '%']);
+                            $query->whereRaw('LOWER(json_extract(tags.name, "$")) LIKE ?', ['%'.strtolower($search).'%']);
                             break;
                         default:
                             // Fallback - try to search the JSON as text
-                            $query->where(DB::raw('LOWER(CAST(tags.name AS TEXT))'), 'LIKE', '%' . strtolower($search) . '%');
+                            $query->where(DB::raw('LOWER(CAST(tags.name AS TEXT))'), 'LIKE', '%'.strtolower($search).'%');
                             break;
                     }
                 });
@@ -160,7 +151,7 @@ class VodRelationManager extends RelationManager
                         return $ownerRecord->tags()
                             ->where('type', $ownerRecord->uuid)
                             ->get()
-                            ->mapWithKeys(fn($tag) => [$tag->getAttributeValue('name') => $tag->getAttributeValue('name')])
+                            ->mapWithKeys(fn ($tag) => [$tag->getAttributeValue('name') => $tag->getAttributeValue('name')])
                             ->toArray();
                     })
                     ->query(function (Builder $query, array $data) use ($ownerRecord): Builder {
@@ -186,13 +177,13 @@ class VodRelationManager extends RelationManager
                     ->schema(VodResource::getForm(customPlaylist: $ownerRecord))
                     ->modalHeading('New Custom VOD')
                     ->modalDescription('NOTE: Custom VOD need to be associated with a Playlist or Custom Playlist.')
-                    ->using(fn(array $data, string $model): Model => VodResource::createCustomChannel(
+                    ->using(fn (array $data, string $model): Model => VodResource::createCustomChannel(
                         data: $data,
                         model: $model,
                     ))
                     ->slideOver(),
                 AttachAction::make()
-                    ->schema(fn(AttachAction $action): array => [
+                    ->schema(fn (AttachAction $action): array => [
                         $action
                             ->getRecordSelect()
                             ->getSearchResultsUsing(function (string $search) {
@@ -226,9 +217,10 @@ class VodRelationManager extends RelationManager
                                 $displayTitle = $record->title_custom ?: $record->title;
                                 $playlistName = $record->getEffectivePlaylist()->name ?? 'Unknown';
                                 $options[$record->id] = "{$displayTitle} [{$playlistName}]";
+
                                 return "{$displayTitle} [{$playlistName}]";
-                            })
-                    ])
+                            }),
+                    ]),
             ])
             ->recordActions([
                 DetachAction::make()
@@ -248,7 +240,7 @@ class VodRelationManager extends RelationManager
                 BulkAction::make('detach')
                     ->label('Detach Selected')
                     ->action(function (Collection $records) use ($ownerRecord): void {
-                        $tags =  $ownerRecord->groupTags()->get();
+                        $tags = $ownerRecord->groupTags()->get();
                         foreach ($records as $record) {
                             $record->detachTags($tags);
                         }
@@ -274,7 +266,7 @@ class VodRelationManager extends RelationManager
                             ->label('Select group')
                             ->options(
                                 $ownerRecord->groupTags()->get()
-                                    ->map(fn($name) => [
+                                    ->map(fn ($name) => [
                                         'id' => $name->getAttributeValue('name'),
                                         'name' => $name->getAttributeValue('name'),
                                     ])->pluck('id', 'name')
@@ -310,8 +302,8 @@ class VodRelationManager extends RelationManager
         $ownerRecord = $this->ownerRecord;
         $tags = $ownerRecord->tags()->where('type', $ownerRecord->uuid)->get();
         $tabs = $tags->map(
-            fn($tag) => Tab::make($tag->name)
-                ->modifyQueryUsing(fn($query) => $query->where('is_vod', true)->whereHas('tags', function ($tagQuery) use ($tag) {
+            fn ($tag) => Tab::make($tag->name)
+                ->modifyQueryUsing(fn ($query) => $query->where('is_vod', true)->whereHas('tags', function ($tagQuery) use ($tag) {
                     $tagQuery->where('type', $tag->type)
                         ->where('name->en', $tag->name);
                 }))
@@ -322,19 +314,20 @@ class VodRelationManager extends RelationManager
         array_unshift(
             $tabs,
             Tab::make('All')
-                ->modifyQueryUsing(fn($query) => $query->where('is_vod', true))
+                ->modifyQueryUsing(fn ($query) => $query->where('is_vod', true))
                 ->badge($ownerRecord->channels()->where('is_vod', true)->count())
         );
         array_push(
             $tabs,
             Tab::make('Uncategorized')
-                ->modifyQueryUsing(fn($query) => $query->where('is_vod', true)->whereDoesntHave('tags', function ($tagQuery) use ($ownerRecord) {
+                ->modifyQueryUsing(fn ($query) => $query->where('is_vod', true)->whereDoesntHave('tags', function ($tagQuery) use ($ownerRecord) {
                     $tagQuery->where('type', $ownerRecord->uuid);
                 }))
                 ->badge($ownerRecord->channels()->where('is_vod', true)->whereDoesntHave('tags', function ($tagQuery) use ($ownerRecord) {
                     $tagQuery->where('type', $ownerRecord->uuid);
                 })->count())
         );
+
         return $tabs;
     }
 }

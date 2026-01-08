@@ -2,25 +2,22 @@
 
 namespace App\Filament\Resources\Groups\RelationManagers;
 
-use Filament\Schemas\Schema;
 use App\Filament\Resources\Vods\Pages\ListVod;
 use App\Filament\Resources\Vods\VodResource;
-use App\Models\Channel;
-use Filament\Forms;
 use Filament\Resources\RelationManagers\RelationManager;
-use Filament\Tables;
+use Filament\Schemas\Schema;
 use Filament\Tables\Table;
-use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Database\Eloquent\SoftDeletingScope;
 
 class VodRelationManager extends RelationManager
 {
     protected static string $relationship = 'vod_channels';
 
     protected static ?string $label = 'VOD Channels';
+
     protected static ?string $pluralLabel = 'VOD Channels';
 
     protected static ?string $title = 'VOD Channels';
+
     protected static ?string $navigationLabel = 'VOD Channels';
 
     protected $listeners = ['refreshRelation' => '$refresh'];
@@ -29,7 +26,7 @@ class VodRelationManager extends RelationManager
     {
         return false;
     }
-    
+
     public function form(Schema $schema): Schema
     {
         return $schema
@@ -46,6 +43,7 @@ class VodRelationManager extends RelationManager
         $table = $table->reorderRecordsTriggerAction(function ($action) {
             return $action->button()->label('Sort');
         })->defaultSort('sort', 'asc')->reorderable('sort');
+
         return VodResource::setupTable($table, $this->ownerRecord->id);
     }
 

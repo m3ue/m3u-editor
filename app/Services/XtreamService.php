@@ -2,8 +2,8 @@
 
 namespace App\Services;
 
-use Exception;
 use App\Models\Playlist;
+use Exception;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 
@@ -13,44 +13,45 @@ use Illuminate\Support\Str;
 class XtreamService
 {
     protected string $server;
+
     protected string $user;
+
     protected string $pass;
+
     protected int $retryLimit;
-    protected Playlist|null $playlist;
-    protected array|null $xtream_config;
+
+    protected ?Playlist $playlist;
+
+    protected ?array $xtream_config;
 
     /**
      * Factory method to create an instance of XtreamService.
      *
-     * @param Playlist|null $playlist
-     * @param array|null $xtream_config
-     * @param int $retryLimit Number of retries for HTTP requests
-     * @return XtreamService
+     * @param  int  $retryLimit  Number of retries for HTTP requests
      */
     public static function make(
-        Playlist|null $playlist = null,
-        array|null $xtream_config = null,
+        ?Playlist $playlist = null,
+        ?array $xtream_config = null,
         $retryLimit = 5
     ): self {
-        $instance = new self();
+        $instance = new self;
+
         return $instance->init($playlist, $xtream_config, $retryLimit);
     }
 
     /**
      * Initialize the XtreamService with a Playlist or Xtream config.
      *
-     * @param Playlist|null $playlist
-     * @param array|null $xtream_config
-     * @param int $retryLimit Number of retries for HTTP requests
+     * @param  int  $retryLimit  Number of retries for HTTP requests
      * @return bool|self Returns false if initialization fails, otherwise returns the instance.
      */
     public function init(
-        Playlist|null $playlist = null,
-        array|null $xtream_config = null,
+        ?Playlist $playlist = null,
+        ?array $xtream_config = null,
         $retryLimit = 5
     ): bool|self {
         // If Playlist, and not an xtream playlist, return false
-        if ($playlist && !$playlist->xtream) {
+        if ($playlist && ! $playlist->xtream) {
             return false;
         }
 
@@ -64,7 +65,7 @@ class XtreamService
             $this->server = $config['url'] ?? '';
             $this->user = $config['username'] ?? '';
             $this->pass = $config['password'] ?? '';
-        } else if ($xtream_config) {
+        } elseif ($xtream_config) {
             $this->server = $xtream_config['url'] ?? '';
             $this->user = $xtream_config['username'] ?? '';
             $this->pass = $xtream_config['password'] ?? '';
@@ -85,7 +86,7 @@ class XtreamService
         $attempts = 0;
         do {
             $user_agent = $this->playlist?->user_agent ?? 'VLC/3.0.21 LibVLC/3.0.21';
-            $verify = !($this->playlist?->disable_ssl_verification ?? false);
+            $verify = ! ($this->playlist?->disable_ssl_verification ?? false);
             $response = Http::timeout($timeout) // defaults to 15 minutes
                 ->withOptions(['verify' => $verify])
                 ->withHeaders(['User-Agent' => $user_agent])
@@ -107,27 +108,30 @@ class XtreamService
         $params = array_merge([
             'username' => $this->user,
             'password' => $this->pass,
-            'action'   => $action,
+            'action' => $action,
         ], $extra);
 
-        if (!Str::startsWith($this->server, 'http://') && !Str::startsWith($this->server, 'https://')) {
-            $this->server = 'http://' . $this->server; // ensure server URL starts with http:// or https://
+        if (! Str::startsWith($this->server, 'http://') && ! Str::startsWith($this->server, 'https://')) {
+            $this->server = 'http://'.$this->server; // ensure server URL starts with http:// or https://
         }
+
         return $this->server
-            . '/player_api.php?' . http_build_query($params);
+            .'/player_api.php?'.http_build_query($params);
     }
 
     public function authenticate(): array
     {
         $url = $this->server
-            . "/player_api.php?username={$this->user}&password={$this->pass}";
+            ."/player_api.php?username={$this->user}&password={$this->pass}";
+
         return $this->call(url: $url, timeout: 5)['user_info'] ?? []; // set short timeout
     }
 
     public function userInfo($timeout = 5): array
     {
         $url = $this->server
-            . "/player_api.php?username={$this->user}&password={$this->pass}";
+            ."/player_api.php?username={$this->user}&password={$this->pass}";
+
         return $this->call(url: $url, timeout: $timeout) ?? []; // set short timeout
     }
 
@@ -174,12 +178,14 @@ class XtreamService
     public function buildMovieUrl(string $id, ?string $ext): string
     {
         $ext = $ext ? ".{$ext}" : '';
+
         return "{$this->server}/movie/{$this->user}/{$this->pass}/{$id}{$ext}";
     }
 
     public function buildSeriesUrl(string $id, ?string $ext): string
     {
         $ext = $ext ? ".{$ext}" : '';
+
         return "{$this->server}/series/{$this->user}/{$this->pass}/{$id}{$ext}";
     }
 }

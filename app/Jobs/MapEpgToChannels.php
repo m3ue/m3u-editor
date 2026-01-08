@@ -54,7 +54,7 @@ class MapEpgToChannels implements ShouldQueue
 
             // Deduplicate the channels
             $bulk = collect($bulk)
-                ->unique(fn($item) => $item['source_id'] . $item['playlist_id'])
+                ->unique(fn ($item) => $item['source_id'].$item['playlist_id'])
                 ->toArray();
 
             // Upsert the channels

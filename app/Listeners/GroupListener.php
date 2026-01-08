@@ -3,8 +3,6 @@
 namespace App\Listeners;
 
 use App\Models\Group;
-use Illuminate\Contracts\Queue\ShouldQueue;
-use Illuminate\Queue\InteractsWithQueue;
 
 class GroupListener
 {

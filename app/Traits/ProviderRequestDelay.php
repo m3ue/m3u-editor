@@ -15,7 +15,7 @@ trait ProviderRequestDelay
 
     /**
      * Lock timeout in seconds.
-     * 
+     *
      * This determines how long a slot reservation persists if not explicitly released.
      * Set to 5 minutes to handle long-running requests while ensuring cleanup if a
      * process crashes. This should be longer than the longest expected request duration.
@@ -30,7 +30,7 @@ trait ProviderRequestDelay
     {
         $settings = app(GeneralSettings::class);
 
-        if (!$settings->enable_provider_request_delay) {
+        if (! $settings->enable_provider_request_delay) {
             return;
         }
 
@@ -55,14 +55,14 @@ trait ProviderRequestDelay
     {
         $settings = app(GeneralSettings::class);
 
-        if (!$settings->enable_provider_request_delay) {
+        if (! $settings->enable_provider_request_delay) {
             return null;
         }
 
         $maxConcurrent = $settings->provider_max_concurrent_requests ?? 2;
-        $slotKey = self::$concurrencyKey . ':slot:' . uniqid('', true);
-        $countKey = self::$concurrencyKey . ':count';
-        $lockKey = self::$concurrencyKey . ':lock';
+        $slotKey = self::$concurrencyKey.':slot:'.uniqid('', true);
+        $countKey = self::$concurrencyKey.':count';
+        $lockKey = self::$concurrencyKey.':lock';
         $maxWaitTime = 60; // Maximum wait time in seconds
         $startTime = time();
 
@@ -77,7 +77,8 @@ trait ProviderRequestDelay
                     if ($activeRequests < $maxConcurrent) {
                         // Safely increment within the lock
                         Cache::put($countKey, $activeRequests + 1, self::$lockTtlSeconds);
-                        Log::debug("Provider request slot acquired. Active requests: " . ($activeRequests + 1) . "/{$maxConcurrent}");
+                        Log::debug('Provider request slot acquired. Active requests: '.($activeRequests + 1)."/{$maxConcurrent}");
+
                         return $slotKey;
                     }
                 } finally {
@@ -88,6 +89,7 @@ trait ProviderRequestDelay
             // Check if we've waited too long
             if ((time() - $startTime) >= $maxWaitTime) {
                 Log::warning("Provider request slot acquisition timed out after {$maxWaitTime}s. Proceeding anyway.");
+
                 return null;
             }
 
@@ -99,7 +101,7 @@ trait ProviderRequestDelay
     /**
      * Release a slot for concurrent request limiting.
      *
-     * @param string|null $slotKey The slot key returned by acquireProviderRequestSlot
+     * @param  string|null  $slotKey  The slot key returned by acquireProviderRequestSlot
      */
     protected function releaseProviderRequestSlot(?string $slotKey): void
     {
@@ -107,8 +109,8 @@ trait ProviderRequestDelay
             return;
         }
 
-        $countKey = self::$concurrencyKey . ':count';
-        $lockKey = self::$concurrencyKey . ':lock';
+        $countKey = self::$concurrencyKey.':count';
+        $lockKey = self::$concurrencyKey.':lock';
 
         // Use atomic lock for safe decrement
         $lock = Cache::lock($lockKey, 10);
@@ -128,7 +130,7 @@ trait ProviderRequestDelay
             if ($currentCount < 0) {
                 Cache::put($countKey, 0, self::$lockTtlSeconds);
             }
-            Log::debug("Provider request slot released (fallback). Active requests: " . max(0, $currentCount));
+            Log::debug('Provider request slot released (fallback). Active requests: '.max(0, $currentCount));
         }
     }
 
@@ -136,7 +138,7 @@ trait ProviderRequestDelay
      * Execute a callback with provider request throttling.
      * This combines delay and concurrency limiting for safe provider access.
      *
-     * @param callable $callback The callback to execute
+     * @param  callable  $callback  The callback to execute
      * @return mixed The result of the callback
      */
     protected function withProviderThrottling(callable $callback): mixed

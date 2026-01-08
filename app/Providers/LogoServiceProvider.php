@@ -13,7 +13,7 @@ class LogoServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->singleton('logo.service', function () {
-            return new LogoService();
+            return new LogoService;
         });
     }
 

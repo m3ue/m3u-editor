@@ -2,9 +2,10 @@
 
 declare(strict_types=1);
 
+use App\Filament\GuestPanel\Pages\GuestDashboard;
+
 use function Pest\Laravel\get;
 use function Pest\Livewire\livewire;
-use App\Filament\GuestPanel\Pages\GuestDashboard;
 
 it('shows login form when not authenticated', function () {
     get(route('filament.playlist.pages.guest', ['uuid' => 'test-uuid']))

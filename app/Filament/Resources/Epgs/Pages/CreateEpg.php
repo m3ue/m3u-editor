@@ -3,7 +3,6 @@
 namespace App\Filament\Resources\Epgs\Pages;
 
 use App\Filament\Resources\Epgs\EpgResource;
-use Filament\Actions;
 use Filament\Resources\Pages\CreateRecord;
 
 class CreateEpg extends CreateRecord

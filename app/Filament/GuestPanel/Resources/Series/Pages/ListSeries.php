@@ -4,15 +4,14 @@ namespace App\Filament\GuestPanel\Resources\Series\Pages;
 
 use App\Filament\GuestPanel\Pages\Concerns\HasPlaylist;
 use App\Filament\GuestPanel\Resources\Series\SeriesResource;
-use Filament\Actions;
 use Filament\Resources\Pages\ListRecords;
-use Illuminate\Database\Eloquent\Builder;
 
 class ListSeries extends ListRecords
 {
     use HasPlaylist;
 
     protected static string $resource = SeriesResource::class;
+
     protected static ?string $title = '';
 
     // public static function getUrl(

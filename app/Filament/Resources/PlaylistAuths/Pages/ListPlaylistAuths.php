@@ -2,9 +2,8 @@
 
 namespace App\Filament\Resources\PlaylistAuths\Pages;
 
-use Filament\Actions\CreateAction;
 use App\Filament\Resources\PlaylistAuths\PlaylistAuthResource;
-use Filament\Actions;
+use Filament\Actions\CreateAction;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ListRecords;
 use Illuminate\Database\Eloquent\Builder;
@@ -22,6 +21,7 @@ class ListPlaylistAuths extends ListRecords
             CreateAction::make()
                 ->using(function (array $data, string $model): Model {
                     $data['user_id'] = auth()->id();
+
                     return $model::create($data);
                 })
                 ->successNotification(

@@ -2,20 +2,18 @@
 
 namespace App\Filament\Resources\Categories\Pages;
 
-use Filament\Actions\ActionGroup;
-use Filament\Actions\Action;
-use Filament\Forms\Components\Select;
-use Filament\Schemas\Components\Utilities\Set;
-use Filament\Schemas\Components\Utilities\Get;
+use App\Filament\Resources\Categories\CategoryResource;
 use App\Jobs\ProcessM3uImportSeriesEpisodes;
 use App\Jobs\SyncSeriesStrmFiles;
-use App\Filament\Resources\Categories\CategoryResource;
-use App\Models\CustomPlaylist;
 use App\Models\Category;
-use Filament\Actions;
-use Filament\Forms;
+use App\Models\CustomPlaylist;
+use Filament\Actions\Action;
+use Filament\Actions\ActionGroup;
+use Filament\Forms\Components\Select;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
+use Filament\Schemas\Components\Utilities\Get;
+use Filament\Schemas\Components\Utilities\Set;
 
 class ViewCategory extends ViewRecord
 {
@@ -42,12 +40,13 @@ class ViewCategory extends ViewRecord
                             ->searchable(),
                         Select::make('category')
                             ->label('Custom Category')
-                            ->disabled(fn(Get $get) => !$get('playlist'))
-                            ->helperText(fn(Get $get) => !$get('playlist') ? 'Select a custom playlist first.' : 'Select the category you would like to assign to the series to.')
+                            ->disabled(fn (Get $get) => ! $get('playlist'))
+                            ->helperText(fn (Get $get) => ! $get('playlist') ? 'Select a custom playlist first.' : 'Select the category you would like to assign to the series to.')
                             ->options(function ($get) {
                                 $customList = CustomPlaylist::find($get('playlist'));
+
                                 return $customList ? $customList->categoryTags()->get()
-                                    ->mapWithKeys(fn($tag) => [$tag->getAttributeValue('name') => $tag->getAttributeValue('name')])
+                                    ->mapWithKeys(fn ($tag) => [$tag->getAttributeValue('name') => $tag->getAttributeValue('name')])
                                     ->toArray() : [];
                             })
                             ->searchable(),
@@ -84,7 +83,7 @@ class ViewCategory extends ViewRecord
                             ->live()
                             ->label('Category')
                             ->helperText('Select the category you would like to move the series to.')
-                            ->options(fn(Get $get, $record) => Category::where(['user_id' => auth()->id(), 'playlist_id' => $record->playlist_id])->get(['name', 'id'])->pluck('name', 'id'))
+                            ->options(fn (Get $get, $record) => Category::where(['user_id' => auth()->id(), 'playlist_id' => $record->playlist_id])->get(['name', 'id'])->pluck('name', 'id'))
                             ->searchable(),
                     ])
                     ->action(function ($record, array $data): void {

@@ -47,7 +47,7 @@ class CopyAttributesToPlaylist implements ShouldQueue
             $results = $this->copyChannelAttributes();
         } catch (\Exception $e) {
             // Log the error
-            Log::error('Error copying attributes to playlist: ' . $e->getMessage());
+            Log::error('Error copying attributes to playlist: '.$e->getMessage());
 
             // Notify the user of the failure
             Notification::make()
@@ -511,7 +511,7 @@ class CopyAttributesToPlaylist implements ShouldQueue
                     $mapping['logo_internal'] = 'logo'; // Special case: source logo_internal -> custom logo
                     break;
 
-                // Then custom field mappings
+                    // Then custom field mappings
                 case 'name':
                     $mapping['name'] = ['name_custom', 'name']; // Prefer custom, fallback to base
                     break;
@@ -522,7 +522,7 @@ class CopyAttributesToPlaylist implements ShouldQueue
                     $mapping['stream_id'] = ['stream_id_custom', 'stream_id']; // Prefer custom, fallback to base
                     break;
 
-                // And finally, direct mappings without custom fields
+                    // And finally, direct mappings without custom fields
                 case 'enabled':
                 case 'station_id':
                 case 'group':

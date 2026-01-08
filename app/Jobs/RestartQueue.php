@@ -2,11 +2,11 @@
 
 namespace App\Jobs;
 
-use Exception;
 use App\Enums\Status;
 use App\Models\Epg;
 use App\Models\EpgMap;
 use App\Models\Playlist;
+use Exception;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Artisan;
@@ -72,7 +72,7 @@ class RestartQueue implements ShouldQueue
                     'errors' => 'The EPG mapping process was interrupted and has been marked as failed.',
                 ]);
         } catch (Exception $e) {
-            Log::error('Failed to restart queue: ' . $e->getMessage(), [
+            Log::error('Failed to restart queue: '.$e->getMessage(), [
                 'exception' => $e,
             ]);
         }

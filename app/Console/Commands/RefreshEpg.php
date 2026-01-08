@@ -3,7 +3,6 @@
 namespace App\Console\Commands;
 
 use App\Enums\Status;
-use App\Jobs\GenerateEpgCache;
 use App\Jobs\ProcessEpgImport;
 use App\Models\Epg;
 use Cron\CronExpression;
@@ -66,7 +65,7 @@ class RefreshEpg extends Command
                     dispatch(new ProcessEpgImport($epg));
                 }
             });
-            $this->info('Dispatched ' . $count . ' epgs for refresh');
+            $this->info('Dispatched '.$count.' epgs for refresh');
         }
     }
 }

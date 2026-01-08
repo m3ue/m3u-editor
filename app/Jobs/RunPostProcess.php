@@ -2,7 +2,6 @@
 
 namespace App\Jobs;
 
-use Exception;
 use App\Enums\Status;
 use App\Facades\PlaylistFacade;
 use App\Mail\PostProcessMail;
@@ -10,6 +9,7 @@ use App\Models\Epg;
 use App\Models\PostProcess;
 use App\Models\PostProcessLog;
 use App\Settings\GeneralSettings;
+use Exception;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Database\Eloquent\Model;
@@ -19,7 +19,6 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Symfony\Component\Process\Process as SymfonyProcess;
-use Illuminate\Support\Str;
 
 class RunPostProcess implements ShouldQueue
 {
@@ -34,9 +33,6 @@ class RunPostProcess implements ShouldQueue
 
     /**
      * Create a new job instance.
-     * 
-     * @param PostProcess $postProcess
-     * @param Model $model
      */
     public function __construct(
         public PostProcess $postProcess,
@@ -49,7 +45,7 @@ class RunPostProcess implements ShouldQueue
             if ($syncData) {
                 foreach ($syncData as $key => $value) {
                     // Only add if not already present in the model
-                    if (!isset($this->model->{$key})) {
+                    if (! isset($this->model->{$key})) {
                         $this->model->{$key} = $value;
                     }
                 }
@@ -68,9 +64,9 @@ class RunPostProcess implements ShouldQueue
         $status = $this->model->status;
         $postProcess = $this->postProcess;
         $metadata = $postProcess->metadata;
-        $sendFailed = (bool)($metadata['send_failed'] ?? false);
+        $sendFailed = (bool) ($metadata['send_failed'] ?? false);
 
-        if ($status === Status::Failed && !$sendFailed) {
+        if ($status === Status::Failed && ! $sendFailed) {
             // If the model status is failed and we don't want to execute the post process, then just return
             return;
         }
@@ -92,7 +88,7 @@ class RunPostProcess implements ShouldQueue
         }
 
         // Check if conditions are met before executing
-        if (!$this->checkConditions()) {
+        if (! $this->checkConditions()) {
             // Log that conditions were not met
             PostProcessLog::create([
                 'name' => $name,
@@ -101,6 +97,7 @@ class RunPostProcess implements ShouldQueue
                 'status' => 'skipped',
                 'message' => 'Post process skipped: conditions not met',
             ]);
+
             return;
         }
         try {
@@ -147,7 +144,7 @@ class RunPostProcess implements ShouldQueue
 
                 // Log that we've sent the email
                 $title = "Post processing email for \"$name\"";
-                $body = "Email sent with details.";
+                $body = 'Email sent with details.';
                 PostProcessLog::create([
                     'name' => $name,
                     'type' => $postProcess->event,
@@ -161,13 +158,13 @@ class RunPostProcess implements ShouldQueue
                     ->body($body)
                     ->broadcast($user)
                     ->sendToDatabase($user);
-            } else if (str_starts_with($metadata['path'], 'http')) {
+            } elseif (str_starts_with($metadata['path'], 'http')) {
                 // Using `post` as true/false; true = POST, false = GET
-                $post = ((bool)$metadata['post']) ?? false;
+                $post = ((bool) $metadata['post']) ?? false;
                 $method = $post ? 'post' : 'get';
                 $url = $metadata['path'];
-                $jsonBody = (bool)($metadata['json_body'] ?? false);
-                $noBody = (bool)($metadata['no_body'] ?? false);
+                $jsonBody = (bool) ($metadata['json_body'] ?? false);
+                $noBody = (bool) ($metadata['no_body'] ?? false);
                 $queryVars = [];
                 $vars = $metadata['post_vars'] ?? [];
                 foreach ($vars as $var) {
@@ -208,7 +205,7 @@ class RunPostProcess implements ShouldQueue
                     $response = Http::withHeaders($headers)
                         ->withBody($jsonContent, 'application/json')
                         ->post($url);
-                } elseif ($post && !empty($queryVars)) {
+                } elseif ($post && ! empty($queryVars)) {
                     // Send variables as form data or JSON based on jsonBody setting
                     if ($jsonBody) {
                         $headers['Content-Type'] = 'application/json';
@@ -228,7 +225,7 @@ class RunPostProcess implements ShouldQueue
                 if ($response->successful()) {
                     $title = "Post processing for \"$name\" completed successfully";
                     $responseBody = $response->body();
-                    $body = !empty($responseBody) ? $responseBody : "Request completed successfully (HTTP {$response->status()})";
+                    $body = ! empty($responseBody) ? $responseBody : "Request completed successfully (HTTP {$response->status()})";
                     PostProcessLog::create([
                         'name' => $name,
                         'type' => $postProcess->event,
@@ -245,7 +242,7 @@ class RunPostProcess implements ShouldQueue
                 } else {
                     $title = "Error running post processing for \"$name\"";
                     $responseBody = $response->body();
-                    $body = !empty($responseBody) ? $responseBody : "Request failed (HTTP {$response->status()})";
+                    $body = ! empty($responseBody) ? $responseBody : "Request failed (HTTP {$response->status()})";
                     PostProcessLog::create([
                         'name' => $name,
                         'type' => $postProcess->event,
@@ -302,7 +299,7 @@ class RunPostProcess implements ShouldQueue
                 );
 
                 // Check if the process was successful
-                if (!$hasErrors) {
+                if (! $hasErrors) {
                     // Success!
                     $title = "Post processing for \"$name\" completed successfully";
                     $body = $output;
@@ -340,7 +337,7 @@ class RunPostProcess implements ShouldQueue
             }
         } catch (Exception $e) {
             // Log the error
-            $error = "Error running post processing for \"$name\": " . $e->getMessage();
+            $error = "Error running post processing for \"$name\": ".$e->getMessage();
             Log::error($error);
             PostProcessLog::create([
                 'name' => $name,
@@ -385,10 +382,11 @@ class RunPostProcess implements ShouldQueue
 
         // Check each condition - all must be true for execution
         foreach ($conditions as $condition) {
-            if (!$this->evaluateCondition($condition)) {
+            if (! $this->evaluateCondition($condition)) {
                 return false;
             }
         }
+
         return true;
     }
 
@@ -401,12 +399,13 @@ class RunPostProcess implements ShouldQueue
         $operator = $condition['operator'] ?? null;
         $expectedValue = $condition['value'] ?? null;
 
-        if (!$field || !$operator) {
+        if (! $field || ! $operator) {
             return false;
         }
 
         // Get the actual value from the model
         $actualValue = $this->getFieldValue($field);
+
         return match ($operator) {
             'equals' => $actualValue == $expectedValue,
             'not_equals' => $actualValue != $expectedValue,
@@ -415,13 +414,13 @@ class RunPostProcess implements ShouldQueue
             'greater_than_or_equal' => is_numeric($actualValue) && is_numeric($expectedValue) && $actualValue >= $expectedValue,
             'less_than_or_equal' => is_numeric($actualValue) && is_numeric($expectedValue) && $actualValue <= $expectedValue,
             'contains' => is_string($actualValue) && is_string($expectedValue) && str_contains($actualValue, $expectedValue),
-            'not_contains' => is_string($actualValue) && is_string($expectedValue) && !str_contains($actualValue, $expectedValue),
+            'not_contains' => is_string($actualValue) && is_string($expectedValue) && ! str_contains($actualValue, $expectedValue),
             'starts_with' => is_string($actualValue) && is_string($expectedValue) && str_starts_with($actualValue, $expectedValue),
             'ends_with' => is_string($actualValue) && is_string($expectedValue) && str_ends_with($actualValue, $expectedValue),
-            'is_true' => (bool)$actualValue === true,
-            'is_false' => (bool)$actualValue === false,
+            'is_true' => (bool) $actualValue === true,
+            'is_false' => (bool) $actualValue === false,
             'is_empty' => empty($actualValue),
-            'is_not_empty' => !empty($actualValue),
+            'is_not_empty' => ! empty($actualValue),
             default => false,
         };
     }
@@ -478,7 +477,7 @@ class RunPostProcess implements ShouldQueue
 
         // Replace all placeholders
         foreach ($placeholders as $key => $value) {
-            $content = str_replace('{{' . $key . '}}', $value, $content);
+            $content = str_replace('{{'.$key.'}}', $value, $content);
         }
 
         return $content;

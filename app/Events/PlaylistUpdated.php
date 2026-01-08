@@ -13,8 +13,6 @@ class PlaylistUpdated
 
     /**
      * Create a new event instance.
-     * 
-     * @param Playlist $playlist
      */
     public function __construct(
         public Playlist $playlist,

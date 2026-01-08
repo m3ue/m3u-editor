@@ -2,30 +2,29 @@
 
 namespace App\Livewire;
 
-use Filament\Actions\Contracts\HasActions;
-use Filament\Actions\Concerns\InteractsWithActions;
-use Filament\Tables\Columns\TextColumn;
 use Filament\Actions\Action;
-use Filament\Tables\Enums\RecordActionsPosition;
-use Filament\Actions\BulkActionGroup;
 use Filament\Actions\BulkAction;
+use Filament\Actions\BulkActionGroup;
+use Filament\Actions\Concerns\InteractsWithActions;
+use Filament\Actions\Contracts\HasActions;
 use Filament\Forms\Concerns\InteractsWithForms;
 use Filament\Forms\Contracts\HasForms;
 use Filament\Notifications\Notification;
+use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
+use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Table;
 use Illuminate\Contracts\View\View;
-use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
 use ShuvroRoy\FilamentSpatieLaravelBackup\FilamentSpatieLaravelBackup;
 use Spatie\Backup\BackupDestination\Backup;
 use Spatie\Backup\BackupDestination\BackupDestination as SpatieBackupDestination;
-use Illuminate\Support\Str;
 
-class BackupDestinationListRecords extends Component implements HasForms, HasTable, HasActions
+class BackupDestinationListRecords extends Component implements HasActions, HasForms, HasTable
 {
     use InteractsWithActions;
     use InteractsWithForms;
@@ -59,7 +58,7 @@ class BackupDestinationListRecords extends Component implements HasForms, HasTab
                     return collect($data)
                         ->when(
                             filled($sortColumn),
-                            fn($data) => $data->sortBy(
+                            fn ($data) => $data->sortBy(
                                 $sortColumn,
                                 SORT_NATURAL,
                                 $sortDirection === 'desc',
@@ -67,9 +66,9 @@ class BackupDestinationListRecords extends Component implements HasForms, HasTab
                         )
                         ->when(
                             filled($search),
-                            fn($data) => $data->filter(
-                                fn(array $record): bool => Str::contains(
-                                    Str::lower($record['path'] . $record['disk'] . $record['date']),
+                            fn ($data) => $data->filter(
+                                fn (array $record): bool => Str::contains(
+                                    Str::lower($record['path'].$record['disk'].$record['date']),
                                     Str::lower($search),
                                 ),
                             ),
@@ -126,7 +125,7 @@ class BackupDestinationListRecords extends Component implements HasForms, HasTab
                     ->icon('heroicon-o-arrow-down-tray')
                     ->visible(auth()->user()->can('download-backup'))
                     ->button()->hiddenLabel()->size('sm')
-                    ->action(fn(array $record) => Storage::disk($record['disk'])->download($record['path'])),
+                    ->action(fn (array $record) => Storage::disk($record['disk'])->download($record['path'])),
             ], position: RecordActionsPosition::BeforeCells)
             ->toolbarActions([
                 BulkActionGroup::make([

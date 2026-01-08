@@ -6,7 +6,7 @@ use Filament\Widgets\Widget;
 
 class KoFiWidget extends Widget
 {
-    protected int | string | array $columnSpan = [
+    protected int|string|array $columnSpan = [
         'sm' => 1,
         'lg' => 2,
     ];

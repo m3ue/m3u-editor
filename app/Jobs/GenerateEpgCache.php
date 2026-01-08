@@ -2,7 +2,6 @@
 
 namespace App\Jobs;
 
-use Throwable;
 use App\Enums\Status;
 use App\Models\Epg;
 use App\Services\EpgCacheService;
@@ -10,6 +9,7 @@ use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Log;
+use Throwable;
 
 class GenerateEpgCache implements ShouldQueue
 {
@@ -39,8 +39,9 @@ class GenerateEpgCache implements ShouldQueue
     public function handle(EpgCacheService $cacheService): void
     {
         $epg = Epg::where('uuid', $this->uuid)->first();
-        if (!$epg) {
+        if (! $epg) {
             Log::error("EPG with UUID {$this->uuid} not found for cache generation.");
+
             return;
         }
 
@@ -71,7 +72,7 @@ class GenerateEpgCache implements ShouldQueue
             }
 
             if ($this->notify) {
-                $msg = "Cache generated successfully in " . round($duration, 2) . " seconds";
+                $msg = 'Cache generated successfully in '.round($duration, 2).' seconds';
                 Notification::make()
                     ->success()
                     ->title("EPG cache created for \"{$epg->name}\"")
@@ -87,7 +88,7 @@ class GenerateEpgCache implements ShouldQueue
                 'processing_started_at' => null,
                 'processing_phase' => null,
             ]);
-            $error = "Failed to generate cache. You can try to run the cache generation again manually from the EPG management page.";
+            $error = 'Failed to generate cache. You can try to run the cache generation again manually from the EPG management page.';
             Notification::make()
                 ->danger()
                 ->title("Error creating cache for \"{$epg->name}\"")

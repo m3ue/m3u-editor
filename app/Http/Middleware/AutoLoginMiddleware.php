@@ -12,11 +12,11 @@ class AutoLoginMiddleware
     /**
      * Handle an incoming request.
      *
-     * @param Closure(Request):Response $next
+     * @param  Closure(Request):Response  $next
      */
     public function handle(Request $request, Closure $next): Response
     {
-        if (config('auth.auto_login') && !auth()->check()) {
+        if (config('auth.auto_login') && ! auth()->check()) {
             $user = User::where('email', config('auth.auto_login_email'))->first();
             if ($user) {
                 auth()->login($user);

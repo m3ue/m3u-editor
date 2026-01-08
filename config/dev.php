@@ -13,7 +13,7 @@ return [
     'kofi' => 'https://ko-fi.com/sparkison',
     'admin_emails' => [
         // Default admin email
-        'admin@test.com'
+        'admin@test.com',
     ],
     'tvgid' => [
         'regex' => env('TVGID_REGEX', '/[^a-zA-Z0-9_\-\.]/'),
@@ -61,6 +61,6 @@ return [
             'symbol' => 'XRP',
             'address' => '',
             'icon' => '/images/crypto-icons/ripple.svg',
-        ]
-    ]
+        ],
+    ],
 ];

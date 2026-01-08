@@ -2,9 +2,8 @@
 
 namespace App\Filament\Resources\Channels\Pages;
 
-use Filament\Actions\DeleteAction;
 use App\Filament\Resources\Channels\ChannelResource;
-use Filament\Actions;
+use Filament\Actions\DeleteAction;
 use Filament\Resources\Pages\EditRecord;
 
 class EditChannel extends EditRecord

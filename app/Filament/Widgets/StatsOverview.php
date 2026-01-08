@@ -14,13 +14,14 @@ use Filament\Widgets\StatsOverviewWidget as BaseWidget;
 use Filament\Widgets\StatsOverviewWidget\Stat;
 
 class StatsOverview extends BaseWidget
-{    
+{
     protected function getStats(): array
     {
         $lastSynced = Carbon::parse(Playlist::where('user_id', auth()->id())->max('synced'));
         $relative = $lastSynced ? $lastSynced->diffForHumans() : null;
         $lastSyncedEpg = Carbon::parse(Epg::where('user_id', auth()->id())->max('synced'));
         $epgRelative = $lastSyncedEpg ? $lastSyncedEpg->diffForHumans() : null;
+
         return [
             Stat::make('Playlists', Playlist::where('user_id', auth()->id())->count())
                 ->description($relative ? "Last sync $relative" : 'No syncs yet')
@@ -30,7 +31,7 @@ class StatsOverview extends BaseWidget
             Stat::make('Enabled Channels', Channel::where(
                 [
                     ['user_id', auth()->id()],
-                    ['enabled', true]
+                    ['enabled', true],
                 ]
             )->count()),
             Stat::make('EPGs', Epg::where('user_id', auth()->id())->count())
@@ -40,7 +41,7 @@ class StatsOverview extends BaseWidget
             Stat::make('EPG Mapped Channels', Channel::where(
                 [
                     ['user_id', auth()->id()],
-                    ['epg_channel_id', '!=', null]
+                    ['epg_channel_id', '!=', null],
                 ]
             )->count()),
             Stat::make('Series', Series::where('user_id', auth()->id())->count()),

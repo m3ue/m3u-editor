@@ -13,7 +13,7 @@ use Illuminate\Support\Facades\Facade;
  * @method static string|null getBuildDate()
  * @method static bool isOnBranch(string $branch)
  * @method static bool isProduction()
- * 
+ *
  * @see \App\Services\GitInfoService
  */
 class GitInfo extends Facade

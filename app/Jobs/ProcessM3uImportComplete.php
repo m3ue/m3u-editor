@@ -2,7 +2,6 @@
 
 namespace App\Jobs;
 
-use Exception;
 use App\Enums\Status;
 use App\Events\SyncCompleted;
 use App\Models\Channel;
@@ -14,6 +13,7 @@ use App\Models\User;
 use App\Services\EpgCacheService;
 use App\Settings\GeneralSettings;
 use Carbon\Carbon;
+use Exception;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -37,6 +37,7 @@ class ProcessM3uImportComplete implements ShouldQueue
 
     // Whether to invalidate the import if the number of new channels is less than the current count
     public $invalidateImport = false;
+
     public $invalidateImportThreshold = 100; // Default threshold for invalidating import
 
     // Default user agent to use for HTTP requests
@@ -109,12 +110,12 @@ class ProcessM3uImportComplete implements ShouldQueue
 
         // See if sync logs are disabled
         $syncLogsDisabled = config('dev.disable_sync_logs', false);
-        if (!$playlist->sync_logs_enabled) {
+        if (! $playlist->sync_logs_enabled) {
             $syncLogsDisabled = true;
         }
 
         // If not a new playlist create a new playlst sync status!
-        if (!$this->isNew) {
+        if (! $this->isNew) {
             // Get counts for removed and new groups/channels
             $removedGroupCount = $removedGroups->count();
             $newGroupCount = $newGroups->count();
@@ -135,7 +136,7 @@ class ProcessM3uImportComplete implements ShouldQueue
                     // If the new count will be less than the current count (minus the threshold), invalidate the import
                     if ($newCount < ($currentCount - $this->invalidateImportThreshold)) {
                         $message = "Playlist Sync Invalidated: The channel count would have been {$newCount} after import, which is less than the current count of {$currentCount} minus the threshold of {$this->invalidateImportThreshold}.";
-                        if (!$syncLogsDisabled) {
+                        if (! $syncLogsDisabled) {
                             $sync = PlaylistSyncStatus::create([
                                 'name' => $playlist->name,
                                 'user_id' => $user->id,
@@ -150,7 +151,7 @@ class ProcessM3uImportComplete implements ShouldQueue
                                     'max_hit' => $this->maxHit,
                                     'message' => $message,
                                     'status' => 'canceled',
-                                ]
+                                ],
                             ]);
 
                             /*
@@ -173,7 +174,7 @@ class ProcessM3uImportComplete implements ShouldQueue
                                 ...$playlist->processing ?? [],
                                 'live_processing' => false,
                                 'vod_processing' => false,
-                            ]
+                            ],
                         ]);
 
                         // Cleanup the any new groups/channels
@@ -190,12 +191,13 @@ class ProcessM3uImportComplete implements ShouldQueue
                             ->body($message)
                             ->broadcast($user)
                             ->sendToDatabase($user);
+
                         return;
                     }
                 }
             }
 
-            if (!$syncLogsDisabled) {
+            if (! $syncLogsDisabled) {
                 $sync = PlaylistSyncStatus::create([
                     'name' => $playlist->name,
                     'user_id' => $user->id,
@@ -209,7 +211,7 @@ class ProcessM3uImportComplete implements ShouldQueue
                         'added_channels' => $newChannelCount,
                         'max_hit' => $this->maxHit,
                         'status' => 'success',
-                    ]
+                    ],
                 ]);
                 $this->createSyncLogEntries(
                     $sync,
@@ -252,10 +254,10 @@ class ProcessM3uImportComplete implements ShouldQueue
 
                 // Make sure EPG doesn't already exist
                 $epg = $user->epgs()->where('url', $epgUrl)->first();
-                if (!$epg) {
+                if (! $epg) {
                     // Create EPG to trigger sync
                     $epg = $user->epgs()->create([
-                        'name' => $playlist->name . ' EPG',
+                        'name' => $playlist->name.' EPG',
                         'url' => $epgUrl,
                         'user_id' => $user->id,
                         'user_agent' => $playlist->user_agent,
@@ -291,7 +293,7 @@ class ProcessM3uImportComplete implements ShouldQueue
                 ...$playlist->processing ?? [],
                 'live_processing' => false,
                 'vod_processing' => false,
-            ]
+            ],
         ];
         if ($this->runningLiveImport) {
             $update['progress'] = 100; // Only set if Live import was run
@@ -344,7 +346,7 @@ class ProcessM3uImportComplete implements ShouldQueue
         $syncVod = ($playlist->auto_sync_vod_stream_files || $playlist->auto_fetch_vod_metadata)
             && $playlist->channels()->where([
                 ['enabled', true],
-                ['is_vod', true]
+                ['is_vod', true],
             ])->exists();
 
         if ($syncVod) {
@@ -352,11 +354,11 @@ class ProcessM3uImportComplete implements ShouldQueue
             $syncStreamFiles = $playlist->auto_sync_vod_stream_files;
             $syncMetaData = $playlist->auto_fetch_vod_metadata;
             if ($syncStreamFiles && $syncMetaData) {
-                $message = "Syncing VOD stream files and fetching VOD metadata now. Please check back later.";
+                $message = 'Syncing VOD stream files and fetching VOD metadata now. Please check back later.';
             } elseif ($syncStreamFiles) {
-                $message = "Syncing VOD stream files now. Please check back later.";
+                $message = 'Syncing VOD stream files now. Please check back later.';
             } elseif ($syncMetaData) {
-                $message = "Fetching VOD metadata now. Please check back later.";
+                $message = 'Fetching VOD metadata now. Please check back later.';
             }
 
             // Process VOD import
@@ -416,11 +418,7 @@ class ProcessM3uImportComplete implements ShouldQueue
     /**
      * Create the sync log entries for the import.
      *
-     * @param PlaylistSyncStatus $sync
-     * @param $newChannels
-     * @param $removedChannels
-     * @param $newGroups
-     * @param $removedGroups
+     * @param  PlaylistSyncStatus  $sync
      */
     private function createSyncLogEntries(
         $sync,

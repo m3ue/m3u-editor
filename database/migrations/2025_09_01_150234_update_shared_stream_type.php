@@ -18,7 +18,7 @@ return new class extends Migration
                 $table->dropColumn('format');
             });
         }
-        
+
         Schema::table('shared_streams', function (Blueprint $table) {
             $table->enum('format', ['ts', 'hls', 'mkv', 'mp4'])->default('ts');
             // Recreate the index
@@ -36,7 +36,7 @@ return new class extends Migration
             $table->dropIndex(['format', 'status']);
             $table->dropColumn('format');
         });
-        
+
         // Recreate the original format column
         Schema::table('shared_streams', function (Blueprint $table) {
             $table->enum('format', ['ts', 'hls'])->default('ts');

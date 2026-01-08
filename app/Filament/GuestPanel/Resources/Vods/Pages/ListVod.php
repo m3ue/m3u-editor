@@ -4,15 +4,14 @@ namespace App\Filament\GuestPanel\Resources\Vods\Pages;
 
 use App\Filament\GuestPanel\Pages\Concerns\HasPlaylist;
 use App\Filament\GuestPanel\Resources\Vods\VODResource;
-use Filament\Actions;
 use Filament\Resources\Pages\ListRecords;
-use Illuminate\Database\Eloquent\Builder;
 
 class ListVod extends ListRecords
 {
     use HasPlaylist;
 
     protected static string $resource = VodResource::class;
+
     protected static ?string $title = '';
 
     // public static function getUrl(

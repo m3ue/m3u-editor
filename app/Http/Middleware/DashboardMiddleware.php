@@ -20,8 +20,10 @@ class DashboardMiddleware
             if ($request->path() === trim(config('app.login_path', 'login'), '/')) {
                 return $next($request);
             }
+
             return redirect()->to('/not-found');
         }
+
         return $next($request);
     }
 }

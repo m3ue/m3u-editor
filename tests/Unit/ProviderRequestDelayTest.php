@@ -9,7 +9,8 @@ use Illuminate\Support\Facades\Cache;
  */
 function createTestClass(): object
 {
-    return new class {
+    return new class
+    {
         use ProviderRequestDelay;
 
         public function callApplyDelay(): void

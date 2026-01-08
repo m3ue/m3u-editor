@@ -20,7 +20,7 @@ class LogoProxyController extends Controller
     {
         try {
             // Decode the URL
-            $originalUrl = base64_decode(strtr($encodedUrl, '-_', '+/') . str_repeat('=', (4 - strlen($encodedUrl) % 4) % 4));
+            $originalUrl = base64_decode(strtr($encodedUrl, '-_', '+/').str_repeat('=', (4 - strlen($encodedUrl) % 4) % 4));
 
             // Validate the decoded URL
             if (! filter_var($originalUrl, FILTER_VALIDATE_URL)) {
@@ -28,7 +28,7 @@ class LogoProxyController extends Controller
             }
 
             // Generate a cache key based on the original URL
-            $cacheKey = 'logo_' . md5($originalUrl);
+            $cacheKey = 'logo_'.md5($originalUrl);
             $cacheFile = "cached-logos/{$cacheKey}";
 
             // Make sure the cache directory exists
@@ -72,7 +72,7 @@ class LogoProxyController extends Controller
         // See if override settings apply
         try {
             $settings = app(GeneralSettings::class);
-            if (!$proxyUrlOverride || empty($proxyUrlOverride)) {
+            if (! $proxyUrlOverride || empty($proxyUrlOverride)) {
                 // Get from settings if not set in config
                 $proxyUrlOverride = $settings->url_override ?? null;
             }
@@ -89,7 +89,7 @@ class LogoProxyController extends Controller
             $encodedUrl = rtrim(strtr(base64_encode($originalUrl), '+/', '-_'), '=');
             // Use override URL only if enabled, not internal request, AND logos are included in override
             $url = $proxyUrlOverride && ! $internal && $includeLogosInOverride
-                ? rtrim($proxyUrlOverride, '/') . "/logo-proxy/{$encodedUrl}"
+                ? rtrim($proxyUrlOverride, '/')."/logo-proxy/{$encodedUrl}"
                 : url("/logo-proxy/{$encodedUrl}");
         }
 
@@ -273,6 +273,6 @@ class LogoProxyController extends Controller
             $i++;
         }
 
-        return round($bytes, 2) . ' ' . $units[$i];
+        return round($bytes, 2).' '.$units[$i];
     }
 }

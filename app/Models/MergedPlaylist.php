@@ -9,7 +9,6 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
-use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
 
@@ -34,7 +33,7 @@ class MergedPlaylist extends Model
         'include_vod_in_m3u' => 'boolean',
         'custom_headers' => 'array',
         'strict_live_ts' => 'boolean',
-        'id_channel_by' => PlaylistChannelId::class
+        'id_channel_by' => PlaylistChannelId::class,
     ];
 
     public function user(): BelongsTo

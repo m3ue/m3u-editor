@@ -38,7 +38,7 @@ return new class extends Migration
             }
             $inserts = collect($inserts)
                 ->unique(function ($item) {
-                    return $item['name'] . $item['playlist_id'];
+                    return $item['name'].$item['playlist_id'];
                 })->toArray();
             SourceGroup::upsert($inserts, uniqueBy: ['name', 'playlist_id'], update: []);
         });

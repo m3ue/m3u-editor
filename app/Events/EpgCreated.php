@@ -13,8 +13,6 @@ class EpgCreated
 
     /**
      * Create a new event instance.
-     * 
-     * @param Epg $epg
      */
     public function __construct(
         public Epg $epg
