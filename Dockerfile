@@ -44,10 +44,14 @@ WORKDIR /app
 # Set production environment for optimized builds
 ENV NODE_ENV=production
 
+# Cache bust argument - change this value to force npm ci layer rebuild
+ARG NPM_CACHE_BUST=2026-01-09-v3
+
 # Copy package files first for better layer caching
 COPY package.json package-lock.json ./
 # Install all dependencies including dev deps (Vite is needed for build)
-RUN npm ci --silent
+# Note: Do NOT use --omit=dev as Vite is a devDependency required for build
+RUN echo "Cache bust: ${NPM_CACHE_BUST}" && npm ci --silent
 
 # Copy only files needed for the build
 COPY vite.config.js postcss.config.js ./
