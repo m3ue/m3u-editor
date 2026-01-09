@@ -157,6 +157,7 @@ jobs:
         run: |
           cp .env.example .env || echo "APP_KEY=" > .env
           php artisan key:generate
+          touch database/jobs.sqlite
           php artisan migrate --force
 
       - name: Run Pest tests
