@@ -268,7 +268,9 @@ class SeriesResource extends Resource
         return [
             ActionGroup::make([
                 EditAction::make()
-                    ->slideOver(),
+                    ->slideOver()
+                    // Refresh table after edit to remove records that no longer match active filters
+                    ->after(fn ($livewire) => $livewire->dispatch('$refresh')),
                 Action::make('move')
                     ->label('Move Series to Category')
                     ->schema([

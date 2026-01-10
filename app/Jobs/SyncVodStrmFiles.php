@@ -288,7 +288,11 @@ class SyncVodStrmFiles implements ShouldQueue
                 // Generate movie NFO file if enabled (pass mapping for hash optimization)
                 if ($nfoService) {
                     $channelMapping = $mappingCache[$channel->id] ?? null;
-                    $nfoService->generateMovieNfo($channel, $filePath, $channelMapping);
+                    $nfoOptions = [
+                        'name_filter_enabled' => $nameFilterEnabled,
+                        'name_filter_patterns' => $nameFilterPatterns,
+                    ];
+                    $nfoService->generateMovieNfo($channel, $filePath, $channelMapping, $nfoOptions);
                 }
             }
 

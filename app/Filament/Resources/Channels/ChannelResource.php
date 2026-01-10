@@ -399,7 +399,9 @@ class ChannelResource extends Resource
                         Grid::make()
                             ->schema(self::getForm(edit: true))
                             ->columns(2),
-                    ]),
+                    ])
+                    // Refresh table after edit to remove records that no longer match active filters
+                    ->after(fn ($livewire) => $livewire->dispatch('$refresh')),
                 DeleteAction::make()->hidden(fn (Model $record) => ! $record->is_custom),
             ])->button()->hiddenLabel()->size('sm')->hidden(fn (Model $record) => ! $record->is_custom),
             EditAction::make('edit')
@@ -409,6 +411,8 @@ class ChannelResource extends Resource
                         ->schema(self::getForm(edit: true))
                         ->columns(2),
                 ])
+                // Refresh table after edit to remove records that no longer match active filters
+                ->after(fn ($livewire) => $livewire->dispatch('$refresh'))
                 ->button()
                 ->hiddenLabel()
                 ->disabled(fn (Model $record) => $record->is_custom)
