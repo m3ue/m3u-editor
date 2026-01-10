@@ -466,7 +466,8 @@ class SyncSeriesStrmFiles implements ShouldQueue
                 $nfoService = app(NfoService::class);
                 // Generate tvshow.nfo for the series if NFO generation is enabled
                 // This should be at the series folder level (or base path if no series folder)
-                $nfoService->generateSeriesNfo($series, $seriesFolderPath);
+                // Pass name filter settings for consistent title filtering
+                $nfoService->generateSeriesNfo($series, $seriesFolderPath, null, $nameFilterEnabled, $nameFilterPatterns);
             }
 
             // Cache frequently accessed values to avoid repeated property lookups in the episode loop
@@ -551,9 +552,10 @@ class SyncSeriesStrmFiles implements ShouldQueue
                 );
 
                 // Generate episode NFO file if enabled (pass mapping for hash optimization)
+                // Pass name filter settings for consistent title filtering
                 if ($nfoService) {
                     $episodeMapping = $mappingCache[$ep->id] ?? null;
-                    $nfoService->generateEpisodeNfo($ep, $series, $filePath, $episodeMapping);
+                    $nfoService->generateEpisodeNfo($ep, $series, $filePath, $episodeMapping, $nameFilterEnabled, $nameFilterPatterns);
                 }
             }
 

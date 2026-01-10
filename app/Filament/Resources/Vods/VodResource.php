@@ -501,7 +501,9 @@ class VodResource extends Resource
                         Grid::make()
                             ->schema(self::getForm(edit: true))
                             ->columns(2),
-                    ]),
+                    ])
+                    // Refresh table after edit to remove records that no longer match active filters
+                    ->after(fn ($livewire) => $livewire->dispatch('$refresh')),
                 Action::make('process_vod')
                     ->label('Fetch Metadata')
                     ->icon('heroicon-o-arrow-down-tray')

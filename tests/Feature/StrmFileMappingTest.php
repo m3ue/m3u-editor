@@ -292,3 +292,162 @@ describe('StrmFileMapping findForSyncable', function () {
         expect($found)->toBeNull();
     });
 });
+describe('StrmFileMapping directory rename optimization', function () {
+    it('renames entire directory when only folder name changes', function () {
+        $channel = Channel::factory()->create(['user_id' => $this->user->id]);
+        $oldDir = $this->testDir.'/Movies/Old Series Name';
+        $newDir = $this->testDir.'/Movies/New Series Name';
+        $filename = 'episode.strm';
+        $nfoFilename = 'episode.nfo';
+        $oldPath = $oldDir.'/'.$filename;
+        $newPath = $newDir.'/'.$filename;
+        $url = 'http://example.com/stream.ts';
+
+        // Create initial file and NFO companion
+        $mapping = StrmFileMapping::syncFile($channel, $this->testDir, $oldPath, $url);
+        file_put_contents($oldDir.'/'.$nfoFilename, 'NFO content');
+        expect(file_exists($oldPath))->toBeTrue();
+        expect(file_exists($oldDir.'/'.$nfoFilename))->toBeTrue();
+
+        // Rename by syncing with new path (only directory changed)
+        $mapping = StrmFileMapping::syncFile($channel, $this->testDir, $newPath, $url);
+
+        // Old directory should be renamed to new directory
+        expect(is_dir($newDir))->toBeTrue();
+        expect(is_dir($oldDir))->toBeFalse();
+        expect(file_exists($newPath))->toBeTrue();
+        expect(file_exists($oldPath))->toBeFalse();
+        // NFO file should also be moved with the directory
+        expect(file_exists($newDir.'/'.$nfoFilename))->toBeTrue();
+    });
+
+    it('moves individual file when filename changes', function () {
+        $channel = Channel::factory()->create(['user_id' => $this->user->id]);
+        $dir = $this->testDir.'/Movies/Series Name';
+        $oldFilename = 'old-episode.strm';
+        $newFilename = 'new-episode.strm';
+        $oldPath = $dir.'/'.$oldFilename;
+        $newPath = $dir.'/'.$newFilename;
+        $url = 'http://example.com/stream.ts';
+
+        // Create initial file with NFO companion
+        $mapping = StrmFileMapping::syncFile($channel, $this->testDir, $oldPath, $url);
+        file_put_contents($dir.'/old-episode.nfo', 'NFO content');
+        expect(file_exists($oldPath))->toBeTrue();
+
+        // Rename file (filename changed, directory same)
+        $mapping = StrmFileMapping::syncFile($channel, $this->testDir, $newPath, $url);
+
+        // Should move individual file, not rename directory
+        expect(file_exists($newPath))->toBeTrue();
+        expect(file_exists($oldPath))->toBeFalse();
+        // NFO companion should also be moved
+        expect(file_exists($dir.'/new-episode.nfo'))->toBeTrue();
+        expect(file_exists($dir.'/old-episode.nfo'))->toBeFalse();
+    });
+
+    it('moves NFO companion file during rename', function () {
+        $channel = Channel::factory()->create(['user_id' => $this->user->id]);
+        $oldPath = $this->testDir.'/Movies/Old Movie.strm';
+        $newPath = $this->testDir.'/Movies/New Movie.strm';
+        $oldNfoPath = $this->testDir.'/Movies/Old Movie.nfo';
+        $newNfoPath = $this->testDir.'/Movies/New Movie.nfo';
+        $url = 'http://example.com/stream.ts';
+
+        // Create initial STRM and NFO files
+        $mapping = StrmFileMapping::syncFile($channel, $this->testDir, $oldPath, $url);
+        file_put_contents($oldNfoPath, 'NFO content');
+        expect(file_exists($oldPath))->toBeTrue();
+        expect(file_exists($oldNfoPath))->toBeTrue();
+
+        // Rename STRM file
+        $mapping = StrmFileMapping::syncFile($channel, $this->testDir, $newPath, $url);
+
+        // Both STRM and NFO should be renamed
+        expect(file_exists($newPath))->toBeTrue();
+        expect(file_exists($newNfoPath))->toBeTrue();
+        expect(file_exists($oldPath))->toBeFalse();
+        expect(file_exists($oldNfoPath))->toBeFalse();
+    });
+});
+
+describe('StrmFileMapping NFO cleanup', function () {
+    it('deletes NFO file when cleaning up orphaned STRM', function () {
+        $channel = Channel::factory()->create([
+            'user_id' => $this->user->id,
+            'enabled' => false,
+        ]);
+        $path = $this->testDir.'/disabled.strm';
+        $nfoPath = $this->testDir.'/disabled.nfo';
+        $url = 'http://example.com/stream.ts';
+
+        StrmFileMapping::syncFile($channel, $this->testDir, $path, $url);
+        file_put_contents($nfoPath, 'NFO content');
+        expect(file_exists($path))->toBeTrue();
+        expect(file_exists($nfoPath))->toBeTrue();
+
+        // Clean up orphaned (disabled channel)
+        $count = StrmFileMapping::cleanupOrphaned(Channel::class, $this->testDir);
+
+        // Both STRM and NFO should be deleted
+        expect($count)->toBe(1);
+        expect(file_exists($path))->toBeFalse();
+        expect(file_exists($nfoPath))->toBeFalse();
+    });
+
+    it('removes orphaned tvshow.nfo in empty series directories', function () {
+        $seriesDir = $this->testDir.'/Series/Show Name';
+        @mkdir($seriesDir, 0755, true);
+        $tvshowNfo = $seriesDir.'/'.StrmFileMapping::TVSHOW_NFO_FILENAME;
+        file_put_contents($tvshowNfo, 'TVShow NFO content');
+
+        expect(file_exists($tvshowNfo))->toBeTrue();
+
+        // Trigger directory cleanup (this would normally be called after orphaned STRM cleanup)
+        StrmFileMapping::cleanupEmptyDirectoriesInLocation($this->testDir);
+
+        // Directory with only tvshow.nfo should be removed
+        expect(file_exists($tvshowNfo))->toBeFalse();
+        expect(is_dir($seriesDir))->toBeFalse();
+    });
+});
+
+describe('StrmFileMapping helper methods', function () {
+    it('converts STRM path to NFO path correctly', function () {
+        $strmPath = '/path/to/movie.strm';
+        $expectedNfoPath = '/path/to/movie.nfo';
+
+        $reflection = new \ReflectionClass(StrmFileMapping::class);
+        $method = $reflection->getMethod('strmPathToNfoPath');
+        $method->setAccessible(true);
+
+        $nfoPath = $method->invokeArgs(null, [$strmPath]);
+
+        expect($nfoPath)->toBe($expectedNfoPath);
+    });
+
+    it('handles case-insensitive STRM extension conversion', function () {
+        $strmPath = '/path/to/MOVIE.STRM';
+        $expectedNfoPath = '/path/to/MOVIE.nfo';
+
+        $reflection = new \ReflectionClass(StrmFileMapping::class);
+        $method = $reflection->getMethod('strmPathToNfoPath');
+        $method->setAccessible(true);
+
+        $nfoPath = $method->invokeArgs(null, [$strmPath]);
+
+        expect($nfoPath)->toBe($expectedNfoPath);
+    });
+
+    it('does not convert non-STRM paths', function () {
+        $nonStrmPath = '/path/to/video.mp4';
+
+        $reflection = new \ReflectionClass(StrmFileMapping::class);
+        $method = $reflection->getMethod('strmPathToNfoPath');
+        $method->setAccessible(true);
+
+        $result = $method->invokeArgs(null, [$nonStrmPath]);
+
+        expect($result)->toBe($nonStrmPath);
+    });
+});
