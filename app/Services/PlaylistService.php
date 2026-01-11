@@ -539,12 +539,12 @@ class PlaylistService
         if ($authMethod === 'playlist_auth' && $authRecord instanceof \App\Models\PlaylistAuth) {
             return $authRecord->expires_at ? $authRecord->expires_at->timestamp : 0;
         }
-    
+
         // Alias login
         if ($authMethod === 'alias_auth' && $authRecord instanceof \App\Models\PlaylistAlias) {
             return $authRecord->expires_at ? $authRecord->expires_at->timestamp : 0;
         }
-    
+
         // Legacy (owner_auth)
         if ($authMethod === 'owner_auth' && $username && $password) {
             // Optional legacy-expiration override: a PlaylistAuth matching legacy creds
@@ -552,15 +552,15 @@ class PlaylistService
                 ->where('password', $password)
                 ->where('enabled', true)
                 ->first();
-    
+
             if ($legacyOverride) {
                 return $legacyOverride->expires_at ? $legacyOverride->expires_at->timestamp : 0;
             }
-    
+
             // No override => treat as "never expires" (0)
             return 0;
         }
-    
+
         // Default fallback
         return 0;
     }
