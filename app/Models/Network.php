@@ -106,4 +106,12 @@ class Network extends Model
     {
         return route('network.epg', ['network' => $this->uuid]);
     }
+
+    /**
+     * Get the stream URL for this network.
+     */
+    public function getStreamUrlAttribute(): string
+    {
+        return route('network.stream', ['network' => $this->uuid, 'container' => 'ts']);
+    }
 }

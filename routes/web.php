@@ -4,6 +4,7 @@ use App\Http\Controllers\EpgFileController;
 use App\Http\Controllers\EpgGenerateController;
 use App\Http\Controllers\LogoProxyController;
 use App\Http\Controllers\NetworkEpgController;
+use App\Http\Controllers\NetworkStreamController;
 use App\Http\Controllers\PlaylistGenerateController;
 use App\Http\Controllers\XtreamApiController;
 use App\Services\ExternalIpService;
@@ -91,6 +92,13 @@ Route::get('/network/{network}/epg.xml', [NetworkEpgController::class, 'show'])
     ->name('network.epg');
 Route::get('/network/{network}/epg.xml.gz', [NetworkEpgController::class, 'compressed'])
     ->name('network.epg.compressed');
+
+// Network stream routes
+Route::get('/network/{network}/stream.{container}', [NetworkStreamController::class, 'stream'])
+    ->name('network.stream')
+    ->where('container', 'ts|mp4|mkv|avi|webm|mov');
+Route::get('/network/{network}/now-playing', [NetworkStreamController::class, 'nowPlaying'])
+    ->name('network.now-playing');
 
 /*
  * DEBUG routes

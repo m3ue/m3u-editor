@@ -162,6 +162,28 @@ class NetworkResource extends Resource
                             }),
                     ])
                     ->visibleOn('edit'),
+
+                Section::make('Stream Output')
+                    ->description('Live stream URL for IPTV players')
+                    ->schema([
+                        TextInput::make('stream_url')
+                            ->label('Stream URL')
+                            ->disabled()
+                            ->dehydrated(false)
+                            ->formatStateUsing(fn ($record) => $record?->stream_url ?? 'Save network first')
+                            ->suffixAction(
+                                \Filament\Forms\Components\Actions\Action::make('copy_stream')
+                                    ->icon('heroicon-o-clipboard')
+                                    ->action(function ($state, $livewire) {
+                                        $livewire->js("navigator.clipboard.writeText('{$state}')");
+                                        Notification::make()
+                                            ->success()
+                                            ->title('Copied to clipboard')
+                                            ->send();
+                                    })
+                            ),
+                    ])
+                    ->visibleOn('edit'),
             ]);
     }
 
