@@ -109,6 +109,13 @@ Route::get('/networks/{user}/playlist.m3u', NetworkPlaylistController::class)
 Route::get('/networks/{user}/epg.xml', [NetworkPlaylistController::class, 'epg'])
     ->name('networks.epg');
 
+// Network HLS broadcast routes (for continuous live broadcasting)
+Route::get('/network/{network}/live.m3u8', [\App\Http\Controllers\NetworkHlsController::class, 'playlist'])
+    ->name('network.hls.playlist');
+Route::get('/network/{network}/{segment}.ts', [\App\Http\Controllers\NetworkHlsController::class, 'segment'])
+    ->name('network.hls.segment')
+    ->where('segment', 'live[0-9]+');
+
 /*
  * DEBUG routes
  */

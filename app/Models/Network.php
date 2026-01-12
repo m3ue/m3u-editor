@@ -25,6 +25,15 @@ class Network extends Model
         'user_id' => 'integer',
         'media_server_integration_id' => 'integer',
         'schedule_generated_at' => 'datetime',
+        // Broadcast settings
+        'broadcast_enabled' => 'boolean',
+        'segment_duration' => 'integer',
+        'hls_list_size' => 'integer',
+        'transcode_on_server' => 'boolean',
+        'video_bitrate' => 'integer',
+        'audio_bitrate' => 'integer',
+        'broadcast_started_at' => 'datetime',
+        'broadcast_pid' => 'integer',
     ];
 
     /**
@@ -125,9 +134,86 @@ class Network extends Model
 
     /**
      * Get the stream URL for this network.
+     * Returns HLS playlist URL if broadcasting, otherwise legacy stream endpoint.
      */
     public function getStreamUrlAttribute(): string
     {
+        if ($this->broadcast_enabled && $this->isBroadcasting()) {
+            return route('network.hls.playlist', ['network' => $this->uuid]);
+        }
+
         return route('network.stream', ['network' => $this->uuid, 'container' => 'ts']);
+    }
+
+    /**
+     * Get the HLS playlist URL for this network.
+     */
+    public function getHlsUrlAttribute(): string
+    {
+        return route('network.hls.playlist', ['network' => $this->uuid]);
+    }
+
+    /**
+     * Check if this network is currently broadcasting.
+     */
+    public function isBroadcasting(): bool
+    {
+        return $this->broadcast_started_at !== null && $this->broadcast_pid !== null;
+    }
+
+    /**
+     * Get the storage path for HLS segments.
+     */
+    public function getHlsStoragePath(): string
+    {
+        return storage_path("app/networks/{$this->uuid}");
+    }
+
+    /**
+     * Get the current programme that should be playing now.
+     */
+    public function getCurrentProgramme(): ?NetworkProgramme
+    {
+        return $this->programmes()
+            ->where('start_time', '<=', now())
+            ->where('end_time', '>', now())
+            ->first();
+    }
+
+    /**
+     * Get the next programme after the current one.
+     */
+    public function getNextProgramme(): ?NetworkProgramme
+    {
+        return $this->programmes()
+            ->where('start_time', '>', now())
+            ->orderBy('start_time')
+            ->first();
+    }
+
+    /**
+     * Calculate the seek position into the current programme.
+     */
+    public function getCurrentSeekPosition(): int
+    {
+        $current = $this->getCurrentProgramme();
+        if (! $current) {
+            return 0;
+        }
+
+        return now()->diffInSeconds($current->start_time);
+    }
+
+    /**
+     * Get the remaining duration of the current programme in seconds.
+     */
+    public function getCurrentRemainingDuration(): int
+    {
+        $current = $this->getCurrentProgramme();
+        if (! $current) {
+            return 0;
+        }
+
+        return $current->end_time->diffInSeconds(now());
     }
 }

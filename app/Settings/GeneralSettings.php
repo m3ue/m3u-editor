@@ -177,6 +177,9 @@ class GeneralSettings extends Settings
 
     public ?int $tmdb_confidence_threshold = 80;
 
+    // Network broadcast settings
+    public ?int $broadcast_max_concurrent = 10;
+
     public static function group(): string
     {
         return 'general';
