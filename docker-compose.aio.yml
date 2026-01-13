@@ -29,6 +29,7 @@ services:
       - REDIS_ENABLED=true # Enable embedded Redis
       - REDIS_SERVER_PORT=${REDIS_PORT:-63790}
       - REDIS_HOST=${REDIS_HOST:-localhost}
+      - REDIS_PASSWORD=${M3U_PROXY_TOKEN:-changeme} # Must match what start-container sets
       
       # M3U Proxy Configuration (External)
       - M3U_PROXY_ENABLED=true # Use embedded m3u-proxy instance

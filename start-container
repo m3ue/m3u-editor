@@ -25,6 +25,11 @@ export PG_USER="${PG_USER:-root}"
 export PG_PASSWORD="${PG_PASSWORD:-root}"
 export PG_PORT="${PG_PORT:-5432}" # Default 5432
 
+# Network Broadcast Worker
+# Enables continuous broadcasting for Networks (pseudo-TV channels)
+# When enabled, supervisor runs `php artisan network:broadcast` continuously
+export NETWORK_BROADCAST_ENABLED="${NETWORK_BROADCAST_ENABLED:-false}"
+
 # M3U Proxy configuration
 # If M3U_PROXY_ENABLED=true, enable embedded proxy
 # If M3U_PROXY_ENABLED=false/unset, disable embedded proxy
