@@ -296,7 +296,16 @@ class AppServiceProvider extends ServiceProvider
         try {
             // Process playlist on creation
             Playlist::created(fn (Playlist $playlist) => event(new PlaylistCreated($playlist)));
-            Playlist::updated(fn (Playlist $playlist) => event(new PlaylistUpdated($playlist)));
+            Playlist::updated(function (Playlist $playlist) {
+                // Check if any of the EPG related fields were changed and perform EPG cache busting
+                $fields = ['auto_channel_increment', 'channel_start', 'dummy_epg', 'dummy_epg_category', 'dummy_epg_length', 'id_channel_by'];
+                if ($playlist->isDirty($fields)) {
+                    EpgCacheService::clearPlaylistEpgCacheFile($playlist);
+                }
+
+                // Fire the updated event
+                event(new PlaylistUpdated($playlist));
+            });
             Playlist::creating(function (Playlist $playlist) {
                 if (! $playlist->user_id) {
                     $playlist->user_id = auth()->id();
