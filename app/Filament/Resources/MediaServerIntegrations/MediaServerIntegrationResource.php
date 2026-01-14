@@ -299,6 +299,14 @@ class MediaServerIntegrationResource extends Resource
                         ->modalHeading('Sync Media Server')
                         ->modalDescription('This will sync all content from the media server. For large libraries, this may take several minutes.')
                         ->action(function (MediaServerIntegration $record) {
+                            // Update status to processing
+                            $record->update([
+                                'status' => 'processing',
+                                'progress' => 0,
+                                'movie_progress' => 0,
+                                'series_progress' => 0,
+                            ]);
+
                             app('Illuminate\Contracts\Bus\Dispatcher')
                                 ->dispatch(new SyncMediaServer($record->id));
 
