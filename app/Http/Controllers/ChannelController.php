@@ -889,4 +889,348 @@ class ChannelController extends Controller
             ],
         ]);
     }
+
+    /**
+     * Check channel availability
+     *
+     * Performs a lightweight HTTP HEAD request to check if the stream URL is reachable.
+     * Does NOT open the stream or consume connection slots.
+     *
+     * @response 200 {
+     *   "success": true,
+     *   "data": {
+     *     "channel_id": 1,
+     *     "title": "ESPN HD",
+     *     "url": "https://example.com/stream.m3u8",
+     *     "available": true,
+     *     "status": "online",
+     *     "response_time_ms": 245,
+     *     "http_status": 200
+     *   }
+     * }
+     * @response 404 {
+     *   "success": false,
+     *   "message": "Channel not found"
+     * }
+     */
+    public function checkAvailability(Request $request, int $id): JsonResponse
+    {
+        $user = $request->user();
+        $channel = Channel::find($id);
+
+        if (! $channel) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Channel not found',
+            ], 404);
+        }
+
+        if ($channel->user_id !== $user->id) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You do not have permission to access this channel',
+            ], 403);
+        }
+
+        $url = $channel->url_custom ?? $channel->url;
+        $startTime = microtime(true);
+
+        try {
+            $response = \Illuminate\Support\Facades\Http::timeout(5)
+                ->withHeaders([
+                    'User-Agent' => 'Mozilla/5.0 (m3u-editor availability check)',
+                ])
+                ->head($url);
+
+            $responseTime = round((microtime(true) - $startTime) * 1000);
+            $httpStatus = $response->status();
+
+            $available = $httpStatus >= 200 && $httpStatus < 400;
+            $status = $available ? 'online' : 'offline';
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'channel_id' => $channel->id,
+                    'title' => $channel->title_custom ?? $channel->title,
+                    'url' => $url,
+                    'available' => $available,
+                    'status' => $status,
+                    'response_time_ms' => $responseTime,
+                    'http_status' => $httpStatus,
+                ],
+            ]);
+        } catch (\Exception $e) {
+            $responseTime = round((microtime(true) - $startTime) * 1000);
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'channel_id' => $channel->id,
+                    'title' => $channel->title_custom ?? $channel->title,
+                    'url' => $url,
+                    'available' => false,
+                    'status' => 'offline',
+                    'response_time_ms' => $responseTime,
+                    'error' => $e->getMessage(),
+                ],
+            ]);
+        }
+    }
+
+    /**
+     * Batch check channel availability
+     *
+     * Checks multiple channels at once with HTTP HEAD requests.
+     * Does NOT open streams or consume connection slots.
+     *
+     * @bodyParam channel_ids array required Array of channel IDs to check. Example: [1, 2, 3]
+     *
+     * @response 200 {
+     *   "success": true,
+     *   "data": {
+     *     "total_checked": 3,
+     *     "online": 2,
+     *     "offline": 1,
+     *     "channels": [
+     *       {
+     *         "channel_id": 1,
+     *         "title": "ESPN HD",
+     *         "available": true,
+     *         "status": "online",
+     *         "response_time_ms": 245
+     *       }
+     *     ]
+     *   }
+     * }
+     */
+    public function batchCheckAvailability(Request $request): JsonResponse
+    {
+        $user = $request->user();
+
+        $validated = $request->validate([
+            'channel_ids' => 'required|array|min:1|max:50',
+            'channel_ids.*' => 'integer|exists:channels,id',
+        ]);
+
+        $channelIds = $validated['channel_ids'];
+        $channels = Channel::whereIn('id', $channelIds)
+            ->where('user_id', $user->id)
+            ->get();
+
+        $results = [];
+        $onlineCount = 0;
+        $offlineCount = 0;
+
+        foreach ($channels as $channel) {
+            $url = $channel->url_custom ?? $channel->url;
+            $startTime = microtime(true);
+
+            try {
+                $response = \Illuminate\Support\Facades\Http::timeout(5)
+                    ->withHeaders([
+                        'User-Agent' => 'Mozilla/5.0 (m3u-editor availability check)',
+                    ])
+                    ->head($url);
+
+                $responseTime = round((microtime(true) - $startTime) * 1000);
+                $httpStatus = $response->status();
+                $available = $httpStatus >= 200 && $httpStatus < 400;
+
+                if ($available) {
+                    $onlineCount++;
+                } else {
+                    $offlineCount++;
+                }
+
+                $results[] = [
+                    'channel_id' => $channel->id,
+                    'title' => $channel->title_custom ?? $channel->title,
+                    'url' => $url,
+                    'available' => $available,
+                    'status' => $available ? 'online' : 'offline',
+                    'response_time_ms' => $responseTime,
+                    'http_status' => $httpStatus,
+                ];
+            } catch (\Exception $e) {
+                $responseTime = round((microtime(true) - $startTime) * 1000);
+                $offlineCount++;
+
+                $results[] = [
+                    'channel_id' => $channel->id,
+                    'title' => $channel->title_custom ?? $channel->title,
+                    'url' => $url,
+                    'available' => false,
+                    'status' => 'offline',
+                    'response_time_ms' => $responseTime,
+                    'error' => $e->getMessage(),
+                ];
+            }
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'total_checked' => count($results),
+                'online' => $onlineCount,
+                'offline' => $offlineCount,
+                'channels' => $results,
+            ],
+        ]);
+    }
+
+    /**
+     * Test channel stability over time
+     *
+     * Opens the stream and uses FFprobe to count frames over multiple intervals.
+     * This test DOES consume a connection slot while running.
+     *
+     * @bodyParam duration integer Seconds to check per interval. Default: 5. Example: 5
+     * @bodyParam checks integer Number of checks to perform. Default: 3. Example: 3
+     * @bodyParam pause_between integer Pause in seconds between checks. Default: 1. Example: 1
+     *
+     * @response 200 {
+     *   "success": true,
+     *   "data": {
+     *     "channel_id": 1,
+     *     "title": "ESPN HD",
+     *     "url": "https://example.com/stream.m3u8",
+     *     "live": true,
+     *     "stable": true,
+     *     "quality": "✅ Online",
+     *     "connect_time_ms": 245,
+     *     "checks_passed": 3,
+     *     "checks_failed": 0,
+     *     "frame_counts": [125, 123, 126],
+     *     "avg_frames_per_check": 124.6,
+     *     "total_test_duration_ms": 18500
+     *   }
+     * }
+     */
+    public function stabilityTest(Request $request, int $id): JsonResponse
+    {
+        $user = $request->user();
+        $channel = Channel::find($id);
+
+        if (! $channel) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Channel not found',
+            ], 404);
+        }
+
+        if ($channel->user_id !== $user->id) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You do not have permission to access this channel',
+            ], 403);
+        }
+
+        $validated = $request->validate([
+            'duration' => 'sometimes|integer|min:1|max:30',
+            'checks' => 'sometimes|integer|min:1|max:10',
+            'pause_between' => 'sometimes|integer|min:0|max:10',
+        ]);
+
+        $duration = $validated['duration'] ?? 5;
+        $numChecks = $validated['checks'] ?? 3;
+        $pauseBetween = $validated['pause_between'] ?? 1;
+
+        $url = $channel->url_custom ?? $channel->url;
+
+        // Measure connect time
+        $connectStart = microtime(true);
+        try {
+            $connectResponse = \Illuminate\Support\Facades\Http::timeout(5)
+                ->withHeaders(['User-Agent' => 'Mozilla/5.0 (m3u-editor stability test)'])
+                ->head($url);
+            $connectTime = round((microtime(true) - $connectStart) * 1000);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'channel_id' => $channel->id,
+                    'title' => $channel->title_custom ?? $channel->title,
+                    'url' => $url,
+                    'live' => false,
+                    'reason' => 'connection_failed',
+                    'error' => $e->getMessage(),
+                ],
+            ]);
+        }
+
+        $testStart = microtime(true);
+        $frameCounts = [];
+        $stableChecks = 0;
+        $failedChecks = 0;
+
+        for ($i = 0; $i < $numChecks; $i++) {
+            try {
+                $command = sprintf(
+                    'ffprobe -v error -rw_timeout 5000000 -user_agent "%s" -read_intervals %%+%d -select_streams v:0 -count_frames -show_entries stream=nb_read_frames -of default=nw=1:nk=1 "%s" 2>&1',
+                    'Mozilla/5.0 (m3u-editor stability test)',
+                    $duration,
+                    $url
+                );
+
+                $process = \Symfony\Component\Process\Process::fromShellCommandline($command);
+                $process->setTimeout($duration + 10);
+                $process->run();
+
+                $output = trim($process->getOutput());
+                $lines = explode("\n", $output);
+                $frameCount = null;
+
+                foreach ($lines as $line) {
+                    $line = trim($line);
+                    if (preg_match('/^[0-9]+$/', $line)) {
+                        $frameCount = (int) $line;
+                        break;
+                    }
+                }
+
+                if ($frameCount !== null && $frameCount > 0) {
+                    $frameCounts[] = $frameCount;
+                    $stableChecks++;
+                } else {
+                    $failedChecks++;
+                }
+            } catch (\Exception $e) {
+                $failedChecks++;
+            }
+
+            if ($i < $numChecks - 1) {
+                sleep($pauseBetween);
+            }
+        }
+
+        $totalDuration = round((microtime(true) - $testStart) * 1000);
+        $avgFrames = count($frameCounts) > 0 ? round(array_sum($frameCounts) / count($frameCounts), 1) : 0;
+
+        $live = $stableChecks > 0;
+        $stable = $failedChecks === 0;
+        $quality = '❌ Offline';
+
+        if ($live) {
+            $quality = $stable ? '✅ Online' : '⚠️ Instabil';
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'channel_id' => $channel->id,
+                'title' => $channel->title_custom ?? $channel->title,
+                'url' => $url,
+                'live' => $live,
+                'stable' => $stable,
+                'quality' => $quality,
+                'connect_time_ms' => $connectTime,
+                'checks_passed' => $stableChecks,
+                'checks_failed' => $failedChecks,
+                'frame_counts' => $frameCounts,
+                'avg_frames_per_check' => $avgFrames,
+                'total_test_duration_ms' => $totalDuration,
+            ],
+        ]);
+    }
 }

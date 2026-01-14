@@ -152,6 +152,14 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         ->name('api.channels.healthcheck');
     Route::get('channel/playlist/{uuid}/health/{search}', [\App\Http\Controllers\ChannelController::class, 'healthcheckByPlaylist'])
         ->name('api.channels.healthcheck.search');
+    Route::get('channel/{id}/availability', [\App\Http\Controllers\ChannelController::class, 'checkAvailability'])
+        ->where('id', '[0-9]+')
+        ->name('api.channels.availability');
+    Route::post('channel/check-availability', [\App\Http\Controllers\ChannelController::class, 'batchCheckAvailability'])
+        ->name('api.channels.batch-availability');
+    Route::post('channel/{id}/stability-test', [\App\Http\Controllers\ChannelController::class, 'stabilityTest'])
+        ->where('id', '[0-9]+')
+        ->name('api.channels.stability-test');
 
     // Group API routes
     Route::get('groups/get', [\App\Http\Controllers\GroupController::class, 'index'])
