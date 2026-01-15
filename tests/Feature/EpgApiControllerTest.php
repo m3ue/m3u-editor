@@ -117,6 +117,7 @@ class EpgApiControllerTest extends TestCase
         $response->assertSuccessful();
 
         $data = $response->json();
+        $channel->refresh(); // Refresh to get latest data
         $channelId = $channel->channel ?? $channel->id;
         $programmes = $data['programmes'][$channelId] ?? [];
 
@@ -151,6 +152,7 @@ class EpgApiControllerTest extends TestCase
         $response->assertSuccessful();
 
         $data = $response->json();
+        $channel->refresh(); // Refresh to get latest data
         $channelId = $channel->channel ?? $channel->id;
 
         // Programmes should be empty or not include the channel without EPG
@@ -181,6 +183,7 @@ class EpgApiControllerTest extends TestCase
         $response->assertSuccessful();
 
         $data = $response->json();
+        $channel->refresh(); // Refresh to get latest data
         $channelId = $channel->channel ?? $channel->id;
         $programmes = $data['programmes'][$channelId] ?? [];
 
@@ -248,6 +251,7 @@ class EpgApiControllerTest extends TestCase
         $this->assertCount(2, $data['channels']);
 
         // Channel without EPG should have dummy programmes
+        $channelWithoutEpg->refresh(); // Refresh to get latest data
         $channelId = $channelWithoutEpg->channel ?? $channelWithoutEpg->id;
         $this->assertArrayHasKey($channelId, $data['programmes']);
         $this->assertNotEmpty($data['programmes'][$channelId]);
@@ -296,6 +300,7 @@ class EpgApiControllerTest extends TestCase
         $response->assertSuccessful();
 
         $data = $response->json();
+        $channel->refresh(); // Refresh to get latest data
         $channelId = $channel->channel ?? $channel->id;
         $programmes = $data['programmes'][$channelId] ?? [];
 
