@@ -204,6 +204,9 @@ class XtreamStreamController extends Controller
         if ($channel instanceof Channel) {
             if ($playlist->enable_proxy) {
                 // Timeshift handled in proxy controller (if needed)
+                // Add username to request for proxy traceability
+                $request->merge(['username' => $username]);
+
                 return app()->call('App\\Http\\Controllers\\Api\\M3uProxyApiController@channel', [
                     'id' => $streamId,
                     'uuid' => $playlist->uuid,
@@ -240,6 +243,9 @@ class XtreamStreamController extends Controller
         [$playlist, $channel] = $this->findAuthenticatedPlaylistAndStreamModel($username, $password, $streamId, 'vod');
         if ($channel instanceof Channel) {
             if ($playlist->enable_proxy) {
+                // Add username to request for proxy traceability
+                $request->merge(['username' => $username]);
+
                 return app()->call('App\\Http\\Controllers\\Api\\M3uProxyApiController@channel', [
                     'id' => $streamId,
                     'uuid' => $playlist->uuid,
@@ -261,6 +267,9 @@ class XtreamStreamController extends Controller
         [$playlist, $episode] = $this->findAuthenticatedPlaylistAndStreamModel($username, $password, $streamId, 'episode');
         if ($episode instanceof Episode) {
             if ($playlist->enable_proxy) {
+                // Add username to request for proxy traceability
+                $request->merge(['username' => $username]);
+
                 return app()->call('App\\Http\\Controllers\\Api\\M3uProxyApiController@episode', [
                     'id' => $streamId,
                     'uuid' => $playlist->uuid,
@@ -313,9 +322,11 @@ class XtreamStreamController extends Controller
 
         // Parse the date parameter and add timeshift parameters to the request
         // Date format from Xtream API: YYYY-MM-DD:HH-MM-SS
+        // Also add username for proxy traceability
         $request->merge([
             'timeshift_duration' => $duration,
             'timeshift_date' => $date,
+            'username' => $username,
         ]);
 
         if ($playlist->enable_proxy) {

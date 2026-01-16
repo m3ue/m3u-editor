@@ -11,8 +11,9 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::table('playlists', function (Blueprint $table) {
-            $table->dropColumn('emby_config');
+        Schema::table('playlist_profiles', function (Blueprint $table) {
+            // Add URL field after password - allows different providers per profile
+            $table->string('url')->nullable()->after('password');
         });
     }
 
@@ -21,8 +22,8 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::table('playlists', function (Blueprint $table) {
-            $table->jsonb('emby_config')->nullable()->after('source_type');
+        Schema::table('playlist_profiles', function (Blueprint $table) {
+            $table->dropColumn('url');
         });
     }
 };

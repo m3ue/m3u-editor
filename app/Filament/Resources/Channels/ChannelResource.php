@@ -9,7 +9,6 @@ use App\Filament\Resources\Channels\Pages\ListChannels;
 use App\Filament\Resources\EpgMaps\EpgMapResource;
 use App\Jobs\ChannelFindAndReplace;
 use App\Jobs\ChannelFindAndReplaceReset;
-use App\Jobs\FetchTmdbIds;
 use App\Jobs\MapPlaylistChannelsToEpg;
 use App\Models\Channel;
 use App\Models\ChannelFailover;
@@ -417,32 +416,6 @@ class ChannelResource extends Resource
                 ->hiddenLabel()
                 ->disabled(fn (Model $record) => $record->is_custom)
                 ->hidden(fn (Model $record) => $record->is_custom),
-            Action::make('fetch_tmdb_ids')
-                ->label('Fetch TMDB IDs')
-                ->icon('heroicon-o-film')
-                ->tooltip('Fetch TMDB/TVDB/IMDB IDs for this channel')
-                ->action(function ($record) {
-                    app('Illuminate\Contracts\Bus\Dispatcher')
-                        ->dispatch(new FetchTmdbIds(
-                            type: 'vod',
-                            ids: [$record->id]
-                        ));
-                })
-                ->after(function () {
-                    \Filament\Notifications\Notification::make()
-                        ->success()
-                        ->title('TMDB Search Started')
-                        ->body('Searching for TMDB/TVDB IDs. Check the logs or refresh the page in a few seconds.')
-                        ->duration(8000)
-                        ->send();
-                })
-                ->requiresConfirmation()
-                ->modalIcon('heroicon-o-film')
-                ->modalDescription('Fetch TMDB, TVDB, and IMDB IDs for this channel from The Movie Database.')
-                ->modalSubmitActionLabel('Fetch IDs now')
-                ->button()
-                ->hiddenLabel()
-                ->size('sm'),
             Action::make('play')
                 ->tooltip('Play Channel')
                 ->action(function ($record, $livewire) {

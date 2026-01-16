@@ -117,6 +117,7 @@ class EpgApiControllerTest extends TestCase
         $response->assertSuccessful();
 
         $data = $response->json();
+        $channel->refresh(); // Refresh to get latest data
         $channelId = $channel->channel ?? $channel->id;
         $programmes = $data['programmes'][$channelId] ?? [];
 
@@ -151,6 +152,7 @@ class EpgApiControllerTest extends TestCase
         $response->assertSuccessful();
 
         $data = $response->json();
+        $channel->refresh(); // Refresh to get latest data
         $channelId = $channel->channel ?? $channel->id;
 
         // Programmes should be empty or not include the channel without EPG
@@ -181,6 +183,7 @@ class EpgApiControllerTest extends TestCase
         $response->assertSuccessful();
 
         $data = $response->json();
+        $channel->refresh(); // Refresh to get latest data
         $channelId = $channel->channel ?? $channel->id;
         $programmes = $data['programmes'][$channelId] ?? [];
 
@@ -212,6 +215,7 @@ class EpgApiControllerTest extends TestCase
         ]);
 
         // Create a channel with EPG mapping
+        // Set explicit sort values to ensure deterministic ordering
         $channelWithEpg = Channel::factory()->create([
             'playlist_id' => $this->playlist->id,
             'user_id' => $this->user->id,
@@ -219,15 +223,22 @@ class EpgApiControllerTest extends TestCase
             'enabled' => true,
             'is_vod' => false,
             'epg_channel_id' => $epgChannel->id,
+            'sort' => 1,
+            'channel' => 1,
+            'title' => 'Channel A',
         ]);
 
         // Create a channel without EPG mapping (should get dummy EPG)
+        // Set explicit sort values to ensure deterministic ordering
         $channelWithoutEpg = Channel::factory()->create([
             'playlist_id' => $this->playlist->id,
             'user_id' => $this->user->id,
             'group_id' => $group->id,
             'enabled' => true,
             'is_vod' => false,
+            'sort' => 2,
+            'channel' => 2,
+            'title' => 'Channel B',
         ]);
 
         $response = $this->getJson("/api/epg/playlist/{$this->playlist->uuid}/data");
@@ -240,6 +251,7 @@ class EpgApiControllerTest extends TestCase
         $this->assertCount(2, $data['channels']);
 
         // Channel without EPG should have dummy programmes
+        $channelWithoutEpg->refresh(); // Refresh to get latest data
         $channelId = $channelWithoutEpg->channel ?? $channelWithoutEpg->id;
         $this->assertArrayHasKey($channelId, $data['programmes']);
         $this->assertNotEmpty($data['programmes'][$channelId]);
@@ -288,6 +300,7 @@ class EpgApiControllerTest extends TestCase
         $response->assertSuccessful();
 
         $data = $response->json();
+        $channel->refresh(); // Refresh to get latest data
         $channelId = $channel->channel ?? $channel->id;
         $programmes = $data['programmes'][$channelId] ?? [];
 

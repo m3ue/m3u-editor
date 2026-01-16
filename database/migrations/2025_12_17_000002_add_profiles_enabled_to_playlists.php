@@ -12,7 +12,7 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('playlists', function (Blueprint $table) {
-            $table->jsonb('emby_config')->nullable()->after('source_type');
+            $table->boolean('profiles_enabled')->default(false)->after('xtream_config');
         });
     }
 
@@ -22,7 +22,7 @@ return new class extends Migration
     public function down(): void
     {
         Schema::table('playlists', function (Blueprint $table) {
-            $table->dropColumn('emby_config');
+            $table->dropColumn('profiles_enabled');
         });
     }
 };

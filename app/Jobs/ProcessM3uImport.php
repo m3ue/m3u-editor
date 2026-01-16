@@ -2,11 +2,13 @@
 
 namespace App\Jobs;
 
+use App\Enums\PlaylistSourceType;
 use App\Enums\Status;
 use App\Events\SyncCompleted;
 use App\Models\Category;
 use App\Models\Group;
 use App\Models\Job;
+use App\Models\MediaServerIntegration;
 use App\Models\Playlist;
 use App\Models\SourceCategory;
 use App\Models\SourceGroup;
@@ -127,6 +129,37 @@ class ProcessM3uImport implements ShouldQueue
      */
     public function handle(): void
     {
+        // Check if this is a media server playlist - these should not be processed via M3U import
+        // Media server playlists should be synced via SyncMediaServer job instead
+        if (in_array($this->playlist->source_type, [PlaylistSourceType::Emby, PlaylistSourceType::Jellyfin])) {
+            $integration = MediaServerIntegration::where('playlist_id', $this->playlist->id)->first();
+            if ($integration) {
+                // Dispatch the correct job for media server playlists
+                Log::info('ProcessM3uImport: Redirecting media server playlist to SyncMediaServer', [
+                    'playlist_id' => $this->playlist->id,
+                    'integration_id' => $integration->id,
+                ]);
+                dispatch(new SyncMediaServer($integration->id));
+
+                return;
+            }
+
+            // No integration found - log warning and abort to prevent data loss
+            Log::warning('ProcessM3uImport: Media server playlist has no integration, skipping to prevent data loss', [
+                'playlist_id' => $this->playlist->id,
+                'source_type' => $this->playlist->source_type?->value,
+            ]);
+
+            Notification::make()
+                ->warning()
+                ->title('Playlist sync skipped')
+                ->body("Playlist \"{$this->playlist->name}\" is a media server playlist but no integration was found. Please sync from the Media Server Integrations page.")
+                ->broadcast($this->playlist->user)
+                ->sendToDatabase($this->playlist->user);
+
+            return;
+        }
+
         if (! $this->force) {
             // Don't update if currently processing
             if ($this->playlist->isProcessing()) {

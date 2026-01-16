@@ -139,15 +139,47 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     // Channel API routes
     Route::get('channel/get', [\App\Http\Controllers\ChannelController::class, 'index'])
         ->name('api.channels.index');
+    Route::get('channel/{id}', [\App\Http\Controllers\ChannelController::class, 'show'])
+        ->where('id', '[0-9]+')
+        ->name('api.channels.show');
     Route::patch('channel/{id}', [\App\Http\Controllers\ChannelController::class, 'update'])
         ->name('api.channels.update');
+    Route::post('channel/toggle', [\App\Http\Controllers\ChannelController::class, 'toggle'])
+        ->name('api.channels.toggle');
+    Route::post('channel/bulk-update', [\App\Http\Controllers\ChannelController::class, 'bulkUpdate'])
+        ->name('api.channels.bulk-update');
     Route::get('channel/{id}/health', [\App\Http\Controllers\ChannelController::class, 'healthcheck'])
         ->name('api.channels.healthcheck');
     Route::get('channel/playlist/{uuid}/health/{search}', [\App\Http\Controllers\ChannelController::class, 'healthcheckByPlaylist'])
         ->name('api.channels.healthcheck.search');
+    Route::get('channel/{id}/availability', [\App\Http\Controllers\ChannelController::class, 'checkAvailability'])
+        ->where('id', '[0-9]+')
+        ->name('api.channels.availability');
+    Route::post('channel/check-availability', [\App\Http\Controllers\ChannelController::class, 'batchCheckAvailability'])
+        ->name('api.channels.batch-availability');
+    Route::post('channel/{id}/stability-test', [\App\Http\Controllers\ChannelController::class, 'stabilityTest'])
+        ->where('id', '[0-9]+')
+        ->name('api.channels.stability-test');
+
+    // Group API routes
+    Route::get('groups/get', [\App\Http\Controllers\GroupController::class, 'index'])
+        ->name('api.groups.index');
+    Route::get('groups/{id}', [\App\Http\Controllers\GroupController::class, 'show'])
+        ->where('id', '[0-9]+')
+        ->name('api.groups.show');
+
+    // Playlist API routes (authenticated)
+    Route::get('playlist/{uuid}/stats', [\App\Http\Controllers\PlaylistController::class, 'stats'])
+        ->name('api.playlist.stats');
+
+    // Proxy API routes
+    Route::get('proxy/status', [\App\Http\Controllers\ProxyController::class, 'status'])
+        ->name('api.proxy.status');
+    Route::get('proxy/streams/active', [\App\Http\Controllers\ProxyController::class, 'streams'])
+        ->name('api.proxy.streams');
 });
 
-// Playlist API routes
+// Playlist API routes (public with UUID auth)
 Route::group(['prefix' => 'playlist'], function () {
     Route::get('{uuid}/sync', [\App\Http\Controllers\PlaylistController::class, 'refreshPlaylist'])
         ->name('api.playlist.sync');
@@ -189,3 +221,17 @@ Route::get('/schedules-direct/{epg}/image/{imageHash}', [
     \App\Http\Controllers\SchedulesDirectImageProxyController::class,
     'proxyImage',
 ])->name('schedules-direct.image.proxy');
+
+/*
+ * Media Server (Emby/Jellyfin) proxy routes
+ * These hide the API key from external clients
+ */
+Route::get('/media-server/{integrationId}/image/{itemId}/{imageType?}', [
+    \App\Http\Controllers\MediaServerProxyController::class,
+    'proxyImage',
+])->name('media-server.image.proxy');
+
+Route::get('/media-server/{integrationId}/stream/{itemId}.{container}', [
+    \App\Http\Controllers\MediaServerProxyController::class,
+    'proxyStream',
+])->name('media-server.stream.proxy');

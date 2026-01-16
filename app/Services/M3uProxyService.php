@@ -564,7 +564,7 @@ class M3uProxyService
      *
      * @throws Exception when base URL missing or API returns an error
      */
-    public function getChannelUrl($playlist, $channel, ?Request $request = null, ?StreamProfile $profile = null): string
+    public function getChannelUrl($playlist, $channel, ?Request $request = null, ?StreamProfile $profile = null, ?string $username = null): string
     {
         if (empty($this->apiBaseUrl)) {
             throw new Exception('M3U Proxy base URL is not configured');
@@ -587,7 +587,7 @@ class M3uProxyService
                     'profile_id' => $profile->id,
                 ]);
 
-                return $this->buildTranscodeStreamUrl($existingStreamId, $profile->format ?? 'ts');
+                return $this->buildTranscodeStreamUrl($existingStreamId, $profile->format ?? 'ts', $username);
             }
         }
 
@@ -669,9 +669,32 @@ class M3uProxyService
             }
         }
 
+        // Provider Profile selection for Xtream playlists with profiles enabled
+        $selectedProfile = null;
+        if ($playlist instanceof Playlist && $playlist->profiles_enabled) {
+            $selectedProfile = ProfileService::selectProfile($playlist);
+
+            if (! $selectedProfile) {
+                Log::warning('No profiles with capacity available', [
+                    'playlist_id' => $playlist->id,
+                    'channel_id' => $id,
+                ]);
+                abort(503, 'All provider profiles have reached their maximum stream limit. Please try again later.');
+            }
+
+            Log::debug('Selected profile for streaming', [
+                'profile_id' => $selectedProfile->id,
+                'profile_name' => $selectedProfile->name,
+                'playlist_id' => $playlist->id,
+                'channel_id' => $id,
+            ]);
+        }
+
         // If we didn't already get a primary URL from failover logic, get it now
         if ($primaryUrl === null) {
-            $primaryUrl = PlaylistUrlService::getChannelUrl($channel, $playlist);
+            // Use the selected profile as context if available
+            $urlContext = $selectedProfile ?? $playlist;
+            $primaryUrl = PlaylistUrlService::getChannelUrl($channel, $urlContext);
         }
         if (empty($primaryUrl)) {
             throw new Exception('Channel primary URL is empty');
@@ -706,30 +729,54 @@ class M3uProxyService
             // (before capacity check) to avoid blocking reuse of existing streams.
             // If we reach here, no existing stream was found, so create a new one.
 
-            $streamId = $this->createTranscodedStream($primaryUrl, $profile, $failovers, $userAgent, $headers, [
+            $metadata = [
                 'id' => $id,
                 'type' => 'channel',
                 'playlist_uuid' => $playlist->uuid,
                 'profile_id' => $profile->id,
-            ]);
+            ];
+
+            // Add provider profile ID if using profiles
+            if ($selectedProfile) {
+                $metadata['provider_profile_id'] = $selectedProfile->id;
+            }
+
+            $streamId = $this->createTranscodedStream($primaryUrl, $profile, $failovers, $userAgent, $headers, $metadata);
+
+            // Track connection for provider profile
+            if ($selectedProfile) {
+                ProfileService::incrementConnections($selectedProfile, $streamId);
+            }
 
             // Return transcoded stream URL
-            return $this->buildTranscodeStreamUrl($streamId, $profile->format ?? 'ts');
+            return $this->buildTranscodeStreamUrl($streamId, $profile->format ?? 'ts', $username);
         } else {
             // Use direct streaming endpoint
-            $streamId = $this->createStream($primaryUrl, $failovers, $userAgent, $headers, [
+            $metadata = [
                 'id' => $id,
                 'type' => 'channel',
                 'playlist_uuid' => $playlist->uuid,
                 'strict_live_ts' => $playlist->strict_live_ts,
-            ]);
+            ];
+
+            // Add provider profile ID if using profiles
+            if ($selectedProfile) {
+                $metadata['provider_profile_id'] = $selectedProfile->id;
+            }
+
+            $streamId = $this->createStream($primaryUrl, $failovers, $userAgent, $headers, $metadata);
+
+            // Track connection for provider profile
+            if ($selectedProfile) {
+                ProfileService::incrementConnections($selectedProfile, $streamId);
+            }
 
             // Get the format from the URL
             $format = pathinfo($primaryUrl, PATHINFO_EXTENSION);
             $format = $format === 'm3u8' ? 'hls' : $format;
 
             // Return the direct proxy URL using the stream ID
-            return $this->buildProxyUrl($streamId, $format);
+            return $this->buildProxyUrl($streamId, $format, $username);
         }
     }
 
@@ -739,10 +786,11 @@ class M3uProxyService
      * @param  Playlist|CustomPlaylist|MergedPlaylist|PlaylistAlias  $playlist
      * @param  Episode  $episode
      * @param  StreamProfile|null  $profile  Optional stream profile to apply
+     * @param  string|null  $username  Optional Xtream username for client tracking
      *
      * @throws Exception when base URL missing or API returns an error
      */
-    public function getEpisodeUrl($playlist, $episode, ?StreamProfile $profile = null): string
+    public function getEpisodeUrl($playlist, $episode, ?StreamProfile $profile = null, ?string $username = null): string
     {
         if (empty($this->apiBaseUrl)) {
             throw new Exception('M3U Proxy base URL is not configured');
@@ -814,7 +862,7 @@ class M3uProxyService
                     'profile_id' => $profile->id,
                 ]);
 
-                return $this->buildTranscodeStreamUrl($existingStreamId, $profile->format ?? 'ts');
+                return $this->buildTranscodeStreamUrl($existingStreamId, $profile->format ?? 'ts', $username);
             }
 
             // No existing pooled stream found, create a new transcoded stream
@@ -826,7 +874,7 @@ class M3uProxyService
             ]);
 
             // Return transcoded stream URL
-            return $this->buildTranscodeStreamUrl($streamId, $profile->format ?? 'ts');
+            return $this->buildTranscodeStreamUrl($streamId, $profile->format ?? 'ts', $username);
         } else {
             // Use direct streaming endpoint
             $streamId = $this->createStream($url, false, $userAgent, $headers, [
@@ -841,7 +889,7 @@ class M3uProxyService
             $format = $format === 'm3u8' ? 'hls' : $format;
 
             // Return the direct proxy URL using the stream ID
-            return $this->buildProxyUrl($streamId, $format);
+            return $this->buildProxyUrl($streamId, $format, $username);
         }
     }
 
@@ -1224,12 +1272,13 @@ class M3uProxyService
      *
      * @param  string  $streamId  The stream ID returned from transcoding API
      * @param  string  $format  The desired format (default 'ts' for MPEG-TS)
+     * @param  string|null  $username  Optional Xtream username for client tracking
      * @return string The stream URL
      */
-    protected function buildTranscodeStreamUrl(string $streamId, $format = 'ts'): string
+    protected function buildTranscodeStreamUrl(string $streamId, $format = 'ts', ?string $username = null): string
     {
         // Transcode route is the same logic as direct now
-        return $this->buildProxyUrl($streamId, $format);
+        return $this->buildProxyUrl($streamId, $format, $username);
     }
 
     /**
@@ -1238,16 +1287,38 @@ class M3uProxyService
      *
      * @return string The full proxy URL
      */
-    protected function buildProxyUrl(string $streamId, $format = 'hls'): string
+    protected function buildProxyUrl(string $streamId, $format = 'hls', ?string $username = null): string
     {
         $baseUrl = $this->getPublicUrl();
         if ($format === 'hls' || $format === 'm3u8') {
             // HLS format: /hls/{stream_id}/playlist.m3u8
-            return $baseUrl.'/hls/'.$streamId.'/playlist.m3u8';
+            $url = $baseUrl.'/hls/'.$streamId.'/playlist.m3u8';
+        } else {
+            // Direct stream format: /stream/{stream_id}
+            $url = $baseUrl.'/stream/'.$streamId;
         }
 
-        // Direct stream format: /stream/{stream_id}
-        return $baseUrl.'/stream/'.$streamId;
+        // Append trace parameters if provided
+        return $this->appendProxyTraceParams($url, $username);
+    }
+
+    /**
+     * Append traceability parameters to a proxy URL.
+     * Adds username as query parameter for client tracking.
+     *
+     * @param  string  $url  The base proxy URL
+     * @param  string|null  $username  Optional Xtream username for client tracking
+     * @return string URL with appended trace parameters
+     */
+    protected function appendProxyTraceParams(string $url, ?string $username = null): string
+    {
+        if (! $username) {
+            return $url;
+        }
+
+        $separator = parse_url($url, PHP_URL_QUERY) ? '&' : '?';
+
+        return $url.$separator.http_build_query(['username' => $username]);
     }
 
     /**

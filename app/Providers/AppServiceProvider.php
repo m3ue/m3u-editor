@@ -8,6 +8,7 @@ use App\Events\EpgUpdated;
 use App\Events\PlaylistCreated;
 use App\Events\PlaylistDeleted;
 use App\Events\PlaylistUpdated;
+use App\Jobs\SyncMediaServer;
 use App\Livewire\BackupDestinationListRecords;
 use App\Livewire\StreamPlayer;
 use App\Livewire\TmdbSearch;
@@ -15,6 +16,7 @@ use App\Models\ChannelFailover;
 use App\Models\CustomPlaylist;
 use App\Models\Epg;
 use App\Models\Group;
+use App\Models\MediaServerIntegration;
 use App\Models\MergedPlaylist;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
@@ -545,6 +547,21 @@ class AppServiceProvider extends ServiceProvider
 
                 return $streamProfile;
             });
+
+            // MediaServerIntegration
+            MediaServerIntegration::created(function (MediaServerIntegration $integration) {
+                // Dispatch initial sync job
+                dispatch(new SyncMediaServer($integration->id));
+
+                return $integration;
+            });
+            MediaServerIntegration::deleting(function (MediaServerIntegration $integration) {
+                // Remove any associated Playlists
+                $integration->playlist()->delete();
+
+                return $integration;
+            });
+
         } catch (Throwable $e) {
             // Log the error
             report($e);
@@ -595,6 +612,7 @@ class AppServiceProvider extends ServiceProvider
                     'epg/',
                     'user/',
                     'channel/',
+                    'proxy/',
                     'player_api.php',
                 ]);
             })

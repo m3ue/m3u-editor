@@ -54,6 +54,7 @@ class Playlist extends Model
         'emby_config' => 'array',
         'custom_headers' => 'array',
         'strict_live_ts' => 'boolean',
+        'profiles_enabled' => 'boolean',
         'status' => Status::class,
         'id_channel_by' => PlaylistChannelId::class,
         'source_type' => PlaylistSourceType::class,
@@ -228,6 +229,21 @@ class Playlist extends Model
     public function enabledAliases(): HasMany
     {
         return $this->aliases()->where('enabled', true)->orderBy('priority');
+    }
+
+    public function profiles(): HasMany
+    {
+        return $this->hasMany(PlaylistProfile::class);
+    }
+
+    public function enabledProfiles(): HasMany
+    {
+        return $this->profiles()->where('enabled', true)->orderBy('priority');
+    }
+
+    public function primaryProfile(): ?PlaylistProfile
+    {
+        return $this->profiles()->where('is_primary', true)->first();
     }
 
     public function getAllConfigs(): array

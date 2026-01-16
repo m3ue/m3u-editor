@@ -19,6 +19,11 @@ Schedule::command('app:refresh-playlist')
     ->everyMinute()
     ->withoutOverlapping();
 
+// Refresh media server integrations
+Schedule::command('app:refresh-media-server-integrations')
+    ->everyMinute()
+    ->withoutOverlapping();
+
 // Refresh EPG
 Schedule::command('app:refresh-epg')
     ->everyMinute()
@@ -46,3 +51,13 @@ Schedule::command('queue:prune-failed --hours=48')
 // Prune old notifications
 Schedule::command('app:prune-old-notifications --days=7')
     ->daily();
+
+// Reconcile profile connection counts
+Schedule::command('profiles:reconcile')
+    ->everyMinute()
+    ->withoutOverlapping();
+
+// Refresh provider profile info (every 15 minutes)
+Schedule::job(new \App\Jobs\RefreshPlaylistProfiles)
+    ->everyFifteenMinutes()
+    ->withoutOverlapping();

@@ -8,6 +8,7 @@ use App\Models\Episode;
 use App\Models\MergedPlaylist;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
+use App\Models\PlaylistProfile;
 
 /**
  * Service to handle playlist URL retrieval and alias management.
@@ -15,9 +16,9 @@ use App\Models\PlaylistAlias;
 class PlaylistUrlService
 {
     /**
-     * Get the effective URL for a channel, considering PlaylistAlias context
+     * Get the effective URL for a channel, considering PlaylistAlias or PlaylistProfile context
      *
-     * @param  Playlist|CustomPlaylist|MergedPlaylist|PlaylistAlias|null  $context
+     * @param  Playlist|CustomPlaylist|MergedPlaylist|PlaylistAlias|PlaylistProfile|null  $context
      */
     public static function getChannelUrl(Channel $channel, $context = null): string
     {
@@ -39,18 +40,28 @@ class PlaylistUrlService
             return $context->transformChannelUrl($channel);
         }
 
+        // If context is a PlaylistProfile, transform the URL with profile credentials
+        if ($context instanceof PlaylistProfile) {
+            return $context->transformChannelUrl($channel);
+        }
+
         return $channel->url ?? '';
     }
 
     /**
-     * Get the effective URL for an episode, considering PlaylistAlias context
+     * Get the effective URL for an episode, considering PlaylistAlias or PlaylistProfile context
      *
-     * @param  Playlist|CustomPlaylist|MergedPlaylist|PlaylistAlias|null  $context
+     * @param  Playlist|CustomPlaylist|MergedPlaylist|PlaylistAlias|PlaylistProfile|null  $context
      */
     public static function getEpisodeUrl(Episode $episode, $context = null): string
     {
         // If context is a PlaylistAlias, transform the URL
         if ($context instanceof PlaylistAlias) {
+            return $context->transformEpisodeUrl($episode);
+        }
+
+        // If context is a PlaylistProfile, transform the URL with profile credentials
+        if ($context instanceof PlaylistProfile) {
             return $context->transformEpisodeUrl($episode);
         }
 

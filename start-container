@@ -66,7 +66,7 @@ if [ "${M3U_PROXY_ENABLED}" = "true" ]; then
 else
     # External mode - proxy through nginx to external container
     export M3U_PROXY_START_EMBEDDED="false"
-    
+
     # Should be in the format: m3u-proxy:38085
     export M3U_PROXY_NGINX_TARGET="${M3U_PROXY_HOST}:${M3U_PROXY_PORT}"
 
@@ -531,6 +531,8 @@ fi
 # Run migrations
 echo "💾 Running migrations..."
 php artisan migrate --force
+# Jobs database uses a separate SQLite file for queue job tracking (see config/database.php)
+php artisan migrate --database=jobs --force
 
 echo "🔄 Resetting any stuck sync processes..."
 php artisan app:reset-sync-process
@@ -561,7 +563,7 @@ else
     echo ""
     echo "🚀 Starting services..."
     echo ""
-    
+
     # Start supervisord
     exec /usr/bin/supervisord -c /etc/supervisor/conf.d/supervisord.conf
 fi

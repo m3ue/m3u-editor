@@ -1,4 +1,42 @@
 <laravel-boost-guidelines>
+=== project rules ===
+
+## M3U Editor Project
+
+### Architecture Overview
+- Laravel 12 app for IPTV playlist management: parse M3U files, manage channels/playlists, proxy streams, emulate Xtream API.
+- Key models: Playlist, Channel (with failovers), Epg, Series/Episode (VOD), CustomPlaylist, MergedPlaylist.
+- Services: M3uProxyService (stream proxying with failover), XtreamService (API emulation), PlaylistService (parsing/sync), EpgCacheService.
+- Data flows: M3U parsing -> DB storage -> Proxy via external m3u-proxy container -> Xtream API output.
+- Filament resources for admin UI; Livewire components for dynamic features.
+
+### Critical Workflows
+- Containerized: Use Docker Compose (docker-compose.proxy.yml for prod: app + proxy + Redis).
+- Proxy setup: External m3u-proxy container; config in config/proxy.php, env vars like M3U_PROXY_TOKEN.
+- Testing: Pest in tests/Feature/; run `php artisan test --filter=TestName`.
+- Code style: `vendor/bin/pint --dirty` pre-commit.
+- Logs: Laravel in storage/logs/laravel.log; FFmpeg for streams; Horizon for queues.
+
+### Project Conventions
+- Models use Spatie Tags (HasTags trait) for categorization.
+- Channels link to failovers (ChannelFailover model) for redundancy.
+- PlaylistAuth for Xtream API auth (username/password per playlist).
+- Settings via Spatie Laravel Settings (app/Settings/GeneralSettings.php).
+- Events/Listeners: PlaylistCreated triggers sync jobs; StreamingStarted/Stopped for monitoring.
+- Use Facades for services (e.g., ProxyFacade).
+- API versioning: routes/api.php with Scramble for docs.
+
+### Integration Points
+- Schedules Direct: EpgService for TV guide data.
+- External proxy: m3u-proxy container handles HLS/MPEG-TS streaming.
+- Redis: Caching (epg data), Horizon queues (sync jobs).
+- Reverb: Websockets for real-time UI updates (e.g., sync progress).
+
+### Examples
+- Create channel: `Channel::create(['name' => 'CNN', 'url' => '...', 'playlist_id' => 1])`.
+- Proxy URL: `app(ProxyService::class)->getBaseUrl()` + '/stream/channel_id'.
+- Test auth: Use PlaylistAuth in XtreamApiControllerTest.
+
 === foundation rules ===
 
 # Laravel Boost Guidelines

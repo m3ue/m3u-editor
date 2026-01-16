@@ -47,13 +47,16 @@ class XtreamApiController extends Controller
      * Returns a JSON array of live stream objects. Only enabled, non-VOD channels are included.
      * Supports optional category filtering via `category_id` parameter.
      * Each stream object contains: `num`, `name`, `stream_type`, `stream_id`, `stream_icon`, `epg_channel_id`,
-     * `added`, `category_id`, `tv_archive`, `direct_source`, `tv_archive_duration`.
+     * `added`, `category_id`, `category_ids`, `tv_archive`, `tv_archive_duration`, `custom_sid`, `thumbnail`, `direct_source`.
+     * The `direct_source` field contains the proxy URL when proxy is enabled, otherwise the Xtream-style stream URL.
+     * The `thumbnail` field contains the same value as `stream_icon`.
      *
      * ### get_vod_streams
      * Returns a JSON array of VOD channel objects (movies marked as VOD). Only enabled VOD channels are included.
      * Supports optional category filtering via `category_id` parameter.
      * Each object contains: `num`, `name`, `title`, `year`, `stream_type` (always "movie"), `stream_id`, `stream_icon`,
-     * `rating`, `rating_5based`, `added`, `category_id`, `category_ids`, `container_extension`, `custom_sid`, `direct_source`.
+     * `rating`, `rating_5based`, `added`, `category_id`, `category_ids`, `tmdb`, `tmdb_id`, `container_extension`, `custom_sid`, `direct_source`.
+     * The `direct_source` field contains the proxy URL when proxy is enabled, otherwise the Xtream-style movie URL.
      *
      * ### get_series
      * Returns a JSON array of series objects. Only enabled series are included.
@@ -156,9 +159,12 @@ class XtreamApiController extends Controller
      *     "epg_channel_id": "cnn.us",
      *     "added": "1640995200",
      *     "category_id": "1",
+     *     "category_ids": [1],
      *     "tv_archive": 1,
-     *     "direct_source": "https://example.com/live/user/pass/12345.ts",
-     *     "tv_archive_duration": 24
+     *     "tv_archive_duration": 24,
+     *     "custom_sid": "cnn-hd",
+     *     "thumbnail": "https://example.com/logos/cnn.png",
+     *     "direct_source": ""
      *   }
      * ]
      * @response 200 scenario="VOD streams response" [
@@ -175,8 +181,10 @@ class XtreamApiController extends Controller
      *     "added": "1640995200",
      *     "category_id": "3",
      *     "category_ids": [3],
+     *     "tmdb": "603",
+     *     "tmdb_id": 603,
      *     "container_extension": "mkv",
-     *     "custom_sid": "",
+     *     "custom_sid": "the-matrix",
      *     "direct_source": ""
      *   }
      * ]
@@ -239,7 +247,7 @@ class XtreamApiController extends Controller
      *         "added": "1640995200",
      *         "season": 1,
      *         "stream_id": "1001",
-     *         "direct_source": "https://example.com/xtream/uuid/series/user/pass/1001.mp4"
+     *         "direct_source": ""
      *       }
      *     ]
      *   },
@@ -590,7 +598,7 @@ class XtreamApiController extends Controller
                     // Get the TVG ID
                     switch ($idChannelBy) {
                         case PlaylistChannelId::ChannelId:
-                            $tvgId = $channel->source_id ?? $channel->id;
+                            $tvgId = $channel->id;
                             break;
                         case PlaylistChannelId::Name:
                             $tvgId = $channel->name_custom ?? $channel->name;
@@ -599,7 +607,7 @@ class XtreamApiController extends Controller
                             $tvgId = $channel->title_custom ?? $channel->title;
                             break;
                         default:
-                            $tvgId = $channel->stream_id_custom ?? $channel->stream_id;
+                            $tvgId = $channel->source_id ?? $channel->stream_id_custom ?? $channel->stream_id;
                             break;
                     }
 
@@ -619,6 +627,9 @@ class XtreamApiController extends Controller
                         $extension = $sourcePlaylist->xtream_config['output'] ?? 'ts'; // Default to 'ts' if not set
                     }
 
+                    // Use stream_icon as thumbnail (or a dedicated thumbnail if available)
+                    $thumbnail = $streamIcon;
+
                     $liveStreams[] = [
                         'num' => $channelNo,
                         'name' => $channel->title_custom ?? $channel->title,
@@ -631,9 +642,9 @@ class XtreamApiController extends Controller
                         'category_ids' => [(int) $channelCategoryId],
                         'tv_archive' => $channel->catchup ? 1 : 0,
                         'tv_archive_duration' => $channel->shift ?? 0,
-                        'custom_sid' => '',
-                        'thumbnail' => '',
-                        'direct_source' => '', // $baseUrl . "/live/{$urlSafeUser}/{$urlSafePass}/" . $channel->id . "." . $extension,
+                        'custom_sid' => $channel->stream_id_custom ?? '',
+                        'thumbnail' => $thumbnail,
+                        'direct_source' => '',
                     ];
                 }
             }
@@ -749,6 +760,7 @@ class XtreamApiController extends Controller
 
                     $extension = $channel->container_extension ?? 'mkv';
                     $tmdb = $channel->info['tmdb_id'] ?? $channel->movie_data['tmdb_id'] ?? 0;
+
                     $vodStreams[] = [
                         'num' => $index + 1,
                         'name' => $channel->title_custom ?? $channel->title,
@@ -765,8 +777,8 @@ class XtreamApiController extends Controller
                         'tmdb' => (string) $tmdb,
                         'tmdb_id' => (int) $tmdb,
                         'container_extension' => $channel->container_extension ?? 'mkv',
-                        'custom_sid' => '',
-                        'direct_source' => '', // $baseUrl . "/movie/{$urlSafeUser}/{$urlSafePass}/" . $channel->id . "." . $extension,
+                        'custom_sid' => $channel->stream_id_custom ?? '',
+                        'direct_source' => '',
                     ];
                 }
             }
@@ -896,12 +908,16 @@ class XtreamApiController extends Controller
                 return response()->json(['error' => 'Series not found or not enabled'], 404);
             }
 
-            // Check if series metadata has been fetched, and if so how recently
-            if (! $seriesItem->last_metadata_fetch || $seriesItem->last_metadata_fetch < now()->subDays(1)) {
+            // Check if this is a media server integration series (already has metadata from sync)
+            $isMediaServerSeries = ! empty($seriesItem->metadata['media_server_id'] ?? null);
+
+            // Only try to fetch metadata for non-media-server series that need refresh
+            if (! $isMediaServerSeries && (! $seriesItem->last_metadata_fetch || $seriesItem->last_metadata_fetch < now()->subDays(1))) {
                 // Either no metadata, or stale metadata
                 $results = $seriesItem->fetchMetadata(sync: false);
                 if ($results === false) {
-                    return response()->json(['error' => 'Failed to fetch series metadata'], 500);
+                    // For non-Xtream playlists without metadata, continue anyway with existing data
+                    // instead of returning an error
                 }
 
                 // Metadata fetched successfully
@@ -993,7 +1009,7 @@ class XtreamApiController extends Controller
                                 'season' => $episode->season,
                                 'custom_sid' => $episode->custom_sid ?? '',
                                 'stream_id' => $episode->id,
-                                'direct_source' => '', // $baseUrl . "/series/{$urlSafeUser}/{$urlSafePass}/" . $episode->id . ".{$containerExtension}"
+                                'direct_source' => '',
                             ];
                         }
                     }
@@ -1391,13 +1407,16 @@ class XtreamApiController extends Controller
                 'category_ids' => ($channel->group_id ? [(int) $channel->group_id] : []),
                 'container_extension' => $extension,
                 'custom_sid' => $movieData['custom_sid'] ?? '',
-                'direct_source' => '', // $baseUrl . "/movie/{$urlSafeUser}/{$urlSafePass}/" . $channel->id . '.' . $extension,
+                'direct_source' => '',
             ];
 
-            return response()->json([
+            // Return response with metadata at BOTH root level (for compatibility with buggy players
+            // like Another IPTV Player that read from root) AND in standard 'info'/'movie_data' objects
+            // (for properly implemented Xtream API clients)
+            return response()->json(array_merge($defaultInfo, [
                 'info' => $defaultInfo,
                 'movie_data' => $defaultMovieData,
-            ]);
+            ]));
         } elseif ($action === 'get_short_epg') {
             $streamId = $request->input('stream_id');
             $limit = $request->input('limit');

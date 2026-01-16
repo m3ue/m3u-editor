@@ -32,8 +32,8 @@ class M3uProxyApiController extends Controller
             'customPlaylist',
         ])->findOrFail($id);
 
-        // See if username is passed in request
-        $username = $request->input('username', null);
+        // Get username from request (query parameter or header as fallback)
+        $username = $request->input('username', $request->header('X-Username'));
 
         // If UUID provided, resolve that specific playlist (e.g., merged playlist)
         // Otherwise fall back to the channel's effective playlist
@@ -67,7 +67,8 @@ class M3uProxyApiController extends Controller
                 $playlist,
                 $channel,
                 $request,
-                $profile
+                $profile,
+                $username
             );
 
         return redirect($url);
@@ -86,8 +87,8 @@ class M3uProxyApiController extends Controller
             'playlist',
         ])->findOrFail($id);
 
-        // See if username is passed in request
-        $username = $request->input('username', null);
+        // Get username from request (query parameter or header as fallback)
+        $username = $request->input('username', $request->header('X-Username'));
 
         // If UUID provided, resolve that specific playlist (e.g., merged playlist)
         // Otherwise fall back to the episode's playlist
@@ -112,7 +113,8 @@ class M3uProxyApiController extends Controller
             ->getEpisodeUrl(
                 $playlist,
                 $episode,
-                $profile
+                $profile,
+                $username
             );
 
         return redirect($url);

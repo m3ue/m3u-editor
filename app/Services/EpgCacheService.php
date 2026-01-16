@@ -94,9 +94,17 @@ class EpgCacheService
      */
     public function cacheEpgData(Epg $epg): bool
     {
-        $epgFilePath = Storage::disk('local')->path($epg->file_path);
-        if (! file_exists($epgFilePath)) {
-            Log::error("EPG file not found: {$epgFilePath}");
+        // Get the content
+        $filePath = null;
+        if ($epg->url && str_starts_with($epg->url, 'http')) {
+            $filePath = Storage::disk('local')->path($epg->file_path);
+        } elseif ($epg->uploads && Storage::disk('local')->exists($epg->uploads)) {
+            $filePath = Storage::disk('local')->path($epg->uploads);
+        } elseif ($epg->url) {
+            $filePath = $epg->url;
+        }
+        if (! file_exists($filePath)) {
+            Log::error("EPG file not found: {$filePath}");
 
             return false;
         }
@@ -115,7 +123,7 @@ class EpgCacheService
 
             // Parse and save channels and programmes in a single pass
             Log::debug("Parsing EPG data for {$epg->name}");
-            $stats = $this->parseAndSaveEpgDataSinglePass($epg, $epgFilePath, $totalChannels, $totalProgrammes);
+            $stats = $this->parseAndSaveEpgDataSinglePass($epg, $filePath, $totalChannels, $totalProgrammes);
             Log::debug("Processed {$stats['channels']} channels and {$stats['programmes']} programmes across {$stats['date_count']} dates");
 
             // Save metadata
