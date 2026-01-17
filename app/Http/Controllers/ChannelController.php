@@ -1097,7 +1097,7 @@ class ChannelController extends Controller
      *     "url": "https://example.com/stream.m3u8",
      *     "live": true,
      *     "stable": true,
-     *     "quality": "✅ Online",
+     *     "quality": "online",
      *     "connect_time_ms": 245,
      *     "checks_passed": 3,
      *     "checks_failed": 0,
