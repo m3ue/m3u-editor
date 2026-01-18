@@ -1500,7 +1500,7 @@ class XtreamApiController extends Controller
                         'start_timestamp' => (string) $startTime->timestamp,
                         'stop_timestamp' => (string) $endTime->timestamp,
                         'now_playing' => ($isCurrentProgramme && $isNowPlaying) ? 1 : 0,
-                        'has_archive' => 0,
+                        'has_archive' => $channel->catchup ? 1 : 0,
                     ];
                     $count++;
                 }
@@ -1565,7 +1565,7 @@ class XtreamApiController extends Controller
                         'start_timestamp' => (string) $startTime->timestamp,
                         'stop_timestamp' => (string) $endTime->timestamp,
                         'now_playing' => ($isCurrentProgramme && $isNowPlaying) ? 1 : 0,
-                        'has_archive' => 0,
+                        'has_archive' => $channel->catchup ? 1 : 0,
                     ];
                 }
             }
