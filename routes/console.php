@@ -1,10 +1,19 @@
 <?php
 
+use App\Settings\GeneralSettings;
 use Illuminate\Support\Facades\Schedule;
 
 /*
  * Register schedules
  */
+
+// Determine HLS cleanup interval from settings (defaults to 5 minutes)
+$hlsCleanupInterval = 5;
+try {
+    $hlsCleanupInterval = app(GeneralSettings::class)->broadcast_segment_cleanup_interval ?? 5;
+} catch (\Throwable $e) {
+    // Settings unavailable, use default
+}
 
 // Check for updates
 Schedule::command('app:update-check')
@@ -48,18 +57,6 @@ Schedule::command('app:logo-cleanup --force')
 Schedule::command('queue:prune-failed --hours=48')
     ->daily();
 
-// Cleanup old HLS segments from network broadcasts
-Schedule::command('network:cleanup-segments')
-    ->cron(function () {
-        try {
-            $interval = app(\App\Settings\GeneralSettings::class)->broadcast_segment_cleanup_interval ?? 5;
-
-            return "*/{$interval} * * * *";
-        } catch (\Throwable $e) {
-            return '*/5 * * * *'; // Fallback to 5 minutes if settings unavailable
-        }
-    });
-
 // Prune old notifications
 Schedule::command('app:prune-old-notifications --days=7')
     ->daily();
@@ -77,4 +74,9 @@ Schedule::job(new \App\Jobs\RefreshPlaylistProfiles)
 // Regenerate network schedules (hourly check, regenerates when needed)
 Schedule::command('networks:regenerate-schedules')
     ->hourly()
+    ->withoutOverlapping();
+
+// Cleanup old HLS segments from network broadcasts
+Schedule::command('network:cleanup-segments')
+    ->cron("*/{$hlsCleanupInterval} * * * *")
     ->withoutOverlapping();
