@@ -150,12 +150,12 @@ class NetworkBroadcastService
                         File::delete($file);
                     }
 
-                    // Kill promoter loop if it was started
+                    // Kill promoter loop if it was started (cross-platform)
                     $promotePidFile = "{$hlsPath}/promote_pid";
                     if (File::exists($promotePidFile)) {
                         try {
                             $promotePid = (int) File::get($promotePidFile);
-                            if ($promotePid > 0 && file_exists("/proc/{$promotePid}")) {
+                            if ($promotePid > 0 && @posix_kill($promotePid, 0)) {
                                 posix_kill($promotePid, SIGKILL);
                             }
                         } catch (\Throwable $e) {

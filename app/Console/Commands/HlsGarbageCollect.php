@@ -2,8 +2,10 @@
 
 namespace App\Console\Commands;
 
+use App\Models\Network;
 use Illuminate\Console\Command;
 use Illuminate\Filesystem\Filesystem;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Str;
 
 class HlsGarbageCollect extends Command
@@ -59,6 +61,9 @@ class HlsGarbageCollect extends Command
     protected function runOnce(Filesystem $files, int $threshold, bool $dryRun): void
     {
         $now = time();
+
+        // First, clean up any stopped broadcasts immediately (regardless of age)
+        $this->cleanupStoppedBroadcasts($files, $dryRun);
 
         // Locations to clean
         $networkBase = storage_path('app/networks');
@@ -174,5 +179,78 @@ class HlsGarbageCollect extends Command
         }
 
         return [$deleted, $bytesFreed];
+    }
+
+    /**
+     * Clean up HLS files for networks that are not currently broadcasting.
+     * This ensures stopped broadcasts are cleaned up immediately.
+     */
+    protected function cleanupStoppedBroadcasts(Filesystem $files, bool $dryRun): void
+    {
+        // Get all networks with HLS directories
+        $networkBase = storage_path('app/networks');
+        if (! $files->isDirectory($networkBase)) {
+            return;
+        }
+
+        // Get UUIDs of networks that are currently broadcasting
+        $activeBroadcasts = Network::whereNotNull('broadcast_pid')
+            ->where('broadcast_enabled', true)
+            ->pluck('uuid')
+            ->toArray();
+
+        $cleaned = 0;
+        foreach ($files->directories($networkBase) as $dir) {
+            $uuid = basename($dir);
+
+            // Skip if this network is currently broadcasting
+            if (in_array($uuid, $activeBroadcasts)) {
+                continue;
+            }
+
+            // Check if there are any HLS files
+            $hasFiles = count($files->glob("{$dir}/*.ts")) > 0 ||
+                       count($files->glob("{$dir}/*.m3u8")) > 0 ||
+                       count($files->glob("{$dir}/*.m3u8.tmp")) > 0;
+
+            if ($hasFiles) {
+                if ($dryRun) {
+                    $this->line("[DRY] Would clean stopped broadcast: {$uuid}");
+                } else {
+                    $this->info("Cleaning stopped broadcast: {$uuid}");
+
+                    // Remove HLS files
+                    foreach ($files->glob("{$dir}/*.ts") as $file) {
+                        $files->delete($file);
+                    }
+                    foreach ($files->glob("{$dir}/*.m3u8") as $file) {
+                        $files->delete($file);
+                    }
+                    foreach ($files->glob("{$dir}/*.m3u8.tmp") as $file) {
+                        $files->delete($file);
+                    }
+
+                    // Kill promoter if still running
+                    $promotePidFile = "{$dir}/promote_pid";
+                    if ($files->exists($promotePidFile)) {
+                        try {
+                            $promotePid = (int) $files->get($promotePidFile);
+                            if ($promotePid > 0 && @posix_kill($promotePid, 0)) {
+                                posix_kill($promotePid, SIGKILL);
+                            }
+                            $files->delete($promotePidFile);
+                        } catch (\Throwable $e) {
+                            // Ignore errors
+                        }
+                    }
+
+                    $cleaned++;
+                }
+            }
+        }
+
+        if ($cleaned > 0) {
+            $this->info("Cleaned up {$cleaned} stopped broadcast(s)");
+        }
     }
 }
