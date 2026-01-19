@@ -76,6 +76,11 @@ class NetworkBroadcastService
                 'network_id' => $network->id,
             ]);
 
+            $network->update([
+                'broadcast_requested' => false,
+                'broadcast_error' => 'No programme scheduled to broadcast.',
+            ]);
+
             return false;
         }
 
@@ -89,10 +94,25 @@ class NetworkBroadcastService
                 'network_id' => $network->id,
             ]);
 
+            $network->update([
+                'broadcast_requested' => false,
+                'broadcast_error' => 'Failed to build FFmpeg command.',
+            ]);
+
             return false;
         }
 
-        return $this->executeCommand($network, $command, $programme, $seekPosition);
+        $result = $this->executeCommand($network, $command, $programme, $seekPosition);
+
+        // Clear error on successful start
+        if ($result) {
+            $network->update(['broadcast_error' => null]);
+        } else {
+            // Clear broadcast_requested on failure so it doesn't stay stuck on "Starting"
+            $network->update(['broadcast_requested' => false]);
+        }
+
+        return $result;
     }
 
     /**
@@ -518,10 +538,17 @@ class NetworkBroadcastService
         usleep(500000); // 500ms
 
         if (! file_exists("/proc/{$pid}")) {
+            $logContent = @file_get_contents($logFile);
+
             Log::error('FFmpeg process exited immediately', [
                 'network_id' => $network->id,
                 'pid' => $pid,
-                'log' => @file_get_contents($logFile),
+                'log' => $logContent,
+            ]);
+
+            // Store error message for user feedback
+            $network->update([
+                'broadcast_error' => $this->parseFfmpegError($logContent),
             ]);
 
             return false;
@@ -904,5 +931,45 @@ class NetworkBroadcastService
         return Network::where('broadcast_enabled', true)
             ->where('enabled', true)
             ->get();
+    }
+
+    /**
+     * Parse FFmpeg error log to extract user-friendly error message.
+     */
+    protected function parseFfmpegError(?string $logContent): string
+    {
+        if (empty($logContent)) {
+            return 'FFmpeg process failed to start. Check server logs for details.';
+        }
+
+        // Check for common errors
+        if (str_contains($logContent, 'No such file or directory')) {
+            if (str_contains($logContent, 'ffmpeg')) {
+                return 'FFmpeg is not installed or not in PATH. Please install FFmpeg on the server.';
+            }
+
+            return 'File not found: '.$logContent;
+        }
+
+        if (str_contains($logContent, 'Permission denied')) {
+            return 'Permission denied. Check file/directory permissions.';
+        }
+
+        if (str_contains($logContent, 'Connection refused') || str_contains($logContent, 'Unable to open')) {
+            return 'Cannot connect to media server. Check media server URL and API key.';
+        }
+
+        if (str_contains($logContent, 'Invalid data found')) {
+            return 'Invalid stream format. Media server may not be transcoding correctly.';
+        }
+
+        if (str_contains($logContent, 'HTTP error')) {
+            return 'HTTP error accessing media server stream.';
+        }
+
+        // Return first line of error if nothing specific matched
+        $lines = explode("\n", trim($logContent));
+
+        return $lines[0] ?? 'Unknown error occurred while starting broadcast.';
     }
 }

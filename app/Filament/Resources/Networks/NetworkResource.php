@@ -764,6 +764,9 @@ class NetworkResource extends Resource
 
                             $result = $service->start($record);
 
+                            // Refresh to get updated error message
+                            $record->refresh();
+
                             if ($result) {
                                 Notification::make()
                                     ->success()
@@ -777,10 +780,12 @@ class NetworkResource extends Resource
                                     ->body("Broadcast will start at {$record->broadcast_scheduled_start->format('M j, Y H:i:s')} ({$record->broadcast_scheduled_start->diffForHumans()})")
                                     ->send();
                             } else {
+                                $errorMsg = $record->broadcast_error ?? 'Could not start broadcast. Check that there is content scheduled.';
+
                                 Notification::make()
                                     ->danger()
                                     ->title('Failed to Start')
-                                    ->body('Could not start broadcast. Check that there is content scheduled.')
+                                    ->body($errorMsg)
                                     ->send();
                             }
                         }),
