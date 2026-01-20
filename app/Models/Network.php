@@ -25,6 +25,8 @@ class Network extends Model
         'user_id' => 'integer',
         'media_server_integration_id' => 'integer',
         'schedule_generated_at' => 'datetime',
+        'schedule_window_days' => 'integer',
+        'auto_regenerate_schedule' => 'boolean',
         // Broadcast settings
         'broadcast_enabled' => 'boolean',
         'broadcast_requested' => 'boolean',
@@ -162,9 +164,15 @@ class Network extends Model
 
     /**
      * Check if the schedule needs to be regenerated.
+     * Returns false if auto_regenerate_schedule is disabled.
      */
     public function needsScheduleRegeneration(): bool
     {
+        // If auto-regeneration is disabled, never auto-regenerate
+        if ($this->auto_regenerate_schedule === false) {
+            return false;
+        }
+
         if (! $this->schedule_generated_at) {
             return true;
         }

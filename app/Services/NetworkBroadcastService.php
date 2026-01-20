@@ -28,6 +28,15 @@ class NetworkBroadcastService
      */
     public function start(Network $network): bool
     {
+        if (! $network->enabled) {
+            Log::warning('Cannot start broadcast: network not enabled', [
+                'network_id' => $network->id,
+                'network_name' => $network->name,
+            ]);
+
+            return false;
+        }
+
         if (! $network->broadcast_enabled) {
             Log::warning('Cannot start broadcast: broadcast not enabled', [
                 'network_id' => $network->id,

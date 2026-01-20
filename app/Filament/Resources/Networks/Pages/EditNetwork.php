@@ -112,7 +112,7 @@ class EditNetwork extends EditRecord
                     ->color('gray')
                     ->requiresConfirmation()
                     ->modalHeading('Generate Schedule')
-                    ->modalDescription('This will generate a 7-day programme schedule for this network. Existing future programmes will be replaced.')
+                    ->modalDescription(fn (): string => 'This will generate a '.($this->record->schedule_window_days ?? 7).'-day programme schedule for this network. Existing future programmes will be replaced.')
                     ->disabled(fn (): bool => $this->record->network_playlist_id === null)
                     ->tooltip(fn (): ?string => $this->record->network_playlist_id === null ? 'Assign to a playlist first' : null)
                     ->action(function () {

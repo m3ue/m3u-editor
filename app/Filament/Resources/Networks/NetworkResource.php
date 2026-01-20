@@ -367,6 +367,20 @@ class NetworkResource extends Resource
                                     ->suffix('seconds')
                                     ->minValue(2)
                                     ->maxValue(30),
+
+                                TextInput::make('schedule_window_days')
+                                    ->label('Schedule Window')
+                                    ->numeric()
+                                    ->default(7)
+                                    ->suffix('days')
+                                    ->minValue(1)
+                                    ->maxValue(30)
+                                    ->helperText('Days of schedule to generate'),
+
+                                Toggle::make('auto_regenerate_schedule')
+                                    ->label('Auto-regenerate Schedule')
+                                    ->helperText('Automatically regenerate when schedule is about to expire.')
+                                    ->default(true),
                             ])->visible(fn (Get $get): bool => $get('broadcast_enabled')),
                         ]),
                 ]),
@@ -559,6 +573,20 @@ class NetworkResource extends Resource
                                     ->minValue(2)
                                     ->maxValue(30)
                                     ->helperText('HLS segment length (6s recommended)'),
+
+                                TextInput::make('schedule_window_days')
+                                    ->label('Schedule Window')
+                                    ->numeric()
+                                    ->default(7)
+                                    ->suffix('days')
+                                    ->minValue(1)
+                                    ->maxValue(30)
+                                    ->helperText('How many days of programme schedule to generate in advance.'),
+
+                                Toggle::make('auto_regenerate_schedule')
+                                    ->label('Auto-regenerate Schedule')
+                                    ->helperText('Automatically regenerate when schedule is about to expire (within 24 hours).')
+                                    ->default(true),
                             ])->visible(fn (Get $get): bool => $get('broadcast_enabled')),
 
                             Section::make('Transcoding')
@@ -763,7 +791,7 @@ class NetworkResource extends Resource
                         ->icon('heroicon-o-calendar')
                         ->requiresConfirmation()
                         ->modalHeading('Generate Schedule')
-                        ->modalDescription('This will generate a 7-day programme schedule for this network. Existing future programmes will be replaced.')
+                        ->modalDescription(fn (Network $record): string => 'This will generate a '.($record->schedule_window_days ?? 7).'-day programme schedule for this network. Existing future programmes will be replaced.')
                         ->disabled(fn (Network $record): bool => $record->network_playlist_id === null)
                         ->tooltip(fn (Network $record): ?string => $record->network_playlist_id === null ? 'Assign to a playlist first' : null)
                         ->action(function (Network $record) {
