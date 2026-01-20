@@ -13,7 +13,6 @@ use App\Models\Playlist;
 use App\Models\Season;
 use App\Models\Series;
 use App\Services\MediaServerService;
-use Exception;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -155,7 +154,7 @@ class SyncMediaServer implements ShouldQueue
                 'stats' => $this->stats,
             ]);
 
-        } catch (Exception $e) {
+        } catch (\Throwable $e) {
             $this->stats['errors'][] = $e->getMessage();
 
             // Update integration with error
@@ -575,7 +574,7 @@ class SyncMediaServer implements ShouldQueue
         return $category;
     }
 
-    public function failed(Exception $exception): void
+    public function failed(\Throwable $exception): void
     {
         $integration = MediaServerIntegration::find($this->integrationId);
         if ($integration) {
