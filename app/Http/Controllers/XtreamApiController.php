@@ -1556,11 +1556,11 @@ class XtreamApiController extends Controller
                     $epgListings[] = [
                         'id' => $programme['id'] ?? $index,
                         'epg_id' => (string) $epg->id,
-                        'title' => $programme['title'] ?? '',
+                        'title' => base64_encode($programme['title'] ?? ''),
+                        'description' => base64_encode($programme['desc'] ?? ''),
                         'lang' => $programme['lang'] ?? 'en',
                         'start' => $startTime->format('Y-m-d H:i:s'),
                         'end' => $endTime->format('Y-m-d H:i:s'),
-                        'description' => $programme['desc'] ?? '',
                         'channel_id' => $channel->epgChannel->channel_id,
                         'start_timestamp' => (string) $startTime->timestamp,
                         'stop_timestamp' => (string) $endTime->timestamp,
