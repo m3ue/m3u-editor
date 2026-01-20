@@ -115,6 +115,14 @@ class MediaServerIntegration extends Model
     }
 
     /**
+     * Check if this is a Plex server.
+     */
+    public function isPlex(): bool
+    {
+        return $this->type === 'plex';
+    }
+
+    /**
      * Get networks associated with this integration.
      */
     public function networks(): \Illuminate\Database\Eloquent\Relations\HasMany
