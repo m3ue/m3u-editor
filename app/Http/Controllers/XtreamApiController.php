@@ -1538,17 +1538,27 @@ class XtreamApiController extends Controller
                 return response()->json(['epg_listings' => []]);
             }
 
-            // Get programmes for today
-            $today = Carbon::now()->format('Y-m-d');
-            $programmes = $cacheService->getCachedProgrammes($epg, $today, [$channel->epgChannel->channel_id]);
+            // Get programmes for several days to ensure we have enough data
+            // Start from 3 days ago to cover past programmes as well
+            // We fetch 7 days total (3 past, today, 3 future)
+            $daysToFetch = 7;
+            $allProgrammes = [];
+            $threeDaysAgo = Carbon::now()->subDays(3);
+            foreach (range(0, $daysToFetch - 1) as $dayOffset) {
+                $date = $threeDaysAgo->clone()->addDays($dayOffset)->format('Y-m-d');
+                $programmes = $cacheService->getCachedProgrammes($epg, $date, [$channel->epgChannel->channel_id]);
+                if (isset($programmes[$channel->epgChannel->channel_id])) {
+                    $allProgrammes = array_merge($allProgrammes, $programmes[$channel->epgChannel->channel_id]);
+                }
+            }
 
             $epgListings = [];
-            if (isset($programmes[$channel->epgChannel->channel_id])) {
+            if (! empty($allProgrammes)) {
                 // Check if channel is currently playing
                 $isNowPlaying = $proxyEnabled ? M3uProxyService::isChannelActive($channel) : false;
 
                 $now = Carbon::now();
-                foreach ($programmes[$channel->epgChannel->channel_id] as $index => $programme) {
+                foreach ($allProgrammes as $index => $programme) {
                     $startTime = Carbon::parse($programme['start']);
                     $endTime = Carbon::parse($programme['stop']);
                     $isCurrentProgramme = $startTime->lte($now) && $endTime->gt($now);
