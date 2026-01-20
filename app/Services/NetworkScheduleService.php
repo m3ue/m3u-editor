@@ -19,7 +19,7 @@ class NetworkScheduleService
     /**
      * Default schedule generation window in days.
      */
-    protected int $scheduleWindowDays = 7;
+    protected const DEFAULT_SCHEDULE_WINDOW_DAYS = 7;
 
     /**
      * Minimum content duration in seconds (fallback for missing duration).
@@ -32,7 +32,8 @@ class NetworkScheduleService
     public function generateSchedule(Network $network, ?Carbon $startFrom = null): void
     {
         $startFrom = $startFrom ?? Carbon::now();
-        $endAt = $startFrom->copy()->addDays($this->scheduleWindowDays);
+        $scheduleWindowDays = $network->schedule_window_days ?? self::DEFAULT_SCHEDULE_WINDOW_DAYS;
+        $endAt = $startFrom->copy()->addDays($scheduleWindowDays);
 
         Log::info("Generating schedule for network {$network->name}", [
             'network_id' => $network->id,
@@ -109,16 +110,21 @@ class NetworkScheduleService
         }
 
         return match ($network->schedule_type) {
-            'shuffle' => $this->shuffleContent($networkContent),
+            'shuffle' => $this->shuffleContent($networkContent, $network),
             'sequential' => $networkContent->sortBy('sort_order')->pluck('contentable')->filter(),
             default => $networkContent->sortBy('sort_order')->pluck('contentable')->filter(),
         };
     }
 
     /**
-     * Shuffle content with weighting support.
+     * Shuffle content with weighting support and week-based seeding.
+     *
+     * Uses network ID + week number as seed to ensure:
+     * - Same week regeneration produces consistent schedule
+     * - Different weeks produce different shuffles (offset)
+     * - Different networks have unique shuffle patterns
      */
-    protected function shuffleContent(Collection $networkContent): Collection
+    protected function shuffleContent(Collection $networkContent, Network $network): Collection
     {
         // Build weighted list
         $weighted = collect();
@@ -131,7 +137,32 @@ class NetworkScheduleService
             }
         }
 
-        return $weighted->shuffle();
+        // Create a seed based on network ID and current week number
+        // This ensures different weeks get different shuffles while
+        // regenerating the same week produces consistent results
+        $weekNumber = (int) now()->format('oW'); // Year + week number (e.g., 202603)
+        $seed = crc32($network->id.'-'.$weekNumber);
+
+        return $this->seededShuffle($weighted, $seed);
+    }
+
+    /**
+     * Shuffle a collection using a seeded random number generator.
+     */
+    protected function seededShuffle(Collection $collection, int $seed): Collection
+    {
+        $items = $collection->values()->all();
+        mt_srand($seed);
+
+        for ($i = count($items) - 1; $i > 0; $i--) {
+            $j = mt_rand(0, $i);
+            [$items[$i], $items[$j]] = [$items[$j], $items[$i]];
+        }
+
+        // Reset random seed to avoid affecting other random operations
+        mt_srand();
+
+        return collect($items);
     }
 
     /**

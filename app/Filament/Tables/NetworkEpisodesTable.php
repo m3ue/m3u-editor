@@ -90,12 +90,22 @@ class NetworkEpisodesTable
             ->filters([
                 SelectFilter::make('series')
                     ->label('Series')
+                    ->attribute('series_id')
                     ->options(fn () => Series::where('playlist_id', $table->getArguments()['playlist_id'] ?? null)->pluck('name', 'id'))
                     ->searchable()
                     ->preload(),
                 SelectFilter::make('category')
-                    ->label(label: 'Category')
+                    ->label('Category')
                     ->options(fn () => Category::where('playlist_id', $table->getArguments()['playlist_id'] ?? null)->pluck('name', 'id'))
+                    ->query(function (Builder $query, array $data): Builder {
+                        if (empty($data['value'])) {
+                            return $query;
+                        }
+
+                        return $query->whereHas('series', function (Builder $query) use ($data) {
+                            $query->where('category_id', $data['value']);
+                        });
+                    })
                     ->searchable()
                     ->preload(),
             ])

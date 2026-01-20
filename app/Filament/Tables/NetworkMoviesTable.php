@@ -74,6 +74,7 @@ class NetworkMoviesTable
             ->filters([
                 SelectFilter::make('group')
                     ->label('Group')
+                    ->attribute('group_id')
                     ->options(fn () => Group::where('playlist_id', $table->getArguments()['playlist_id'] ?? null)->pluck('name', 'id'))
                     ->searchable()
                     ->preload(),

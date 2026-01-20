@@ -246,3 +246,16 @@ This section summarizes what has already been implemented for the Network → HL
   - `database/migrations/*broadcast_reference*.php`
 
 ---
+
+## Road Map
+
+- [x] Add configurable schedule generation window (per-network setting, 1-30 days)
+- [ ] Implement network refresh and regeneration. (perhaps on adjustments, network is regenerated cleanly -- May require duplicating the network and removing the source)
+- [ ] Implement Schedules view with gui adjustments
+- [ ] Add optional filler content when no media is available
+- [ ] Add optional automatic playlist generation on network creation
+- [ ] Add optional intelligent content line ups based on media collections (e.g. "Trilogys", "Top Rated", "Recently Added")
+- [ ] Add "Export lineup" feature to generate shareable playlists from networks
+- [x] Content reshuffling to avoid repeats in short timeframes (seeded shuffle with weekly variation)
+- [x] Add configurable schedule generations (e.g. beyond the 7 day default) (per-network `schedule_window_days` setting)
+- [x] Add auto-regeneration toggle (per-network `auto_regenerate_schedule` flag)
