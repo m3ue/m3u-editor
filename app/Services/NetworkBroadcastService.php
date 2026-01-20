@@ -432,27 +432,27 @@ class NetworkBroadcastService
             return null;
         }
 
-        // Build the stream URL with media server seeking
-        $url = "{$integration->base_url}/Videos/{$itemId}/stream.ts";
-        $params = [
-            'static' => 'true',
-            'api_key' => $integration->api_key,
-        ];
+        $service = MediaServerService::make($integration);
+        $request = request();
+        $request->merge(['static' => 'true']); // static stream for HLS
 
         // Use media server's native seeking if we need to seek
         if ($seekSeconds > 0) {
             // Jellyfin/Emby use ticks (100-nanosecond intervals)
-            $params['StartTimeTicks'] = $seekSeconds * 10_000_000;
+            $startTimeTicks = $seekSeconds * 10_000_000;
+            $request->merge(['StartTimeTicks' => $startTimeTicks]);
 
             Log::debug('📍 Media server seek applied', [
                 'network_id' => $network->id,
                 'item_id' => $itemId,
                 'seek_seconds' => $seekSeconds,
-                'seek_ticks' => $params['StartTimeTicks'],
+                'seek_ticks' => $startTimeTicks,
             ]);
         }
 
-        return $url.'?'.http_build_query($params);
+        $streamUrl = $service->getDirectStreamUrl($request, $itemId, 'ts');
+
+        return $streamUrl;
     }
 
     /**
