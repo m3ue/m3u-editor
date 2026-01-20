@@ -70,6 +70,11 @@ class RefreshPlaylistProfiles implements ShouldQueue
     {
         $playlists = Playlist::where('profiles_enabled', true)->get();
 
+        if ($playlists->isEmpty()) {
+            // If no playlists with profiles enabled, nothing to do
+            return;
+        }
+
         Log::info('Starting refresh of all playlist profiles', [
             'playlist_count' => $playlists->count(),
         ]);

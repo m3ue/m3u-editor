@@ -41,7 +41,6 @@ class ReconcileProfileConnections extends Command
         }
 
         if ($playlists->isEmpty()) {
-            $this->info('No playlists with profiles enabled found.');
 
             return self::SUCCESS;
         }
