@@ -15,8 +15,6 @@ class UpdateXtreamStats implements ShouldBeUnique, ShouldQueue
 {
     use Queueable;
 
-    public $tries = 2; // Max 2 attempts
-
     public $cacheKey = '';
 
     public function __construct(
