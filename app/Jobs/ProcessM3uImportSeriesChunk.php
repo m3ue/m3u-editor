@@ -11,6 +11,7 @@ use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use JsonMachine\Items;
 
 class ProcessM3uImportSeriesChunk implements ShouldQueue
@@ -134,6 +135,15 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
 
         // Create the streams
         foreach ($seriesStreams as $item) {
+            // Normalize and validate the name — some providers omit it which violates the DB NOT NULL constraint
+            $itemName = $item->name ?? $item->title ?? null;
+            $itemName = $itemName !== null ? trim((string) $itemName) : null;
+
+            // We need a name to proceed, if still not set, skip this item
+            if (empty($itemName)) {
+                continue;
+            }
+
             // Check if we already have this series in the playlist
             $existingSeries = $playlist->series()
                 ->where('source_series_id', $item->series_id)
@@ -148,7 +158,7 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
             // If we reach here, it means we need to create a new series
             $bulk[] = [
                 'enabled' => $this->autoEnable, // Disable the series by default
-                'name' => $item->name,
+                'name' => $itemName,
                 'source_series_id' => $item->series_id,
                 'source_category_id' => $sourceCategoryId,
                 'import_batch_no' => $this->batchNo,
@@ -174,7 +184,19 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
             'series_progress' => min(99, $playlist->series_progress + ($this->batchCount / 100) * 5),
         ]);
 
-        // Bulk insert the series in chunks
-        collect($bulk)->chunk(100)->each(fn ($chunk) => Series::insert($chunk->toArray()));
+        // Bulk insert the series in chunks with logging on failure
+        collect($bulk)->chunk(100)->each(function ($chunk) {
+            try {
+                Series::insert($chunk->toArray());
+            } catch (\Throwable $e) {
+                Log::error('Series bulk insert failed', [
+                    'exception' => $e->getMessage(),
+                    'chunk' => $chunk->toArray(),
+                ]);
+
+                // Re-throw so the job fails loudly if needed
+                throw $e;
+            }
+        });
     }
 }
