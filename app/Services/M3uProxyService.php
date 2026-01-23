@@ -1912,6 +1912,43 @@ class M3uProxyService
     }
 
     /**
+     * Make a request to the proxy service.
+     * Send a generic HTTP request to the m3u-proxy API.
+     *
+     * @param  string  $method  HTTP method (GET, POST, DELETE)
+     * @param  string  $endpoint  API endpoint (e.g. '/streams')
+     * @param  array  $data  Optional data to send with the request
+     */
+    public function proxyRequest(string $method, string $endpoint, array $data = [])
+    {
+        $url = $this->apiBaseUrl.$endpoint;
+
+        $request = Http::timeout(30)
+            ->acceptJson();
+
+        if ($this->apiToken) {
+            $request->withHeaders([
+                'X-API-Token' => $this->apiToken,
+            ]);
+        }
+
+        return match (strtoupper($method)) {
+            'GET' => $request->get($url, $data),
+            'POST' => $request->post($url, $data),
+            'DELETE' => $request->delete($url, $data),
+            default => throw new \InvalidArgumentException("Unsupported HTTP method: {$method}"),
+        };
+    }
+
+    /**
+     * Get the HLS URL from the proxy for a network.
+     */
+    public function getProxyHlsUrl(Network $network): string
+    {
+        return "{$this->getPublicUrl()}/broadcast/{$network->uuid}/live.m3u8";
+    }
+
+    /**
      * Get the failover resolver URL for smart failover handling.
      * This URL is passed to m3u-proxy so it can call back to validate failover channels
      * before attempting to stream from them.

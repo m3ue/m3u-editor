@@ -6,7 +6,6 @@ use App\Models\MediaServerIntegration;
 use App\Models\Network;
 use App\Models\NetworkProgramme;
 use Carbon\Carbon;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -23,16 +22,13 @@ use Illuminate\Support\Facades\Log;
  */
 class NetworkBroadcastService
 {
-    protected string $proxyBaseUrl;
-
-    protected ?string $proxyToken;
+    protected M3uProxyService $proxyService;
 
     public function __construct()
     {
-        $host = config('proxy.m3u_proxy_host', 'localhost');
-        $port = config('proxy.m3u_proxy_port', 8085);
-        $this->proxyBaseUrl = "http://{$host}:{$port}";
-        $this->proxyToken = config('proxy.m3u_proxy_token');
+        // Initialize the M3uProxyService
+        // We'll use this to communicate with the proxy for broadcast management
+        $this->proxyService = new M3uProxyService;
     }
 
     /**
@@ -197,9 +193,8 @@ class NetworkBroadcastService
         $startNumber = max(0, $network->broadcast_segment_sequence ?? 0);
         $addDiscontinuity = $startNumber > 0;
 
-        // Build callback URL for when FFmpeg exits
-        $callbackUrl = route('m3u-proxy.broadcast.callback');
-
+        // Get the callback URL
+        $callbackUrl = $this->proxyService->getBroadcastCallbackUrl();
         $payload = [
             'stream_url' => $streamUrl,
             'seek_seconds' => $seekPosition,
@@ -222,7 +217,7 @@ class NetworkBroadcastService
         ]);
 
         try {
-            $response = $this->proxyRequest(
+            $response = $this->proxyService->proxyRequest(
                 'POST',
                 "/broadcast/{$network->uuid}/start",
                 $payload
@@ -283,7 +278,7 @@ class NetworkBroadcastService
     {
         // First try to stop via proxy
         try {
-            $response = $this->proxyRequest(
+            $response = $this->proxyService->proxyRequest(
                 'POST',
                 "/broadcast/{$network->uuid}/stop"
             );
@@ -319,7 +314,7 @@ class NetworkBroadcastService
 
         // Clean up via proxy (removes files)
         try {
-            $this->proxyRequest('DELETE', "/broadcast/{$network->uuid}");
+            $this->proxyService->proxyRequest('DELETE', "/broadcast/{$network->uuid}");
         } catch (\Exception $e) {
             Log::warning('Failed to cleanup broadcast files via proxy', [
                 'network_id' => $network->id,
@@ -336,7 +331,7 @@ class NetworkBroadcastService
     public function isProcessRunning(Network $network): bool
     {
         try {
-            $response = $this->proxyRequest(
+            $response = $this->proxyService->proxyRequest(
                 'GET',
                 "/broadcast/{$network->uuid}/status"
             );
@@ -362,30 +357,6 @@ class NetworkBroadcastService
 
             return false;
         }
-    }
-
-    /**
-     * Make a request to the proxy service.
-     */
-    protected function proxyRequest(string $method, string $endpoint, array $data = [])
-    {
-        $url = $this->proxyBaseUrl.$endpoint;
-
-        $request = Http::timeout(30)
-            ->acceptJson();
-
-        if ($this->proxyToken) {
-            $request->withHeaders([
-                'X-API-Token' => $this->proxyToken,
-            ]);
-        }
-
-        return match (strtoupper($method)) {
-            'GET' => $request->get($url, $data),
-            'POST' => $request->post($url, $data),
-            'DELETE' => $request->delete($url, $data),
-            default => throw new \InvalidArgumentException("Unsupported HTTP method: {$method}"),
-        };
     }
 
     /**
@@ -513,7 +484,7 @@ class NetworkBroadcastService
             'running' => $isRunning,
             'pid' => $network->broadcast_pid,
             'started_at' => $network->broadcast_started_at?->toIso8601String(),
-            'hls_url' => $this->getProxyHlsUrl($network),
+            'hls_url' => $this->proxyService->getProxyHlsUrl($network),
         ];
 
         if ($isRunning) {
@@ -530,14 +501,6 @@ class NetworkBroadcastService
         }
 
         return $status;
-    }
-
-    /**
-     * Get the HLS URL from the proxy for a network.
-     */
-    public function getProxyHlsUrl(Network $network): string
-    {
-        return "{$this->proxyBaseUrl}/broadcast/{$network->uuid}/live.m3u8";
     }
 
     /**
