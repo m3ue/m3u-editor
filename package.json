@@ -16,7 +16,7 @@
         "laravel-vite-plugin": "^1.0",
         "postcss": "^8.4.47",
         "pusher-js": "^8.4.0-rc2",
-        "sass-embedded": "^1.85.0",
+        "sass-embedded": "^1.97.3",
         "tailwindcss": "^4.1.12",
         "vite": ">=6.4.1"
     },
