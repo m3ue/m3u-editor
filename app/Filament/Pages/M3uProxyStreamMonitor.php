@@ -5,6 +5,7 @@ namespace App\Filament\Pages;
 use App\Facades\LogoFacade;
 use App\Models\Channel;
 use App\Models\Episode;
+use App\Models\Network;
 use App\Models\StreamProfile;
 use App\Services\M3uProxyService;
 use Carbon\Carbon;
@@ -137,6 +138,28 @@ class M3uProxyStreamMonitor extends Page
     public function stopStream(string $streamId): void
     {
         try {
+            // Support stopping broadcasts via a special stream ID prefix
+            if (str_starts_with($streamId, 'broadcast:')) {
+                $networkId = substr($streamId, 10);
+                $success = $this->apiService->stopBroadcast($networkId);
+
+                if ($success) {
+                    Notification::make()
+                        ->title("Broadcast for network {$networkId} stopped successfully.")
+                        ->success()
+                        ->send();
+                } else {
+                    Notification::make()
+                        ->title("Failed to stop broadcast for network {$networkId}.")
+                        ->danger()
+                        ->send();
+                }
+
+                $this->refreshData();
+
+                return;
+            }
+
             $success = $this->apiService->stopStream($streamId);
             if ($success) {
                 Notification::make()
@@ -164,6 +187,7 @@ class M3uProxyStreamMonitor extends Page
     {
         $apiStreams = $this->apiService->fetchActiveStreams();
         $apiClients = $this->apiService->fetchActiveClients();
+        $apiBroadcasts = $this->apiService->fetchBroadcasts();
 
         // Check for connection errors
         if (! $apiStreams['success']) {
@@ -181,120 +205,154 @@ class M3uProxyStreamMonitor extends Page
         // Clear any previous errors
         $this->connectionError = null;
 
-        if (empty($apiStreams['streams'])) {
-            return [];
+        $streams = [];
+        if (! empty($apiStreams['streams'])) {
+            // Group clients by stream_id for easier lookup
+            $clientsByStream = collect($apiClients['clients'] ?? [])
+                ->groupBy('stream_id')
+                ->toArray();
+
+            foreach ($apiStreams['streams'] as $stream) {
+                $streamId = $stream['stream_id'];
+                $streamClients = $clientsByStream[$streamId] ?? [];
+
+                // Get model information if metadata exists
+                $model = [];
+                if (isset($stream['metadata']['type']) && isset($stream['metadata']['id'])) {
+                    $modelType = $stream['metadata']['type'];
+                    $modelId = $stream['metadata']['id'];
+                    if ($modelType === 'channel') {
+                        $channel = Channel::find($modelId);
+                        if ($channel) {
+                            $title = $channel->name_custom ?? $channel->name ?? $channel->title;
+                            $logo = LogoFacade::getChannelLogoUrl($channel);
+                        }
+                    } elseif ($modelType === 'episode') {
+                        $episode = Episode::find($modelId);
+                        if ($episode) {
+                            $title = $episode->title;
+                            $logo = LogoFacade::getEpisodeLogoUrl($episode);
+                        }
+                    }
+                    if ($title || $logo) {
+                        $model = [
+                            'title' => $title ?? 'N/A',
+                            'logo' => $logo,
+                        ];
+                    }
+                }
+
+                // Calculate uptime
+                $startedAt = Carbon::parse($stream['created_at'], 'UTC');
+                $uptime = $startedAt->diffForHumans(null, true);
+
+                // Format bytes transferred
+                $bytesTransferred = $this->formatBytes($stream['total_bytes_served']);
+
+                // Calculate bandwidth (approximate based on bytes and time)
+                $durationSeconds = $startedAt->diffInSeconds(now());
+                $bandwidthKbps = $durationSeconds > 0
+                    ? round(($stream['total_bytes_served'] * 8) / $durationSeconds / 1000, 2)
+                    : 0;
+
+                // Normalize clients
+                $clients = array_map(function ($client) {
+                    $connectedAt = Carbon::parse($client['created_at'], 'UTC');
+                    $lastAccess = Carbon::parse($client['last_access'], 'UTC');
+
+                    // Client is considered active if:
+                    // 1. is_connected is true (from API), OR
+                    // 2. last_access was within the last 30 seconds (more lenient for active streaming)
+                    $isActive = ($client['is_connected'] ?? false) || $lastAccess->diffInSeconds(now()) < 30;
+
+                    return [
+                        'ip' => $client['ip_address'],
+                        'username' => $client['username'] ?? null,
+                        'connected_at' => $connectedAt->format('Y-m-d H:i:s'),
+                        'duration' => $connectedAt->diffForHumans(null, true),
+                        'bytes_received' => $this->formatBytes($client['bytes_served']),
+                        'bandwidth' => 'N/A', // Can calculate if needed
+                        'is_active' => $isActive,
+                    ];
+                }, $streamClients);
+
+                $transcoding = $stream['metadata']['transcoding'] ?? false;
+                $transcodingFormat = null;
+                if ($transcoding) {
+                    $profile = StreamProfile::find($stream['metadata']['profile_id'] ?? null);
+                    if ($profile) {
+                        $transcodingFormat = $profile->format === 'm3u8'
+                            ? 'HLS'
+                            : strtoupper($profile->format);
+                    }
+                }
+
+                $streams[] = [
+                    'stream_id' => $streamId,
+                    'source_url' => $this->truncateUrl($stream['original_url']),
+                    'current_url' => $stream['current_url'],
+                    'format' => strtoupper($stream['stream_type']),
+                    'status' => $stream['is_active'] && $stream['client_count'] > 0 ? 'active' : 'idle',
+                    'client_count' => $stream['client_count'],
+                    'bandwidth_kbps' => $bandwidthKbps,
+                    'bytes_transferred' => $bytesTransferred,
+                    'uptime' => $uptime,
+                    'started_at' => $startedAt->format('Y-m-d H:i:s'),
+                    'process_running' => $stream['is_active'] && $stream['client_count'] > 0,
+                    'model' => $model,
+                    'clients' => $clients,
+                    'has_failover' => $stream['has_failover'],
+                    'error_count' => $stream['error_count'],
+                    'segments_served' => $stream['total_segments_served'],
+                    'transcoding' => $transcoding,
+                    'transcoding_format' => $transcodingFormat,
+                    // Failover details
+                    'failover_urls' => $stream['failover_urls'] ?? [],
+                    'failover_resolver_url' => $stream['failover_resolver_url'] ?? null,
+                    'current_failover_index' => $stream['current_failover_index'] ?? 0,
+                    'failover_attempts' => $stream['failover_attempts'] ?? 0,
+                    'last_failover_time' => isset($stream['last_failover_time'])
+                        ? Carbon::parse($stream['last_failover_time'], 'UTC')->format('Y-m-d H:i:s')
+                        : null,
+                    'using_failover' => ($stream['current_failover_index'] ?? 0) > 0 || ($stream['failover_attempts'] ?? 0) > 0,
+                ];
+            }
         }
 
-        // Group clients by stream_id for easier lookup
-        $clientsByStream = collect($apiClients['clients'] ?? [])
-            ->groupBy('stream_id')
-            ->toArray();
+        // Append any active network broadcasts (simplified output)
+        if (! empty($apiBroadcasts['success']) && ! empty($apiBroadcasts['broadcasts'])) {
+            foreach ($apiBroadcasts['broadcasts'] as $bcast) {
+                $network = Network::where('uuid', $bcast['network_id'])->first();
 
-        $streams = [];
-        foreach ($apiStreams['streams'] as $stream) {
-            $streamId = $stream['stream_id'];
-            $streamClients = $clientsByStream[$streamId] ?? [];
+                $startedAt = isset($bcast['started_at']) ? Carbon::parse($bcast['started_at'], 'UTC') : null;
+                $uptime = $startedAt ? $startedAt->diffForHumans(null, true) : 'N/A';
 
-            // Get model information if metadata exists
-            $model = [];
-            if (isset($stream['metadata']['type']) && isset($stream['metadata']['id'])) {
-                $modelType = $stream['metadata']['type'];
-                $modelId = $stream['metadata']['id'];
-                if ($modelType === 'channel') {
-                    $channel = Channel::find($modelId);
-                    if ($channel) {
-                        $title = $channel->name_custom ?? $channel->name ?? $channel->title;
-                        $logo = LogoFacade::getChannelLogoUrl($channel);
-                    }
-                } elseif ($modelType === 'episode') {
-                    $episode = Episode::find($modelId);
-                    if ($episode) {
-                        $title = $episode->title;
-                        $logo = LogoFacade::getEpisodeLogoUrl($episode);
-                    }
-                }
-                if ($title || $logo) {
-                    $model = [
-                        'title' => $title ?? 'N/A',
-                        'logo' => $logo,
-                    ];
-                }
-            }
-
-            // Calculate uptime
-            $startedAt = Carbon::parse($stream['created_at'], 'UTC');
-            $uptime = $startedAt->diffForHumans(null, true);
-
-            // Format bytes transferred
-            $bytesTransferred = $this->formatBytes($stream['total_bytes_served']);
-
-            // Calculate bandwidth (approximate based on bytes and time)
-            $durationSeconds = $startedAt->diffInSeconds(now());
-            $bandwidthKbps = $durationSeconds > 0
-                ? round(($stream['total_bytes_served'] * 8) / $durationSeconds / 1000, 2)
-                : 0;
-
-            // Normalize clients
-            $clients = array_map(function ($client) {
-                $connectedAt = Carbon::parse($client['created_at'], 'UTC');
-                $lastAccess = Carbon::parse($client['last_access'], 'UTC');
-
-                // Client is considered active if:
-                // 1. is_connected is true (from API), OR
-                // 2. last_access was within the last 30 seconds (more lenient for active streaming)
-                $isActive = ($client['is_connected'] ?? false) || $lastAccess->diffInSeconds(now()) < 30;
-
-                return [
-                    'ip' => $client['ip_address'],
-                    'username' => $client['username'] ?? null,
-                    'connected_at' => $connectedAt->format('Y-m-d H:i:s'),
-                    'duration' => $connectedAt->diffForHumans(null, true),
-                    'bytes_received' => $this->formatBytes($client['bytes_served']),
-                    'bandwidth' => 'N/A', // Can calculate if needed
-                    'is_active' => $isActive,
+                $streams[] = [
+                    'stream_id' => 'broadcast:'.$bcast['network_id'],
+                    'source_url' => $network ? $network->hls_url : ($bcast['stream_url'] ?? ''),
+                    'current_url' => $network ? $network->hls_url : ($bcast['stream_url'] ?? ''),
+                    'format' => 'HLS',
+                    'status' => (($bcast['status'] ?? '') === 'running') ? 'active' : 'idle',
+                    'client_count' => 0,
+                    'bandwidth_kbps' => 0,
+                    'bytes_transferred' => 'N/A',
+                    'uptime' => $uptime,
+                    'started_at' => $startedAt ? $startedAt->format('Y-m-d H:i:s') : null,
+                    'process_running' => (($bcast['status'] ?? '') === 'running'),
+                    'model' => [
+                        'title' => $network ? $network->name : ('Network '.$bcast['network_id']),
+                        'logo' => null,
+                    ],
+                    'clients' => [],
+                    'has_failover' => false,
+                    'error_count' => 0,
+                    'segments_served' => $network ? $network->hls_segment_count : 0,
+                    'transcoding' => false,
+                    'transcoding_format' => null,
+                    'using_failover' => false,
+                    'broadcast' => true,
                 ];
-            }, $streamClients);
-
-            $transcoding = $stream['metadata']['transcoding'] ?? false;
-            $transcodingFormat = null;
-            if ($transcoding) {
-                $profile = StreamProfile::find($stream['metadata']['profile_id'] ?? null);
-                if ($profile) {
-                    $transcodingFormat = $profile->format === 'm3u8'
-                        ? 'HLS'
-                        : strtoupper($profile->format);
-                }
             }
-
-            $streams[] = [
-                'stream_id' => $streamId,
-                'source_url' => $this->truncateUrl($stream['original_url']),
-                'current_url' => $stream['current_url'],
-                'format' => strtoupper($stream['stream_type']),
-                'status' => $stream['is_active'] && $stream['client_count'] > 0 ? 'active' : 'idle',
-                'client_count' => $stream['client_count'],
-                'bandwidth_kbps' => $bandwidthKbps,
-                'bytes_transferred' => $bytesTransferred,
-                'uptime' => $uptime,
-                'started_at' => $startedAt->format('Y-m-d H:i:s'),
-                'process_running' => $stream['is_active'] && $stream['client_count'] > 0,
-                'model' => $model,
-                'clients' => $clients,
-                'has_failover' => $stream['has_failover'],
-                'error_count' => $stream['error_count'],
-                'segments_served' => $stream['total_segments_served'],
-                'transcoding' => $transcoding,
-                'transcoding_format' => $transcodingFormat,
-                // Failover details
-                'failover_urls' => $stream['failover_urls'] ?? [],
-                'failover_resolver_url' => $stream['failover_resolver_url'] ?? null,
-                'current_failover_index' => $stream['current_failover_index'] ?? 0,
-                'failover_attempts' => $stream['failover_attempts'] ?? 0,
-                'last_failover_time' => isset($stream['last_failover_time'])
-                    ? Carbon::parse($stream['last_failover_time'], 'UTC')->format('Y-m-d H:i:s')
-                    : null,
-                'using_failover' => ($stream['current_failover_index'] ?? 0) > 0 || ($stream['failover_attempts'] ?? 0) > 0,
-            ];
         }
 
         return $streams;

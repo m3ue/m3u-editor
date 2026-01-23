@@ -1244,6 +1244,99 @@ class M3uProxyService
     }
 
     /**
+     * Fetch active broadcasts (network broadcasts) from the proxy server API.
+     * Returns array with 'success', 'broadcasts', and optional 'error' keys.
+     */
+    public function fetchBroadcasts(): array
+    {
+        if (empty($this->apiBaseUrl)) {
+            return [
+                'success' => false,
+                'error' => 'M3U Proxy base URL is not configured',
+                'broadcasts' => [],
+            ];
+        }
+
+        try {
+            $endpoint = $this->apiBaseUrl.'/broadcast';
+            $response = Http::timeout(5)->acceptJson()
+                ->withHeaders($this->apiToken ? [
+                    'X-API-Token' => $this->apiToken,
+                ] : [])
+                ->get($endpoint);
+
+            if ($response->successful()) {
+                $data = $response->json() ?: [];
+
+                // Only include broadcasts for networks owned by the current user
+                // Get networks for current user
+                $userNetworkUuids = \App\Models\Network::where('user_id', auth()->id())->pluck('uuid')->toArray();
+
+                $broadcasts = array_filter($data['broadcasts'] ?? [], function ($b) use ($userNetworkUuids) {
+                    return isset($b['network_id']) && in_array($b['network_id'], $userNetworkUuids);
+                });
+
+                return [
+                    'success' => true,
+                    'broadcasts' => array_values($broadcasts),
+                    'count' => count($broadcasts),
+                ];
+            }
+
+            Log::warning('Failed to fetch broadcasts from m3u-proxy: HTTP '.$response->status());
+
+            return [
+                'success' => false,
+                'error' => 'M3U Proxy returned status '.$response->status(),
+                'broadcasts' => [],
+            ];
+        } catch (Exception $e) {
+            Log::warning('Failed to fetch broadcasts from m3u-proxy: '.$e->getMessage());
+
+            return [
+                'success' => false,
+                'error' => 'Unable to connect to m3u-proxy: '.$e->getMessage(),
+                'broadcasts' => [],
+            ];
+        }
+    }
+
+    /**
+     * Stop a running network broadcast on the proxy. Returns true on success.
+     */
+    public function stopBroadcast(string $networkId): bool
+    {
+        if (empty($this->apiBaseUrl)) {
+            Log::warning('M3U Proxy base URL not configured');
+
+            return false;
+        }
+
+        try {
+            $endpoint = $this->apiBaseUrl.'/broadcast/'.rawurlencode($networkId).'/stop';
+            $response = Http::timeout(10)->acceptJson()
+                ->withHeaders($this->apiToken ? [
+                    'X-API-Token' => $this->apiToken,
+                ] : [])
+                ->post($endpoint);
+
+            if ($response->successful()) {
+                Log::debug("Broadcast {$networkId} stopped successfully");
+
+                return true;
+            }
+
+            Log::warning("Failed to stop broadcast {$networkId}: ".$response->body());
+
+            return false;
+        } catch (Exception $e) {
+            Log::error("Error stopping broadcast {$networkId}: ".$e->getMessage());
+
+            return false;
+        }
+    }
+
+    /**
      * Create or update a stream on the m3u-proxy API.
      * Returns the stream ID.
      *
