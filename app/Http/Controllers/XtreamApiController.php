@@ -1527,7 +1527,7 @@ class XtreamApiController extends Controller
                     $isCurrentProgramme = $startTime->lte($now) && $endTime->gt($now);
 
                     $epgListings[] = [
-                        'id' => $programme['id'] ?? $count,
+                        'id' => (string) ($programme['id'] ?? $count),
                         'epg_id' => (string) $epg->id,
                         'title' => $programme['title'] ?? '',
                         'lang' => $programme['lang'] ?? 'en',
@@ -1582,11 +1582,11 @@ class XtreamApiController extends Controller
             }
 
             // Get programmes for several days to ensure we have enough data
-            // Start from 3 days ago to cover past programmes as well
-            // We fetch 7 days total (3 past, today, 3 future)
-            $daysToFetch = 7;
+            // Start from 4 days ago to cover past programmes as well
+            // We fetch 8 days total (4 past, today, 3 future)
+            $daysToFetch = 8;
             $allProgrammes = [];
-            $threeDaysAgo = Carbon::now()->subDays(3);
+            $threeDaysAgo = Carbon::now()->subDays(value: 4);
             foreach (range(0, $daysToFetch - 1) as $dayOffset) {
                 $date = $threeDaysAgo->clone()->addDays($dayOffset)->format('Y-m-d');
                 $programmes = $cacheService->getCachedProgrammes($epg, $date, [$channel->epgChannel->channel_id]);
@@ -1607,7 +1607,7 @@ class XtreamApiController extends Controller
                     $isCurrentProgramme = $startTime->lte($now) && $endTime->gt($now);
 
                     $epgListings[] = [
-                        'id' => $programme['id'] ?? $index,
+                        'id' => (string) ($programme['id'] ?? $index),
                         'epg_id' => (string) $epg->id,
                         'title' => base64_encode($programme['title'] ?? ''),
                         'description' => base64_encode($programme['desc'] ?? ''),
