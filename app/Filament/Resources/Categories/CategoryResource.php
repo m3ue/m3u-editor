@@ -2,11 +2,10 @@
 
 namespace App\Filament\Resources\Categories;
 
+use App\Filament\Resources\Categories\Pages\EditCategory;
 use App\Filament\Resources\Categories\Pages\ListCategories;
-use App\Filament\Resources\Categories\Pages\ViewCategory;
 use App\Filament\Resources\Categories\RelationManagers\SeriesRelationManager;
 use App\Filament\Resources\CategoryResource\Pages;
-use App\Filament\Resources\Playlists\PlaylistResource;
 use App\Jobs\ProcessM3uImportSeriesEpisodes;
 use App\Jobs\SyncSeriesStrmFiles;
 use App\Models\Category;
@@ -15,12 +14,13 @@ use App\Traits\HasUserFiltering;
 use Filament\Actions\Action;
 use Filament\Actions\BulkAction;
 use Filament\Actions\BulkActionGroup;
-use Filament\Actions\ViewAction;
+use Filament\Actions\EditAction;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
-use Filament\Infolists\Components\TextEntry;
+use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
+use Filament\Schemas\Components\Group as ComponentsGroup;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
@@ -62,17 +62,36 @@ class CategoryResource extends Resource
 
     public static function form(Schema $schema): Schema
     {
+        $fields = [
+            TextInput::make('name')
+                ->required()
+                ->maxLength(255),
+            Toggle::make('enabled')
+                ->inline(false)
+                ->label('Auto Enable New Channels')
+                ->helperText('Automatically enable newly added channels to this group.')
+                ->default(true),
+            Select::make('stream_file_setting_id')
+                ->label('Stream File Setting Profile')
+                ->searchable()
+                ->relationship('streamFileSetting', 'name', fn ($query) => $query->forSeries()->where('user_id', auth()->id()))
+                ->nullable()
+                ->helperText('Select a Stream File Setting profile for all series in this category. Series-level settings take priority. Leave empty to use global settings.'),
+        ];
+
         return $schema
             ->components([
-                TextInput::make('name')
-                    ->required()
-                    ->maxLength(255),
-                Select::make('stream_file_setting_id')
-                    ->label('Stream File Setting Profile')
-                    ->searchable()
-                    ->relationship('streamFileSetting', 'name', fn ($query) => $query->forSeries()->where('user_id', auth()->id()))
-                    ->nullable()
-                    ->helperText('Select a Stream File Setting profile for all series in this category. Series-level settings take priority. Leave empty to use global settings.'),
+                Section::make('Category Settings')
+                    ->compact()
+                    ->columns(2)
+                    ->icon('heroicon-s-cog')
+                    ->collapsed(true)
+                    ->schema($fields)
+                    ->hiddenOn(['create']),
+                ComponentsGroup::make($fields)
+                    ->columnSpanFull()
+                    ->columns(2)
+                    ->hiddenOn(['edit']),
             ]);
     }
 
@@ -133,7 +152,6 @@ class CategoryResource extends Resource
             ])
             ->recordActions([
                 BulkActionGroup::make([
-                    ViewAction::make(),
                     Action::make('add')
                         ->label('Add to Custom Playlist')
                         ->schema([
@@ -294,6 +312,8 @@ class CategoryResource extends Resource
                         ->modalDescription('Disable the selected category series now?')
                         ->modalSubmitActionLabel('Yes, disable now'),
                 ])->color('primary')->button()->hiddenLabel()->size('sm'),
+                EditAction::make()
+                    ->button()->hiddenLabel()->size('sm'),
             ], position: RecordActionsPosition::BeforeCells)
             ->toolbarActions([
                 BulkActionGroup::make([
@@ -548,28 +568,7 @@ class CategoryResource extends Resource
         return [
             'index' => ListCategories::route('/'),
             // 'create' => Pages\CreateCategory::route('/create'),
-            'view' => ViewCategory::route('/{record}'),
-            // 'edit' => Pages\EditCategory::route('/{record}/edit'),
+            'edit' => EditCategory::route('/{record}/edit'),
         ];
-    }
-
-    public static function infolist(Schema $schema): Schema
-    {
-        return $schema
-            ->components([
-                Section::make('Category Details')
-                    ->collapsible(true)
-                    ->collapsed(true)
-                    ->compact()
-                    ->columns(2)
-                    ->schema([
-                        TextEntry::make('name')
-                            ->badge(),
-                        TextEntry::make('playlist.name')
-                            ->label('Playlist')
-                            // ->badge(),
-                            ->url(fn ($record) => PlaylistResource::getUrl('edit', ['record' => $record->playlist_id])),
-                    ]),
-            ]);
     }
 }
