@@ -150,7 +150,7 @@ class AppServiceProvider extends ServiceProvider
      * Configure a sensible base URL for console/CLI contexts where there is
      * no incoming HTTP request. This ensures that route() and url() include
      * the correct host and port when generating absolute URLs (e.g. for
-     * Schedules Direct artwork proxies written into EPG files).
+     * SchedulesDirect artwork proxies written into EPG files).
      */
     private function configureConsoleBaseUrl(): void
     {

@@ -109,7 +109,10 @@ class MapPlaylistChannelsToEpg implements ShouldQueue
                     ->whereNotNull('epg_channel_id')
                     ->count();
                 $channels = Channel::whereIn('id', $this->channels)
-                    ->where('is_vod', false)
+                    ->where([
+                        ['is_vod', false],
+                        ['epg_map_enabled', true],
+                    ])
                     ->when(! $this->force, function ($query) {
                         $query->where('epg_channel_id', null);
                     });
@@ -120,7 +123,10 @@ class MapPlaylistChannelsToEpg implements ShouldQueue
                     ->whereNotNull('epg_channel_id')
                     ->count();
                 $channels = $playlist->channels()
-                    ->where('is_vod', false)
+                    ->where([
+                        ['is_vod', false],
+                        ['epg_map_enabled', true],
+                    ])
                     ->when(! $this->force, function ($query) {
                         $query->where('epg_channel_id', null);
                     });

@@ -20,7 +20,7 @@ class EpgFileController extends Controller
             $filePath = $epg->url;
         } else {
             // Finally, fallback to the generated file path
-            // This will be for EPGs generated via Schedules Direct
+            // This will be for EPGs generated via SchedulesDirect
             $filePath = Storage::disk('local')->path($epg->file_path);
         }
         if (! ($filePath && file_exists($filePath))) {

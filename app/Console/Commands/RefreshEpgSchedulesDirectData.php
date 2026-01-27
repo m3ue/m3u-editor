@@ -20,7 +20,7 @@ class RefreshEpgSchedulesDirectData extends Command
      *
      * @var string
      */
-    protected $description = 'Refresh Schedules Direct data for a specific EPG. Use force flag to force refresh regardless of last modified time.';
+    protected $description = 'Refresh SchedulesDirect data for a specific EPG. Use force flag to force refresh regardless of last modified time.';
 
     /**
      * Execute the console command.
@@ -29,19 +29,19 @@ class RefreshEpgSchedulesDirectData extends Command
     {
         $epgId = $this->argument('epg');
         $force = $this->argument('force') ?? false;
-        $this->info("Refreshing Schedules Direct data for EPG with ID: {$epgId}, force: ".($force ? 'true' : 'false'));
+        $this->info("Refreshing SchedulesDirect data for EPG with ID: {$epgId}, force: ".($force ? 'true' : 'false'));
         $epg = Epg::where([
             ['source_type', 'schedules_direct'],
             ['id', $epgId],
         ])->first();
 
         if (! $epg) {
-            $this->error("EPG with ID {$epgId} not found or not a Schedules Direct EPG.");
+            $this->error("EPG with ID {$epgId} not found or not a SchedulesDirect EPG.");
 
             return;
         }
         dispatch(new ProcessEpgSDImport(epg: $epg, force: $force));
-        $this->info('Dispatched Schedules Direct sync job for EPG ID: '.$epgId);
+        $this->info('Dispatched SchedulesDirect sync job for EPG ID: '.$epgId);
 
     }
 }

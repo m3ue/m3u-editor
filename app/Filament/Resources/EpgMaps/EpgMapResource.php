@@ -269,6 +269,13 @@ class EpgMapResource extends Resource
                 ->columns(2)
                 ->columnSpanFull()
                 ->schema([
+                    Toggle::make('settings.skip_missing')
+                        ->label('Skip channels without EPG ID')
+                        ->columnSpanFull()
+                        ->inline(true)
+                        ->live()
+                        ->default(false)
+                        ->helperText('When enabled, channels that do not have "epg_channel_id" or "tvg-id" will be skipped during the mapping process. Disable this to attempt to match all channels, even those without an EPG ID.'),
                     Toggle::make('settings.use_regex')
                         ->label('Use regex for filtering')
                         ->columnSpanFull()

@@ -179,7 +179,33 @@ class ListChannels extends ListRecords
                     ->modalWidth(Width::FourExtraLarge)
                     ->modalDescription('Map the selected EPG to the selected Playlist channels.')
                     ->modalSubmitActionLabel('Map now'),
-
+                Action::make('unmap')
+                    ->label('Undo EPG Map')
+                    ->schema([
+                        Select::make('playlist_id')
+                            ->label('Playlist')
+                            ->options(Playlist::where('user_id', auth()->id())->pluck('name', 'id'))
+                            ->live()
+                            ->required()
+                            ->searchable()
+                            ->helperText(text: 'Playlist to clear EPG mappings for.'),
+                    ])
+                    ->action(function (array $data): void {
+                        $playlist = Playlist::find($data['playlist_id']);
+                        $playlist->live_channels()->update(['epg_channel_id' => null]);
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title('EPG Channel mapping removed')
+                            ->body('Channel mapping removed for the selected Playlist.')
+                            ->send();
+                    })
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-arrow-uturn-left')
+                    ->color('warning')
+                    ->modalIcon('heroicon-o-arrow-uturn-left')
+                    ->modalDescription('Clear EPG mappings for all channels of the selected playlist.')
+                    ->modalSubmitActionLabel('Reset now'),
                 Action::make('find-replace')
                     ->label('Find & Replace')
                     ->schema([

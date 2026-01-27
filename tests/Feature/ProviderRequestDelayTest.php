@@ -40,10 +40,11 @@ beforeEach(function () {
 });
 
 it('does not apply delay when disabled', function () {
-    $settings = app(GeneralSettings::class);
-    $settings->enable_provider_request_delay = false;
-    $settings->provider_request_delay_ms = 500;
-    $settings->save();
+    // Mock settings instead of saving to avoid missing properties error
+    $mockSettings = Mockery::mock(GeneralSettings::class);
+    $mockSettings->enable_provider_request_delay = false;
+    $mockSettings->provider_request_delay_ms = 500;
+    app()->instance(GeneralSettings::class, $mockSettings);
 
     $testClass = createTestClass();
 
@@ -56,10 +57,11 @@ it('does not apply delay when disabled', function () {
 });
 
 it('applies delay when enabled', function () {
-    $settings = app(GeneralSettings::class);
-    $settings->enable_provider_request_delay = true;
-    $settings->provider_request_delay_ms = 200;
-    $settings->save();
+    // Mock settings instead of saving
+    $mockSettings = Mockery::mock(GeneralSettings::class);
+    $mockSettings->enable_provider_request_delay = true;
+    $mockSettings->provider_request_delay_ms = 200;
+    app()->instance(GeneralSettings::class, $mockSettings);
 
     $testClass = createTestClass();
 
@@ -73,9 +75,9 @@ it('applies delay when enabled', function () {
 });
 
 it('returns null slot when concurrency is disabled', function () {
-    $settings = app(GeneralSettings::class);
-    $settings->enable_provider_request_delay = false;
-    $settings->save();
+    $mockSettings = Mockery::mock(GeneralSettings::class);
+    $mockSettings->enable_provider_request_delay = false;
+    app()->instance(GeneralSettings::class, $mockSettings);
 
     $testClass = createTestClass();
     $slot = $testClass->callAcquireSlot();
@@ -84,11 +86,11 @@ it('returns null slot when concurrency is disabled', function () {
 });
 
 it('acquires and releases slots correctly', function () {
-    $settings = app(GeneralSettings::class);
-    $settings->enable_provider_request_delay = true;
-    $settings->provider_max_concurrent_requests = 2;
-    $settings->provider_request_delay_ms = 0;
-    $settings->save();
+    $mockSettings = Mockery::mock(GeneralSettings::class);
+    $mockSettings->enable_provider_request_delay = true;
+    $mockSettings->provider_max_concurrent_requests = 2;
+    $mockSettings->provider_request_delay_ms = 0;
+    app()->instance(GeneralSettings::class, $mockSettings);
 
     $testClass = createTestClass();
 
@@ -112,10 +114,10 @@ it('acquires and releases slots correctly', function () {
 });
 
 it('does not decrement below zero', function () {
-    $settings = app(GeneralSettings::class);
-    $settings->enable_provider_request_delay = true;
-    $settings->provider_max_concurrent_requests = 2;
-    $settings->save();
+    $mockSettings = Mockery::mock(GeneralSettings::class);
+    $mockSettings->enable_provider_request_delay = true;
+    $mockSettings->provider_max_concurrent_requests = 2;
+    app()->instance(GeneralSettings::class, $mockSettings);
 
     $testClass = createTestClass();
 
@@ -130,11 +132,11 @@ it('does not decrement below zero', function () {
 });
 
 it('executes callback with throttling', function () {
-    $settings = app(GeneralSettings::class);
-    $settings->enable_provider_request_delay = true;
-    $settings->provider_max_concurrent_requests = 2;
-    $settings->provider_request_delay_ms = 100;
-    $settings->save();
+    $mockSettings = Mockery::mock(GeneralSettings::class);
+    $mockSettings->enable_provider_request_delay = true;
+    $mockSettings->provider_max_concurrent_requests = 2;
+    $mockSettings->provider_request_delay_ms = 100;
+    app()->instance(GeneralSettings::class, $mockSettings);
 
     $testClass = createTestClass();
 
@@ -148,11 +150,11 @@ it('executes callback with throttling', function () {
 });
 
 it('releases slot even on exception', function () {
-    $settings = app(GeneralSettings::class);
-    $settings->enable_provider_request_delay = true;
-    $settings->provider_max_concurrent_requests = 2;
-    $settings->provider_request_delay_ms = 0;
-    $settings->save();
+    $mockSettings = Mockery::mock(GeneralSettings::class);
+    $mockSettings->enable_provider_request_delay = true;
+    $mockSettings->provider_max_concurrent_requests = 2;
+    $mockSettings->provider_request_delay_ms = 0;
+    app()->instance(GeneralSettings::class, $mockSettings);
 
     $testClass = createTestClass();
 

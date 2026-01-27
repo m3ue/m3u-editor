@@ -120,7 +120,7 @@ class EpgResource extends Resource
                     ->toggleable(),
                 ProgressColumn::make('sd_progress')
                     ->label('SD Progress')
-                    ->tooltip('Progress of Schedules Direct import (if using)')
+                    ->tooltip('Progress of SchedulesDirect import (if using)')
                     ->sortable()
                     ->poll(fn ($record) => $record->status === Status::Processing || $record->status === Status::Pending ? '3s' : null)
                     ->toggleable(),
@@ -348,7 +348,7 @@ class EpgResource extends Resource
                 ->grouped()
                 ->options([
                     'url' => 'File, URL or Path',
-                    'schedules_direct' => 'Schedules Direct',
+                    'schedules_direct' => 'SchedulesDirect',
                 ])
                 ->icons([
                     'url' => 'heroicon-s-link',
@@ -357,14 +357,14 @@ class EpgResource extends Resource
                 ->default('url')
                 ->live()
                 ->hiddenOn('edit')
-                ->helperText('Choose between URL/file upload or Schedules Direct integration'),
+                ->helperText('Choose between URL/file upload or SchedulesDirect integration'),
 
-            // Schedules Direct Configuration
-            Section::make('Schedules Direct Configuration')
-                ->description('Configure your Schedules Direct account settings')
+            // SchedulesDirect Configuration
+            Section::make('SchedulesDirect Configuration')
+                ->description('Configure your SchedulesDirect account settings')
                 ->headerActions([
-                    Action::make('Schedules Direct')
-                        ->label('Schedules Direct')
+                    Action::make('SchedulesDirect')
+                        ->label('SchedulesDirect')
                         ->icon('heroicon-o-arrow-top-right-on-square')
                         ->iconPosition('after')
                         ->size('sm')
@@ -427,7 +427,7 @@ class EpgResource extends Resource
                         ->schema([
                             Select::make('sd_lineup_id')
                                 ->label('Lineup')
-                                ->helperText('Select your Schedules Direct lineup')
+                                ->helperText('Select your SchedulesDirect lineup')
                                 ->searchable()
                                 ->getSearchResultsUsing(function (string $search, Get $get, SchedulesDirectService $service) {
                                     $country = $get('sd_country');
@@ -514,16 +514,21 @@ class EpgResource extends Resource
                                 ->default(3)
                                 ->minValue(1)
                                 ->maxValue(14)
-                                ->helperText('Number of days to import from Schedules Direct (1-14)')
+                                ->helperText('Number of days to import from SchedulesDirect (1-14)')
                                 ->required(fn (Get $get): bool => $get('source_type') === EpgSourceType::SCHEDULES_DIRECT->value),
-                        ]),
+                            Toggle::make('sd_metadata.enabled')
+                                ->label('Import  Metadata')
+                                ->helperText('Enable to import additional program images (NOTE: this can significantly increase import time)')
+                                ->default(false)
+                                ->visible(fn (Get $get): bool => $get('source_type') === EpgSourceType::SCHEDULES_DIRECT->value),
 
-                    Toggle::make('sd_metadata.enabled')
-                        ->label('Import  Metadata')
-                        ->helperText('Enable to import additional program images (NOTE: this can significantly increase import time)')
-                        ->default(false)
-                        ->columnSpanFull()
-                        ->visible(fn (Get $get): bool => $get('source_type') === EpgSourceType::SCHEDULES_DIRECT->value),
+                            Toggle::make('sd_debug')
+                                ->label('Enable Debugging')
+                                ->helperText('This should be disabled unless directed by SchedulesDirect support')
+                                ->default(false)
+                                ->hiddenOn('create')
+                                ->visible(fn (Get $get): bool => $get('source_type') === EpgSourceType::SCHEDULES_DIRECT->value),
+                        ]),
 
                     Grid::make()
                         ->columns(2)
@@ -644,7 +649,7 @@ class EpgResource extends Resource
                                 //             Notification::make()
                                 //                 ->success()
                                 //                 ->title('Lineup added successfully!')
-                                //                 ->body("Lineup {$lineupId} has been added to your Schedules Direct account")
+                                //                 ->body("Lineup {$lineupId} has been added to your SchedulesDirect account")
                                 //                 ->send();
                                 //         } catch (\Exception $e) {
                                 //             Notification::make()

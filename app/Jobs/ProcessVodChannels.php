@@ -115,10 +115,7 @@ class ProcessVodChannels implements ShouldQueue
                 ['source_id', '!=', null],
             ])
             ->when(! $this->force, function ($query) {
-                return $query->where(function ($query) {
-                    $query->whereNull('info')
-                        ->orWhereNull('movie_data');
-                });
+                return $query->whereNull('last_metadata_fetch');
             });
 
         $total = $query->count();

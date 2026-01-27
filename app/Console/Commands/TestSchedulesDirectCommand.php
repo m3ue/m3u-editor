@@ -13,7 +13,7 @@ class TestSchedulesDirectCommand extends Command
 
     protected $signature = 'app:schedules-direct-test {--epg=} {--username=} {--password=} {--country=USA} {--postal_code=60030} {--metadata}';
 
-    protected $description = 'Test Schedules Direct API connection and metadata endpoints';
+    protected $description = 'Test SchedulesDirect API connection and metadata endpoints';
 
     public function handle(SchedulesDirectService $service): int
     {
@@ -31,7 +31,7 @@ class TestSchedulesDirectCommand extends Command
                 }
 
                 if (! $epg->sd_username || ! $epg->sd_password) {
-                    $this->error("EPG {$epgId} does not have Schedules Direct credentials configured");
+                    $this->error("EPG {$epgId} does not have SchedulesDirect credentials configured");
 
                     return Command::FAILURE;
                 }
@@ -50,12 +50,12 @@ class TestSchedulesDirectCommand extends Command
                     ->get();
 
                 if ($epgs->isEmpty()) {
-                    $this->error('No EPGs with Schedules Direct credentials found. Use --username and --password options or configure an EPG first.');
+                    $this->error('No EPGs with SchedulesDirect credentials found. Use --username and --password options or configure an EPG first.');
 
                     return Command::FAILURE;
                 }
 
-                $this->info('Available EPGs with Schedules Direct credentials:');
+                $this->info('Available EPGs with SchedulesDirect credentials:');
                 foreach ($epgs as $epg) {
                     $this->info("  [{$epg->id}] {$epg->name} ({$epg->sd_username})");
                 }
@@ -88,7 +88,7 @@ class TestSchedulesDirectCommand extends Command
                 $this->testMetadataEndpoints($token);
             }
 
-            $this->info("\n✓ Schedules Direct API test completed successfully");
+            $this->info("\n✓ SchedulesDirect API test completed successfully");
 
             return Command::SUCCESS;
         } catch (\Exception $e) {

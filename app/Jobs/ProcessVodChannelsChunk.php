@@ -56,12 +56,11 @@ class ProcessVodChannelsChunk implements ShouldQueue
 
         // Get the channels for this chunk
         $channels = $playlist->channels()
-            ->whereIn('id', $this->channelIds)
-            ->get(['id', 'name', 'source_id']);
+            ->whereIn('id', $this->channelIds);
 
         $totalChannels = count($this->channelIds);
 
-        foreach ($channels as $index => $channel) {
+        foreach ($channels->cursor() as $index => $channel) {
             try {
                 // Use provider throttling to limit concurrent requests and apply delay
                 $this->withProviderThrottling(fn () => $channel->fetchMetadata($xtream));

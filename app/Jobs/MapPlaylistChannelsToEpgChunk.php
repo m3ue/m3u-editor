@@ -67,11 +67,18 @@ class MapPlaylistChannelsToEpgChunk implements ShouldQueue
         // Process each channel
         $patterns = $this->settings['exclude_prefixes'] ?? [];
         $useRegex = $this->settings['use_regex'] ?? false;
+        $skipMissing = $this->settings['skip_missing'] ?? false;
         $mappedChannels = [];
 
         foreach ($channels->cursor() as $channel) {
             // Get the title and stream id - sanitize UTF-8 immediately
             $streamId = $this->sanitizeUtf8(trim($channel->stream_id_custom ?? $channel->stream_id));
+
+            if ($skipMissing && empty($streamId)) {
+                // Skip channels without stream ID if the setting is enabled
+                continue;
+            }
+
             $name = $this->sanitizeUtf8(trim($channel->name_custom ?? $channel->name));
             $title = $this->sanitizeUtf8(trim($channel->title_custom ?? $channel->title));
 

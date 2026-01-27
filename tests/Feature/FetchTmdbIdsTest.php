@@ -16,13 +16,17 @@ beforeEach(function () {
     $this->user = User::factory()->create();
     $this->playlist = Playlist::factory()->create(['user_id' => $this->user->id]);
 
-    // Configure TMDB settings
-    $settings = app(GeneralSettings::class);
-    $settings->tmdb_api_key = 'fake-api-key';
-    $settings->tmdb_language = 'en-US';
-    $settings->tmdb_rate_limit = 40;
-    $settings->tmdb_confidence_threshold = 80;
-    $settings->save();
+    // Mock TMDB settings without saving to avoid missing properties error
+    $this->mock(GeneralSettings::class, function ($mock) {
+        $mock->shouldReceive('getAttribute')->with('tmdb_api_key')->andReturn('fake-api-key');
+        $mock->shouldReceive('getAttribute')->with('tmdb_language')->andReturn('en-US');
+        $mock->shouldReceive('getAttribute')->with('tmdb_rate_limit')->andReturn(40);
+        $mock->shouldReceive('getAttribute')->with('tmdb_confidence_threshold')->andReturn(80);
+        $mock->tmdb_api_key = 'fake-api-key';
+        $mock->tmdb_language = 'en-US';
+        $mock->tmdb_rate_limit = 40;
+        $mock->tmdb_confidence_threshold = 80;
+    });
 });
 
 it('can fetch TMDB ID for a VOD channel', function () {

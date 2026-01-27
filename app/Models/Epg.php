@@ -39,6 +39,7 @@ class Epg extends Model
         'sd_errors' => 'array',
         'sd_days_to_import' => 'integer',
         'sd_metadata' => 'array',
+        'sd_debug' => 'boolean',
     ];
 
     /**

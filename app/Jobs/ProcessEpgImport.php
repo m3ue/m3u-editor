@@ -117,7 +117,7 @@ class ProcessEpgImport implements ShouldQueue
                     logger()->error("Error processing \"{$this->epg->name}\"");
 
                     // Send notification
-                    $error = 'Invalid Schedules Direct credentials. Unable to get results from the API. Please check the credentials and try again.';
+                    $error = 'Invalid SchedulesDirect credentials. Unable to get results from the API. Please check the credentials and try again.';
                     Notification::make()
                         ->danger()
                         ->title("Error processing \"{$this->epg->name}\"")
@@ -145,12 +145,12 @@ class ProcessEpgImport implements ShouldQueue
 
                     return;
                 } else {
-                    // Sync the EPG data from Schedules Direct
+                    // Sync the EPG data from SchedulesDirect
                     // Notify user we're starting the sync...
                     Notification::make()
                         ->info()
-                        ->title('Starting Schedules Direct Data Sync')
-                        ->body("Schedules Direct Data Sync started for EPG \"{$epg->name}\".")
+                        ->title('Starting SchedulesDirect Data Sync')
+                        ->body("SchedulesDirect Data Sync started for EPG \"{$epg->name}\".")
                         ->broadcast($epg->user)
                         ->sendToDatabase($epg->user);
 
@@ -180,8 +180,8 @@ class ProcessEpgImport implements ShouldQueue
                     // Notify user of success
                     Notification::make()
                         ->success()
-                        ->title('Schedules Direct Data Synced')
-                        ->body("Schedules Direct Data Synced successfully for EPG \"{$epg->name}\". Completed in {$completedInRounded} seconds. Now parsing data and generating EPG cache...")
+                        ->title('SchedulesDirect Data Synced')
+                        ->body("SchedulesDirect Data Synced successfully for EPG \"{$epg->name}\". Completed in {$completedInRounded} seconds. Now parsing data and generating EPG cache...")
                         ->broadcast($epg->user)
                         ->sendToDatabase($epg->user);
 

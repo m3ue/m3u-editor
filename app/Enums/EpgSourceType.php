@@ -11,7 +11,7 @@ enum EpgSourceType: string
     {
         return match ($this) {
             self::URL => 'URL/XML File',
-            self::SCHEDULES_DIRECT => 'Schedules Direct',
+            self::SCHEDULES_DIRECT => 'SchedulesDirect',
         };
     }
 }

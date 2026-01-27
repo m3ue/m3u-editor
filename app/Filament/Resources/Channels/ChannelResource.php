@@ -278,6 +278,9 @@ class ChannelResource extends Resource
                     }
                 })
                 ->sortable(),
+            ToggleColumn::make('epg_map_enabled')
+                ->label('Mapping Enabled')
+                ->sortable(),
             TextColumn::make('epgChannel.name')
                 ->label('EPG Channel')
                 ->toggleable()
@@ -539,31 +542,6 @@ class ChannelResource extends Resource
                     ->modalIcon('heroicon-o-arrows-right-left')
                     ->modalDescription('Move the selected channel(s) to the chosen group.')
                     ->modalSubmitActionLabel('Move now'),
-                BulkAction::make('map')
-                    ->label('Map EPG to selected')
-                    ->schema(EpgMapResource::getForm(showPlaylist: false, showEpg: true))
-                    ->action(function (Collection $records, array $data): void {
-                        app('Illuminate\Contracts\Bus\Dispatcher')
-                            ->dispatch(new MapPlaylistChannelsToEpg(
-                                epg: (int) $data['epg_id'],
-                                channels: $records->pluck('id')->toArray(),
-                                force: $data['override'],
-                                settings: $data['settings'] ?? [],
-                            ));
-                    })->after(function () {
-                        Notification::make()
-                            ->success()
-                            ->title('EPG to Channel mapping')
-                            ->body('Mapping started, you will be notified when the process is complete.')
-                            ->send();
-                    })
-                    ->deselectRecordsAfterCompletion()
-                    ->requiresConfirmation()
-                    ->icon('heroicon-o-link')
-                    ->modalIcon('heroicon-o-link')
-                    ->modalWidth(Width::FourExtraLarge)
-                    ->modalDescription('Map the selected EPG to the selected channel(s).')
-                    ->modalSubmitActionLabel('Map now'),
                 BulkAction::make('preferred_logo')
                     ->label('Update preferred icon')
                     ->schema([
@@ -691,6 +669,49 @@ class ChannelResource extends Resource
                     ->modalIcon('heroicon-o-arrow-path-rounded-square')
                     ->modalDescription('Add the selected channel(s) to the chosen channel as failover sources.')
                     ->modalSubmitActionLabel('Add failovers now'),
+                BulkAction::make('map')
+                    ->label('Map EPG to selected')
+                    ->schema(EpgMapResource::getForm(showPlaylist: false, showEpg: true))
+                    ->action(function (Collection $records, array $data): void {
+                        app('Illuminate\Contracts\Bus\Dispatcher')
+                            ->dispatch(new MapPlaylistChannelsToEpg(
+                                epg: (int) $data['epg_id'],
+                                channels: $records->pluck('id')->toArray(),
+                                force: $data['override'],
+                                settings: $data['settings'] ?? [],
+                            ));
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title('EPG to Channel mapping')
+                            ->body('Mapping started, you will be notified when the process is complete.')
+                            ->send();
+                    })
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-link')
+                    ->modalIcon('heroicon-o-link')
+                    ->modalWidth(Width::FourExtraLarge)
+                    ->modalDescription('Map the selected EPG to the selected channel(s).')
+                    ->modalSubmitActionLabel('Map now'),
+                BulkAction::make('unmap')
+                    ->label('Undo EPG Map')
+                    ->action(function (Collection $records, array $data): void {
+                        Channel::whereIn('id', $records->pluck('id')->toArray())
+                            ->update(['epg_channel_id' => null]);
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title('EPG Channel mapping removed')
+                            ->body('Channel mapping removed for the selected channels.')
+                            ->send();
+                    })
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-arrow-uturn-left')
+                    ->color('warning')
+                    ->modalIcon('heroicon-o-arrow-uturn-left')
+                    ->modalDescription('Clear EPG mappings for the selected channels.')
+                    ->modalSubmitActionLabel('Reset now'),
                 BulkAction::make('find-replace')
                     ->label('Find & Replace')
                     ->schema([
@@ -783,6 +804,47 @@ class ChannelResource extends Resource
                     ->modalIcon('heroicon-o-arrow-uturn-left')
                     ->modalDescription('Reset Find & Replace results back to playlist defaults for the selected channels. This will remove any custom values set in the selected column.')
                     ->modalSubmitActionLabel('Reset now'),
+                BulkAction::make('enable-epg-mapping')
+                    ->label('Enable EPG mapping')
+                    ->action(function (Collection $records, array $data): void {
+                        $records->each(fn ($channel) => $channel->update([
+                            'epg_map_enabled' => true,
+                        ]));
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title('EPG map re-enabled for selected channels')
+                            ->body('The EPG map has been re-enabled for the selected channels.')
+                            ->send();
+                    })
+                    ->hidden(fn () => ! $addToCustom)
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-calendar')
+                    ->modalIcon('heroicon-o-calendar')
+                    ->modalDescription('Allow mapping EPG to selected channels when running EPG mapping jobs.')
+                    ->modalSubmitActionLabel('Enable now'),
+                BulkAction::make('disable-epg-mapping')
+                    ->label('Disabled EPG mapping')
+                    ->color('warning')
+                    ->action(function (Collection $records, array $data): void {
+                        $records->each(fn ($channel) => $channel->update([
+                            'epg_map_enabled' => false,
+                        ]));
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title('EPG map disabled for selected channels')
+                            ->body('The EPG map has been disabled for the selected channels.')
+                            ->send();
+                    })
+                    ->hidden(fn () => ! $addToCustom)
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-calendar')
+                    ->modalIcon('heroicon-o-calendar')
+                    ->modalDescription('Don\'t map EPG to selected channels when running EPG mapping jobs.')
+                    ->modalSubmitActionLabel('Disable now'),
                 BulkAction::make('enable')
                     ->label('Enable selected')
                     ->action(function (Collection $records): void {

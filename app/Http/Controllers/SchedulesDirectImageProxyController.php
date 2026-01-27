@@ -16,7 +16,7 @@ class SchedulesDirectImageProxyController extends Controller
     ) {}
 
     /**
-     * Proxy Schedules Direct program images with authentication
+     * Proxy SchedulesDirect program images with authentication
      *
      * Route: /schedules-direct/{epg}/image/{imageHash}
      */
@@ -29,9 +29,9 @@ class SchedulesDirectImageProxyController extends Controller
                 return response()->json(['error' => 'EPG not found'], 404);
             }
 
-            // Validate that this EPG uses Schedules Direct
+            // Validate that this EPG uses SchedulesDirect
             if (! $epg->isSchedulesDirect()) {
-                return response()->json(['error' => 'EPG does not use Schedules Direct'], 400);
+                return response()->json(['error' => 'EPG does not use SchedulesDirect'], 400);
             }
 
             // Create cache key for this image
@@ -49,7 +49,7 @@ class SchedulesDirectImageProxyController extends Controller
                 $epg->refresh();
             }
 
-            // Build the Schedules Direct image URL
+            // Build the SchedulesDirect image URL
             $imageUrl = "https://json.schedulesdirect.org/20141201/image/{$imageHash}";
 
             // Fetch the image with authentication
@@ -76,7 +76,7 @@ class SchedulesDirectImageProxyController extends Controller
                     'headers' => $headers,
                 ], now()->addHours(24));
 
-                Log::debug('Successfully proxied Schedules Direct image', [
+                Log::debug('Successfully proxied SchedulesDirect image', [
                     'epg_id' => $epgId,
                     'image_hash' => $imageHash,
                     'content_type' => $contentType,
@@ -85,7 +85,7 @@ class SchedulesDirectImageProxyController extends Controller
 
                 return response($body, 200, $headers);
             } else {
-                Log::warning('Failed to fetch Schedules Direct image', [
+                Log::warning('Failed to fetch SchedulesDirect image', [
                     'epg_id' => $epgId,
                     'image_hash' => $imageHash,
                     'status' => $response->status(),
@@ -93,12 +93,12 @@ class SchedulesDirectImageProxyController extends Controller
                 ]);
 
                 return response()->json([
-                    'error' => 'Failed to fetch image from Schedules Direct',
+                    'error' => 'Failed to fetch image from SchedulesDirect',
                     'status' => $response->status(),
                 ], $response->status());
             }
         } catch (\Exception $e) {
-            Log::error('Exception in Schedules Direct image proxy', [
+            Log::error('Exception in SchedulesDirect image proxy', [
                 'epg_id' => $epgId,
                 'image_hash' => $imageHash,
                 'error' => $e->getMessage(),
