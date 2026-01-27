@@ -10,11 +10,12 @@ use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
+use Filament\Forms\Components\ToggleButtons;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Fieldset;
 use Filament\Schemas\Schema;
-use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Columns\ToggleColumn;
 use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
@@ -23,13 +24,18 @@ class StreamFileSettingResource extends Resource
 {
     protected static ?string $model = StreamFileSetting::class;
 
-    protected static string|\UnitEnum|null $navigationGroup = 'Proxy';
+    protected static string|\UnitEnum|null $navigationGroup = 'Playlist';
 
     protected static ?string $navigationLabel = 'Stream File Settings';
 
     protected static ?string $modelLabel = 'Stream File Setting';
 
     protected static ?string $pluralModelLabel = 'Stream File Settings';
+
+    public static function getNavigationSort(): ?int
+    {
+        return 6;
+    }
 
     public static function form(Schema $schema): Schema
     {
@@ -38,7 +44,6 @@ class StreamFileSettingResource extends Resource
                 TextInput::make('name')
                     ->label('Profile Name')
                     ->required()
-                    ->columnSpanFull()
                     ->maxLength(255)
                     ->helperText('A descriptive name for this stream file setting profile'),
 
@@ -62,17 +67,19 @@ class StreamFileSettingResource extends Resource
                 Toggle::make('enabled')
                     ->label('Enable .strm file generation')
                     ->default(true)
+                    ->columnSpanFull()
                     ->live(),
 
                 TextInput::make('location')
                     ->label('Sync Location')
                     ->rules([new CheckIfUrlOrLocalPath(localOnly: true, isDirectory: true)])
                     ->required()
+                    ->columnSpanFull()
                     ->hidden(fn ($get) => ! $get('enabled'))
                     ->placeholder(fn ($get) => $get('type') === 'series' ? '/Series' : '/Movies')
                     ->helperText('Base directory path for synced .strm files'),
 
-                Forms\Components\ToggleButtons::make('path_structure')
+                ToggleButtons::make('path_structure')
                     ->label('Path structure (folders)')
                     ->live()
                     ->multiple()
@@ -90,7 +97,7 @@ class StreamFileSettingResource extends Resource
                 Fieldset::make('Include Metadata')
                     ->columnSpanFull()
                     ->schema([
-                        Forms\Components\ToggleButtons::make('filename_metadata')
+                        ToggleButtons::make('filename_metadata')
                             ->label('Filename metadata')
                             ->live()
                             ->inline()
@@ -100,7 +107,7 @@ class StreamFileSettingResource extends Resource
                                 'year' => 'Year',
                                 'tmdb_id' => 'TMDB ID',
                             ]),
-                        Forms\Components\ToggleButtons::make('tmdb_id_format')
+                        ToggleButtons::make('tmdb_id_format')
                             ->label('TMDB ID format')
                             ->inline()
                             ->grouped()
@@ -126,7 +133,7 @@ class StreamFileSettingResource extends Resource
                             ->label('Remove consecutive replacement characters')
                             ->default(true)
                             ->inline(false),
-                        Forms\Components\ToggleButtons::make('replace_char')
+                        ToggleButtons::make('replace_char')
                             ->label('Replace with')
                             ->live()
                             ->inline()
@@ -178,6 +185,13 @@ class StreamFileSettingResource extends Resource
     public static function table(Table $table): Table
     {
         return $table
+            ->persistSortInSession()
+            ->filtersTriggerAction(function ($action) {
+                return $action->button()->label('Filters');
+            })
+            ->modifyQueryUsing(function ($query) {
+                $query->withCount(['series', 'channels', 'groups', 'categories']);
+            })
             ->columns([
                 TextColumn::make('name')
                     ->label('Name')
@@ -195,9 +209,8 @@ class StreamFileSettingResource extends Resource
                     ->label('Location')
                     ->limit(30)
                     ->toggleable(),
-                IconColumn::make('enabled')
-                    ->label('Enabled')
-                    ->boolean(),
+                ToggleColumn::make('enabled')
+                    ->label('Enabled'),
                 TextColumn::make('series_count')
                     ->label('Series')
                     ->counts('series')

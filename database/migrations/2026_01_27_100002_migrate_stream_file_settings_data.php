@@ -16,62 +16,67 @@ return new class extends Migration
             return; // No users yet, nothing to migrate
         }
 
-        $settings = app(GeneralSettings::class);
+        // Read existing settings directly from the repository to avoid instantiating GeneralSettings during migrations (prevents MissingSettings in tests)
+        $settingsMapper = app(\Spatie\LaravelSettings\SettingsMapper::class);
+        $config = $settingsMapper->initialize(GeneralSettings::class);
+        $repo = $config->getRepository();
+        $existing = $repo->getPropertiesInGroup($config->getGroup());
 
         // Only migrate if there are existing sync settings enabled
-        $seriesEnabled = $settings->stream_file_sync_enabled ?? false;
-        $vodEnabled = $settings->vod_stream_file_sync_enabled ?? false;
+        $seriesEnabled = $existing['stream_file_sync_enabled'] ?? false;
+        $vodEnabled = $existing['vod_stream_file_sync_enabled'] ?? false;
+
+        $updates = [];
 
         // Create default Series Stream File Setting from existing settings
-        if ($seriesEnabled || $settings->stream_file_sync_location) {
+        if ($seriesEnabled || ($existing['stream_file_sync_location'] ?? null)) {
             $seriesProfile = StreamFileSetting::create([
                 'user_id' => $user->id,
                 'name' => 'Default Series Settings (Migrated)',
                 'description' => 'Automatically migrated from global settings',
                 'type' => 'series',
                 'enabled' => $seriesEnabled,
-                'location' => $settings->stream_file_sync_location,
-                'path_structure' => $settings->stream_file_sync_path_structure ?? ['category', 'series', 'season'],
-                'filename_metadata' => $settings->stream_file_sync_filename_metadata ?? [],
-                'tmdb_id_format' => $settings->stream_file_sync_tmdb_id_format ?? 'square',
-                'clean_special_chars' => $settings->stream_file_sync_clean_special_chars ?? true,
-                'remove_consecutive_chars' => $settings->stream_file_sync_remove_consecutive_chars ?? true,
-                'replace_char' => $settings->stream_file_sync_replace_char ?? 'space',
-                'name_filter_enabled' => $settings->stream_file_sync_name_filter_enabled ?? false,
-                'name_filter_patterns' => $settings->stream_file_sync_name_filter_patterns ?? [],
-                'generate_nfo' => $settings->stream_file_sync_generate_nfo ?? false,
+                'location' => $existing['stream_file_sync_location'] ?? null,
+                'path_structure' => $existing['stream_file_sync_path_structure'] ?? ['category', 'series', 'season'],
+                'filename_metadata' => $existing['stream_file_sync_filename_metadata'] ?? [],
+                'tmdb_id_format' => $existing['stream_file_sync_tmdb_id_format'] ?? 'square',
+                'clean_special_chars' => $existing['stream_file_sync_clean_special_chars'] ?? true,
+                'remove_consecutive_chars' => $existing['stream_file_sync_remove_consecutive_chars'] ?? true,
+                'replace_char' => $existing['stream_file_sync_replace_char'] ?? 'space',
+                'name_filter_enabled' => $existing['stream_file_sync_name_filter_enabled'] ?? false,
+                'name_filter_patterns' => $existing['stream_file_sync_name_filter_patterns'] ?? [],
+                'generate_nfo' => $existing['stream_file_sync_generate_nfo'] ?? false,
             ]);
 
-            // Update the global default
-            $settings->default_series_stream_file_setting_id = $seriesProfile->id;
+            $updates['default_series_stream_file_setting_id'] = $seriesProfile->id;
         }
 
         // Create default VOD Stream File Setting from existing settings
-        if ($vodEnabled || $settings->vod_stream_file_sync_location) {
+        if ($vodEnabled || ($existing['vod_stream_file_sync_location'] ?? null)) {
             $vodProfile = StreamFileSetting::create([
                 'user_id' => $user->id,
                 'name' => 'Default VOD Settings (Migrated)',
                 'description' => 'Automatically migrated from global settings',
                 'type' => 'vod',
                 'enabled' => $vodEnabled,
-                'location' => $settings->vod_stream_file_sync_location,
-                'path_structure' => $settings->vod_stream_file_sync_path_structure ?? ['group', 'title'],
-                'filename_metadata' => $settings->vod_stream_file_sync_filename_metadata ?? [],
-                'tmdb_id_format' => $settings->vod_stream_file_sync_tmdb_id_format ?? 'square',
-                'clean_special_chars' => $settings->vod_stream_file_sync_clean_special_chars ?? true,
-                'remove_consecutive_chars' => $settings->vod_stream_file_sync_remove_consecutive_chars ?? true,
-                'replace_char' => $settings->vod_stream_file_sync_replace_char ?? 'space',
-                'name_filter_enabled' => $settings->vod_stream_file_sync_name_filter_enabled ?? false,
-                'name_filter_patterns' => $settings->vod_stream_file_sync_name_filter_patterns ?? [],
-                'generate_nfo' => $settings->vod_stream_file_sync_generate_nfo ?? false,
+                'location' => $existing['vod_stream_file_sync_location'] ?? null,
+                'path_structure' => $existing['vod_stream_file_sync_path_structure'] ?? ['group', 'title'],
+                'filename_metadata' => $existing['vod_stream_file_sync_filename_metadata'] ?? [],
+                'tmdb_id_format' => $existing['vod_stream_file_sync_tmdb_id_format'] ?? 'square',
+                'clean_special_chars' => $existing['vod_stream_file_sync_clean_special_chars'] ?? true,
+                'remove_consecutive_chars' => $existing['vod_stream_file_sync_remove_consecutive_chars'] ?? true,
+                'replace_char' => $existing['vod_stream_file_sync_replace_char'] ?? 'space',
+                'name_filter_enabled' => $existing['vod_stream_file_sync_name_filter_enabled'] ?? false,
+                'name_filter_patterns' => $existing['vod_stream_file_sync_name_filter_patterns'] ?? [],
+                'generate_nfo' => $existing['vod_stream_file_sync_generate_nfo'] ?? false,
             ]);
 
-            // Update the global default
-            $settings->default_vod_stream_file_setting_id = $vodProfile->id;
+            $updates['default_vod_stream_file_setting_id'] = $vodProfile->id;
         }
 
-        // Save the updated settings
-        $settings->save();
+        if (! empty($updates)) {
+            $repo->updatePropertiesPayload($config->getGroup(), $updates);
+        }
     }
 
     public function down(): void
@@ -79,10 +84,14 @@ return new class extends Migration
         // Remove migrated profiles (be careful not to delete user-created ones)
         StreamFileSetting::where('name', 'like', '% (Migrated)')->delete();
 
-        // Reset the default IDs
-        $settings = app(GeneralSettings::class);
-        $settings->default_series_stream_file_setting_id = null;
-        $settings->default_vod_stream_file_setting_id = null;
-        $settings->save();
+        // Reset the default IDs using the repository (avoid instantiating GeneralSettings during rollback)
+        $settingsMapper = app(\Spatie\LaravelSettings\SettingsMapper::class);
+        $config = $settingsMapper->initialize(GeneralSettings::class);
+        $repo = $config->getRepository();
+
+        $repo->updatePropertiesPayload($config->getGroup(), [
+            'default_series_stream_file_setting_id' => null,
+            'default_vod_stream_file_setting_id' => null,
+        ]);
     }
 };

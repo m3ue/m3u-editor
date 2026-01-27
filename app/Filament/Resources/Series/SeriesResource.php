@@ -901,8 +901,8 @@ class SeriesResource extends Resource
                                         )
                                         ->nullable()
                                         ->hintAction(
-                                            Action::make('manage_profiles')
-                                                ->label('Manage Profiles')
+                                            Action::make('manage_stream_file_settings')
+                                                ->label('Manage Stream File Settings')
                                                 ->icon('heroicon-o-arrow-top-right-on-square')
                                                 ->iconPosition('after')
                                                 ->size('sm')

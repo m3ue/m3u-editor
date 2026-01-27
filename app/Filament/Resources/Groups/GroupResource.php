@@ -627,13 +627,6 @@ class GroupResource extends Resource
                 ->default(9999)
                 ->helperText('Enter a number to define the sort order (e.g., 1, 2, 3). Lower numbers appear first.')
                 ->rules(['integer', 'min:0']),
-            Select::make('stream_file_setting_id')
-                ->label('Stream File Setting Profile (VOD)')
-                ->searchable()
-                ->relationship('streamFileSetting', 'name', fn ($query) => $query->forVod()->where('user_id', auth()->id())
-                )
-                ->nullable()
-                ->helperText('Select a Stream File Setting profile for all VOD channels in this group. VOD-level settings take priority. Leave empty to use global settings.'),
         ];
     }
 }

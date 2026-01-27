@@ -613,54 +613,62 @@ class Preferences extends SettingsPage
                                             ->helperText('If the current sync will have less channels than the current channel count (less this value), the sync will be invalidated and canceled.'),
                                     ]),
                                 Section::make('Series stream file settings')
-                                    ->description('Select a Stream File Setting profile for series .strm file generation. Profiles can be created and managed in Proxy > Stream File Settings. Settings can be overridden at the Category level or per-Series.')
+                                    ->description('Select a Stream File Setting for series .strm file generation.')
                                     ->columnSpan('full')
                                     ->columns(1)
                                     ->collapsible(false)
                                     ->schema([
                                         Select::make('default_series_stream_file_setting_id')
-                                            ->label('Default Series Stream File Profile')
+                                            ->label('Default Series Stream File Setting')
                                             ->searchable()
+                                            ->hintIcon(
+                                                'heroicon-m-question-mark-circle',
+                                                tooltip: 'Stream File Settings can be created and managed in Playlist > Stream File Settings. Settings can be overridden at the Category level or per-Series.'
+                                            )
                                             ->options(function () {
                                                 return \App\Models\StreamFileSetting::where('user_id', auth()->id())
                                                     ->forSeries()
                                                     ->pluck('name', 'id');
                                             })
                                             ->hintAction(
-                                                Action::make('manage_series_profiles')
-                                                    ->label('Manage Profiles')
+                                                Action::make('manage_series_settings')
+                                                    ->label('Manage Stream File Settings')
                                                     ->icon('heroicon-o-arrow-top-right-on-square')
                                                     ->iconPosition('after')
                                                     ->size('sm')
                                                     ->url('/stream-file-settings')
                                                     ->openUrlInNewTab(false)
                                             )
-                                            ->helperText('Select the default Stream File Settings profile to use for Series. Leave empty to disable .strm file generation for series. Priority: Series > Category > Global.'),
+                                            ->helperText('Leave empty to disable .strm file generation for series. Priority: Series > Category > Global.'),
                                     ]),
                                 Section::make('VOD stream file settings')
-                                    ->description('Select a Stream File Setting profile for VOD .strm file generation. Profiles can be created and managed in Proxy > Stream File Settings. Settings can be overridden at the Group level or per-VOD channel.')
+                                    ->description('Select a Stream File Setting for VOD .strm file generation. ')
                                     ->columnSpan('full')
                                     ->columns(1)
                                     ->collapsible(false)
                                     ->schema([
                                         Select::make('default_vod_stream_file_setting_id')
-                                            ->label('Default VOD Stream File Profile')
+                                            ->label('Default VOD Stream File Setting')
                                             ->searchable()
+                                            ->hintIcon(
+                                                'heroicon-m-question-mark-circle',
+                                                tooltip: 'Stream File Settings can be created and managed in Playlist > Stream File Settings. Settings can be overridden at the Group level or per-VOD channel.'
+                                            )
                                             ->options(function () {
                                                 return \App\Models\StreamFileSetting::where('user_id', auth()->id())
                                                     ->forVod()
                                                     ->pluck('name', 'id');
                                             })
                                             ->hintAction(
-                                                Action::make('manage_vod_profiles')
-                                                    ->label('Manage Profiles')
+                                                Action::make('manage_vod_settings')
+                                                    ->label('Manage Stream File Settings')
                                                     ->icon('heroicon-o-arrow-top-right-on-square')
                                                     ->iconPosition('after')
                                                     ->size('sm')
                                                     ->url('/stream-file-settings')
                                                     ->openUrlInNewTab(false)
                                             )
-                                            ->helperText('Select the default Stream File Settings profile to use for VOD. Leave empty to disable .strm file generation for VOD. Priority: VOD > Group > Global.'),
+                                            ->helperText('Leave empty to disable .strm file generation for VOD. Priority: VOD > Group > Global.'),
                                     ]),
                             ]),
 
