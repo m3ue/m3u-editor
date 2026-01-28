@@ -463,16 +463,16 @@ class SeriesResource extends Resource
                     ->modalDescription('Are you sure you want to delete this series? This will delete all episodes and seasons for this series. This action cannot be undone.')
                     ->modalSubmitActionLabel('Yes, delete series'),
             ])->button()->hiddenLabel()->size('sm'),
-            ViewAction::make()
-                ->url(fn ($record) => static::getUrl('view', ['record' => $record]))
-                ->button()->hiddenLabel()->size('sm')
-                ->icon('heroicon-o-eye')
-                ->tooltip('View enhanced details'),
             EditAction::make()
                 ->slideOver()
                 ->button()->hiddenLabel()->size('sm')
                     // Refresh table after edit to remove records that no longer match active filters
                 ->after(fn ($livewire) => $livewire->dispatch('$refresh')),
+            ViewAction::make()
+                ->url(fn ($record) => static::getUrl('view', ['record' => $record]))
+                ->button()->hiddenLabel()->size('sm')
+                ->icon('heroicon-s-eye')
+                ->tooltip('View enhanced details'),
         ];
     }
 

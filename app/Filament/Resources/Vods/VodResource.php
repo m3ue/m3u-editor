@@ -673,7 +673,7 @@ class VodResource extends Resource
             ViewAction::make()
                 ->url(fn ($record) => static::getUrl('view', ['record' => $record]))
                 ->button()
-                ->icon('heroicon-o-eye')
+                ->icon('heroicon-s-eye')
                 ->hiddenLabel()
                 ->tooltip('View enhanced details')
                 ->size('sm'),
