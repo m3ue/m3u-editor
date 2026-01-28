@@ -896,7 +896,7 @@ class SeriesResource extends Resource
                     Section::make('Stream file settings')
                         ->columnSpan(2)
                         ->icon('heroicon-o-cog')
-                        ->description('Override global .strm file generation settings for this series. Priority: Series > Category > Global.')
+                        ->description('Override global .strm file generation settings for this series.')
                         ->collapsible()
                         ->collapsed()
                         ->schema([
