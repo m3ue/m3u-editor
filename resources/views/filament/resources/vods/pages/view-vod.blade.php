@@ -170,11 +170,23 @@
                         </button>
 
                         @if($youtubeTrailer)
-                            <a href="https://www.youtube.com/watch?v={{ $youtubeTrailer }}" target="_blank"
-                                class="inline-flex items-center gap-2 px-4 py-3 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors">
-                                <x-heroicon-s-play class="w-5 h-5" />
-                                Watch Trailer
-                            </a>
+                            <x-filament::modal width="3xl">
+                                <x-slot name="trigger">
+                                    <button type="button" target="_blank"
+                                        class="inline-flex items-center gap-2 px-4 py-3 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors">
+                                        <x-heroicon-s-play class="w-5 h-5" />
+                                        Watch Trailer
+                                    </button>
+                                </x-slot>
+
+                                <div class="aspect-video">
+                                    <iframe class="w-full h-full" src="https://www.youtube.com/embed/{{ $youtubeTrailer }}"
+                                        title="YouTube video player" frameborder="0"
+                                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                                        referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+                                </div>
+                            </x-filament::modal>
+
                         @endif
                     </div>
 
