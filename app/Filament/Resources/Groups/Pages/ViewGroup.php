@@ -5,6 +5,7 @@ namespace App\Filament\Resources\Groups\Pages;
 use App\Facades\SortFacade;
 use App\Filament\Resources\Groups\GroupResource;
 use App\Jobs\MergeChannels;
+use App\Jobs\UnmergeChannels;
 use App\Models\CustomPlaylist;
 use App\Models\Group;
 use App\Models\Playlist;
@@ -172,7 +173,7 @@ class ViewGroup extends ViewRecord
                     ->modalDescription('Sort all channels in this group alphabetically? This will update the sort order.'),
 
                 Action::make('merge')
-                    ->label('Merge Same ID for Group')
+                    ->label('Merge Same ID')
                     ->schema([
                         Select::make('playlist_id')
                             ->required()
@@ -238,6 +239,28 @@ class ViewGroup extends ViewRecord
                     ->modalIcon('heroicon-o-arrows-pointing-in')
                     ->modalDescription('Merge all channels with the same ID in this group into a single channel with failover.')
                     ->modalSubmitActionLabel('Merge now'),
+
+                Action::make('unmerge')
+                    ->label('Unmerge Same ID')
+                    ->action(function (Group $record, $data): void {
+                        app('Illuminate\Contracts\Bus\Dispatcher')
+                            ->dispatch(new UnmergeChannels(
+                                user: auth()->user(),
+                                groupId: $record->id,
+                            ));
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title('Channel unmerge started')
+                            ->body('Unmerging channels for this group in the background. You will be notified once the process is complete.')
+                            ->send();
+                    })
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-arrows-pointing-out')
+                    ->color('warning')
+                    ->modalIcon('heroicon-o-arrows-pointing-out')
+                    ->modalDescription('Unmerge all channels with the same ID in this group, removing all failover relationships.')
+                    ->modalSubmitActionLabel('Unmerge now'),
 
                 Action::make('enable')
                     ->label('Enable group channels')

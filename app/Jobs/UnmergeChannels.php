@@ -21,6 +21,7 @@ class UnmergeChannels implements ShouldQueue
     public function __construct(
         public $user,
         public $playlistId = null,
+        public $groupId = null,
     ) {}
 
     /**
@@ -34,6 +35,25 @@ class UnmergeChannels implements ShouldQueue
 
             // Need to efficiently work through potentially 100s of thousands of channels
             // so we use cursor() to avoid loading everything into memory at once
+            $idsToDelete = [];
+            foreach ($channelIds->cursor() as $channel) {
+                // Bulk delete in chunks of 100
+                $idsToDelete[] = $channel->id;
+                if (count($idsToDelete) >= 100) {
+                    ChannelFailover::whereIn('channel_id', $idsToDelete)->delete();
+                    $idsToDelete = [];
+                }
+            }
+
+            // Clean up any remaining IDs
+            if (count($idsToDelete) > 0) {
+                ChannelFailover::whereIn('channel_id', $idsToDelete)->delete();
+            }
+        } elseif ($this->groupId) {
+            // Get the group channels IDs
+            $channelIds = Channel::where('group_id', $this->groupId);
+
+            // Should be much less channels than playlist unmerge but still use cursor() for safety
             $idsToDelete = [];
             foreach ($channelIds->cursor() as $channel) {
                 // Bulk delete in chunks of 100
