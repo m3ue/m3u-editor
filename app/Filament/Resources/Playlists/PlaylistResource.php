@@ -1706,6 +1706,9 @@ class PlaylistResource extends Resource
                                 ->getOptionLabelFromRecordUsing(fn ($record) => $record->name)
                                 ->getOptionLabelsUsing(function (array $values, $record): array {
                                     // Values are IDs, return id => name pairs
+                                    // Need to filter out strings (names) that may exist from previous storage format
+                                    $values = array_filter($values, fn ($value) => is_numeric($value));
+
                                     return SourceGroup::where('playlist_id', $record?->id)
                                         ->where('type', 'live')
                                         ->whereIn('id', $values)
@@ -1792,6 +1795,9 @@ class PlaylistResource extends Resource
                                 ->getOptionLabelFromRecordUsing(fn ($record) => $record->name)
                                 ->getOptionLabelsUsing(function (array $values, $record): array {
                                     // Values are IDs, return id => name pairs
+                                    // Need to filter out strings (names) that may exist from previous storage format
+                                    $values = array_filter($values, fn ($value) => is_numeric($value));
+
                                     return SourceGroup::where('playlist_id', $record?->id)
                                         ->where('type', 'vod')
                                         ->whereIn('id', $values)
@@ -1877,6 +1883,9 @@ class PlaylistResource extends Resource
                                 ->getOptionLabelFromRecordUsing(fn ($record) => $record->name)
                                 ->getOptionLabelsUsing(function (array $values, $record): array {
                                     // Values are IDs, return id => name pairs
+                                    // Need to filter out strings (names) that may exist from previous storage format
+                                    $values = array_filter($values, fn ($value) => is_numeric($value));
+
                                     return SourceCategory::where('playlist_id', $record?->id)
                                         ->whereIn('id', $values)
                                         ->pluck('name', 'id')  // id => name
