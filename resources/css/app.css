@@ -75,6 +75,6 @@
 }
 
 .fi-dropdown-panel {
-    max-height: 300px;
+    max-height: calc(100vh - 64px);
     overflow-y: auto;
 }
