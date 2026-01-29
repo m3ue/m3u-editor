@@ -74,7 +74,7 @@
     transition: all 0.2s;
 }
 
-.fi-dropdown-panel {
+/* .fi-dropdown-panel {
     max-height: calc(100vh - 64px);
     overflow-y: auto;
-}
+} */
