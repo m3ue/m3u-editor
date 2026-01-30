@@ -598,8 +598,6 @@ class PlaylistGenerateController extends Controller
 
     /**
      * Build the base query for channels for a playlist.
-     *
-     * @param  Playlist  $playlist
      */
     public static function getChannelQuery($playlist): mixed
     {
@@ -620,6 +618,8 @@ class PlaylistGenerateController extends Controller
 
         // Join EPG channel data to avoid N+1 queries and select common fields
         $query->leftJoin('epg_channels', 'channels.epg_channel_id', '=', 'epg_channels.id')
+            ->selectRaw('epg_channels.epg_id as epg_id')
+            ->selectRaw('epg_channels.channel_id as epg_channel_id')
             ->selectRaw('epg_channels.icon as epg_icon')
             ->selectRaw('epg_channels.icon_custom as epg_icon_custom')
             // Alias the external EPG channel identifier to avoid clobbering the FK attribute

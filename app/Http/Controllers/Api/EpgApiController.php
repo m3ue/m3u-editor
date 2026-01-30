@@ -7,6 +7,7 @@ use App\Enums\PlaylistChannelId;
 use App\Facades\PlaylistFacade;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\LogoProxyController;
+use App\Http\Controllers\PlaylistGenerateController;
 use App\Models\Epg;
 use App\Models\Playlist;
 use App\Models\StreamProfile;
@@ -191,27 +192,7 @@ class EpgApiController extends Controller
         ]);
         try {
             // Get enabled channels from the playlist
-            $playlistChannels = $playlist->channels()
-                ->leftJoin('groups', 'channels.group_id', '=', 'groups.id')
-                ->where('channels.enabled', true)
-                ->when(! $vod, function ($query) {
-                    return $query->where('channels.is_vod', false);
-                })
-                ->with(['epgChannel', 'tags', 'group'])
-                ->orderBy('groups.sort_order') // Primary sort
-                ->orderBy('channels.sort') // Secondary sort
-                ->orderBy('channels.channel')
-                ->orderBy('channels.title')
-                ->when($search, function ($queryBuilder) use ($search) {
-                    $search = Str::lower($search);
-
-                    return $queryBuilder->where(function ($query) use ($search) {
-                        $query->whereRaw('LOWER(channels.name) LIKE ?', ['%'.$search.'%'])
-                            ->orWhereRaw('LOWER(channels.name_custom) LIKE ?', ['%'.$search.'%'])
-                            ->orWhereRaw('LOWER(channels.title) LIKE ?', ['%'.$search.'%'])
-                            ->orWhereRaw('LOWER(channels.title_custom) LIKE ?', ['%'.$search.'%']);
-                    });
-                })
+            $playlistChannels = PlaylistGenerateController::getChannelQuery($playlist)
                 ->limit($perPage)
                 ->offset($skip)
                 ->select('channels.*')
@@ -249,7 +230,7 @@ class EpgApiController extends Controller
             $playlistChannelData = [];
             $channelSortIndex = $skip;
             foreach ($playlistChannels as $channel) {
-                $epgData = $channel->epgChannel ?? null;
+                $epgId = $channel->epg_id ?? null;
                 $channelNo = $channel->channel;
                 if (! $channelNo && ($playlist->auto_channel_increment || $idChannelBy === PlaylistChannelId::Number)) {
                     $channelNo = ++$channelNumber;
@@ -258,8 +239,7 @@ class EpgApiController extends Controller
                 // Ensure we always have a unique identifier for the channel
                 // Use database ID as fallback if channel number is not set
                 $channelKey = $channelNo ?: $channel->id;
-                if ($epgData) {
-                    $epgId = $epgData->epg_id;
+                if ($epgId) {
                     $epgIds[] = $epgId;
                     if (! isset($epgChannelMap[$epgId])) {
                         $epgChannelMap[$epgId] = [];
@@ -267,16 +247,16 @@ class EpgApiController extends Controller
 
                     // Map EPG channel ID to playlist channel info
                     // Store array of playlist channels for each EPG channel (one-to-many mapping)
-                    if (! isset($epgChannelMap[$epgId][$epgData->channel_id])) {
-                        $epgChannelMap[$epgId][$epgData->channel_id] = [];
+                    if (! isset($epgChannelMap[$epgId][$channel->epg_channel_id])) {
+                        $epgChannelMap[$epgId][$channel->epg_channel_id] = [];
                     }
 
                     $logo = url('/placeholder.png');
                     if ($channel->logo) {
                         // Logo override takes precedence
                         $logo = $channel->logo;
-                    } elseif ($channel->logo_type === ChannelLogoType::Epg && $channel->epgChannel && $channel->epgChannel->icon) {
-                        $logo = $channel->epgChannel->icon;
+                    } elseif ($channel->logo_type === ChannelLogoType::Epg && ($channel->epg_icon || $channel->epg_icon_custom)) {
+                        $logo = $channel->epg_icon_custom ?? $channel->epg_icon ?? '';
                     } elseif ($channel->logo_type === ChannelLogoType::Channel && ($channel->logo || $channel->logo_internal)) {
                         $logo = $channel->logo ?? $channel->logo_internal ?? '';
                         $logo = filter_var($logo, FILTER_VALIDATE_URL) ? $logo : url('/placeholder.png');
@@ -286,7 +266,7 @@ class EpgApiController extends Controller
                     }
 
                     // Add the playlist channel info to the EPG channel map
-                    $epgChannelMap[$epgId][$epgData->channel_id][] = [
+                    $epgChannelMap[$epgId][$channel->epg_channel_id][] = [
                         'playlist_channel_id' => $channelKey,
                         'display_name' => $channel->title_custom ?? $channel->title,
                         'title' => $channel->name_custom ?? $channel->name,
@@ -381,8 +361,8 @@ class EpgApiController extends Controller
                     'channel_number' => $channelNo,
                     'group' => $channel->group ?? $channel->group_internal,
                     'icon' => $icon,
-                    'has_epg' => $epgData !== null,
-                    'epg_channel_id' => $epgData->channel_id ?? null,
+                    'has_epg' => $epgId !== null,
+                    'epg_channel_id' => $channel->epg_channel_id ?? null,
                     'tvg_shift' => (int) ($channel->tvg_shift ?? 0), // EPG time shift in hours
                     'sort_index' => $channelSortIndex++,
                 ];
