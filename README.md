@@ -29,6 +29,10 @@ Join our [Discord](https://discord.gg/rS3abJ5dz7) server to ask questions and ge
 Check out the docs: [m3u editor docs](https://sparkison.github.io/m3u-editor-docs/) (we could use some help with this one...)
 
 ## 🐳 Docker quick start <sup><small><code>v0.8.x+</code></small></sup>
+> [!IMPORTANT]
+> - **Default Username:** admin
+> - **Default password:** admin
+> - **Default port:** 36400
 
 | Use Case                    | File                                                    | Description                                                                                            |
 | --------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
