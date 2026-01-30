@@ -354,7 +354,7 @@ class PlaylistService
         return (object) [
             'title' => 'John Wick: Chapter 4 (2023)',
             'year' => '2023',
-            'group' => 'Action',
+            'group' => '4K',
             'info' => [
                 'name' => 'John Wick: Chapter 4',
                 'tmdb_id' => 603692,
