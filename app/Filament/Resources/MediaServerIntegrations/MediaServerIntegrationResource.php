@@ -19,11 +19,15 @@ use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
+use Filament\Forms\Components\CheckboxList;
+use Filament\Forms\Components\Hidden;
+use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
+use Filament\Schemas\Components\Actions;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
@@ -131,6 +135,65 @@ class MediaServerIntegrationResource extends Resource
                                     default => 'Generate an API key in your media server\'s dashboard under Settings → API Keys',
                                 };
                             }),
+
+                        Actions::make([
+                            Action::make('testAndDiscover')
+                                ->label('Test Connection & Discover Libraries')
+                                ->icon('heroicon-o-signal')
+                                ->action(function (callable $get, callable $set, $livewire) {
+                                    // Create temporary model from form state
+                                    $tempIntegration = new MediaServerIntegration([
+                                        'type' => $get('type'),
+                                        'host' => $get('host'),
+                                        'port' => $get('port'),
+                                        'ssl' => $get('ssl'),
+                                        'api_key' => $get('api_key') ?: $livewire->record?->api_key,
+                                    ]);
+
+                                    // Test connection
+                                    $service = MediaServerService::make($tempIntegration);
+                                    $result = $service->testConnection();
+
+                                    if (! $result['success']) {
+                                        Notification::make()
+                                            ->danger()
+                                            ->title('Connection Failed')
+                                            ->body($result['message'])
+                                            ->send();
+
+                                        return;
+                                    }
+
+                                    // Fetch libraries
+                                    $libraries = $service->fetchLibraries();
+
+                                    if ($libraries->isEmpty()) {
+                                        Notification::make()
+                                            ->warning()
+                                            ->title('Connected but No Libraries Found')
+                                            ->body("Connected to {$result['server_name']}. No movie or TV show libraries were found.")
+                                            ->send();
+                                        $set('available_libraries', []);
+
+                                        return;
+                                    }
+
+                                    // Store libraries in form state
+                                    $set('available_libraries', $libraries->toArray());
+
+                                    // Preserve existing selections if valid
+                                    $existingSelections = $get('selected_library_ids') ?? [];
+                                    $newLibraryIds = $libraries->pluck('id')->toArray();
+                                    $validSelections = array_intersect($existingSelections, $newLibraryIds);
+                                    $set('selected_library_ids', array_values($validSelections));
+
+                                    Notification::make()
+                                        ->success()
+                                        ->title('Connection Successful')
+                                        ->body("Connected to {$result['server_name']} (v{$result['version']}). Found {$libraries->count()} libraries.")
+                                        ->send();
+                                }),
+                        ])->fullWidth(),
                     ]),
 
                 Section::make('Import Settings')
@@ -164,6 +227,91 @@ class MediaServerIntegrationResource extends Resource
                             ->helperText('How to handle content with multiple genres')
                             ->native(false)
                             ->visible(fn (callable $get) => $get('enabled')),
+                    ]),
+
+                Section::make('Library Selection')
+                    ->description('Select which libraries to import from your media server')
+                    ->schema([
+                        Hidden::make('available_libraries')
+                            ->dehydrateStateUsing(fn ($state) => $state)
+                            ->default([])
+                            ->rules([
+                                fn (callable $get): \Closure => function (string $attribute, $value, \Closure $fail) use ($get) {
+                                    $enabled = $get('enabled');
+                                    $importMovies = $get('import_movies');
+                                    $importSeries = $get('import_series');
+
+                                    if ($enabled && ($importMovies || $importSeries) && empty($value)) {
+                                        $fail('Libraries must be discovered before saving. Use the test connection button above.');
+                                    }
+                                },
+                            ]),
+
+                        Placeholder::make('library_instructions')
+                            ->label('')
+                            ->content(function (callable $get) {
+                                $libraries = $get('available_libraries');
+
+                                if (empty($libraries)) {
+                                    return new HtmlString(
+                                        '<div class="text-sm text-gray-500 dark:text-gray-400">'.
+                                        '<p class="font-medium text-warning-600 dark:text-warning-400">No libraries discovered yet.</p>'.
+                                        '<p class="mt-1">Click "Test Connection & Discover Libraries" above to discover available libraries.</p>'.
+                                        '</div>'
+                                    );
+                                }
+
+                                $libraryCount = count($libraries);
+                                $selectedCount = count($get('selected_library_ids') ?? []);
+
+                                return new HtmlString(
+                                    '<div class="text-sm text-gray-500 dark:text-gray-400">'.
+                                    "<p>Found <strong>{$libraryCount}</strong> libraries. <strong>{$selectedCount}</strong> selected for import.</p>".
+                                    '<p class="mt-1">Select the libraries you want to sync content from.</p>'.
+                                    '</div>'
+                                );
+                            }),
+
+                        CheckboxList::make('selected_library_ids')
+                            ->label('Libraries to Import')
+                            ->options(function (callable $get) {
+                                $libraries = $get('available_libraries');
+                                if (empty($libraries)) {
+                                    return [];
+                                }
+
+                                $options = [];
+                                foreach ($libraries as $library) {
+                                    $typeLabel = $library['type'] === 'movies' ? 'Movies' : 'TV Shows';
+                                    $itemCount = $library['item_count'] > 0 ? " ({$library['item_count']} items)" : '';
+                                    $options[$library['id']] = "{$library['name']} [{$typeLabel}]{$itemCount}";
+                                }
+
+                                return $options;
+                            })
+                            ->descriptions(function (callable $get) {
+                                $libraries = $get('available_libraries');
+                                if (empty($libraries)) {
+                                    return [];
+                                }
+
+                                $descriptions = [];
+                                foreach ($libraries as $library) {
+                                    if (! empty($library['path'])) {
+                                        $descriptions[$library['id']] = $library['path'];
+                                    }
+                                }
+
+                                return $descriptions;
+                            })
+                            ->columns(1)
+                            ->bulkToggleable()
+                            ->live()
+                            ->visible(fn (callable $get) => ! empty($get('available_libraries')))
+                            ->required(fn (callable $get) => $get('enabled') && ($get('import_movies') || $get('import_series')))
+                            ->validationMessages([
+                                'required' => 'Please select at least one library to import.',
+                            ]),
                     ]),
 
                 Section::make('Sync Schedule')
@@ -347,6 +495,22 @@ class MediaServerIntegrationResource extends Resource
                     ->toggleable()
                     ->copyable(),
 
+                TextColumn::make('selected_library_ids')
+                    ->label('Libraries')
+                    ->formatStateUsing(function ($record, $state): string {
+                        $available = $record->available_libraries ?? [];
+
+                        if (empty($available)) {
+                            return 'Not configured';
+                        }
+
+                        return collect($available)
+                            ->where('id', '=', (string) $state)->first()['name'] ?? 'N/A';
+                    })
+                    ->toggleable()
+                    ->badge()
+                    ->color('success'),
+
                 TextColumn::make('status')
                     ->label('Status')
                     ->badge()
@@ -421,16 +585,72 @@ class MediaServerIntegrationResource extends Resource
                             $result = $service->testConnection();
 
                             if ($result['success']) {
-                                Notification::make()
-                                    ->success()
-                                    ->title('Connection Successful')
-                                    ->body("Connected to {$result['server_name']} (v{$result['version']})")
-                                    ->send();
+                                // Auto-fetch libraries on successful connection
+                                $libraries = $service->fetchLibraries();
+
+                                if ($libraries->isNotEmpty()) {
+                                    // Update the integration with available libraries
+                                    $record->update([
+                                        'available_libraries' => $libraries->toArray(),
+                                    ]);
+
+                                    Notification::make()
+                                        ->success()
+                                        ->title('Connection Successful')
+                                        ->body("Connected to {$result['server_name']} (v{$result['version']}). Found {$libraries->count()} libraries. Edit the integration to select which libraries to import.")
+                                        ->send();
+                                } else {
+                                    Notification::make()
+                                        ->success()
+                                        ->title('Connection Successful')
+                                        ->body("Connected to {$result['server_name']} (v{$result['version']}). No movie or TV show libraries found.")
+                                        ->send();
+                                }
                             } else {
                                 Notification::make()
                                     ->danger()
                                     ->title('Connection Failed')
                                     ->body($result['message'])
+                                    ->send();
+                            }
+                        }),
+
+                    Action::make('refreshLibraries')
+                        ->label('Refresh Libraries')
+                        ->icon('heroicon-o-arrow-path')
+                        ->action(function (MediaServerIntegration $record) {
+                            $service = MediaServerService::make($record);
+                            $libraries = $service->fetchLibraries();
+
+                            if ($libraries->isNotEmpty()) {
+                                // Preserve existing selections where possible
+                                $existingSelections = $record->selected_library_ids ?? [];
+                                $newLibraryIds = $libraries->pluck('id')->toArray();
+
+                                // Filter selections to only include libraries that still exist
+                                $validSelections = array_intersect($existingSelections, $newLibraryIds);
+
+                                $record->update([
+                                    'available_libraries' => $libraries->toArray(),
+                                    'selected_library_ids' => array_values($validSelections),
+                                ]);
+
+                                $removedCount = count($existingSelections) - count($validSelections);
+                                $message = "Found {$libraries->count()} libraries.";
+                                if ($removedCount > 0) {
+                                    $message .= " {$removedCount} previously selected libraries no longer exist.";
+                                }
+
+                                Notification::make()
+                                    ->success()
+                                    ->title('Libraries Refreshed')
+                                    ->body($message)
+                                    ->send();
+                            } else {
+                                Notification::make()
+                                    ->warning()
+                                    ->title('No Libraries Found')
+                                    ->body('No movie or TV show libraries were found on the server.')
                                     ->send();
                             }
                         }),
