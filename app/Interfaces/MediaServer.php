@@ -12,6 +12,14 @@ interface MediaServer
 
     public function testConnection(): array;
 
+    /**
+     * Fetch available libraries from the media server.
+     * Returns only movies and TV shows libraries.
+     *
+     * @return Collection<int, array{id: string, name: string, type: string, item_count: int}>
+     */
+    public function fetchLibraries(): Collection;
+
     public function fetchMovies(): Collection;
 
     public function fetchSeries(): Collection;

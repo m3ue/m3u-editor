@@ -78,6 +78,61 @@ class PlexService implements MediaServer
         }
     }
 
+    /**
+     * Fetch available libraries from the media server.
+     * Returns only movies and TV shows libraries.
+     *
+     * @return Collection<int, array{id: string, name: string, type: string, item_count: int}>
+     */
+    public function fetchLibraries(): Collection
+    {
+        try {
+            $response = $this->client()->get('/library/sections');
+
+            if ($response->successful()) {
+                $data = $response->json();
+
+                return collect($data['MediaContainer']['Directory'] ?? [])
+                    ->filter(function ($library) {
+                        // Only include movies and shows libraries
+                        $type = $library['type'] ?? '';
+
+                        return in_array($type, ['movie', 'show']);
+                    })
+                    ->map(function ($library) {
+                        $plexType = $library['type'] ?? 'unknown';
+                        // Normalize type to match Emby/Jellyfin convention
+                        $normalizedType = $plexType === 'movie' ? 'movies' : 'tvshows';
+
+                        return [
+                            'id' => $library['key'] ?? '',
+                            'name' => $library['title'] ?? 'Unknown Library',
+                            'type' => $normalizedType,
+                            'item_count' => 0, // Plex doesn't include count in sections endpoint
+                            'path' => isset($library['Location'][0]['path'])
+                                ? $library['Location'][0]['path']
+                                : '',
+                        ];
+                    })
+                    ->values();
+            }
+
+            Log::warning('PlexService: Failed to fetch libraries', [
+                'integration_id' => $this->integration->id,
+                'status' => $response->status(),
+            ]);
+
+            return collect();
+        } catch (Exception $e) {
+            Log::error('PlexService: Error fetching libraries', [
+                'integration_id' => $this->integration->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return collect();
+        }
+    }
+
     public function fetchMovies(): Collection
     {
         $libraries = $this->fetchPlexLibraries('movie');
@@ -136,6 +191,7 @@ class PlexService implements MediaServer
 
     /**
      * Fetch all Plex libraries of a specific type.
+     * If specific libraries are selected, only returns those libraries.
      *
      * @param  string  $type  'movie' or 'show'
      * @return Collection<int, array>
@@ -149,7 +205,22 @@ class PlexService implements MediaServer
                 $data = $response->json();
                 $libraries = collect($data['MediaContainer']['Directory'] ?? []);
 
-                return $libraries->where('type', $type);
+                // Filter by type
+                $libraries = $libraries->where('type', $type);
+
+                // Check if specific libraries are selected
+                // Map Plex type to normalized type for lookup
+                $normalizedType = $type === 'movie' ? 'movies' : 'tvshows';
+                $selectedLibraryIds = $this->integration->getSelectedLibraryIdsForType($normalizedType);
+
+                if (! empty($selectedLibraryIds)) {
+                    // Filter to only include selected libraries
+                    $libraries = $libraries->filter(function ($library) use ($selectedLibraryIds) {
+                        return in_array($library['key'], $selectedLibraryIds);
+                    });
+                }
+
+                return $libraries;
             }
 
             return collect();

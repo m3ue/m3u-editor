@@ -113,6 +113,9 @@ class SyncMediaServer implements ShouldQueue
                 throw new Exception('Connection failed: '.$connectionTest['message']);
             }
 
+            // Validate selected libraries still exist
+            $this->validateSelectedLibraries($integration, $service);
+
             $integration->update(['progress' => 10]);
 
             // Sync movies (as VOD channels)
@@ -673,6 +676,57 @@ class SyncMediaServer implements ShouldQueue
         }
 
         return $category;
+    }
+
+    /**
+     * Validate that selected libraries still exist on the media server.
+     * If libraries are missing, send a warning notification.
+     */
+    protected function validateSelectedLibraries(
+        MediaServerIntegration $integration,
+        MediaServer $service
+    ): void {
+        // Skip validation if no libraries are selected (backwards compatibility)
+        if (empty($integration->selected_library_ids)) {
+            return;
+        }
+
+        // Fetch current libraries from the media server
+        $currentLibraries = $service->fetchLibraries()->toArray();
+
+        // Check for missing libraries
+        $missingIds = $integration->validateSelectedLibraries($currentLibraries);
+
+        if (! empty($missingIds)) {
+            // Get names of missing libraries from the cached available_libraries
+            $availableLibraries = $integration->available_libraries ?? [];
+            $missingNames = collect($availableLibraries)
+                ->filter(fn ($lib) => in_array($lib['id'], $missingIds))
+                ->pluck('name')
+                ->toArray();
+
+            $missingNamesStr = ! empty($missingNames)
+                ? implode(', ', $missingNames)
+                : implode(', ', $missingIds);
+
+            // Log warning
+            Log::warning('SyncMediaServer: Some selected libraries no longer exist', [
+                'integration_id' => $integration->id,
+                'missing_library_ids' => $missingIds,
+                'missing_library_names' => $missingNames,
+            ]);
+
+            // Send warning notification to user
+            Notification::make()
+                ->warning()
+                ->title('Missing Libraries Detected')
+                ->body("The following libraries no longer exist on {$integration->name}: {$missingNamesStr}. Please update your library selection.")
+                ->broadcast($integration->user)
+                ->sendToDatabase($integration->user);
+
+            // Track in sync stats
+            $this->stats['errors'][] = "Missing libraries: {$missingNamesStr}";
+        }
     }
 
     public function failed(\Throwable $exception): void

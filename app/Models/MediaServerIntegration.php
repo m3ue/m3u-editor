@@ -60,6 +60,8 @@ class MediaServerIntegration extends Model
         'series_progress' => 'integer',
         'total_movies' => 'integer',
         'total_series' => 'integer',
+        'available_libraries' => 'array',
+        'selected_library_ids' => 'array',
     ];
 
     /**
@@ -136,5 +138,71 @@ class MediaServerIntegration extends Model
     public function scopeEnabled($query)
     {
         return $query->where('enabled', true);
+    }
+
+    /**
+     * Get selected library IDs for a specific type (movies or tvshows).
+     *
+     * @param  string  $type  'movies' or 'tvshows'
+     * @return array<string>
+     */
+    public function getSelectedLibraryIdsForType(string $type): array
+    {
+        $selectedIds = $this->selected_library_ids ?? [];
+        $availableLibraries = $this->available_libraries ?? [];
+
+        if (empty($selectedIds) || empty($availableLibraries)) {
+            return [];
+        }
+
+        return collect($availableLibraries)
+            ->filter(fn ($lib) => $lib['type'] === $type && in_array($lib['id'], $selectedIds))
+            ->pluck('id')
+            ->toArray();
+    }
+
+    /**
+     * Check if any libraries of a specific type are selected.
+     *
+     * @param  string  $type  'movies' or 'tvshows'
+     */
+    public function hasSelectedLibrariesOfType(string $type): bool
+    {
+        return ! empty($this->getSelectedLibraryIdsForType($type));
+    }
+
+    /**
+     * Get the names of selected libraries for display.
+     *
+     * @return array<string>
+     */
+    public function getSelectedLibraryNames(): array
+    {
+        $selectedIds = $this->selected_library_ids ?? [];
+        $availableLibraries = $this->available_libraries ?? [];
+
+        if (empty($selectedIds) || empty($availableLibraries)) {
+            return [];
+        }
+
+        return collect($availableLibraries)
+            ->filter(fn ($lib) => in_array($lib['id'], $selectedIds))
+            ->pluck('name')
+            ->toArray();
+    }
+
+    /**
+     * Validate that selected libraries still exist on the media server.
+     * Returns missing library IDs.
+     *
+     * @param  array  $currentLibraries  Libraries fetched from the server
+     * @return array<string>  IDs of libraries that were selected but no longer exist
+     */
+    public function validateSelectedLibraries(array $currentLibraries): array
+    {
+        $selectedIds = $this->selected_library_ids ?? [];
+        $currentIds = collect($currentLibraries)->pluck('id')->toArray();
+
+        return array_diff($selectedIds, $currentIds);
     }
 }

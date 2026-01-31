@@ -97,20 +97,95 @@ class EmbyJellyfinService implements MediaServer
     }
 
     /**
+     * Fetch available libraries from the media server.
+     * Returns only movies and TV shows libraries.
+     *
+     * @return Collection<int, array{id: string, name: string, type: string, item_count: int}>
+     */
+    public function fetchLibraries(): Collection
+    {
+        try {
+            $response = $this->client()->get('/Library/VirtualFolders');
+
+            if ($response->successful()) {
+                $data = $response->json();
+
+                return collect($data ?? [])
+                    ->filter(function ($library) {
+                        // Only include movies and tvshows libraries
+                        $collectionType = $library['CollectionType'] ?? '';
+
+                        return in_array($collectionType, ['movies', 'tvshows']);
+                    })
+                    ->map(function ($library) {
+                        $collectionType = $library['CollectionType'] ?? 'unknown';
+
+                        return [
+                            'id' => $library['ItemId'] ?? $library['Id'] ?? '',
+                            'name' => $library['Name'] ?? 'Unknown Library',
+                            'type' => $collectionType,
+                            'item_count' => $library['ChildCount'] ?? 0,
+                            'path' => is_array($library['Locations'] ?? null)
+                                ? implode(', ', $library['Locations'])
+                                : ($library['Path'] ?? ''),
+                        ];
+                    })
+                    ->values();
+            }
+
+            Log::warning('EmbyJellyfinService: Failed to fetch libraries', [
+                'integration_id' => $this->integration->id,
+                'status' => $response->status(),
+            ]);
+
+            return collect();
+        } catch (Exception $e) {
+            Log::error('EmbyJellyfinService: Error fetching libraries', [
+                'integration_id' => $this->integration->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return collect();
+        }
+    }
+
+    /**
      * Fetch all movies from the media server.
+     * If specific libraries are selected, only fetches from those libraries.
      *
      * @return Collection<int, array>
      */
     public function fetchMovies(): Collection
     {
         try {
-            $response = $this->client()->get('/Items', [
+            $params = [
                 'IncludeItemTypes' => 'Movie',
                 'Recursive' => 'true',
                 'Fields' => 'Genres,Path,MediaSources,Overview,CommunityRating,OfficialRating,ProductionYear,RunTimeTicks,People,OriginalTitle,PremiereDate,ProductionLocations',
                 'EnableImages' => 'true',
                 'ImageTypeLimit' => 1,
-            ]);
+            ];
+
+            // Filter by selected libraries if specified
+            $selectedLibraryIds = $this->integration->getSelectedLibraryIdsForType('movies');
+            if (! empty($selectedLibraryIds)) {
+                // For multiple libraries, we need to fetch from each and merge
+                $allMovies = collect();
+                foreach ($selectedLibraryIds as $libraryId) {
+                    $params['ParentId'] = $libraryId;
+                    $response = $this->client()->get('/Items', $params);
+
+                    if ($response->successful()) {
+                        $data = $response->json();
+                        $allMovies = $allMovies->concat(collect($data['Items'] ?? []));
+                    }
+                }
+
+                return $allMovies;
+            }
+
+            // No library filter - fetch all movies
+            $response = $this->client()->get('/Items', $params);
 
             if ($response->successful()) {
                 $data = $response->json();
@@ -118,14 +193,14 @@ class EmbyJellyfinService implements MediaServer
                 return collect($data['Items'] ?? []);
             }
 
-            Log::warning('MediaServerService: Failed to fetch movies', [
+            Log::warning('EmbyJellyfinService: Failed to fetch movies', [
                 'integration_id' => $this->integration->id,
                 'status' => $response->status(),
             ]);
 
             return collect();
         } catch (Exception $e) {
-            Log::error('MediaServerService: Error fetching movies', [
+            Log::error('EmbyJellyfinService: Error fetching movies', [
                 'integration_id' => $this->integration->id,
                 'error' => $e->getMessage(),
             ]);
@@ -136,19 +211,41 @@ class EmbyJellyfinService implements MediaServer
 
     /**
      * Fetch all series from the media server.
+     * If specific libraries are selected, only fetches from those libraries.
      *
      * @return Collection<int, array>
      */
     public function fetchSeries(): Collection
     {
         try {
-            $response = $this->client()->get('/Items', [
+            $params = [
                 'IncludeItemTypes' => 'Series',
                 'Recursive' => 'true',
                 'Fields' => 'Genres,Overview,CommunityRating,OfficialRating,ProductionYear',
                 'EnableImages' => 'true',
                 'ImageTypeLimit' => 1,
-            ]);
+            ];
+
+            // Filter by selected libraries if specified
+            $selectedLibraryIds = $this->integration->getSelectedLibraryIdsForType('tvshows');
+            if (! empty($selectedLibraryIds)) {
+                // For multiple libraries, we need to fetch from each and merge
+                $allSeries = collect();
+                foreach ($selectedLibraryIds as $libraryId) {
+                    $params['ParentId'] = $libraryId;
+                    $response = $this->client()->get('/Items', $params);
+
+                    if ($response->successful()) {
+                        $data = $response->json();
+                        $allSeries = $allSeries->concat(collect($data['Items'] ?? []));
+                    }
+                }
+
+                return $allSeries;
+            }
+
+            // No library filter - fetch all series
+            $response = $this->client()->get('/Items', $params);
 
             if ($response->successful()) {
                 $data = $response->json();
@@ -156,14 +253,14 @@ class EmbyJellyfinService implements MediaServer
                 return collect($data['Items'] ?? []);
             }
 
-            Log::warning('MediaServerService: Failed to fetch series', [
+            Log::warning('EmbyJellyfinService: Failed to fetch series', [
                 'integration_id' => $this->integration->id,
                 'status' => $response->status(),
             ]);
 
             return collect();
         } catch (Exception $e) {
-            Log::error('MediaServerService: Error fetching series', [
+            Log::error('EmbyJellyfinService: Error fetching series', [
                 'integration_id' => $this->integration->id,
                 'error' => $e->getMessage(),
             ]);

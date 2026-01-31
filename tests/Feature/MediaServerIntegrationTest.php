@@ -315,3 +315,231 @@ it('can reset status and progress fields', function () {
     expect($integration->total_movies)->toBe(0);
     expect($integration->total_series)->toBe(0);
 });
+
+// Library Selection Tests
+
+it('can store available libraries', function () {
+    $integration = MediaServerIntegration::create([
+        'name' => 'Test Server',
+        'type' => 'jellyfin',
+        'host' => '192.168.1.100',
+        'api_key' => 'test-key',
+        'user_id' => $this->user->id,
+        'available_libraries' => [
+            ['id' => 'lib1', 'name' => 'Movies', 'type' => 'movies', 'item_count' => 150],
+            ['id' => 'lib2', 'name' => 'TV Shows', 'type' => 'tvshows', 'item_count' => 50],
+            ['id' => 'lib3', 'name' => '4K Movies', 'type' => 'movies', 'item_count' => 25],
+        ],
+    ]);
+
+    expect($integration->available_libraries)->toBeArray();
+    expect($integration->available_libraries)->toHaveCount(3);
+    expect($integration->available_libraries[0]['name'])->toBe('Movies');
+    expect($integration->available_libraries[1]['type'])->toBe('tvshows');
+});
+
+it('can store selected library ids', function () {
+    $integration = MediaServerIntegration::create([
+        'name' => 'Test Server',
+        'type' => 'jellyfin',
+        'host' => '192.168.1.100',
+        'api_key' => 'test-key',
+        'user_id' => $this->user->id,
+        'available_libraries' => [
+            ['id' => 'lib1', 'name' => 'Movies', 'type' => 'movies', 'item_count' => 150],
+            ['id' => 'lib2', 'name' => 'TV Shows', 'type' => 'tvshows', 'item_count' => 50],
+        ],
+        'selected_library_ids' => ['lib1', 'lib2'],
+    ]);
+
+    expect($integration->selected_library_ids)->toBeArray();
+    expect($integration->selected_library_ids)->toContain('lib1');
+    expect($integration->selected_library_ids)->toContain('lib2');
+});
+
+it('can get selected library ids for movies type', function () {
+    $integration = MediaServerIntegration::create([
+        'name' => 'Test Server',
+        'type' => 'jellyfin',
+        'host' => '192.168.1.100',
+        'api_key' => 'test-key',
+        'user_id' => $this->user->id,
+        'available_libraries' => [
+            ['id' => 'lib1', 'name' => 'Movies', 'type' => 'movies', 'item_count' => 150],
+            ['id' => 'lib2', 'name' => 'TV Shows', 'type' => 'tvshows', 'item_count' => 50],
+            ['id' => 'lib3', 'name' => '4K Movies', 'type' => 'movies', 'item_count' => 25],
+        ],
+        'selected_library_ids' => ['lib1', 'lib2', 'lib3'],
+    ]);
+
+    $movieLibraries = $integration->getSelectedLibraryIdsForType('movies');
+
+    expect($movieLibraries)->toBeArray();
+    expect($movieLibraries)->toContain('lib1');
+    expect($movieLibraries)->toContain('lib3');
+    expect($movieLibraries)->not->toContain('lib2');
+});
+
+it('can get selected library ids for tvshows type', function () {
+    $integration = MediaServerIntegration::create([
+        'name' => 'Test Server',
+        'type' => 'jellyfin',
+        'host' => '192.168.1.100',
+        'api_key' => 'test-key',
+        'user_id' => $this->user->id,
+        'available_libraries' => [
+            ['id' => 'lib1', 'name' => 'Movies', 'type' => 'movies', 'item_count' => 150],
+            ['id' => 'lib2', 'name' => 'TV Shows', 'type' => 'tvshows', 'item_count' => 50],
+            ['id' => 'lib3', 'name' => 'Anime', 'type' => 'tvshows', 'item_count' => 100],
+        ],
+        'selected_library_ids' => ['lib1', 'lib2', 'lib3'],
+    ]);
+
+    $tvLibraries = $integration->getSelectedLibraryIdsForType('tvshows');
+
+    expect($tvLibraries)->toBeArray();
+    expect($tvLibraries)->toContain('lib2');
+    expect($tvLibraries)->toContain('lib3');
+    expect($tvLibraries)->not->toContain('lib1');
+});
+
+it('returns empty array when no libraries are selected', function () {
+    $integration = MediaServerIntegration::create([
+        'name' => 'Test Server',
+        'type' => 'jellyfin',
+        'host' => '192.168.1.100',
+        'api_key' => 'test-key',
+        'user_id' => $this->user->id,
+        'available_libraries' => [
+            ['id' => 'lib1', 'name' => 'Movies', 'type' => 'movies', 'item_count' => 150],
+        ],
+        'selected_library_ids' => [],
+    ]);
+
+    expect($integration->getSelectedLibraryIdsForType('movies'))->toBeEmpty();
+});
+
+it('returns empty array when available libraries is null', function () {
+    $integration = MediaServerIntegration::create([
+        'name' => 'Test Server',
+        'type' => 'jellyfin',
+        'host' => '192.168.1.100',
+        'api_key' => 'test-key',
+        'user_id' => $this->user->id,
+    ]);
+
+    expect($integration->getSelectedLibraryIdsForType('movies'))->toBeEmpty();
+});
+
+it('can check if libraries of a type are selected', function () {
+    $integration = MediaServerIntegration::create([
+        'name' => 'Test Server',
+        'type' => 'jellyfin',
+        'host' => '192.168.1.100',
+        'api_key' => 'test-key',
+        'user_id' => $this->user->id,
+        'available_libraries' => [
+            ['id' => 'lib1', 'name' => 'Movies', 'type' => 'movies', 'item_count' => 150],
+            ['id' => 'lib2', 'name' => 'TV Shows', 'type' => 'tvshows', 'item_count' => 50],
+        ],
+        'selected_library_ids' => ['lib1'], // Only movies selected
+    ]);
+
+    expect($integration->hasSelectedLibrariesOfType('movies'))->toBeTrue();
+    expect($integration->hasSelectedLibrariesOfType('tvshows'))->toBeFalse();
+});
+
+it('can get selected library names', function () {
+    $integration = MediaServerIntegration::create([
+        'name' => 'Test Server',
+        'type' => 'jellyfin',
+        'host' => '192.168.1.100',
+        'api_key' => 'test-key',
+        'user_id' => $this->user->id,
+        'available_libraries' => [
+            ['id' => 'lib1', 'name' => 'Movies', 'type' => 'movies', 'item_count' => 150],
+            ['id' => 'lib2', 'name' => 'TV Shows', 'type' => 'tvshows', 'item_count' => 50],
+            ['id' => 'lib3', 'name' => '4K Movies', 'type' => 'movies', 'item_count' => 25],
+        ],
+        'selected_library_ids' => ['lib1', 'lib3'],
+    ]);
+
+    $names = $integration->getSelectedLibraryNames();
+
+    expect($names)->toBeArray();
+    expect($names)->toContain('Movies');
+    expect($names)->toContain('4K Movies');
+    expect($names)->not->toContain('TV Shows');
+});
+
+it('can validate selected libraries against current libraries', function () {
+    $integration = MediaServerIntegration::create([
+        'name' => 'Test Server',
+        'type' => 'jellyfin',
+        'host' => '192.168.1.100',
+        'api_key' => 'test-key',
+        'user_id' => $this->user->id,
+        'available_libraries' => [
+            ['id' => 'lib1', 'name' => 'Movies', 'type' => 'movies', 'item_count' => 150],
+            ['id' => 'lib2', 'name' => 'TV Shows', 'type' => 'tvshows', 'item_count' => 50],
+            ['id' => 'lib3', 'name' => 'Old Library', 'type' => 'movies', 'item_count' => 25],
+        ],
+        'selected_library_ids' => ['lib1', 'lib2', 'lib3'],
+    ]);
+
+    // Simulate that lib3 has been deleted from the media server
+    $currentLibraries = [
+        ['id' => 'lib1', 'name' => 'Movies', 'type' => 'movies', 'item_count' => 160],
+        ['id' => 'lib2', 'name' => 'TV Shows', 'type' => 'tvshows', 'item_count' => 55],
+    ];
+
+    $missingIds = $integration->validateSelectedLibraries($currentLibraries);
+
+    expect($missingIds)->toBeArray();
+    expect($missingIds)->toContain('lib3');
+    expect($missingIds)->not->toContain('lib1');
+    expect($missingIds)->not->toContain('lib2');
+});
+
+it('returns empty array when all selected libraries still exist', function () {
+    $integration = MediaServerIntegration::create([
+        'name' => 'Test Server',
+        'type' => 'jellyfin',
+        'host' => '192.168.1.100',
+        'api_key' => 'test-key',
+        'user_id' => $this->user->id,
+        'selected_library_ids' => ['lib1', 'lib2'],
+    ]);
+
+    $currentLibraries = [
+        ['id' => 'lib1', 'name' => 'Movies', 'type' => 'movies', 'item_count' => 150],
+        ['id' => 'lib2', 'name' => 'TV Shows', 'type' => 'tvshows', 'item_count' => 50],
+        ['id' => 'lib3', 'name' => 'New Library', 'type' => 'movies', 'item_count' => 10],
+    ];
+
+    $missingIds = $integration->validateSelectedLibraries($currentLibraries);
+
+    expect($missingIds)->toBeEmpty();
+});
+
+it('only returns selected library ids that match available libraries', function () {
+    // Test edge case where selected_library_ids contains IDs not in available_libraries
+    $integration = MediaServerIntegration::create([
+        'name' => 'Test Server',
+        'type' => 'jellyfin',
+        'host' => '192.168.1.100',
+        'api_key' => 'test-key',
+        'user_id' => $this->user->id,
+        'available_libraries' => [
+            ['id' => 'lib1', 'name' => 'Movies', 'type' => 'movies', 'item_count' => 150],
+        ],
+        // lib2 is selected but not in available_libraries
+        'selected_library_ids' => ['lib1', 'lib2'],
+    ]);
+
+    $movieLibraries = $integration->getSelectedLibraryIdsForType('movies');
+
+    // Should only return lib1 since lib2 is not in available_libraries
+    expect($movieLibraries)->toContain('lib1');
+    expect($movieLibraries)->not->toContain('lib2');
+});
