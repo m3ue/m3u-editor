@@ -21,6 +21,8 @@ class StreamFileSetting extends Model
         'name_filter_enabled' => 'boolean',
         'name_filter_patterns' => 'array',
         'generate_nfo' => 'boolean',
+        'refresh_media_server' => 'boolean',
+        'refresh_delay_seconds' => 'integer',
     ];
 
     public function user(): BelongsTo
@@ -46,6 +48,11 @@ class StreamFileSetting extends Model
     public function categories(): HasMany
     {
         return $this->hasMany(Category::class, 'stream_file_setting_id');
+    }
+
+    public function mediaServerIntegration(): BelongsTo
+    {
+        return $this->belongsTo(MediaServerIntegration::class);
     }
 
     public function scopeForSeries(Builder $query): Builder
@@ -75,6 +82,9 @@ class StreamFileSetting extends Model
             'name_filter_enabled' => $this->name_filter_enabled,
             'name_filter_patterns' => $this->name_filter_patterns ?? [],
             'generate_nfo' => $this->generate_nfo,
+            'refresh_media_server' => $this->refresh_media_server,
+            'media_server_integration_id' => $this->media_server_integration_id,
+            'refresh_delay_seconds' => $this->refresh_delay_seconds ?? 5,
         ];
     }
 }

@@ -659,4 +659,97 @@ class PlexService implements MediaServer
         // 10,000,000 ticks = 1 second
         return (int) ($ticks / 10000000);
     }
+
+    /**
+     * Trigger a library refresh/scan on the Plex server.
+     * Refreshes all movie and TV show libraries.
+     *
+     * @return array{success: bool, message: string}
+     */
+    public function refreshLibrary(): array
+    {
+        try {
+            // Get all libraries first
+            $response = $this->client()->get('/library/sections');
+
+            if (! $response->successful()) {
+                return [
+                    'success' => false,
+                    'message' => 'Failed to fetch library sections: '.$response->status(),
+                ];
+            }
+
+            $data = $response->json();
+            $sections = $data['MediaContainer']['Directory'] ?? [];
+
+            // Filter to only movie and show libraries
+            $librariesToRefresh = collect($sections)->filter(function ($library) {
+                $type = $library['type'] ?? '';
+
+                return in_array($type, ['movie', 'show']);
+            });
+
+            if ($librariesToRefresh->isEmpty()) {
+                return [
+                    'success' => true,
+                    'message' => 'No movie or TV libraries found to refresh',
+                ];
+            }
+
+            $refreshedCount = 0;
+            $errors = [];
+
+            foreach ($librariesToRefresh as $library) {
+                $sectionKey = $library['key'] ?? null;
+                if (! $sectionKey) {
+                    continue;
+                }
+
+                $refreshResponse = $this->client()->get("/library/sections/{$sectionKey}/refresh");
+
+                if ($refreshResponse->successful()) {
+                    $refreshedCount++;
+                    Log::info('PlexService: Library section refresh triggered', [
+                        'integration_id' => $this->integration->id,
+                        'section_key' => $sectionKey,
+                        'section_name' => $library['title'] ?? 'Unknown',
+                    ]);
+                } else {
+                    $errors[] = $library['title'] ?? $sectionKey;
+                    Log::warning('PlexService: Failed to refresh library section', [
+                        'integration_id' => $this->integration->id,
+                        'section_key' => $sectionKey,
+                        'status' => $refreshResponse->status(),
+                    ]);
+                }
+            }
+
+            if ($refreshedCount > 0) {
+                $message = "Library refresh triggered for {$refreshedCount} section(s)";
+                if (! empty($errors)) {
+                    $message .= '. Failed: '.implode(', ', $errors);
+                }
+
+                return [
+                    'success' => true,
+                    'message' => $message,
+                ];
+            }
+
+            return [
+                'success' => false,
+                'message' => 'Failed to refresh any libraries: '.implode(', ', $errors),
+            ];
+        } catch (Exception $e) {
+            Log::error('PlexService: Error triggering library refresh', [
+                'integration_id' => $this->integration->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return [
+                'success' => false,
+                'message' => 'Failed to trigger refresh: '.$e->getMessage(),
+            ];
+        }
+    }
 }

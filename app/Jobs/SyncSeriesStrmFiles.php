@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Models\Episode;
+use App\Models\MediaServerIntegration;
 use App\Models\Series;
 use App\Models\StreamFileSetting;
 use App\Models\StrmFileMapping;
@@ -65,6 +66,9 @@ class SyncSeriesStrmFiles implements ShouldQueue
 
                 // For single series sync, cleanup immediately
                 $this->performCleanup();
+
+                // Trigger media server refresh for single series sync
+                $this->dispatchSingleSeriesMediaServerRefresh($series, $settings);
             } elseif ($this->isCleanupJob) {
                 // Special cleanup job - runs after all batch jobs
                 $this->performGlobalCleanup($settings);
@@ -234,6 +238,9 @@ class SyncSeriesStrmFiles implements ShouldQueue
             'duration_seconds' => $duration,
         ]);
 
+        // Trigger media server library refresh if configured
+        $this->dispatchMediaServerRefresh($settings);
+
         // Notify user
         if ($this->notify && $this->user_id) {
             $user = User::find($this->user_id);
@@ -244,6 +251,106 @@ class SyncSeriesStrmFiles implements ShouldQueue
                     ->body('All series STRM files have been synced.')
                     ->broadcast($user)
                     ->sendToDatabase($user);
+            }
+        }
+    }
+
+    /**
+     * Dispatch media server refresh for a single series sync.
+     */
+    protected function dispatchSingleSeriesMediaServerRefresh(Series $series, GeneralSettings $settings): void
+    {
+        // Check series-level StreamFileSetting first
+        $streamFileSetting = $series->streamFileSetting;
+
+        // Fall back to category-level
+        if (! $streamFileSetting && $series->category) {
+            $streamFileSetting = $series->category->streamFileSetting;
+        }
+
+        // Fall back to global setting
+        if (! $streamFileSetting && $settings->default_series_stream_file_setting_id) {
+            $streamFileSetting = StreamFileSetting::find($settings->default_series_stream_file_setting_id);
+        }
+
+        // Dispatch refresh if configured
+        if ($streamFileSetting?->refresh_media_server && $streamFileSetting?->media_server_integration_id) {
+            $integration = MediaServerIntegration::find($streamFileSetting->media_server_integration_id);
+            if ($integration) {
+                RefreshMediaServerLibraryJob::dispatch($integration, $this->notify)
+                    ->delay(now()->addSeconds($streamFileSetting->refresh_delay_seconds ?? 5));
+            }
+        }
+    }
+
+    /**
+     * Dispatch media server refresh jobs for any StreamFileSettings that have refresh enabled.
+     */
+    protected function dispatchMediaServerRefresh(GeneralSettings $settings): void
+    {
+        $integrationIds = collect();
+
+        // Check global series StreamFileSetting
+        if ($settings->default_series_stream_file_setting_id) {
+            $globalStreamFileSetting = StreamFileSetting::find($settings->default_series_stream_file_setting_id);
+            if ($globalStreamFileSetting?->refresh_media_server && $globalStreamFileSetting?->media_server_integration_id) {
+                $integrationIds->push([
+                    'id' => $globalStreamFileSetting->media_server_integration_id,
+                    'delay' => $globalStreamFileSetting->refresh_delay_seconds ?? 5,
+                ]);
+            }
+        }
+
+        // Get all series-level and category-level StreamFileSettings for this user that have refresh enabled
+        $seriesStreamFileSettings = StreamFileSetting::query()
+            ->where('type', 'series')
+            ->where('refresh_media_server', true)
+            ->whereNotNull('media_server_integration_id')
+            ->whereHas('series', function ($query) {
+                $query->where('user_id', $this->user_id);
+                if ($this->playlist_id) {
+                    $query->where('playlist_id', $this->playlist_id);
+                }
+            })
+            ->get();
+
+        foreach ($seriesStreamFileSettings as $streamFileSetting) {
+            if (! $integrationIds->contains('id', $streamFileSetting->media_server_integration_id)) {
+                $integrationIds->push([
+                    'id' => $streamFileSetting->media_server_integration_id,
+                    'delay' => $streamFileSetting->refresh_delay_seconds ?? 5,
+                ]);
+            }
+        }
+
+        // Also check category-level settings
+        $categoryStreamFileSettings = StreamFileSetting::query()
+            ->where('type', 'series')
+            ->where('refresh_media_server', true)
+            ->whereNotNull('media_server_integration_id')
+            ->whereHas('categories', function ($query) {
+                $query->where('user_id', $this->user_id);
+                if ($this->playlist_id) {
+                    $query->where('playlist_id', $this->playlist_id);
+                }
+            })
+            ->get();
+
+        foreach ($categoryStreamFileSettings as $streamFileSetting) {
+            if (! $integrationIds->contains('id', $streamFileSetting->media_server_integration_id)) {
+                $integrationIds->push([
+                    'id' => $streamFileSetting->media_server_integration_id,
+                    'delay' => $streamFileSetting->refresh_delay_seconds ?? 5,
+                ]);
+            }
+        }
+
+        // Dispatch refresh jobs for each unique integration
+        foreach ($integrationIds as $integrationData) {
+            $integration = MediaServerIntegration::find($integrationData['id']);
+            if ($integration) {
+                RefreshMediaServerLibraryJob::dispatch($integration, $this->notify)
+                    ->delay(now()->addSeconds($integrationData['delay']));
             }
         }
     }
