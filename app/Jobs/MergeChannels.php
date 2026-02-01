@@ -176,8 +176,8 @@ class MergeChannels implements ShouldQueue
     {
         // Cache group priorities from config
         $configGroupPriorities = $this->weightedConfig['group_priorities'] ?? [];
-        foreach ($configGroupPriorities as $groupId => $priority) {
-            $this->groupPriorityCache[(int) $groupId] = (int) $priority;
+        foreach ($configGroupPriorities as $priority) {
+            $this->groupPriorityCache[(int) $priority['group_id']] = (int) $priority['weight'];
         }
 
         // Cache disabled group IDs if exclude_disabled_groups is enabled

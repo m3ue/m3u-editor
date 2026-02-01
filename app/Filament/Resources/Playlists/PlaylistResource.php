@@ -2173,27 +2173,25 @@ class PlaylistResource extends Resource
                                 ->reorderableWithButtons()
                                 ->addActionLabel('Add group priority')
                                 ->defaultItems(0)
-                                ->afterStateHydrated(function ($component, $state) {
-                                    // Convert stored format to repeater format
-                                    if (is_array($state) && ! empty($state)) {
-                                        $formatted = [];
-                                        foreach ($state as $key => $value) {
-                                            if (is_numeric($key)) {
-                                                $formatted[] = ['group_id' => (int) $key, 'weight' => (int) $value];
-                                            } elseif (is_array($value) && isset($value['group_id'])) {
-                                                $formatted[] = $value;
-                                            }
-                                        }
-                                        $component->state($formatted);
-                                    }
-                                })
                                 ->dehydrateStateUsing(function ($state) {
-                                    // Convert repeater format to stored format (group_id => weight)
+                                    // Store as an array of objects [{group_id: id|null, weight: weight}, ...]
                                     if (is_array($state) && ! empty($state)) {
                                         $formatted = [];
+
                                         foreach ($state as $item) {
-                                            if (isset($item['group_id']) && isset($item['weight'])) {
-                                                $formatted[(int) $item['group_id']] = (int) $item['weight'];
+                                            if (is_array($item) && isset($item['weight'])) {
+                                                $groupId = $item['group_id'] ?? null;
+
+                                                if (is_numeric($groupId)) {
+                                                    $groupId = (int) $groupId;
+                                                } else {
+                                                    $groupId = is_string($groupId) && is_numeric($groupId) ? (int) $groupId : ($groupId ?? null);
+                                                }
+
+                                                $formatted[] = [
+                                                    'group_id' => $groupId,
+                                                    'weight' => (int) $item['weight'],
+                                                ];
                                             }
                                         }
 
