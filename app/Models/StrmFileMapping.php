@@ -834,7 +834,7 @@ class StrmFileMapping extends Model
      * - If the path already ends with ".nfo", return it unchanged.
      * - Otherwise append ".nfo" to the path.
      */
-    protected static function strmPathToNfoPath(string $path): string
+    public static function strmPathToNfoPath(string $path): string
     {
         // Directory path -> tvshow.nfo
         if (str_ends_with($path, '/') || is_dir($path)) {
