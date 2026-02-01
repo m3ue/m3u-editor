@@ -12,6 +12,7 @@ The Auto-Merge Channels functionality automatically merges channels with the sam
 - **Smart Optimization**: Excludes already processed channels for better performance
 - **Resolution-Based Prioritization**: Option to prioritize channels based on stream resolution
 - **Complete Re-merge**: Force full reprocessing of all channels when needed
+- **Weighted Priority Scoring**: Advanced scoring system for intelligent master selection
 
 ### Configuration Options
 
@@ -20,6 +21,13 @@ The Auto-Merge Channels functionality automatically merges channels with the sam
 - **Deactivate failover channels**: Automatically disable channels used as failovers
 - **Prioritize by resolution**: Use stream resolution to determine master channel priority
 - **Force complete re-merge**: Reprocess all channels instead of just new ones
+
+#### Advanced Priority Scoring (Optional)
+- **Preferred Codec**: Prioritize HEVC/H.265 or H.264/AVC streams
+- **Priority Keywords**: Boost channels with specific keywords in their name (e.g., "RAW", "LOCAL", "HD")
+- **Group Priorities**: Assign weights to specific groups for fine-grained control
+- **Priority Attributes**: Custom ordering of scoring attributes (playlist, group, catchup, resolution, codec, keyword)
+- **Exclude Disabled Groups**: Never select master from groups that are disabled
 
 ## How It Works
 
@@ -37,6 +45,23 @@ The system identifies channels for merging by:
 
 ### 3. Master Channel Selection
 Priority rules for selecting the master channel:
+
+**With Weighted Priority Scoring (Advanced - recommended):**
+When weighted priority options are configured (codec preference, priority keywords, group priorities, or priority attributes), the system uses a sophisticated scoring algorithm:
+
+1. Each channel receives a score based on configured priority attributes (in order):
+   - **Playlist Priority**: Higher score for preferred playlist
+   - **Group Priority**: Configurable weights per group
+   - **Catchup Support**: Bonus for channels with catch-up/replay
+   - **Resolution**: Higher resolutions score better (if resolution checking enabled)
+   - **Codec**: HEVC/H.265 or H.264/AVC preference
+   - **Keyword Match**: Bonus for matching priority keywords in channel name
+
+2. Channel with highest total score becomes master
+3. Remaining channels become failovers, sorted by score (highest first)
+
+**Exclude Disabled Groups:**
+When enabled, channels from disabled groups are automatically filtered out before master selection. They can still be included as failovers but will never become the master channel.
 
 **With Resolution Check (when "Order by Resolution" is enabled):**
 ⚠️ **IMPORTANT**: This option will analyze each stream to determine resolution, which can cause rate limiting or blocking with IPTV providers. Only use this option when necessary and with providers that allow stream analysis.
@@ -91,6 +116,17 @@ New fields added to the `playlists` table:
 - `auto_merge_channels_enabled` (boolean): Enable auto-merge functionality
 - `auto_merge_deactivate_failover` (boolean): Deactivate failover channels
 - `auto_merge_config` (JSON): Advanced configuration options
+  - `new_channels_only` (boolean): Only merge newly synced channels (default: true)
+  - `preferred_playlist_id` (integer|null): Playlist ID to prioritize as master source
+  - `failover_playlists` (array): Additional playlists to include as failover sources
+  - `check_resolution` (boolean): Prioritize by stream resolution
+  - `force_complete_remerge` (boolean): Reprocess all channels including existing failovers
+  - `prefer_catchup_as_primary` (boolean): Prefer channels with catch-up as master
+  - `prefer_codec` (string|null): Preferred codec ('hevc' or 'h264')
+  - `priority_keywords` (array): Keywords to boost in channel names
+  - `group_priorities` (array): Group ID to weight mappings
+  - `priority_attributes` (array): Ordered list of scoring attributes
+  - `exclude_disabled_groups` (boolean): Exclude disabled groups from master selection
 
 ### Example Configuration
 ```php
@@ -98,8 +134,31 @@ $playlist->update([
     'auto_merge_channels_enabled' => true,
     'auto_merge_deactivate_failover' => true,
     'auto_merge_config' => [
+        'new_channels_only' => true,
+        'preferred_playlist_id' => null, // or playlist ID
+        'failover_playlists' => [
+            ['playlist_failover_id' => 2],
+            ['playlist_failover_id' => 3],
+        ],
         'check_resolution' => false,
-        'force_complete_remerge' => false
+        'force_complete_remerge' => false,
+        'prefer_catchup_as_primary' => false,
+        // Advanced priority scoring (all optional)
+        'prefer_codec' => 'hevc', // 'hevc', 'h264', or null
+        'priority_keywords' => ['RAW', 'LOCAL', 'HD'],
+        'group_priorities' => [
+            ['group_id' => 1, 'weight' => 100],
+            ['group_id' => 2, 'weight' => 80],
+        ],
+        'priority_attributes' => [
+            ['attribute' => 'playlist'],
+            ['attribute' => 'group'],
+            ['attribute' => 'catchup'],
+            ['attribute' => 'resolution'],
+            ['attribute' => 'codec'],
+            ['attribute' => 'keyword'],
+        ],
+        'exclude_disabled_groups' => true,
     ]
 ]);
 ```
@@ -107,28 +166,45 @@ $playlist->update([
 ## User Interface
 
 ### Playlist Form Fields
-Located in the sync settings section of playlist creation/editing:
+Located in the **Processing** tab of playlist creation/editing:
 
-1. **Auto-merge channels after sync** toggle
+#### Auto-Merge Processing Section
+
+1. **Enable auto-merge after sync** toggle
    - Main enable/disable switch
-   - Helper text explains functionality
+   - When enabled, reveals additional configuration options
 
-2. **Deactivate failover channels** toggle
-   - Visible only when auto-merge is enabled
-   - Controls whether failover channels are disabled
+2. **Merge source configuration** fieldset
+   - **Preferred Playlist**: Select a playlist to prioritize as master during merge (optional)
+   - **Additional Failover Playlists**: Add other playlists to include as failover sources (optional)
 
-3. **Advanced Settings** (expandable section)
-   - **Prioritize by resolution**: Use stream analysis for master selection
-   - **Force complete re-merge**: Reprocess all channels regardless of existing state
+3. **Merge behavior** fieldset
+   - **Merge only new channels**: Only process newly synced channels (enabled by default)
+   - **Deactivate failover channels**: Automatically disable channels used as failovers
+   - **Prefer catch-up as primary**: Prioritize channels with catch-up enabled as master
+   - **Prioritize by resolution**: ⚠️ Use stream analysis for master selection (may cause IPTV rate limiting)
+   - **Force complete re-merge**: ⚠️ Re-evaluate ALL existing failover relationships on each sync
+   - **Exclude disabled groups**: Prevent channels from disabled groups becoming master
+
+4. **Advanced Priority Scoring** fieldset (optional)
+   - **Preferred Codec**: Select HEVC/H.265 or H.264/AVC preference
+   - **Priority Keywords**: Add keywords that boost channel priority (e.g., RAW, LOCAL, HD)
+   - **Group Priorities**: Assign weight values to specific groups (higher = more preferred)
+   - **Priority Attributes**: Drag-and-drop ordering of scoring attributes
 
 ### Manual Merge Interface
-Located in Channels and VODs list pages:
+Located in Channels, VODs, and Groups list pages:
 
 1. **Merge Same ID** action
    - **Preferred Playlist**: Select playlist to prioritize as master during merge
    - **Failover Playlists**: One or more playlists to use as failover sources
    - **Order by Resolution**: ⚠️ Enable resolution-based prioritization (may cause IPTV rate limiting)
    - **Deactivate Failover Channels**: Automatically disable channels used as failovers
+   - **Prefer catch-up channels as primary**: Prioritize channels with catch-up enabled
+   - **Exclude disabled groups**: Prevent channels from disabled groups becoming master
+   - **Force complete re-merge**: Re-evaluate existing failover relationships
+   - **Preferred Codec**: Select codec preference (HEVC or H.264)
+   - **Priority Keywords**: Add keywords to boost matching channels
 
 ## Testing Locally
 

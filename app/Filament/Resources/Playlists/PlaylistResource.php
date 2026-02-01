@@ -23,6 +23,7 @@ use App\Livewire\PlaylistEpgUrl;
 use App\Livewire\PlaylistInfo;
 use App\Livewire\PlaylistM3uUrl;
 use App\Livewire\XtreamApiInfo;
+use App\Models\Group;
 use App\Models\MediaServerIntegration;
 use App\Models\Playlist;
 use App\Models\PlaylistAuth;
@@ -1553,41 +1554,6 @@ class PlaylistResource extends Resource
                                 ->helperText('When enabled, a backup will be created before syncing.')
                                 ->inline(false)
                                 ->default(false),
-                            Toggle::make('auto_merge_channels_enabled')
-                                ->label('Auto-merge channels after sync')
-                                ->helperText('When enabled, channels with the same stream ID will be automatically merged with failover relationships after each sync.')
-                                ->live()
-                                ->inline(false)
-                                ->default(false),
-                            Toggle::make('auto_merge_deactivate_failover')
-                                ->label('Deactivate failover channels')
-                                ->helperText('When enabled, all failover channels will be automatically deactivated during the merge process, keeping only the master channel active.')
-                                ->inline(false)
-                                ->default(false)
-                                ->hidden(fn (Get $get): bool => ! $get('auto_merge_channels_enabled')),
-                        ]),
-
-                    Fieldset::make('Auto-Merge advanced settings')
-                        ->columnSpanFull()
-                        ->hidden(fn (Get $get): bool => ! $get('auto_merge_channels_enabled'))
-                        ->schema([
-                            static::makeToggle('auto_merge_config.check_resolution')
-                                ->label('Prioritize by resolution')
-                                ->hintIcon(
-                                    'heroicon-m-exclamation-triangle',
-                                    tooltip: 'This process takes longer as stream resolution needs to be analyzed. Only recommended for smaller playlists.'
-                                )
-                                ->helperText('When enabled, channels with higher resolution will be prioritized as master channels during merge.'),
-                            static::makeToggle('auto_merge_config.force_complete_remerge')
-                                ->label('Force complete re-merge')
-                                ->hintIcon(
-                                    'heroicon-m-exclamation-triangle',
-                                    tooltip: 'Disable this for better performance if you only want to merge new channels.'
-                                )
-                                ->helperText('When enabled, all channels will be re-evaluated during merge, including existing failover relationships.'),
-                            static::makeToggle('auto_merge_config.prefer_catchup_as_primary')
-                                ->label('Prefer catch-up channels as primary')
-                                ->helperText('When enabled, channels with catch-up enabled will be selected as the master channel when available.'),
                         ]),
 
                     TextInput::make('sync_interval')
@@ -1990,6 +1956,219 @@ class PlaylistResource extends Resource
                         ->default(false)
                         ->helperText('When enabled, VOD channels will be included in the M3U output.'),
                 ])->hidden(fn (Get $get): bool => ! $get('xtream')),
+
+            Section::make('Auto-Merge Processing')
+                ->description('Automatically merge channels with the same stream ID into failover relationships after sync')
+                ->columnSpanFull()
+                ->collapsible()
+                ->collapsed($creating)
+                ->columns(2)
+                ->schema([
+                    Toggle::make('auto_merge_channels_enabled')
+                        ->label('Enable auto-merge after sync')
+                        ->helperText('When enabled, channels with the same stream ID will be automatically merged with failover relationships after each sync.')
+                        ->columnSpanFull()
+                        ->live()
+                        ->inline(false)
+                        ->default(false),
+
+                    Fieldset::make('Merge source configuration')
+                        ->columnSpanFull()
+                        ->columns(2)
+                        ->hidden(fn (Get $get): bool => ! $get('auto_merge_channels_enabled'))
+                        ->schema([
+                            Select::make('auto_merge_config.preferred_playlist_id')
+                                ->label('Preferred Playlist (optional)')
+                                ->options(fn () => Playlist::where('user_id', auth()->id())->pluck('name', 'id'))
+                                ->searchable()
+                                ->placeholder('Use this playlist only')
+                                ->helperText('If set, channels from this playlist will be prioritized as master during merge. Leave empty to only merge within this playlist.'),
+                            Repeater::make('auto_merge_config.failover_playlists')
+                                ->label('Additional Failover Playlists (optional)')
+                                ->helperText('Select additional playlists to include as failover sources. Leave empty to only merge channels within this playlist.')
+                                ->reorderable()
+                                ->reorderableWithButtons()
+                                ->simple(
+                                    Select::make('playlist_failover_id')
+                                        ->label('Failover Playlist')
+                                        ->options(fn () => Playlist::where('user_id', auth()->id())->pluck('name', 'id'))
+                                        ->searchable()
+                                        ->required()
+                                )
+                                ->distinct()
+                                ->columns(1)
+                                ->addActionLabel('Add failover playlist')
+                                ->columnSpanFull()
+                                ->defaultItems(0),
+                        ]),
+
+                    Fieldset::make('Merge behavior')
+                        ->columnSpanFull()
+                        ->columns(2)
+                        ->hidden(fn (Get $get): bool => ! $get('auto_merge_channels_enabled'))
+                        ->schema([
+                            Toggle::make('auto_merge_config.new_channels_only')
+                                ->label('Merge only new channels')
+                                ->inline(false)
+                                ->default(true)
+                                ->helperText('When enabled, only newly synced channels will be merged. Disable to re-process all channels on each sync.'),
+                            Toggle::make('auto_merge_deactivate_failover')
+                                ->label('Deactivate failover channels')
+                                ->inline(false)
+                                ->default(false)
+                                ->helperText('When enabled, channels that become failovers will be automatically disabled.'),
+                            Toggle::make('auto_merge_config.prefer_catchup_as_primary')
+                                ->label('Prefer catch-up as primary')
+                                ->inline(false)
+                                ->default(false)
+                                ->helperText('When enabled, channels with catch-up enabled will be selected as the master when available.'),
+                            Toggle::make('auto_merge_config.check_resolution')
+                                ->label('Prioritize by resolution')
+                                ->inline(false)
+                                ->default(false)
+                                ->hintIcon(
+                                    'heroicon-m-exclamation-triangle',
+                                    tooltip: '⚠️ IPTV WARNING: This will analyze each stream to determine resolution, which may cause rate limiting or blocking with IPTV providers.'
+                                )
+                                ->helperText('When enabled, channels with higher resolution will be prioritized as master.'),
+                            Toggle::make('auto_merge_config.force_complete_remerge')
+                                ->label('Force complete re-merge')
+                                ->inline(false)
+                                ->default(false)
+                                ->hintIcon(
+                                    'heroicon-m-exclamation-triangle',
+                                    tooltip: 'This will re-evaluate ALL existing failover relationships on each sync.'
+                                )
+                                ->helperText('When enabled, all channels will be re-evaluated during merge, including existing failover relationships.'),
+                            Toggle::make('auto_merge_config.exclude_disabled_groups')
+                                ->label('Exclude disabled groups from master selection')
+                                ->inline(false)
+                                ->default(false)
+                                ->helperText('Channels from disabled groups will never be selected as master, only as failovers.'),
+                        ]),
+
+                    Fieldset::make('Advanced Priority Scoring (optional)')
+                        ->columnSpanFull()
+                        ->columns(2)
+                        ->hidden(fn (Get $get): bool => ! $get('auto_merge_channels_enabled'))
+                        ->schema([
+                            Select::make('auto_merge_config.prefer_codec')
+                                ->label('Preferred Codec')
+                                ->options([
+                                    'hevc' => 'HEVC / H.265 (smaller file size)',
+                                    'h264' => 'H.264 / AVC (better compatibility)',
+                                ])
+                                ->placeholder('No preference')
+                                ->helperText('Prioritize channels with a specific video codec.'),
+                            TagsInput::make('auto_merge_config.priority_keywords')
+                                ->label('Priority Keywords')
+                                ->placeholder('Add keyword...')
+                                ->helperText('Channels with these keywords in their name will be prioritized (e.g., "RAW", "LOCAL", "HD").')
+                                ->splitKeys(['Tab', 'Return']),
+                            Repeater::make('auto_merge_config.group_priorities')
+                                ->label('Group Priority Weights')
+                                ->helperText('Assign priority weights to specific groups. Higher weight = more preferred as master. Leave empty for default behavior.')
+                                ->columnSpanFull()
+                                ->columns(2)
+                                ->schema([
+                                    Select::make('group_id')
+                                        ->label('Group')
+                                        ->options(fn () => Group::where('user_id', auth()->id())
+                                            ->orderBy('name')
+                                            ->pluck('name', 'id'))
+                                        ->searchable()
+                                        ->required(),
+                                    TextInput::make('weight')
+                                        ->label('Weight')
+                                        ->numeric()
+                                        ->default(100)
+                                        ->minValue(1)
+                                        ->maxValue(1000)
+                                        ->helperText('1-1000, higher = more preferred')
+                                        ->required(),
+                                ])
+                                ->reorderable()
+                                ->reorderableWithButtons()
+                                ->addActionLabel('Add group priority')
+                                ->defaultItems(0)
+                                ->afterStateHydrated(function ($component, $state) {
+                                    // Convert stored format to repeater format
+                                    if (is_array($state) && ! empty($state)) {
+                                        $formatted = [];
+                                        foreach ($state as $key => $value) {
+                                            if (is_numeric($key)) {
+                                                $formatted[] = ['group_id' => (int) $key, 'weight' => (int) $value];
+                                            } elseif (is_array($value) && isset($value['group_id'])) {
+                                                $formatted[] = $value;
+                                            }
+                                        }
+                                        $component->state($formatted);
+                                    }
+                                })
+                                ->dehydrateStateUsing(function ($state) {
+                                    // Convert repeater format to stored format (group_id => weight)
+                                    if (is_array($state) && ! empty($state)) {
+                                        $formatted = [];
+                                        foreach ($state as $item) {
+                                            if (isset($item['group_id']) && isset($item['weight'])) {
+                                                $formatted[(int) $item['group_id']] = (int) $item['weight'];
+                                            }
+                                        }
+
+                                        return $formatted;
+                                    }
+
+                                    return [];
+                                }),
+                            Repeater::make('auto_merge_config.priority_attributes')
+                                ->label('Priority Order')
+                                ->helperText('Drag to reorder priority attributes. First attribute has highest priority. Leave empty for default order.')
+                                ->columnSpanFull()
+                                ->simple(
+                                    Select::make('attribute')
+                                        ->options([
+                                            'playlist_priority' => '📋 Playlist Priority (from failover list order)',
+                                            'group_priority' => '📁 Group Priority (from weights above)',
+                                            'catchup_support' => '⏪ Catch-up/Replay Support',
+                                            'resolution' => '📺 Resolution (requires stream analysis)',
+                                            'codec' => '🎬 Codec Preference (HEVC/H264)',
+                                            'keyword_match' => '🏷️ Keyword Match',
+                                        ])
+                                        ->required()
+                                )
+                                ->reorderable()
+                                ->reorderableWithDragAndDrop()
+                                ->distinct()
+                                ->addActionLabel('Add priority attribute')
+                                ->defaultItems(0)
+                                ->afterStateHydrated(function ($component, $state) {
+                                    // Convert stored format to repeater format
+                                    if (is_array($state) && ! empty($state)) {
+                                        $formatted = [];
+                                        foreach ($state as $item) {
+                                            if (is_string($item)) {
+                                                $formatted[] = ['attribute' => $item];
+                                            } elseif (is_array($item) && isset($item['attribute'])) {
+                                                $formatted[] = $item;
+                                            }
+                                        }
+                                        $component->state($formatted);
+                                    }
+                                })
+                                ->dehydrateStateUsing(function ($state) {
+                                    // Convert repeater format to simple array
+                                    if (is_array($state) && ! empty($state)) {
+                                        return collect($state)
+                                            ->pluck('attribute')
+                                            ->filter()
+                                            ->values()
+                                            ->toArray();
+                                    }
+
+                                    return [];
+                                }),
+                        ]),
+                ]),
         ];
 
         $outputFields = [
