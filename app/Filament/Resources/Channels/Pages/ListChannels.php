@@ -20,6 +20,7 @@ use Filament\Actions\ExportAction;
 use Filament\Actions\ImportAction;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
+use Filament\Forms\Components\TagsInput;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
@@ -101,16 +102,49 @@ class ListChannels extends ListRecords
                             ->label('Prefer catch-up channels as primary')
                             ->helperText('When enabled, catch-up channels will be selected as the master when available.')
                             ->default(false),
+                        Toggle::make('exclude_disabled_groups')
+                            ->label('Exclude disabled groups from master selection')
+                            ->helperText('Channels from disabled groups will never be selected as master.')
+                            ->default(false),
+                        Toggle::make('force_complete_remerge')
+                            ->label('Force complete re-merge')
+                            ->helperText('Re-evaluate ALL existing failover relationships, not just unmerged channels.')
+                            ->default(false),
+                        Select::make('prefer_codec')
+                            ->label('Preferred Codec (optional)')
+                            ->options([
+                                'hevc' => 'HEVC / H.265',
+                                'h264' => 'H.264 / AVC',
+                            ])
+                            ->placeholder('No preference')
+                            ->helperText('Prioritize channels with a specific video codec.'),
+                        TagsInput::make('priority_keywords')
+                            ->label('Priority Keywords (optional)')
+                            ->placeholder('Add keyword...')
+                            ->helperText('Channels with these keywords in their name will be prioritized.')
+                            ->splitKeys(['Tab', 'Return']),
                     ])
                     ->action(function (array $data): void {
+                        // Build weighted config if advanced options are used
+                        $weightedConfig = null;
+                        if (! empty($data['priority_keywords']) || ! empty($data['prefer_codec']) || ($data['exclude_disabled_groups'] ?? false)) {
+                            $weightedConfig = [
+                                'priority_keywords' => $data['priority_keywords'] ?? [],
+                                'prefer_codec' => $data['prefer_codec'] ?? null,
+                                'exclude_disabled_groups' => $data['exclude_disabled_groups'] ?? false,
+                            ];
+                        }
+
                         app('Illuminate\Contracts\Bus\Dispatcher')
                             ->dispatch(new MergeChannels(
                                 user: auth()->user(),
                                 playlists: collect($data['failover_playlists']),
                                 playlistId: $data['playlist_id'],
-                                checkResolution: $data['by_resolution'] ?? false, // Sort failovers by resolution, or by playlist (default behavior)
+                                checkResolution: $data['by_resolution'] ?? false,
                                 deactivateFailoverChannels: $data['deactivate_failover_channels'] ?? false,
+                                forceCompleteRemerge: $data['force_complete_remerge'] ?? false,
                                 preferCatchupAsPrimary: $data['prefer_catchup_as_primary'] ?? false,
+                                weightedConfig: $weightedConfig,
                             ));
                     })->after(function () {
                         Notification::make()
@@ -123,6 +157,7 @@ class ListChannels extends ListRecords
                     ->icon('heroicon-o-arrows-pointing-in')
                     ->modalIcon('heroicon-o-arrows-pointing-in')
                     ->modalDescription('Merge all channels with the same ID into a single channel with failover.')
+                    ->modalWidth(Width::FourExtraLarge)
                     ->modalSubmitActionLabel('Merge now'),
                 Action::make('unmerge')
                     ->schema([

@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Models\Channel;
 use App\Models\ChannelFailover;
+use App\Models\Group;
 use Filament\Notifications\Notification;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -17,6 +18,28 @@ class MergeChannels implements ShouldQueue
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     /**
+     * Default priority attributes order (first = highest priority)
+     */
+    protected const DEFAULT_PRIORITY_ORDER = [
+        'playlist_priority',
+        'group_priority',
+        'catchup_support',
+        'resolution',
+        'codec',
+        'keyword_match',
+    ];
+
+    /**
+     * Cached group priorities for performance
+     */
+    protected array $groupPriorityCache = [];
+
+    /**
+     * Cached disabled group IDs
+     */
+    protected array $disabledGroupIds = [];
+
+    /**
      * Create a new job instance.
      */
     public function __construct(
@@ -28,6 +51,8 @@ class MergeChannels implements ShouldQueue
         public bool $forceCompleteRemerge = false,
         public bool $preferCatchupAsPrimary = false,
         public ?int $groupId = null,
+        public ?array $weightedConfig = null,
+        public ?bool $newChannelsOnly = null,
     ) {}
 
     /**
@@ -51,6 +76,9 @@ class MergeChannels implements ShouldQueue
 
         // Create playlist priority lookup for efficient sorting
         $playlistPriority = $playlistIds ? array_flip($playlistIds) : [];
+
+        // Initialize caches for weighted priority system
+        $this->initializeCaches($playlistIds);
 
         // Get existing failover channel IDs to exclude them from being masters
         $existingFailoverChannelIds = ChannelFailover::where('user_id', $this->user->id)
@@ -79,6 +107,10 @@ class MergeChannels implements ShouldQueue
             ->when($shouldExcludeExistingFailovers, function ($query) use ($existingFailoverChannelIds) {
                 // Only exclude existing failovers if we're not forcing a complete re-merge
                 $query->whereNotIn('id', $existingFailoverChannelIds);
+            })
+            ->when($this->newChannelsOnly, function ($query) {
+                // Filter to only include new channels when newChannelsOnly is provided
+                $query->where('new', true);
             })->cursor();
 
         // Group channels by stream ID using LazyCollection
@@ -94,7 +126,7 @@ class MergeChannels implements ShouldQueue
                 continue; // Skip single channels
             }
 
-            // Select master channel based on criteria
+            // Select master channel based on weighted priority or legacy criteria
             $master = $this->selectMasterChannel($group, $playlistPriority);
             if (! $master) {
                 continue; // Skip if no valid master found
@@ -107,22 +139,9 @@ class MergeChannels implements ShouldQueue
 
             // Create failover relationships for remaining channels
             $failoverChannels = $group->where('id', '!=', $master->id);
-            if ($this->checkResolution) {
-                // Sort failovers by catch-up (if preferred), resolution (highest first), then playlist priority, then ID for consistency
-                $failoverChannels = $failoverChannels->sortBy([
-                    fn ($channel) => $this->preferCatchupAsPrimary && empty($channel->catchup) ? 1 : 0,
-                    fn ($channel) => -$this->getResolution($channel), // Negative for desc sort
-                    fn ($channel) => $playlistPriority[$channel->playlist_id] ?? 999,
-                    fn ($channel) => $channel->id,
-                ]);
-            } else {
-                // Sort failovers by catch-up (if preferred), then playlist priority, then ID for consistency
-                $failoverChannels = $failoverChannels->sortBy([
-                    fn ($channel) => $this->preferCatchupAsPrimary && empty($channel->catchup) ? 1 : 0,
-                    fn ($channel) => $playlistPriority[$channel->playlist_id] ?? 999,
-                    fn ($channel) => $channel->id,
-                ]);
-            }
+
+            // Sort failovers using the same scoring system (descending score)
+            $failoverChannels = $this->sortChannelsByScore($failoverChannels, $playlistPriority);
 
             // Create failover relationships using updateOrCreate for compatibility
             foreach ($failoverChannels as $failover) {
@@ -148,9 +167,260 @@ class MergeChannels implements ShouldQueue
     }
 
     /**
-     * Select the master channel from a group based on priority rules
+     * Initialize caches for group priorities and disabled groups
      */
-    private function selectMasterChannel($group, array $playlistPriority)
+    protected function initializeCaches(array $playlistIds): void
+    {
+        // Cache group priorities from config
+        $configGroupPriorities = $this->weightedConfig['group_priorities'] ?? [];
+        foreach ($configGroupPriorities as $priority) {
+            $this->groupPriorityCache[(int) $priority['group_id']] = (int) $priority['weight'];
+        }
+
+        // Cache disabled group IDs if exclude_disabled_groups is enabled
+        if ($this->weightedConfig['exclude_disabled_groups'] ?? false) {
+            $this->disabledGroupIds = Group::whereIn('playlist_id', $playlistIds)
+                ->where('enabled', false)
+                ->pluck('id')
+                ->toArray();
+        }
+    }
+
+    /**
+     * Select the master channel from a group based on weighted priority scoring
+     */
+    protected function selectMasterChannel($group, array $playlistPriority)
+    {
+        // Filter out channels from disabled groups if enabled
+        $eligibleGroup = $this->filterDisabledGroups($group);
+
+        if ($eligibleGroup->isEmpty()) {
+            // Fallback to original group if all were filtered
+            $eligibleGroup = $group;
+        }
+
+        // Use weighted priority system if config provided
+        if ($this->weightedConfig !== null) {
+            return $this->selectMasterByWeightedScore($eligibleGroup, $playlistPriority);
+        }
+
+        // Legacy selection logic for backward compatibility
+        return $this->selectMasterLegacy($eligibleGroup, $playlistPriority);
+    }
+
+    /**
+     * Filter out channels from disabled groups
+     */
+    protected function filterDisabledGroups($group)
+    {
+        if (empty($this->disabledGroupIds)) {
+            return $group;
+        }
+
+        return $group->filter(function ($channel) {
+            return ! in_array($channel->group_id, $this->disabledGroupIds);
+        });
+    }
+
+    /**
+     * Select master channel using weighted scoring system
+     */
+    protected function selectMasterByWeightedScore($group, array $playlistPriority)
+    {
+        $scoredChannels = $group->map(function ($channel) use ($playlistPriority) {
+            return [
+                'channel' => $channel,
+                'score' => $this->calculateChannelScore($channel, $playlistPriority),
+            ];
+        });
+
+        // Get highest score
+        $maxScore = $scoredChannels->max('score');
+
+        // Get all channels with the highest score
+        $topChannels = $scoredChannels->where('score', $maxScore)->pluck('channel');
+
+        // If preferred playlist is set, try to use it among top scorers
+        if ($this->playlistId) {
+            $preferredTop = $topChannels->where('playlist_id', $this->playlistId);
+            if ($preferredTop->isNotEmpty()) {
+                return $preferredTop->sortBy('id')->first();
+            }
+        }
+
+        // Return first top scorer (sorted by ID for consistency)
+        return $topChannels->sortBy('id')->first();
+    }
+
+    /**
+     * Calculate weighted score for a channel
+     */
+    protected function calculateChannelScore($channel, array $playlistPriority): int
+    {
+        $score = 0;
+        $priorityOrder = $this->weightedConfig['priority_attributes'] ?? self::DEFAULT_PRIORITY_ORDER;
+
+        // Base multiplier decreases for each priority level
+        $multiplier = count($priorityOrder) * 1000;
+
+        foreach ($priorityOrder as $attribute) {
+            $attributeScore = match ($attribute) {
+                'playlist_priority' => $this->getPlaylistPriorityScore($channel, $playlistPriority),
+                'group_priority' => $this->getGroupPriorityScore($channel),
+                'catchup_support' => $this->getCatchupScore($channel),
+                'resolution' => $this->getResolutionScore($channel),
+                'codec' => $this->getCodecScore($channel),
+                'keyword_match' => $this->getKeywordScore($channel),
+                default => 0,
+            };
+
+            $score += $attributeScore * $multiplier;
+            $multiplier = max(1, $multiplier - 1000);
+        }
+
+        return $score;
+    }
+
+    /**
+     * Get playlist priority score (higher = better)
+     */
+    protected function getPlaylistPriorityScore($channel, array $playlistPriority): int
+    {
+        // Invert priority so lower index = higher score
+        $priority = $playlistPriority[$channel->playlist_id] ?? 999;
+
+        return max(0, 100 - $priority);
+    }
+
+    /**
+     * Get group priority score from config (higher = better)
+     */
+    protected function getGroupPriorityScore($channel): int
+    {
+        return $this->groupPriorityCache[$channel->group_id] ?? 0;
+    }
+
+    /**
+     * Get catchup support score
+     */
+    protected function getCatchupScore($channel): int
+    {
+        // Higher score if channel has catchup/replay
+        return ! empty($channel->catchup) ? 100 : 0;
+    }
+
+    /**
+     * Get resolution score (normalized 0-100)
+     */
+    protected function getResolutionScore($channel): int
+    {
+        $resolution = $this->getResolution($channel);
+
+        // Normalize: 4K (3840x2160 = 8294400) = 100, 1080p = ~25, 720p = ~11
+        return min(100, (int) ($resolution / 82944));
+    }
+
+    /**
+     * Get codec preference score
+     */
+    protected function getCodecScore($channel): int
+    {
+        $preferredCodec = $this->weightedConfig['prefer_codec'] ?? null;
+        if (! $preferredCodec) {
+            return 0;
+        }
+
+        $channelCodec = $this->getCodec($channel);
+        if (! $channelCodec) {
+            return 0;
+        }
+
+        $preferredCodec = strtolower($preferredCodec);
+        $channelCodec = strtolower($channelCodec);
+
+        // Check for HEVC/H265 preference
+        if ($preferredCodec === 'hevc' || $preferredCodec === 'h265') {
+            return (str_contains($channelCodec, 'hevc') || str_contains($channelCodec, 'h265') || str_contains($channelCodec, '265')) ? 100 : 0;
+        }
+
+        // Check for H264/AVC preference
+        if ($preferredCodec === 'h264' || $preferredCodec === 'avc') {
+            return (str_contains($channelCodec, 'h264') || str_contains($channelCodec, 'avc') || str_contains($channelCodec, '264')) ? 100 : 0;
+        }
+
+        return 0;
+    }
+
+    /**
+     * Get keyword match score
+     */
+    protected function getKeywordScore($channel): int
+    {
+        $keywords = $this->weightedConfig['priority_keywords'] ?? [];
+        if (empty($keywords)) {
+            return 0;
+        }
+
+        $channelName = strtolower($channel->title ?? $channel->name ?? '');
+        $matchCount = 0;
+
+        foreach ($keywords as $keyword) {
+            if (str_contains($channelName, strtolower($keyword))) {
+                $matchCount++;
+            }
+        }
+
+        // More matches = higher score (cap at 100)
+        return min(100, $matchCount * 25);
+    }
+
+    /**
+     * Get codec from channel stream stats
+     */
+    protected function getCodec($channel): ?string
+    {
+        $streamStats = $channel->stream_stats ?? [];
+        foreach ($streamStats as $stream) {
+            if (isset($stream['stream']['codec_type']) && $stream['stream']['codec_type'] === 'video') {
+                return $stream['stream']['codec_name'] ?? null;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Sort channels by score (descending)
+     */
+    protected function sortChannelsByScore($channels, array $playlistPriority)
+    {
+        if ($this->weightedConfig !== null) {
+            return $channels->sortByDesc(function ($channel) use ($playlistPriority) {
+                return $this->calculateChannelScore($channel, $playlistPriority);
+            });
+        }
+
+        // Legacy sorting
+        if ($this->checkResolution) {
+            return $channels->sortBy([
+                fn ($channel) => $this->preferCatchupAsPrimary && empty($channel->catchup) ? 1 : 0,
+                fn ($channel) => -$this->getResolution($channel),
+                fn ($channel) => $playlistPriority[$channel->playlist_id] ?? 999,
+                fn ($channel) => $channel->id,
+            ]);
+        }
+
+        return $channels->sortBy([
+            fn ($channel) => $this->preferCatchupAsPrimary && empty($channel->catchup) ? 1 : 0,
+            fn ($channel) => $playlistPriority[$channel->playlist_id] ?? 999,
+            fn ($channel) => $channel->id,
+        ]);
+    }
+
+    /**
+     * Legacy master selection for backward compatibility
+     */
+    protected function selectMasterLegacy($group, array $playlistPriority)
     {
         $selectionGroup = $group->when($this->preferCatchupAsPrimary, function ($group) {
             $catchupChannels = $group->filter(fn ($channel) => ! empty($channel->catchup));
@@ -174,26 +444,20 @@ class MergeChannels implements ShouldQueue
             if ($this->playlistId) {
                 $preferredHighRes = $highestResChannels->where('playlist_id', $this->playlistId);
                 if ($preferredHighRes->isNotEmpty()) {
-                    // Return first channel from preferred playlist with highest resolution (sorted by ID for consistency)
                     return $preferredHighRes->sortBy('id')->first();
                 }
             }
 
-            // No preferred playlist or none found with highest res: return first highest resolution channel
             return $highestResChannels->sortBy('id')->first();
         } else {
             // Simple selection without resolution check
-
-            // If preferred playlist is set, try to use it first
             if ($this->playlistId) {
                 $preferredChannels = $selectionGroup->where('playlist_id', $this->playlistId);
                 if ($preferredChannels->isNotEmpty()) {
-                    // Return first channel from preferred playlist (sorted by ID for consistency)
                     return $preferredChannels->sortBy('id')->first();
                 }
             }
 
-            // No preferred playlist or none found: use playlist priority order, then ID for consistency
             return $selectionGroup->sortBy([
                 fn ($channel) => $playlistPriority[$channel->playlist_id] ?? 999,
                 fn ($channel) => $channel->id,
@@ -201,9 +465,12 @@ class MergeChannels implements ShouldQueue
         }
     }
 
-    private function getResolution($channel)
+    /**
+     * Get resolution from channel stream stats
+     */
+    protected function getResolution($channel): int
     {
-        $streamStats = $channel->stream_stats;
+        $streamStats = $channel->stream_stats ?? [];
         foreach ($streamStats as $stream) {
             if (isset($stream['stream']['codec_type']) && $stream['stream']['codec_type'] === 'video') {
                 return ($stream['stream']['width'] ?? 0) * ($stream['stream']['height'] ?? 0);

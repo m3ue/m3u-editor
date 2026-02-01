@@ -19,6 +19,6 @@ class SyncCompleted
      */
     public function __construct(
         public Model $model,
-        public string $source = 'playlist'
+        public string $source = 'playlist',
     ) {}
 }
