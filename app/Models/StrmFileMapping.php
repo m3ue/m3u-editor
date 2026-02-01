@@ -685,6 +685,7 @@ class StrmFileMapping extends Model
         $batchSize = 500;
 
         // Ensure chunkById uses the fully-qualified column name to avoid ambiguous "id" when joined
+        // Pass both column (for WHERE clause) and alias (for accessing value from result)
         $baseQuery->orderBy('strm_file_mappings.id')
             ->chunkById($batchSize, function ($rows) use (&$idsToDelete, &$pathsToUnlink, &$count, $batchSize) {
                 foreach ($rows as $row) {
@@ -722,7 +723,7 @@ class StrmFileMapping extends Model
                     $idsToDelete = [];
                     $pathsToUnlink = [];
                 }
-            }, 'strm_file_mappings.id');
+            }, 'strm_file_mappings.id', 'id');
 
         // Final flush of remaining ids/paths
         if (! empty($pathsToUnlink)) {
