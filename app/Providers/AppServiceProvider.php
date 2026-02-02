@@ -41,6 +41,7 @@ use Filament\Support\Facades\FilamentView;
 use Filament\View\PanelsRenderHook;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Route;
 use Illuminate\Support\Facades\DB;
@@ -48,6 +49,7 @@ use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\HtmlString;
@@ -276,6 +278,13 @@ class AppServiceProvider extends ServiceProvider
                     continue;
                 }
 
+                // For the jobs database, ensure the schema exists
+                // This handles cases where the jobs.sqlite file gets deleted/corrupted
+                // since migrations are tracked in the main database.sqlite
+                if ($connection === 'jobs') {
+                    $this->ensureJobsTableExists();
+                }
+
                 // Set SQLite pragmas
                 DB::connection($connection)
                     ->statement('
@@ -292,6 +301,36 @@ class AppServiceProvider extends ServiceProvider
         } catch (Throwable $throwable) {
             // Log the error
             Log::error('Error setting SQLite pragmas: '.$throwable->getMessage());
+        }
+    }
+
+    /**
+     * Ensure the jobs table exists in the jobs database.
+     *
+     * This is necessary because the jobs.sqlite database is separate from the main
+     * database, but migrations are tracked in the main database. If the jobs.sqlite
+     * file gets deleted or corrupted, the migration won't run again automatically.
+     *
+     * This method creates the table schema directly if it doesn't exist, ensuring
+     * the application can always write to the jobs table.
+     */
+    private function ensureJobsTableExists(): void
+    {
+        try {
+            if (! Schema::connection('jobs')->hasTable('jobs')) {
+                Schema::connection('jobs')->create('jobs', function (Blueprint $table) {
+                    $table->id();
+                    $table->string('title');
+                    $table->string('batch_no');
+                    $table->longText('payload');
+                    $table->json('variables')->nullable();
+                    $table->timestamps();
+                });
+
+                Log::info('Created jobs table in jobs.sqlite database');
+            }
+        } catch (Throwable $e) {
+            Log::error('Failed to create jobs table: '.$e->getMessage());
         }
     }
 
