@@ -552,4 +552,50 @@ class EmbyJellyfinService implements MediaServer
         // 10,000,000 ticks = 1 second
         return (int) ($ticks / 10000000);
     }
+
+    /**
+     * Trigger a library refresh/scan on the media server.
+     *
+     * @return array{success: bool, message: string}
+     */
+    public function refreshLibrary(): array
+    {
+        try {
+            // Both Emby and Jellyfin use the same endpoint for library refresh
+            $response = $this->client()->post('/Library/Refresh');
+
+            if ($response->successful()) {
+                Log::info('EmbyJellyfinService: Library refresh triggered', [
+                    'integration_id' => $this->integration->id,
+                    'server_name' => $this->integration->name,
+                ]);
+
+                return [
+                    'success' => true,
+                    'message' => 'Library refresh triggered successfully',
+                ];
+            }
+
+            Log::warning('EmbyJellyfinService: Failed to trigger library refresh', [
+                'integration_id' => $this->integration->id,
+                'status' => $response->status(),
+                'body' => $response->body(),
+            ]);
+
+            return [
+                'success' => false,
+                'message' => 'Server returned status: '.$response->status(),
+            ];
+        } catch (Exception $e) {
+            Log::error('EmbyJellyfinService: Error triggering library refresh', [
+                'integration_id' => $this->integration->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return [
+                'success' => false,
+                'message' => 'Failed to trigger refresh: '.$e->getMessage(),
+            ];
+        }
+    }
 }

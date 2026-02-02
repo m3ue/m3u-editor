@@ -43,4 +43,11 @@ interface MediaServer
     public function getContainerExtension(array $item): string;
 
     public function ticksToSeconds(?int $ticks): ?int;
+
+    /**
+     * Trigger a library refresh/scan on the media server.
+     *
+     * @return array{success: bool, message: string}
+     */
+    public function refreshLibrary(): array;
 }

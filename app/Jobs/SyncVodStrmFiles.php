@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Models\Channel;
+use App\Models\MediaServerIntegration;
 use App\Models\Playlist;
 use App\Models\StreamFileSetting;
 use App\Models\StrmFileMapping;
@@ -314,9 +315,58 @@ class SyncVodStrmFiles implements ShouldQueue
                 // Clean up empty directories after orphaned cleanup
                 StrmFileMapping::cleanupEmptyDirectoriesInLocation($cleanupLocation);
             }
+
+            // Trigger media server library refresh if configured
+            $this->dispatchMediaServerRefresh($globalStreamFileSetting, $channels);
         } catch (\Exception $e) {
             // Log the exception or handle it as needed
             Log::error('Error syncing VOD .strm files: '.$e->getMessage());
+        }
+    }
+
+    /**
+     * Dispatch media server refresh jobs for any StreamFileSettings that have refresh enabled.
+     */
+    protected function dispatchMediaServerRefresh(?StreamFileSetting $globalStreamFileSetting, $channels): void
+    {
+        $integrationIds = collect();
+
+        // Check global setting
+        if ($globalStreamFileSetting?->refresh_media_server && $globalStreamFileSetting?->media_server_integration_id) {
+            $integrationIds->push([
+                'id' => $globalStreamFileSetting->media_server_integration_id,
+                'delay' => $globalStreamFileSetting->refresh_delay_seconds ?? 5,
+            ]);
+        }
+
+        // Check channel-level and group-level settings
+        foreach ($channels as $channel) {
+            $streamFileSetting = $channel->streamFileSetting;
+
+            // Check group-level if no channel-level setting
+            if (! $streamFileSetting && $channel->relationLoaded('group')) {
+                $groupModel = $channel->getRelation('group');
+                $streamFileSetting = $groupModel?->streamFileSetting;
+            }
+
+            if ($streamFileSetting?->refresh_media_server && $streamFileSetting?->media_server_integration_id) {
+                // Only add if not already in the collection
+                if (! $integrationIds->contains('id', $streamFileSetting->media_server_integration_id)) {
+                    $integrationIds->push([
+                        'id' => $streamFileSetting->media_server_integration_id,
+                        'delay' => $streamFileSetting->refresh_delay_seconds ?? 5,
+                    ]);
+                }
+            }
+        }
+
+        // Dispatch refresh jobs for each unique integration
+        foreach ($integrationIds as $integrationData) {
+            $integration = MediaServerIntegration::find($integrationData['id']);
+            if ($integration) {
+                RefreshMediaServerLibraryJob::dispatch($integration, $this->notify)
+                    ->delay(now()->addSeconds($integrationData['delay']));
+            }
         }
     }
 

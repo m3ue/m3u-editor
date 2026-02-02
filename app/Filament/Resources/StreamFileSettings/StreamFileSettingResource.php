@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\StreamFileSettings;
 
+use App\Models\MediaServerIntegration;
 use App\Models\StreamFileSetting;
 use App\Rules\CheckIfUrlOrLocalPath;
 use App\Services\PlaylistService;
@@ -313,6 +314,36 @@ class StreamFileSettingResource extends Resource
                                 : 'Create movie.nfo files for Kodi, Emby, and Jellyfin compatibility'
                             )
                             ->inline(false),
+                    ])
+                    ->hidden(fn ($get) => ! $get('enabled')),
+
+                Fieldset::make('Media Server Library Refresh')
+                    ->columnSpanFull()
+                    ->schema([
+                        Toggle::make('refresh_media_server')
+                            ->label('Refresh media server library after sync')
+                            ->helperText('Automatically trigger a library scan on your media server after .strm files are synced')
+                            ->inline(false)
+                            ->live(),
+                        Select::make('media_server_integration_id')
+                            ->label('Media Server')
+                            ->options(fn () => MediaServerIntegration::query()
+                                ->where('user_id', auth()->id())
+                                ->whereIn('type', ['jellyfin', 'emby', 'plex'])
+                                ->pluck('name', 'id')
+                            )
+                            ->searchable()
+                            ->required()
+                            ->helperText('Select which media server to refresh (Jellyfin, Emby, or Plex)')
+                            ->hidden(fn ($get) => ! $get('refresh_media_server')),
+                        TextInput::make('refresh_delay_seconds')
+                            ->label('Delay before refresh (seconds)')
+                            ->numeric()
+                            ->default(5)
+                            ->minValue(0)
+                            ->maxValue(300)
+                            ->helperText('Wait this many seconds after sync completes before triggering the library refresh')
+                            ->hidden(fn ($get) => ! $get('refresh_media_server')),
                     ])
                     ->hidden(fn ($get) => ! $get('enabled')),
             ]);
