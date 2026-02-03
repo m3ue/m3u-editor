@@ -5,6 +5,7 @@ namespace App\Filament\Widgets;
 use App\Facades\GitInfo;
 use App\Providers\VersionServiceProvider;
 use Filament\Widgets\Widget;
+use Illuminate\Support\Str;
 
 class UpdateNoticeWidget extends Widget
 {
@@ -62,5 +63,12 @@ class UpdateNoticeWidget extends Widget
         // Set update info as public properties (no emit on server side)
         $this->currentVersion = $current;
         $this->updateAvailable = VersionServiceProvider::updateAvailable();
+    }
+
+    public function formatMarkdown(string $text): string
+    {
+        // $text = nl2br(e($text));
+
+        return Str::markdown($text);
     }
 }
