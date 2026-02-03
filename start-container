@@ -106,58 +106,63 @@ if [ "${REDIS_ENABLED}" = "true" ]; then
     fi
 fi
 
-# Configure HLS segment storage (persistent location)
-# Default to storage/app/hls-segments for persistence across container restarts
-export HLS_TEMP_DIR="${HLS_TEMP_DIR:-/var/www/html/storage/app/hls-segments}"
-export HLS_GC_ENABLED="${HLS_GC_ENABLED:-true}"
-export HLS_GC_INTERVAL="${HLS_GC_INTERVAL:-600}"           # 10 minutes
-export HLS_GC_AGE_THRESHOLD="${HLS_GC_AGE_THRESHOLD:-7200}" # 2 hours (increased from default 1 hour)
+if [ "${M3U_PROXY_ENABLED}" = "true" ]; then
+    # Only configure HLS storage for embedded proxy mode
+    # For external proxy, HLS storage is handled by the proxy container
+    
+    # Configure HLS segment storage (persistent location)
+    # Default to storage/app/hls-segments for persistence across container restarts
+    export HLS_TEMP_DIR="${HLS_TEMP_DIR:-/var/www/html/storage/app/hls-segments}"
+    export HLS_GC_ENABLED="${HLS_GC_ENABLED:-true}"
+    export HLS_GC_INTERVAL="${HLS_GC_INTERVAL:-600}"           # 10 minutes
+    export HLS_GC_AGE_THRESHOLD="${HLS_GC_AGE_THRESHOLD:-7200}" # 2 hours (increased from default 1 hour)
 
-echo ""
-echo "🎬 Configuring HLS segment storage..."
-echo "   HLS_TEMP_DIR: ${HLS_TEMP_DIR}"
-echo "   HLS_GC_ENABLED: ${HLS_GC_ENABLED}"
-echo "   HLS_GC_INTERVAL: ${HLS_GC_INTERVAL}s"
-echo "   HLS_GC_AGE_THRESHOLD: ${HLS_GC_AGE_THRESHOLD}s"
+    echo ""
+    echo "🎬 Configuring HLS segment storage..."
+    echo "   HLS_TEMP_DIR: ${HLS_TEMP_DIR}"
+    echo "   HLS_GC_ENABLED: ${HLS_GC_ENABLED}"
+    echo "   HLS_GC_INTERVAL: ${HLS_GC_INTERVAL}s"
+    echo "   HLS_GC_AGE_THRESHOLD: ${HLS_GC_AGE_THRESHOLD}s"
 
-# Create HLS storage directory if it doesn't exist
-if [ ! -d "$HLS_TEMP_DIR" ]; then
-    echo "   Creating HLS storage directory..."
-    mkdir -p "$HLS_TEMP_DIR"
-    chown -R $WWWUSER:$WWWGROUP "$HLS_TEMP_DIR"
-    chmod 755 "$HLS_TEMP_DIR"
-    echo "   ✅ Created: $HLS_TEMP_DIR"
-else
-    echo "   ✅ Directory exists: $HLS_TEMP_DIR"
-    # Ensure correct permissions
-    chown -R $WWWUSER:$WWWGROUP "$HLS_TEMP_DIR"
-    chmod 755 "$HLS_TEMP_DIR"
+    # Create HLS storage directory if it doesn't exist
+    if [ ! -d "$HLS_TEMP_DIR" ]; then
+        echo "   Creating HLS storage directory..."
+        mkdir -p "$HLS_TEMP_DIR"
+        chown -R $WWWUSER:$WWWGROUP "$HLS_TEMP_DIR"
+        chmod 755 "$HLS_TEMP_DIR"
+        echo "   ✅ Created: $HLS_TEMP_DIR"
+    else
+        echo "   ✅ Directory exists: $HLS_TEMP_DIR"
+        # Ensure correct permissions
+        chown -R $WWWUSER:$WWWGROUP "$HLS_TEMP_DIR"
+        chmod 755 "$HLS_TEMP_DIR"
+    fi
+
+    # Check available disk space for HLS storage
+    AVAILABLE_SPACE_KB=$(df -k "$HLS_TEMP_DIR" | tail -1 | awk '{print $4}')
+    AVAILABLE_SPACE_MB=$((AVAILABLE_SPACE_KB / 1024))
+    AVAILABLE_SPACE_GB=$((AVAILABLE_SPACE_MB / 1024))
+
+    echo "   Available disk space: ${AVAILABLE_SPACE_GB}GB (${AVAILABLE_SPACE_MB}MB)"
+
+    # Warn if less than 2GB available
+    if [ "$AVAILABLE_SPACE_MB" -lt 2048 ]; then
+        echo "   ⚠️  WARNING: Low disk space for HLS segments!"
+        echo "      Available: ${AVAILABLE_SPACE_MB}MB"
+        echo "      Recommended: At least 2GB for HLS streaming"
+        echo "      HLS streams may fail if disk fills up!"
+    fi
+
+    # Warn if less than 500MB available (critical)
+    if [ "$AVAILABLE_SPACE_MB" -lt 512 ]; then
+        echo "   🔴 CRITICAL: Very low disk space!"
+        echo "      HLS streaming will likely fail!"
+        echo "      Free up disk space immediately!"
+    fi
+
+    echo "✅ HLS storage configured"
+    echo ""
 fi
-
-# Check available disk space for HLS storage
-AVAILABLE_SPACE_KB=$(df -k "$HLS_TEMP_DIR" | tail -1 | awk '{print $4}')
-AVAILABLE_SPACE_MB=$((AVAILABLE_SPACE_KB / 1024))
-AVAILABLE_SPACE_GB=$((AVAILABLE_SPACE_MB / 1024))
-
-echo "   Available disk space: ${AVAILABLE_SPACE_GB}GB (${AVAILABLE_SPACE_MB}MB)"
-
-# Warn if less than 2GB available
-if [ "$AVAILABLE_SPACE_MB" -lt 2048 ]; then
-    echo "   ⚠️  WARNING: Low disk space for HLS segments!"
-    echo "      Available: ${AVAILABLE_SPACE_MB}MB"
-    echo "      Recommended: At least 2GB for HLS streaming"
-    echo "      HLS streams may fail if disk fills up!"
-fi
-
-# Warn if less than 500MB available (critical)
-if [ "$AVAILABLE_SPACE_MB" -lt 512 ]; then
-    echo "   🔴 CRITICAL: Very low disk space!"
-    echo "      HLS streaming will likely fail!"
-    echo "      Free up disk space immediately!"
-fi
-
-echo "✅ HLS storage configured"
-echo ""
 
 # Redis pooling settings for embedded proxy
 # Variables are ignored if using external proxy
