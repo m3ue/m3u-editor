@@ -6,6 +6,7 @@ use App\Enums\ChannelLogoType;
 use App\Enums\PlaylistChannelId;
 use App\Facades\PlaylistFacade;
 use App\Facades\ProxyFacade;
+use App\Models\Category;
 use App\Models\Channel;
 use App\Models\CustomPlaylist;
 use App\Models\Epg;
@@ -1270,7 +1271,7 @@ class XtreamApiController extends Controller
                 $seriesWithoutTags = $seriesIds->diff($seriesWithTags);
 
                 if ($seriesWithoutTags->isNotEmpty()) {
-                    $fallbackCategories = \App\Models\Category::whereIn('id', function ($query) use ($seriesWithoutTags) {
+                    $fallbackCategories = Category::whereIn('id', function ($query) use ($seriesWithoutTags) {
                         $query->select('category_id')
                             ->from('series')
                             ->whereIn('id', $seriesWithoutTags)
