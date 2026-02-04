@@ -193,6 +193,16 @@ class EpgApiController extends Controller
         try {
             // Get enabled channels from the playlist
             $playlistChannels = PlaylistGenerateController::getChannelQuery($playlist)
+                ->when($search, function ($queryBuilder) use ($search) {
+                    $search = Str::lower($search);
+
+                    return $queryBuilder->where(function ($query) use ($search) {
+                        $query->whereRaw('LOWER(channels.name) LIKE ?', ['%'.$search.'%'])
+                            ->orWhereRaw('LOWER(channels.name_custom) LIKE ?', ['%'.$search.'%'])
+                            ->orWhereRaw('LOWER(channels.title) LIKE ?', ['%'.$search.'%'])
+                            ->orWhereRaw('LOWER(channels.title_custom) LIKE ?', ['%'.$search.'%']);
+                    });
+                })
                 ->limit($perPage)
                 ->offset($skip)
                 ->cursor();
