@@ -289,6 +289,7 @@ class ChannelsRelationManager extends RelationManager
                     ->schema([
                         Select::make('group')
                             ->label('Select group')
+                            ->native(false)
                             ->options(
                                 $ownerRecord->groupTags()->get()
                                     ->map(fn ($name) => [

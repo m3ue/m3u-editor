@@ -247,6 +247,7 @@ class SeriesRelationManager extends RelationManager
                     ->schema([
                         Select::make('category')
                             ->label('Select category')
+                            ->native(false)
                             ->options(
                                 $ownerRecord->categoryTags()->get()
                                     ->map(fn ($name) => [
