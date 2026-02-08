@@ -1625,6 +1625,107 @@ class XtreamApiController extends Controller
             }
 
             return response()->json(['epg_listings' => $epgListings]);
+        } elseif ($action === 'get_epg_batch') {
+            // Batch EPG endpoint - fetches EPG for multiple channels in a single request
+            if ($isNetworkPlaylist) {
+                return response()->json(['error' => 'Batch EPG not supported for network playlists'], 400);
+            }
+
+            $streamIdsParam = $request->input('stream_ids');
+            if (! $streamIdsParam) {
+                return response()->json(['error' => 'stream_ids parameter is required'], 400);
+            }
+
+            $streamIds = array_map('intval', explode(',', $streamIdsParam));
+            $streamIds = array_slice($streamIds, 0, 100);
+
+            $date = $request->input('date', Carbon::now()->format('Y-m-d'));
+            $proxyEnabled = $playlist->enable_proxy;
+
+            // Load all requested channels in one query
+            $channels = $playlist->channels()
+                ->where('enabled', true)
+                ->whereIn('channels.id', $streamIds)
+                ->with('epgChannel')
+                ->get()
+                ->keyBy('id');
+
+            // Group channels by EPG source so each JSONL file is read once
+            $epgGroups = [];
+            foreach ($channels as $channel) {
+                if (! $channel->epgChannel) {
+                    continue;
+                }
+                $epgId = $channel->epgChannel->epg_id;
+                if (! isset($epgGroups[$epgId])) {
+                    $epg = Epg::find($epgId);
+                    if (! $epg || ! $epg->is_cached) {
+                        continue;
+                    }
+                    $epgGroups[$epgId] = ['epg' => $epg, 'channelMap' => []];
+                }
+                $epgGroups[$epgId]['channelMap'][$channel->id] = $channel->epgChannel->channel_id;
+            }
+
+            $cacheService = new EpgCacheService;
+            $now = Carbon::now();
+            $nextDate = Carbon::parse($date)->addDay()->format('Y-m-d');
+            $result = [];
+
+            foreach ($epgGroups as $group) {
+                $epg = $group['epg'];
+                $epgChannelIds = array_values($group['channelMap']);
+
+                // Fetch requested date + next day to cover timezone differences
+                $programmes = $cacheService->getCachedProgrammes($epg, $date, $epgChannelIds);
+                $nextDayProgrammes = $cacheService->getCachedProgrammes($epg, $nextDate, $epgChannelIds);
+
+                // Merge next day's programmes into the main set
+                foreach ($nextDayProgrammes as $channelId => $progs) {
+                    if (! isset($programmes[$channelId])) {
+                        $programmes[$channelId] = [];
+                    }
+                    $programmes[$channelId] = array_merge($programmes[$channelId], $progs);
+                }
+
+                foreach ($group['channelMap'] as $streamId => $epgChannelId) {
+                    $channelProgrammes = $programmes[$epgChannelId] ?? [];
+                    $channel = $channels[$streamId];
+                    $isNowPlaying = $proxyEnabled ? M3uProxyService::isChannelActive($channel) : false;
+
+                    $epgListings = [];
+                    foreach ($channelProgrammes as $index => $programme) {
+                        $startTime = Carbon::parse($programme['start']);
+                        $endTime = Carbon::parse($programme['stop']);
+                        $isCurrentProgramme = $startTime->lte($now) && $endTime->gt($now);
+
+                        $epgListings[] = [
+                            'id' => (string) ($programme['id'] ?? $index),
+                            'epg_id' => (string) $epg->id,
+                            'title' => base64_encode($programme['title'] ?? ''),
+                            'description' => base64_encode($programme['desc'] ?? ''),
+                            'lang' => $programme['lang'] ?? 'en',
+                            'start' => $startTime->format('Y-m-d H:i:s'),
+                            'end' => $endTime->format('Y-m-d H:i:s'),
+                            'channel_id' => $epgChannelId,
+                            'start_timestamp' => (string) $startTime->timestamp,
+                            'stop_timestamp' => (string) $endTime->timestamp,
+                            'now_playing' => ($isCurrentProgramme && $isNowPlaying) ? 1 : 0,
+                            'has_archive' => ($channel->catchup && $endTime->lt($now)) ? 1 : 0,
+                        ];
+                    }
+                    $result[(string) $streamId] = ['epg_listings' => $epgListings];
+                }
+            }
+
+            // Include empty results for channels without EPG data
+            foreach ($streamIds as $sid) {
+                if (! isset($result[(string) $sid])) {
+                    $result[(string) $sid] = ['epg_listings' => []];
+                }
+            }
+
+            return response()->json($result);
         } elseif ($action === 'm3u_plus') {
             // For m3u_plus, redirect to the m3u method which handles the request
             return $this->m3u($playlist);
