@@ -2195,18 +2195,6 @@ class PlaylistResource extends Resource
                                         }
                                         $component->state($formatted);
                                     }
-                                })
-                                ->dehydrateStateUsing(function ($state) {
-                                    // Convert repeater format back to simple array of attribute keys
-                                    if (is_array($state) && ! empty($state)) {
-                                        return collect($state)
-                                            ->pluck('attribute')
-                                            ->filter()
-                                            ->values()
-                                            ->toArray();
-                                    }
-
-                                    return [];
                                 }),
                         ]),
                 ]),
