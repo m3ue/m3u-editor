@@ -27,6 +27,7 @@ class PlaylistAlias extends Model
         'expires_at' => 'datetime',
         'custom_headers' => 'array',
         'strict_live_ts' => 'boolean',
+        'use_sticky_session' => 'boolean',
     ];
 
     /**

@@ -394,26 +394,36 @@ class PlaylistAliasResource extends Resource
                         ->default(0) // Default to 0 streams (for unlimted)
                         ->required()
                         ->hidden(fn (Get $get): bool => ! $get('enable_proxy')),
-                    Forms\Components\TextInput::make('server_timezone')
-                        ->label('Provider Timezone')
-                        ->helperText('The portal/provider timezone (DST-aware). Needed to correctly use timeshift functionality when playlist proxy is enabled.')
-                        ->placeholder('Etc/UTC')
-                        ->hidden(fn (Get $get): bool => ! $get('enable_proxy')),
-                    Forms\Components\Toggle::make('strict_live_ts')
-                        ->label('Enable Strict Live TS Handling')
-                        ->hintAction(
-                            Actions\Action::make('learn_more_strict_live_ts')
-                                ->label('Learn More')
-                                ->icon('heroicon-o-arrow-top-right-on-square')
-                                ->iconPosition('after')
-                                ->size('sm')
-                                ->url('https://github.com/sparkison/m3u-proxy/blob/master/docs/STRICT_LIVE_TS_MODE.md')
-                                ->openUrlInNewTab(true)
-                        )
-                        ->helperText('Enhanced stability for live MPEG-TS streams with PVR clients like Kodi and HDHomeRun (only used when not using transcoding profiles).')
-                        ->inline(false)
-                        ->default(false)
-                        ->hidden(fn (Get $get): bool => ! $get('enable_proxy')),
+
+                    Grid::make()
+                        ->columns(1)
+                        ->schema([
+                            Forms\Components\TextInput::make('server_timezone')
+                                ->label('Provider Timezone')
+                                ->helperText('The portal/provider timezone (DST-aware). Needed to correctly use timeshift functionality when playlist proxy is enabled.')
+                                ->placeholder('Etc/UTC'),
+                            Forms\Components\Toggle::make('strict_live_ts')
+                                ->label('Enable Strict Live TS Handling')
+                                ->hintAction(
+                                    Actions\Action::make('learn_more_strict_live_ts')
+                                        ->label('Learn More')
+                                        ->icon('heroicon-o-arrow-top-right-on-square')
+                                        ->iconPosition('after')
+                                        ->size('sm')
+                                        ->url('https://github.com/sparkison/m3u-proxy/blob/master/docs/STRICT_LIVE_TS_MODE.md')
+                                        ->openUrlInNewTab(true)
+                                )
+                                ->helperText('Enhanced stability for live MPEG-TS streams with PVR clients like Kodi and HDHomeRun (only used when not using transcoding profiles).')
+                                ->inline(false)
+                                ->default(false),
+                            Forms\Components\Toggle::make('use_sticky_session')
+                                ->label('Enable Sticky Session Handler')
+                                ->helperText('')
+                                ->inline(false)
+                                ->default(false)
+                                ->helperText('Lock clients to specific backend origins after redirects to prevent playback loops when load balancers bounce between origins. Disable if your provider doesn\'t use load balancing.'),
+                        ])->hidden(fn (Get $get): bool => ! $get('enable_proxy')),
+
                     Schemas\Components\Fieldset::make('Transcoding Settings (optional)')
                         ->columnSpanFull()
                         ->schema([

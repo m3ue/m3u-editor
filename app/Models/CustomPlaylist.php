@@ -35,6 +35,7 @@ class CustomPlaylist extends Model
         'include_vod_in_m3u' => 'boolean',
         'custom_headers' => 'array',
         'strict_live_ts' => 'boolean',
+        'use_sticky_session' => 'boolean',
         'id_channel_by' => PlaylistChannelId::class,
     ];
 
