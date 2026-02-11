@@ -433,6 +433,11 @@ class PlaylistService
             ->first();
 
         if ($alias) {
+            // If alias found but expired, treat as not found
+            if ($alias->isExpired()) {
+                return false;
+            }
+
             return [
                 $alias,
                 'alias_auth',
