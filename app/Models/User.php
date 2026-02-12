@@ -219,11 +219,11 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
     }
 
     /**
-     * Check if user can access tools.
+     * Check if user can use tools.
      */
-    public function canAccessTools(): bool
+    public function canUseTools(): bool
     {
-        return $this->hasPermission('tools');
+        return $this->hasPermission('use_tools');
     }
 
     /**
@@ -234,7 +234,7 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
         return [
             'use_proxy' => 'Use Proxy',
             'use_integrations' => 'Use Integrations',
-            'tools' => 'Access Tools',
+            'use_tools' => 'Use Tools',
         ];
     }
 }

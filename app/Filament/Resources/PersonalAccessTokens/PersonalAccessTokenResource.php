@@ -30,7 +30,7 @@ class PersonalAccessTokenResource extends Resource
      */
     public static function canAccess(): bool
     {
-        return auth()->check() && auth()->user()->canAccessTools();
+        return auth()->check() && auth()->user()->canUseTools();
     }
 
     public static function getGloballySearchableAttributes(): array
