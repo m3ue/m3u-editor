@@ -37,6 +37,15 @@ class StreamFileSettingResource extends Resource
 
     protected static ?string $pluralModelLabel = 'Stream File Settings';
 
+    /**
+     * Check if the user can access this page.
+     * Only users with the "stream file sync" permission can access this page.
+     */
+    public static function canAccess(): bool
+    {
+        return auth()->check() && auth()->user()->canUseStreamFileSync();
+    }
+
     public static function getNavigationSort(): ?int
     {
         return 6;

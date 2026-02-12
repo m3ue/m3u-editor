@@ -227,6 +227,14 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
     }
 
     /**
+     * Check if user can use stream file sync.
+     */
+    public function canUseStreamFileSync(): bool
+    {
+        return $this->hasPermission('use_stream_file_sync');
+    }
+
+    /**
      * Get all available permissions.
      */
     public static function getAvailablePermissions(): array
@@ -235,6 +243,7 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
             'use_proxy' => 'Use Proxy',
             'use_integrations' => 'Use Integrations',
             'use_tools' => 'Use Tools',
+            'use_stream_file_sync' => 'Use Stream File Sync',
         ];
     }
 }

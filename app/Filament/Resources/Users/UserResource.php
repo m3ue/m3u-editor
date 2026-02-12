@@ -55,7 +55,8 @@ class UserResource extends Resource
                     ->descriptions([
                         'use_proxy' => 'Allow this user to access proxy features and stream via the m3u-proxy server',
                         'use_integrations' => 'Allow this user to access media server integrations and related features',
-                        'tools' => 'Allow this user to access tools like API Tokens and Post Processing',
+                        'use_tools' => 'Allow this user to access tools like API Tokens and Post Processing',
+                        'use_stream_file_sync' => 'Allow this user to access stream file sync features',
                     ])
                     ->columnSpanFull()
                     ->gridDirection('row')
