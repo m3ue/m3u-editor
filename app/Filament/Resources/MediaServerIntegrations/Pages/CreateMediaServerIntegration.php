@@ -15,6 +15,14 @@ class CreateMediaServerIntegration extends CreateRecord
         $data['user_id'] = Auth::id();
         $data['status'] = 'processing'; // Set initial status to processing
 
+        // Local media integrations don't need network fields
+        if (($data['type'] ?? '') === 'local') {
+            $data['host'] = $data['host'] ?? null;
+            $data['api_key'] = $data['api_key'] ?? null;
+            $data['port'] = $data['port'] ?? 0;
+            $data['ssl'] = $data['ssl'] ?? false;
+        }
+
         return $data;
     }
 

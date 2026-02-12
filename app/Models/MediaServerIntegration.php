@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 
 class MediaServerIntegration extends Model
 {
@@ -36,6 +37,9 @@ class MediaServerIntegration extends Model
         'series_progress' => 0,
         'total_movies' => 0,
         'total_series' => 0,
+        'metadata_source' => 'tmdb',
+        'auto_fetch_metadata' => true,
+        'scan_recursive' => true,
     ];
 
     /**
@@ -62,6 +66,10 @@ class MediaServerIntegration extends Model
         'total_series' => 'integer',
         'available_libraries' => 'array',
         'selected_library_ids' => 'array',
+        'local_media_paths' => 'array',
+        'video_extensions' => 'array',
+        'scan_recursive' => 'boolean',
+        'auto_fetch_metadata' => 'boolean',
     ];
 
     /**
@@ -88,6 +96,36 @@ class MediaServerIntegration extends Model
     public function playlist(): BelongsTo
     {
         return $this->belongsTo(Playlist::class);
+    }
+
+    /**
+     * Get the channels (VOD movies) through the associated playlist.
+     */
+    public function channels(): HasManyThrough
+    {
+        return $this->hasManyThrough(
+            Channel::class,
+            Playlist::class,
+            'id',
+            'playlist_id',
+            'playlist_id',
+            'id'
+        );
+    }
+
+    /**
+     * Get the series through the associated playlist.
+     */
+    public function series(): HasManyThrough
+    {
+        return $this->hasManyThrough(
+            Series::class,
+            Playlist::class,
+            'id',
+            'playlist_id',
+            'playlist_id',
+            'id'
+        );
     }
 
     /**
@@ -122,6 +160,53 @@ class MediaServerIntegration extends Model
     public function isPlex(): bool
     {
         return $this->type === 'plex';
+    }
+
+    /**
+     * Check if this is a local media integration.
+     */
+    public function isLocal(): bool
+    {
+        return $this->type === 'local';
+    }
+
+    /**
+     * Check if this integration requires network connectivity.
+     * Local media does not require network connectivity.
+     */
+    public function requiresNetwork(): bool
+    {
+        return ! $this->isLocal();
+    }
+
+    /**
+     * Get the configured local media paths for a specific type.
+     *
+     * @param  string|null  $type  'movies' or 'tvshows', null for all
+     * @return array<array{path: string, type: string, name: string}>
+     */
+    public function getLocalMediaPathsForType(?string $type = null): array
+    {
+        $paths = $this->local_media_paths ?? [];
+
+        if ($type === null) {
+            return $paths;
+        }
+
+        return array_filter($paths, fn ($path) => ($path['type'] ?? '') === $type);
+    }
+
+    /**
+     * Get the default video extensions to scan for.
+     *
+     * @return array<string>
+     */
+    public function getVideoExtensions(): array
+    {
+        return $this->video_extensions ?? [
+            'mp4', 'mkv', 'avi', 'mov', 'wmv', 'flv', 'webm',
+            'm4v', 'mpeg', 'mpg', 'ts', 'm2ts', 'mts', 'vob',
+        ];
     }
 
     /**

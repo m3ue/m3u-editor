@@ -14,6 +14,7 @@ use App\Models\Playlist;
 use App\Models\Season;
 use App\Models\Series;
 use App\Services\MediaServerService;
+use App\Services\TmdbService;
 use Exception;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -147,10 +148,20 @@ class SyncMediaServer implements ShouldQueue
             ]);
 
             // Send success notification
+            $body = "Synced {$this->stats['movies_synced']} movies and {$this->stats['series_synced']} series from {$integration->name}";
+
+            if ($integration->isLocal() && $this->stats['series_synced'] === 0 && $service instanceof \App\Services\LocalMediaService) {
+                $flatWarnings = $service->getSeriesPathWarnings();
+
+                if (! empty($flatWarnings)) {
+                    $body .= '. Warning: '.implode(' ', $flatWarnings);
+                }
+            }
+
             Notification::make()
                 ->success()
                 ->title('Media Server Sync Complete')
-                ->body("Synced {$this->stats['movies_synced']} movies and {$this->stats['series_synced']} series from {$integration->name}")
+                ->body($body)
                 ->broadcast($integration->user)
                 ->sendToDatabase($integration->user);
 
@@ -158,6 +169,9 @@ class SyncMediaServer implements ShouldQueue
                 'integration_id' => $integration->id,
                 'stats' => $this->stats,
             ]);
+
+            // Dispatch TMDB metadata lookup for local media integrations
+            $this->dispatchMetadataLookup($integration, $playlist);
 
         } catch (\Throwable $e) {
             $this->stats['errors'][] = $e->getMessage();
@@ -203,15 +217,24 @@ class SyncMediaServer implements ShouldQueue
         }
 
         // Determine source type based on integration type
-        $sourceType = $integration->type === 'emby'
-            ? PlaylistSourceType::Emby
-            : PlaylistSourceType::Jellyfin;
+        $sourceType = match ($integration->type) {
+            'emby' => PlaylistSourceType::Emby,
+            'jellyfin' => PlaylistSourceType::Jellyfin,
+            'plex' => PlaylistSourceType::Plex,
+            'local' => PlaylistSourceType::LocalMedia,
+            default => PlaylistSourceType::M3u,
+        };
+
+        // Determine URL for reference
+        $url = $integration->isLocal()
+            ? 'local://'.$integration->name
+            : $integration->base_url;
 
         // Create a new playlist for this integration
         $playlist = Playlist::createQuietly([
             'uuid' => Str::orderedUuid()->toString(),
             'name' => $integration->name,
-            'url' => $integration->base_url, // Store the server URL for reference
+            'url' => $url,
             'user_id' => $integration->user_id,
             'source_type' => $sourceType,
             'status' => Status::Processing,
@@ -728,6 +751,75 @@ class SyncMediaServer implements ShouldQueue
             // Track in sync stats
             $this->stats['errors'][] = "Missing libraries: {$missingNamesStr}";
         }
+    }
+
+    /**
+     * Dispatch TMDB metadata lookup for local media integrations.
+     *
+     * Only dispatches if:
+     * - Integration is local type
+     * - auto_fetch_metadata is enabled
+     * - TMDB service is configured
+     * - Items were actually synced
+     */
+    protected function dispatchMetadataLookup(
+        MediaServerIntegration $integration,
+        Playlist $playlist
+    ): void {
+        if (! $integration->isLocal()) {
+            return;
+        }
+
+        if (! $integration->auto_fetch_metadata) {
+            Log::debug('SyncMediaServer: Skipping metadata lookup (auto_fetch_metadata disabled)', [
+                'integration_id' => $integration->id,
+            ]);
+
+            return;
+        }
+
+        $tmdbService = app(TmdbService::class);
+        if (! $tmdbService->isConfigured()) {
+            Log::info('SyncMediaServer: Skipping metadata lookup (TMDB API key not configured)', [
+                'integration_id' => $integration->id,
+            ]);
+
+            Notification::make()
+                ->warning()
+                ->title('Metadata Lookup Skipped')
+                ->body('TMDB API key is not configured. Add your API key in Settings to enable automatic metadata lookup for local media.')
+                ->broadcast($integration->user)
+                ->sendToDatabase($integration->user);
+
+            return;
+        }
+
+        $totalSynced = $this->stats['movies_synced'] + $this->stats['series_synced'];
+        if ($totalSynced === 0) {
+            Log::debug('SyncMediaServer: Skipping metadata lookup (no items synced)', [
+                'integration_id' => $integration->id,
+            ]);
+
+            return;
+        }
+
+        Log::info('SyncMediaServer: Dispatching TMDB metadata lookup for local media', [
+            'integration_id' => $integration->id,
+            'playlist_id' => $playlist->id,
+            'movies_synced' => $this->stats['movies_synced'],
+            'series_synced' => $this->stats['series_synced'],
+        ]);
+
+        FetchTmdbIds::dispatch(
+            vodChannelIds: null,
+            seriesIds: null,
+            vodPlaylistId: $this->stats['movies_synced'] > 0 ? $playlist->id : null,
+            seriesPlaylistId: $this->stats['series_synced'] > 0 ? $playlist->id : null,
+            allVodPlaylists: false,
+            allSeriesPlaylists: false,
+            overwriteExisting: false,
+            user: $integration->user
+        );
     }
 
     public function failed(\Throwable $exception): void

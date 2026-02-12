@@ -13,6 +13,7 @@ class MediaServerService
         return match ($integration->type) {
             'emby', 'jellyfin' => new EmbyJellyfinService($integration),
             'plex' => new PlexService($integration),
+            'local' => new LocalMediaService($integration),
             default => throw new InvalidArgumentException("Unsupported media server type: {$integration->type}"),
         };
     }
