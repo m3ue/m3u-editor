@@ -8,6 +8,7 @@ use App\Models\User;
 use App\Services\TmdbService;
 use App\Settings\GeneralSettings;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Http;
 
 uses(RefreshDatabase::class);
@@ -219,4 +220,32 @@ it('handles items with no match gracefully', function () {
 
     // Should not have any ID set
     expect($channel->info)->not->toHaveKey('tmdb_id');
+});
+
+it('splits large lookups into batched chunk jobs', function () {
+    Channel::factory()
+        ->count(5)
+        ->create([
+            'playlist_id' => $this->playlist->id,
+            'user_id' => $this->user->id,
+            'is_vod' => true,
+            'enabled' => true,
+            'info' => [],
+        ]);
+
+    Bus::fake();
+
+    $job = new FetchTmdbIds(
+        allVodPlaylists: true,
+        overwriteExisting: false,
+        user: $this->user,
+    );
+
+    $job->batchChunkSize = 2;
+
+    $job->handle(app(TmdbService::class));
+
+    Bus::assertBatched(function ($batch) {
+        return count($batch->jobs) === 3;
+    });
 });

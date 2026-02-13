@@ -7,9 +7,13 @@ use App\Models\Series;
 use App\Models\User;
 use App\Services\TmdbService;
 use Filament\Notifications\Notification;
+use Illuminate\Bus\Batch;
+use Illuminate\Bus\Batchable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -18,11 +22,17 @@ use Illuminate\Support\Facades\Log;
  */
 class FetchTmdbIds implements ShouldQueue
 {
-    use Queueable;
+    use Batchable, Queueable;
+
+    public const BATCH_CHUNK_SIZE = 100;
+
+    protected const BATCH_STATS_TTL_HOURS = 6;
+
+    public int $batchChunkSize = self::BATCH_CHUNK_SIZE;
 
     public $tries = 1;
 
-    public $timeout = 60 * 30; // 30 minutes max for batch processing
+    public $timeout = 60 * 15; // 15 minutes per chunk
 
     protected int $foundCount = 0;
 
@@ -53,6 +63,8 @@ class FetchTmdbIds implements ShouldQueue
         public bool $allSeriesPlaylists = false,
         public bool $overwriteExisting = false,
         public ?User $user = null,
+        public bool $isChunkJob = false,
+        public bool $sendCompletionNotification = true,
     ) {
         // Legacy support: convert Collections to arrays
         if ($this->vodChannelIds instanceof Collection) {
@@ -75,6 +87,12 @@ class FetchTmdbIds implements ShouldQueue
             return;
         }
 
+        if (! $this->isChunkJob && $this->shouldRunAsBatchedChunks()) {
+            $this->dispatchBatchedChunks();
+
+            return;
+        }
+
         // Process VOD channels (new playlist-based or legacy ID-based)
         if ($this->vodPlaylistId || $this->allVodPlaylists || ! empty($this->vodChannelIds)) {
             $this->processVodChannels($tmdb);
@@ -85,14 +103,167 @@ class FetchTmdbIds implements ShouldQueue
             $this->processSeries($tmdb);
         }
 
+        if ($this->isChunkJob) {
+            $this->recordBatchStats();
+        }
+
         // Send completion notification
-        $this->sendCompletionNotification();
+        if ($this->sendCompletionNotification) {
+            $this->sendCompletionNotification();
+        }
     }
 
     /**
-     * Process VOD channels to fetch TMDB IDs.
+     * Determine whether this run should be split into multiple chunk jobs.
      */
-    protected function processVodChannels(TmdbService $tmdb): void
+    protected function shouldRunAsBatchedChunks(): bool
+    {
+        return $this->getTargetCount() > $this->batchChunkSize;
+    }
+
+    /**
+     * Dispatch child chunk jobs in a Laravel batch to avoid long-running single jobs.
+     */
+    protected function dispatchBatchedChunks(): void
+    {
+        $jobs = collect();
+
+        $this->queueVodChunkJobs($jobs);
+        $this->queueSeriesChunkJobs($jobs);
+
+        if ($jobs->isEmpty()) {
+            if ($this->sendCompletionNotification) {
+                $this->sendCompletionNotification();
+            }
+
+            return;
+        }
+
+        $chunkCount = $jobs->count();
+        $userId = $this->user?->id;
+
+        Bus::batch($jobs->all())
+            ->onConnection('redis') // force to use redis connection
+            ->onQueue('import')
+            ->allowFailures()
+            ->finally(function (Batch $batch) use ($userId): void {
+                if (! $userId) {
+                    return;
+                }
+
+                $user = User::find($userId);
+
+                if (! $user) {
+                    return;
+                }
+
+                $stats = self::readBatchStats($batch->id);
+                $failedJobs = $batch->failedJobs;
+                $total = $stats['found'] + $stats['not_found'] + $stats['skipped'] + $stats['errors'];
+
+                $body = sprintf(
+                    'Found: %d | Not found: %d | Skipped (already had IDs): %d | Errors: %d',
+                    $stats['found'],
+                    $stats['not_found'],
+                    $stats['skipped'],
+                    $stats['errors']
+                );
+
+                if ($failedJobs > 0) {
+                    $body .= " | Failed chunks: {$failedJobs}";
+                }
+
+                $notification = Notification::make()
+                    ->title("TMDB ID Lookup Complete ({$total} processed)")
+                    ->body($body);
+
+                if ($failedJobs > 0 || $stats['errors'] > 0) {
+                    $notification->warning();
+                } else {
+                    $notification->success();
+                }
+
+                $notification
+                    ->broadcast($user)
+                    ->sendToDatabase($user);
+
+                self::clearBatchStats($batch->id);
+            })
+            ->dispatch();
+
+        $this->notifyUser(
+            'TMDB ID Lookup Started',
+            "Large lookup split into {$chunkCount} jobs and queued for processing. You will receive a notification when the batch is complete.",
+            'info'
+        );
+    }
+
+    /**
+     * Queue chunk jobs for VOD channels.
+     */
+    protected function queueVodChunkJobs(Collection $jobs): void
+    {
+        $query = $this->buildVodQuery();
+
+        if (! $query) {
+            return;
+        }
+
+        $query->select('id')
+            ->orderBy('id')
+            ->chunkById($this->batchChunkSize, function (Collection $channels) use ($jobs): void {
+                $ids = $channels->pluck('id')->all();
+
+                if (empty($ids)) {
+                    return;
+                }
+
+                $jobs->push(new self(
+                    vodChannelIds: $ids,
+                    seriesIds: null,
+                    overwriteExisting: $this->overwriteExisting,
+                    user: $this->user,
+                    isChunkJob: true,
+                    sendCompletionNotification: false,
+                ));
+            });
+    }
+
+    /**
+     * Queue chunk jobs for series.
+     */
+    protected function queueSeriesChunkJobs(Collection $jobs): void
+    {
+        $query = $this->buildSeriesQuery();
+
+        if (! $query) {
+            return;
+        }
+
+        $query->select('id')
+            ->orderBy('id')
+            ->chunkById($this->batchChunkSize, function (Collection $seriesChunk) use ($jobs): void {
+                $ids = $seriesChunk->pluck('id')->all();
+
+                if (empty($ids)) {
+                    return;
+                }
+
+                $jobs->push(new self(
+                    vodChannelIds: null,
+                    seriesIds: $ids,
+                    overwriteExisting: $this->overwriteExisting,
+                    user: $this->user,
+                    isChunkJob: true,
+                    sendCompletionNotification: false,
+                ));
+            });
+    }
+
+    /**
+     * Build filtered VOD query based on job arguments.
+     */
+    protected function buildVodQuery()
     {
         $query = Channel::where('is_vod', true);
 
@@ -110,11 +281,75 @@ class FetchTmdbIds implements ShouldQueue
             $query->whereIn('id', $this->vodChannelIds)
                 ->where('user_id', $this->user?->id);
         } else {
-            return; // No criteria specified
+            return null; // No criteria specified
+        }
+
+        return $query;
+    }
+
+    /**
+     * Build filtered series query based on job arguments.
+     */
+    protected function buildSeriesQuery()
+    {
+        $query = Series::query();
+
+        // Use playlist-based filtering if provided
+        if ($this->seriesPlaylistId) {
+            $query->where('playlist_id', $this->seriesPlaylistId)
+                ->where('user_id', $this->user?->id)
+                ->where('enabled', true);
+        } elseif ($this->allSeriesPlaylists && $this->user) {
+            $query->where('user_id', $this->user->id)
+                ->where('enabled', true);
+        } elseif (! empty($this->seriesIds)) {
+            // Legacy: direct ID array support
+            $query->whereIn('id', $this->seriesIds)
+                ->where('user_id', $this->user?->id);
+        } else {
+            return null; // No criteria specified
+        }
+
+        return $query;
+    }
+
+    /**
+     * Get count of records targeted by this lookup request.
+     */
+    protected function getTargetCount(): int
+    {
+        $count = 0;
+
+        $vodQuery = $this->buildVodQuery();
+        if ($vodQuery) {
+            $count += (clone $vodQuery)->count();
+        }
+
+        $seriesQuery = $this->buildSeriesQuery();
+        if ($seriesQuery) {
+            $count += (clone $seriesQuery)->count();
+        }
+
+        return $count;
+    }
+
+    /**
+     * Process VOD channels to fetch TMDB IDs.
+     */
+    protected function processVodChannels(TmdbService $tmdb): void
+    {
+        $query = $this->buildVodQuery();
+
+        if (! $query) {
+            return;
         }
 
         // Use cursor for memory-efficient iteration
         foreach ($query->cursor() as $channel) {
+            if (! $channel instanceof Channel) {
+                continue;
+            }
+
             try {
                 $this->processVodChannel($tmdb, $channel);
             } catch (\Exception $e) {
@@ -210,26 +445,18 @@ class FetchTmdbIds implements ShouldQueue
      */
     protected function processSeries(TmdbService $tmdb): void
     {
-        $query = Series::query();
+        $query = $this->buildSeriesQuery();
 
-        // Use playlist-based filtering if provided
-        if ($this->seriesPlaylistId) {
-            $query->where('playlist_id', $this->seriesPlaylistId)
-                ->where('user_id', $this->user?->id)
-                ->where('enabled', true);
-        } elseif ($this->allSeriesPlaylists && $this->user) {
-            $query->where('user_id', $this->user->id)
-                ->where('enabled', true);
-        } elseif (! empty($this->seriesIds)) {
-            // Legacy: direct ID array support
-            $query->whereIn('id', $this->seriesIds)
-                ->where('user_id', $this->user?->id);
-        } else {
-            return; // No criteria specified
+        if (! $query) {
+            return;
         }
 
         // Use cursor for memory-efficient iteration
         foreach ($query->cursor() as $series) {
+            if (! $series instanceof Series) {
+                continue;
+            }
+
             try {
                 $this->processSingleSeries($tmdb, $series);
             } catch (\Exception $e) {
@@ -389,6 +616,74 @@ class FetchTmdbIds implements ShouldQueue
         $notification
             ->broadcast($this->user)
             ->sendToDatabase($this->user);
+    }
+
+    /**
+     * Record chunk counters to cache for batch-level completion summary.
+     */
+    protected function recordBatchStats(): void
+    {
+        $batchId = $this->batch()?->id;
+
+        if (! $batchId) {
+            return;
+        }
+
+        self::incrementBatchStat($batchId, 'found', $this->foundCount);
+        self::incrementBatchStat($batchId, 'not_found', $this->notFoundCount);
+        self::incrementBatchStat($batchId, 'skipped', $this->skippedCount);
+        self::incrementBatchStat($batchId, 'errors', $this->errorCount);
+    }
+
+    /**
+     * Read aggregated chunk counters for the provided batch.
+     *
+     * @return array{found:int,not_found:int,skipped:int,errors:int}
+     */
+    protected static function readBatchStats(string $batchId): array
+    {
+        return [
+            'found' => (int) Cache::get(self::batchStatKey($batchId, 'found'), 0),
+            'not_found' => (int) Cache::get(self::batchStatKey($batchId, 'not_found'), 0),
+            'skipped' => (int) Cache::get(self::batchStatKey($batchId, 'skipped'), 0),
+            'errors' => (int) Cache::get(self::batchStatKey($batchId, 'errors'), 0),
+        ];
+    }
+
+    /**
+     * Increment a cached batch counter.
+     */
+    protected static function incrementBatchStat(string $batchId, string $metric, int $value): void
+    {
+        if ($value <= 0) {
+            return;
+        }
+
+        $key = self::batchStatKey($batchId, $metric);
+        $ttl = now()->addHours(self::BATCH_STATS_TTL_HOURS);
+
+        Cache::add($key, 0, $ttl);
+        Cache::increment($key, $value);
+        Cache::put($key, Cache::get($key, 0), $ttl);
+    }
+
+    /**
+     * Remove cached counters for a completed batch.
+     */
+    protected static function clearBatchStats(string $batchId): void
+    {
+        Cache::forget(self::batchStatKey($batchId, 'found'));
+        Cache::forget(self::batchStatKey($batchId, 'not_found'));
+        Cache::forget(self::batchStatKey($batchId, 'skipped'));
+        Cache::forget(self::batchStatKey($batchId, 'errors'));
+    }
+
+    /**
+     * Build cache key for batch stats metric.
+     */
+    protected static function batchStatKey(string $batchId, string $metric): string
+    {
+        return "tmdb-lookup:batch:{$batchId}:{$metric}";
     }
 
     /**
