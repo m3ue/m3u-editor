@@ -14,10 +14,12 @@ use Filament\Actions\ActionGroup;
 use Filament\Actions\DeleteAction;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
+use Filament\Forms\Components\TagsInput;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\EditRecord;
+use Filament\Schemas\Components\Fieldset;
 use Filament\Schemas\Components\Utilities\Get;
 
 class EditGroup extends EditRecord
@@ -140,47 +142,187 @@ class EditGroup extends EditRecord
                 Action::make('merge')
                     ->label('Merge Same ID')
                     ->schema([
-                        Select::make('playlist_id')
-                            ->required()
-                            ->label('Preferred Playlist')
-                            ->options(Playlist::where('user_id', auth()->id())->pluck('name', 'id'))
-                            ->live()
-                            ->searchable()
-                            ->helperText('Select a playlist to prioritize as the master during the merge process.'),
-                        Repeater::make('failover_playlists')
-                            ->label('')
-                            ->helperText('Select one or more playlists use as failover source(s).')
-                            ->reorderable()
-                            ->reorderableWithButtons()
-                            ->orderColumn('sort')
-                            ->simple(
-                                Select::make('playlist_failover_id')
-                                    ->label('Failover Playlists')
-                                    ->options(Playlist::where('user_id', auth()->id())->pluck('name', 'id'))
-                                    ->searchable()
+                        Fieldset::make('Merge source configuration')
+                            ->schema([
+                                Select::make('playlist_id')
                                     ->required()
-                            )
-                            ->distinct()
-                            ->columns(1)
-                            ->addActionLabel('Add failover playlist')
-                            ->columnSpanFull()
-                            ->minItems(1)
-                            ->defaultItems(1),
-                        Toggle::make('by_resolution')
-                            ->label('Order by Resolution')
-                            ->live()
-                            ->helperText('⚠️ IPTV WARNING: This will analyze each stream to determine resolution, which may cause rate limiting or blocking with IPTV providers. Only enable if your provider allows stream analysis.')
-                            ->default(false),
-                        Toggle::make('deactivate_failover_channels')
-                            ->label('Deactivate Failover Channels')
-                            ->helperText('When enabled, channels that become failovers will be automatically disabled.')
-                            ->default(false),
-                        Toggle::make('prefer_catchup_as_primary')
-                            ->label('Prefer catch-up channels as primary')
-                            ->helperText('When enabled, catch-up channels will be selected as the master when available.')
-                            ->default(false),
+                                    ->label('Preferred Playlist')
+                                    ->options(Playlist::where('user_id', auth()->id())->pluck('name', 'id'))
+                                    ->live()
+                                    ->searchable()
+                                    ->helperText('Select a playlist to prioritize as the master during the merge process.'),
+                                Repeater::make('failover_playlists')
+                                    ->label('')
+                                    ->helperText('Select one or more playlists use as failover source(s).')
+                                    ->reorderable()
+                                    ->reorderableWithButtons()
+                                    ->orderColumn('sort')
+                                    ->simple(
+                                        Select::make('playlist_failover_id')
+                                            ->label('Failover Playlists')
+                                            ->options(Playlist::where('user_id', auth()->id())->pluck('name', 'id'))
+                                            ->searchable()
+                                            ->required()
+                                    )
+                                    ->distinct()
+                                    ->columns(1)
+                                    ->addActionLabel('Add failover playlist')
+                                    ->columnSpanFull()
+                                    ->minItems(1)
+                                    ->defaultItems(1),
+                            ])
+                            ->columnSpanFull(),
+                        Fieldset::make('Merge behavior')
+                            ->schema([
+                                Toggle::make('by_resolution')
+                                    ->label('Order by Resolution')
+                                    ->live()
+                                    ->helperText('⚠️ IPTV WARNING: This will analyze each stream to determine resolution, which may cause rate limiting or blocking with IPTV providers. Only enable if your provider allows stream analysis.')
+                                    ->default(false),
+                                Toggle::make('deactivate_failover_channels')
+                                    ->label('Deactivate Failover Channels')
+                                    ->helperText('When enabled, channels that become failovers will be automatically disabled.')
+                                    ->default(false),
+                                Toggle::make('prefer_catchup_as_primary')
+                                    ->label('Prefer catch-up channels as primary')
+                                    ->helperText('When enabled, catch-up channels will be selected as the master when available.')
+                                    ->default(false),
+                                Toggle::make('exclude_disabled_groups')
+                                    ->label('Exclude disabled groups from master selection')
+                                    ->helperText('Channels from disabled groups will never be selected as master.')
+                                    ->default(false),
+                                Toggle::make('force_complete_remerge')
+                                    ->label('Force complete re-merge')
+                                    ->helperText('Re-evaluate ALL existing failover relationships, not just unmerged channels.')
+                                    ->default(false),
+                            ])
+                            ->columns(2)
+                            ->columnSpanFull(),
+                        Fieldset::make('Advanced Priority Scoring (optional)')
+                            ->schema([
+                                Select::make('prefer_codec')
+                                    ->label('Preferred Codec')
+                                    ->options([
+                                        'hevc' => 'HEVC / H.265 (smaller file size)',
+                                        'h264' => 'H.264 / AVC (better compatibility)',
+                                    ])
+                                    ->placeholder('No preference')
+                                    ->helperText('Prioritize channels with a specific video codec.'),
+                                TagsInput::make('priority_keywords')
+                                    ->label('Priority Keywords')
+                                    ->placeholder('Add keyword...')
+                                    ->helperText('Channels with these keywords in their name will be prioritized (e.g., "RAW", "LOCAL", "HD").')
+                                    ->splitKeys(['Tab', 'Return']),
+                                Repeater::make('group_priorities')
+                                    ->label('Group Priority Weights')
+                                    ->helperText('Assign priority weights to specific groups. Higher weight = more preferred as master. Leave empty for default behavior.')
+                                    ->columnSpanFull()
+                                    ->columns(2)
+                                    ->schema([
+                                        Select::make('group_id')
+                                            ->label('Group')
+                                            ->options(fn () => Group::query()
+                                                ->with(['playlist'])
+                                                ->where(['user_id' => auth()->id(), 'type' => 'live'])
+                                                ->get(['name', 'id', 'playlist_id'])
+                                                ->transform(fn ($group) => [
+                                                    'id' => $group->id,
+                                                    'name' => $group->name.' ('.$group->playlist->name.')',
+                                                ])->pluck('name', 'id')
+                                            )
+                                            ->searchable()
+                                            ->required(),
+                                        TextInput::make('weight')
+                                            ->label('Weight')
+                                            ->numeric()
+                                            ->default(100)
+                                            ->minValue(1)
+                                            ->maxValue(1000)
+                                            ->helperText('1-1000, higher = more preferred')
+                                            ->required(),
+                                    ])
+                                    ->reorderable()
+                                    ->reorderableWithButtons()
+                                    ->addActionLabel('Add group priority')
+                                    ->defaultItems(0)
+                                    ->dehydrateStateUsing(function ($state) {
+                                        if (is_array($state) && ! empty($state)) {
+                                            $formatted = [];
+                                            foreach ($state as $item) {
+                                                if (is_array($item) && isset($item['weight'])) {
+                                                    $groupId = $item['group_id'] ?? null;
+                                                    if (! $groupId) {
+                                                        continue;
+                                                    }
+                                                    $formatted[] = [
+                                                        'group_id' => $groupId,
+                                                        'weight' => (int) $item['weight'],
+                                                    ];
+                                                }
+                                            }
+
+                                            return $formatted;
+                                        }
+
+                                        return [];
+                                    }),
+                                Repeater::make('priority_attributes')
+                                    ->label('Priority Order')
+                                    ->helperText('Drag to reorder priority attributes. First attribute has highest priority. Leave empty for default order.')
+                                    ->columnSpanFull()
+                                    ->simple(
+                                        Select::make('attribute')
+                                            ->options([
+                                                'playlist_priority' => '📋 Playlist Priority (from failover list order)',
+                                                'group_priority' => '📁 Group Priority (from weights above)',
+                                                'catchup_support' => '⏪ Catch-up/Replay Support',
+                                                'resolution' => '📺 Resolution (requires stream analysis)',
+                                                'codec' => '🎬 Codec Preference (HEVC/H264)',
+                                                'keyword_match' => '🏷️ Keyword Match',
+                                            ])
+                                            ->required()
+                                    )
+                                    ->reorderable()
+                                    ->reorderableWithDragAndDrop()
+                                    ->distinct()
+                                    ->addActionLabel('Add priority attribute')
+                                    ->defaultItems(0)
+                                    ->afterStateHydrated(function ($component, $state) {
+                                        if (is_array($state) && ! empty($state)) {
+                                            $formatted = [];
+                                            foreach ($state as $item) {
+                                                if (is_string($item)) {
+                                                    $formatted[] = ['attribute' => $item];
+                                                } elseif (is_array($item) && isset($item['attribute'])) {
+                                                    $formatted[] = $item;
+                                                }
+                                            }
+                                            $component->state($formatted);
+                                        }
+                                    }),
+                            ])
+                            ->columns(2)
+                            ->columnSpanFull(),
                     ])
                     ->action(function (Group $record, array $data): void {
+                        $weightedConfig = null;
+                        $groupPriorities = $data['group_priorities'] ?? [];
+                        $priorityAttributes = collect($data['priority_attributes'] ?? [])
+                            ->pluck('attribute')
+                            ->filter()
+                            ->values()
+                            ->toArray();
+
+                        if (! empty($data['priority_keywords']) || ! empty($data['prefer_codec']) || ($data['exclude_disabled_groups'] ?? false) || ! empty($groupPriorities) || ! empty($priorityAttributes)) {
+                            $weightedConfig = [
+                                'priority_keywords' => $data['priority_keywords'] ?? [],
+                                'prefer_codec' => $data['prefer_codec'] ?? null,
+                                'exclude_disabled_groups' => $data['exclude_disabled_groups'] ?? false,
+                                'group_priorities' => $groupPriorities,
+                                'priority_attributes' => $priorityAttributes,
+                            ];
+                        }
+
                         app('Illuminate\Contracts\Bus\Dispatcher')
                             ->dispatch(new MergeChannels(
                                 user: auth()->user(),
@@ -188,8 +330,10 @@ class EditGroup extends EditRecord
                                 playlistId: $data['playlist_id'],
                                 checkResolution: $data['by_resolution'] ?? false,
                                 deactivateFailoverChannels: $data['deactivate_failover_channels'] ?? false,
+                                forceCompleteRemerge: $data['force_complete_remerge'] ?? false,
                                 preferCatchupAsPrimary: $data['prefer_catchup_as_primary'] ?? false,
                                 groupId: $record->id,
+                                weightedConfig: $weightedConfig,
                             ));
                     })->after(function ($livewire) {
                         $livewire->dispatch('refreshRelation');
@@ -203,6 +347,7 @@ class EditGroup extends EditRecord
                     ->icon('heroicon-o-arrows-pointing-in')
                     ->modalIcon('heroicon-o-arrows-pointing-in')
                     ->modalDescription('Merge all channels with the same ID in this group into a single channel with failover.')
+                    ->modalWidth(\Filament\Support\Enums\Width::FourExtraLarge)
                     ->modalSubmitActionLabel('Merge now'),
 
                 Action::make('unmerge')
