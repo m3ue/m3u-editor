@@ -187,6 +187,9 @@ Route::get('/shared/stream/{encodedId}.{format?}', function (string $encodedId) 
     return redirect()->route('m3u-proxy.channel', ['id' => $id]);
 })->name('shared.stream.channel');
 
+Route::get('/player/popout', [\App\Http\Controllers\PlayerController::class, 'popout'])
+    ->name('player.popout');
+
 /*
  * API routes
  */
