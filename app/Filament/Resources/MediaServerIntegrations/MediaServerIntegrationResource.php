@@ -5,6 +5,7 @@ namespace App\Filament\Resources\MediaServerIntegrations;
 use App\Filament\Resources\MediaServerIntegrations\Pages\CreateMediaServerIntegration;
 use App\Filament\Resources\MediaServerIntegrations\Pages\EditMediaServerIntegration;
 use App\Filament\Resources\MediaServerIntegrations\Pages\ListMediaServerIntegrations;
+use App\Filament\Resources\Playlists\PlaylistResource;
 use App\Jobs\SyncMediaServer;
 use App\Models\MediaServerIntegration;
 use App\Models\Playlist;
@@ -578,7 +579,7 @@ class MediaServerIntegrationResource extends Resource
                             if (! $playlist) {
                                 return null;
                             }
-                            $playlistLink = route('filament.admin.resources.playlists.edit', $record->playlist_id);
+                            $playlistLink = PlaylistResource::getUrl('view', ['record' => $record->playlist_id]);
 
                             return new HtmlString('
                             <div class="flex items-center gap-1">
@@ -780,9 +781,9 @@ class MediaServerIntegrationResource extends Resource
 
                     Action::make('viewPlaylist')
                         ->label('View Playlist')
-                        ->icon('heroicon-o-queue-list')
+                        ->icon('heroicon-o-eye')
                         ->url(fn ($record) => $record->playlist_id
-                            ? route('filament.admin.resources.playlists.edit', $record->playlist_id)
+                            ? PlaylistResource::getUrl('view', ['record' => $record->playlist_id])
                             : null
                         )
                         ->visible(fn ($record) => $record->playlist_id !== null),

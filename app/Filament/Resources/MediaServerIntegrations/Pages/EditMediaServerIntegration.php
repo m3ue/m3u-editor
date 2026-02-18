@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\MediaServerIntegrations\Pages;
 
 use App\Filament\Resources\MediaServerIntegrations\MediaServerIntegrationResource;
+use App\Filament\Resources\Playlists\PlaylistResource;
 use App\Jobs\SyncMediaServer;
 use App\Models\MediaServerIntegration;
 use App\Services\MediaServerService;
@@ -62,9 +63,9 @@ class EditMediaServerIntegration extends EditRecord
 
                 Action::make('viewPlaylist')
                     ->label('View Playlist')
-                    ->icon('heroicon-o-queue-list')
+                    ->icon('heroicon-o-eye')
                     ->url(fn () => $this->record->playlist_id
-                        ? route('filament.admin.resources.playlists.edit', $this->record->playlist_id)
+                        ? PlaylistResource::getUrl('view', ['record' => $this->record->playlist_id])
                         : null
                     )
                     ->visible(fn () => $this->record->playlist_id !== null),
