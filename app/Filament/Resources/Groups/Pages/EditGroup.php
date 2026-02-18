@@ -4,18 +4,13 @@ namespace App\Filament\Resources\Groups\Pages;
 
 use App\Facades\SortFacade;
 use App\Filament\Resources\Groups\GroupResource;
-use App\Jobs\MergeChannels;
-use App\Jobs\UnmergeChannels;
 use App\Models\Group;
-use App\Models\Playlist;
 use App\Services\PlaylistService;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Actions\DeleteAction;
-use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
-use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\EditRecord;
 use Filament\Schemas\Components\Utilities\Get;
@@ -137,102 +132,23 @@ class EditGroup extends EditRecord
                     ->modalIcon('heroicon-o-bars-arrow-down')
                     ->modalDescription('Sort all channels in this group alphabetically? This will update the sort order.'),
 
-                Action::make('merge')
-                    ->label('Merge Same ID')
-                    ->schema([
-                        Select::make('playlist_id')
-                            ->required()
-                            ->label('Preferred Playlist')
-                            ->options(Playlist::where('user_id', auth()->id())->pluck('name', 'id'))
-                            ->live()
-                            ->searchable()
-                            ->helperText('Select a playlist to prioritize as the master during the merge process.'),
-                        Repeater::make('failover_playlists')
-                            ->label('')
-                            ->helperText('Select one or more playlists use as failover source(s).')
-                            ->reorderable()
-                            ->reorderableWithButtons()
-                            ->orderColumn('sort')
-                            ->simple(
-                                Select::make('playlist_failover_id')
-                                    ->label('Failover Playlists')
-                                    ->options(Playlist::where('user_id', auth()->id())->pluck('name', 'id'))
-                                    ->searchable()
-                                    ->required()
-                            )
-                            ->distinct()
-                            ->columns(1)
-                            ->addActionLabel('Add failover playlist')
-                            ->columnSpanFull()
-                            ->minItems(1)
-                            ->defaultItems(1),
-                        Toggle::make('by_resolution')
-                            ->label('Order by Resolution')
-                            ->live()
-                            ->helperText('⚠️ IPTV WARNING: This will analyze each stream to determine resolution, which may cause rate limiting or blocking with IPTV providers. Only enable if your provider allows stream analysis.')
-                            ->default(false),
-                        Toggle::make('deactivate_failover_channels')
-                            ->label('Deactivate Failover Channels')
-                            ->helperText('When enabled, channels that become failovers will be automatically disabled.')
-                            ->default(false),
-                        Toggle::make('prefer_catchup_as_primary')
-                            ->label('Prefer catch-up channels as primary')
-                            ->helperText('When enabled, catch-up channels will be selected as the master when available.')
-                            ->default(false),
-                    ])
-                    ->action(function (Group $record, array $data): void {
-                        app('Illuminate\Contracts\Bus\Dispatcher')
-                            ->dispatch(new MergeChannels(
-                                user: auth()->user(),
-                                playlists: collect($data['failover_playlists']),
-                                playlistId: $data['playlist_id'],
-                                checkResolution: $data['by_resolution'] ?? false,
-                                deactivateFailoverChannels: $data['deactivate_failover_channels'] ?? false,
-                                preferCatchupAsPrimary: $data['prefer_catchup_as_primary'] ?? false,
-                                groupId: $record->id,
-                            ));
-                    })->after(function ($livewire) {
+                PlaylistService::getMergeAction(groupScoped: true)
+                    ->after(function ($livewire) {
                         $livewire->dispatch('refreshRelation');
                         Notification::make()
                             ->success()
                             ->title('Channel merge started')
                             ->body('Merging channels in the background for this group only. You will be notified once the process is complete.')
                             ->send();
-                    })
-                    ->requiresConfirmation()
-                    ->icon('heroicon-o-arrows-pointing-in')
-                    ->modalIcon('heroicon-o-arrows-pointing-in')
-                    ->modalDescription('Merge all channels with the same ID in this group into a single channel with failover.')
-                    ->modalSubmitActionLabel('Merge now'),
-
-                Action::make('unmerge')
-                    ->label('Unmerge Same ID')
-                    ->schema([
-                        Toggle::make('reactivate_channels')
-                            ->label('Reactivate disabled channels')
-                            ->helperText('Enable channels that were previously disabled during merge.')
-                            ->default(false),
-                    ])
-                    ->action(function (Group $record, array $data): void {
-                        app('Illuminate\Contracts\Bus\Dispatcher')
-                            ->dispatch(new UnmergeChannels(
-                                user: auth()->user(),
-                                groupId: $record->id,
-                                reactivateChannels: $data['reactivate_channels'] ?? false,
-                            ));
-                    })->after(function () {
+                    }),
+                PlaylistService::getUnmergeAction(groupScoped: true)
+                    ->after(function () {
                         Notification::make()
                             ->success()
                             ->title('Channel unmerge started')
                             ->body('Unmerging channels for this group in the background. You will be notified once the process is complete.')
                             ->send();
-                    })
-                    ->requiresConfirmation()
-                    ->icon('heroicon-o-arrows-pointing-out')
-                    ->color('warning')
-                    ->modalIcon('heroicon-o-arrows-pointing-out')
-                    ->modalDescription('Unmerge all channels with the same ID in this group, removing all failover relationships.')
-                    ->modalSubmitActionLabel('Unmerge now'),
+                    }),
 
                 Action::make('enable')
                     ->label('Enable group channels')

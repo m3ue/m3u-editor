@@ -38,6 +38,16 @@ This project has domain-specific skills available. You MUST activate the relevan
 - Use descriptive names for variables and methods. For example, `isRegisteredForDiscounts`, not `discount()`.
 - Check for existing components to reuse before writing a new one.
 
+## Git Workflow
+
+- Always pull the latest `dev` branch before starting work: `git fetch origin && git checkout dev && git pull origin dev`.
+- Create feature/fix branches from `dev`: `git checkout -b feature/my-feature dev` or `git checkout -b fix/my-fix dev`.
+- Before pushing, ensure the code passes **both** code style checks and tests:
+  1. Run `vendor/bin/pint` to fix formatting (not `--test`, just fix it).
+  2. Run `php artisan test --compact` (or with `--filter` for specific tests) to verify tests pass.
+- Only push when both pint and pest pass locally. This ensures the GitHub CI pipeline also passes.
+- When rebasing a feature branch onto the latest dev, use `git rebase origin/dev` and resolve conflicts carefully.
+
 ## Verification Scripts
 
 - Do not create verification scripts or tinker when tests cover that functionality and prove they work. Unit and feature tests are more important.

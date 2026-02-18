@@ -9,18 +9,15 @@ use App\Filament\Resources\EpgMaps\EpgMapResource;
 use App\Jobs\ChannelFindAndReplace;
 use App\Jobs\ChannelFindAndReplaceReset;
 use App\Jobs\MapPlaylistChannelsToEpg;
-use App\Jobs\MergeChannels;
-use App\Jobs\UnmergeChannels;
 use App\Models\Channel;
 use App\Models\Playlist;
+use App\Services\PlaylistService;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Actions\CreateAction;
 use Filament\Actions\ExportAction;
 use Filament\Actions\ImportAction;
-use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
-use Filament\Forms\Components\TagsInput;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
@@ -60,139 +57,22 @@ class ListChannels extends ListRecords
                 ))
                 ->slideOver(),
             ActionGroup::make([
-                Action::make('merge')
-                    ->label('Merge Same ID')
-                    ->schema([
-                        Select::make('playlist_id')
-                            ->required()
-                            ->label('Preferred Playlist')
-                            ->options(Playlist::where('user_id', auth()->id())->pluck('name', 'id'))
-                            ->live()
-                            ->searchable()
-                            ->helperText('Select a playlist to prioritize as the master during the merge process.'),
-                        Repeater::make('failover_playlists')
-                            ->label('')
-                            ->helperText('Select one or more playlists use as failover source(s).')
-                            ->reorderable()
-                            ->reorderableWithButtons()
-                            ->orderColumn('sort')
-                            ->simple(
-                                Select::make('playlist_failover_id')
-                                    ->label('Failover Playlists')
-                                    ->options(Playlist::where('user_id', auth()->id())->pluck('name', 'id'))
-                                    ->searchable()
-                                    ->required()
-                            )
-                            ->distinct()
-                            ->columns(1)
-                            ->addActionLabel('Add failover playlist')
-                            ->columnSpanFull()
-                            ->minItems(1)
-                            ->defaultItems(1),
-                        Toggle::make('by_resolution')
-                            ->label('Order by Resolution')
-                            ->live()
-                            ->helperText('⚠️ IPTV WARNING: This will analyze each stream to determine resolution, which may cause rate limiting or blocking with IPTV providers. Only enable if your provider allows stream analysis.')
-                            ->default(false),
-                        Toggle::make('deactivate_failover_channels')
-                            ->label('Deactivate Failover Channels')
-                            ->helperText('When enabled, channels that become failovers will be automatically disabled.')
-                            ->default(false),
-                        Toggle::make('prefer_catchup_as_primary')
-                            ->label('Prefer catch-up channels as primary')
-                            ->helperText('When enabled, catch-up channels will be selected as the master when available.')
-                            ->default(false),
-                        Toggle::make('exclude_disabled_groups')
-                            ->label('Exclude disabled groups from master selection')
-                            ->helperText('Channels from disabled groups will never be selected as master.')
-                            ->default(false),
-                        Toggle::make('force_complete_remerge')
-                            ->label('Force complete re-merge')
-                            ->helperText('Re-evaluate ALL existing failover relationships, not just unmerged channels.')
-                            ->default(false),
-                        Select::make('prefer_codec')
-                            ->label('Preferred Codec (optional)')
-                            ->options([
-                                'hevc' => 'HEVC / H.265',
-                                'h264' => 'H.264 / AVC',
-                            ])
-                            ->placeholder('No preference')
-                            ->helperText('Prioritize channels with a specific video codec.'),
-                        TagsInput::make('priority_keywords')
-                            ->label('Priority Keywords (optional)')
-                            ->placeholder('Add keyword...')
-                            ->helperText('Channels with these keywords in their name will be prioritized.')
-                            ->splitKeys(['Tab', 'Return']),
-                    ])
-                    ->action(function (array $data): void {
-                        // Build weighted config if advanced options are used
-                        $weightedConfig = null;
-                        if (! empty($data['priority_keywords']) || ! empty($data['prefer_codec']) || ($data['exclude_disabled_groups'] ?? false)) {
-                            $weightedConfig = [
-                                'priority_keywords' => $data['priority_keywords'] ?? [],
-                                'prefer_codec' => $data['prefer_codec'] ?? null,
-                                'exclude_disabled_groups' => $data['exclude_disabled_groups'] ?? false,
-                            ];
-                        }
-
-                        app('Illuminate\Contracts\Bus\Dispatcher')
-                            ->dispatch(new MergeChannels(
-                                user: auth()->user(),
-                                playlists: collect($data['failover_playlists']),
-                                playlistId: $data['playlist_id'],
-                                checkResolution: $data['by_resolution'] ?? false,
-                                deactivateFailoverChannels: $data['deactivate_failover_channels'] ?? false,
-                                forceCompleteRemerge: $data['force_complete_remerge'] ?? false,
-                                preferCatchupAsPrimary: $data['prefer_catchup_as_primary'] ?? false,
-                                weightedConfig: $weightedConfig,
-                            ));
-                    })->after(function () {
+                PlaylistService::getMergeAction()
+                    ->after(function () {
                         Notification::make()
                             ->success()
                             ->title('Channel merge started')
                             ->body('Merging channels in the background. You will be notified once the process is complete.')
                             ->send();
-                    })
-                    ->requiresConfirmation()
-                    ->icon('heroicon-o-arrows-pointing-in')
-                    ->modalIcon('heroicon-o-arrows-pointing-in')
-                    ->modalDescription('Merge all channels with the same ID into a single channel with failover.')
-                    ->modalWidth(Width::FourExtraLarge)
-                    ->modalSubmitActionLabel('Merge now'),
-                Action::make('unmerge')
-                    ->schema([
-                        Select::make('playlist_id')
-                            ->label('Unmerge Playlist')
-                            ->options(Playlist::where('user_id', auth()->id())->pluck('name', 'id'))
-                            ->live()
-                            ->searchable()
-                            ->helperText('Playlist to unmerge channels from (or leave empty to unmerge all).'),
-                        Toggle::make('reactivate_channels')
-                            ->label('Reactivate disabled channels')
-                            ->helperText('Enable channels that were previously disabled during merge.')
-                            ->default(false),
-                    ])
-                    ->label('Unmerge Same ID')
-                    ->action(function (array $data): void {
-                        app('Illuminate\Contracts\Bus\Dispatcher')
-                            ->dispatch(new UnmergeChannels(
-                                user: auth()->user(),
-                                playlistId: $data['playlist_id'] ?? null,
-                                reactivateChannels: $data['reactivate_channels'] ?? false,
-                            ));
-                    })->after(function () {
+                    }),
+                PlaylistService::getUnmergeAction()
+                    ->after(function () {
                         Notification::make()
                             ->success()
                             ->title('Channel unmerge started')
                             ->body('Unmerging channels in the background. You will be notified once the process is complete.')
                             ->send();
-                    })
-                    ->requiresConfirmation()
-                    ->icon('heroicon-o-arrows-pointing-out')
-                    ->color('warning')
-                    ->modalIcon('heroicon-o-arrows-pointing-out')
-                    ->modalDescription('Unmerge all channels with the same ID, removing all failover relationships.')
-                    ->modalSubmitActionLabel('Unmerge now'),
+                    }),
                 Action::make('map')
                     ->label('Map EPG to Playlist')
                     ->schema(EpgMapResource::getForm())
