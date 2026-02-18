@@ -4,10 +4,12 @@ use App\Models\MediaServerIntegration;
 use App\Models\Playlist;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Queue;
 
 uses(RefreshDatabase::class);
 
 beforeEach(function () {
+    Queue::fake();
     $this->user = User::factory()->create();
 });
 
@@ -542,4 +544,110 @@ it('only returns selected library ids that match available libraries', function 
     // Should only return lib1 since lib2 is not in available_libraries
     expect($movieLibraries)->toContain('lib1');
     expect($movieLibraries)->not->toContain('lib2');
+});
+
+// HasManyThrough Relationship Tests
+
+it('can access channels through playlist via HasManyThrough', function () {
+    $playlist = Playlist::withoutEvents(fn () => Playlist::factory()->create(['user_id' => $this->user->id]));
+
+    $integration = MediaServerIntegration::create([
+        'name' => 'Test Server',
+        'type' => 'jellyfin',
+        'host' => '192.168.1.100',
+        'api_key' => 'test-key',
+        'user_id' => $this->user->id,
+        'playlist_id' => $playlist->id,
+    ]);
+
+    $channel1 = \App\Models\Channel::factory()->create([
+        'playlist_id' => $playlist->id,
+        'user_id' => $this->user->id,
+        'name' => 'Movie Channel 1',
+    ]);
+
+    $channel2 = \App\Models\Channel::factory()->create([
+        'playlist_id' => $playlist->id,
+        'user_id' => $this->user->id,
+        'name' => 'Movie Channel 2',
+    ]);
+
+    // Channel on a different playlist should not be included
+    $otherPlaylist = Playlist::withoutEvents(fn () => Playlist::factory()->create(['user_id' => $this->user->id]));
+    \App\Models\Channel::factory()->create([
+        'playlist_id' => $otherPlaylist->id,
+        'user_id' => $this->user->id,
+        'name' => 'Other Channel',
+    ]);
+
+    $channels = $integration->channels;
+
+    expect($channels)->toHaveCount(2);
+    expect($channels->pluck('name')->toArray())->toContain('Movie Channel 1');
+    expect($channels->pluck('name')->toArray())->toContain('Movie Channel 2');
+    expect($channels->pluck('name')->toArray())->not->toContain('Other Channel');
+});
+
+it('can access series through playlist via HasManyThrough', function () {
+    $playlist = Playlist::withoutEvents(fn () => Playlist::factory()->create(['user_id' => $this->user->id]));
+
+    $integration = MediaServerIntegration::create([
+        'name' => 'Test Server',
+        'type' => 'jellyfin',
+        'host' => '192.168.1.100',
+        'api_key' => 'test-key',
+        'user_id' => $this->user->id,
+        'playlist_id' => $playlist->id,
+    ]);
+
+    $series1 = \App\Models\Series::factory()->create([
+        'playlist_id' => $playlist->id,
+        'user_id' => $this->user->id,
+        'name' => 'Breaking Bad',
+    ]);
+
+    $series2 = \App\Models\Series::factory()->create([
+        'playlist_id' => $playlist->id,
+        'user_id' => $this->user->id,
+        'name' => 'The Wire',
+    ]);
+
+    // Series on a different playlist should not be included
+    $otherPlaylist = Playlist::withoutEvents(fn () => Playlist::factory()->create(['user_id' => $this->user->id]));
+    \App\Models\Series::factory()->create([
+        'playlist_id' => $otherPlaylist->id,
+        'user_id' => $this->user->id,
+        'name' => 'Other Series',
+    ]);
+
+    $series = $integration->series;
+
+    expect($series)->toHaveCount(2);
+    expect($series->pluck('name')->toArray())->toContain('Breaking Bad');
+    expect($series->pluck('name')->toArray())->toContain('The Wire');
+    expect($series->pluck('name')->toArray())->not->toContain('Other Series');
+});
+
+it('returns empty channels collection when no playlist is assigned', function () {
+    $integration = MediaServerIntegration::create([
+        'name' => 'Test Server',
+        'type' => 'jellyfin',
+        'host' => '192.168.1.100',
+        'api_key' => 'test-key',
+        'user_id' => $this->user->id,
+    ]);
+
+    expect($integration->channels)->toBeEmpty();
+});
+
+it('returns empty series collection when no playlist is assigned', function () {
+    $integration = MediaServerIntegration::create([
+        'name' => 'Test Server',
+        'type' => 'jellyfin',
+        'host' => '192.168.1.100',
+        'api_key' => 'test-key',
+        'user_id' => $this->user->id,
+    ]);
+
+    expect($integration->series)->toBeEmpty();
 });

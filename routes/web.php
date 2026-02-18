@@ -285,3 +285,12 @@ Route::get('/media-server/{integrationId}/stream/{itemId}.{container}', [
     \App\Http\Controllers\MediaServerProxyController::class,
     'proxyStream',
 ])->name('media-server.stream.proxy');
+
+/*
+ * Local Media streaming routes
+ * Streams local video files mounted to the container
+ */
+Route::get('/local-media/{integration}/stream/{item}', [
+    \App\Http\Controllers\MediaServerProxyController::class,
+    'streamLocalMedia',
+])->name('local-media.stream');

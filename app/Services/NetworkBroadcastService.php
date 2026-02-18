@@ -170,15 +170,22 @@ class NetworkBroadcastService
         // Start broadcast via proxy
         $result = $this->startViaProxy($network, $streamUrl, $seekPosition, $remainingDuration, $programme);
 
-        // Clear error on successful start
-        if ($result) {
+        if ($result === true) {
+            // Success - clear any previous error
             $network->update(['broadcast_error' => null]);
+        } elseif ($result === null) {
+            // Transient failure (proxy not reachable) - keep broadcast_requested = true
+            // so the next tick will retry. Don't clear the request flag.
+            Log::info('Broadcast start deferred due to transient proxy failure (will retry)', [
+                'network_id' => $network->id,
+                'network_name' => $network->name,
+            ]);
         } else {
-            // Clear broadcast_requested on failure so it doesn't stay stuck on "Starting"
+            // Permanent failure - clear broadcast_requested so it doesn't stay stuck on "Starting"
             $network->update(['broadcast_requested' => false]);
         }
 
-        return $result;
+        return (bool) $result;
     }
 
     /**
@@ -190,17 +197,20 @@ class NetworkBroadcastService
         int $seekPosition,
         int $remainingDuration,
         NetworkProgramme $programme
-    ): bool {
+    ): ?bool {
         $startNumber = max(0, $network->broadcast_segment_sequence ?? 0);
         $addDiscontinuity = $startNumber > 0;
 
         // Get the callback URL
         $callbackUrl = $this->proxyService->getBroadcastCallbackUrl();
 
-        // Check if the stream URL already has seeking built in (e.g., Plex's offset= or StartTimeTicks=)
-        // If so, don't also add FFmpeg's -ss seeking (double-seeking causes corruption, especially with AC3 audio)
+        // Only trust URL-based seeking when using server-side transcoding (TranscodeMode::Server).
+        // For direct streams (static=true), media servers like Emby/Jellyfin ignore StartTimeTicks,
+        // so FFmpeg must always handle seeking via -ss. Double-seeking is only a risk when the
+        // server is actively transcoding and applying the seek itself.
+        $isServerTranscode = ($network->transcode_mode ?? null) === TranscodeMode::Server;
         $urlHasSeeking = preg_match('/[?&](offset|StartTimeTicks)=/', $streamUrl);
-        $ffmpegSeekSeconds = $urlHasSeeking ? 0 : $seekPosition;
+        $ffmpegSeekSeconds = ($isServerTranscode && $urlHasSeeking) ? 0 : $seekPosition;
 
         // If using server-side transcoding, ensure we have a valid transcode start URL from the media server
         if ((($network->transcode_mode ?? null) === TranscodeMode::Server) && empty($streamUrl)) {
@@ -332,7 +342,9 @@ class NetworkBroadcastService
 
             return false;
         } catch (\Exception $e) {
-            Log::error('Failed to start broadcast via proxy', [
+            // Transient failure (proxy not reachable yet, e.g. during container boot)
+            // Return null so the caller knows to retry on the next tick
+            Log::warning('Failed to connect to proxy for broadcast (transient, will retry)', [
                 'network_id' => $network->id,
                 'exception' => $e->getMessage(),
             ]);
@@ -341,7 +353,7 @@ class NetworkBroadcastService
                 'broadcast_error' => "Failed to connect to proxy: {$e->getMessage()}",
             ]);
 
-            return false;
+            return null;
         }
     }
 
@@ -752,5 +764,52 @@ class NetworkBroadcastService
         return Network::where('broadcast_enabled', true)
             ->where('enabled', true)
             ->get();
+    }
+
+    /**
+     * Perform boot recovery for broadcast networks.
+     *
+     * After an unclean container shutdown, broadcast_requested may have been cleared
+     * by a transient proxy failure, or stale process state (pid, started_at) may
+     * linger. This method resets that state so the tick loop can restart broadcasts.
+     *
+     * Call this ONCE before the continuous worker loop (not for --once mode).
+     *
+     * @param  Network|null  $network  If provided, recover only this network. Otherwise recover all broadcasting networks.
+     * @return int Number of networks recovered
+     */
+    public function performBootRecovery(?Network $network = null): int
+    {
+        if ($network) {
+            $networks = collect([$network])->filter(fn (Network $n) => $n->broadcast_enabled && $n->enabled);
+        } else {
+            $networks = $this->getBroadcastingNetworks();
+        }
+
+        $recovered = 0;
+
+        foreach ($networks as $net) {
+            // Set broadcast_requested = true so the tick loop will attempt to start it.
+            // Clear stale process state that no longer reflects reality after a reboot.
+            $net->update([
+                'broadcast_requested' => true,
+                'broadcast_pid' => null,
+                'broadcast_started_at' => null,
+                'broadcast_error' => null,
+            ]);
+
+            $recovered++;
+
+            Log::info('🔄 BOOT RECOVERY: Marked network for broadcast restart', [
+                'network_id' => $net->id,
+                'network_name' => $net->name,
+            ]);
+        }
+
+        if ($recovered > 0) {
+            Log::info("🔄 BOOT RECOVERY: Recovered {$recovered} network(s) for broadcast");
+        }
+
+        return $recovered;
     }
 }

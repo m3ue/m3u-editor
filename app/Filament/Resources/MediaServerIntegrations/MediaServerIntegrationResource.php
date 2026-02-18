@@ -22,7 +22,9 @@ use Filament\Actions\EditAction;
 use Filament\Forms\Components\CheckboxList;
 use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\Placeholder;
+use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
+use Filament\Forms\Components\TagsInput;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
@@ -81,12 +83,16 @@ class MediaServerIntegrationResource extends Resource
         return $schema
             ->components([
                 Section::make('Server Configuration')
-                    ->description('Configure your Emby or Jellyfin media server connection')
+                    ->description(fn (callable $get) => $get('type') === 'local'
+                        ? 'Configure your local media library paths'
+                        : 'Configure your media server connection')
                     ->schema([
                         Grid::make(2)->schema([
                             TextInput::make('name')
                                 ->label('Display Name')
-                                ->placeholder('e.g., Living Room Jellyfin')
+                                ->placeholder(fn (callable $get) => $get('type') === 'local'
+                                    ? 'e.g., My Local Movies'
+                                    : 'e.g., Living Room Jellyfin')
                                 ->required()
                                 ->maxLength(255),
 
@@ -96,6 +102,7 @@ class MediaServerIntegrationResource extends Resource
                                     'emby' => 'Emby',
                                     'jellyfin' => 'Jellyfin',
                                     'plex' => 'Plex',
+                                    'local' => 'Local Media',
                                 ])
                                 ->required()
                                 ->default('emby')
@@ -103,12 +110,13 @@ class MediaServerIntegrationResource extends Resource
                                 ->native(false),
                         ]),
 
+                        // Network server configuration (hidden for local media)
                         Grid::make(3)->schema([
                             TextInput::make('host')
                                 ->label('Host / IP Address')
                                 ->prefix(fn (callable $get) => $get('ssl') ? 'https://' : 'http://')
                                 ->placeholder('192.168.1.100 or media.example.com')
-                                ->required()
+                                ->required(fn (callable $get) => $get('type') !== 'local')
                                 ->maxLength(255),
 
                             TextInput::make('port')
@@ -116,7 +124,7 @@ class MediaServerIntegrationResource extends Resource
                                 ->numeric()
                                 ->default(8096)
                                 ->helperText('e.g., 8096 for Emby/Jellyfin, 32400 for Plex')
-                                ->required()
+                                ->required(fn (callable $get) => $get('type') !== 'local')
                                 ->minValue(1)
                                 ->maxValue(65535),
 
@@ -126,13 +134,13 @@ class MediaServerIntegrationResource extends Resource
                                 ->label('Use HTTPS')
                                 ->helperText('Enable if your server uses SSL/TLS')
                                 ->default(false),
-                        ]),
+                        ])->visible(fn (callable $get) => $get('type') !== 'local'),
 
                         TextInput::make('api_key')
                             ->label('API Key/Token')
                             ->password()
                             ->revealable()
-                            ->required(fn (string $operation): bool => $operation === 'create')
+                            ->required(fn (string $operation, callable $get): bool => $operation === 'create' && $get('type') !== 'local')
                             ->dehydrateStateUsing(fn ($state, $record) => filled($state) ? $state : $record?->api_key)
                             ->helperText(function (string $operation, callable $get) {
                                 if ($operation === 'edit') {
@@ -141,10 +149,13 @@ class MediaServerIntegrationResource extends Resource
 
                                 return match ($get('type')) {
                                     'plex' => new HtmlString('See <a class="text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300" href="https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/" target="_blank">Plex Docs</a> for instructions on finding your token'),
+                                    'local' => 'Not required for local media',
                                     default => 'Generate an API key in your media server\'s dashboard under Settings → API Keys',
                                 };
-                            }),
+                            })
+                            ->visible(fn (callable $get) => $get('type') !== 'local'),
 
+                        // Test connection button for network servers
                         Actions::make([
                             Action::make('testAndDiscover')
                                 ->label('Test Connection & Discover Libraries')
@@ -202,8 +213,148 @@ class MediaServerIntegrationResource extends Resource
                                         ->body("Connected to {$result['server_name']} (v{$result['version']}). Found {$libraries->count()} libraries.")
                                         ->send();
                                 }),
-                        ])->fullWidth(),
+                        ])->fullWidth()->visible(fn (callable $get) => $get('type') !== 'local'),
                     ]),
+
+                // Local Media Configuration Section
+                Section::make('Local Media Libraries')
+                    ->description(new HtmlString(
+                        '<p>Configure paths to your local media files.</p>'.
+                        '<p class="mt-2 text-warning-600 dark:text-warning-400"><strong>Important:</strong> These paths must be accessible within the Docker container. '.
+                        'Mount your media directories in your <code>docker-compose.yml</code> file, e.g.:</p>'.
+                        '<pre class="mt-1 text-xs bg-gray-100 dark:bg-gray-800 p-2 rounded">volumes:'."\n".'  - /path/on/host/movies:/media/movies'."\n".'  - /path/on/host/tvshows:/media/tvshows</pre>'
+                    ))
+                    ->schema([
+                        Repeater::make('local_media_paths')
+                            ->label('Media Library Paths')
+                            ->schema([
+                                TextInput::make('name')
+                                    ->label('Library Name')
+                                    ->placeholder('e.g., Movies, TV Shows')
+                                    ->required(),
+
+                                TextInput::make('path')
+                                    ->label('Container Path')
+                                    ->placeholder('/media/movies')
+                                    ->required()
+                                    ->helperText('Path inside the Docker container'),
+
+                                Select::make('type')
+                                    ->label('Content Type')
+                                    ->options([
+                                        'movies' => 'Movies',
+                                        'tvshows' => 'TV Shows',
+                                    ])
+                                    ->required()
+                                    ->default('movies')
+                                    ->native(false),
+                            ])
+                            ->columns(3)
+                            ->defaultItems(1)
+                            ->addActionLabel('Add Library Path')
+                            ->reorderable()
+                            ->collapsible()
+                            ->itemLabel(fn (array $state): ?string => $state['name'] ?? 'New Library'),
+
+                        Grid::make(2)->schema([
+                            Toggle::make('scan_recursive')
+                                ->label('Scan Recursively')
+                                ->helperText('Scan subdirectories for media files')
+                                ->default(true),
+
+                            Toggle::make('auto_fetch_metadata')
+                                ->label('Auto-Fetch Metadata')
+                                ->helperText('Automatically lookup TMDB metadata after sync completes')
+                                ->default(true),
+                        ]),
+
+                        Grid::make(1)->schema([
+                            Select::make('metadata_source')
+                                ->label('Metadata Source')
+                                ->options([
+                                    'filename_only' => 'Filename Only (No External Lookup)',
+                                    'tmdb' => 'TMDB (The Movie Database)',
+                                ])
+                                ->default('tmdb')
+                                ->helperText('Where to fetch metadata for discovered content (requires TMDB API key in Settings)')
+                                ->native(false),
+                        ]),
+
+                        TagsInput::make('video_extensions')
+                            ->label('Video File Extensions')
+                            ->placeholder('Add extension...')
+                            ->default(['mp4', 'mkv', 'avi', 'mov', 'wmv', 'ts', 'm4v'])
+                            ->helperText('File extensions to scan for (without dots)'),
+
+                        Actions::make([
+                            Action::make('scanLocalMedia')
+                                ->label('Scan & Discover Libraries')
+                                ->icon('heroicon-o-folder-open')
+                                ->action(function (callable $get, callable $set, $livewire) {
+                                    $paths = $get('local_media_paths') ?? [];
+
+                                    if (empty($paths)) {
+                                        Notification::make()
+                                            ->warning()
+                                            ->title('No Paths Configured')
+                                            ->body('Please add at least one media library path before scanning.')
+                                            ->send();
+
+                                        return;
+                                    }
+
+                                    // Create temporary model from form state
+                                    $tempIntegration = new MediaServerIntegration([
+                                        'type' => 'local',
+                                        'local_media_paths' => $paths,
+                                        'scan_recursive' => $get('scan_recursive') ?? true,
+                                        'video_extensions' => $get('video_extensions') ?? null,
+                                    ]);
+
+                                    // Test connection (validates paths)
+                                    $service = MediaServerService::make($tempIntegration);
+                                    $result = $service->testConnection();
+
+                                    if (! $result['success']) {
+                                        Notification::make()
+                                            ->danger()
+                                            ->title('Path Validation Failed')
+                                            ->body($result['message'])
+                                            ->send();
+
+                                        return;
+                                    }
+
+                                    // Fetch libraries (returns the configured paths with item counts)
+                                    $libraries = $service->fetchLibraries();
+
+                                    if ($libraries->isEmpty()) {
+                                        Notification::make()
+                                            ->warning()
+                                            ->title('No Media Found')
+                                            ->body('No video files were found in the configured paths.')
+                                            ->send();
+                                        $set('available_libraries', []);
+
+                                        return;
+                                    }
+
+                                    // Store libraries in form state
+                                    $set('available_libraries', $libraries->toArray());
+
+                                    // Auto-select all libraries for local media
+                                    $libraryIds = $libraries->pluck('id')->toArray();
+                                    $set('selected_library_ids', $libraryIds);
+
+                                    Notification::make()
+                                        ->success()
+                                        ->title('Scan Complete')
+                                        ->body($result['message'])
+                                        ->send();
+                                }),
+                        ])->fullWidth(),
+                    ])
+                    ->visible(fn (callable $get) => $get('type') === 'local'),
 
                 Section::make('Import Settings')
                     ->description('Control what content is synced from the media server')
@@ -249,6 +400,12 @@ class MediaServerIntegrationResource extends Resource
                                     $enabled = $get('enabled');
                                     $importMovies = $get('import_movies');
                                     $importSeries = $get('import_series');
+                                    $type = $get('type');
+
+                                    // For local media, paths are configured separately
+                                    if ($type === 'local') {
+                                        return;
+                                    }
 
                                     if ($enabled && ($importMovies || $importSeries) && empty($value)) {
                                         $fail('Libraries must be discovered before saving. Use the test connection button above.');
@@ -260,12 +417,17 @@ class MediaServerIntegrationResource extends Resource
                             ->label('')
                             ->content(function (callable $get) {
                                 $libraries = $get('available_libraries');
+                                $type = $get('type');
 
                                 if (empty($libraries)) {
+                                    $buttonLabel = $type === 'local'
+                                        ? 'Scan & Discover Libraries'
+                                        : 'Test Connection & Discover Libraries';
+
                                     return new HtmlString(
                                         '<div class="text-sm text-gray-500 dark:text-gray-400">'.
                                         '<p class="font-medium text-warning-600 dark:text-warning-400">No libraries discovered yet.</p>'.
-                                        '<p class="mt-1">Click "Test Connection & Discover Libraries" above to discover available libraries.</p>'.
+                                        "<p class=\"mt-1\">Click \"{$buttonLabel}\" above to discover available libraries.</p>".
                                         '</div>'
                                     );
                                 }
@@ -317,11 +479,12 @@ class MediaServerIntegrationResource extends Resource
                             ->bulkToggleable()
                             ->live()
                             ->visible(fn (callable $get) => ! empty($get('available_libraries')))
-                            ->required(fn (callable $get) => $get('enabled') && ($get('import_movies') || $get('import_series')))
+                            ->required(fn (callable $get) => $get('enabled') && ($get('import_movies') || $get('import_series')) && $get('type') !== 'local')
                             ->validationMessages([
                                 'required' => 'Please select at least one library to import.',
                             ]),
-                    ]),
+                    ])
+                    ->visible(fn (callable $get) => $get('type') !== 'local' || ! empty($get('available_libraries'))),
 
                 Section::make('Sync Schedule')
                     ->description('Configure automatic sync schedule')
@@ -490,17 +653,23 @@ class MediaServerIntegrationResource extends Resource
                 TextColumn::make('type')
                     ->label('Type')
                     ->badge()
-                    ->formatStateUsing(fn (string $state): string => ucfirst($state))
+                    ->formatStateUsing(fn (string $state): string => match ($state) {
+                        'local' => 'Local Media',
+                        default => ucfirst($state),
+                    })
                     ->color(fn (string $state): string => match ($state) {
                         'emby' => 'success',
                         'jellyfin' => 'info',
                         'plex' => 'warning',
+                        'local' => 'gray',
                         default => 'gray',
                     }),
 
                 TextColumn::make('host')
                     ->label('Server')
-                    ->formatStateUsing(fn ($record): string => "{$record->host}:{$record->port}")
+                    ->formatStateUsing(fn ($record): string => $record->type === 'local'
+                        ? 'Local filesystem'
+                        : "{$record->host}:{$record->port}")
                     ->toggleable()
                     ->copyable(),
 
@@ -555,6 +724,7 @@ class MediaServerIntegrationResource extends Resource
                         'emby' => 'Emby',
                         'jellyfin' => 'Jellyfin',
                         'plex' => 'Plex',
+                        'local' => 'Local Media',
                     ]),
                 Tables\Filters\TernaryFilter::make('enabled')
                     ->label('Enabled'),
@@ -787,6 +957,14 @@ class MediaServerIntegrationResource extends Resource
                     DeleteBulkAction::make(),
                 ]),
             ]);
+    }
+
+    public static function getRelations(): array
+    {
+        return [
+            RelationManagers\MoviesRelationManager::class,
+            RelationManagers\SeriesRelationManager::class,
+        ];
     }
 
     public static function getPages(): array

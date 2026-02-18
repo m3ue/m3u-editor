@@ -67,6 +67,13 @@ class NetworkBroadcastWorker extends Command
             return self::SUCCESS;
         }
 
+        // Boot recovery: ensure broadcast_requested is set and stale state is cleared
+        // so the tick loop can restart the broadcast after a container reboot
+        $recovered = $service->performBootRecovery($network);
+        if ($recovered > 0) {
+            $this->info("Boot recovery: marked {$network->name} for broadcast restart");
+        }
+
         // Continuous loop with resilience (catch exceptions and apply exponential backoff)
         $this->info('Running in continuous mode (Ctrl+C to stop)...');
         $this->info("Tick interval: {$interval} seconds");
@@ -117,6 +124,13 @@ class NetworkBroadcastWorker extends Command
             }
 
             return self::SUCCESS;
+        }
+
+        // Boot recovery: ensure broadcast_requested is set and stale state is cleared
+        // so the tick loop can restart broadcasts after a container reboot
+        $recovered = $service->performBootRecovery();
+        if ($recovered > 0) {
+            $this->info("Boot recovery: marked {$recovered} network(s) for broadcast restart");
         }
 
         // Continuous loop with resilience (catch exceptions and apply exponential backoff)

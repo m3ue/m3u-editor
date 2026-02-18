@@ -45,6 +45,12 @@ it('can fetch TMDB ID for a VOD channel', function () {
         'https://api.themoviedb.org/3/movie/603/external_ids*' => Http::response([
             'imdb_id' => 'tt0133093',
         ], 200),
+        'https://api.themoviedb.org/3/movie/603*' => Http::response([
+            'id' => 603,
+            'title' => 'The Matrix',
+            'overview' => 'A computer hacker learns about the true nature of reality.',
+            'poster_path' => '/matrix.jpg',
+        ], 200),
     ]);
 
     $channel = Channel::factory()->create([
@@ -87,6 +93,12 @@ it('can fetch TMDB and TVDB IDs for a series', function () {
             'tvdb_id' => 78020,
             'imdb_id' => 'tt0090390',
         ], 200),
+        'https://api.themoviedb.org/3/tv/4592*' => Http::response([
+            'id' => 4592,
+            'name' => 'ALF',
+            'overview' => 'An alien lifestyle.',
+            'poster_path' => '/alf.jpg',
+        ], 200),
     ]);
 
     $series = Series::factory()->create([
@@ -113,7 +125,7 @@ it('can fetch TMDB and TVDB IDs for a series', function () {
         ->and($series->metadata['imdb_id'])->toBe('tt0090390');
 });
 
-it('skips items that already have IDs when overwrite is false', function () {
+it('skips items that already have IDs and metadata when overwrite is false', function () {
     Http::fake([
         'https://api.themoviedb.org/3/search/movie*' => Http::response([
             'results' => [
@@ -132,7 +144,12 @@ it('skips items that already have IDs when overwrite is false', function () {
         'user_id' => $this->user->id,
         'is_vod' => true,
         'title' => 'The Matrix',
-        'info' => ['tmdb_id' => 603], // Already has ID
+        'tmdb_id' => 603, // Already has ID
+        'info' => [
+            'tmdb_id' => 603,
+            'plot' => 'A computer hacker learns about the true nature of reality.',
+            'cover_big' => 'https://image.tmdb.org/t/p/w500/matrix.jpg',
+        ], // Already has ID and metadata
     ]);
 
     $job = new FetchTmdbIds(
@@ -146,8 +163,80 @@ it('skips items that already have IDs when overwrite is false', function () {
 
     $channel->refresh();
 
-    // Should still have original ID, not updated
-    expect($channel->info['tmdb_id'])->toBe(603);
+    // Should still have original ID, not updated (skipped because metadata exists)
+    expect($channel->tmdb_id)->toBe(603);
+});
+
+it('processes items with IDs but missing metadata to populate them', function () {
+    Http::fake([
+        'https://api.themoviedb.org/3/movie/603/external_ids*' => Http::response([
+            'imdb_id' => 'tt0133093',
+        ], 200),
+        'https://api.themoviedb.org/3/movie/603*' => Http::response([
+            'id' => 603,
+            'imdb_id' => 'tt0133093',
+            'title' => 'The Matrix',
+            'overview' => 'A computer hacker learns about the true nature of reality.',
+            'poster_path' => '/matrix.jpg',
+            'backdrop_path' => '/matrix_backdrop.jpg',
+            'release_date' => '1999-03-30',
+            'genres' => [
+                ['name' => 'Action'],
+                ['name' => 'Sci-Fi'],
+            ],
+            'credits' => [
+                'cast' => [
+                    ['name' => 'Keanu Reeves'],
+                    ['name' => 'Laurence Fishburne'],
+                ],
+                'crew' => [
+                    ['name' => 'Lana Wachowski', 'job' => 'Director'],
+                ],
+            ],
+            'videos' => [
+                'results' => [
+                    ['site' => 'YouTube', 'type' => 'Trailer', 'key' => 'abc123'],
+                ],
+            ],
+        ], 200),
+    ]);
+
+    $channel = Channel::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'is_vod' => true,
+        'title' => 'The Matrix',
+        'tmdb_id' => 603, // Has ID but missing metadata
+        'logo' => '', // Empty logo (local media)
+        'logo_internal' => '', // Empty logo_internal (local media)
+        'info' => [
+            'tmdb_id' => 603,
+            'genre' => 'Uncategorized',
+            // plot and cover_big are empty - metadata should be fetched
+        ],
+    ]);
+
+    $job = new FetchTmdbIds(
+        vodChannelIds: [$channel->id],
+        seriesIds: null,
+        overwriteExisting: false,
+        user: $this->user,
+    );
+
+    $job->handle(app(TmdbService::class));
+
+    $channel->refresh();
+
+    // Should have metadata populated now
+    expect($channel->tmdb_id)->toBe(603)
+        ->and($channel->imdb_id)->toBe('tt0133093')
+        ->and($channel->info['plot'])->toBe('A computer hacker learns about the true nature of reality.')
+        ->and($channel->info['cover_big'])->toBe('https://image.tmdb.org/t/p/w500/matrix.jpg')
+        ->and($channel->info['genre'])->toBe('Action, Sci-Fi')
+        ->and($channel->info['cast'])->toContain('Keanu Reeves')
+        ->and($channel->logo)->toBe('https://image.tmdb.org/t/p/w500/matrix.jpg')
+        ->and($channel->logo_internal)->toBe('https://image.tmdb.org/t/p/w500/matrix.jpg')
+        ->and($channel->last_metadata_fetch)->not->toBeNull();
 });
 
 it('overwrites existing IDs when overwrite is true', function () {
@@ -164,6 +253,11 @@ it('overwrites existing IDs when overwrite is true', function () {
         ], 200),
         'https://api.themoviedb.org/3/movie/603/external_ids*' => Http::response([
             'imdb_id' => 'tt0133093',
+        ], 200),
+        'https://api.themoviedb.org/3/movie/603*' => Http::response([
+            'id' => 603,
+            'title' => 'The Matrix',
+            'overview' => 'A computer hacker learns about the true nature of reality.',
         ], 200),
     ]);
 

@@ -495,6 +495,229 @@ class TmdbService
     }
 
     /**
+     * Get full TV series details from TMDB.
+     * Returns poster, overview, genres, rating, etc.
+     *
+     * @param  int  $tmdbId  The TMDB ID of the TV series
+     * @return array|null Full series details or null on error
+     */
+    public function getTvSeriesDetails(int $tmdbId): ?array
+    {
+        $this->waitForRateLimit();
+
+        try {
+            $response = Http::timeout(15)->get(
+                self::BASE_URL."/tv/{$tmdbId}",
+                [
+                    'api_key' => $this->apiKey,
+                    'language' => $this->language,
+                    'append_to_response' => 'external_ids,credits,videos',
+                ]
+            );
+
+            if (! $response->successful()) {
+                Log::warning('TMDB: Failed to get TV series details', [
+                    'tmdb_id' => $tmdbId,
+                    'status' => $response->status(),
+                ]);
+
+                return null;
+            }
+
+            $data = $response->json();
+
+            // Extract external IDs
+            $imdbId = $data['external_ids']['imdb_id'] ?? null;
+            $tvdbId = $data['external_ids']['tvdb_id'] ?? null;
+
+            // Build poster URL
+            $posterUrl = null;
+            if (! empty($data['poster_path'])) {
+                $posterUrl = 'https://image.tmdb.org/t/p/w500'.$data['poster_path'];
+            }
+
+            // Build backdrop URL
+            $backdropUrl = null;
+            if (! empty($data['backdrop_path'])) {
+                $backdropUrl = 'https://image.tmdb.org/t/p/original'.$data['backdrop_path'];
+            }
+
+            // Extract genres as comma-separated string
+            $genres = collect($data['genres'] ?? [])->pluck('name')->implode(', ');
+
+            // Extract cast (top 10 actors)
+            $cast = null;
+            if (! empty($data['credits']['cast'])) {
+                $cast = collect($data['credits']['cast'])
+                    ->take(10)
+                    ->pluck('name')
+                    ->implode(', ');
+            }
+
+            // Extract director(s) from crew
+            $director = null;
+            if (! empty($data['credits']['crew'])) {
+                $directors = collect($data['credits']['crew'])
+                    ->filter(fn ($crew) => $crew['job'] === 'Director')
+                    ->pluck('name')
+                    ->implode(', ');
+
+                if (! empty($directors)) {
+                    $director = $directors;
+                }
+            }
+
+            // Extract YouTube trailer
+            $youtubeTrailer = null;
+            if (! empty($data['videos']['results'])) {
+                $trailer = collect($data['videos']['results'])
+                    ->firstWhere(function ($video) {
+                        return $video['site'] === 'YouTube'
+                            && in_array($video['type'], ['Trailer', 'Teaser']);
+                    });
+
+                if ($trailer) {
+                    $youtubeTrailer = 'https://www.youtube.com/watch?v='.$trailer['key'];
+                }
+            }
+
+            return [
+                'tmdb_id' => $data['id'] ?? null,
+                'tvdb_id' => $tvdbId,
+                'imdb_id' => $imdbId,
+                'name' => $data['name'] ?? null,
+                'original_name' => $data['original_name'] ?? null,
+                'overview' => $data['overview'] ?? null,
+                'poster_url' => $posterUrl,
+                'backdrop_url' => $backdropUrl,
+                'first_air_date' => $data['first_air_date'] ?? null,
+                'genres' => $genres,
+                'vote_average' => $data['vote_average'] ?? null,
+                'vote_count' => $data['vote_count'] ?? null,
+                'status' => $data['status'] ?? null,
+                'number_of_seasons' => $data['number_of_seasons'] ?? null,
+                'number_of_episodes' => $data['number_of_episodes'] ?? null,
+                'cast' => $cast,
+                'director' => $director,
+                'youtube_trailer' => $youtubeTrailer,
+            ];
+        } catch (\Exception $e) {
+            Log::error('TMDB get TV series details error', [
+                'tmdb_id' => $tmdbId,
+                'error' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
+    }
+
+    /**
+     * Get full movie details from TMDB.
+     * Returns poster, overview, genres, rating, etc.
+     *
+     * @param  int  $tmdbId  The TMDB ID of the movie
+     * @return array|null Full movie details or null on error
+     */
+    public function getMovieDetails(int $tmdbId): ?array
+    {
+        $this->waitForRateLimit();
+
+        try {
+            $response = Http::timeout(15)->get(
+                self::BASE_URL."/movie/{$tmdbId}",
+                [
+                    'api_key' => $this->apiKey,
+                    'language' => $this->language,
+                    'append_to_response' => 'external_ids,credits,videos',
+                ]
+            );
+
+            if (! $response->successful()) {
+                Log::warning('TMDB: Failed to get movie details', [
+                    'tmdb_id' => $tmdbId,
+                    'status' => $response->status(),
+                ]);
+
+                return null;
+            }
+
+            $data = $response->json();
+
+            // Build poster URL
+            $posterUrl = null;
+            if (! empty($data['poster_path'])) {
+                $posterUrl = 'https://image.tmdb.org/t/p/w500'.$data['poster_path'];
+            }
+
+            // Build backdrop URL
+            $backdropUrl = null;
+            if (! empty($data['backdrop_path'])) {
+                $backdropUrl = 'https://image.tmdb.org/t/p/original'.$data['backdrop_path'];
+            }
+
+            // Extract genres as comma-separated string
+            $genres = collect($data['genres'] ?? [])->pluck('name')->implode(', ');
+
+            // Extract cast (limit to first 10)
+            $cast = [];
+            if (! empty($data['credits']['cast'])) {
+                $cast = collect($data['credits']['cast'])
+                    ->take(10)
+                    ->pluck('name')
+                    ->toArray();
+            }
+
+            // Extract director(s)
+            $directors = [];
+            if (! empty($data['credits']['crew'])) {
+                $directors = collect($data['credits']['crew'])
+                    ->filter(fn ($person) => $person['job'] === 'Director')
+                    ->pluck('name')
+                    ->toArray();
+            }
+
+            // Extract YouTube trailer
+            $youtubeTrailer = null;
+            if (! empty($data['videos']['results'])) {
+                $trailer = collect($data['videos']['results'])
+                    ->where('site', 'YouTube')
+                    ->where('type', 'Trailer')
+                    ->first();
+
+                if ($trailer) {
+                    $youtubeTrailer = 'https://www.youtube.com/watch?v='.$trailer['key'];
+                }
+            }
+
+            return [
+                'tmdb_id' => $data['id'] ?? null,
+                'imdb_id' => $data['imdb_id'] ?? $data['external_ids']['imdb_id'] ?? null,
+                'title' => $data['title'] ?? null,
+                'original_title' => $data['original_title'] ?? null,
+                'overview' => $data['overview'] ?? null,
+                'poster_url' => $posterUrl,
+                'backdrop_url' => $backdropUrl,
+                'release_date' => $data['release_date'] ?? null,
+                'genres' => $genres,
+                'vote_average' => $data['vote_average'] ?? null,
+                'vote_count' => $data['vote_count'] ?? null,
+                'runtime' => $data['runtime'] ?? null,
+                'status' => $data['status'] ?? null,
+                'cast' => $cast,
+                'director' => $directors,
+                'youtube_trailer' => $youtubeTrailer,
+            ];
+        } catch (\Exception $e) {
+            Log::error('TMDB get movie details error', [
+                'tmdb_id' => $tmdbId,
+                'error' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
+    }
+
+    /**
      * Get alternative titles for a TV series.
      * Returns titles in different languages/regions.
      *
@@ -1181,6 +1404,113 @@ class TmdbService
             ]);
 
             return null;
+        }
+    }
+
+    /**
+     * Get detailed information about a TV series season including episodes.
+     *
+     * @param  int  $tmdbId  The TMDB ID of the TV series
+     * @param  int  $seasonNumber  The season number
+     * @return array|null Season details with episodes or null on error
+     */
+    public function getSeasonDetails(int $tmdbId, int $seasonNumber): ?array
+    {
+        $this->waitForRateLimit();
+
+        try {
+            $response = Http::timeout(15)->get(
+                self::BASE_URL."/tv/{$tmdbId}/season/{$seasonNumber}",
+                [
+                    'api_key' => $this->apiKey,
+                    'language' => $this->language,
+                    'append_to_response' => 'credits,videos',
+                ]
+            );
+
+            if (! $response->successful()) {
+                Log::warning('TMDB: Failed to get season details', [
+                    'tmdb_id' => $tmdbId,
+                    'season' => $seasonNumber,
+                    'status' => $response->status(),
+                ]);
+
+                return null;
+            }
+
+            $data = $response->json();
+
+            return [
+                'season_number' => $data['season_number'] ?? $seasonNumber,
+                'name' => $data['name'] ?? null,
+                'overview' => $data['overview'] ?? null,
+                'air_date' => $data['air_date'] ?? null,
+                'poster_path' => $data['poster_path'] ?? null,
+                'poster_url' => isset($data['poster_path']) ? "https://image.tmdb.org/t/p/w500{$data['poster_path']}" : null,
+                'episodes' => collect($data['episodes'] ?? [])->map(function ($episode) {
+                    return [
+                        'id' => $episode['id'] ?? null,
+                        'tmdb_id' => $episode['id'] ?? null,
+                        'episode_number' => $episode['episode_number'] ?? null,
+                        'name' => $episode['name'] ?? null,
+                        'overview' => $episode['overview'] ?? null,
+                        'air_date' => $episode['air_date'] ?? null,
+                        'still_path' => $episode['still_path'] ?? null,
+                        'vote_average' => $episode['vote_average'] ?? null,
+                        'vote_count' => $episode['vote_count'] ?? null,
+                        'runtime' => $episode['runtime'] ?? null,
+                    ];
+                })->toArray(),
+            ];
+        } catch (\Exception $e) {
+            Log::error('TMDB get season details error', [
+                'tmdb_id' => $tmdbId,
+                'season' => $seasonNumber,
+                'error' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
+    }
+
+    /**
+     * Get all seasons for a TV series.
+     *
+     * @param  int  $tmdbId  The TMDB ID of the TV series
+     * @return array Array of season data
+     */
+    public function getAllSeasons(int $tmdbId): array
+    {
+        $this->waitForRateLimit();
+
+        try {
+            $response = Http::timeout(15)->get(
+                self::BASE_URL."/tv/{$tmdbId}",
+                [
+                    'api_key' => $this->apiKey,
+                    'language' => $this->language,
+                ]
+            );
+
+            if (! $response->successful()) {
+                Log::warning('TMDB: Failed to get TV series for seasons', [
+                    'tmdb_id' => $tmdbId,
+                    'status' => $response->status(),
+                ]);
+
+                return [];
+            }
+
+            $data = $response->json();
+
+            return $data['seasons'] ?? [];
+        } catch (\Exception $e) {
+            Log::error('TMDB get all seasons error', [
+                'tmdb_id' => $tmdbId,
+                'error' => $e->getMessage(),
+            ]);
+
+            return [];
         }
     }
 }

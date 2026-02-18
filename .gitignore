@@ -56,3 +56,6 @@ npm_output.log
 *.log
 docker-compose.ci-test.yml
 docker-compose.local.yml
+fast-build.sh
+.opencode/
+.tmp/

@@ -43,6 +43,8 @@ class Channel extends Model
         'kodidrop' => 'array',
         'is_custom' => 'boolean',
         'is_vod' => 'boolean',
+        'tmdb_id' => 'integer',
+        'tvdb_id' => 'integer',
         'info' => 'array',
         'movie_data' => 'array',
         'sync_settings' => 'array',

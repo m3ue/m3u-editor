@@ -256,4 +256,168 @@ class MediaServerProxyController extends Controller
     {
         return ProxyFacade::getBaseUrl()."/media-server/{$integrationId}/stream/{$itemId}.{$container}";
     }
+
+    /**
+     * Stream a local media file.
+     *
+     * Route: /local-media/{integration}/stream/{item}
+     *
+     * This streams local video files that are mounted to the container.
+     * Supports range requests for seeking.
+     *
+     * @param  int  $integration  The integration ID
+     * @param  string  $item  Base64-encoded file path
+     * @return Response|StreamedResponse
+     */
+    public function streamLocalMedia(Request $request, int $integration, string $item)
+    {
+        try {
+            set_time_limit(0);
+            ignore_user_abort(true);
+
+            $mediaIntegration = MediaServerIntegration::find($integration);
+
+            if (! $mediaIntegration) {
+                return response()->json(['error' => 'Integration not found'], 404);
+            }
+
+            if (! $mediaIntegration->enabled) {
+                return response()->json(['error' => 'Integration is disabled'], 403);
+            }
+
+            if ($mediaIntegration->type !== 'local') {
+                return response()->json(['error' => 'Integration is not a local media type'], 400);
+            }
+
+            // Decode the file path from base64
+            $filePath = base64_decode($item);
+
+            if (! $filePath || ! file_exists($filePath)) {
+                Log::warning('Local media file not found', [
+                    'integration_id' => $integration,
+                    'item_id' => $item,
+                    'decoded_path' => $filePath,
+                ]);
+
+                return response()->json(['error' => 'File not found'], 404);
+            }
+
+            // Security check: ensure the file is within one of the configured paths
+            $configuredPaths = $mediaIntegration->local_media_paths ?? [];
+            $isAllowed = false;
+
+            foreach ($configuredPaths as $pathConfig) {
+                $allowedPath = realpath($pathConfig['path'] ?? '');
+                $realFilePath = realpath($filePath);
+
+                if ($allowedPath && $realFilePath && (str_starts_with($realFilePath, $allowedPath.DIRECTORY_SEPARATOR) || $realFilePath === $allowedPath)) {
+                    $isAllowed = true;
+                    break;
+                }
+            }
+
+            if (! $isAllowed) {
+                Log::warning('Local media access denied - file outside configured paths', [
+                    'integration_id' => $integration,
+                    'file_path' => $filePath,
+                ]);
+
+                return response()->json(['error' => 'Access denied'], 403);
+            }
+
+            $fileSize = filesize($filePath);
+            $extension = strtolower(pathinfo($filePath, PATHINFO_EXTENSION));
+            $contentType = $this->getContentTypeForContainer($extension);
+
+            // Handle range requests for video seeking
+            $start = 0;
+            $end = $fileSize - 1;
+            $statusCode = 200;
+
+            $headers = [
+                'Content-Type' => $contentType,
+                'Accept-Ranges' => 'bytes',
+                'Content-Disposition' => 'inline; filename="'.basename($filePath).'"',
+                'X-Content-Duration' => 'unknown',
+            ];
+
+            if ($request->hasHeader('Range')) {
+                $range = $request->header('Range');
+
+                if (preg_match('/bytes=(\d*)-(\d*)/', $range, $matches)) {
+                    $start = $matches[1] !== '' ? (int) $matches[1] : 0;
+                    $end = $matches[2] !== '' ? (int) $matches[2] : $fileSize - 1;
+
+                    // Validate range
+                    if ($start > $end || $start >= $fileSize) {
+                        return response('', 416, [
+                            'Content-Range' => "bytes */{$fileSize}",
+                        ]);
+                    }
+
+                    $end = min($end, $fileSize - 1);
+                    $statusCode = 206;
+                    $headers['Content-Range'] = "bytes {$start}-{$end}/{$fileSize}";
+                }
+            }
+
+            $length = $end - $start + 1;
+            $headers['Content-Length'] = $length;
+
+            Log::debug('Streaming local media file', [
+                'integration_id' => $integration,
+                'file_path' => $filePath,
+                'file_size' => $fileSize,
+                'range' => $request->header('Range'),
+                'start' => $start,
+                'end' => $end,
+                'length' => $length,
+            ]);
+
+            return new StreamedResponse(function () use ($filePath, $start, $end) {
+                $handle = fopen($filePath, 'rb');
+
+                if (! $handle) {
+                    return;
+                }
+
+                fseek($handle, $start);
+                $remaining = $end - $start + 1;
+                $bufferSize = 1024 * 1024; // 1MB chunks
+
+                while ($remaining > 0 && ! feof($handle) && connection_status() === CONNECTION_NORMAL) {
+                    $readSize = min($bufferSize, $remaining);
+                    $data = fread($handle, $readSize);
+
+                    if ($data === false) {
+                        break;
+                    }
+
+                    echo $data;
+                    flush();
+                    $remaining -= strlen($data);
+                }
+
+                fclose($handle);
+            }, $statusCode, $headers);
+        } catch (\Exception $e) {
+            Log::error('Exception in local media stream', [
+                'integration_id' => $integration,
+                'item_id' => $item,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'error' => 'Internal server error while streaming local media',
+            ], 500);
+        }
+    }
+
+    /**
+     * Generate a URL for streaming local media.
+     */
+    public static function generateLocalMediaStreamUrl(int $integrationId, string $itemId): string
+    {
+        return ProxyFacade::getBaseUrl()."/local-media/{$integrationId}/stream/{$itemId}";
+    }
 }

@@ -33,6 +33,8 @@ class Series extends Model
         'user_id' => 'integer',
         'playlist_id' => 'integer',
         'category_id' => 'integer',
+        'tmdb_id' => 'integer',
+        'tvdb_id' => 'integer',
         // 'release_date' => 'date', // Not always well formed date, don't attempt to cast
         'rating_5based' => 'integer',
         'enabled' => 'boolean',
