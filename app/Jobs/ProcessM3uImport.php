@@ -18,6 +18,7 @@ use Exception;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Http;
@@ -1705,5 +1706,85 @@ class ProcessM3uImport implements ShouldQueue
         }
 
         return false;
+    }
+
+    private function isHttp503(Throwable $e): bool
+    {
+        // Laravel HTTP client usually throws RequestException with message containing status
+        if ($e instanceof RequestException) {
+            $response = $e->response;
+            if ($response) {
+                return $response->status() === 503;
+            }
+        }
+    
+        $msg = $e->getMessage();
+    
+        return Str::contains($msg, [
+            'status code 503',
+            'HTTP request returned status code 503',
+            '503 Service Temporarily Unavailable',
+            ' 503:',
+        ]);
+    }
+    
+    private function resetProcessingState(Playlist $playlist): void
+    {
+        $playlist->update([
+            'status' => Status::Pending,
+            'processing' => [
+                ...$playlist->processing ?? [],
+                'live_processing' => false,
+                'vod_processing' => false,
+                'series_processing' => false,
+            ],
+        ]);
+    }
+    
+    private function canRetry503(Playlist $playlist): bool
+    {
+        if (! (bool) config('dev.auto_retry_503_enabled', true)) {
+            return false;
+        }
+    
+        $max = (int) config('dev.auto_retry_503_max', 3);
+        $cooldown = (int) config('dev.auto_retry_503_cooldown_minutes', 10);
+    
+        if (($playlist->auto_retry_503_count ?? 0) >= $max) {
+            return false;
+        }
+    
+        if ($playlist->auto_retry_503_last_at && $playlist->auto_retry_503_last_at->diffInMinutes(now()) < $cooldown) {
+            return false;
+        }
+    
+        return true;
+    }
+    
+    private function scheduleRetry503(Playlist $playlist): void
+    {
+        if (! $this->canRetry503($playlist)) {
+            return;
+        }
+    
+        $playlist->update([
+            'auto_retry_503_count' => ($playlist->auto_retry_503_count ?? 0) + 1,
+            'auto_retry_503_last_at' => now(),
+        ]);
+    
+        $min = (int) config('dev.auto_retry_503_delay_min_seconds', 300);
+        $max = (int) config('dev.auto_retry_503_delay_max_seconds', 900);
+        $delay = random_int($min, $max);
+    
+        dispatch(new ProcessM3uImport($playlist))
+            ->delay(now()->addSeconds($delay));
+    }
+    
+    private function clearRetry503Counters(Playlist $playlist): void
+    {
+        $playlist->update([
+            'auto_retry_503_count' => 0,
+            'auto_retry_503_last_at' => null,
+        ]);
     }
 }
