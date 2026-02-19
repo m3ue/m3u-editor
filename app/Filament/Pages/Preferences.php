@@ -16,6 +16,7 @@ use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Select;
+use Filament\Forms\Components\TagsInput;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
@@ -34,6 +35,7 @@ use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\HtmlString;
 use Illuminate\Support\Str;
 
@@ -358,6 +360,71 @@ class Preferences extends SettingsPage
                                                                 ->duration(10000)
                                                                 ->send();
                                                         }
+                                                    }),
+                                            ]),
+
+                                        Fieldset::make('Failover conditions')
+                                            ->hidden(fn ($get) => ! (bool) $get('enable_failover_resolver'))
+                                            ->schema([
+                                                Toggle::make('failover_fail_conditions_enabled')
+                                                    ->label('Enable playlist fail conditions')
+                                                    ->columnSpanFull()
+                                                    ->live()
+                                                    ->hintIcon(
+                                                        'heroicon-m-question-mark-circle',
+                                                        tooltip: 'When enabled, playlists returning specific HTTP status codes will be temporarily marked as invalid during failover resolution. This enables account-level failover by skipping all channels from a failing playlist/account.'
+                                                    )
+                                                    ->helperText('Mark playlists as temporarily unavailable when specific HTTP errors are encountered during failover.'),
+
+                                                TagsInput::make('failover_fail_conditions')
+                                                    ->label('HTTP status codes')
+                                                    ->columnSpanFull()
+                                                    ->hidden(fn ($get) => ! (bool) $get('failover_fail_conditions_enabled'))
+                                                    ->placeholder('e.g. 403, 404, 502, 503')
+                                                    ->helperText('HTTP response codes that should mark a playlist as temporarily unavailable. All channels from the affected playlist will be skipped during failover resolution.'),
+
+                                                TextInput::make('failover_fail_conditions_timeout')
+                                                    ->label('Invalid timeout (minutes)')
+                                                    ->columnSpanFull()
+                                                    ->hidden(fn ($get) => ! (bool) $get('failover_fail_conditions_enabled'))
+                                                    ->numeric()
+                                                    ->minValue(1)
+                                                    ->default(5)
+                                                    ->suffixIcon('heroicon-m-clock')
+                                                    ->helperText('How long (in minutes) a playlist remains marked as invalid before being retried.'),
+
+                                                Action::make('clear_failed_playlists')
+                                                    ->label('Clear failed playlists')
+                                                    ->icon('heroicon-o-arrow-path')
+                                                    ->color('warning')
+                                                    ->hidden(fn ($get) => ! (bool) $get('failover_fail_conditions_enabled'))
+                                                    ->requiresConfirmation()
+                                                    ->modalIcon('heroicon-o-arrow-path')
+                                                    ->modalDescription('This will clear all playlists currently marked as invalid, allowing them to be used for failover again immediately.')
+                                                    ->modalSubmitActionLabel('Clear all')
+                                                    ->action(function () {
+                                                        $prefix = config('cache.prefix');
+                                                        $pattern = $prefix.'playlist_invalid:*';
+                                                        $connection = config('cache.stores.redis.connection', 'cache');
+                                                        $redis = Redis::connection($connection);
+                                                        $cleared = 0;
+                                                        $cursor = '0';
+                                                        do {
+                                                            [$cursor, $keys] = $redis->scan($cursor, ['match' => $pattern, 'count' => 100]);
+                                                            if (! empty($keys)) {
+                                                                $redis->del(...$keys);
+                                                                $cleared += count($keys);
+                                                            }
+                                                        } while ($cursor !== '0');
+
+                                                        Notification::make()
+                                                            ->success()
+                                                            ->title('Failed playlists cleared')
+                                                            ->body($cleared > 0
+                                                                ? "Cleared {$cleared} invalid playlist(s). They are now eligible for failover again."
+                                                                : 'No invalid playlists found in cache.')
+                                                            ->duration(5000)
+                                                            ->send();
                                                     }),
                                             ]),
 

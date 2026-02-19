@@ -57,6 +57,13 @@ class GeneralSettings extends Settings
 
     public ?bool $proxy_stop_oldest_on_limit = false;
 
+    // Failover fail conditions - mark playlists invalid on specific HTTP status codes
+    public ?bool $failover_fail_conditions_enabled = false;
+
+    public ?array $failover_fail_conditions = null;
+
+    public ?int $failover_fail_conditions_timeout = 5;
+
     // Logo cache and placeholders
     public ?bool $logo_cache_permanent = false;
 
