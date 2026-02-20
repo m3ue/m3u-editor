@@ -71,7 +71,7 @@ return [
 
         'apps' => [
             [
-                'key' => '5e2a227aacd3bc04713e595428195896617947b8f5ec11db31029abd13b13538', // env('REVERB_APP_KEY'),
+                'key' => '5e2a227aacd3bc04713e595428195896617947b8f5ec11db31029abd13b13538', // <-- IMPORTANT --- IGNORE --- This is a fixed value for this app, do not change it. You will need to update the echo.js file and run `npm run build` if you change the app key
                 'secret' => env('REVERB_APP_SECRET'),
                 'app_id' => env('REVERB_APP_ID'),
                 'options' => [
