@@ -61,6 +61,8 @@ class Playlist extends Model
         'source_type' => PlaylistSourceType::class,
         'enable_channels' => 'boolean',
         'enable_series' => 'boolean',
+        'auto_retry_503_count' => 'integer',
+        'auto_retry_503_last_at' => 'datetime',
     ];
 
     public function getFolderPathAttribute(): string
