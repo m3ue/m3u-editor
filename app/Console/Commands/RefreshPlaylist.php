@@ -44,14 +44,17 @@ class RefreshPlaylist extends Command
             Playlist::query()
                 ->where('status', Status::Processing)
                 ->where('updated_at', '<', now()->subMinutes($stuckMinutes))
-                ->update([
-                    'status' => Status::Pending,
-                    'processing' => [
-                        'live_processing' => false,
-                        'vod_processing' => false,
-                        'series_processing' => false,
-                    ],
-                ]);
+                ->each(function (Playlist $playlist) {
+                    $playlist->update([
+                        'status' => Status::Pending,
+                        'processing' => [
+                            ...$playlist->processing ?? [],
+                            'live_processing' => false,
+                            'vod_processing' => false,
+                            'series_processing' => false,
+                        ],
+                    ]);
+                });
 
             // Get all playlists that are not currently processing
             // Exclude network playlists as they don't have M3U sources
