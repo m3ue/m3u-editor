@@ -4,6 +4,7 @@ namespace App\Filament\Resources\CustomPlaylists\RelationManagers;
 
 use App\Filament\Resources\Channels\ChannelResource;
 use App\Models\Channel;
+use App\Facades\SortFacade;
 use Filament\Actions\AttachAction;
 use Filament\Actions\BulkAction;
 use Filament\Actions\CreateAction;
@@ -144,8 +145,7 @@ class ChannelsRelationManager extends RelationManager
             })
             ->paginated([10, 25, 50, 100])
             ->defaultPaginationPageOption(25)
-            ->defaultSort('sort', 'asc')
-            ->reorderable('sort')
+            ->defaultSort('channel_custom_playlist.sort', 'asc')
             ->columns($defaultColumns)
             ->filters([
                 ...ChannelResource::getTableFilters(showPlaylist: true),
@@ -246,6 +246,26 @@ class ChannelsRelationManager extends RelationManager
                 //         ->label('Title')
                 //         ->required(),
                 // ]),
+            ])
+            ->bulkActions([
+                BulkAction::make('recount_custom')
+                    ->label('Recount (Custom Playlist)')
+                    ->form([
+                        Forms\Components\TextInput::make('start')
+                            ->numeric()
+                            ->default(1)
+                            ->required(),
+                    ])
+                    ->action(function (Collection $records, array $data) use ($ownerRecord): void {
+                        $start = (int) $data['start'];
+            
+                        SortFacade::bulkRecountCustomPlaylistChannels($ownerRecord, $start);
+            
+                        Notification::make()
+                            ->title('Custom playlist recount done')
+                            ->success()
+                            ->send();
+                    }),
             ])
             ->recordActions([
                 DetachAction::make()
