@@ -127,7 +127,9 @@ class PlaylistGenerateController extends Controller
                     // Use selected EPG fields (avoids N+1 query for epgChannel relation)
                     $epgIcon = $channel->epg_icon ?? null;
                     $epgIconCustom = $channel->epg_icon_custom ?? null;
-                    $channelNo = $channel->channel;
+                    $channelNo = ($playlist instanceof CustomPlaylist)
+                        ? ($channel->custom_channel_number ?? null)
+                        : $channel->channel;
                     $timeshift = $channel->shift ?? 0;
                     $stationId = $channel->station_id ?? '';
                     $epgShift = $channel->tvg_shift ?? 0;
@@ -658,15 +660,17 @@ class PlaylistGenerateController extends Controller
 
             // Order by custom tag order when present, otherwise fall back to group sort_order
             $query->orderByRaw('COALESCE(custom_tags.order_column, groups.sort_order)')
-                ->orderBy('channels.sort')
-                ->orderBy('channels.channel')
-                ->orderBy('channels.title');
+                    ->orderBy('channel_custom_playlist.sort')
+                    ->orderBy('channel_custom_playlist.channel_number')
+                    ->orderBy('channels.title');
 
             // Include the custom tag name/order in the selected columns
             // Note: custom_tags.name is a JSON field with translations like {"en":"Name"}
             // We'll decode it in PHP to extract the locale-specific value
             $query->selectRaw('custom_tags.name as custom_group_name')
                 ->selectRaw('custom_tags.order_column as custom_order');
+            $query->selectRaw('channel_custom_playlist.channel_number as custom_channel_number')
+                ->selectRaw('channel_custom_playlist.sort as custom_pivot_sort');
         } else {
             // Standard ordering for non-custom playlists
             $query->orderBy('groups.sort_order')
