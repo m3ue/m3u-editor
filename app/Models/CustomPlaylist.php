@@ -55,9 +55,11 @@ class CustomPlaylist extends Model
         return $this->belongsTo(StreamProfile::class, 'vod_stream_profile_id');
     }
 
-    public function channels(): BelongsToMany
+    function channels(): BelongsToMany
     {
-        return $this->belongsToMany(Channel::class, 'channel_custom_playlist');
+        return $this->belongsToMany(Channel::class, 'channel_custom_playlist')
+            ->withPivot(['sort', 'channel_number'])
+            ->orderBy('channel_custom_playlist.sort');
     }
 
     public function enabled_channels(): BelongsToMany
