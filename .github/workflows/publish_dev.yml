@@ -210,6 +210,7 @@ jobs:
           git log "${PREV}..HEAD" --no-merges --pretty=format:"%s|%h" > commits.txt
 
           while IFS='|' read -r msg hash; do
+            [[ "$msg" =~ ^[Vv]ersion\ bump ]] && continue
             if [[ "$msg" =~ ^feat ]]; then
               printf -- '- %s (`%s`)\n' "$msg" "$hash" >> features.tmp
             elif [[ "$msg" =~ ^fix ]]; then
