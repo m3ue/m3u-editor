@@ -37,7 +37,7 @@ RUN composer dump-autoload --no-dev --optimize --classmap-authoritative
 ########################################
 # Stage 2: Node builder - builds frontend assets
 ########################################
-FROM node:18-alpine AS node_builder
+FROM node:22-alpine AS node_builder
 WORKDIR /app
 
 # Copy package files first for better layer caching

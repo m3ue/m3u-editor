@@ -207,23 +207,23 @@ jobs:
         run: |
           PREV="${{ steps.prev_tag.outputs.prev_tag }}"
 
-          git log "${PREV}..HEAD" --no-merges --pretty=format:"%s|%h|%an" > commits.txt
+          git log "${PREV}..HEAD" --no-merges --pretty=format:"%s|%h" > commits.txt
 
-          while IFS='|' read -r msg hash author; do
+          while IFS='|' read -r msg hash; do
             if [[ "$msg" =~ ^feat ]]; then
-              printf -- '- %s (`%s`) - @%s\n' "$msg" "$hash" "$author" >> features.tmp
+              printf -- '- %s (`%s`)\n' "$msg" "$hash" >> features.tmp
             elif [[ "$msg" =~ ^fix ]]; then
-              printf -- '- %s (`%s`) - @%s\n' "$msg" "$hash" "$author" >> fixes.tmp
+              printf -- '- %s (`%s`)\n' "$msg" "$hash" >> fixes.tmp
             elif [[ "$msg" =~ ^perf ]]; then
-              printf -- '- %s (`%s`) - @%s\n' "$msg" "$hash" "$author" >> perf.tmp
+              printf -- '- %s (`%s`)\n' "$msg" "$hash" >> perf.tmp
             elif [[ "$msg" =~ ^refactor ]]; then
-              printf -- '- %s (`%s`) - @%s\n' "$msg" "$hash" "$author" >> refactor.tmp
+              printf -- '- %s (`%s`)\n' "$msg" "$hash" >> refactor.tmp
             elif [[ "$msg" =~ ^docs ]]; then
-              printf -- '- %s (`%s`) - @%s\n' "$msg" "$hash" "$author" >> docs.tmp
+              printf -- '- %s (`%s`)\n' "$msg" "$hash" >> docs.tmp
             elif [[ "$msg" =~ ^chore ]]; then
-              printf -- '- %s (`%s`) - @%s\n' "$msg" "$hash" "$author" >> chores.tmp
+              printf -- '- %s (`%s`)\n' "$msg" "$hash" >> chores.tmp
             else
-              printf -- '- %s (`%s`) - @%s\n' "$msg" "$hash" "$author" >> other.tmp
+              printf -- '- %s (`%s`)\n' "$msg" "$hash" >> other.tmp
             fi
           done < commits.txt
 

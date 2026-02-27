@@ -302,6 +302,15 @@ class ProcessM3uImport implements ShouldQueue
             $vodStreamsEnabled = in_array('vod', $categoriesToImport);
             $seriesStreamsEnabled = in_array('series', $categoriesToImport);
 
+            // Check if pre-processing enabled and no groups selected - if so, we need to get the categories first to determine what to include in the streams import
+            $preProcessingLive = $this->preprocess
+                && count($this->selectedGroups) === 0
+                && count($this->includedGroupPrefixes) === 0;
+
+            $preProcessingVod = $this->preprocess
+                && count($this->selectedVodGroups) === 0
+                && count($this->includedVodGroupPrefixes) === 0;
+
             // Setup the user agent and SSL verification
             $verify = ! $playlist->disable_ssl_verification;
             $userAgent = empty($playlist->user_agent) ? $this->userAgent : $playlist->user_agent;
@@ -321,7 +330,7 @@ class ProcessM3uImport implements ShouldQueue
             if ($liveStreamsEnabled) {
                 $categoriesResponse = $this->withProviderThrottling(fn () => Http::withUserAgent($userAgent)
                     ->withOptions(['verify' => $verify])
-                    ->timeout(60) // set timeout to one minute
+                    ->timeout(60 * 5) // set timeout to five minutes
                     ->throw()->get($liveCategories));
                 if (! $categoriesResponse->ok()) {
                     $error = $categoriesResponse->body();
@@ -342,19 +351,25 @@ class ProcessM3uImport implements ShouldQueue
                 if (Storage::disk('local')->exists($liveFp)) {
                     Storage::disk('local')->delete($liveFp);
                 }
-                $liveResponse = $this->withProviderThrottling(fn () => Http::withUserAgent($userAgent)
-                    ->sink($liveFp) // Save the response to a file for later processing
-                    ->withOptions(['verify' => $verify])
-                    ->timeout(60 * 5)
-                    ->throw()->get($liveStreamsUrl));
-                if (! $liveResponse->ok()) {
-                    $error = $liveResponse->body();
-                    $message = "Error processing Live streams: $error";
-                    $this->sendError($message, $error);
 
-                    return;
+                // Only fetch the streams if not pre-processing, otherwise we'll fetch them later after we determine what groups to include
+                if (! $preProcessingLive) {
+                    $liveResponse = $this->withProviderThrottling(fn () => Http::withUserAgent($userAgent)
+                        ->sink($liveFp) // Save the response to a file for later processing
+                        ->withOptions(['verify' => $verify])
+                        ->timeout(60 * 5) // set timeout to five minutes
+                        ->throw()->get($liveStreamsUrl));
+                    if (! $liveResponse->ok()) {
+                        $error = $liveResponse->body();
+                        $message = "Error processing Live streams: $error";
+                        $this->sendError($message, $error);
+
+                        return;
+                    }
+                    $playlist->update(attributes: ['progress' => 5]);
+                } else {
+                    $liveFp = null; // we'll fetch the streams later after we determine what groups to include
                 }
-                $playlist->update(attributes: ['progress' => 5]);
             }
 
             // If including VOD, get the categories and streams
@@ -382,19 +397,25 @@ class ProcessM3uImport implements ShouldQueue
                 if (Storage::disk('local')->exists($vodFp)) {
                     Storage::disk('local')->delete($vodFp);
                 }
-                $vodResponse = $this->withProviderThrottling(fn () => Http::withUserAgent($userAgent)
-                    ->sink($vodFp) // Save the response to a file for later processing
-                    ->withOptions(['verify' => $verify])
-                    ->timeout(60 * 5)
-                    ->throw()->get($vodStreamsUrl));
-                if (! $vodResponse->ok()) {
-                    $error = $vodResponse->body();
-                    $message = "Error processing VOD streams: $error";
-                    $this->sendError($message, $error);
 
-                    return;
+                // Only fetch the streams if not pre-processing, otherwise we'll fetch them later after we determine what groups to include
+                if (! $preProcessingVod) {
+                    $vodResponse = $this->withProviderThrottling(fn () => Http::withUserAgent($userAgent)
+                        ->sink($vodFp) // Save the response to a file for later processing
+                        ->withOptions(['verify' => $verify])
+                        ->timeout(60 * 5)
+                        ->throw()->get($vodStreamsUrl));
+                    if (! $vodResponse->ok()) {
+                        $error = $vodResponse->body();
+                        $message = "Error processing VOD streams: $error";
+                        $this->sendError($message, $error);
+
+                        return;
+                    }
+                    $playlist->update(attributes: ['vod_progress' => 5]);
+                } else {
+                    $vodFp = null; // we'll fetch the streams later after we determine what groups to include
                 }
-                $playlist->update(attributes: ['vod_progress' => 5]);
             }
 
             // If including Series streams, get the categories and streams
