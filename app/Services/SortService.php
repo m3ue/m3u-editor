@@ -2,8 +2,8 @@
 
 namespace App\Services;
 
-use App\Models\Group;
 use App\Models\CustomPlaylist;
+use App\Models\Group;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 
@@ -159,10 +159,10 @@ class SortService
     {
         $offset = max(0, $start - 1);
         $driver = DB::getPdo()->getAttribute(\PDO::ATTR_DRIVER_NAME);
-    
+
         if ($driver === 'mysql') {
             DB::statement(
-                "UPDATE channel_custom_playlist ccp
+                'UPDATE channel_custom_playlist ccp
                  JOIN (
                     SELECT channel_id, custom_playlist_id,
                            ROW_NUMBER() OVER (ORDER BY sort, channel_id) AS rn
@@ -172,16 +172,16 @@ class SortService
                    ON ccp.channel_id = t.channel_id
                   AND ccp.custom_playlist_id = t.custom_playlist_id
                  SET ccp.channel_number = t.rn + ?
-                 WHERE ccp.custom_playlist_id = ?",
+                 WHERE ccp.custom_playlist_id = ?',
                 [$playlist->id, $offset, $playlist->id]
             );
-    
+
             return;
         }
-    
+
         if (str_contains($driver, 'pgsql') || $driver === 'postgres') {
             DB::statement(
-                "UPDATE channel_custom_playlist ccp
+                'UPDATE channel_custom_playlist ccp
                  SET channel_number = t.rn + ?
                  FROM (
                     SELECT channel_id, custom_playlist_id,
@@ -190,16 +190,16 @@ class SortService
                     WHERE custom_playlist_id = ?
                  ) t
                  WHERE ccp.channel_id = t.channel_id
-                   AND ccp.custom_playlist_id = t.custom_playlist_id",
+                   AND ccp.custom_playlist_id = t.custom_playlist_id',
                 [$offset, $playlist->id]
             );
-    
+
             return;
         }
-    
+
         if ($driver === 'sqlite') {
             DB::statement(
-                "WITH ranked AS (
+                'WITH ranked AS (
                     SELECT channel_id, custom_playlist_id,
                            ROW_NUMBER() OVER (ORDER BY sort, channel_id) AS rn
                     FROM channel_custom_playlist
@@ -209,7 +209,7 @@ class SortService
                  SET channel_number = (SELECT rn FROM ranked
                                        WHERE ranked.channel_id = channel_custom_playlist.channel_id
                                          AND ranked.custom_playlist_id = channel_custom_playlist.custom_playlist_id) + ?
-                 WHERE custom_playlist_id = ?",
+                 WHERE custom_playlist_id = ?',
                 [$playlist->id, $offset, $playlist->id]
             );
         }

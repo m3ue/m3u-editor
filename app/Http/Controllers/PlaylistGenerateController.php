@@ -660,9 +660,9 @@ class PlaylistGenerateController extends Controller
 
             // Order by custom tag order when present, otherwise fall back to group sort_order
             $query->orderByRaw('COALESCE(custom_tags.order_column, groups.sort_order)')
-                    ->orderBy('channel_custom_playlist.sort')
-                    ->orderBy('channel_custom_playlist.channel_number')
-                    ->orderBy('channels.title');
+                ->orderBy('channel_custom_playlist.sort')
+                ->orderBy('channel_custom_playlist.channel_number')
+                ->orderBy('channels.title');
 
             // Include the custom tag name/order in the selected columns
             // Note: custom_tags.name is a JSON field with translations like {"en":"Name"}
