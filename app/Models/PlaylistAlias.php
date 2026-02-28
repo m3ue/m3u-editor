@@ -225,7 +225,8 @@ class PlaylistAlias extends Model
     public function channels(): BelongsToMany|HasManyThrough
     {
         if ($this->custom_playlist_id) {
-            return $this->belongsToMany(Channel::class, 'channel_custom_playlist', 'custom_playlist_id', 'channel_id', 'custom_playlist_id', 'id');
+            return $this->belongsToMany(Channel::class, 'channel_custom_playlist', 'custom_playlist_id', 'channel_id', 'custom_playlist_id', 'id')
+                ->withPivot(['channel_number']);
         }
 
         return $this->hasManyThrough(
