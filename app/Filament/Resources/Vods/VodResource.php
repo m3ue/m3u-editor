@@ -684,7 +684,7 @@ class VodResource extends Resource
         ];
     }
 
-    public static function getTableBulkActions($addToCustom = true): array
+    public static function getTableBulkActions($addToCustom = true, bool $includeRecount = true): array
     {
         return [
             BulkActionGroup::make([
@@ -920,30 +920,32 @@ class VodResource extends Resource
                     ->modalIcon('heroicon-o-arrow-path-rounded-square')
                     ->modalDescription('Add the selected channel(s) to the chosen channel as failover sources.')
                     ->modalSubmitActionLabel('Add failovers now'),
-                BulkAction::make('recount')
-                    ->label('Recount Channels')
-                    ->icon('heroicon-o-hashtag')
-                    ->schema([
-                        TextInput::make('start')
-                            ->label('Start Number')
-                            ->numeric()
-                            ->default(1)
-                            ->required(),
-                    ])
-                    ->action(function (Collection $records, array $data): void {
-                        $start = (int) $data['start'];
-                        SortFacade::bulkRecountChannels($records, $start);
-                    })
-                    ->after(function ($livewire) {
-                        Notification::make()
-                            ->success()
-                            ->title('Channels Recounted')
-                            ->body('The selected channels have been recounted.')
-                            ->send();
-                    })
-                    ->requiresConfirmation()
-                    ->modalIcon('heroicon-o-hashtag')
-                    ->modalDescription('Recount the selected channels sequentially? Channel numbers will be assigned based on the current sort order.'),
+                ...($includeRecount ? [
+                    BulkAction::make('recount')
+                        ->label('Recount Channels')
+                        ->icon('heroicon-o-hashtag')
+                        ->schema([
+                            TextInput::make('start')
+                                ->label('Start Number')
+                                ->numeric()
+                                ->default(1)
+                                ->required(),
+                        ])
+                        ->action(function (Collection $records, array $data): void {
+                            $start = (int) $data['start'];
+                            SortFacade::bulkRecountChannels($records, $start);
+                        })
+                        ->after(function ($livewire) {
+                            Notification::make()
+                                ->success()
+                                ->title('Channels Recounted')
+                                ->body('The selected channels have been recounted.')
+                                ->send();
+                        })
+                        ->requiresConfirmation()
+                        ->modalIcon('heroicon-o-hashtag')
+                        ->modalDescription('Recount the selected channels sequentially? Channel numbers will be assigned based on the current sort order.'),
+                ] : []),
                 BulkAction::make('process_vod')
                     ->label('Fetch Metadata')
                     ->icon('heroicon-o-arrow-down-tray')
