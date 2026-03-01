@@ -405,6 +405,13 @@ class FetchTmdbIds implements ShouldQueue
             return;
         }
 
+        // If previously attempted but no match was found, skip unless overwriting
+        if (! $tmdbId && $channel->last_metadata_fetch && ! $this->overwriteExisting) {
+            $this->skippedCount++;
+
+            return;
+        }
+
         // Get title and year for search
         $title = $channel->title_custom ?? $channel->title ?? $channel->name;
         $year = $channel->year
@@ -501,6 +508,11 @@ class FetchTmdbIds implements ShouldQueue
                     $info['release_date'] = $details['release_date'];
                 }
 
+                // Populate year from release date if not already set
+                if (! empty($details['release_date']) && empty($channel->year)) {
+                    $updateData['year'] = substr($details['release_date'], 0, 4);
+                }
+
                 // Populate rating if not already set
                 if (! empty($details['vote_average']) && empty($info['rating'])) {
                     $info['rating'] = $details['vote_average'];
@@ -547,9 +559,7 @@ class FetchTmdbIds implements ShouldQueue
             }
 
             // Set last_metadata_fetch now that we've actually populated metadata
-            if (! empty($info['plot']) || ! empty($info['cover_big'])) {
-                $updateData['last_metadata_fetch'] = now();
-            }
+            $updateData['last_metadata_fetch'] = now();
 
             $channel->update($updateData);
 
@@ -562,6 +572,9 @@ class FetchTmdbIds implements ShouldQueue
 
             $this->foundCount++;
         } else {
+            // Mark as attempted so we don't keep re-processing on every sync cycle
+            $channel->update(['last_metadata_fetch' => now()]);
+
             Log::debug('FetchTmdbIds: No TMDB match found for VOD channel', [
                 'channel_id' => $channel->id,
                 'title' => $title,
@@ -633,6 +646,13 @@ class FetchTmdbIds implements ShouldQueue
             return;
         }
 
+        // If previously attempted but no match was found, skip unless overwriting
+        if (! $existingTmdbId && ! $existingTvdbId && $series->last_metadata_fetch && ! $this->overwriteExisting) {
+            $this->skippedCount++;
+
+            return;
+        }
+
         // Get name and year for search
         $name = $series->name;
         $year = null;
@@ -683,6 +703,7 @@ class FetchTmdbIds implements ShouldQueue
             // Update series with found IDs - use dedicated columns
             $updateData = [
                 'tmdb_id' => $result['tmdb_id'],
+                'last_metadata_fetch' => now(),
             ];
 
             if (! empty($result['tvdb_id'])) {
@@ -803,6 +824,9 @@ class FetchTmdbIds implements ShouldQueue
 
             $this->foundCount++;
         } else {
+            // Mark as attempted so we don't keep re-processing on every sync cycle
+            $series->update(['last_metadata_fetch' => now()]);
+
             Log::warning('FetchTmdbIds: No TMDB match found for series', [
                 'series_id' => $series->id,
                 'name' => $name,

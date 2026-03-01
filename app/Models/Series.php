@@ -136,6 +136,7 @@ class Series extends Model
             if ($refresh) {
                 $item = $detail['info'] ?? null;
                 if ($item) {
+                    $backdropPath = $item['backdrop_path'] ?? [];
                     $update = array_merge($update, [
                         'name' => $item['name'],
                         'cover' => $item['cover'] ?? null,
@@ -146,7 +147,7 @@ class Series extends Model
                         'director' => $item['director'] ?? null,
                         'rating' => $item['rating'] ?? null,
                         'rating_5based' => (float) ($item['rating_5based'] ?? 0),
-                        'backdrop_path' => json_encode($item['backdrop_path'] ?? []),
+                        'backdrop_path' => is_string($backdropPath) ? json_decode($backdropPath, true) : $backdropPath,
                         'youtube_trailer' => $item['youtube_trailer'] ?? null,
                     ]);
                 }

@@ -439,6 +439,7 @@ class ListVod extends ListRecords
                             'tmdb_id' => $metadata['tmdb_id'],
                             'tvdb_id' => $metadata['tvdb_id'],
                             'imdb_id' => $metadata['imdb_id'],
+                            'last_metadata_fetch' => null, // Clear to trigger full metadata re-fetch
                         ]);
 
                         Log::info('Manual TMDB search: Applied IDs to series', [
@@ -471,6 +472,9 @@ class ListVod extends ListRecords
                         $info['imdb_id'] = $metadata['imdb_id'];
 
                         $vod->update([
+                            'tmdb_id' => $metadata['tmdb_id'],
+                            'imdb_id' => $metadata['imdb_id'],
+                            'last_metadata_fetch' => null, // Clear to trigger full metadata re-fetch
                             'info' => $info,
                         ]);
 

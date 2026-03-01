@@ -1628,11 +1628,18 @@ class PlaylistResource extends Resource
                 ->schema([
                     Toggle::make('import_prefs.preprocess')
                         ->label('Preprocess playlist')
-                        ->columnSpanFull()
                         ->live()
                         ->inline(true)
                         ->default(false)
                         ->helperText('When enabled, the playlist will be preprocessed before importing. You can then select which groups you would like to import.'),
+
+                    Toggle::make('import_prefs.import_via_category')
+                        ->label('Fetch by category')
+                        ->live()
+                        ->hidden(fn (Get $get): bool => ! $get('xtream'))
+                        ->inline(true)
+                        ->default(false)
+                        ->helperText('When enabled, the playlist will fetch items by category. This may slow down the import process but can help with larger playlists that time out when fetching all items at once.'),
 
                     Toggle::make('import_prefs.use_regex')
                         ->label('Use regex for filtering')
@@ -2339,7 +2346,7 @@ class PlaylistResource extends Resource
                                         ->icon('heroicon-o-arrow-top-right-on-square')
                                         ->iconPosition('after')
                                         ->size('sm')
-                                        ->url('https://github.com/sparkison/m3u-proxy/blob/master/docs/STRICT_LIVE_TS_MODE.md')
+                                        ->url('https://m3ue.sparkison.dev/docs/proxy/strict-live-ts')
                                         ->openUrlInNewTab(true)
                                 )
                                 ->helperText('Enhanced stability for live MPEG-TS streams with PVR clients like Kodi and HDHomeRun (only used when not using transcoding profiles).')
@@ -2353,7 +2360,7 @@ class PlaylistResource extends Resource
                                         ->icon('heroicon-o-arrow-top-right-on-square')
                                         ->iconPosition('after')
                                         ->size('sm')
-                                        ->url('https://github.com/sparkison/m3u-proxy/blob/master/docs/STICKY_SESSION.md')
+                                        ->url('https://m3ue.sparkison.dev/docs/proxy/sticky-sessions')
                                         ->openUrlInNewTab(true)
                                 )
                                 ->helperText('')

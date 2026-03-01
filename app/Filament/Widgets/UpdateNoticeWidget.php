@@ -56,6 +56,17 @@ class UpdateNoticeWidget extends Widget
         // Mark current version on each item for view convenience
         $current = VersionServiceProvider::getVersion();
         $normalizedCurrent = ltrim((string) $current, 'v');
+
+        // Match up the tags and version for dev and experimental branches
+        // Local version is in format `0.9.7-dev` and `0.9.7-exp` but GitHub
+        // tags are in format `dev-0.9.7` and `experimental-0.9.7` (to allow for proper semver sorting on GitHub releases page)
+        if (Str::endsWith($normalizedCurrent, '-dev')) {
+            $normalizedCurrent = 'dev-'.Str::replace('-dev', '', $normalizedCurrent);
+        }
+        if (Str::endsWith($normalizedCurrent, '-exp')) {
+            $normalizedCurrent = 'experimental-'.Str::replace('-exp', '', $normalizedCurrent);
+        }
+
         foreach ($this->releases as &$r) {
             $r['is_current'] = ($r['tag'] !== null) && (ltrim($r['tag'], 'v') === $normalizedCurrent);
         }

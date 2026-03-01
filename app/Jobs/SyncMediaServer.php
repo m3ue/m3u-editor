@@ -359,7 +359,7 @@ class SyncMediaServer implements ShouldQueue
         $country = is_array($locations) ? implode(', ', $locations) : (string) $locations;
 
         // Build info structure compatible with Xtream API output
-        $info = [
+        $syncInfo = [
             'media_server_id' => $itemId,
             'media_server_type' => $integration->type,
             'name' => $movie['Name'],
@@ -381,32 +381,61 @@ class SyncMediaServer implements ShouldQueue
             'country' => $country,
         ];
 
-        // Create or update the channel
-        Channel::updateOrCreate(
-            [
-                'playlist_id' => $playlist->id,
-                'source_id' => "media-server-{$integration->id}-{$itemId}",
-            ],
-            [
-                'name' => $movie['Name'],
-                'title' => $movie['Name'],
-                'url' => $streamUrl,
-                'logo' => $imageUrl,
-                'logo_internal' => $imageUrl,
-                'group' => $group->name,
-                'group_internal' => $group->name,
-                'group_id' => $group->id,
-                'user_id' => $playlist->user_id,
-                'enabled' => true,
-                'is_vod' => true,
-                'container_extension' => $container,
-                'import_batch_no' => $this->batchNo,
-                'year' => $movie['ProductionYear'] ?? null,
-                'rating' => $movie['CommunityRating'] ?? null,
-                'info' => $info,
-                'last_metadata_fetch' => $integration->isLocal() ? null : now(), // Only mark as fetched for non-local integrations (local media needs TMDB lookup)
-            ]
-        );
+        // Find or create the channel
+        $sourceId = "media-server-{$integration->id}-{$itemId}";
+        $channel = Channel::firstOrNew([
+            'playlist_id' => $playlist->id,
+            'source_id' => $sourceId,
+        ]);
+
+        $isNew = ! $channel->exists;
+
+        // For existing channels, merge info to preserve TMDB-populated fields (plot, cover, etc.)
+        // Sync data only overwrites fields that have non-empty values from the media server
+        if ($isNew) {
+            $info = $syncInfo;
+        } else {
+            $existingInfo = $channel->info ?? [];
+            $info = $existingInfo;
+
+            // Only overwrite fields from sync if they have meaningful (non-empty) values
+            foreach ($syncInfo as $key => $value) {
+                if ($value !== '' && $value !== null && $value !== []) {
+                    $info[$key] = $value;
+                } elseif (! isset($info[$key])) {
+                    // Set the key if it doesn't exist at all (even if value is empty)
+                    $info[$key] = $value;
+                }
+            }
+        }
+
+        $channel->fill([
+            'name' => $movie['Name'],
+            'title' => $movie['Name'],
+            'url' => $streamUrl,
+            'logo' => ($isNew || ! empty($imageUrl)) ? $imageUrl : $channel->logo,
+            'logo_internal' => ($isNew || ! empty($imageUrl)) ? $imageUrl : $channel->logo_internal,
+            'group' => $group->name,
+            'group_internal' => $group->name,
+            'group_id' => $group->id,
+            'user_id' => $playlist->user_id,
+            'enabled' => true,
+            'is_vod' => true,
+            'container_extension' => $container,
+            'import_batch_no' => $this->batchNo,
+            'year' => $movie['ProductionYear'] ?? null,
+            'rating' => $movie['CommunityRating'] ?? null,
+            'info' => $info,
+        ]);
+
+        // Only reset last_metadata_fetch for new local media channels (existing ones keep their timestamp)
+        if ($isNew && $integration->isLocal()) {
+            $channel->last_metadata_fetch = null;
+        } elseif (! $integration->isLocal()) {
+            $channel->last_metadata_fetch = now();
+        }
+
+        $channel->save();
     }
 
     /**
@@ -542,40 +571,56 @@ class SyncMediaServer implements ShouldQueue
         $communityRating = $seriesData['CommunityRating'] ?? null;
         $rating5Based = $communityRating ? round($communityRating / 2, 1) : null;
 
-        // Create or update the series
-        $series = Series::updateOrCreate(
-            [
-                'playlist_id' => $playlist->id,
-                'source_series_id' => crc32("media-server-{$integration->id}-{$seriesId}"),
+        // Find or create the series
+        $series = Series::firstOrNew([
+            'playlist_id' => $playlist->id,
+            'source_series_id' => crc32("media-server-{$integration->id}-{$seriesId}"),
+        ]);
+
+        $isNewSeries = ! $series->exists;
+
+        // For local media, Overview/People/ProviderIds are empty — don't overwrite
+        // TMDB-populated data with empty sync values on existing records
+        $syncPlot = $seriesData['Overview'] ?? null;
+        $syncCover = $service->getImageUrl($seriesId, 'Primary');
+        $syncCast = ! empty($actors) ? implode(', ', $actors) : null;
+        $syncDirector = ! empty($directors) ? implode(', ', $directors) : null;
+
+        $series->fill([
+            'name' => $seriesData['Name'],
+            'user_id' => $playlist->user_id,
+            'category_id' => $category->id,
+            'source_category_id' => $category->source_category_id ?? $category->id,
+            'import_batch_no' => $this->batchNo,
+            'enabled' => true,
+            'cover' => ($isNewSeries || ! empty($syncCover)) ? $syncCover : $series->cover,
+            'plot' => ($isNewSeries || ! empty($syncPlot)) ? $syncPlot : $series->plot,
+            'genre' => implode(', ', $genres),
+            'release_date' => $seriesData['PremiereDate'] ?? $seriesData['ProductionYear'] ?? null,
+            'cast' => ($isNewSeries || ! empty($syncCast)) ? $syncCast : $series->cast,
+            'director' => ($isNewSeries || ! empty($syncDirector)) ? $syncDirector : $series->director,
+            'rating' => $communityRating,
+            'rating_5based' => $rating5Based,
+            'backdrop_path' => ! empty($backdropPaths) ? $backdropPaths : ($isNewSeries ? null : $series->backdrop_path),
+            'tmdb_id' => $tmdbId ?: ($isNewSeries ? null : $series->tmdb_id),
+            'tvdb_id' => $tvdbId ?: ($isNewSeries ? null : $series->tvdb_id),
+            'imdb_id' => $imdbId ?: ($isNewSeries ? null : $series->imdb_id),
+            'metadata' => [
+                'media_server_id' => $seriesId,
+                'media_server_type' => $integration->type,
+                'official_rating' => $seriesData['OfficialRating'] ?? null,
+                'original_title' => $seriesData['OriginalTitle'] ?? null,
             ],
-            [
-                'name' => $seriesData['Name'],
-                'user_id' => $playlist->user_id,
-                'category_id' => $category->id,
-                'source_category_id' => $category->source_category_id ?? $category->id,
-                'import_batch_no' => $this->batchNo,
-                'enabled' => true,
-                'cover' => $service->getImageUrl($seriesId, 'Primary'),
-                'plot' => $seriesData['Overview'] ?? null,
-                'genre' => implode(', ', $genres),
-                'release_date' => $seriesData['PremiereDate'] ?? $seriesData['ProductionYear'] ?? null,
-                'cast' => ! empty($actors) ? implode(', ', $actors) : null,
-                'director' => ! empty($directors) ? implode(', ', $directors) : null,
-                'rating' => $communityRating,
-                'rating_5based' => $rating5Based,
-                'backdrop_path' => ! empty($backdropPaths) ? $backdropPaths : null,
-                'tmdb_id' => $tmdbId,
-                'tvdb_id' => $tvdbId,
-                'imdb_id' => $imdbId,
-                'last_metadata_fetch' => now(),
-                'metadata' => [
-                    'media_server_id' => $seriesId,
-                    'media_server_type' => $integration->type,
-                    'official_rating' => $seriesData['OfficialRating'] ?? null,
-                    'original_title' => $seriesData['OriginalTitle'] ?? null,
-                ],
-            ]
-        );
+        ]);
+
+        // Only reset last_metadata_fetch for new local media series (existing ones keep their timestamp)
+        if ($isNewSeries && $integration->isLocal()) {
+            $series->last_metadata_fetch = null;
+        } elseif ($isNewSeries || ! $integration->isLocal()) {
+            $series->last_metadata_fetch = now();
+        }
+
+        $series->save();
 
         // Fetch and sync seasons
         $seasons = $service->fetchSeasons($seriesId);

@@ -18,6 +18,7 @@ use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\HtmlString;
+use Illuminate\Support\Str;
 
 class VodResource extends Resource
 {
@@ -122,8 +123,10 @@ class VodResource extends Resource
                         $title = $record->title_custom ?: $record->title;
                         $html = "<span class='fi-ta-text-item-label whitespace-normal text-sm leading-6 text-gray-950 dark:text-white'>{$title}</span>";
                         if (is_array($info)) {
-                            $description = $info['description'] ?? $info['plot'] ?? '';
-                            $html .= "<p class='text-sm text-gray-500 dark:text-gray-400 whitespace-normal mt-2'>{$description}</p>";
+                            $description = Str::limit(($info['description'] ?: null) ?? ($info['plot'] ?: null) ?? '', 200);
+                            if (! empty($description)) {
+                                $html .= "<p class='text-sm text-gray-500 dark:text-gray-400 whitespace-normal mt-2'>{$description}</p>";
+                            }
                         }
 
                         return new HtmlString($html);

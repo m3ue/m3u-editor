@@ -2,7 +2,6 @@
 
 namespace App\Console\Commands;
 
-use App\Facades\ProxyFacade;
 use App\Services\M3uProxyService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Http;
@@ -34,7 +33,7 @@ class RegisterM3uProxyWebhook extends Command
 
         // Construct webhook URL - use APP_URL instead of apiPublicUrl
         // because m3u-proxy needs to call back to Laravel, not to itself
-        $webhookUrl = ProxyFacade::getBaseUrl().'/api/m3u-proxy/webhooks';
+        $webhookUrl = $service->getWebhookUrl();
 
         $this->info("Webhook URL: {$webhookUrl}");
 

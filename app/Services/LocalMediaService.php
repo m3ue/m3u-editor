@@ -34,10 +34,14 @@ class LocalMediaService implements MediaServer
      * Matches: "Movie Title (2024).mkv" or "Movie.Title.2024.1080p.BluRay.mkv"
      */
     protected array $moviePatterns = [
-        // Standard format: "Movie Title (2024).ext"
+        // Standard format: "Movie Title (2024).ext" or "Movie Title (2024) [extras].ext"
         '/^(?<title>.+?)\s*\((?<year>\d{4})\)\s*(?:\[.*?\])?\s*\.(?<ext>\w+)$/i',
-        // Dot-separated: "Movie.Title.2024.quality.source.ext"
+        // Dot-separated with metadata: "Movie.Title.2024.quality.source.ext"
         '/^(?<title>.+?)\.(?<year>(?:19|20)\d{2})\..*\.(?<ext>\w+)$/i',
+        // Dot-separated year only: "Movie.Title.2024.ext"
+        '/^(?<title>.+?)\.(?<year>(?:19|20)\d{2})\.(?<ext>\w+)$/i',
+        // Space-separated year: "Movie Title 2024.ext"
+        '/^(?<title>.+?)\s+(?<year>(?:19|20)\d{2})\s*\.(?<ext>\w+)$/i',
         // Simple: "Movie Title.ext" (no year)
         '/^(?<title>.+?)\.(?<ext>\w+)$/i',
     ];
@@ -53,6 +57,8 @@ class LocalMediaService implements MediaServer
         '/^(?<show>.+?)[.\s]+[Ss](?<season>\d{1,2})[Ee](?<episode>\d{1,2})[.\s]*(?<title>.+?)?\.(?<ext>\w+)$/i',
         // Season x Episode: "Show Name 1x02.ext"
         '/^(?<show>.+?)\s*(?<season>\d{1,2})x(?<episode>\d{1,2})(?:\s*-?\s*(?<title>.+?))?\.(?<ext>\w+)$/i',
+        // No show prefix: "S01E02- Title.ext" or "S01E02 - Title.ext" (show name from folder)
+        '/^[Ss](?<season>\d{1,2})[Ee](?<episode>\d{1,2})(?:\s*-\s*(?<title>.+?))?\.(?<ext>\w+)$/i',
         // Folder-based: assumes parent folder is season folder
         '/^(?<episode>\d{1,2})\s*[-.]?\s*(?<title>.+?)?\.(?<ext>\w+)$/i',
     ];
@@ -121,8 +127,8 @@ class LocalMediaService implements MediaServer
 
                 $validPaths++;
 
-                // Quick count of video files
-                $files = $this->scanDirectoryForVideoFiles($path, false);
+                // Quick count of video files (use recursive setting to match actual sync behavior)
+                $files = $this->scanDirectoryForVideoFiles($path, $this->integration->scan_recursive);
                 $totalFiles += count($files);
             }
 
@@ -184,8 +190,8 @@ class LocalMediaService implements MediaServer
                 continue;
             }
 
-            // Count files in the directory
-            $files = $this->scanDirectoryForVideoFiles($path, false);
+            // Count files in the directory (use recursive setting to match actual sync behavior)
+            $files = $this->scanDirectoryForVideoFiles($path, $this->integration->scan_recursive);
             $itemCount = count($files);
 
             $libraries[] = [
@@ -333,21 +339,37 @@ class LocalMediaService implements MediaServer
                     continue;
                 }
 
-                // Scan for episodes
-                $files = $this->scanDirectoryForVideoFiles($seriesDir, true);
-
-                foreach ($files as $file) {
-                    $episodeData = $this->parseEpisodeFile($file, basename($seriesDir));
-
-                    if ($episodeData) {
-                        // Filter by season if specified
-                        if ($seasonId !== null) {
-                            $seasonNumber = $this->resolveSeasonNumber($seriesDir, $seasonId);
-                            if ($seasonNumber !== null && ($episodeData['ParentIndexNumber'] ?? 0) !== $seasonNumber) {
-                                continue;
+                // If a specific season is requested, resolve its path and only scan that directory
+                // This avoids re-scanning the entire series tree for every season call
+                if ($seasonId !== null) {
+                    $seasonPath = $this->resolveSeasonPath($seriesDir, $seasonId);
+                    if ($seasonPath) {
+                        // Scan only the season directory (non-recursive; season folders are flat)
+                        $files = $this->scanDirectoryForVideoFiles($seasonPath, false);
+                        foreach ($files as $file) {
+                            $episodeData = $this->parseEpisodeFile($file, basename($seriesDir));
+                            if ($episodeData) {
+                                $episodes->push($episodeData);
                             }
                         }
-                        $episodes->push($episodeData);
+                    } else {
+                        // Season ID didn't match any known season — fall back to all episodes
+                        $files = $this->scanDirectoryForVideoFiles($seriesDir, true);
+                        foreach ($files as $file) {
+                            $episodeData = $this->parseEpisodeFile($file, basename($seriesDir));
+                            if ($episodeData) {
+                                $episodes->push($episodeData);
+                            }
+                        }
+                    }
+                } else {
+                    // No season filter — scan entire series tree
+                    $files = $this->scanDirectoryForVideoFiles($seriesDir, true);
+                    foreach ($files as $file) {
+                        $episodeData = $this->parseEpisodeFile($file, basename($seriesDir));
+                        if ($episodeData) {
+                            $episodes->push($episodeData);
+                        }
                     }
                 }
             }
@@ -485,6 +507,26 @@ class LocalMediaService implements MediaServer
         foreach ($seasons as $season) {
             if ($season['Id'] === $seasonId) {
                 return $season['IndexNumber'];
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Resolve the filesystem path for a given season ID within a series directory.
+     *
+     * @param  string  $seriesDir  Path to the series directory
+     * @param  string  $seasonId  The md5-based season ID
+     * @return string|null The season directory path, or null if not found
+     */
+    protected function resolveSeasonPath(string $seriesDir, string $seasonId): ?string
+    {
+        $seasons = $this->scanSeasonsInSeries($seriesDir);
+
+        foreach ($seasons as $season) {
+            if ($season['Id'] === $seasonId) {
+                return $season['Path'];
             }
         }
 

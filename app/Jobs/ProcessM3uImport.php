@@ -95,6 +95,9 @@ class ProcessM3uImport implements ShouldQueue
     // Merging enabled by default
     public bool $canMergeEnabled = true;
 
+    // Import via category instead of all items at once (Xtream API only)
+    public bool $importViaCategory = false;
+
     // Categories we should auto-enable series for
     public Collection $enabledCategories;
 
@@ -113,6 +116,7 @@ class ProcessM3uImport implements ShouldQueue
         $this->maxItems = config('dev.max_channels') + 1; // Maximum number of channels allowed for m3u import
         $this->preprocess = $playlist->import_prefs['preprocess'] ?? false;
         $this->useRegex = $playlist->import_prefs['use_regex'] ?? false;
+        $this->importViaCategory = $playlist->import_prefs['import_via_category'] ?? false;
 
         // Selected live groups for import
         $this->selectedGroups = $playlist->import_prefs['selected_groups'] ?? [];
@@ -302,6 +306,15 @@ class ProcessM3uImport implements ShouldQueue
             $vodStreamsEnabled = in_array('vod', $categoriesToImport);
             $seriesStreamsEnabled = in_array('series', $categoriesToImport);
 
+            // Check if pre-processing enabled and no groups selected - if so, we need to get the categories first to determine what to include in the streams import
+            $preProcessingLive = $this->preprocess
+                && count($this->selectedGroups) === 0
+                && count($this->includedGroupPrefixes) === 0;
+
+            $preProcessingVod = $this->preprocess
+                && count($this->selectedVodGroups) === 0
+                && count($this->includedVodGroupPrefixes) === 0;
+
             // Setup the user agent and SSL verification
             $verify = ! $playlist->disable_ssl_verification;
             $userAgent = empty($playlist->user_agent) ? $this->userAgent : $playlist->user_agent;
@@ -321,7 +334,7 @@ class ProcessM3uImport implements ShouldQueue
             if ($liveStreamsEnabled) {
                 $categoriesResponse = $this->withProviderThrottling(fn () => Http::withUserAgent($userAgent)
                     ->withOptions(['verify' => $verify])
-                    ->timeout(60) // set timeout to one minute
+                    ->timeout(60 * 5) // set timeout to five minutes
                     ->throw()->get($liveCategories));
                 if (! $categoriesResponse->ok()) {
                     $error = $categoriesResponse->body();
@@ -342,19 +355,52 @@ class ProcessM3uImport implements ShouldQueue
                 if (Storage::disk('local')->exists($liveFp)) {
                     Storage::disk('local')->delete($liveFp);
                 }
-                $liveResponse = $this->withProviderThrottling(fn () => Http::withUserAgent($userAgent)
-                    ->sink($liveFp) // Save the response to a file for later processing
-                    ->withOptions(['verify' => $verify])
-                    ->timeout(60 * 5)
-                    ->throw()->get($liveStreamsUrl));
-                if (! $liveResponse->ok()) {
-                    $error = $liveResponse->body();
-                    $message = "Error processing Live streams: $error";
-                    $this->sendError($message, $error);
 
-                    return;
+                // Only fetch the streams if not pre-processing, otherwise we'll fetch them later after we determine what groups to include
+                if (! $preProcessingLive) {
+                    if ($this->importViaCategory) {
+                        // Build a single-pass generator: fetch each category and yield items directly,
+                        // avoiding the need to write and then re-read an intermediate merged file.
+                        $liveStreams = (function () use ($liveCategories, $liveStreamsUrl, $userAgent, $verify) {
+                            foreach ($liveCategories as $category) {
+                                $categoryId = $category['category_id'];
+                                $categoryName = $category['category_name'];
+                                if ($this->preprocess && ! $this->shouldIncludeChannel($categoryName)) {
+                                    continue;
+                                }
+                                $tempFp = tempnam(sys_get_temp_dir(), 'live_cat_');
+                                try {
+                                    $this->withProviderThrottling(fn () => Http::withUserAgent($userAgent)
+                                        ->sink($tempFp)
+                                        ->withOptions(['verify' => $verify])
+                                        ->timeout(60) // set timeout to one minute per category
+                                        ->throw()->get("$liveStreamsUrl&category_id=$categoryId"));
+                                    foreach (Items::fromFile($tempFp) as $item) {
+                                        yield $item;
+                                    }
+                                } finally {
+                                    @unlink($tempFp);
+                                }
+                            }
+                        })();
+                    } else {
+                        $liveResponse = $this->withProviderThrottling(fn () => Http::withUserAgent($userAgent)
+                            ->sink($liveFp) // Save the response to a file for later processing
+                            ->withOptions(['verify' => $verify])
+                            ->timeout(60 * 5) // set timeout to five minutes
+                            ->throw()->get($liveStreamsUrl));
+                        if (! $liveResponse->ok()) {
+                            $error = $liveResponse->body();
+                            $message = "Error processing Live streams: $error";
+                            $this->sendError($message, $error);
+
+                            return;
+                        }
+                    }
+                    $playlist->update(attributes: ['progress' => 5]);
+                } else {
+                    $liveFp = null; // we'll fetch the streams later after we determine what groups to include
                 }
-                $playlist->update(attributes: ['progress' => 5]);
             }
 
             // If including VOD, get the categories and streams
@@ -382,19 +428,52 @@ class ProcessM3uImport implements ShouldQueue
                 if (Storage::disk('local')->exists($vodFp)) {
                     Storage::disk('local')->delete($vodFp);
                 }
-                $vodResponse = $this->withProviderThrottling(fn () => Http::withUserAgent($userAgent)
-                    ->sink($vodFp) // Save the response to a file for later processing
-                    ->withOptions(['verify' => $verify])
-                    ->timeout(60 * 5)
-                    ->throw()->get($vodStreamsUrl));
-                if (! $vodResponse->ok()) {
-                    $error = $vodResponse->body();
-                    $message = "Error processing VOD streams: $error";
-                    $this->sendError($message, $error);
 
-                    return;
+                // Only fetch the streams if not pre-processing, otherwise we'll fetch them later after we determine what groups to include
+                if (! $preProcessingVod) {
+                    if ($this->importViaCategory) {
+                        // Build a single-pass generator: fetch each category and yield items directly,
+                        // avoiding the need to write and then re-read an intermediate merged file.
+                        $vodStreams = (function () use ($vodCategories, $vodStreamsUrl, $userAgent, $verify) {
+                            foreach ($vodCategories as $category) {
+                                $categoryId = $category['category_id'];
+                                $categoryName = $category['category_name'];
+                                if ($this->preprocess && ! $this->shouldIncludeVod($categoryName)) {
+                                    continue;
+                                }
+                                $tempFp = tempnam(sys_get_temp_dir(), 'vod_cat_');
+                                try {
+                                    $this->withProviderThrottling(fn () => Http::withUserAgent($userAgent)
+                                        ->sink($tempFp)
+                                        ->withOptions(['verify' => $verify])
+                                        ->timeout(60) // set timeout to one minute per category
+                                        ->throw()->get("$vodStreamsUrl&category_id=$categoryId"));
+                                    foreach (Items::fromFile($tempFp) as $item) {
+                                        yield $item;
+                                    }
+                                } finally {
+                                    @unlink($tempFp);
+                                }
+                            }
+                        })();
+                    } else {
+                        $vodResponse = $this->withProviderThrottling(fn () => Http::withUserAgent($userAgent)
+                            ->sink($vodFp) // Save the response to a file for later processing
+                            ->withOptions(['verify' => $verify])
+                            ->timeout(60 * 5)
+                            ->throw()->get($vodStreamsUrl));
+                        if (! $vodResponse->ok()) {
+                            $error = $vodResponse->body();
+                            $message = "Error processing VOD streams: $error";
+                            $this->sendError($message, $error);
+
+                            return;
+                        }
+                    }
+                    $playlist->update(attributes: ['vod_progress' => 5]);
+                } else {
+                    $vodFp = null; // we'll fetch the streams later after we determine what groups to include
                 }
-                $playlist->update(attributes: ['vod_progress' => 5]);
             }
 
             // If including Series streams, get the categories and streams
@@ -461,9 +540,10 @@ class ProcessM3uImport implements ShouldQueue
                 $channelFields['sort'] = 0;
             }
 
-            // Get the live streams
-            $liveStreams = $liveStreamsEnabled && $liveFp ? Items::fromFile($liveFp) : null;
-            $vodStreams = $vodStreamsEnabled && $vodFp ? Items::fromFile($vodFp) : null;
+            // Get the live/VOD streams - already set to a generator in importViaCategory mode,
+            // otherwise read from the downloaded file.
+            $liveStreams ??= $liveStreamsEnabled && $liveFp ? Items::fromFile($liveFp) : null;
+            $vodStreams ??= $vodStreamsEnabled && $vodFp ? Items::fromFile($vodFp) : null;
 
             // Process the live streams
             $streamBaseUrl = "$baseUrl/live/$user/$password";

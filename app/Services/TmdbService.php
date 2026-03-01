@@ -51,9 +51,10 @@ class TmdbService
      * @param  string  $title  The movie title to search for
      * @param  int|null  $year  The release year (optional, will be extracted from title if not provided)
      * @param  bool  $tryFallback  Whether to try fallback search strategies
+     * @param  bool  $skipYearExtraction  Whether to skip extracting year from title (used internally to prevent infinite recursion)
      * @return array|null Returns movie data with tmdb_id and imdb_id, or null if not found
      */
-    public function searchMovie(string $title, ?int $year = null, bool $tryFallback = true): ?array
+    public function searchMovie(string $title, ?int $year = null, bool $tryFallback = true, bool $skipYearExtraction = false): ?array
     {
         if (! $this->isConfigured()) {
             Log::warning('TMDB API key not configured');
@@ -61,8 +62,8 @@ class TmdbService
             return null;
         }
 
-        // Extract year from title if not provided
-        if ($year === null) {
+        // Extract year from title if not provided (and not explicitly skipped)
+        if ($year === null && ! $skipYearExtraction) {
             $year = self::extractYearFromTitle($title);
         }
 
@@ -107,7 +108,7 @@ class TmdbService
                 if ($year) {
                     Log::debug('TMDB: No results with year, retrying without year', ['title' => $normalizedTitle]);
 
-                    return $this->searchMovie($title, null, $tryFallback);
+                    return $this->searchMovie($title, null, $tryFallback, skipYearExtraction: true);
                 }
 
                 // Try removing subtitle after " - " (common in German titles)
@@ -1043,18 +1044,25 @@ class TmdbService
         $title = preg_replace('/\s*\[[^\]]*\]/i', '', $title);
 
         // Remove year in parentheses from title (will be used as separate param)
-        $title = preg_replace('/\s*\(\d{4}\)\s*/', '', $title);
+        // Replace with a space to avoid collapsing adjacent words (e.g., "Alarum (2025) Extra" -> "Alarum Extra", not "AlarumExtra")
+        $title = preg_replace('/\s*\(\d{4}\)\s*/', ' ', $title);
 
         // Remove quality suffixes anywhere in the title (with slash, space, or hyphen)
         // Matches: 4K/UHD, 4KUHD, 4K UHD, 4K-UHD, UHD, HD, FHD, 720p, 1080p, 2160p, etc.
         $title = preg_replace('/\s*[-\/\s]*(4K\s*[\/\-]?\s*U?HD|UHD|FHD|HD|SD|720p|1080p|2160p|4K|REMUX|BluRay|Blu-Ray|BDRip|WEBRip|WEB-DL|HDRip|HDTV|DVDRip)/i', '', $title);
+
+        // Remove release group tags at end of title: "-LAMA", "-YTS", "-SPARKS", etc.
+        // Also handles patterns like "5 1-LAMA" (residual metadata after year/quality removal)
+        $title = preg_replace('/\s+\d[\d\s]*-[A-Za-z]+\s*$/', '', $title);
+        $title = preg_replace('/\s+-[A-Z][A-Za-z]{1,10}\s*$/', '', $title);
 
         // Remove German subtitle after " - " (e.g., "See - Reich der Blinden" -> "See")
         // Only if the subtitle starts with a German article or common German word
         $title = preg_replace('/\s+-\s+(Die|Der|Das|Ein|Eine|Reich|Zeit|Land|Haus)\s+\S+.*$/iu', '', $title);
 
         // Remove language tags: DE, EN, GER, ENG, German, English, Multi, etc.
-        $title = preg_replace('/\s*[-\s]*(DE|EN|GER|ENG|German|English|Deutsch|Multi|Dual|Audio)\s*$/i', '', $title);
+        // Requires whitespace before the tag to avoid stripping parts of words (e.g., "X-Men" losing "en")
+        $title = preg_replace('/\s+[-\s]*(DE|EN|GER|ENG|German|English|Deutsch|Multi|Dual|Audio)\s*$/i', '', $title);
 
         // Remove year at end of title (will be extracted separately): "Atlas 2024" -> "Atlas"
         $title = preg_replace('/\s+\d{4}\s*$/', '', $title);

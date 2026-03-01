@@ -2154,4 +2154,19 @@ class M3uProxyService
         // Build the broadcast callback path
         return ProxyFacade::getBaseUrl().'/api/m3u-proxy/broadcast/callback';
     }
+
+    /**
+     * Get the webhook callback URL for m3u-proxy to send webhook events.
+     *
+     * @return string The webhook callback endpoint URL
+     */
+    public function getWebhookUrl(): string
+    {
+        if (! empty($this->failoverResolverUrl)) {
+            // Use the configured failover resolver URL
+            return "$this->failoverResolverUrl/api/m3u-proxy/webhooks";
+        }
+
+        return ProxyFacade::getBaseUrl().'/api/m3u-proxy/webhooks';
+    }
 }

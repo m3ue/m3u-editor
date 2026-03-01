@@ -287,6 +287,15 @@ class Preferences extends SettingsPage
                                                 Toggle::make('enable_failover_resolver')
                                                     ->label('Enable advanced failover logic')
                                                     ->columnSpanFull()
+                                                    ->hintAction(
+                                                        Action::make('learn_more_strict_live_ts')
+                                                            ->label('Learn More')
+                                                            ->icon('heroicon-o-arrow-top-right-on-square')
+                                                            ->iconPosition('after')
+                                                            ->size('sm')
+                                                            ->url('https://m3ue.sparkison.dev/docs/proxy/failover#advanced-failover-m3u-editor')
+                                                            ->openUrlInNewTab(true)
+                                                    )
                                                     ->hintIcon(
                                                         'heroicon-m-question-mark-circle',
                                                         tooltip: 'When enabled, the proxy will make a call to the editor to determine which failover to use based on available capacity. When disabled, a list of failover URLs will be sent to the proxy and it will loop through them without any capacity checks when a stream failure occurs.'

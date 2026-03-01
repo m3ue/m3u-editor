@@ -949,6 +949,9 @@ class XtreamApiController extends Controller
 
             $cover = $seriesItem->cover ? (filter_var($seriesItem->cover, FILTER_VALIDATE_URL) ? $seriesItem->cover : $baseUrl."/$seriesItem->cover") : LogoCacheService::getPlaceholderUrl('poster');
             $backdropPaths = $seriesItem->backdrop_path ?? [];
+            if (is_string($backdropPaths)) {
+                $backdropPaths = json_decode($backdropPaths, true) ?? [];
+            }
             if ($playlist->enable_logo_proxy) {
                 $cover = LogoProxyController::generateProxyUrl($cover);
                 $backdropPaths = array_map(fn ($path) => LogoProxyController::generateProxyUrl($path), $backdropPaths);
@@ -1395,6 +1398,9 @@ class XtreamApiController extends Controller
             $cover = $info['cover_big'] ?? $channel->logo ?? $channel->logo_internal;
             $movieImage = $info['movie_image'] ?? $channel->logo ?? $channel->logo_internal;
             $backdropPaths = $info['backdrop_path'] ?? [];
+            if (is_string($backdropPaths)) {
+                $backdropPaths = json_decode($backdropPaths, true) ?? [];
+            }
             if ($playlist->enable_logo_proxy) {
                 $cover = LogoProxyController::generateProxyUrl($cover);
                 $movieImage = LogoProxyController::generateProxyUrl($movieImage);

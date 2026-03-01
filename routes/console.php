@@ -6,13 +6,13 @@ use Illuminate\Support\Facades\Schedule;
  * Register schedules
  */
 
-// Check for updates
-Schedule::command('app:update-check')
-    ->daily();
-
 // Cleanup old/stale job batches
 Schedule::command('app:flush-jobs-table')
     ->twiceDaily();
+
+// Check for updates
+Schedule::command('app:update-check')
+    ->hourly();
 
 // Refresh playlists
 Schedule::command('app:refresh-playlist')
