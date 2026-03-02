@@ -3,8 +3,10 @@
 use App\Jobs\FetchTmdbIds;
 use App\Models\Category;
 use App\Models\Channel;
+use App\Models\Episode;
 use App\Models\Group;
 use App\Models\Playlist;
+use App\Models\Season;
 use App\Models\Series;
 use App\Models\User;
 use App\Services\TmdbService;
@@ -463,4 +465,254 @@ it('updates series category from library name to TMDB genre on first fetch', fun
     expect($updatedCategory)->not->toBeNull()
         ->and($updatedCategory->name)->toBe('Drama')
         ->and($series->genre)->toContain('Drama');
+});
+
+it('enriches episodes when series has complete metadata but episodes lack tmdb_id', function () {
+    Http::fake([
+        // getAllSeasons call
+        'https://api.themoviedb.org/3/tv/224372?*' => Http::response([
+            'seasons' => [
+                ['season_number' => 1, 'episode_count' => 2],
+            ],
+        ], 200),
+        // getSeasonDetails call
+        'https://api.themoviedb.org/3/tv/224372/season/1*' => Http::response([
+            'season_number' => 1,
+            'poster_path' => '/season1.jpg',
+            'episodes' => [
+                [
+                    'id' => 4360857,
+                    'episode_number' => 1,
+                    'name' => 'The Hedge Knight',
+                    'overview' => 'Dunk and Egg arrive at the tourney.',
+                    'air_date' => '2025-04-06',
+                    'still_path' => '/hedge_knight.jpg',
+                    'vote_average' => 8.5,
+                    'runtime' => 62,
+                ],
+                [
+                    'id' => 5329379,
+                    'episode_number' => 2,
+                    'name' => 'Hard Salt Beef',
+                    'overview' => 'Dunk faces the consequences.',
+                    'air_date' => '2025-04-13',
+                    'still_path' => '/hard_salt_beef.jpg',
+                    'vote_average' => 8.2,
+                    'runtime' => 58,
+                ],
+            ],
+        ], 200),
+    ]);
+
+    $series = Series::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'name' => 'A Knight of the Seven Kingdoms',
+        'tmdb_id' => 224372,
+        'plot' => 'A century before the events of Game of Thrones...',
+        'cover' => 'https://image.tmdb.org/t/p/w500/poster.jpg',
+        'last_metadata_fetch' => now()->subDay(),
+        'metadata' => ['tmdb_id' => 224372],
+    ]);
+
+    $season = Season::factory()->create([
+        'series_id' => $series->id,
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'season_number' => 1,
+    ]);
+
+    // Episodes with filename-based titles and no TMDB data
+    $ep1 = Episode::factory()->create([
+        'series_id' => $series->id,
+        'season_id' => $season->id,
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'title' => 'The Hedge Knight WEBDL-1080p Proper',
+        'season' => 1,
+        'episode_num' => 1,
+        'tmdb_id' => null,
+        'cover' => null,
+        'plot' => null,
+        'info' => [],
+    ]);
+
+    $ep2 = Episode::factory()->create([
+        'series_id' => $series->id,
+        'season_id' => $season->id,
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'title' => 'Hard Salt Beef WEBDL-1080p',
+        'season' => 1,
+        'episode_num' => 2,
+        'tmdb_id' => null,
+        'cover' => null,
+        'plot' => null,
+        'info' => [],
+    ]);
+
+    $job = new FetchTmdbIds(
+        seriesIds: [$series->id],
+        overwriteExisting: false,
+        user: $this->user,
+    );
+
+    $job->handle(app(TmdbService::class));
+
+    $ep1->refresh();
+    $ep2->refresh();
+
+    // Episode titles should be updated from TMDB (stripping quality tags)
+    expect($ep1->title)->toBe('The Hedge Knight')
+        ->and($ep2->title)->toBe('Hard Salt Beef');
+
+    // Dedicated tmdb_id column should be set
+    expect($ep1->tmdb_id)->toBe(4360857)
+        ->and($ep2->tmdb_id)->toBe(5329379);
+
+    // Dedicated plot column should be set
+    expect($ep1->plot)->toBe('Dunk and Egg arrive at the tourney.')
+        ->and($ep2->plot)->toBe('Dunk faces the consequences.');
+
+    // Cover should be set from TMDB still_path
+    expect($ep1->cover)->toBe('https://image.tmdb.org/t/p/original/hedge_knight.jpg')
+        ->and($ep2->cover)->toBe('https://image.tmdb.org/t/p/original/hard_salt_beef.jpg');
+
+    // Info array should also contain the metadata
+    expect($ep1->info['tmdb_id'])->toBe(4360857)
+        ->and($ep1->info['movie_image'])->toBe('https://image.tmdb.org/t/p/original/hedge_knight.jpg')
+        ->and($ep1->info['plot'])->toBe('Dunk and Egg arrive at the tourney.')
+        ->and($ep1->info['releasedate'])->toBe('2025-04-06')
+        ->and($ep1->info['rating'])->toBe(8.5)
+        ->and($ep1->info['duration_secs'])->toBe(3720);
+});
+
+it('enriches episodes even when series is skipped due to complete metadata', function () {
+    Http::fake([
+        // getAllSeasons call
+        'https://api.themoviedb.org/3/tv/1396?*' => Http::response([
+            'seasons' => [
+                ['season_number' => 1, 'episode_count' => 1],
+            ],
+        ], 200),
+        // getSeasonDetails call
+        'https://api.themoviedb.org/3/tv/1396/season/1*' => Http::response([
+            'season_number' => 1,
+            'poster_path' => '/bb_s1.jpg',
+            'episodes' => [
+                [
+                    'id' => 62085,
+                    'episode_number' => 1,
+                    'name' => 'Pilot',
+                    'overview' => 'Walter White begins his descent.',
+                    'air_date' => '2008-01-20',
+                    'still_path' => '/bb_pilot.jpg',
+                    'vote_average' => 8.8,
+                    'runtime' => 58,
+                ],
+            ],
+        ], 200),
+    ]);
+
+    // Series with complete metadata (would normally be skipped entirely)
+    $series = Series::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'name' => 'Breaking Bad',
+        'tmdb_id' => 1396,
+        'plot' => 'A high school chemistry teacher turned drug lord.',
+        'cover' => 'https://image.tmdb.org/t/p/w500/breakingbad.jpg',
+        'last_metadata_fetch' => now()->subDay(),
+        'metadata' => ['tmdb_id' => 1396],
+    ]);
+
+    $season = Season::factory()->create([
+        'series_id' => $series->id,
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'season_number' => 1,
+    ]);
+
+    // Episode with no TMDB enrichment
+    $episode = Episode::factory()->create([
+        'series_id' => $series->id,
+        'season_id' => $season->id,
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'title' => 'Episode 1',
+        'season' => 1,
+        'episode_num' => 1,
+        'tmdb_id' => null,
+        'cover' => null,
+        'plot' => null,
+        'info' => [],
+    ]);
+
+    $job = new FetchTmdbIds(
+        seriesIds: [$series->id],
+        overwriteExisting: false,
+        user: $this->user,
+    );
+
+    $job->handle(app(TmdbService::class));
+
+    $episode->refresh();
+    $series->refresh();
+
+    // Series metadata should remain unchanged (still skipped for re-processing)
+    expect($series->tmdb_id)->toBe(1396)
+        ->and($series->plot)->toBe('A high school chemistry teacher turned drug lord.');
+
+    // But the episode should be enriched with TMDB data
+    expect($episode->title)->toBe('Pilot')
+        ->and($episode->tmdb_id)->toBe(62085)
+        ->and($episode->plot)->toBe('Walter White begins his descent.')
+        ->and($episode->cover)->toBe('https://image.tmdb.org/t/p/original/bb_pilot.jpg');
+});
+
+it('skips episode enrichment when all episodes already have tmdb_id', function () {
+    Http::fake();
+
+    $series = Series::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'name' => 'Breaking Bad',
+        'tmdb_id' => 1396,
+        'plot' => 'A high school chemistry teacher turned drug lord.',
+        'cover' => 'https://image.tmdb.org/t/p/w500/breakingbad.jpg',
+        'last_metadata_fetch' => now()->subDay(),
+        'metadata' => ['tmdb_id' => 1396],
+    ]);
+
+    $season = Season::factory()->create([
+        'series_id' => $series->id,
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'season_number' => 1,
+    ]);
+
+    // Episode already enriched
+    Episode::factory()->create([
+        'series_id' => $series->id,
+        'season_id' => $season->id,
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'title' => 'Pilot',
+        'season' => 1,
+        'episode_num' => 1,
+        'tmdb_id' => 62085,
+        'cover' => 'https://image.tmdb.org/t/p/original/bb_pilot.jpg',
+        'plot' => 'Walter White begins his descent.',
+    ]);
+
+    $job = new FetchTmdbIds(
+        seriesIds: [$series->id],
+        overwriteExisting: false,
+        user: $this->user,
+    );
+
+    $job->handle(app(TmdbService::class));
+
+    // No HTTP calls should have been made (series and episodes both skipped)
+    Http::assertNothingSent();
 });

@@ -634,13 +634,23 @@ class FetchTmdbIds implements ShouldQueue
         $hasMetadata = ! empty($series->plot) && ! empty($series->cover);
 
         if (($existingTvdbId || $existingTmdbId) && $hasMetadata && ! $this->overwriteExisting) {
-            Log::debug('FetchTmdbIds: Skipping series (already has IDs and metadata)', [
-                'series_id' => $series->id,
-                'name' => $series->name,
-                'existing_tmdb_id' => $existingTmdbId,
-                'existing_tvdb_id' => $existingTvdbId,
-                'overwrite_existing' => $this->overwriteExisting,
-            ]);
+            // Series-level metadata is complete, but episodes may still need enrichment.
+            // Check if any episodes are missing TMDB data and process them if so.
+            if ($existingTmdbId && $series->episodes()->whereNull('tmdb_id')->exists()) {
+                Log::info('FetchTmdbIds: Series metadata complete but episodes need enrichment', [
+                    'series_id' => $series->id,
+                    'tmdb_id' => $existingTmdbId,
+                ]);
+                $this->processSeriesEpisodes($tmdb, $series, (int) $existingTmdbId);
+            } else {
+                Log::debug('FetchTmdbIds: Skipping series (already has IDs and metadata)', [
+                    'series_id' => $series->id,
+                    'name' => $series->name,
+                    'existing_tmdb_id' => $existingTmdbId,
+                    'existing_tvdb_id' => $existingTvdbId,
+                    'overwrite_existing' => $this->overwriteExisting,
+                ]);
+            }
             $this->skippedCount++;
 
             return;
@@ -919,14 +929,26 @@ class FetchTmdbIds implements ShouldQueue
                     }
 
                     if (! empty($episodeData['id'])) {
-                        if (empty($info['tmdb_id'] ?? true) || $this->overwriteExisting) {
+                        // Set the dedicated tmdb_id column
+                        if (empty($episode->tmdb_id) || $this->overwriteExisting) {
+                            $updateData['tmdb_id'] = $episodeData['id'];
+                        }
+
+                        // Also store in the info array for backward compatibility
+                        if (empty($info['tmdb_id'] ?? null) || $this->overwriteExisting) {
                             $info['tmdb_id'] = $episodeData['id'];
                             $updateData['info'] = $info;
                         }
                     }
 
                     if (! empty($episodeData['overview'])) {
-                        if (empty($info['plot'] ?? true) || $this->overwriteExisting) {
+                        // Set the dedicated plot column
+                        if (empty($episode->plot) || $this->overwriteExisting) {
+                            $updateData['plot'] = $episodeData['overview'];
+                        }
+
+                        // Also store in the info array for backward compatibility
+                        if (empty($info['plot'] ?? null) || $this->overwriteExisting) {
                             $info['plot'] = $episodeData['overview'];
                             $updateData['info'] = $info;
                         }
