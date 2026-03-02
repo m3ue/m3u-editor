@@ -529,12 +529,25 @@ class SyncSeriesStrmFiles implements ShouldQueue
                 $tvdbId = $series->tvdb_id ?? $series->metadata['tvdb_id'] ?? $series->metadata['tvdb'] ?? null;
                 $tmdbId = $series->tmdb_id ?? $series->metadata['tmdb_id'] ?? $series->metadata['tmdb'] ?? null;
                 $imdbId = $series->imdb_id ?? $series->metadata['imdb_id'] ?? $series->metadata['imdb'] ?? null;
+
                 // Ensure IDs are scalar values (not arrays)
                 $tvdbId = is_scalar($tvdbId) ? $tvdbId : null;
                 $tmdbId = is_scalar($tmdbId) ? $tmdbId : null;
                 $imdbId = is_scalar($imdbId) ? $imdbId : null;
+
+                // Determine bracket style based on settings
                 $bracket = $tmdbIdFormat === 'curly' ? ['{', '}'] : ['[', ']'];
-                if ($applyTmdbToSeriesFolder) {
+
+                // When applying TMDB ID to the series folder and the series has no IDs,
+                // fall back to the first episode's TMDB ID
+                if ($applyTmdbToSeriesFolder && empty($tvdbId) && empty($tmdbId) && empty($imdbId)) {
+                    $firstEpisode = $episodes->first();
+                    if ($firstEpisode) {
+                        $epInfo = $firstEpisode->info ?? [];
+                        $fallbackTmdb = $firstEpisode->tmdb_id ?? $epInfo['tmdb_id'] ?? $epInfo['tmdb'] ?? null;
+                        $tmdbId = \is_scalar($fallbackTmdb) ? $fallbackTmdb : null;
+                    }
+                } elseif ($applyTmdbToSeriesFolder) {
                     if (! empty($tmdbId)) {
                         $seriesFolder .= " {$bracket[0]}tmdb-{$tmdbId}{$bracket[1]}";
                     } elseif (! empty($tvdbId)) {
@@ -542,10 +555,6 @@ class SyncSeriesStrmFiles implements ShouldQueue
                     } elseif (! empty($imdbId)) {
                         $seriesFolder .= " {$bracket[0]}imdb-{$imdbId}{$bracket[1]}";
                     }
-                } elseif (! empty($tvdbId)) {
-                    $seriesFolder .= " {$bracket[0]}tvdb-{$tvdbId}{$bracket[1]}";
-                } elseif (! empty($imdbId)) {
-                    $seriesFolder .= " {$bracket[0]}imdb-{$imdbId}{$bracket[1]}";
                 }
 
                 $cleanName = $cleanSpecialChars
@@ -597,7 +606,7 @@ class SyncSeriesStrmFiles implements ShouldQueue
                 }
 
                 if ($applyTmdbToEpisodes) {
-                    $tmdbId = $seriesMetadata['tmdb_id'] ?? $ep->info['tmdb_id'] ?? null;
+                    $tmdbId = $ep->info['tmdb_id'] ?? $seriesMetadata['tmdb_id'] ?? null;
                     // Ensure ID is a scalar value (not an array)
                     $tmdbId = is_scalar($tmdbId) ? $tmdbId : null;
                     if (! empty($tmdbId)) {
