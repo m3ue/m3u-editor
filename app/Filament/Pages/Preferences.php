@@ -1053,8 +1053,8 @@ class Preferences extends SettingsPage
                                             ->columnSpanFull()
                                             ->helperText('Your TMDB API key (v3 auth). You can get one for free at themoviedb.org.'),
                                         Toggle::make('tmdb_auto_lookup_on_import')
-                                            ->label('Auto-lookup on import')
-                                            ->helperText('Automatically lookup TMDB IDs when importing VOD content and Series. This may slow down imports for large playlists.')
+                                            ->label('Auto-lookup on metadata fetch')
+                                            ->helperText('Automatically lookup TMDB IDs when fetching metadata for VOD and Series. This may slow down imports and metadata fetching for large playlists. Will only be fetched for enabled items.')
                                             ->default(false),
                                         TextInput::make('tmdb_rate_limit')
                                             ->label('Rate Limit (requests/second)')

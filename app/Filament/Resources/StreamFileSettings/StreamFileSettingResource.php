@@ -16,6 +16,8 @@ use Filament\Forms\Components\Toggle;
 use Filament\Forms\Components\ToggleButtons;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Fieldset;
+use Filament\Schemas\Components\Utilities\Get;
+use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Columns\ToggleColumn;
@@ -70,6 +72,14 @@ class StreamFileSettingResource extends Resource
                     ->required()
                     ->live()
                     ->disabledOn('edit')
+                    ->afterStateUpdated(function ($state, callable $set) {
+                        if ($state === 'series') {
+                            $set('path_structure', ['category', 'series', 'season']);
+                        } else {
+                            $set('path_structure', ['group', 'title']);
+                        }
+                        $set('filename_metadata', []);
+                    })
                     ->helperText('Determines which path structure options are available and where this profile can be assigned'),
 
                 Textarea::make('description')
@@ -128,13 +138,15 @@ class StreamFileSettingResource extends Resource
                                     $titleFolder .= " ({$vod->year})";
                                 }
 
-                                $tmdbId = $vod->info['tmdb_id'] ?? $vod->info['tmdb'] ?? $vod->movie_data['tmdb_id'] ?? $vod->movie_data['tmdb'] ?? null;
-                                $imdbId = $vod->info['imdb_id'] ?? $vod->info['imdb'] ?? $vod->movie_data['imdb_id'] ?? $vod->movie_data['imdb'] ?? null;
-                                $bracket = $tmdbIdFormat === 'curly' ? ['{', '}'] : ['[', ']'];
-                                if (! empty($tmdbId)) {
-                                    $titleFolder .= " {$bracket[0]}tmdb-{$tmdbId}{$bracket[1]}";
-                                } elseif (! empty($imdbId)) {
-                                    $titleFolder .= " {$bracket[0]}imdb-{$imdbId}{$bracket[1]}";
+                                if (in_array('tmdb_id', $filenameMetadata)) {
+                                    $tmdbId = $vod->info['tmdb_id'] ?? $vod->info['tmdb'] ?? $vod->movie_data['tmdb_id'] ?? $vod->movie_data['tmdb'] ?? null;
+                                    $imdbId = $vod->info['imdb_id'] ?? $vod->info['imdb'] ?? $vod->movie_data['imdb_id'] ?? $vod->movie_data['imdb'] ?? null;
+                                    $bracket = $tmdbIdFormat === 'curly' ? ['{', '}'] : ['[', ']'];
+                                    if (! empty($tmdbId)) {
+                                        $titleFolder .= " {$bracket[0]}tmdb-{$tmdbId}{$bracket[1]}";
+                                    } elseif (! empty($imdbId)) {
+                                        $titleFolder .= " {$bracket[0]}imdb-{$imdbId}{$bracket[1]}";
+                                    }
                                 }
 
                                 $preview .= '/'.$titleFolder;
@@ -263,29 +275,64 @@ class StreamFileSettingResource extends Resource
                         ? ['category', 'series', 'season']
                         : ['group', 'title']
                     )
+                    ->afterStateUpdated(function ($state, Set $set, Get $get): void {
+                        if ($get('type') === 'vod') {
+                            $filenameMetadata = $get('filename_metadata') ?? [];
+                            $set('folder_metadata', in_array('tmdb_id', $filenameMetadata) ? ['tmdb_id'] : []);
+                        }
+                    })
                     ->hidden(fn ($get) => ! $get('enabled')),
 
                 Fieldset::make('Include Metadata')
                     ->columnSpanFull()
                     ->columns(2)
                     ->schema([
+                        ToggleButtons::make('folder_metadata')
+                            ->label('Folder metadata')
+                            ->helperText('Added to the title folder name')
+                            ->live()
+                            ->inline()
+                            ->multiple()
+                            ->options(['tmdb_id' => 'TMDB ID'])
+                            ->dehydrated(false)
+                            ->afterStateHydrated(function (Set $set, Get $get): void {
+                                $set('folder_metadata',
+                                    in_array('tmdb_id', $get('filename_metadata') ?? []) ? ['tmdb_id'] : []
+                                );
+                            })
+                            ->afterStateUpdated(function ($state, Set $set, Get $get): void {
+                                $metadata = $get('filename_metadata') ?? [];
+                                $hasTmdb = in_array('tmdb_id', $state ?? []);
+                                $metaHasTmdb = in_array('tmdb_id', $metadata);
+                                if ($hasTmdb && ! $metaHasTmdb) {
+                                    $metadata[] = 'tmdb_id';
+                                    $set('filename_metadata', array_values($metadata));
+                                } elseif (! $hasTmdb && $metaHasTmdb) {
+                                    $set('filename_metadata', array_values(array_filter($metadata, fn ($v) => $v !== 'tmdb_id')));
+                                }
+                            })
+                            ->visible(fn (Get $get): bool => $get('type') === 'vod' && in_array('title', $get('path_structure') ?? [])),
                         ToggleButtons::make('filename_metadata')
                             ->label('Filename metadata')
                             ->live()
                             ->inline()
                             ->multiple()
-                            ->options(fn ($get) => $get('type') === 'series'
-                                ? [
+                            ->options(fn (Get $get): array => match (true) {
+                                $get('type') === 'series' => [
                                     'year' => 'Year',
                                     'tmdb_id' => 'TMDB ID',
                                     'category' => 'Category',
-                                ]
-                                : [
+                                ],
+                                $get('type') === 'vod' && in_array('title', $get('path_structure') ?? []) => [
+                                    'year' => 'Year',
+                                    'group' => 'Group',
+                                ],
+                                default => [
                                     'year' => 'Year',
                                     'tmdb_id' => 'TMDB ID',
                                     'group' => 'Group',
-                                ]
-                            ),
+                                ],
+                            }),
                         ToggleButtons::make('tmdb_id_format')
                             ->label('TMDB ID format')
                             ->inline()
@@ -296,7 +343,8 @@ class StreamFileSettingResource extends Resource
                                 'curly' => '{curly}',
                             ])
                             ->default('square')
-                            ->hidden(fn ($get) => ! in_array('tmdb_id', $get('filename_metadata') ?? [])),
+                            ->hidden(fn (Get $get): bool => ! in_array('tmdb_id', $get('filename_metadata') ?? [])
+                                && ! in_array('tmdb_id', $get('folder_metadata') ?? [])),
                         ToggleButtons::make('tmdb_id_apply_to')
                             ->label('Apply TMDB ID to')
                             ->inline()
@@ -309,7 +357,7 @@ class StreamFileSettingResource extends Resource
                             ])
                             ->default('episodes')
                             ->helperText('How should the TMDB ID be used.')
-                            ->hidden(fn ($get) => $get('type') !== 'series' || ! in_array('tmdb_id', $get('filename_metadata') ?? [])),
+                            ->hidden(fn (Get $get): bool => $get('type') !== 'series' || ! in_array('tmdb_id', $get('filename_metadata') ?? [])),
                     ])
                     ->hidden(fn ($get) => ! $get('enabled')),
 

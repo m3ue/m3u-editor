@@ -3,14 +3,17 @@
 namespace App\Models;
 
 use App\Enums\PlaylistSourceType;
+use App\Jobs\FetchTmdbIds;
 use App\Jobs\SyncSeriesStrmFiles;
 use App\Services\XtreamService;
+use App\Settings\GeneralSettings;
 use Filament\Notifications\Notification;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Spatie\Tags\HasTags;
@@ -103,6 +106,9 @@ class Series extends Model
     {
         try {
             $playlist = $this->playlist;
+
+            // Get settings instance
+            $settings = app(GeneralSettings::class);
 
             // For Xtream playlists, use XtreamService
             if (! $playlist->xtream && $playlist->source_type !== PlaylistSourceType::Xtream) {
@@ -257,10 +263,22 @@ class Series extends Model
                 // Update last fetched timestamp for the series
                 $this->update($update);
 
+                $jobs = [];
+                if ($settings->tmdb_auto_lookup_on_import && $this->enabled) {
+                    // If TMDB auto lookup enabled, dispatch job to fetch TMDB metadata for episodes
+                    $jobs[] = new FetchTmdbIds(
+                        seriesIds: [$this->id],
+                        overwriteExisting: $refresh ?? false,
+                        sendCompletionNotification: false,
+                    );
+                }
                 if ($sync && $this->enabled) {
                     // Dispatch the job to sync .strm files
-                    dispatch(new SyncSeriesStrmFiles(series: $this, notify: false))
-                        ->afterCommit();
+                    $jobs[] = new SyncSeriesStrmFiles(series: $this, notify: false);
+                }
+
+                if (count($jobs) > 0) {
+                    Bus::chain($jobs)->dispatch()->afterCommit();
                 }
 
                 return $episodeCount;

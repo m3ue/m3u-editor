@@ -181,7 +181,7 @@ class VodResource extends Resource
                     $title = $record->title_custom ?: $record->title;
                     $html = "<span class='fi-ta-text-item-label whitespace-normal text-sm leading-6 text-gray-950 dark:text-white'>{$title}</span>";
                     if (is_array($info)) {
-                        $description = Str::limit(($info['description'] ?: null) ?? ($info['plot'] ?: null) ?? '', 200);
+                        $description = Str::limit($info['description'] ?? $info['plot'] ?? '', 200);
                         if (! empty($description)) {
                             $html .= "<p class='text-sm text-gray-500 dark:text-gray-400 whitespace-normal mt-2'>{$description}</p>";
                         }
@@ -382,7 +382,9 @@ class VodResource extends Resource
             TextColumn::make('url')
                 ->label('Default URL')
                 ->sortable()
-                ->searchable()
+                ->searchable(query: function (Builder $query, string $search): Builder {
+                    return $query->orWhereRaw('LOWER(channels.url::text) LIKE ?', ['%'.strtolower($search).'%']);
+                })
                 ->toggleable(isToggledHiddenByDefault: true),
 
             TextColumn::make('created_at')

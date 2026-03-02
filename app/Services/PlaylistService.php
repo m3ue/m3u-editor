@@ -388,7 +388,7 @@ class PlaylistService
     {
         // Minimal example data for VOD to use for the path preview
         return (object) [
-            'title' => 'John Wick: Chapter 4 (2023)',
+            'title' => 'John Wick Chapter 4',
             'year' => '2023',
             'group' => '4K',
             'info' => [

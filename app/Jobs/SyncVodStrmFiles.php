@@ -354,10 +354,12 @@ class SyncVodStrmFiles implements ShouldQueue
                 $imdbId = is_scalar($imdbId) ? $imdbId : null;
 
                 $bracket = $tmdbIdFormat === 'curly' ? ['{', '}'] : ['[', ']'];
-                if (! empty($tmdbId)) {
-                    $titleFolder .= " {$bracket[0]}tmdb-{$tmdbId}{$bracket[1]}";
-                } elseif (! empty($imdbId)) {
-                    $titleFolder .= " {$bracket[0]}imdb-{$imdbId}{$bracket[1]}";
+                if (in_array('tmdb_id', $filenameMetadata)) {
+                    if (! empty($tmdbId)) {
+                        $titleFolder .= " {$bracket[0]}tmdb-{$tmdbId}{$bracket[1]}";
+                    } elseif (! empty($imdbId)) {
+                        $titleFolder .= " {$bracket[0]}imdb-{$imdbId}{$bracket[1]}";
+                    }
                 }
 
                 $titleFolder = $cleanSpecialChars
