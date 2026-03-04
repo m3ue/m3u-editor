@@ -26,6 +26,8 @@ return Application::configure(basePath: dirname(__DIR__))
                 'webhook/test',
                 'channel',
                 'channel/*',
+                'player_api.php',
+                'get.php',
             ])
             ->throttleWithRedis();
     })

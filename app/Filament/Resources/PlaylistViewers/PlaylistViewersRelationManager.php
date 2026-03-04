@@ -11,6 +11,7 @@ use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Table;
 use Illuminate\Support\Str;
 
@@ -63,10 +64,12 @@ class PlaylistViewersRelationManager extends RelationManager
             ])
             ->recordActions([
                 EditAction::make()
+                    ->button()->hiddenLabel()->size('sm')
                     ->visible(fn (PlaylistViewer $record): bool => ! $record->is_admin),
                 DeleteAction::make()
                     ->disabled(fn (PlaylistViewer $record): bool => $record->is_admin)
+                    ->button()->hiddenLabel()->size('sm')
                     ->tooltip(fn (PlaylistViewer $record): ?string => $record->is_admin ? 'The Admin viewer cannot be deleted' : null),
-            ]);
+            ], position: RecordActionsPosition::BeforeCells);
     }
 }

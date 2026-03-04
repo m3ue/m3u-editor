@@ -246,8 +246,8 @@ Route::group(['prefix' => 'epg'], function () {
  */
 
 // Main Xtream API endpoint at /player_api.php and /get.php
-Route::get('/player_api.php', [XtreamApiController::class, 'handle'])->name('xtream.api.player');
-Route::get('/get.php', [XtreamApiController::class, 'handle'])->name('xtream.api.get');
+Route::match(['get', 'post'], '/player_api.php', [XtreamApiController::class, 'handle'])->name('xtream.api.player');
+Route::match(['get', 'post'], '/get.php', [XtreamApiController::class, 'handle'])->name('xtream.api.get');
 Route::get('/xmltv.php', [XtreamApiController::class, 'epg'])->name('xtream.api.epg');
 
 // Stream endpoints
