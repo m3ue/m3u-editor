@@ -147,6 +147,12 @@ class NetworkResource extends Resource
                                         ->placeholder('https://example.com/logo.png')
                                         ->url()
                                         ->maxLength(500),
+
+                                    TextInput::make('group_name')
+                                        ->label('Group Name')
+                                        ->placeholder('Networks')
+                                        ->helperText('Group name used in the M3U playlist. Defaults to "Networks" if left empty.')
+                                        ->maxLength(255),
                                 ]),
                         ]),
 
@@ -288,6 +294,12 @@ class NetworkResource extends Resource
                                 ->placeholder('https://example.com/logo.png')
                                 ->url()
                                 ->maxLength(500),
+
+                            TextInput::make('group_name')
+                                ->label('Group Name')
+                                ->placeholder('Networks')
+                                ->helperText('Group name used in the M3U playlist. Defaults to "Networks" if left empty.')
+                                ->maxLength(255),
                         ]),
                 ]),
 
