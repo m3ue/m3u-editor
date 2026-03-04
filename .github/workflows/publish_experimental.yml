@@ -193,9 +193,9 @@ jobs:
       - name: Get previous experimental tag
         id: prev_tag
         run: |
-          PREV_TAG=$(git tag -l "v*-experimental" --sort=-version:refname | head -n 1)
+          PREV_TAG=$(git tag -l "v*-exp" --sort=-version:refname | head -n 1)
           if [ -z "$PREV_TAG" ]; then
-            PREV_TAG=$(git tag -l "experimental-*" --sort=-version:refname | head -n 1)
+            PREV_TAG=$(git tag -l "v*-experimental" --sort=-version:refname | head -n 1)
           fi
           if [ -z "$PREV_TAG" ]; then
             PREV_TAG=$(git tag -l "v*" --sort=-version:refname | head -n 1)
@@ -284,7 +284,7 @@ jobs:
       - name: Create experimental pre-release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ needs.get-version.outputs.version }}-experimental
+          tag_name: v${{ needs.get-version.outputs.version }}-exp
           name: "Experimental ${{ needs.get-version.outputs.version }}"
           body_path: changelog.md
           prerelease: true
