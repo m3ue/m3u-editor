@@ -163,6 +163,11 @@ echo $totalBandwidth > 1000 ? round($totalBandwidth / 1000, 1) . ' Mbps' : $tota
                                     <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200">
                                         {{ $stream['format'] }}
                                     </span>
+                                    @if($stream['broadcast'] ?? false)
+                                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 dark:bg-indigo-900 text-indigo-800 dark:text-indigo-200 ml-2">
+                                            Broadcast
+                                        </span>
+                                    @endif
                                     @if($stream['transcoding'])
                                         <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200">
                                             {{ $stream['transcoding_format'] ?? 'N/A' }}
@@ -224,10 +229,12 @@ echo $totalBandwidth > 1000 ? round($totalBandwidth / 1000, 1) . ' Mbps' : $tota
                                 </div>
                                 
                                 <div class="flex items-center space-x-2">
-                                    <button wire:click="triggerFailover('{{ $stream['stream_id'] }}')" 
-                                            class="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md text-white bg-yellow-600 hover:bg-yellow-700 focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-gray-800 focus:ring-yellow-500">
-                                        Trigger Failover
-                                    </button>
+                                    @unless($stream['broadcast'] ?? false)
+                                        <button wire:click="triggerFailover('{{ $stream['stream_id'] }}')" 
+                                                class="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md text-white bg-yellow-600 hover:bg-yellow-700 focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-gray-800 focus:ring-yellow-500">
+                                            Trigger Failover
+                                        </button>
+                                    @endunless
                                     <button wire:click="stopStream('{{ $stream['stream_id'] }}')" 
                                             class="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-gray-800 focus:ring-red-500">
                                         Remove Stream

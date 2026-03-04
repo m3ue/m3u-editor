@@ -16,6 +16,8 @@ use App\Models\ChannelFailover;
 use App\Models\CustomPlaylist;
 use App\Models\Group;
 use App\Models\Playlist;
+use App\Services\LogoCacheService;
+use App\Services\PlaylistService;
 use App\Traits\HasUserFiltering;
 use Exception;
 use Filament\Actions\Action;
@@ -347,7 +349,9 @@ class ChannelResource extends Resource
             TextColumn::make('url')
                 ->label('Default URL')
                 ->sortable()
-                ->searchable()
+                ->searchable(query: function (Builder $query, string $search): Builder {
+                    return $query->orWhereRaw('LOWER(channels.url::text) LIKE ?', ['%'.strtolower($search).'%']);
+                })
                 ->toggleable(isToggledHiddenByDefault: true),
 
             TextColumn::make('created_at')
@@ -446,60 +450,8 @@ class ChannelResource extends Resource
     {
         return [
             BulkActionGroup::make([
-                BulkAction::make('add')
-                    ->label('Add to Custom Playlist')
-                    ->schema([
-                        Select::make('playlist')
-                            ->required()
-                            ->live()
-                            ->label('Custom Playlist')
-                            ->helperText('Select the custom playlist you would like to add the selected channel(s) to.')
-                            ->options(CustomPlaylist::where(['user_id' => auth()->id()])->get(['name', 'id'])->pluck('name', 'id'))
-                            ->afterStateUpdated(function (Set $set, $state) {
-                                if ($state) {
-                                    $set('category', null);
-                                }
-                            })
-                            ->searchable(),
-                        Select::make('category')
-                            ->label('Custom Group')
-                            ->disabled(fn (Get $get) => ! $get('playlist'))
-                            ->helperText(fn (Get $get) => ! $get('playlist') ? 'Select a custom playlist first.' : 'Select the group you would like to assign to the selected channel(s) to.')
-                            ->options(function ($get) {
-                                $customList = CustomPlaylist::find($get('playlist'));
-
-                                return $customList ? $customList->groupTags()->get()
-                                    ->mapWithKeys(fn ($tag) => [$tag->getAttributeValue('name') => $tag->getAttributeValue('name')])
-                                    ->toArray() : [];
-                            })
-                            ->searchable(),
-                    ])
-                    ->action(function (Collection $records, array $data): void {
-                        $playlist = CustomPlaylist::findOrFail($data['playlist']);
-                        $playlist->channels()->syncWithoutDetaching($records->pluck('id'));
-                        if ($data['category']) {
-                            $tags = $playlist->groupTags()->get();
-                            $tag = $playlist->groupTags()->where('name->en', $data['category'])->first();
-                            foreach ($records as $record) {
-                                // Need to detach any existing tags from this playlist first
-                                $record->detachTags($tags);
-                                $record->attachTag($tag);
-                            }
-                        }
-                    })->after(function () {
-                        Notification::make()
-                            ->success()
-                            ->title('Channels added to custom playlist')
-                            ->body('The selected channels have been added to the chosen custom playlist.')
-                            ->send();
-                    })
-                    ->hidden(fn () => ! $addToCustom)
-                    ->deselectRecordsAfterCompletion()
-                    ->requiresConfirmation()
-                    ->icon('heroicon-o-play')
-                    ->modalIcon('heroicon-o-play')
-                    ->modalDescription('Add the selected channel(s) to the chosen custom playlist.')
-                    ->modalSubmitActionLabel('Add now'),
+                PlaylistService::getAddToPlaylistBulkAction('add', 'channel')
+                    ->hidden(fn () => ! $addToCustom),
                 BulkAction::make('move')
                     ->label('Move to Group')
                     ->schema([
@@ -579,6 +531,59 @@ class ChannelResource extends Resource
                     ->modalIcon('heroicon-o-photo')
                     ->modalDescription('Update the preferred icon for the selected channel(s).')
                     ->modalSubmitActionLabel('Update now'),
+                BulkAction::make('set_logo_override_url')
+                    ->label('Set logo override URL')
+                    ->schema([
+                        TextInput::make('logo')
+                            ->label('Logo override URL')
+                            ->url()
+                            ->nullable()
+                            ->helperText('Leave empty to remove the custom logo and use provider/EPG logo.'),
+                    ])
+                    ->action(function (Collection $records, array $data): void {
+                        Channel::whereIn('id', $records->pluck('id')->toArray())
+                            ->update([
+                                'logo' => empty($data['logo']) ? null : $data['logo'],
+                            ]);
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title('Logo override updated')
+                            ->body('The logo override URL has been updated for the selected channels.')
+                            ->send();
+                    })
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-link')
+                    ->modalIcon('heroicon-o-link')
+                    ->modalDescription('Apply a single logo override URL to all selected channels. Leave empty to remove overrides.')
+                    ->modalSubmitActionLabel('Apply URL'),
+                BulkAction::make('refresh_logo_cache')
+                    ->label('Refresh logo cache (selected)')
+                    ->action(function (Collection $records): void {
+                        $urls = [];
+
+                        foreach ($records as $record) {
+                            $urls[] = $record->logo;
+                            $urls[] = $record->logo_internal;
+                            $urls[] = $record->epgChannel?->icon_custom;
+                            $urls[] = $record->epgChannel?->icon;
+                        }
+
+                        $cleared = LogoCacheService::clearByUrls($urls);
+
+                        Notification::make()
+                            ->success()
+                            ->title('Selected logo cache refreshed')
+                            ->body("Removed {$cleared} cache file(s) for selected channels.")
+                            ->send();
+                    })
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-arrow-path')
+                    ->modalIcon('heroicon-o-arrow-path')
+                    ->modalDescription('Clear cached logos for selected channels so they are fetched again on the next request.')
+                    ->modalSubmitActionLabel('Refresh selected cache'),
                 BulkAction::make('failover')
                     ->label('Add as failover')
                     ->schema(function (Collection $records) {

@@ -7,7 +7,10 @@
 
 @import "./components/tables.scss";
 @import "./components/widgets.css";
+@import "./components/logs.css";
 @import "./components/footer.css";
+
+@plugin '@tailwindcss/typography';
 
 @source '../../app/Filament';
 @source '../../resources/views/filament';

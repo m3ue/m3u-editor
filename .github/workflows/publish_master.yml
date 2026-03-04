@@ -90,7 +90,7 @@ jobs:
           tags: ${{ steps.meta-amd64.outputs.tags }}
           labels: ${{ steps.meta-amd64.outputs.labels }}
           build-args: |
-            GIT_BRANCH=${{ github.ref_name }}
+            GIT_BRANCH=master
             GIT_COMMIT=${{ github.sha }}
             GIT_TAG=${{ github.ref_type == 'tag' && github.ref_name || '' }}
             M3U_PROXY_REPO=https://github.com/${{ github.repository_owner }}/m3u-proxy.git
@@ -139,7 +139,7 @@ jobs:
           tags: ${{ steps.meta-arm64.outputs.tags }}
           labels: ${{ steps.meta-arm64.outputs.labels }}
           build-args: |
-            GIT_BRANCH=${{ github.ref_name }}
+            GIT_BRANCH=master
             GIT_COMMIT=${{ github.sha }}
             GIT_TAG=${{ github.ref_type == 'tag' && github.ref_name || '' }}
             M3U_PROXY_REPO=https://github.com/${{ github.repository_owner }}/m3u-proxy.git

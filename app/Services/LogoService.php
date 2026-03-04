@@ -16,7 +16,7 @@ class LogoService
     public static function getChannelLogoUrl($channel): string
     {
         if (! $channel) {
-            return url('/placeholder.png');
+            return LogoCacheService::getPlaceholderUrl('logo');
         }
 
         $logoUrl = '';
@@ -45,7 +45,11 @@ class LogoService
 
         // If still empty, return placeholder
         if (empty($logoUrl)) {
-            return url('/placeholder.png');
+            if ($channel->is_vod) {
+                return LogoCacheService::getPlaceholderUrl('poster');
+            } else {
+                return LogoCacheService::getPlaceholderUrl('logo');
+            }
         }
 
         // If it's already a local URL, return as-is
@@ -68,7 +72,7 @@ class LogoService
     public static function getSeriesLogoUrl($series): string
     {
         if (! $series || empty($series->cover)) {
-            return url('/placeholder.png');
+            return LogoCacheService::getPlaceholderUrl('poster');
         }
 
         $logoUrl = $series->cover;
@@ -90,7 +94,7 @@ class LogoService
     public static function getEpisodeLogoUrl($episode): string
     {
         if (! $episode || empty($episode->info)) {
-            return url('/episode-placeholder.png');
+            return LogoCacheService::getPlaceholderUrl('episode');
         }
 
         $logoUrl = $episode->info['movie_image'] ?? $episode->info['cover_big'] ?? '';
@@ -112,7 +116,7 @@ class LogoService
     public static function getEpgChannelLogoUrl($epgChannel): string
     {
         if (! $epgChannel || empty($epgChannel->icon)) {
-            return url('/placeholder.png');
+            return LogoCacheService::getPlaceholderUrl('logo');
         }
 
         $logoUrl = $epgChannel->icon;

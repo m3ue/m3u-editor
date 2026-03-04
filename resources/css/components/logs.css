@@ -1,0 +1,24 @@
+.release-body-content {
+    max-width: 100% !important;
+    overflow-x: hidden !important;
+}
+
+.release-body-content * {
+    max-width: 100% !important;
+}
+
+.release-body-content a,
+.release-body-content code {
+    word-break: break-all !important;
+    overflow-wrap: break-word !important;
+}
+
+.release-body-content table {
+    display: block !important;
+    overflow-x: auto !important;
+}
+
+.release-body-content pre {
+    white-space: pre-wrap !important;
+    word-wrap: break-word !important;
+}

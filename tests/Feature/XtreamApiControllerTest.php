@@ -377,10 +377,10 @@ class XtreamApiControllerTest extends TestCase
      */
     public function test_merge_and_unmerge_channels_jobs()
     {
-        // Create channels with the same stream_id
-        $channel1 = Channel::factory()->create(['playlist_id' => $this->playlist->id, 'stream_id' => '100', 'user_id' => $this->user->id]);
-        $channel2 = Channel::factory()->create(['playlist_id' => $this->playlist->id, 'stream_id' => '100', 'user_id' => $this->user->id]);
-        $channel3 = Channel::factory()->create(['playlist_id' => $this->playlist->id, 'stream_id' => '100', 'user_id' => $this->user->id]);
+        // Create channels with the same stream_id (explicit sort order so channel1 is master)
+        $channel1 = Channel::factory()->create(['playlist_id' => $this->playlist->id, 'stream_id' => '100', 'user_id' => $this->user->id, 'sort' => 1.0]);
+        $channel2 = Channel::factory()->create(['playlist_id' => $this->playlist->id, 'stream_id' => '100', 'user_id' => $this->user->id, 'sort' => 2.0]);
+        $channel3 = Channel::factory()->create(['playlist_id' => $this->playlist->id, 'stream_id' => '100', 'user_id' => $this->user->id, 'sort' => 3.0]);
 
         // Run the merge job with required arguments: user, playlists (as collection with playlist_failover_id), playlistId
         $playlists = collect([['playlist_failover_id' => $this->playlist->id]]);

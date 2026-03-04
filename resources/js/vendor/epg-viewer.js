@@ -483,6 +483,24 @@ function epgViewer(config) {
             const leftPos = startHours * pixelsPerHour;
             const width = Math.max(durationHours * pixelsPerHour, minWidth);
 
+            // Debug logging for programme positioning
+            if (programme.title && programme.title.toLowerCase().includes('deadpool')) {
+                console.log('EPG Programme Debug:', {
+                    title: programme.title,
+                    rawStart: programme.start,
+                    rawStop: programme.stop,
+                    parsedStart: start.toISOString(),
+                    parsedStop: stop.toISOString(),
+                    dayStart: dayStart.toISOString(),
+                    clippedStart: clippedStart.toISOString(),
+                    clippedStop: clippedStop.toISOString(),
+                    startHours: startHours,
+                    durationHours: durationHours,
+                    leftPos: leftPos,
+                    width: width
+                });
+            }
+
             return `left: ${leftPos}px; width: ${width}px;`;
         },
 

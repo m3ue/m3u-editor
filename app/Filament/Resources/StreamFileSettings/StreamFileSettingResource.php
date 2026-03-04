@@ -1,0 +1,529 @@
+<?php
+
+namespace App\Filament\Resources\StreamFileSettings;
+
+use App\Models\MediaServerIntegration;
+use App\Models\StreamFileSetting;
+use App\Rules\CheckIfUrlOrLocalPath;
+use App\Services\PlaylistService;
+use App\Traits\HasUserFiltering;
+use Filament\Actions;
+use Filament\Forms;
+use Filament\Forms\Components\Select;
+use Filament\Forms\Components\Textarea;
+use Filament\Forms\Components\TextInput;
+use Filament\Forms\Components\Toggle;
+use Filament\Forms\Components\ToggleButtons;
+use Filament\Resources\Resource;
+use Filament\Schemas\Components\Fieldset;
+use Filament\Schemas\Components\Utilities\Get;
+use Filament\Schemas\Components\Utilities\Set;
+use Filament\Schemas\Schema;
+use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Columns\ToggleColumn;
+use Filament\Tables\Enums\RecordActionsPosition;
+use Filament\Tables\Filters\SelectFilter;
+use Filament\Tables\Table;
+
+class StreamFileSettingResource extends Resource
+{
+    use HasUserFiltering;
+
+    protected static ?string $model = StreamFileSetting::class;
+
+    protected static string|\UnitEnum|null $navigationGroup = 'Playlist';
+
+    protected static ?string $navigationLabel = 'Stream File Settings';
+
+    protected static ?string $modelLabel = 'Stream File Setting';
+
+    protected static ?string $pluralModelLabel = 'Stream File Settings';
+
+    /**
+     * Check if the user can access this page.
+     * Only users with the "stream file sync" permission can access this page.
+     */
+    public static function canAccess(): bool
+    {
+        return auth()->check() && auth()->user()->canUseStreamFileSync();
+    }
+
+    public static function getNavigationSort(): ?int
+    {
+        return 6;
+    }
+
+    public static function form(Schema $schema): Schema
+    {
+        return $schema
+            ->components([
+                TextInput::make('name')
+                    ->label('Profile Name')
+                    ->required()
+                    ->maxLength(255)
+                    ->helperText('A descriptive name for this stream file setting profile'),
+
+                Select::make('type')
+                    ->label('Type')
+                    ->options([
+                        'series' => 'Series',
+                        'vod' => 'VOD',
+                    ])
+                    ->required()
+                    ->live()
+                    ->disabledOn('edit')
+                    ->afterStateUpdated(function ($state, callable $set) {
+                        if ($state === 'series') {
+                            $set('path_structure', ['category', 'series', 'season']);
+                            $set('folder_metadata', []);
+                        } else {
+                            $set('path_structure', ['group', 'title']);
+                            $set('folder_metadata', ['year', 'tmdb_id']);
+                        }
+                        $set('filename_metadata', []);
+                    })
+                    ->helperText('Determines which path structure options are available and where this profile can be assigned'),
+
+                Textarea::make('description')
+                    ->label('Description')
+                    ->columnSpanFull()
+                    ->rows(2)
+                    ->maxLength(255)
+                    ->helperText('Optional description of this profile'),
+
+                Toggle::make('enabled')
+                    ->label('Enable .strm file generation')
+                    ->default(true)
+                    ->columnSpanFull()
+                    ->live(),
+
+                TextInput::make('location')
+                    ->label('Sync Location')
+                    ->rules([new CheckIfUrlOrLocalPath(localOnly: true, isDirectory: true)])
+                    ->required()
+                    ->columnSpanFull()
+                    ->helperText(function ($get) {
+                        $type = $get('type');
+
+                        // Map replace_char to actual character
+                        $map = function ($char) {
+                            return match ($char) {
+                                'space' => ' ',
+                                'dash' => '-',
+                                'underscore' => '_',
+                                'period' => '.',
+                                'remove' => '',
+                                default => $char,
+                            };
+                        };
+
+                        if ($type === 'vod') {
+                            $vod = PlaylistService::getVodExample();
+
+                            $path = $get('location') ?? '';
+                            $pathStructure = $get('path_structure') ?? [];
+                            $filenameMetadata = $get('filename_metadata') ?? [];
+                            $folderMetadata = $get('folder_metadata') ?? [];
+                            $tmdbIdFormat = $get('tmdb_id_format') ?? 'square';
+                            $replaceChar = $map($get('replace_char') ?? 'space');
+                            $titleFolderEnabled = in_array('title', $pathStructure);
+
+                            $preview = 'Preview: '.$path;
+
+                            if (in_array('group', $pathStructure)) {
+                                $groupName = $vod->group->name ?? $vod->group ?? 'Uncategorized';
+                                $preview .= '/'.PlaylistService::makeFilesystemSafe($groupName, $replaceChar);
+                            }
+
+                            if ($titleFolderEnabled) {
+                                $titleFolder = PlaylistService::makeFilesystemSafe($vod->title ?? '', $replaceChar);
+
+                                if (in_array('year', $folderMetadata) && ! empty($vod->year) && strpos($titleFolder, "({$vod->year})") === false) {
+                                    $titleFolder .= " ({$vod->year})";
+                                }
+
+                                if (in_array('tmdb_id', $folderMetadata)) {
+                                    $tmdbId = $vod->info['tmdb_id'] ?? $vod->info['tmdb'] ?? $vod->movie_data['tmdb_id'] ?? $vod->movie_data['tmdb'] ?? null;
+                                    $imdbId = $vod->info['imdb_id'] ?? $vod->info['imdb'] ?? $vod->movie_data['imdb_id'] ?? $vod->movie_data['imdb'] ?? null;
+                                    $bracket = $tmdbIdFormat === 'curly' ? ['{', '}'] : ['[', ']'];
+                                    if (! empty($tmdbId)) {
+                                        $titleFolder .= " {$bracket[0]}tmdb-{$tmdbId}{$bracket[1]}";
+                                    } elseif (! empty($imdbId)) {
+                                        $titleFolder .= " {$bracket[0]}imdb-{$imdbId}{$bracket[1]}";
+                                    }
+                                }
+
+                                $preview .= '/'.$titleFolder;
+                            }
+
+                            $filename = PlaylistService::makeFilesystemSafe($vod->title ?? '', $replaceChar);
+
+                            if (in_array('year', $filenameMetadata) && ! empty($vod->year)) {
+                                if (strpos($filename, "({$vod->year})") === false) {
+                                    $filename .= " ({$vod->year})";
+                                }
+                            }
+
+                            $tmdbId = $vod->info['tmdb_id'] ?? $vod->info['tmdb'] ?? $vod->movie_data['tmdb_id'] ?? $vod->movie_data['tmdb'] ?? null;
+                            $imdbId = $vod->info['imdb_id'] ?? $vod->info['imdb'] ?? $vod->movie_data['imdb_id'] ?? $vod->movie_data['imdb'] ?? null;
+                            if (in_array('tmdb_id', $filenameMetadata)) {
+                                $bracket = $tmdbIdFormat === 'curly' ? ['{', '}'] : ['[', ']'];
+                                if (! empty($tmdbId)) {
+                                    $filename .= " {$bracket[0]}tmdb-{$tmdbId}{$bracket[1]}";
+                                } elseif (! empty($imdbId)) {
+                                    $filename .= " {$bracket[0]}imdb-{$imdbId}{$bracket[1]}";
+                                }
+                            }
+
+                            if (in_array('group', $filenameMetadata)) {
+                                $groupName = $vod->group->name ?? $vod->group ?? 'Uncategorized';
+                                $groupName = PlaylistService::makeFilesystemSafe($groupName, $replaceChar);
+                                $filename .= " - {$groupName}";
+                            }
+
+                            $preview .= '/'.$filename.'.strm';
+
+                            return $preview;
+                        }
+
+                        // Default to series preview
+                        $series = PlaylistService::getEpisodeExample();
+
+                        $path = $get('location') ?? '';
+                        $pathStructure = $get('path_structure') ?? [];
+                        $filenameMetadata = $get('filename_metadata') ?? [];
+                        $tmdbIdFormat = $get('tmdb_id_format') ?? 'square';
+                        $tmdbIdApplyTo = $get('tmdb_id_apply_to') ?? 'episodes';
+                        $replaceChar = $map($get('replace_char') ?? 'space');
+
+                        $preview = 'Preview: '.$path;
+
+                        if (in_array('category', $pathStructure)) {
+                            $preview .= '/'.($series->category ?? 'Uncategorized');
+                        }
+                        if (in_array('series', $pathStructure)) {
+                            $seriesFolder = $series->series->metadata['name'] ?? $series->series->name ?? 'Series';
+
+                            if (! empty($series->series->release_date ?? null)) {
+                                $year = substr($series->series->release_date, 0, 4);
+                                if (strpos($seriesFolder, "({$year})") === false) {
+                                    $seriesFolder .= " ({$year})";
+                                }
+                            }
+
+                            $tvdbId = $series->series->tvdb_id ?? $series->series->metadata['tvdb_id'] ?? $series->series->metadata['tvdb'] ?? null;
+                            $tmdbId = $series->series->tmdb_id ?? $series->series->metadata['tmdb_id'] ?? $series->series->metadata['tmdb'] ?? null;
+                            $imdbId = $series->series->imdb_id ?? $series->series->metadata['imdb_id'] ?? $series->series->metadata['imdb'] ?? null;
+                            $tmdbEnabled = in_array('tmdb_id', $filenameMetadata, true);
+                            $applyTmdbToSeriesFolder = $tmdbEnabled && in_array($tmdbIdApplyTo, ['series', 'both'], true);
+                            $bracket = $tmdbIdFormat === 'curly' ? ['{', '}'] : ['[', ']'];
+
+                            if ($applyTmdbToSeriesFolder) {
+                                if (! empty($tmdbId)) {
+                                    $seriesFolder .= " {$bracket[0]}tmdb-{$tmdbId}{$bracket[1]}";
+                                } elseif (! empty($tvdbId)) {
+                                    $seriesFolder .= " {$bracket[0]}tvdb-{$tvdbId}{$bracket[1]}";
+                                } elseif (! empty($imdbId)) {
+                                    $seriesFolder .= " {$bracket[0]}imdb-{$imdbId}{$bracket[1]}";
+                                }
+                            } elseif (! empty($tvdbId)) {
+                                $seriesFolder .= " {$bracket[0]}tvdb-{$tvdbId}{$bracket[1]}";
+                            } elseif (! empty($imdbId)) {
+                                $seriesFolder .= " {$bracket[0]}imdb-{$imdbId}{$bracket[1]}";
+                            }
+
+                            $preview .= '/'.$seriesFolder;
+                        }
+                        if (in_array('season', $pathStructure)) {
+                            $preview .= '/Season '.str_pad($series->info->season ?? 0, 2, '0', STR_PAD_LEFT);
+                        }
+
+                        $season = str_pad($series->info->season ?? 0, 2, '0', STR_PAD_LEFT);
+                        $episode = str_pad($series->episode_num ?? 0, 2, '0', STR_PAD_LEFT);
+                        $filename = PlaylistService::makeFilesystemSafe("S{$season}E{$episode} - ".($series->title ?? ''), $replaceChar);
+
+                        if (in_array('year', $filenameMetadata) && ! empty($series->series->release_date ?? null)) {
+                            $year = substr($series->series->release_date, 0, 4);
+                            $filename .= " ({$year})";
+                        }
+                        $tmdbEnabled = in_array('tmdb_id', $filenameMetadata, true);
+                        $applyTmdbToEpisodes = $tmdbEnabled && in_array($tmdbIdApplyTo, ['episodes', 'both'], true);
+                        if ($applyTmdbToEpisodes && ! empty($series->info->tmdb_id ?? null)) {
+                            $bracket = $tmdbIdFormat === 'curly' ? ['{', '}'] : ['[', ']'];
+                            $filename .= " {$bracket[0]}tmdb-{$series->info->tmdb_id}{$bracket[1]}";
+                        }
+
+                        if (in_array('category', $filenameMetadata)) {
+                            $catName = $series->category ?? 'Uncategorized';
+                            $catName = PlaylistService::makeFilesystemSafe($catName, $replaceChar);
+                            $filename .= " - {$catName}";
+                        }
+
+                        $preview .= '/'.$filename.'.strm';
+
+                        return $preview;
+                    })
+                    ->hidden(fn ($get) => ! $get('enabled'))
+                    ->placeholder(fn ($get) => $get('type') === 'series' ? '/Series' : '/Movies'),
+
+                ToggleButtons::make('path_structure')
+                    ->label('Path structure (folders)')
+                    ->live()
+                    ->multiple()
+                    ->grouped()
+                    ->options(fn ($get) => $get('type') === 'series'
+                        ? ['category' => 'Category', 'series' => 'Series', 'season' => 'Season']
+                        : ['group' => 'Group', 'title' => 'Title']
+                    )
+                    ->default(fn ($get) => $get('type') === 'series'
+                        ? ['category', 'series', 'season']
+                        : ['group', 'title']
+                    )
+                    ->afterStateUpdated(function ($state, Set $set, Get $get): void {
+                        if ($get('type') !== 'vod') {
+                            return;
+                        }
+                        if (in_array('title', $state ?? [])) {
+                            if (empty($get('folder_metadata'))) {
+                                $set('folder_metadata', ['year', 'tmdb_id']);
+                            }
+                        } else {
+                            $set('folder_metadata', []);
+                        }
+                    })
+                    ->hidden(fn ($get) => ! $get('enabled')),
+
+                Fieldset::make('Include Metadata')
+                    ->columnSpanFull()
+                    ->columns(2)
+                    ->schema([
+                        ToggleButtons::make('folder_metadata')
+                            ->label('Title folder metadata')
+                            ->helperText('Added to the title folder name')
+                            ->live()
+                            ->inline()
+                            ->multiple()
+                            ->options(['year' => 'Year', 'tmdb_id' => 'TMDB ID'])
+                            ->default(['year', 'tmdb_id'])
+                            ->visible(fn (Get $get): bool => $get('type') === 'vod' && in_array('title', $get('path_structure') ?? [])),
+                        ToggleButtons::make('filename_metadata')
+                            ->label('Filename metadata')
+                            ->live()
+                            ->inline()
+                            ->multiple()
+                            ->options(fn (Get $get): array => match (true) {
+                                $get('type') === 'series' => [
+                                    'year' => 'Year',
+                                    'tmdb_id' => 'TMDB ID',
+                                    'category' => 'Category',
+                                ],
+                                $get('type') === 'vod' && in_array('title', $get('path_structure') ?? []) => [
+                                    'year' => 'Year',
+                                    'group' => 'Group',
+                                ],
+                                default => [
+                                    'year' => 'Year',
+                                    'tmdb_id' => 'TMDB ID',
+                                    'group' => 'Group',
+                                ],
+                            }),
+                        ToggleButtons::make('tmdb_id_format')
+                            ->label('TMDB ID format')
+                            ->inline()
+                            ->grouped()
+                            ->live()
+                            ->options([
+                                'square' => '[square]',
+                                'curly' => '{curly}',
+                            ])
+                            ->default('square')
+                            ->hidden(fn (Get $get): bool => ! in_array('tmdb_id', $get('filename_metadata') ?? [])
+                                && ! in_array('tmdb_id', $get('folder_metadata') ?? [])),
+                        ToggleButtons::make('tmdb_id_apply_to')
+                            ->label('Apply TMDB ID to')
+                            ->inline()
+                            ->grouped()
+                            ->live()
+                            ->options([
+                                'episodes' => 'Episodes',
+                                'series' => 'Series folder',
+                                'both' => 'Both',
+                            ])
+                            ->default('episodes')
+                            ->helperText('How should the TMDB ID be used.')
+                            ->hidden(fn (Get $get): bool => $get('type') !== 'series' || ! in_array('tmdb_id', $get('filename_metadata') ?? [])),
+                    ])
+                    ->hidden(fn ($get) => ! $get('enabled')),
+
+                Fieldset::make('Filename Cleansing')
+                    ->columnSpanFull()
+                    ->schema([
+                        Toggle::make('clean_special_chars')
+                            ->label('Clean special characters')
+                            ->helperText('Remove or replace special characters in filenames')
+                            ->default(true)
+                            ->inline(false),
+                        Toggle::make('remove_consecutive_chars')
+                            ->label('Remove consecutive replacement characters')
+                            ->default(true)
+                            ->inline(false),
+                        ToggleButtons::make('replace_char')
+                            ->label('Replace with')
+                            ->live()
+                            ->inline()
+                            ->grouped()
+                            ->columnSpanFull()
+                            ->options([
+                                'space' => 'Space',
+                                'dash' => '-',
+                                'underscore' => '_',
+                                'period' => '.',
+                                'remove' => 'Remove',
+                            ])
+                            ->default('space'),
+                    ])
+                    ->hidden(fn ($get) => ! $get('enabled')),
+
+                Fieldset::make('Name Filtering')
+                    ->columnSpanFull()
+                    ->schema([
+                        Toggle::make('name_filter_enabled')
+                            ->label('Enable name filtering')
+                            ->helperText('Remove specific words or symbols from folder and file names')
+                            ->inline(false)
+                            ->live(),
+                        Forms\Components\TagsInput::make('name_filter_patterns')
+                            ->label('Patterns to remove')
+                            ->placeholder('Add pattern (e.g. "DE • " or "EN |")')
+                            ->helperText('Enter words, symbols or prefixes to remove. Press Enter after each pattern.')
+                            ->columnSpanFull()
+                            ->hidden(fn ($get) => ! $get('name_filter_enabled')),
+                    ])
+                    ->hidden(fn ($get) => ! $get('enabled')),
+
+                Fieldset::make('NFO File Generation')
+                    ->columnSpanFull()
+                    ->schema([
+                        Toggle::make('generate_nfo')
+                            ->label('Generate NFO files')
+                            ->helperText(fn ($get) => $get('type') === 'series'
+                                ? 'Create tvshow.nfo and episode.nfo files for Kodi, Emby, and Jellyfin compatibility'
+                                : 'Create movie.nfo files for Kodi, Emby, and Jellyfin compatibility'
+                            )
+                            ->inline(false),
+                    ])
+                    ->hidden(fn ($get) => ! $get('enabled')),
+
+                Fieldset::make('Media Server Library Refresh')
+                    ->columnSpanFull()
+                    ->schema([
+                        Toggle::make('refresh_media_server')
+                            ->label('Refresh media server library after sync')
+                            ->helperText('Automatically trigger a library scan on your media server after .strm files are synced')
+                            ->inline(false)
+                            ->live(),
+                        Select::make('media_server_integration_id')
+                            ->label('Media Server')
+                            ->options(fn () => MediaServerIntegration::query()
+                                ->where('user_id', auth()->id())
+                                ->whereIn('type', ['jellyfin', 'emby', 'plex'])
+                                ->pluck('name', 'id')
+                            )
+                            ->searchable()
+                            ->required()
+                            ->helperText('Select which media server to refresh (Jellyfin, Emby, or Plex)')
+                            ->hidden(fn ($get) => ! $get('refresh_media_server')),
+                        TextInput::make('refresh_delay_seconds')
+                            ->label('Delay before refresh (seconds)')
+                            ->numeric()
+                            ->default(5)
+                            ->minValue(0)
+                            ->maxValue(300)
+                            ->helperText('Wait this many seconds after sync completes before triggering the library refresh')
+                            ->hidden(fn ($get) => ! $get('refresh_media_server')),
+                    ])
+                    ->hidden(fn ($get) => ! $get('enabled')),
+            ]);
+    }
+
+    public static function table(Table $table): Table
+    {
+        return $table
+            ->persistSortInSession()
+            ->filtersTriggerAction(function ($action) {
+                return $action->button()->label('Filters');
+            })
+            ->modifyQueryUsing(function ($query) {
+                $query->withCount(['series', 'channels', 'groups', 'categories']);
+            })
+            ->columns([
+                TextColumn::make('name')
+                    ->label('Name')
+                    ->sortable()
+                    ->searchable(),
+                TextColumn::make('type')
+                    ->label('Type')
+                    ->badge()
+                    ->colors([
+                        'primary' => 'series',
+                        'success' => 'vod',
+                    ])
+                    ->sortable(),
+                TextColumn::make('location')
+                    ->label('Location')
+                    ->limit(30)
+                    ->toggleable(),
+                ToggleColumn::make('enabled')
+                    ->label('Enabled'),
+                TextColumn::make('series_count')
+                    ->label('Series')
+                    ->counts('series')
+                    ->toggleable(),
+                TextColumn::make('channels_count')
+                    ->label('VOD')
+                    ->counts('channels')
+                    ->toggleable(),
+                TextColumn::make('groups_count')
+                    ->label('Groups')
+                    ->counts('groups')
+                    ->toggleable(),
+                TextColumn::make('categories_count')
+                    ->label('Categories')
+                    ->counts('categories')
+                    ->toggleable(),
+            ])
+            ->filters([
+                SelectFilter::make('type')
+                    ->options([
+                        'series' => 'Series',
+                        'vod' => 'VOD',
+                    ]),
+            ])
+            ->recordActions([
+                Actions\DeleteAction::make()
+                    ->button()->hiddenLabel()->size('sm'),
+                Actions\EditAction::make()
+                    ->slideOver()
+                    ->button()->hiddenLabel()->size('sm'),
+            ], position: RecordActionsPosition::BeforeCells)
+            ->toolbarActions([
+                Actions\BulkActionGroup::make([
+                    Actions\DeleteBulkAction::make(),
+                ]),
+            ]);
+    }
+
+    public static function getRelations(): array
+    {
+        return [
+            //
+        ];
+    }
+
+    public static function getPages(): array
+    {
+        return [
+            'index' => Pages\ListStreamFileSettings::route('/'),
+        ];
+    }
+}

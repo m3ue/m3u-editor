@@ -7,3 +7,27 @@
         z-index: 9999 !important;
     }
 }
+
+.modal-action-group {
+    .fi-sc-action {
+        .fi-ac-btn-action {
+            width: 100% !important;
+        }
+    }
+}
+
+/* Gradient backgrounds for dark mode */
+.dark {
+
+    & .fi-wi-widget:not(.fi-wi-stats-overview):not(.fi-wi-chart):not(.fi-wi-table) .fi-section,
+    & .fi-wi-stats-overview-stat,
+    & .fi-wi-widget.fi-wi-chart .fi-section,
+    & .fi-wi-widget.fi-wi-table .fi-ta-ctn,
+    & .fi-tenant-menu,
+    & .fi-dropdown-panel {
+        background:
+            linear-gradient(#121216, #18181b);
+        background-clip: padding-box, border-box;
+        background-origin: border-box;
+    }
+}

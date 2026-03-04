@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Support\Collection as SupportCollection;
@@ -40,6 +41,7 @@ class Epg extends Model
         'sd_days_to_import' => 'integer',
         'sd_metadata' => 'array',
         'sd_debug' => 'boolean',
+        'is_merged' => 'boolean',
     ];
 
     /**
@@ -116,6 +118,11 @@ class Epg extends Model
         return ! empty($this->sd_lineup_id);
     }
 
+    public function isMerged(): bool
+    {
+        return (bool) $this->is_merged;
+    }
+
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
@@ -129,6 +136,17 @@ class Epg extends Model
     public function epgMaps(): HasMany
     {
         return $this->hasMany(EpgMap::class);
+    }
+
+    public function sourceEpgs(): BelongsToMany
+    {
+        return $this->belongsToMany(self::class, 'merged_epg_epg', 'merged_epg_id', 'epg_id')
+            ->withPivot('sort_order');
+    }
+
+    public function mergedByEpgs(): BelongsToMany
+    {
+        return $this->belongsToMany(self::class, 'merged_epg_epg', 'epg_id', 'merged_epg_id');
     }
 
     /**

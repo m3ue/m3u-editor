@@ -2,14 +2,20 @@
 
 namespace App\Jobs;
 
+use App\Models\Category;
 use App\Models\Channel;
+use App\Models\Group;
 use App\Models\Series;
 use App\Models\User;
 use App\Services\TmdbService;
 use Filament\Notifications\Notification;
+use Illuminate\Bus\Batch;
+use Illuminate\Bus\Batchable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -18,11 +24,17 @@ use Illuminate\Support\Facades\Log;
  */
 class FetchTmdbIds implements ShouldQueue
 {
-    use Queueable;
+    use Batchable, Queueable;
+
+    public const BATCH_CHUNK_SIZE = 100;
+
+    protected const BATCH_STATS_TTL_HOURS = 6;
+
+    public int $batchChunkSize = self::BATCH_CHUNK_SIZE;
 
     public $tries = 1;
 
-    public $timeout = 60 * 30; // 30 minutes max for batch processing
+    public $timeout = 60 * 15; // 15 minutes per chunk
 
     protected int $foundCount = 0;
 
@@ -53,6 +65,8 @@ class FetchTmdbIds implements ShouldQueue
         public bool $allSeriesPlaylists = false,
         public bool $overwriteExisting = false,
         public ?User $user = null,
+        public bool $isChunkJob = false,
+        public bool $sendCompletionNotification = true,
     ) {
         // Legacy support: convert Collections to arrays
         if ($this->vodChannelIds instanceof Collection) {
@@ -68,9 +82,24 @@ class FetchTmdbIds implements ShouldQueue
      */
     public function handle(TmdbService $tmdb): void
     {
+        Log::info('FetchTmdbIds: Starting job', [
+            'vodPlaylistId' => $this->vodPlaylistId,
+            'seriesPlaylistId' => $this->seriesPlaylistId,
+            'allVodPlaylists' => $this->allVodPlaylists,
+            'allSeriesPlaylists' => $this->allSeriesPlaylists,
+            'user_id' => $this->user?->id,
+            'overwriteExisting' => $this->overwriteExisting,
+        ]);
+
         if (! $tmdb->isConfigured()) {
             Log::warning('FetchTmdbIds: TMDB API key not configured');
             $this->notifyUser('TMDB Lookup Failed', 'TMDB API key is not configured. Please add your API key in Settings.', 'danger');
+
+            return;
+        }
+
+        if (! $this->isChunkJob && $this->shouldRunAsBatchedChunks()) {
+            $this->dispatchBatchedChunks();
 
             return;
         }
@@ -85,14 +114,167 @@ class FetchTmdbIds implements ShouldQueue
             $this->processSeries($tmdb);
         }
 
+        if ($this->isChunkJob) {
+            $this->recordBatchStats();
+        }
+
         // Send completion notification
-        $this->sendCompletionNotification();
+        if ($this->sendCompletionNotification) {
+            $this->sendCompletionNotification();
+        }
     }
 
     /**
-     * Process VOD channels to fetch TMDB IDs.
+     * Determine whether this run should be split into multiple chunk jobs.
      */
-    protected function processVodChannels(TmdbService $tmdb): void
+    protected function shouldRunAsBatchedChunks(): bool
+    {
+        return $this->getTargetCount() > $this->batchChunkSize;
+    }
+
+    /**
+     * Dispatch child chunk jobs in a Laravel batch to avoid long-running single jobs.
+     */
+    protected function dispatchBatchedChunks(): void
+    {
+        $jobs = collect();
+
+        $this->queueVodChunkJobs($jobs);
+        $this->queueSeriesChunkJobs($jobs);
+
+        if ($jobs->isEmpty()) {
+            if ($this->sendCompletionNotification) {
+                $this->sendCompletionNotification();
+            }
+
+            return;
+        }
+
+        $chunkCount = $jobs->count();
+        $userId = $this->user?->id;
+
+        Bus::batch($jobs->all())
+            ->onConnection('redis') // force to use redis connection
+            ->onQueue('import')
+            ->allowFailures()
+            ->finally(function (Batch $batch) use ($userId): void {
+                if (! $userId) {
+                    return;
+                }
+
+                $user = User::find($userId);
+
+                if (! $user) {
+                    return;
+                }
+
+                $stats = self::readBatchStats($batch->id);
+                $failedJobs = $batch->failedJobs;
+                $total = $stats['found'] + $stats['not_found'] + $stats['skipped'] + $stats['errors'];
+
+                $body = sprintf(
+                    'Found: %d | Not found: %d | Skipped (already had IDs): %d | Errors: %d',
+                    $stats['found'],
+                    $stats['not_found'],
+                    $stats['skipped'],
+                    $stats['errors']
+                );
+
+                if ($failedJobs > 0) {
+                    $body .= " | Failed chunks: {$failedJobs}";
+                }
+
+                $notification = Notification::make()
+                    ->title("TMDB ID Lookup Complete ({$total} processed)")
+                    ->body($body);
+
+                if ($failedJobs > 0 || $stats['errors'] > 0) {
+                    $notification->warning();
+                } else {
+                    $notification->success();
+                }
+
+                $notification
+                    ->broadcast($user)
+                    ->sendToDatabase($user);
+
+                self::clearBatchStats($batch->id);
+            })
+            ->dispatch();
+
+        $this->notifyUser(
+            'TMDB ID Lookup Started',
+            "Large lookup split into {$chunkCount} jobs and queued for processing. You will receive a notification when the batch is complete.",
+            'info'
+        );
+    }
+
+    /**
+     * Queue chunk jobs for VOD channels.
+     */
+    protected function queueVodChunkJobs(Collection $jobs): void
+    {
+        $query = $this->buildVodQuery();
+
+        if (! $query) {
+            return;
+        }
+
+        $query->select('id')
+            ->orderBy('id')
+            ->chunkById($this->batchChunkSize, function (Collection $channels) use ($jobs): void {
+                $ids = $channels->pluck('id')->all();
+
+                if (empty($ids)) {
+                    return;
+                }
+
+                $jobs->push(new self(
+                    vodChannelIds: $ids,
+                    seriesIds: null,
+                    overwriteExisting: $this->overwriteExisting,
+                    user: $this->user,
+                    isChunkJob: true,
+                    sendCompletionNotification: false,
+                ));
+            });
+    }
+
+    /**
+     * Queue chunk jobs for series.
+     */
+    protected function queueSeriesChunkJobs(Collection $jobs): void
+    {
+        $query = $this->buildSeriesQuery();
+
+        if (! $query) {
+            return;
+        }
+
+        $query->select('id')
+            ->orderBy('id')
+            ->chunkById($this->batchChunkSize, function (Collection $seriesChunk) use ($jobs): void {
+                $ids = $seriesChunk->pluck('id')->all();
+
+                if (empty($ids)) {
+                    return;
+                }
+
+                $jobs->push(new self(
+                    vodChannelIds: null,
+                    seriesIds: $ids,
+                    overwriteExisting: $this->overwriteExisting,
+                    user: $this->user,
+                    isChunkJob: true,
+                    sendCompletionNotification: false,
+                ));
+            });
+    }
+
+    /**
+     * Build filtered VOD query based on job arguments.
+     */
+    protected function buildVodQuery()
     {
         $query = Channel::where('is_vod', true);
 
@@ -110,11 +292,82 @@ class FetchTmdbIds implements ShouldQueue
             $query->whereIn('id', $this->vodChannelIds)
                 ->where('user_id', $this->user?->id);
         } else {
-            return; // No criteria specified
+            return null; // No criteria specified
         }
+
+        return $query;
+    }
+
+    /**
+     * Build filtered series query based on job arguments.
+     */
+    protected function buildSeriesQuery()
+    {
+        $query = Series::query();
+
+        // Use playlist-based filtering if provided
+        if ($this->seriesPlaylistId) {
+            $query->where('playlist_id', $this->seriesPlaylistId)
+                ->where('user_id', $this->user?->id)
+                ->where('enabled', true);
+        } elseif ($this->allSeriesPlaylists && $this->user) {
+            $query->where('user_id', $this->user->id)
+                ->where('enabled', true);
+        } elseif (! empty($this->seriesIds)) {
+            // Legacy: direct ID array support
+            $query->whereIn('id', $this->seriesIds)
+                ->where('user_id', $this->user?->id);
+        } else {
+            return null; // No criteria specified
+        }
+
+        return $query;
+    }
+
+    /**
+     * Get count of records targeted by this lookup request.
+     */
+    protected function getTargetCount(): int
+    {
+        $count = 0;
+
+        $vodQuery = $this->buildVodQuery();
+        if ($vodQuery) {
+            $count += (clone $vodQuery)->count();
+        }
+
+        $seriesQuery = $this->buildSeriesQuery();
+        if ($seriesQuery) {
+            $count += (clone $seriesQuery)->count();
+        }
+
+        return $count;
+    }
+
+    /**
+     * Process VOD channels to fetch TMDB IDs.
+     */
+    protected function processVodChannels(TmdbService $tmdb): void
+    {
+        $query = $this->buildVodQuery();
+
+        if (! $query) {
+            return;
+        }
+
+        $count = $query->count();
+        Log::info('FetchTmdbIds: Processing VOD channels', [
+            'playlist_id' => $this->vodPlaylistId,
+            'user_id' => $this->user?->id,
+            'count' => $count,
+        ]);
 
         // Use cursor for memory-efficient iteration
         foreach ($query->cursor() as $channel) {
+            if (! $channel instanceof Channel) {
+                continue;
+            }
+
             try {
                 $this->processVodChannel($tmdb, $channel);
             } catch (\Exception $e) {
@@ -132,21 +385,71 @@ class FetchTmdbIds implements ShouldQueue
      */
     protected function processVodChannel(TmdbService $tmdb, Channel $channel): void
     {
-        // Check if already has TMDB ID in the dedicated column
-        if ($channel->tmdb_id && ! $this->overwriteExisting) {
+        $info = $channel->info ?? [];
+        $hasMetadata = ! empty($info['plot']) && ! empty($info['cover_big']);
+
+        // Determine the best existing TMDB ID we have
+        $tmdbId = $channel->tmdb_id
+            ?? $info['tmdb_id']
+            ?? $channel->movie_data['tmdb_id']
+            ?? null;
+
+        // If we have an ID AND metadata, and we're not overwriting, we can skip
+        if ($tmdbId && $hasMetadata && ! $this->overwriteExisting) {
+            // Ensure the ID is migrated to the dedicated column if it was only in legacy fields
+            if (empty($channel->tmdb_id)) {
+                $channel->update(['tmdb_id' => $tmdbId]);
+            }
+
+            // Check if genre/group needs TMDB enrichment (e.g., still set to library folder name)
+            $currentGenre = $info['genre'] ?? $channel->group ?? '';
+            if (! empty($currentGenre) && ! str_contains($currentGenre, ',') && strlen($currentGenre) <= 20) {
+                $details = $tmdb->getMovieDetails((int) $tmdbId);
+                if ($details && ! empty($details['genres'])) {
+                    $tmdbGenres = is_string($details['genres'])
+                        ? array_map('trim', explode(',', $details['genres']))
+                        : (array) $details['genres'];
+
+                    if (! in_array(trim($currentGenre), $tmdbGenres)) {
+                        Log::info('FetchTmdbIds: VOD genre appears to be a library name, updating from TMDB', [
+                            'channel_id' => $channel->id,
+                            'current_genre' => $currentGenre,
+                            'tmdb_genres' => $details['genres'],
+                        ]);
+
+                        $info['genre'] = $details['genres'];
+                        $updateData = ['info' => $info];
+
+                        $primaryGenre = $tmdbGenres[0] ?? null;
+                        if ($primaryGenre) {
+                            $group = Group::firstOrCreate(
+                                [
+                                    'playlist_id' => $channel->playlist_id,
+                                    'name' => $primaryGenre,
+                                ],
+                                [
+                                    'name_internal' => $primaryGenre,
+                                    'user_id' => $channel->user_id,
+                                    'type' => 'vod',
+                                ]
+                            );
+                            $updateData['group'] = $primaryGenre;
+                            $updateData['group_internal'] = $primaryGenre;
+                            $updateData['group_id'] = $group->id;
+                        }
+
+                        $channel->update($updateData);
+                    }
+                }
+            }
+
             $this->skippedCount++;
 
             return;
         }
 
-        // Check legacy info/movie_data fields for existing ID
-        $legacyTmdbId = $channel->info['tmdb_id']
-            ?? $channel->movie_data['tmdb_id']
-            ?? null;
-
-        // If legacy ID exists and we're not overwriting, migrate it to the column and skip
-        if ($legacyTmdbId && ! $this->overwriteExisting) {
-            $channel->update(['tmdb_id' => $legacyTmdbId]);
+        // If previously attempted but no match was found, skip unless overwriting
+        if (! $tmdbId && $channel->last_metadata_fetch && ! $this->overwriteExisting) {
             $this->skippedCount++;
 
             return;
@@ -164,8 +467,21 @@ class FetchTmdbIds implements ShouldQueue
             return;
         }
 
-        // Search TMDB
-        $result = $tmdb->searchMovie($title, $year);
+        // If we already have tmdb_id but missing metadata, use it directly
+        // Otherwise, search TMDB for the movie
+        if ($tmdbId && ! $this->overwriteExisting) {
+            $result = [
+                'tmdb_id' => $tmdbId,
+                'imdb_id' => $channel->imdb_id ?? $info['imdb_id'] ?? null,
+            ];
+            Log::debug('FetchTmdbIds: Using existing TMDB ID to fetch metadata', [
+                'channel_id' => $channel->id,
+                'tmdb_id' => $tmdbId,
+            ]);
+        } else {
+            // Search TMDB
+            $result = $tmdb->searchMovie($title, $year);
+        }
 
         if ($result && isset($result['tmdb_id'])) {
             // Update channel with found IDs - use dedicated columns
@@ -183,7 +499,110 @@ class FetchTmdbIds implements ShouldQueue
             if (! empty($result['imdb_id'])) {
                 $info['imdb_id'] = $result['imdb_id'];
             }
+
+            // Fetch full movie details from TMDB to populate metadata
+            $details = $tmdb->getMovieDetails($result['tmdb_id']);
+            if ($details) {
+                // Populate IMDB ID if missing
+                if (! empty($details['imdb_id']) && empty($updateData['imdb_id'])) {
+                    $updateData['imdb_id'] = $details['imdb_id'];
+                    $info['imdb_id'] = $details['imdb_id'];
+                }
+
+                // Populate cover image if not already set
+                if (! empty($details['poster_url']) && empty($info['cover_big'])) {
+                    $info['cover_big'] = $details['poster_url'];
+                }
+
+                // Populate plot/description if not already set
+                if (! empty($details['overview']) && empty($info['plot'])) {
+                    $info['plot'] = $details['overview'];
+                }
+
+                // Populate genre if not already set (treat 'Uncategorized' and first-fetch as empty)
+                if (! empty($details['genres']) && (empty($info['genre']) || ($info['genre'] ?? '') === 'Uncategorized' || $channel->last_metadata_fetch === null)) {
+                    $info['genre'] = $details['genres'];
+
+                    // Update the channel's group to match the primary TMDB genre
+                    $primaryGenre = is_string($details['genres'])
+                        ? explode(', ', $details['genres'])[0]
+                        : (is_array($details['genres']) ? $details['genres'][0] : null);
+
+                    if ($primaryGenre && ($channel->group === 'Uncategorized' || $channel->group_internal === 'Uncategorized' || $channel->last_metadata_fetch === null)) {
+                        $group = Group::firstOrCreate(
+                            [
+                                'playlist_id' => $channel->playlist_id,
+                                'name' => $primaryGenre,
+                            ],
+                            [
+                                'name_internal' => $primaryGenre,
+                                'user_id' => $channel->user_id,
+                                'type' => 'vod',
+                            ]
+                        );
+                        $updateData['group'] = $primaryGenre;
+                        $updateData['group_internal'] = $primaryGenre;
+                        $updateData['group_id'] = $group->id;
+                    }
+                }
+
+                // Populate release date if not already set
+                if (! empty($details['release_date']) && empty($info['release_date'])) {
+                    $info['release_date'] = $details['release_date'];
+                }
+
+                // Populate year from release date if not already set
+                if (! empty($details['release_date']) && empty($channel->year)) {
+                    $updateData['year'] = substr($details['release_date'], 0, 4);
+                }
+
+                // Populate rating if not already set
+                if (! empty($details['vote_average']) && empty($info['rating'])) {
+                    $info['rating'] = $details['vote_average'];
+                }
+
+                // Populate backdrop path
+                if (! empty($details['backdrop_url'])) {
+                    $info['backdrop_path'] = [$details['backdrop_url']];
+                }
+
+                // Populate cast if available
+                if (! empty($details['cast'])) {
+                    $info['cast'] = is_array($details['cast']) ? implode(', ', $details['cast']) : $details['cast'];
+                }
+
+                // Populate director if available
+                if (! empty($details['director'])) {
+                    $info['director'] = is_array($details['director']) ? implode(', ', $details['director']) : $details['director'];
+                }
+
+                // Populate YouTube trailer if available
+                if (! empty($details['youtube_trailer'])) {
+                    $info['youtube_trailer'] = $details['youtube_trailer'];
+                }
+
+                // Populate duration from TMDB runtime (in minutes)
+                if (! empty($details['runtime']) && (empty($info['duration_secs']) || ($info['duration_secs'] ?? 0) === 0)) {
+                    $runtimeMinutes = (int) $details['runtime'];
+                    $runtimeSeconds = $runtimeMinutes * 60;
+                    $info['duration_secs'] = $runtimeSeconds;
+                    $info['duration'] = gmdate('H:i:s', $runtimeSeconds);
+                    $info['episode_run_time'] = $runtimeMinutes;
+                }
+            }
+
             $updateData['info'] = $info;
+
+            // Update logo/logo_internal from TMDB poster if they're empty
+            if (! empty($info['cover_big']) && empty($channel->logo)) {
+                $updateData['logo'] = $info['cover_big'];
+            }
+            if (! empty($info['cover_big']) && empty($channel->logo_internal)) {
+                $updateData['logo_internal'] = $info['cover_big'];
+            }
+
+            // Set last_metadata_fetch now that we've actually populated metadata
+            $updateData['last_metadata_fetch'] = now();
 
             $channel->update($updateData);
 
@@ -196,6 +615,9 @@ class FetchTmdbIds implements ShouldQueue
 
             $this->foundCount++;
         } else {
+            // Mark as attempted so we don't keep re-processing on every sync cycle
+            $channel->update(['last_metadata_fetch' => now()]);
+
             Log::debug('FetchTmdbIds: No TMDB match found for VOD channel', [
                 'channel_id' => $channel->id,
                 'title' => $title,
@@ -210,26 +632,25 @@ class FetchTmdbIds implements ShouldQueue
      */
     protected function processSeries(TmdbService $tmdb): void
     {
-        $query = Series::query();
+        $query = $this->buildSeriesQuery();
 
-        // Use playlist-based filtering if provided
-        if ($this->seriesPlaylistId) {
-            $query->where('playlist_id', $this->seriesPlaylistId)
-                ->where('user_id', $this->user?->id)
-                ->where('enabled', true);
-        } elseif ($this->allSeriesPlaylists && $this->user) {
-            $query->where('user_id', $this->user->id)
-                ->where('enabled', true);
-        } elseif (! empty($this->seriesIds)) {
-            // Legacy: direct ID array support
-            $query->whereIn('id', $this->seriesIds)
-                ->where('user_id', $this->user?->id);
-        } else {
-            return; // No criteria specified
+        if (! $query) {
+            return;
         }
+
+        $count = $query->count();
+        Log::info('FetchTmdbIds: Processing series', [
+            'playlist_id' => $this->seriesPlaylistId,
+            'user_id' => $this->user?->id,
+            'count' => $count,
+        ]);
 
         // Use cursor for memory-efficient iteration
         foreach ($query->cursor() as $series) {
+            if (! $series instanceof Series) {
+                continue;
+            }
+
             try {
                 $this->processSingleSeries($tmdb, $series);
             } catch (\Exception $e) {
@@ -252,14 +673,83 @@ class FetchTmdbIds implements ShouldQueue
         $existingTvdbId = $series->tvdb_id ?? $series->metadata['tvdb_id'] ?? null;
         $existingTmdbId = $series->tmdb_id ?? $series->metadata['tmdb_id'] ?? null;
 
-        if (($existingTvdbId || $existingTmdbId) && ! $this->overwriteExisting) {
-            Log::debug('FetchTmdbIds: Skipping series (already has IDs)', [
-                'series_id' => $series->id,
-                'name' => $series->name,
-                'existing_tmdb_id' => $existingTmdbId,
-                'existing_tvdb_id' => $existingTvdbId,
-                'overwrite_existing' => $this->overwriteExisting,
-            ]);
+        // Only skip if we have IDs AND the metadata is populated
+        $hasMetadata = ! empty($series->plot) && ! empty($series->cover);
+
+        if (($existingTvdbId || $existingTmdbId) && $hasMetadata && ! $this->overwriteExisting) {
+            $needsEnrichment = false;
+
+            // Check if episodes need TMDB data
+            if ($existingTmdbId && $series->episodes()->whereNull('tmdb_id')->exists()) {
+                Log::info('FetchTmdbIds: Series metadata complete but episodes need enrichment', [
+                    'series_id' => $series->id,
+                    'tmdb_id' => $existingTmdbId,
+                ]);
+                $this->processSeriesEpisodes($tmdb, $series, (int) $existingTmdbId);
+                $needsEnrichment = true;
+            }
+
+            // Check if genre needs TMDB enrichment (e.g., still set to library folder name)
+            // A TMDB-enriched genre typically contains a comma (multiple genres) or matches known TMDB genres.
+            // If the genre is a single short word that doesn't contain a comma, it's likely a library name placeholder.
+            if ($existingTmdbId && ! empty($series->genre) && ! str_contains($series->genre, ',') && strlen($series->genre) <= 20) {
+                // Fetch TMDB details to check if the current genre matches a TMDB genre
+                $details = $tmdb->getTvSeriesDetails((int) $existingTmdbId);
+                if ($details && ! empty($details['genres'])) {
+                    $tmdbGenres = is_string($details['genres'])
+                        ? array_map('trim', explode(',', $details['genres']))
+                        : (array) $details['genres'];
+                    $currentGenreTrimmed = trim($series->genre);
+
+                    // If the current genre is NOT one of the TMDB genres, it's a placeholder — update it
+                    if (! in_array($currentGenreTrimmed, $tmdbGenres)) {
+                        Log::info('FetchTmdbIds: Series genre appears to be a library name, updating from TMDB', [
+                            'series_id' => $series->id,
+                            'current_genre' => $series->genre,
+                            'tmdb_genres' => $details['genres'],
+                        ]);
+
+                        $updateData = ['genre' => $details['genres']];
+
+                        // Update category to match the primary TMDB genre
+                        $primaryGenre = $tmdbGenres[0] ?? null;
+                        if ($primaryGenre) {
+                            $category = Category::firstOrCreate(
+                                [
+                                    'playlist_id' => $series->playlist_id,
+                                    'name' => $primaryGenre,
+                                ],
+                                [
+                                    'name_internal' => $primaryGenre,
+                                    'user_id' => $series->user_id,
+                                ]
+                            );
+                            $updateData['category_id'] = $category->id;
+                            $updateData['source_category_id'] = $category->id;
+                        }
+
+                        $series->update($updateData);
+                        $needsEnrichment = true;
+                    }
+                }
+            }
+
+            if (! $needsEnrichment) {
+                Log::debug('FetchTmdbIds: Skipping series (already has IDs and metadata)', [
+                    'series_id' => $series->id,
+                    'name' => $series->name,
+                    'existing_tmdb_id' => $existingTmdbId,
+                    'existing_tvdb_id' => $existingTvdbId,
+                    'overwrite_existing' => $this->overwriteExisting,
+                ]);
+            }
+            $this->skippedCount++;
+
+            return;
+        }
+
+        // If previously attempted but no match was found, skip unless overwriting
+        if (! $existingTmdbId && ! $existingTvdbId && $series->last_metadata_fetch && ! $this->overwriteExisting) {
             $this->skippedCount++;
 
             return;
@@ -286,21 +776,36 @@ class FetchTmdbIds implements ShouldQueue
             return;
         }
 
-        // Log search attempt
-        Log::info('FetchTmdbIds: Searching TMDB for series', [
-            'series_id' => $series->id,
-            'name' => $name,
-            'year' => $year,
-            'release_date' => $series->release_date,
-        ]);
+        // If we already have tmdb_id but missing metadata, use it directly
+        // Otherwise, search TMDB for the series
+        if ($existingTmdbId) {
+            $result = [
+                'tmdb_id' => $existingTmdbId,
+                'tvdb_id' => $existingTvdbId,
+                'imdb_id' => $series->imdb_id,
+            ];
+            Log::debug('FetchTmdbIds: Using existing TMDB ID to fetch series metadata', [
+                'series_id' => $series->id,
+                'tmdb_id' => $existingTmdbId,
+            ]);
+        } else {
+            // Log search attempt
+            Log::info('FetchTmdbIds: Searching TMDB for series', [
+                'series_id' => $series->id,
+                'name' => $name,
+                'year' => $year,
+                'release_date' => $series->release_date,
+            ]);
 
-        // Search TMDB
-        $result = $tmdb->searchTvSeries($name, $year);
+            // Search TMDB
+            $result = $tmdb->searchTvSeries($name, $year);
+        }
 
         if ($result && isset($result['tmdb_id'])) {
             // Update series with found IDs - use dedicated columns
             $updateData = [
                 'tmdb_id' => $result['tmdb_id'],
+                'last_metadata_fetch' => now(),
             ];
 
             if (! empty($result['tvdb_id'])) {
@@ -321,6 +826,89 @@ class FetchTmdbIds implements ShouldQueue
             }
             $updateData['metadata'] = $metadata;
 
+            // Fetch full series details from TMDB to populate metadata
+            $details = $tmdb->getTvSeriesDetails($result['tmdb_id']);
+            if ($details) {
+                // Populate TVDB/IMDB ID if missing
+                if (! empty($details['tvdb_id']) && empty($updateData['tvdb_id'])) {
+                    $updateData['tvdb_id'] = $details['tvdb_id'];
+                    $metadata['tvdb_id'] = $details['tvdb_id'];
+                }
+                if (! empty($details['imdb_id']) && empty($updateData['imdb_id'])) {
+                    $updateData['imdb_id'] = $details['imdb_id'];
+                    $metadata['imdb_id'] = $details['imdb_id'];
+                }
+                $updateData['metadata'] = $metadata;
+
+                // Populate cover image if not already set
+                if (! empty($details['poster_url']) && empty($series->cover)) {
+                    $updateData['cover'] = $details['poster_url'];
+                }
+
+                // Populate plot/description if not already set
+                if (! empty($details['overview']) && empty($series->plot)) {
+                    $updateData['plot'] = $details['overview'];
+                }
+
+                // Populate genre if not already set (treat 'Uncategorized' and first-fetch as empty)
+                if (! empty($details['genres']) && (empty($series->genre) || ($series->genre ?? '') === 'Uncategorized' || $series->last_metadata_fetch === null)) {
+                    $updateData['genre'] = $details['genres'];
+
+                    // Update the series' category to match the primary TMDB genre
+                    $primaryGenre = is_string($details['genres'])
+                        ? explode(', ', $details['genres'])[0]
+                        : (is_array($details['genres']) ? $details['genres'][0] : null);
+
+                    if ($primaryGenre) {
+                        $currentCategory = $series->category_id ? Category::find($series->category_id) : null;
+                        if (! $currentCategory || $currentCategory->name === 'Uncategorized' || $series->last_metadata_fetch === null) {
+                            $category = Category::firstOrCreate(
+                                [
+                                    'playlist_id' => $series->playlist_id,
+                                    'name' => $primaryGenre,
+                                ],
+                                [
+                                    'name_internal' => $primaryGenre,
+                                    'user_id' => $series->user_id,
+                                ]
+                            );
+                            $updateData['category_id'] = $category->id;
+                            $updateData['source_category_id'] = $category->id;
+                        }
+                    }
+                }
+
+                // Populate release date if not already set
+                if (! empty($details['first_air_date']) && empty($series->release_date)) {
+                    $updateData['release_date'] = $details['first_air_date'];
+                }
+
+                // Populate rating if not already set
+                if (! empty($details['vote_average']) && empty($series->rating)) {
+                    $updateData['rating'] = $details['vote_average'];
+                }
+
+                // Populate backdrop path
+                if (! empty($details['backdrop_url'])) {
+                    $updateData['backdrop_path'] = json_encode([$details['backdrop_url']]);
+                }
+
+                // Populate cast if available
+                if (! empty($details['cast'])) {
+                    $updateData['cast'] = is_array($details['cast']) ? implode(', ', $details['cast']) : $details['cast'];
+                }
+
+                // Populate director if available
+                if (! empty($details['director'])) {
+                    $updateData['director'] = is_array($details['director']) ? implode(', ', $details['director']) : $details['director'];
+                }
+
+                // Populate YouTube trailer if available
+                if (! empty($details['youtube_trailer'])) {
+                    $updateData['youtube_trailer'] = $details['youtube_trailer'];
+                }
+            }
+
             $series->update($updateData);
 
             Log::info('FetchTmdbIds: Successfully found and saved IDs for series', [
@@ -333,8 +921,14 @@ class FetchTmdbIds implements ShouldQueue
                 'matched_name' => $result['name'] ?? null,
             ]);
 
+            // Fetch and populate episode data from TMDB
+            $this->processSeriesEpisodes($tmdb, $series, $result['tmdb_id']);
+
             $this->foundCount++;
         } else {
+            // Mark as attempted so we don't keep re-processing on every sync cycle
+            $series->update(['last_metadata_fetch' => now()]);
+
             Log::warning('FetchTmdbIds: No TMDB match found for series', [
                 'series_id' => $series->id,
                 'name' => $name,
@@ -344,6 +938,166 @@ class FetchTmdbIds implements ShouldQueue
             ]);
             $this->notFoundCount++;
         }
+    }
+
+    /**
+     * Process Series episodes after fetching series TMDB data.
+     */
+    protected function processSeriesEpisodes(TmdbService $tmdb, Series $series, int $tmdbId): void
+    {
+        Log::info('FetchTmdbIds: Fetching episode data for series', [
+            'series_id' => $series->id,
+            'tmdb_id' => $tmdbId,
+        ]);
+
+        // Get all seasons from TMDB
+        $seasons = $tmdb->getAllSeasons($tmdbId);
+
+        if (empty($seasons)) {
+            Log::debug('FetchTmdbIds: No seasons found for series', [
+                'series_id' => $series->id,
+                'tmdb_id' => $tmdbId,
+            ]);
+
+            return;
+        }
+
+        $episodeCount = 0;
+
+        foreach ($seasons as $season) {
+            $seasonNumber = $season['season_number'] ?? 0;
+
+            // Skip specials (season 0) unless explicitly needed
+            if ($seasonNumber === 0) {
+                continue;
+            }
+
+            // Fetch detailed season data with episodes
+            $seasonDetails = $tmdb->getSeasonDetails($tmdbId, $seasonNumber);
+
+            if (! $seasonDetails || empty($seasonDetails['episodes'])) {
+                continue;
+            }
+
+            $seasonRecord = $series->seasons()
+                ->where('season_number', $seasonNumber)
+                ->first();
+
+            if ($seasonRecord && ! empty($seasonDetails['poster_path'])) {
+                $coverUrl = 'https://image.tmdb.org/t/p/w500'.$seasonDetails['poster_path'];
+                $coverBigUrl = 'https://image.tmdb.org/t/p/original'.$seasonDetails['poster_path'];
+
+                $seasonUpdateData = [];
+
+                if (empty($seasonRecord->cover) || $this->overwriteExisting) {
+                    $seasonUpdateData['cover'] = $coverUrl;
+                }
+
+                if (empty($seasonRecord->cover_big) || $this->overwriteExisting) {
+                    $seasonUpdateData['cover_big'] = $coverBigUrl;
+                }
+
+                if (! empty($seasonUpdateData)) {
+                    $seasonRecord->update($seasonUpdateData);
+                }
+            }
+
+            foreach ($seasonDetails['episodes'] as $episodeData) {
+                $episodeNumber = $episodeData['episode_number'] ?? 0;
+
+                // Find matching episode in database
+                $episode = $series->episodes()
+                    ->where('season', $seasonNumber)
+                    ->where('episode_num', $episodeNumber)
+                    ->first();
+
+                if ($episode) {
+                    // Build update data - only update if field is empty or we're overwriting
+                    $updateData = [];
+                    $info = $episode->info ?? [];
+
+                    if (! empty($episodeData['name']) && (empty($episode->title) || $this->overwriteExisting || $episode->title !== $episodeData['name'])) {
+                        $updateData['title'] = $episodeData['name'];
+                    }
+
+                    if (! empty($episodeData['id'])) {
+                        // Set the dedicated tmdb_id column
+                        if (empty($episode->tmdb_id) || $this->overwriteExisting) {
+                            $updateData['tmdb_id'] = $episodeData['id'];
+                        }
+
+                        // Also store in the info array for backward compatibility
+                        if (empty($info['tmdb_id'] ?? null) || $this->overwriteExisting) {
+                            $info['tmdb_id'] = $episodeData['id'];
+                            $updateData['info'] = $info;
+                        }
+                    }
+
+                    if (! empty($episodeData['overview'])) {
+                        // Set the dedicated plot column
+                        if (empty($episode->plot) || $this->overwriteExisting) {
+                            $updateData['plot'] = $episodeData['overview'];
+                        }
+
+                        // Also store in the info array for backward compatibility
+                        if (empty($info['plot'] ?? null) || $this->overwriteExisting) {
+                            $info['plot'] = $episodeData['overview'];
+                            $updateData['info'] = $info;
+                        }
+                    }
+
+                    if (! empty($episodeData['still_path'])) {
+                        // Use original size for better quality
+                        $stillUrl = 'https://image.tmdb.org/t/p/original'.$episodeData['still_path'];
+
+                        // Store in both the dedicated cover column and info array
+                        if (empty($episode->cover) || $this->overwriteExisting) {
+                            $updateData['cover'] = $stillUrl;
+                        }
+
+                        $info = $updateData['info'] ?? $episode->info ?? [];
+                        $info['movie_image'] = $stillUrl;
+                        $updateData['info'] = $info;
+                    }
+
+                    if (! empty($episodeData['air_date'])) {
+                        $info = $updateData['info'] ?? $episode->info ?? [];
+                        $info['releasedate'] = $episodeData['air_date'];
+                        $updateData['info'] = $info;
+                    }
+
+                    if (! empty($episodeData['vote_average'])) {
+                        $info = $updateData['info'] ?? $episode->info ?? [];
+                        $info['rating'] = $episodeData['vote_average'];
+                        $updateData['info'] = $info;
+                    }
+
+                    // Populate duration from TMDB episode runtime (in minutes)
+                    if (! empty($episodeData['runtime'])) {
+                        $info = $updateData['info'] ?? $episode->info ?? [];
+                        $existingDurationSecs = $info['duration_secs'] ?? 0;
+                        if (empty($existingDurationSecs) || $existingDurationSecs === 0 || $this->overwriteExisting) {
+                            $runtimeMinutes = (int) $episodeData['runtime'];
+                            $runtimeSeconds = $runtimeMinutes * 60;
+                            $info['duration_secs'] = $runtimeSeconds;
+                            $info['duration'] = gmdate('H:i:s', $runtimeSeconds);
+                            $updateData['info'] = $info;
+                        }
+                    }
+
+                    if (! empty($updateData)) {
+                        $episode->update($updateData);
+                        $episodeCount++;
+                    }
+                }
+            }
+        }
+
+        Log::info('FetchTmdbIds: Completed episode data fetch for series', [
+            'series_id' => $series->id,
+            'tmdb_id' => $tmdbId,
+            'episodes_updated' => $episodeCount,
+        ]);
     }
 
     /**
@@ -389,6 +1143,74 @@ class FetchTmdbIds implements ShouldQueue
         $notification
             ->broadcast($this->user)
             ->sendToDatabase($this->user);
+    }
+
+    /**
+     * Record chunk counters to cache for batch-level completion summary.
+     */
+    protected function recordBatchStats(): void
+    {
+        $batchId = $this->batch()?->id;
+
+        if (! $batchId) {
+            return;
+        }
+
+        self::incrementBatchStat($batchId, 'found', $this->foundCount);
+        self::incrementBatchStat($batchId, 'not_found', $this->notFoundCount);
+        self::incrementBatchStat($batchId, 'skipped', $this->skippedCount);
+        self::incrementBatchStat($batchId, 'errors', $this->errorCount);
+    }
+
+    /**
+     * Read aggregated chunk counters for the provided batch.
+     *
+     * @return array{found:int,not_found:int,skipped:int,errors:int}
+     */
+    protected static function readBatchStats(string $batchId): array
+    {
+        return [
+            'found' => (int) Cache::get(self::batchStatKey($batchId, 'found'), 0),
+            'not_found' => (int) Cache::get(self::batchStatKey($batchId, 'not_found'), 0),
+            'skipped' => (int) Cache::get(self::batchStatKey($batchId, 'skipped'), 0),
+            'errors' => (int) Cache::get(self::batchStatKey($batchId, 'errors'), 0),
+        ];
+    }
+
+    /**
+     * Increment a cached batch counter.
+     */
+    protected static function incrementBatchStat(string $batchId, string $metric, int $value): void
+    {
+        if ($value <= 0) {
+            return;
+        }
+
+        $key = self::batchStatKey($batchId, $metric);
+        $ttl = now()->addHours(self::BATCH_STATS_TTL_HOURS);
+
+        Cache::add($key, 0, $ttl);
+        Cache::increment($key, $value);
+        Cache::put($key, Cache::get($key, 0), $ttl);
+    }
+
+    /**
+     * Remove cached counters for a completed batch.
+     */
+    protected static function clearBatchStats(string $batchId): void
+    {
+        Cache::forget(self::batchStatKey($batchId, 'found'));
+        Cache::forget(self::batchStatKey($batchId, 'not_found'));
+        Cache::forget(self::batchStatKey($batchId, 'skipped'));
+        Cache::forget(self::batchStatKey($batchId, 'errors'));
+    }
+
+    /**
+     * Build cache key for batch stats metric.
+     */
+    protected static function batchStatKey(string $batchId, string $metric): string
+    {
+        return "tmdb-lookup:batch:{$batchId}:{$metric}";
     }
 
     /**

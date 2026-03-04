@@ -7,6 +7,7 @@ use BackedEnum;
 use Filament\Actions;
 use Filament\Forms;
 use Filament\Resources\Resource;
+use Filament\Schemas\Components\Fieldset;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables;
@@ -49,6 +50,23 @@ class UserResource extends Resource
                     ->label('Email address')
                     ->email()
                     ->required(),
+                Fieldset::make('User Permissions')
+                    ->columns(1)
+                    ->schema([
+                        Forms\Components\CheckboxList::make('permissions')
+                            ->label('Select Permissions')
+                            ->options(User::getAvailablePermissions())
+                            ->bulkToggleable()
+                            ->descriptions([
+                                'use_proxy' => 'Allow this user to access proxy features and stream via the m3u-proxy server',
+                                'use_integrations' => 'Allow this user to access media server integrations and related features',
+                                'use_tools' => 'Allow this user to access tools like API Tokens and Post Processing',
+                                'use_stream_file_sync' => 'Allow this user to access stream file sync features',
+                            ])
+                            ->columnSpanFull()
+                            ->gridDirection('row')
+                            ->columns(2),
+                    ]),
                 Forms\Components\Toggle::make('update_password')
                     ->label('Update Password')
                     ->default(false)
@@ -87,6 +105,10 @@ class UserResource extends Resource
                 Tables\Columns\TextColumn::make('email')
                     ->label('Email address')
                     ->searchable(),
+                Tables\Columns\TextColumn::make('permissions')
+                    ->label('Permissions')
+                    ->badge()
+                    ->toggleable(),
                 // Tables\Columns\TextColumn::make('email_verified_at')
                 //     ->dateTime()
                 //     ->sortable(),

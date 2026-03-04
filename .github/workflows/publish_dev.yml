@@ -178,10 +178,120 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
 
+  create-release:
+    name: Create Dev Pre-release
+    runs-on: ubuntu-latest
+    needs: [get-version, push-manifest]
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Get previous dev tag
+        id: prev_tag
+        run: |
+          PREV_TAG=$(git tag -l "v*-dev" --sort=-version:refname | head -n 1)
+          if [ -z "$PREV_TAG" ]; then
+            PREV_TAG=$(git tag -l "dev-*" --sort=-version:refname | head -n 1)
+          fi
+          if [ -z "$PREV_TAG" ]; then
+            PREV_TAG=$(git tag -l "v*" --sort=-version:refname | head -n 1)
+          fi
+          if [ -z "$PREV_TAG" ]; then
+            PREV_TAG=$(git rev-list --max-parents=0 HEAD)
+          fi
+          echo "prev_tag=$PREV_TAG" >> $GITHUB_OUTPUT
+          echo "Previous tag: $PREV_TAG"
+
+      - name: Generate changelog
+        run: |
+          PREV="${{ steps.prev_tag.outputs.prev_tag }}"
+
+          git log "${PREV}..HEAD" --no-merges --pretty=format:"%s|%h" > commits.txt
+
+          while IFS='|' read -r msg hash; do
+            [[ "$msg" =~ ^[Vv]ersion\ bump ]] && continue
+            if [[ "$msg" =~ ^feat ]]; then
+              printf -- '- %s (`%s`)\n' "$msg" "$hash" >> features.tmp
+            elif [[ "$msg" =~ ^fix ]]; then
+              printf -- '- %s (`%s`)\n' "$msg" "$hash" >> fixes.tmp
+            elif [[ "$msg" =~ ^perf ]]; then
+              printf -- '- %s (`%s`)\n' "$msg" "$hash" >> perf.tmp
+            elif [[ "$msg" =~ ^refactor ]]; then
+              printf -- '- %s (`%s`)\n' "$msg" "$hash" >> refactor.tmp
+            elif [[ "$msg" =~ ^docs ]]; then
+              printf -- '- %s (`%s`)\n' "$msg" "$hash" >> docs.tmp
+            elif [[ "$msg" =~ ^chore ]]; then
+              printf -- '- %s (`%s`)\n' "$msg" "$hash" >> chores.tmp
+            else
+              printf -- '- %s (`%s`)\n' "$msg" "$hash" >> other.tmp
+            fi
+          done < commits.txt
+
+          {
+            echo "## What's Changed"
+            echo ""
+            if [ -f features.tmp ]; then
+              echo "### Features"
+              cat features.tmp
+              echo ""
+            fi
+            if [ -f fixes.tmp ]; then
+              echo "### Bug Fixes"
+              cat fixes.tmp
+              echo ""
+            fi
+            if [ -f perf.tmp ]; then
+              echo "### Performance"
+              cat perf.tmp
+              echo ""
+            fi
+            if [ -f refactor.tmp ]; then
+              echo "### Refactoring"
+              cat refactor.tmp
+              echo ""
+            fi
+            if [ -f docs.tmp ]; then
+              echo "### Documentation"
+              cat docs.tmp
+              echo ""
+            fi
+            if [ -f chores.tmp ]; then
+              echo "### Maintenance"
+              cat chores.tmp
+              echo ""
+            fi
+            if [ -f other.tmp ]; then
+              echo "### Other Changes"
+              cat other.tmp
+              echo ""
+            fi
+            echo "---"
+            echo "### Docker Image"
+            echo '```'
+            echo "docker pull ${{ env.REGISTRY_IMAGE }}:dev-${{ needs.get-version.outputs.version }}"
+            echo '```'
+          } > changelog.md
+
+          rm -f *.tmp commits.txt
+
+      - name: Create dev pre-release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.get-version.outputs.version }}-dev
+          name: "Dev ${{ needs.get-version.outputs.version }}"
+          body_path: changelog.md
+          prerelease: true
+          generate_release_notes: false
+          make_latest: false
+
   notify-failure:
     name: Notify on Failure
     runs-on: ubuntu-latest
-    needs: [push-amd64, push-arm64, push-manifest]
+    needs: [push-amd64, push-arm64, push-manifest, create-release]
     if: failure()
     steps:
       - name: Report failure

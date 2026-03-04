@@ -20,6 +20,15 @@ class StreamProfileResource extends Resource
 
     protected static string|\UnitEnum|null $navigationGroup = 'Proxy';
 
+    /**
+     * Check if the user can access this resource.
+     * Only users with proxy permission can access stream profiles.
+     */
+    public static function canAccess(): bool
+    {
+        return auth()->check() && auth()->user()->canUseProxy();
+    }
+
     public static function form(Schema $schema): Schema
     {
         return $schema
@@ -49,7 +58,7 @@ class StreamProfileResource extends Resource
                             ->icon('heroicon-o-arrow-top-right-on-square')
                             ->iconPosition('after')
                             ->size('sm')
-                            ->url('https://github.com/sparkison/m3u-proxy/blob/master/docs/PROFILE_VARIABLES.md')
+                            ->url('https://m3ue.sparkison.dev/docs/proxy/transcoding')
                             ->openUrlInNewTab(true)
                     )
                     ->default('-i {input_url} -c:v libx264 -preset faster -crf {crf|23} -maxrate {maxrate|2500k} -bufsize {bufsize|5000k} -c:a aac -b:a {audio_bitrate|192k} -f mpegts {output_args|pipe:1}')

@@ -3,28 +3,29 @@
 namespace App\Filament\Resources\VodGroups;
 
 use App\Facades\SortFacade;
-use App\Filament\Resources\Playlists\PlaylistResource;
+use App\Filament\Resources\VodGroups\Pages\EditVodGroup;
 use App\Filament\Resources\VodGroups\Pages\ListVodGroups;
-use App\Filament\Resources\VodGroups\Pages\ViewVodGroup;
 use App\Filament\Resources\VodGroups\RelationManagers\VodRelationManager;
-use App\Models\CustomPlaylist;
+use App\Jobs\ProcessVodChannels;
+use App\Jobs\SyncVodStrmFiles;
 use App\Models\Group;
 use App\Models\Playlist;
+use App\Services\PlaylistService;
 use App\Traits\HasUserFiltering;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Actions\BulkAction;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
-use Filament\Actions\ViewAction;
+use Filament\Actions\EditAction;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
-use Filament\Infolists\Components\TextEntry;
+use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
+use Filament\Schemas\Components\Group as ComponentsGroup;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
-use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
@@ -151,59 +152,14 @@ class VodGroupResource extends Resource
             ])
             ->recordActions([
                 ActionGroup::make([
-                    ViewAction::make(),
-                    Action::make('add')
-                        ->label('Add to Custom Playlist')
-                        ->schema([
-                            Select::make('playlist')
-                                ->required()
-                                ->live()
-                                ->label('Custom Playlist')
-                                ->helperText('Select the custom playlist you would like to add the selected channel(s) to.')
-                                ->options(CustomPlaylist::where(['user_id' => auth()->id()])->get(['name', 'id'])->pluck('name', 'id'))
-                                ->afterStateUpdated(function (Set $set, $state) {
-                                    if ($state) {
-                                        $set('category', null);
-                                    }
-                                })
-                                ->searchable(),
-                            Select::make('category')
-                                ->label('Custom Group')
-                                ->disabled(fn (Get $get) => ! $get('playlist'))
-                                ->helperText(fn (Get $get) => ! $get('playlist') ? 'Select a custom playlist first.' : 'Select the group you would like to assign to the selected channel(s) to.')
-                                ->options(function ($get) {
-                                    $customList = CustomPlaylist::find($get('playlist'));
-
-                                    return $customList ? $customList->groupTags()->get()
-                                        ->mapWithKeys(fn ($tag) => [$tag->getAttributeValue('name') => $tag->getAttributeValue('name')])
-                                        ->toArray() : [];
-                                })
-                                ->searchable(),
-                        ])
-                        ->action(function ($record, array $data): void {
-                            $playlist = CustomPlaylist::findOrFail($data['playlist']);
-                            $playlist->channels()->syncWithoutDetaching($record->channels()->pluck('id'));
-                            if ($data['category']) {
-                                $tags = $playlist->groupTags()->get();
-                                $tag = $playlist->groupTags()->where('name->en', $data['category'])->first();
-                                foreach ($record->channels()->cursor() as $channel) {
-                                    // Need to detach any existing tags from this playlist first
-                                    $channel->detachTags($tags);
-                                    $channel->attachTag($tag);
-                                }
-                            }
-                        })->after(function () {
+                    PlaylistService::getAddToPlaylistAction('add', 'channel', fn ($record) => $record->channels())
+                        ->after(function () {
                             Notification::make()
                                 ->success()
                                 ->title('Group channels added to custom playlist')
                                 ->body('The groups channels have been added to the chosen custom playlist.')
                                 ->send();
-                        })
-                        ->requiresConfirmation()
-                        ->icon('heroicon-o-play')
-                        ->modalIcon('heroicon-o-play')
-                        ->modalDescription('Add the group channels to the chosen custom playlist.')
-                        ->modalSubmitActionLabel('Add now'),
+                        }),
                     Action::make('move')
                         ->label('Move Channels to Group')
                         ->schema([
@@ -301,6 +257,60 @@ class VodGroupResource extends Resource
                         ->modalIcon('heroicon-o-bars-arrow-down')
                         ->modalDescription('Sort all channels in this group alphabetically? This will update the sort order.'),
 
+                    Action::make('process_vod')
+                        ->label('Fetch Metadata')
+                        ->icon('heroicon-o-arrow-down-tray')
+                        ->schema([
+                            Toggle::make('overwrite_existing')
+                                ->label('Overwrite Existing Metadata')
+                                ->helperText('Overwrite existing metadata? If disabled, it will only fetch and process metadata if it does not already exist.')
+                                ->default(false),
+                        ])
+                        ->action(function ($record, array $data) {
+                            foreach ($record->enabled_channels as $channel) {
+                                app('Illuminate\Contracts\Bus\Dispatcher')
+                                    ->dispatch(new ProcessVodChannels(
+                                        channel: $channel,
+                                        force: $data['overwrite_existing'] ?? false,
+                                    ));
+                            }
+                        })->after(function () {
+                            Notification::make()
+                                ->success()
+                                ->title('Fetching VOD metadata for channel')
+                                ->body('The VOD metadata fetching and processing has been started for the group channels. Only enabled channels will be processed. You will be notified when it is complete.')
+                                ->duration(10000)
+                                ->send();
+                        })
+                        ->requiresConfirmation()
+                        ->icon('heroicon-o-arrow-down-tray')
+                        ->modalIcon('heroicon-o-arrow-down-tray')
+                        ->modalDescription('Fetch and process VOD metadata for the group channels.')
+                        ->modalSubmitActionLabel('Yes, process now'),
+
+                    Action::make('sync_vod')
+                        ->label('Sync VOD .strm file')
+                        ->action(function ($record) {
+                            foreach ($record->enabled_channels as $channel) {
+                                app('Illuminate\Contracts\Bus\Dispatcher')
+                                    ->dispatch(new SyncVodStrmFiles(
+                                        channel: $channel,
+                                    ));
+                            }
+                        })->after(function () {
+                            Notification::make()
+                                ->success()
+                                ->title('.strm files are being synced for the group channels. Only enabled channels will be synced.')
+                                ->body('You will be notified once complete.')
+                                ->duration(10000)
+                                ->send();
+                        })
+                        ->requiresConfirmation()
+                        ->icon('heroicon-o-document-arrow-down')
+                        ->modalIcon('heroicon-o-document-arrow-down')
+                        ->modalDescription('Sync group VOD channels .strm files now? This will generate .strm files for the group channels.')
+                        ->modalSubmitActionLabel('Yes, sync now'),
+
                     Action::make('enable')
                         ->label('Enable group channels')
                         ->action(function ($record): void {
@@ -330,7 +340,7 @@ class VodGroupResource extends Resource
                             Notification::make()
                                 ->success()
                                 ->title('Group channels disabled')
-                                ->body('The groups channels have been disabled.')
+                                ->body('The group channels have been disabled.')
                                 ->send();
                         })
                         ->color('warning')
@@ -343,66 +353,20 @@ class VodGroupResource extends Resource
                     DeleteAction::make()
                         ->hidden(fn ($record) => ! $record->custom),
                 ])->button()->hiddenLabel()->size('sm'),
+                EditAction::make()
+                    ->button()->hiddenLabel()->size('sm'),
             ], position: RecordActionsPosition::BeforeCells)
             ->toolbarActions([
                 BulkActionGroup::make([
-                    BulkAction::make('add')
-                        ->label('Add to Custom Playlist')
-                        ->schema([
-                            Select::make('playlist')
-                                ->required()
-                                ->live()
-                                ->label('Custom Playlist')
-                                ->helperText('Select the custom playlist you would like to add the selected group channel(s) to.')
-                                ->options(CustomPlaylist::where(['user_id' => auth()->id()])->get(['name', 'id'])->pluck('name', 'id'))
-                                ->afterStateUpdated(function (Set $set, $state) {
-                                    if ($state) {
-                                        $set('category', null);
-                                    }
-                                })
-                                ->searchable(),
-                            Select::make('category')
-                                ->label('Custom Group')
-                                ->disabled(fn (Get $get) => ! $get('playlist'))
-                                ->helperText(fn (Get $get) => ! $get('playlist') ? 'Select a custom playlist first.' : 'Select the group you would like to assign to the selected channel(s) to.')
-                                ->options(function ($get) {
-                                    $customList = CustomPlaylist::find($get('playlist'));
-
-                                    return $customList ? $customList->groupTags()->get()
-                                        ->mapWithKeys(fn ($tag) => [$tag->getAttributeValue('name') => $tag->getAttributeValue('name')])
-                                        ->toArray() : [];
-                                })
-                                ->searchable(),
-                        ])
-                        ->action(function (Collection $records, array $data): void {
-                            $playlist = CustomPlaylist::findOrFail($data['playlist']);
-                            $tags = $playlist->groupTags()->get();
-                            $tag = $data['category'] ? $playlist->groupTags()->where('name->en', $data['category'])->first() : null;
-                            foreach ($records as $record) {
-                                // Sync the channels to the custom playlist
-                                // This will add the channels to the playlist without detaching existing ones
-                                // Prevents duplicates in the playlist
-                                $playlist->channels()->syncWithoutDetaching($record->channels()->pluck('id'));
-                                if ($data['category']) {
-                                    foreach ($record->channels()->cursor() as $channel) {
-                                        // Need to detach any existing tags from this playlist first
-                                        $channel->detachTags($tags);
-                                        $channel->attachTag($tag);
-                                    }
-                                }
-                            }
-                        })->after(function () {
-                            Notification::make()
-                                ->success()
-                                ->title('Group channels added to custom playlist')
-                                ->body('The groups channels have been added to the chosen custom playlist.')
-                                ->send();
-                        })
-                        ->requiresConfirmation()
-                        ->icon('heroicon-o-play')
-                        ->modalIcon('heroicon-o-play')
-                        ->modalDescription('Add the group channels to the chosen custom playlist.')
-                        ->modalSubmitActionLabel('Add now'),
+                    PlaylistService::getAddToPlaylistBulkAction('add', 'channel', function (Collection $records) {
+                        return $records->flatMap->channels;
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title('Group channels added to custom playlist')
+                            ->body('The groups channels have been added to the chosen custom playlist.')
+                            ->send();
+                    }),
                     BulkAction::make('move')
                         ->label('Move Channels to Group')
                         ->schema([
@@ -488,7 +452,7 @@ class VodGroupResource extends Resource
                             Notification::make()
                                 ->success()
                                 ->title('Selected group channels disabled')
-                                ->body('The selected groups channels have been disabled.')
+                                ->body('The selected group channels have been disabled.')
                                 ->send();
                         })
                         ->deselectRecordsAfterCompletion()
@@ -497,6 +461,65 @@ class VodGroupResource extends Resource
                         ->modalIcon('heroicon-o-x-circle')
                         ->modalDescription('Disable the selected group(s) channels now?')
                         ->modalSubmitActionLabel('Yes, disable now'),
+
+                    BulkAction::make('process_bulk_vod')
+                        ->label('Fetch Metadata')
+                        ->icon('heroicon-o-arrow-down-tray')
+                        ->schema([
+                            Toggle::make('overwrite_existing')
+                                ->label('Overwrite Existing Metadata')
+                                ->helperText('Overwrite existing metadata? If disabled, it will only fetch and process metadata if it does not already exist.')
+                                ->default(false),
+                        ])
+                        ->action(function (Collection $records, array $data) {
+                            foreach ($records as $record) {
+                                foreach ($record->enabled_channels as $channel) {
+                                    app('Illuminate\Contracts\Bus\Dispatcher')
+                                        ->dispatch(new ProcessVodChannels(
+                                            channel: $channel,
+                                            force: $data['overwrite_existing'] ?? false,
+                                        ));
+                                }
+                            }
+                        })->after(function () {
+                            Notification::make()
+                                ->success()
+                                ->title('Fetching VOD metadata for selected group channels')
+                                ->body('The VOD metadata fetching and processing has been started for the selected group channels. Only enabled channels will be processed. You will be notified when it is complete.')
+                                ->duration(10000)
+                                ->send();
+                        })
+                        ->requiresConfirmation()
+                        ->icon('heroicon-o-arrow-down-tray')
+                        ->modalIcon('heroicon-o-arrow-down-tray')
+                        ->modalDescription('Fetch and process VOD metadata for the selected group channels.')
+                        ->modalSubmitActionLabel('Yes, process now'),
+
+                    BulkAction::make('sync_bulk_vod')
+                        ->label('Sync VOD .strm file')
+                        ->action(function (Collection $records) {
+                            foreach ($records as $record) {
+                                foreach ($record->enabled_channels as $channel) {
+                                    app('Illuminate\Contracts\Bus\Dispatcher')
+                                        ->dispatch(new SyncVodStrmFiles(
+                                            channel: $channel,
+                                        ));
+                                }
+                            }
+                        })->after(function () {
+                            Notification::make()
+                                ->success()
+                                ->title('.strm files are being synced for the selected group channels. Only enabled channels will be synced.')
+                                ->body('You will be notified once complete.')
+                                ->duration(10000)
+                                ->send();
+                        })
+                        ->requiresConfirmation()
+                        ->icon('heroicon-o-document-arrow-down')
+                        ->modalIcon('heroicon-o-document-arrow-down')
+                        ->modalDescription('Sync selected group VOD channels .strm files now? This will generate .strm files for the group channels.')
+                        ->modalSubmitActionLabel('Yes, sync now'),
+
                     BulkAction::make('enable_groups')
                         ->label('Enable Groups')
                         ->action(function (Collection $records): void {
@@ -557,38 +580,21 @@ class VodGroupResource extends Resource
         return [
             'index' => ListVodGroups::route('/'),
             // 'create' => Pages\CreateVodGroup::route('/create'),
-            'view' => ViewVodGroup::route('/{record}'),
-            // 'edit' => Pages\EditVodGroup::route('/{record}/edit'),
+            'edit' => EditVodGroup::route('/{record}/edit'),
         ];
-    }
-
-    public static function infolist(Schema $schema): Schema
-    {
-        // return parent::infolist($infolist);
-        return $schema
-            ->components([
-                Section::make('Group Details')
-                    ->collapsible(true)
-                    ->collapsed(true)
-                    ->compact()
-                    ->columns(2)
-                    ->schema([
-                        TextEntry::make('name')
-                            ->badge(),
-                        TextEntry::make('playlist.name')
-                            ->label('Playlist')
-                            // ->badge(),
-                            ->url(fn ($record) => PlaylistResource::getUrl('edit', ['record' => $record->playlist_id])),
-                    ]),
-            ]);
     }
 
     public static function getForm(): array
     {
-        return [
+        $fields = [
             TextInput::make('name')
                 ->required()
                 ->maxLength(255),
+            Toggle::make('enabled')
+                ->inline(false)
+                ->label('Auto Enable New Channels')
+                ->helperText('Automatically enable newly added channels to this group.')
+                ->default(true),
             Select::make('playlist_id')
                 ->required()
                 ->label('Playlist')
@@ -603,6 +609,27 @@ class VodGroupResource extends Resource
                 ->default(9999)
                 ->helperText('Enter a number to define the sort order (e.g., 1, 2, 3). Lower numbers appear first.')
                 ->rules(['integer', 'min:0']),
+            Select::make('stream_file_setting_id')
+                ->label('Stream File Setting')
+                ->searchable()
+                ->relationship('streamFileSetting', 'name', fn ($query) => $query->forVod()->where('user_id', auth()->id())
+                )
+                ->nullable()
+                ->helperText('Select a Stream File Setting profile for all VOD channels in this group. VOD-level settings take priority. Leave empty to use global settings.'),
+        ];
+
+        return [
+            Section::make('Group Settings')
+                ->compact()
+                ->columns(2)
+                ->icon('heroicon-s-cog')
+                ->collapsed(true)
+                ->schema($fields)
+                ->hiddenOn(['create']),
+            ComponentsGroup::make($fields)
+                ->columnSpanFull()
+                ->columns(2)
+                ->hiddenOn(['edit']),
         ];
     }
 }

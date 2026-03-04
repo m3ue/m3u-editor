@@ -45,6 +45,20 @@ class GenerateEpgCache implements ShouldQueue
             return;
         }
 
+        if ($epg->isMerged()) {
+            Log::info("Skipping cache generation for merged EPG {$epg->uuid}.");
+
+            $epg->update([
+                'status' => Status::Completed,
+                'is_cached' => false,
+                'cache_progress' => 0,
+                'processing_started_at' => null,
+                'processing_phase' => null,
+            ]);
+
+            return;
+        }
+
         // Set memory and time limits for large EPG files
         ini_set('memory_limit', '2G');
         set_time_limit(0); // No time limit

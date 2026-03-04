@@ -32,6 +32,11 @@ class Group extends Model
         return $this->belongsTo(Playlist::class);
     }
 
+    public function streamFileSetting(): BelongsTo
+    {
+        return $this->belongsTo(StreamFileSetting::class);
+    }
+
     public function channels(): HasMany
     {
         return $this->hasMany(Channel::class);

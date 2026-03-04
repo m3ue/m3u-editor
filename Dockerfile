@@ -3,7 +3,7 @@
 ########################################
 # Allow customization of m3u-proxy repository and branch
 # NOTE: GitHub Actions workflow automatically overrides these with dynamic values
-# based on the repository owner (e.g., hektyc/m3u-proxy for hektyc/m3u-editor)
+# based on the repository owner (e.g., sparkison/m3u-proxy for sparkison/m3u-editor)
 # Default: upstream sparkison/m3u-proxy (main branch) - used for manual builds
 # Override: --build-arg M3U_PROXY_REPO=https://github.com/yourusername/m3u-proxy.git
 #           --build-arg M3U_PROXY_BRANCH=dev
@@ -37,7 +37,7 @@ RUN composer dump-autoload --no-dev --optimize --classmap-authoritative
 ########################################
 # Stage 2: Node builder - builds frontend assets
 ########################################
-FROM node:18-alpine AS node_builder
+FROM node:22-alpine AS node_builder
 WORKDIR /app
 
 # Copy package files first for better layer caching

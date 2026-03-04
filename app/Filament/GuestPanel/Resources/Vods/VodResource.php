@@ -12,13 +12,13 @@ use Filament\Actions\Action;
 use Filament\Actions\ViewAction;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
-use Filament\Support\Icons\Heroicon;
 use Filament\Tables;
 use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\HtmlString;
+use Illuminate\Support\Str;
 
 class VodResource extends Resource
 {
@@ -123,8 +123,10 @@ class VodResource extends Resource
                         $title = $record->title_custom ?: $record->title;
                         $html = "<span class='fi-ta-text-item-label whitespace-normal text-sm leading-6 text-gray-950 dark:text-white'>{$title}</span>";
                         if (is_array($info)) {
-                            $description = $info['description'] ?? $info['plot'] ?? '';
-                            $html .= "<p class='text-sm text-gray-500 dark:text-gray-400 whitespace-normal mt-2'>{$description}</p>";
+                            $description = Str::limit($info['description'] ?? $info['plot'] ?? '', 200);
+                            if (! empty($description)) {
+                                $html .= "<p class='text-sm text-gray-500 dark:text-gray-400 whitespace-normal mt-2'>{$description}</p>";
+                            }
                         }
 
                         return new HtmlString($html);
@@ -190,7 +192,9 @@ class VodResource extends Resource
                 Tables\Columns\TextColumn::make('url')
                     ->label('Default URL')
                     ->sortable()
-                    ->searchable()
+                    ->searchable(query: function (Builder $query, string $search): Builder {
+                        return $query->orWhereRaw('LOWER(channels.url::text) LIKE ?', ['%'.strtolower($search).'%']);
+                    })
                     ->toggleable(isToggledHiddenByDefault: true),
 
                 Tables\Columns\TextColumn::make('created_at')
@@ -215,11 +219,10 @@ class VodResource extends Resource
                     ->button()
                     ->hiddenLabel()
                     ->size('sm'),
-                // ViewAction::make()
-                //     ->button()
-                //     ->icon('heroicon-s-information-circle')
-                //     ->hiddenLabel()
-                //     ->slideOver(),
+                ViewAction::make()
+                    ->button()
+                    ->icon('heroicon-s-eye')
+                    ->hiddenLabel(),
             ], position: RecordActionsPosition::BeforeCells)
             ->toolbarActions([
                 //
@@ -237,7 +240,7 @@ class VodResource extends Resource
     {
         return [
             'index' => Pages\ListVod::route('/'),
-            // 'view' => Pages\ViewVod::route('/{record}'),
+            'view' => Pages\ViewVod::route('/{record}'),
         ];
     }
 }

@@ -577,6 +577,54 @@ class ProfileService
     }
 
     /**
+     * Quick reconcile of profile connection counts from proxy active streams.
+     *
+     * Used inline (e.g. after stopping a stream) to immediately correct
+     * Redis counts without waiting for the scheduled reconcile task.
+     */
+    public static function reconcileFromProxy(Playlist $playlist): void
+    {
+        if (! $playlist->profiles_enabled) {
+            return;
+        }
+
+        $activeStreams = M3uProxyService::getPlaylistActiveStreams($playlist);
+
+        // If API call failed, don't touch counts
+        if ($activeStreams === null) {
+            return;
+        }
+
+        // Build map of profile_id => active stream count
+        $profileStreamCounts = [];
+        foreach ($activeStreams as $stream) {
+            $profileId = $stream['metadata']['provider_profile_id'] ?? null;
+            if ($profileId) {
+                $profileStreamCounts[$profileId] = ($profileStreamCounts[$profileId] ?? 0) + ($stream['client_count'] ?? 1);
+            }
+        }
+
+        foreach ($playlist->enabledProfiles()->get() as $profile) {
+            $redisCount = static::getConnectionCount($profile);
+            $proxyCount = $profileStreamCounts[$profile->id] ?? 0;
+
+            if ($redisCount !== $proxyCount) {
+                $key = static::getConnectionCountKey($profile);
+                try {
+                    Redis::set($key, $proxyCount);
+                    Log::debug('Quick reconciled profile connection count', [
+                        'profile_id' => $profile->id,
+                        'old_count' => $redisCount,
+                        'new_count' => $proxyCount,
+                    ]);
+                } catch (\Exception $e) {
+                    Log::error("Failed to quick reconcile profile {$profile->id}: {$e->getMessage()}");
+                }
+            }
+        }
+    }
+
+    /**
      * Clean up stale stream entries for a profile.
      *
      * Called periodically to remove orphaned stream records.

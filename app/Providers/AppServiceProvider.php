@@ -12,18 +12,23 @@ use App\Jobs\SyncMediaServer;
 use App\Livewire\BackupDestinationListRecords;
 use App\Livewire\StreamPlayer;
 use App\Livewire\TmdbSearch;
+use App\Models\Channel;
 use App\Models\ChannelFailover;
 use App\Models\CustomPlaylist;
 use App\Models\Epg;
 use App\Models\Group;
 use App\Models\MediaServerIntegration;
 use App\Models\MergedPlaylist;
+use App\Models\Network;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
+use App\Models\StreamFileSetting;
 use App\Models\StreamProfile;
 use App\Models\User;
 use App\Services\EpgCacheService;
 use App\Services\GitInfoService;
+use App\Services\NetworkBroadcastService;
+use App\Services\NetworkChannelSyncService;
 use App\Services\PlaylistService;
 use App\Services\ProxyService;
 use App\Services\SortService;
@@ -62,6 +67,20 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->singleton(GitInfoService::class);
+
+        // Register Artisan commands for HLS maintenance
+        if ($this->app->runningInConsole()) {
+            // Ensure command class file is loaded in environments without composer dump-autoload
+            $ensurePath = __DIR__.'/../Console/Commands/NetworkBroadcastEnsure.php';
+            if (file_exists($ensurePath)) {
+                require_once $ensurePath;
+            }
+
+            $this->commands([
+                \App\Console\Commands\NetworkBroadcastHeal::class,
+                \App\Console\Commands\NetworkBroadcastEnsure::class,
+            ]);
+        }
     }
 
     /**
@@ -424,7 +443,7 @@ class AppServiceProvider extends ServiceProvider
             });
             Epg::updating(function (Epg $epg) {
                 if (! $epg->sync_interval) {
-                    $epg->sync_interval = '0 0 * * *';
+                    $epg->sync_interval = '0 */6 * * *';
                 }
 
                 return $epg;
@@ -601,6 +620,40 @@ class AppServiceProvider extends ServiceProvider
 
                 return $integration;
             });
+
+            // Network
+            Network::creating(function (Network $network) {
+                if (empty($network->uuid)) {
+                    $network->uuid = Str::uuid()->toString();
+                }
+            });
+            Network::updated(function (Network $network) {
+                app(NetworkChannelSyncService::class)->refreshNetworkChannel($network);
+            });
+            Network::deleting(function (Network $network) {
+                // Ensure any running broadcast is stopped and HLS files are removed
+                try {
+                    app(NetworkBroadcastService::class)->stop($network);
+                } catch (Throwable $e) {
+                    Log::warning('Failed to stop network broadcast during deletion', [
+                        'network_id' => $network->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+
+                Channel::where('network_id', $network->id)->delete();
+            });
+
+            // StreamFileSetting
+            StreamFileSetting::creating(function (StreamFileSetting $setting) {
+                if (! $setting->user_id) {
+                    $setting->user_id = auth()->id();
+                }
+
+                return $setting;
+            });
+
+            // ...
 
         } catch (Throwable $e) {
             // Log the error

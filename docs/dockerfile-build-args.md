@@ -51,13 +51,13 @@ This uses:
 
 ```bash
 docker build \
-  --build-arg M3U_PROXY_REPO=https://github.com/hektyc/m3u-proxy.git \
+  --build-arg M3U_PROXY_REPO=https://github.com/sparkison/m3u-proxy.git \
   --build-arg M3U_PROXY_BRANCH=dev \
   -t m3u-editor:custom .
 ```
 
 This uses:
-- Your fork: `hektyc/m3u-proxy`
+- Your fork: `sparkison/m3u-proxy`
 - Your branch: `dev`
 
 ---
@@ -83,7 +83,7 @@ services:
     build:
       context: .
       args:
-        M3U_PROXY_REPO: https://github.com/hektyc/m3u-proxy.git
+        M3U_PROXY_REPO: https://github.com/sparkison/m3u-proxy.git
         M3U_PROXY_BRANCH: dev
     image: m3u-editor:custom
     # ... rest of config
@@ -113,7 +113,7 @@ build-args: |
 
 **How it works:**
 - `${{ github.repository_owner }}` automatically resolves to the GitHub username
-- For `hektyc/m3u-editor`, it uses `https://github.com/hektyc/m3u-proxy.git`
+- For `sparkison/m3u-editor`, it uses `https://github.com/sparkison/m3u-proxy.git`
 - For `sparkison/m3u-editor`, it uses `https://github.com/sparkison/m3u-proxy.git`
 - **Fully dynamic** - works for any fork!
 
@@ -152,7 +152,7 @@ docker exec m3u-editor cat /opt/m3u-proxy/.git/config
 
 You should see output like:
 ```
-Cloning m3u-proxy from: https://github.com/hektyc/m3u-proxy.git (branch: dev)
+Cloning m3u-proxy from: https://github.com/sparkison/m3u-proxy.git (branch: dev)
 ```
 
 ---

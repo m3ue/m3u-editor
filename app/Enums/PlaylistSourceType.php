@@ -9,4 +9,6 @@ enum PlaylistSourceType: string
     case Local = 'local';
     case Emby = 'emby';
     case Jellyfin = 'jellyfin';
+    case Plex = 'plex';
+    case LocalMedia = 'local_media';
 }

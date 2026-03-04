@@ -121,7 +121,7 @@ class VodRelationManager extends RelationManager
         $defaultColumns = VodResource::getTableColumns(showGroup: true, showPlaylist: true);
 
         // Inject the custom group column after the group column
-        array_splice($defaultColumns, 13, 0, [$groupColumn]);
+        array_splice($defaultColumns, 14, 0, [$groupColumn]);
 
         return $table->persistFiltersInSession()
             ->persistFiltersInSession()
@@ -220,7 +220,20 @@ class VodRelationManager extends RelationManager
 
                                 return "{$displayTitle} [{$playlistName}]";
                             }),
-                    ]),
+                    ])
+                    ->after(function () use ($ownerRecord): void {
+                        // Auto-enable proxy if the custom playlist now contains channels from pooled playlists
+                        if ($ownerRecord->hasPooledSourcePlaylists() && ! $ownerRecord->enable_proxy) {
+                            $ownerRecord->update(['enable_proxy' => true]);
+
+                            Notification::make()
+                                ->title('Proxy Enabled')
+                                ->body('Proxy mode was automatically enabled because this playlist now contains channels from source playlists with Provider Profiles enabled.')
+                                ->info()
+                                ->persistent()
+                                ->send();
+                        }
+                    }),
             ])
             ->recordActions([
                 DetachAction::make()
@@ -264,6 +277,7 @@ class VodRelationManager extends RelationManager
                     ->schema([
                         Select::make('group')
                             ->label('Select group')
+                            ->native(false)
                             ->options(
                                 $ownerRecord->groupTags()->get()
                                     ->map(fn ($name) => [

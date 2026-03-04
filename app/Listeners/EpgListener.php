@@ -27,6 +27,10 @@ class EpgListener
 
     private function handleEpgCreated(EpgCreated $event)
     {
+        if ($event->epg->isMerged() && ! $event->epg->sourceEpgs()->exists()) {
+            return;
+        }
+
         dispatch(new ProcessEpgImport($event->epg));
         $event->epg->postProcesses()->where([
             ['event', 'created'],

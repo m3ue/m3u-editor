@@ -6,6 +6,7 @@ use App\Models\Channel;
 use App\Models\CustomPlaylist;
 use App\Models\Episode;
 use App\Models\MergedPlaylist;
+use App\Models\Network;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
 use App\Models\PlaylistAuth;
@@ -211,6 +212,11 @@ class XtreamStreamController extends Controller
         $format = $format ?? 'ts'; // Default to 'ts' if no format provided
         [$playlist, $channel] = $this->findAuthenticatedPlaylistAndStreamModel($username, $password, $streamId, 'live');
 
+        // Handle network playlists - stream_id is actually a network ID
+        if ($playlist instanceof Playlist && $playlist->is_network_playlist) {
+            return $this->handleNetworkStream($playlist, $streamId);
+        }
+
         if ($channel instanceof Channel) {
             if ($playlist->enable_proxy) {
                 // Timeshift handled in proxy controller (if needed)
@@ -365,5 +371,29 @@ class XtreamStreamController extends Controller
 
             return Redirect::to($streamUrl);
         }
+    }
+
+    /**
+     * Handle network stream requests.
+     * Redirects to the network's HLS playlist.
+     */
+    private function handleNetworkStream(Playlist $playlist, string|int $networkId)
+    {
+        $network = $playlist->networks()
+            ->where('id', $networkId)
+            ->where('enabled', true)
+            ->first();
+
+        if (! $network) {
+            return response()->json(['error' => 'Network not found or not enabled'], 404);
+        }
+
+        // Check if network is broadcasting
+        if (! $network->broadcast_enabled) {
+            return response()->json(['error' => 'Network broadcast not enabled'], 503);
+        }
+
+        // Redirect to the network's HLS playlist
+        return Redirect::to($network->stream_url);
     }
 }

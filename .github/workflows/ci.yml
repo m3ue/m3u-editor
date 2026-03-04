@@ -156,6 +156,7 @@ jobs:
           TEST_DB_PASSWORD: testing
         run: |
           cp .env.example .env || echo "APP_KEY=" > .env
+          echo "REVERB_APP_SECRET=123" >> .env
           php artisan key:generate
           touch database/jobs.sqlite
           php artisan migrate --force

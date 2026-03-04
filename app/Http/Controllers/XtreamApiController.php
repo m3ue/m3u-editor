@@ -16,6 +16,7 @@ use App\Models\PlaylistAlias;
 use App\Models\PlaylistAuth;
 use App\Models\Series;
 use App\Services\EpgCacheService;
+use App\Services\LogoCacheService;
 use App\Services\M3uProxyService;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Collection;
@@ -392,6 +393,9 @@ class XtreamApiController extends Controller
             $tagUuid = $playlist->customPlaylist->uuid; // PlaylistAlias case, get the attached CustomPlaylist UUID
         }
 
+        // Check if this is a network playlist (pseudo-TV channels from media server content)
+        $isNetworkPlaylist = $playlist instanceof Playlist && $playlist->is_network_playlist;
+
         $baseUrl = ProxyFacade::getBaseUrl();
         $action = $request->input('action', 'panel');
         if (
@@ -482,6 +486,11 @@ class XtreamApiController extends Controller
                 'server_info' => $serverInfo,
             ]);
         } elseif ($action === 'get_live_streams') {
+            // Handle network playlists - return networks as live streams
+            if ($isNetworkPlaylist) {
+                return $this->getNetworkLiveStreams($playlist, $baseUrl);
+            }
+
             $categoryId = $request->input('category_id');
 
             $channelsQuery = $playlist->channels()
@@ -655,6 +664,11 @@ class XtreamApiController extends Controller
 
             return response()->json($liveStreams);
         } elseif ($action === 'get_vod_streams') {
+            // Network playlists don't have VOD streams
+            if ($isNetworkPlaylist) {
+                return response()->json([]);
+            }
+
             $categoryId = $request->input('category_id');
 
             $channelsQuery = $playlist->channels()
@@ -789,6 +803,11 @@ class XtreamApiController extends Controller
 
             return response()->json($vodStreams);
         } elseif ($action === 'get_series') {
+            // Network playlists don't have series
+            if ($isNetworkPlaylist) {
+                return response()->json([]);
+            }
+
             $categoryId = $request->input('category_id');
 
             $seriesQuery = $playlist->series()
@@ -875,7 +894,7 @@ class XtreamApiController extends Controller
                         'num' => $index + 1,
                         'name' => $seriesItem->name,
                         'series_id' => (int) $seriesItem->id,
-                        'cover' => $seriesItem->cover ? (filter_var($seriesItem->cover, FILTER_VALIDATE_URL) ? $seriesItem->cover : $baseUrl."/$seriesItem->cover") : $baseUrl.'/placeholder.png',
+                        'cover' => $seriesItem->cover ? (filter_var($seriesItem->cover, FILTER_VALIDATE_URL) ? $seriesItem->cover : $baseUrl."/$seriesItem->cover") : LogoCacheService::getPlaceholderUrl('poster'),
                         'plot' => $seriesItem->plot ?? '',
                         'cast' => $seriesItem->cast ?? '',
                         'director' => $seriesItem->director ?? '',
@@ -925,11 +944,14 @@ class XtreamApiController extends Controller
                 }
 
                 // Metadata fetched successfully
-                $seriesItem->load('seasons.episodes', 'category');
+                $seriesItem->fresh('seasons.episodes', 'category'); // Refresh to get the latest metadata
             }
 
-            $cover = $seriesItem->cover ? (filter_var($seriesItem->cover, FILTER_VALIDATE_URL) ? $seriesItem->cover : $baseUrl."/$seriesItem->cover") : $baseUrl.'/placeholder.png';
+            $cover = $seriesItem->cover ? (filter_var($seriesItem->cover, FILTER_VALIDATE_URL) ? $seriesItem->cover : $baseUrl."/$seriesItem->cover") : LogoCacheService::getPlaceholderUrl('poster');
             $backdropPaths = $seriesItem->backdrop_path ?? [];
+            if (is_string($backdropPaths)) {
+                $backdropPaths = json_decode($backdropPaths, true) ?? [];
+            }
             if ($playlist->enable_logo_proxy) {
                 $cover = LogoProxyController::generateProxyUrl($cover);
                 $backdropPaths = array_map(fn ($path) => LogoProxyController::generateProxyUrl($path), $backdropPaths);
@@ -1029,6 +1051,11 @@ class XtreamApiController extends Controller
                 'seasons' => $seasons,
             ]);
         } elseif ($action === 'get_live_categories') {
+            // Handle network playlists - return a single "Networks" category
+            if ($isNetworkPlaylist) {
+                return $this->getNetworkLiveCategories($playlist);
+            }
+
             $liveCategories = [];
 
             if ($isCustomPlaylist) {
@@ -1130,6 +1157,11 @@ class XtreamApiController extends Controller
 
             return response()->json($liveCategories);
         } elseif ($action === 'get_vod_categories') {
+            // Network playlists don't have VOD categories
+            if ($isNetworkPlaylist) {
+                return response()->json([]);
+            }
+
             $vodCategories = [];
 
             if ($isCustomPlaylist) {
@@ -1232,6 +1264,11 @@ class XtreamApiController extends Controller
 
             return response()->json($vodCategories);
         } elseif ($action === 'get_series_categories') {
+            // Network playlists don't have series categories
+            if ($isNetworkPlaylist) {
+                return response()->json([]);
+            }
+
             $seriesCategories = [];
 
             if ($isCustomPlaylist) {
@@ -1353,6 +1390,7 @@ class XtreamApiController extends Controller
                 if ($results === false) {
                     return response()->json(['error' => 'Failed to fetch VOD metadata'], 500);
                 }
+                $channel->fresh(); // Refresh to get the latest metadata
             }
 
             // Build info section - use channel's info field if available, otherwise build from channel data
@@ -1361,6 +1399,9 @@ class XtreamApiController extends Controller
             $cover = $info['cover_big'] ?? $channel->logo ?? $channel->logo_internal;
             $movieImage = $info['movie_image'] ?? $channel->logo ?? $channel->logo_internal;
             $backdropPaths = $info['backdrop_path'] ?? [];
+            if (is_string($backdropPaths)) {
+                $backdropPaths = json_decode($backdropPaths, true) ?? [];
+            }
             if ($playlist->enable_logo_proxy) {
                 $cover = LogoProxyController::generateProxyUrl($cover);
                 $movieImage = LogoProxyController::generateProxyUrl($movieImage);
@@ -1422,6 +1463,11 @@ class XtreamApiController extends Controller
                 'movie_data' => $defaultMovieData,
             ]));
         } elseif ($action === 'get_short_epg') {
+            // Handle network playlists - return EPG from network schedule
+            if ($isNetworkPlaylist) {
+                return $this->getNetworkShortEpg($playlist, $request);
+            }
+
             $streamId = $request->input('stream_id');
             $limit = $request->input('limit');
             $limit = (int) ($limit ?? 4);
@@ -1509,6 +1555,11 @@ class XtreamApiController extends Controller
 
             return response()->json(['epg_listings' => $epgListings]);
         } elseif ($action === 'get_simple_data_table') {
+            // Handle network playlists - return EPG from network schedule
+            if ($isNetworkPlaylist) {
+                return $this->getNetworkSimpleDataTable($playlist, $request);
+            }
+
             $streamId = $request->input('stream_id');
             $proxyEnabled = $playlist->enable_proxy;
 
@@ -1582,6 +1633,192 @@ class XtreamApiController extends Controller
             }
 
             return response()->json(['epg_listings' => $epgListings]);
+        } elseif ($action === 'get_epg_batch') {
+            // Batch EPG endpoint - fetches EPG for multiple channels in a single request
+            if ($isNetworkPlaylist) {
+                return response()->json(['error' => 'Batch EPG not supported for network playlists'], 400);
+            }
+
+            $streamIdsParam = $request->input('stream_ids');
+            if (! $streamIdsParam) {
+                return response()->json(['error' => 'stream_ids parameter is required'], 400);
+            }
+
+            $streamIds = array_map('intval', explode(',', $streamIdsParam));
+            $streamIds = array_slice($streamIds, 0, 100);
+
+            $date = $request->input('date', Carbon::now()->format('Y-m-d'));
+            $proxyEnabled = $playlist->enable_proxy;
+
+            // Load all requested channels in one query
+            $channels = $playlist->channels()
+                ->where('enabled', true)
+                ->whereIn('channels.id', $streamIds)
+                ->with('epgChannel')
+                ->get()
+                ->keyBy('id');
+
+            // Group channels by EPG source so each JSONL file is read once
+            $epgGroups = [];
+            foreach ($channels as $channel) {
+                if (! $channel->epgChannel) {
+                    continue;
+                }
+                $epgId = $channel->epgChannel->epg_id;
+                if (! isset($epgGroups[$epgId])) {
+                    $epg = Epg::find($epgId);
+                    if (! $epg || ! $epg->is_cached) {
+                        continue;
+                    }
+                    $epgGroups[$epgId] = ['epg' => $epg, 'channelMap' => []];
+                }
+                $epgGroups[$epgId]['channelMap'][$channel->id] = $channel->epgChannel->channel_id;
+            }
+
+            $cacheService = new EpgCacheService;
+            $now = Carbon::now();
+            $nextDate = Carbon::parse($date)->addDay()->format('Y-m-d');
+            $result = [];
+
+            foreach ($epgGroups as $group) {
+                $epg = $group['epg'];
+                $epgChannelIds = array_values($group['channelMap']);
+
+                // Fetch requested date + next day to cover timezone differences
+                $programmes = $cacheService->getCachedProgrammes($epg, $date, $epgChannelIds);
+                $nextDayProgrammes = $cacheService->getCachedProgrammes($epg, $nextDate, $epgChannelIds);
+
+                // Merge next day's programmes into the main set
+                foreach ($nextDayProgrammes as $channelId => $progs) {
+                    if (! isset($programmes[$channelId])) {
+                        $programmes[$channelId] = [];
+                    }
+                    $programmes[$channelId] = array_merge($programmes[$channelId], $progs);
+                }
+
+                foreach ($group['channelMap'] as $streamId => $epgChannelId) {
+                    $channelProgrammes = $programmes[$epgChannelId] ?? [];
+                    $channel = $channels[$streamId];
+
+                    // Fill gaps in EPG
+                    if (empty($channelProgrammes)) {
+                        $start = Carbon::parse($date)->startOfDay();
+                        $end = Carbon::parse($nextDate)->endOfDay();
+
+                        $current = $start->copy();
+                        while ($current->lt($end)) {
+                            $chunkEnd = $current->copy()->addHour();
+                            if ($chunkEnd->gt($end)) {
+                                $chunkEnd = $end->copy();
+                            }
+
+                            $channelProgrammes[] = [
+                                'id' => 'dummy-'.md5($streamId.$current->timestamp),
+                                'title' => $channel->name ?? 'Unknown Channel',
+                                'desc' => 'No information available',
+                                'start' => $current->format('Y-m-d H:i:s'),
+                                'stop' => $chunkEnd->format('Y-m-d H:i:s'),
+                                'lang' => 'en',
+                            ];
+                            $current = $chunkEnd;
+                        }
+                    } else {
+                        usort($channelProgrammes, function ($a, $b) {
+                            return strcmp($a['start'], $b['start']);
+                        });
+
+                        $filled = [];
+                        $lastEnd = Carbon::parse($date)->startOfDay();
+                        $finalEnd = Carbon::parse($nextDate)->endOfDay();
+
+                        foreach ($channelProgrammes as $prog) {
+                            $start = Carbon::parse($prog['start']);
+                            $stop = Carbon::parse($prog['stop']);
+
+                            if ($start->gt($lastEnd) && $start->diffInMinutes($lastEnd) > 1) {
+                                $gapStart = $lastEnd->copy();
+                                while ($gapStart->lt($start)) {
+                                    $gapEnd = $gapStart->copy()->addHour();
+                                    if ($gapEnd->gt($start)) {
+                                        $gapEnd = $start->copy();
+                                    }
+
+                                    $filled[] = [
+                                        'id' => 'dummy-'.md5($streamId.$gapStart->timestamp),
+                                        'title' => $channel->name ?? 'Unknown Channel',
+                                        'desc' => 'No information available',
+                                        'start' => $gapStart->format('Y-m-d H:i:s'),
+                                        'stop' => $gapEnd->format('Y-m-d H:i:s'),
+                                        'lang' => 'en',
+                                    ];
+                                    $gapStart = $gapEnd;
+                                }
+                            }
+
+                            $filled[] = $prog;
+
+                            if ($stop->gt($lastEnd)) {
+                                $lastEnd = $stop;
+                            }
+                        }
+
+                        if ($finalEnd->gt($lastEnd) && $finalEnd->diffInMinutes($lastEnd) > 1) {
+                            $gapStart = $lastEnd->copy();
+                            while ($gapStart->lt($finalEnd)) {
+                                $gapEnd = $gapStart->copy()->addHour();
+                                if ($gapEnd->gt($finalEnd)) {
+                                    $gapEnd = $finalEnd->copy();
+                                }
+
+                                $filled[] = [
+                                    'id' => 'dummy-'.md5($streamId.$gapStart->timestamp),
+                                    'title' => $channel->name ?? 'Unknown Channel',
+                                    'desc' => 'No information available',
+                                    'start' => $gapStart->format('Y-m-d H:i:s'),
+                                    'stop' => $gapEnd->format('Y-m-d H:i:s'),
+                                    'lang' => 'en',
+                                ];
+                                $gapStart = $gapEnd;
+                            }
+                        }
+                        $channelProgrammes = $filled;
+                    }
+
+                    $isNowPlaying = $proxyEnabled ? M3uProxyService::isChannelActive($channel) : false;
+
+                    $epgListings = [];
+                    foreach ($channelProgrammes as $index => $programme) {
+                        $startTime = Carbon::parse($programme['start']);
+                        $endTime = Carbon::parse($programme['stop']);
+                        $isCurrentProgramme = $startTime->lte($now) && $endTime->gt($now);
+
+                        $epgListings[] = [
+                            'id' => (string) ($programme['id'] ?? $index),
+                            'epg_id' => (string) $epg->id,
+                            'title' => base64_encode($programme['title'] ?? ''),
+                            'description' => base64_encode($programme['desc'] ?? ''),
+                            'lang' => $programme['lang'] ?? 'en',
+                            'start' => $startTime->format('Y-m-d H:i:s'),
+                            'end' => $endTime->format('Y-m-d H:i:s'),
+                            'channel_id' => $epgChannelId,
+                            'start_timestamp' => (string) $startTime->timestamp,
+                            'stop_timestamp' => (string) $endTime->timestamp,
+                            'now_playing' => ($isCurrentProgramme && $isNowPlaying) ? 1 : 0,
+                            'has_archive' => ($channel->catchup && $endTime->lt($now)) ? 1 : 0,
+                        ];
+                    }
+                    $result[(string) $streamId] = ['epg_listings' => $epgListings];
+                }
+            }
+
+            // Include empty results for channels without EPG data
+            foreach ($streamIds as $sid) {
+                if (! isset($result[(string) $sid])) {
+                    $result[(string) $sid] = ['epg_listings' => []];
+                }
+            }
+
+            return response()->json($result);
         } elseif ($action === 'm3u_plus') {
             // For m3u_plus, redirect to the m3u method which handles the request
             return $this->m3u($playlist);
@@ -1630,6 +1867,168 @@ class XtreamApiController extends Controller
 
         // If here, user is authenticated
         return redirect()->to(route('epg.generate', ['uuid' => $playlist->uuid]));
+    }
+
+    /**
+     * Get live streams for a network playlist.
+     * Each network becomes a "channel" in the Xtream API response.
+     */
+    private function getNetworkLiveStreams(Playlist $playlist, string $baseUrl): \Illuminate\Http\JsonResponse
+    {
+        $networks = $playlist->networks()
+            ->where('enabled', true)
+            ->orderBy('channel_number')
+            ->get();
+
+        $liveStreams = [];
+        foreach ($networks as $network) {
+            $streamIcon = $network->logo ?: $baseUrl.'/placeholder.png';
+
+            // Use network ID as stream_id, channel_number as epg_channel_id
+            $liveStreams[] = [
+                'num' => $network->channel_number ?? $network->id,
+                'name' => $network->name,
+                'stream_type' => 'live',
+                'stream_id' => $network->id,
+                'stream_icon' => $streamIcon,
+                'epg_channel_id' => 'network-'.($network->channel_number ?? $network->id),
+                'added' => (string) $network->created_at->timestamp,
+                'category_id' => 'networks',
+                'category_ids' => [1],
+                'tv_archive' => 0,
+                'tv_archive_duration' => 0,
+                'custom_sid' => '',
+                'thumbnail' => '',
+                'direct_source' => '',
+            ];
+        }
+
+        return response()->json($liveStreams);
+    }
+
+    /**
+     * Get live categories for a network playlist.
+     * Returns a single "Networks" category.
+     */
+    private function getNetworkLiveCategories(Playlist $playlist): \Illuminate\Http\JsonResponse
+    {
+        $networkCount = $playlist->networks()->where('enabled', true)->count();
+
+        if ($networkCount === 0) {
+            return response()->json([]);
+        }
+
+        return response()->json([
+            [
+                'category_id' => 'networks',
+                'category_name' => 'Networks',
+                'parent_id' => 0,
+            ],
+        ]);
+    }
+
+    /**
+     * Get short EPG for a network (from the generated programme schedule).
+     */
+    private function getNetworkShortEpg(Playlist $playlist, Request $request): \Illuminate\Http\JsonResponse
+    {
+        $streamId = $request->input('stream_id');
+        $limit = (int) ($request->input('limit') ?? 4);
+
+        if (! $streamId) {
+            return response()->json(['error' => 'stream_id parameter is required for get_short_epg action'], 400);
+        }
+
+        $network = $playlist->networks()
+            ->where('enabled', true)
+            ->where('id', $streamId)
+            ->first();
+
+        if (! $network) {
+            return response()->json(['error' => 'Network not found'], 404);
+        }
+
+        $now = Carbon::now();
+        $programmes = $network->programmes()
+            ->where('end_time', '>', $now)
+            ->orderBy('start_time')
+            ->limit($limit)
+            ->get();
+
+        $epgListings = [];
+        foreach ($programmes as $index => $programme) {
+            $isCurrentProgramme = $programme->start_time->lte($now) && $programme->end_time->gt($now);
+
+            $epgListings[] = [
+                'id' => (string) $programme->id,
+                'epg_id' => (string) $network->id,
+                'title' => base64_encode($programme->title),
+                'lang' => 'en',
+                'start' => $programme->start_time->format('Y-m-d H:i:s'),
+                'end' => $programme->end_time->format('Y-m-d H:i:s'),
+                'description' => base64_encode($programme->description ?? ''),
+                'channel_id' => 'network-'.($network->channel_number ?? $network->id),
+                'start_timestamp' => (string) $programme->start_time->timestamp,
+                'stop_timestamp' => (string) $programme->end_time->timestamp,
+                'now_playing' => $isCurrentProgramme ? 1 : 0,
+                'has_archive' => 0,
+            ];
+        }
+
+        return response()->json(['epg_listings' => $epgListings]);
+    }
+
+    /**
+     * Get simple data table EPG for a network (full day schedule).
+     */
+    private function getNetworkSimpleDataTable(Playlist $playlist, Request $request): \Illuminate\Http\JsonResponse
+    {
+        $streamId = $request->input('stream_id');
+
+        if (! $streamId) {
+            return response()->json(['error' => 'stream_id parameter is required for get_simple_data_table action'], 400);
+        }
+
+        $network = $playlist->networks()
+            ->where('enabled', true)
+            ->where('id', $streamId)
+            ->first();
+
+        if (! $network) {
+            return response()->json(['error' => 'Network not found'], 404);
+        }
+
+        $today = Carbon::now()->startOfDay();
+        $tomorrow = $today->copy()->addDay();
+
+        $programmes = $network->programmes()
+            ->where('start_time', '>=', $today)
+            ->where('start_time', '<', $tomorrow)
+            ->orderBy('start_time')
+            ->get();
+
+        $now = Carbon::now();
+        $epgListings = [];
+        foreach ($programmes as $programme) {
+            $isCurrentProgramme = $programme->start_time->lte($now) && $programme->end_time->gt($now);
+
+            $epgListings[] = [
+                'id' => (string) $programme->id,
+                'epg_id' => (string) $network->id,
+                'title' => base64_encode($programme->title),
+                'lang' => 'en',
+                'start' => $programme->start_time->format('Y-m-d H:i:s'),
+                'end' => $programme->end_time->format('Y-m-d H:i:s'),
+                'description' => base64_encode($programme->description ?? ''),
+                'channel_id' => 'network-'.($network->channel_number ?? $network->id),
+                'start_timestamp' => (string) $programme->start_time->timestamp,
+                'stop_timestamp' => (string) $programme->end_time->timestamp,
+                'now_playing' => $isCurrentProgramme ? 1 : 0,
+                'has_archive' => 0,
+            ];
+        }
+
+        return response()->json(['epg_listings' => $epgListings]);
     }
 
     /**

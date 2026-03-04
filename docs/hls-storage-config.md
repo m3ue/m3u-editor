@@ -27,14 +27,14 @@ docker run -d \
   -v ./data:/var/www/config \
   -v /dev/shm:/hls-segments \  # ← Map host /dev/shm to container path
   -e HLS_TEMP_DIR=/hls-segments \  # ← Point to the mapped path
-  hektyc/m3u-editor:dev
+  sparkison/m3u-editor:dev
 ```
 
 **Docker Compose**:
 ```yaml
 services:
   m3u-editor:
-    image: hektyc/m3u-editor:dev
+    image: sparkison/m3u-editor:dev
     container_name: m3u-editor
     ports:
       - "36400:36400"
@@ -59,14 +59,14 @@ docker run -d \
   -v ./data:/var/www/config \
   -v /path/to/your/hls-storage:/hls-segments \  # ← Map host directory
   -e HLS_TEMP_DIR=/hls-segments \
-  hektyc/m3u-editor:dev
+  sparkison/m3u-editor:dev
 ```
 
 **Docker Compose**:
 ```yaml
 services:
   m3u-editor:
-    image: hektyc/m3u-editor:dev
+    image: sparkison/m3u-editor:dev
     container_name: m3u-editor
     ports:
       - "36400:36400"
@@ -91,14 +91,14 @@ docker run -d \
   -v ./data:/var/www/config \
   --tmpfs /hls-segments:rw,size=10g \  # ← Create 10GB tmpfs
   -e HLS_TEMP_DIR=/hls-segments \
-  hektyc/m3u-editor:dev
+  sparkison/m3u-editor:dev
 ```
 
 **Docker Compose**:
 ```yaml
 services:
   m3u-editor:
-    image: hektyc/m3u-editor:dev
+    image: sparkison/m3u-editor:dev
     container_name: m3u-editor
     ports:
       - "36400:36400"
@@ -121,7 +121,7 @@ services:
 ```yaml
 services:
   m3u-editor:
-    image: hektyc/m3u-editor:dev
+    image: sparkison/m3u-editor:dev
     container_name: m3u-editor
     ports:
       - "36400:36400"
@@ -143,6 +143,71 @@ services:
       - M3U_PROXY_ENABLED=true
       - M3U_PROXY_TOKEN=your-secure-token
 ```
+
+---
+
+## Environment variables
+
+The following environment variables control HLS storage behavior and garbage collection. Add them to your environment or `.env` file to override defaults.
+
+```env
+# HLS storage path (where segments are written)
+HLS_TEMP_DIR=/var/www/html/storage/app/hls-segments
+
+# Garbage collection: enable/disable the background GC loop
+HLS_GC_ENABLED=true
+
+# GC loop interval in seconds (default: 600 seconds = 10 minutes)
+HLS_GC_INTERVAL=600
+
+# Delete files older than this threshold in seconds (default: 7200 seconds = 2 hours)
+HLS_GC_AGE_THRESHOLD=7200
+```
+
+### Defaults & behavior (when env vars are not set)
+- **Defaults used by the system:**
+  - `HLS_TEMP_DIR=/var/www/html/storage/app/hls-segments`
+  - `HLS_GC_ENABLED=true`
+  - `HLS_GC_INTERVAL=600` (seconds)
+  - `HLS_GC_AGE_THRESHOLD=7200` (seconds)
+- **Startup behavior:** If `HLS_TEMP_DIR` is not set the startup script uses the default path, **creates the directory if missing**, sets permissions, and **checks available disk space** (warns if <2GB, critical if <512MB).
+- **Garbage collector behavior:** `php artisan hls:gc` honors `HLS_GC_ENABLED`; when enabled Supervisor runs the command in loop mode using the configured `--interval` and `--threshold` values. Use `--dry-run` to preview deletions safely.
+- **Recommendation:** For production explicitly set these env vars and **volume map** `HLS_TEMP_DIR` to a host path (or tmpfs) so you control capacity and retention.
+
+**Tips:**
+- Use `HLS_GC_ENABLED=false` to disable automatic GC (useful for local development or debugging). 
+- Use `php artisan hls:gc --dry-run` to preview deletions before enabling automatic GC.
+
+---
+
+## HLS Garbage Collector (hls:gc)
+
+A built-in Artisan command `php artisan hls:gc` will remove old HLS segment files and stale playlists. It supports a looping mode which is enabled in the container via Supervisor when `HLS_GC_ENABLED=true`.
+
+Supervisor runs the command as:
+
+```
+php /var/www/html/artisan hls:gc --loop --interval=$HLS_GC_INTERVAL --threshold=$HLS_GC_AGE_THRESHOLD --no-interaction
+```
+
+The command has the following options:
+
+- `--loop` : Run continuously (used by Supervisor)
+- `--interval` : Seconds to sleep between iterations (default: 600)
+- `--threshold` : File age threshold in seconds (default: 7200)
+- `--dry-run` : Show which files would be deleted without removing them
+
+By default the GC looks in both `storage/app/networks/*` and the `HLS_TEMP_DIR` path.
+
+### Metrics emitter
+
+A lightweight metrics emitter `php artisan hls:metrics` will record per-network HLS metrics (segment counts and storage bytes) to `/var/log/hls-metrics.log` and to the Laravel log. Supervisor can run this in a loop when `HLS_METRICS_ENABLED=true`.
+
+Environment variables:
+
+- `HLS_METRICS_ENABLED` (default: `true`) — run periodic metrics emitter via Supervisor
+- `HLS_METRICS_INTERVAL` (default: `300`) — run interval in seconds
+
 
 ---
 

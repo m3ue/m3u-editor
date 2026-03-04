@@ -81,6 +81,11 @@ function streamPlayer() {
                     maxMaxBufferLength: 600,
                     maxBufferSize: 60 * 1000 * 1000,
                     maxBufferHole: 0.5,
+                    // Live stream settings - critical for continuous playback
+                    liveSyncDurationCount: 3,       // Sync to 3 segments behind live edge
+                    liveMaxLatencyDurationCount: 6, // Max latency before seeking forward
+                    liveDurationInfinity: true,     // Treat stream as infinite (no duration limit)
+                    liveBackBufferLength: 60,       // Keep 60s of back buffer for seeking
                     // Add debug logging
                     debug: false,
                     // Add retry and timeout configurations

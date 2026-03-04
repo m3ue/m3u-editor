@@ -6,6 +6,7 @@ use App\Enums\EpgSourceType;
 use App\Enums\Status;
 use App\Events\SyncCompleted;
 use App\Models\Epg;
+use App\Models\EpgChannel;
 use App\Models\Job;
 use App\Services\SchedulesDirectService;
 use App\Traits\ProviderRequestDelay;
@@ -21,6 +22,7 @@ use Illuminate\Support\LazyCollection;
 use Illuminate\Support\Str;
 use Throwable;
 use XMLReader;
+use XMLWriter;
 
 class ProcessEpgImport implements ShouldQueue
 {
@@ -108,6 +110,12 @@ class ProcessEpgImport implements ShouldQueue
             $epgId = $epg->id;
             $userId = $epg->user_id;
             $batchNo = Str::uuid7()->toString();
+
+            if ($epg->isMerged()) {
+                $this->processMergedEpg($epg, $start);
+
+                return;
+            }
 
             $channelReader = null;
             $filePath = null;
@@ -222,8 +230,9 @@ class ProcessEpgImport implements ShouldQueue
                 }
             } else {
                 // Get uploaded file contents
-                if ($epg->uploads && Storage::disk('local')->exists($epg->uploads)) {
-                    $filePath = Storage::disk('local')->path($epg->uploads);
+                $uploadPath = is_array($epg->uploads) ? ($epg->uploads[0] ?? null) : $epg->uploads;
+                if ($uploadPath && Storage::disk('local')->exists($uploadPath)) {
+                    $filePath = Storage::disk('local')->path($uploadPath);
                 } elseif ($epg->url) {
                     $filePath = $epg->url;
                 }
@@ -477,5 +486,173 @@ class ProcessEpgImport implements ShouldQueue
             event(new SyncCompleted($this->epg));
         }
 
+    }
+
+    private function resolveEpgSourceFilePath(Epg $epg): ?string
+    {
+        if ($epg->isMerged() || $epg->source_type === EpgSourceType::SCHEDULES_DIRECT || ($epg->url && str_starts_with($epg->url, 'http'))) {
+            return Storage::disk('local')->exists($epg->file_path)
+                ? Storage::disk('local')->path($epg->file_path)
+                : null;
+        }
+
+        $uploadPath = is_array($epg->uploads) ? ($epg->uploads[0] ?? null) : $epg->uploads;
+        if ($uploadPath && Storage::disk('local')->exists($uploadPath)) {
+            return Storage::disk('local')->path($uploadPath);
+        }
+
+        if ($epg->url && file_exists($epg->url)) {
+            return $epg->url;
+        }
+
+        return null;
+    }
+
+    private function processMergedEpg(Epg $epg, Carbon $start): void
+    {
+        $merged = $this->buildMergedEpgFile($epg);
+
+        if (! $merged) {
+            $error = 'Invalid merged EPG configuration. Please ensure you selected at least 2 valid source EPGs and try again.';
+
+            Notification::make()
+                ->danger()
+                ->title("Error processing \"{$epg->name}\"")
+                ->body($error)
+                ->broadcast($epg->user);
+            Notification::make()
+                ->danger()
+                ->title("Error processing \"{$epg->name}\"")
+                ->body($error)
+                ->sendToDatabase($epg->user);
+
+            $epg->update([
+                'status' => Status::Failed,
+                'synced' => now(),
+                'errors' => $error,
+                'progress' => 100,
+                'processing' => false,
+                'processing_started_at' => null,
+                'processing_phase' => null,
+            ]);
+
+            event(new SyncCompleted($epg));
+
+            return;
+        }
+
+        EpgChannel::where('epg_id', $epg->id)->delete();
+
+        $completedIn = $start->diffInSeconds(now());
+        $completedInRounded = round($completedIn, 2);
+
+        $epg->update([
+            'status' => Status::Completed,
+            'synced' => now(),
+            'errors' => null,
+            'progress' => 100,
+            'processing' => false,
+            'processing_started_at' => null,
+            'processing_phase' => null,
+            'sync_time' => $completedIn,
+            'channel_count' => $merged['channel_count'],
+            'programme_count' => $merged['programme_count'],
+        ]);
+
+        Notification::make()
+            ->success()
+            ->title('EPG Synced')
+            ->body("\"{$epg->name}\" has been synced successfully. Import completed in {$completedInRounded} seconds.")
+            ->broadcast($epg->user)
+            ->sendToDatabase($epg->user);
+
+        event(new SyncCompleted($epg));
+    }
+
+    private function buildMergedEpgFile(Epg $epg): ?array
+    {
+        $sourceEpgs = $epg->sourceEpgs()
+            ->where('epgs.id', '!=', $epg->id)
+            ->where('epgs.is_merged', false)
+            ->orderBy('merged_epg_epg.sort_order')
+            ->get();
+
+        if ($sourceEpgs->isEmpty()) {
+            return null;
+        }
+
+        Storage::disk('local')->makeDirectory($epg->folder_path);
+
+        if (Storage::disk('local')->exists($epg->file_path)) {
+            Storage::disk('local')->delete($epg->file_path);
+        }
+
+        $mergedFilePath = Storage::disk('local')->path($epg->file_path);
+        $writer = new XMLWriter;
+        $writer->openURI($mergedFilePath);
+        $writer->startDocument('1.0', 'utf-8');
+        $writer->writeDTD('tv', null, 'xmltv.dtd');
+        $writer->startElement('tv');
+        $writer->writeAttribute('generator-info-name', 'Generated by m3u editor');
+        $writer->writeAttribute('generator-info-url', url(''));
+
+        $seenChannelIds = [];
+        $channelCount = 0;
+        $programmeCount = 0;
+
+        foreach ($sourceEpgs as $sourceEpg) {
+            $sourcePath = $this->resolveEpgSourceFilePath($sourceEpg);
+            if (! $sourcePath) {
+                continue;
+            }
+
+            $reader = new XMLReader;
+            if (! $reader->open('compress.zlib://'.$sourcePath)) {
+                continue;
+            }
+
+            while (@$reader->read()) {
+                if ($reader->nodeType !== XMLReader::ELEMENT) {
+                    continue;
+                }
+
+                if ($reader->name === 'channel') {
+                    $channelId = trim((string) $reader->getAttribute('id'));
+                    if ($channelId && array_key_exists($channelId, $seenChannelIds)) {
+                        $reader->readOuterXml();
+
+                        continue;
+                    }
+
+                    if ($channelId) {
+                        $seenChannelIds[$channelId] = true;
+                        $channelCount++;
+                    }
+
+                    $writer->writeRaw($reader->readOuterXml());
+
+                    continue;
+                }
+
+                if ($reader->name === 'programme') {
+                    $programmeCount++;
+                    $writer->writeRaw($reader->readOuterXml());
+                }
+            }
+
+            $reader->close();
+        }
+
+        $writer->endElement();
+        $writer->endDocument();
+        $writer->flush();
+
+        return file_exists($mergedFilePath)
+            ? [
+                'path' => $mergedFilePath,
+                'channel_count' => $channelCount,
+                'programme_count' => $programmeCount,
+            ]
+            : null;
     }
 }

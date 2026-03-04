@@ -8,6 +8,7 @@ use App\Jobs\SyncSeriesStrmFiles;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Actions\DeleteAction;
+use Filament\Actions\ViewAction;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\EditRecord;
 
@@ -18,6 +19,9 @@ class EditSeries extends EditRecord
     protected function getHeaderActions(): array
     {
         return [
+            ViewAction::make()
+                ->label('View Series')
+                ->icon('heroicon-s-eye'),
             ActionGroup::make([
                 Action::make('process')
                     ->label('Fetch Series Metadata')

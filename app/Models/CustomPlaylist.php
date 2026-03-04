@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\PlaylistChannelId;
 use App\Traits\ShortUrlTrait;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -31,9 +32,11 @@ class CustomPlaylist extends Model
         'proxy_options' => 'array',
         'short_urls_enabled' => 'boolean',
         'include_series_in_m3u' => 'boolean',
+        'include_networks_in_m3u' => 'boolean',
         'include_vod_in_m3u' => 'boolean',
         'custom_headers' => 'array',
         'strict_live_ts' => 'boolean',
+        'use_sticky_session' => 'boolean',
         'id_channel_by' => PlaylistChannelId::class,
     ];
 
@@ -187,5 +190,50 @@ class CustomPlaylist extends Model
             })
             ->filter(fn ($config) => $config['url'] !== null)
             ->toArray();
+    }
+
+    /**
+     * Check if any source playlists have provider profiles enabled.
+     * When this returns true, proxy mode should be required for proper connection pooling.
+     */
+    public function hasPooledSourcePlaylists(): bool
+    {
+        return $this->channels()
+            ->whereNotNull('playlist_id')
+            ->whereHas('playlist', function ($query) {
+                $query->where('profiles_enabled', true);
+            })
+            ->exists();
+    }
+
+    /**
+     * Get source playlists that have provider profiles enabled.
+     */
+    public function getPooledSourcePlaylists(): \Illuminate\Database\Eloquent\Collection
+    {
+        $playlistIds = $this->channels()
+            ->whereNotNull('playlist_id')
+            ->distinct()
+            ->pluck('playlist_id');
+
+        return Playlist::whereIn('id', $playlistIds)
+            ->where('profiles_enabled', true)
+            ->get();
+    }
+
+    public function enableProxy(): Attribute
+    {
+        return Attribute::make(
+            get: function ($value) {
+                if ($value) {
+                    // Check playlist user has access to proxy features
+                    if (! $this->user?->canUseProxy()) {
+                        return false;
+                    }
+                }
+
+                return $value;
+            }
+        );
     }
 }

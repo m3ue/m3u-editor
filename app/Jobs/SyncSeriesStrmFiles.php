@@ -3,7 +3,9 @@
 namespace App\Jobs;
 
 use App\Models\Episode;
+use App\Models\MediaServerIntegration;
 use App\Models\Series;
+use App\Models\StreamFileSetting;
 use App\Models\StrmFileMapping;
 use App\Models\User;
 use App\Services\NfoService;
@@ -64,6 +66,9 @@ class SyncSeriesStrmFiles implements ShouldQueue
 
                 // For single series sync, cleanup immediately
                 $this->performCleanup();
+
+                // Trigger media server refresh for single series sync
+                $this->dispatchSingleSeriesMediaServerRefresh($series, $settings);
             } elseif ($this->isCleanupJob) {
                 // Special cleanup job - runs after all batch jobs
                 $this->performGlobalCleanup($settings);
@@ -191,6 +196,10 @@ class SyncSeriesStrmFiles implements ShouldQueue
                 ->get();
 
             foreach ($seriesChunk as $series) {
+                if (! $series instanceof Series) {
+                    continue;
+                }
+
                 $this->fetchMetadataForSeries($series, $settings, skipCleanup: true);
                 $processedCount++;
             }
@@ -233,6 +242,9 @@ class SyncSeriesStrmFiles implements ShouldQueue
             'duration_seconds' => $duration,
         ]);
 
+        // Trigger media server library refresh if configured
+        $this->dispatchMediaServerRefresh($settings);
+
         // Notify user
         if ($this->notify && $this->user_id) {
             $user = User::find($this->user_id);
@@ -243,6 +255,106 @@ class SyncSeriesStrmFiles implements ShouldQueue
                     ->body('All series STRM files have been synced.')
                     ->broadcast($user)
                     ->sendToDatabase($user);
+            }
+        }
+    }
+
+    /**
+     * Dispatch media server refresh for a single series sync.
+     */
+    protected function dispatchSingleSeriesMediaServerRefresh(Series $series, GeneralSettings $settings): void
+    {
+        // Check series-level StreamFileSetting first
+        $streamFileSetting = $series->streamFileSetting;
+
+        // Fall back to category-level
+        if (! $streamFileSetting && $series->category) {
+            $streamFileSetting = $series->category->streamFileSetting;
+        }
+
+        // Fall back to global setting
+        if (! $streamFileSetting && $settings->default_series_stream_file_setting_id) {
+            $streamFileSetting = StreamFileSetting::find($settings->default_series_stream_file_setting_id);
+        }
+
+        // Dispatch refresh if configured
+        if ($streamFileSetting?->refresh_media_server && $streamFileSetting?->media_server_integration_id) {
+            $integration = MediaServerIntegration::find($streamFileSetting->media_server_integration_id);
+            if ($integration) {
+                RefreshMediaServerLibraryJob::dispatch($integration, $this->notify)
+                    ->delay(now()->addSeconds($streamFileSetting->refresh_delay_seconds ?? 5));
+            }
+        }
+    }
+
+    /**
+     * Dispatch media server refresh jobs for any StreamFileSettings that have refresh enabled.
+     */
+    protected function dispatchMediaServerRefresh(GeneralSettings $settings): void
+    {
+        $integrationIds = collect();
+
+        // Check global series StreamFileSetting
+        if ($settings->default_series_stream_file_setting_id) {
+            $globalStreamFileSetting = StreamFileSetting::find($settings->default_series_stream_file_setting_id);
+            if ($globalStreamFileSetting?->refresh_media_server && $globalStreamFileSetting?->media_server_integration_id) {
+                $integrationIds->push([
+                    'id' => $globalStreamFileSetting->media_server_integration_id,
+                    'delay' => $globalStreamFileSetting->refresh_delay_seconds ?? 5,
+                ]);
+            }
+        }
+
+        // Get all series-level and category-level StreamFileSettings for this user that have refresh enabled
+        $seriesStreamFileSettings = StreamFileSetting::query()
+            ->where('type', 'series')
+            ->where('refresh_media_server', true)
+            ->whereNotNull('media_server_integration_id')
+            ->whereHas('series', function ($query) {
+                $query->where('user_id', $this->user_id);
+                if ($this->playlist_id) {
+                    $query->where('playlist_id', $this->playlist_id);
+                }
+            })
+            ->get();
+
+        foreach ($seriesStreamFileSettings as $streamFileSetting) {
+            if (! $integrationIds->contains('id', $streamFileSetting->media_server_integration_id)) {
+                $integrationIds->push([
+                    'id' => $streamFileSetting->media_server_integration_id,
+                    'delay' => $streamFileSetting->refresh_delay_seconds ?? 5,
+                ]);
+            }
+        }
+
+        // Also check category-level settings
+        $categoryStreamFileSettings = StreamFileSetting::query()
+            ->where('type', 'series')
+            ->where('refresh_media_server', true)
+            ->whereNotNull('media_server_integration_id')
+            ->whereHas('categories', function ($query) {
+                $query->where('user_id', $this->user_id);
+                if ($this->playlist_id) {
+                    $query->where('playlist_id', $this->playlist_id);
+                }
+            })
+            ->get();
+
+        foreach ($categoryStreamFileSettings as $streamFileSetting) {
+            if (! $integrationIds->contains('id', $streamFileSetting->media_server_integration_id)) {
+                $integrationIds->push([
+                    'id' => $streamFileSetting->media_server_integration_id,
+                    'delay' => $streamFileSetting->refresh_delay_seconds ?? 5,
+                ]);
+            }
+        }
+
+        // Dispatch refresh jobs for each unique integration
+        foreach ($integrationIds as $integrationData) {
+            $integration = MediaServerIntegration::find($integrationData['id']);
+            if ($integration) {
+                RefreshMediaServerLibraryJob::dispatch($integration, $this->notify)
+                    ->delay(now()->addSeconds($integrationData['delay']));
             }
         }
     }
@@ -280,34 +392,13 @@ class SyncSeriesStrmFiles implements ShouldQueue
 
         // Only load relations if not already loaded (bulk mode pre-loads them)
         if (! $series->relationLoaded('enabled_episodes')) {
-            $series->load('enabled_episodes', 'playlist', 'user', 'category');
+            $series->load('enabled_episodes', 'playlist', 'user', 'category', 'streamFileSetting', 'category.streamFileSetting');
         }
 
         $playlist = $series->playlist;
         try {
-            // Get playlist sync settings
-            $sync_settings = $series->sync_settings;
-
-            // Get global sync settings
-            $global_sync_settings = [
-                'enabled' => $settings->stream_file_sync_enabled ?? false,
-                'include_category' => $settings->stream_file_sync_include_category ?? true,
-                'include_series' => $settings->stream_file_sync_include_series ?? true,
-                'include_season' => $settings->stream_file_sync_include_season ?? true,
-                'sync_location' => $series->sync_location ?? $settings->stream_file_sync_location ?? null,
-                'path_structure' => $settings->stream_file_sync_path_structure ?? ['category', 'series', 'season'],
-                'filename_metadata' => $settings->stream_file_sync_filename_metadata ?? [],
-                'tmdb_id_format' => $settings->stream_file_sync_tmdb_id_format ?? 'square',
-                'clean_special_chars' => $settings->stream_file_sync_clean_special_chars ?? false,
-                'remove_consecutive_chars' => $settings->stream_file_sync_remove_consecutive_chars ?? false,
-                'replace_char' => $settings->stream_file_sync_replace_char ?? 'space',
-                'name_filter_enabled' => $settings->stream_file_sync_name_filter_enabled ?? false,
-                'name_filter_patterns' => $settings->stream_file_sync_name_filter_patterns ?? [],
-                'generate_nfo' => $settings->stream_file_sync_generate_nfo ?? false,
-            ];
-
-            // Merge global settings with series specific settings
-            $sync_settings = array_merge($global_sync_settings, $sync_settings ?? []);
+            // Resolve settings with priority chain: Series > Category > Global Profile > Legacy Settings
+            $sync_settings = $this->resolveSeriesSyncSettings($series, $settings);
 
             // Check if sync is enabled
             if (! $sync_settings['enabled'] ?? false) {
@@ -380,6 +471,13 @@ class SyncSeriesStrmFiles implements ShouldQueue
             $cleanSpecialChars = $sync_settings['clean_special_chars'] ?? false;
             $tmdbIdFormat = $sync_settings['tmdb_id_format'] ?? 'square';
 
+            // Get filename metadata settings early so folder/episode naming can respect TMDB target settings
+            $filenameMetadata = $sync_settings['filename_metadata'] ?? [];
+            $tmdbIdApplyTo = $sync_settings['tmdb_id_apply_to'] ?? 'episodes';
+            $tmdbEnabled = in_array('tmdb_id', $filenameMetadata, true);
+            $applyTmdbToSeriesFolder = $tmdbEnabled && in_array($tmdbIdApplyTo, ['series', 'both'], true);
+            $applyTmdbToEpisodes = $tmdbEnabled && in_array($tmdbIdApplyTo, ['episodes', 'both'], true);
+
             // Get name filtering settings
             $nameFilterEnabled = $sync_settings['name_filter_enabled'] ?? false;
             $nameFilterPatterns = $sync_settings['name_filter_patterns'] ?? [];
@@ -425,23 +523,41 @@ class SyncSeriesStrmFiles implements ShouldQueue
                     }
                 }
 
-                // Add TVDB/TMDB/IMDB ID to folder name for Trash Guides compatibility
-                // Priority: TVDB (Sonarr's source) > TMDB > IMDB
+                // Add TVDB/TMDB/IMDB ID to folder name for Trash Guides compatibility.
+                // TMDB is only included in series folder names when explicitly enabled via tmdb_id_apply_to.
                 // Check dedicated columns first, then fall back to metadata JSON for legacy support
                 $tvdbId = $series->tvdb_id ?? $series->metadata['tvdb_id'] ?? $series->metadata['tvdb'] ?? null;
                 $tmdbId = $series->tmdb_id ?? $series->metadata['tmdb_id'] ?? $series->metadata['tmdb'] ?? null;
                 $imdbId = $series->imdb_id ?? $series->metadata['imdb_id'] ?? $series->metadata['imdb'] ?? null;
+
                 // Ensure IDs are scalar values (not arrays)
                 $tvdbId = is_scalar($tvdbId) ? $tvdbId : null;
                 $tmdbId = is_scalar($tmdbId) ? $tmdbId : null;
                 $imdbId = is_scalar($imdbId) ? $imdbId : null;
+
+                // Determine bracket style based on settings
                 $bracket = $tmdbIdFormat === 'curly' ? ['{', '}'] : ['[', ']'];
-                if (! empty($tvdbId)) {
-                    $seriesFolder .= " {$bracket[0]}tvdb-{$tvdbId}{$bracket[1]}";
-                } elseif (! empty($tmdbId)) {
-                    $seriesFolder .= " {$bracket[0]}tmdb-{$tmdbId}{$bracket[1]}";
-                } elseif (! empty($imdbId)) {
-                    $seriesFolder .= " {$bracket[0]}imdb-{$imdbId}{$bracket[1]}";
+
+                // When applying TMDB ID to the series folder and the series has no IDs,
+                // fall back to the first episode's TMDB ID
+                if ($applyTmdbToSeriesFolder && empty($tvdbId) && empty($tmdbId) && empty($imdbId)) {
+                    $firstEpisode = $episodes->first();
+                    if ($firstEpisode) {
+                        $epInfo = $firstEpisode->info ?? [];
+                        $fallbackTmdb = $firstEpisode->tmdb_id ?? $epInfo['tmdb_id'] ?? $epInfo['tmdb'] ?? null;
+                        $tmdbId = \is_scalar($fallbackTmdb) ? $fallbackTmdb : null;
+                    }
+                }
+
+                // Add TMDB/TVDB/IMDB ID to series folder name if enabled and available (TMDB only if tmdb_id_apply_to includes series)
+                if ($applyTmdbToSeriesFolder) {
+                    if (! empty($tmdbId)) {
+                        $seriesFolder .= " {$bracket[0]}tmdb-{$tmdbId}{$bracket[1]}";
+                    } elseif (! empty($tvdbId)) {
+                        $seriesFolder .= " {$bracket[0]}tvdb-{$tvdbId}{$bracket[1]}";
+                    } elseif (! empty($imdbId)) {
+                        $seriesFolder .= " {$bracket[0]}imdb-{$imdbId}{$bracket[1]}";
+                    }
                 }
 
                 $cleanName = $cleanSpecialChars
@@ -454,7 +570,6 @@ class SyncSeriesStrmFiles implements ShouldQueue
             $seriesFolderPath = $path;
 
             // Get filename metadata settings
-            $filenameMetadata = $sync_settings['filename_metadata'] ?? [];
             $removeConsecutiveChars = $sync_settings['remove_consecutive_chars'] ?? false;
 
             // NFO generation setting - instantiate service once if needed
@@ -493,14 +608,21 @@ class SyncSeriesStrmFiles implements ShouldQueue
                     $fileName .= " ({$year})";
                 }
 
-                if (in_array('tmdb_id', $filenameMetadata)) {
-                    $tmdbId = $seriesMetadata['tmdb_id'] ?? $ep->info['tmdb_id'] ?? null;
+                if ($applyTmdbToEpisodes) {
+                    $tmdbId = $ep->info['tmdb_id'] ?? $seriesMetadata['tmdb_id'] ?? null;
                     // Ensure ID is a scalar value (not an array)
                     $tmdbId = is_scalar($tmdbId) ? $tmdbId : null;
                     if (! empty($tmdbId)) {
                         $bracket = $tmdbIdFormat === 'curly' ? ['{', '}'] : ['[', ']'];
                         $fileName .= " {$bracket[0]}tmdb-{$tmdbId}{$bracket[1]}";
                     }
+                }
+
+                // Add category suffix to filename if enabled
+                if (in_array('category', $filenameMetadata)) {
+                    $catSuffix = $category?->name ?? $category?->name_internal ?? 'Uncategorized';
+                    $catSuffix = $applyNameFilter($catSuffix);
+                    $fileName .= " - {$catSuffix}";
                 }
 
                 // Clean the filename
@@ -588,5 +710,60 @@ class SyncSeriesStrmFiles implements ShouldQueue
                 'trace' => $e->getTraceAsString(),
             ]);
         }
+    }
+
+    /**
+     * Resolve sync settings with priority chain: Series > Category > Global Profile > Legacy Settings
+     */
+    protected function resolveSeriesSyncSettings(Series $series, GeneralSettings $settings): array
+    {
+        // Priority 1: Series-level StreamFileSetting
+        $streamFileSetting = $series->streamFileSetting;
+
+        // Priority 2: Category-level StreamFileSetting
+        if (! $streamFileSetting && $series->category) {
+            $streamFileSetting = $series->category->streamFileSetting;
+        }
+
+        // Priority 3: Global StreamFileSetting from GeneralSettings
+        if (! $streamFileSetting && $settings->default_series_stream_file_setting_id) {
+            $streamFileSetting = StreamFileSetting::find($settings->default_series_stream_file_setting_id);
+        }
+
+        // If we have a StreamFileSetting model, use its settings
+        if ($streamFileSetting) {
+            $sync_settings = $streamFileSetting->toSyncSettings();
+
+            // Allow series-level sync_location override
+            if ($series->sync_location) {
+                $sync_settings['sync_location'] = $series->sync_location;
+            }
+
+            return $sync_settings;
+        }
+
+        // Priority 4: Legacy settings from GeneralSettings (backwards compatibility)
+        $legacy_sync_settings = $series->sync_settings ?? [];
+
+        $global_sync_settings = [
+            'enabled' => $settings->stream_file_sync_enabled ?? false,
+            'include_category' => $settings->stream_file_sync_include_category ?? true,
+            'include_series' => $settings->stream_file_sync_include_series ?? true,
+            'include_season' => $settings->stream_file_sync_include_season ?? true,
+            'sync_location' => $series->sync_location ?? $settings->stream_file_sync_location ?? null,
+            'path_structure' => $settings->stream_file_sync_path_structure ?? ['category', 'series', 'season'],
+            'filename_metadata' => $settings->stream_file_sync_filename_metadata ?? [],
+            'tmdb_id_format' => $settings->stream_file_sync_tmdb_id_format ?? 'square',
+            'tmdb_id_apply_to' => 'episodes',
+            'clean_special_chars' => $settings->stream_file_sync_clean_special_chars ?? false,
+            'remove_consecutive_chars' => $settings->stream_file_sync_remove_consecutive_chars ?? false,
+            'replace_char' => $settings->stream_file_sync_replace_char ?? 'space',
+            'name_filter_enabled' => $settings->stream_file_sync_name_filter_enabled ?? false,
+            'name_filter_patterns' => $settings->stream_file_sync_name_filter_patterns ?? [],
+            'generate_nfo' => $settings->stream_file_sync_generate_nfo ?? false,
+        ];
+
+        // Merge global settings with series-specific legacy settings
+        return array_merge($global_sync_settings, $legacy_sync_settings);
     }
 }

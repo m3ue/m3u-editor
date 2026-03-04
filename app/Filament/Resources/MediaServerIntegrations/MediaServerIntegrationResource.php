@@ -5,6 +5,7 @@ namespace App\Filament\Resources\MediaServerIntegrations;
 use App\Filament\Resources\MediaServerIntegrations\Pages\CreateMediaServerIntegration;
 use App\Filament\Resources\MediaServerIntegrations\Pages\EditMediaServerIntegration;
 use App\Filament\Resources\MediaServerIntegrations\Pages\ListMediaServerIntegrations;
+use App\Filament\Resources\Playlists\PlaylistResource;
 use App\Jobs\SyncMediaServer;
 use App\Models\MediaServerIntegration;
 use App\Models\Playlist;
@@ -19,13 +20,22 @@ use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
+use Filament\Forms\Components\CheckboxList;
+use Filament\Forms\Components\Hidden;
+use Filament\Forms\Components\Placeholder;
+use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
+use Filament\Forms\Components\TagsInput;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
+use Filament\Schemas\Components\Actions;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
+use Filament\Schemas\Components\Tabs;
+use Filament\Schemas\Components\Tabs\Tab;
+use Filament\Schemas\Components\Wizard\Step;
 use Filament\Schemas\Schema;
 use Filament\Tables;
 use Filament\Tables\Columns\TextColumn;
@@ -58,6 +68,15 @@ class MediaServerIntegrationResource extends Resource
 
     protected static ?int $navigationSort = 100;
 
+    /**
+     * Check if the user can access this page.
+     * Only users with the "integrations" permission can access this page.
+     */
+    public static function canAccess(): bool
+    {
+        return auth()->check() && auth()->user()->canUseIntegrations();
+    }
+
     public static function getRecordTitle(?Model $record): string|null|Htmlable
     {
         return $record?->name;
@@ -66,14 +85,82 @@ class MediaServerIntegrationResource extends Resource
     public static function form(Schema $schema): Schema
     {
         return $schema
-            ->components([
+            ->components(self::getForm());
+    }
+
+    public static function getForm(): array
+    {
+        $tabs = [];
+        foreach (collect(self::getFormSections(creating: false)) as $section => $fields) {
+            // Determine icon for section
+            $icon = match (strtolower($section)) {
+                'connection' => 'heroicon-m-signal',
+                'import' => 'heroicon-m-arrow-down-tray',
+                'schedule' => 'heroicon-m-calendar',
+                'status' => 'heroicon-m-information-circle',
+                'networks' => 'heroicon-m-tv',
+                default => null,
+            };
+
+            $tabs[] = Tab::make($section)
+                ->icon($icon)
+                ->schema($fields);
+        }
+
+        return [
+            Tabs::make('Media Server Integration')
+                ->tabs($tabs)
+                ->columnSpanFull()
+                ->contained(false)
+                ->persistTabInQueryString(),
+        ];
+    }
+
+    public static function getFormSteps(): array
+    {
+        $wizard = [];
+        foreach (self::getFormSections(creating: true) as $step => $fields) {
+            if ($step === 'Status' || $step === 'Networks') {
+                continue;
+            }
+
+            // Determine icon for step
+            $icon = match (strtolower($step)) {
+                'connection' => 'heroicon-m-signal',
+                'import' => 'heroicon-m-arrow-down-tray',
+                'schedule' => 'heroicon-m-calendar',
+                default => null,
+            };
+
+            $wizard[] = Step::make($step)
+                ->icon($icon)
+                ->schema($fields);
+        }
+
+        return $wizard;
+    }
+
+    public static function getFormSections($creating = false): array
+    {
+        return [
+            'Connection' => [
                 Section::make('Server Configuration')
-                    ->description('Configure your Emby or Jellyfin media server connection')
+                    ->description(fn (callable $get) => match ($get('type')) {
+                        'local' => 'Configure your local media library paths',
+                        'webdav' => 'Configure your WebDAV server connection and media library paths',
+                        default => 'Configure your media server connection',
+                    })
+                    ->collapsible(! $creating)
+                    ->collapsed(! $creating)
                     ->schema([
                         Grid::make(2)->schema([
                             TextInput::make('name')
                                 ->label('Display Name')
-                                ->placeholder('e.g., Living Room Jellyfin')
+                                ->placeholder(fn (callable $get) => match ($get('type')) {
+                                    'local' => 'e.g., My Local Movies',
+                                    'webdav' => 'e.g., My NAS Media',
+                                    default => 'e.g., Living Room Jellyfin',
+                                })
                                 ->required()
                                 ->maxLength(255),
 
@@ -82,25 +169,37 @@ class MediaServerIntegrationResource extends Resource
                                 ->options([
                                     'emby' => 'Emby',
                                     'jellyfin' => 'Jellyfin',
+                                    'plex' => 'Plex',
+                                    'local' => 'Local Media',
+                                    'webdav' => 'WebDAV',
                                 ])
                                 ->required()
                                 ->default('emby')
+                                ->live()
+                                ->disabledOn('edit')
                                 ->native(false),
                         ]),
 
+                        // Network server configuration (hidden for local media)
                         Grid::make(3)->schema([
                             TextInput::make('host')
                                 ->label('Host / IP Address')
                                 ->prefix(fn (callable $get) => $get('ssl') ? 'https://' : 'http://')
-                                ->placeholder('192.168.1.100 or media.example.com')
-                                ->required()
+                                ->placeholder(fn (callable $get) => $get('type') === 'webdav'
+                                    ? '192.168.1.100 or nas.example.com'
+                                    : '192.168.1.100 or media.example.com')
+                                ->required(fn (callable $get) => $get('type') !== 'local')
                                 ->maxLength(255),
 
                             TextInput::make('port')
                                 ->label('Port')
                                 ->numeric()
-                                ->default(8096)
-                                ->required()
+                                ->default(fn (callable $get) => $get('type') === 'webdav' ? 5005 : 8096)
+                                ->helperText(fn (callable $get) => match ($get('type')) {
+                                    'webdav' => 'e.g., 5005 for Synology, 80/443 for standard WebDAV',
+                                    default => 'e.g., 8096 for Emby/Jellyfin, 32400 for Plex',
+                                })
+                                ->required(fn (callable $get) => $get('type') !== 'local')
                                 ->minValue(1)
                                 ->maxValue(65535),
 
@@ -110,22 +209,62 @@ class MediaServerIntegrationResource extends Resource
                                 ->label('Use HTTPS')
                                 ->helperText('Enable if your server uses SSL/TLS')
                                 ->default(false),
-                        ]),
+                        ])->visible(fn (callable $get) => $get('type') !== 'local'),
+
+                        // WebDAV authentication (username/password)
+                        Grid::make(2)->schema([
+                            TextInput::make('webdav_username')
+                                ->label('WebDAV Username')
+                                ->placeholder('username')
+                                ->helperText('Username for WebDAV authentication'),
+
+                            TextInput::make('webdav_password')
+                                ->label('WebDAV Password')
+                                ->password()
+                                ->revealable()
+                                ->dehydrateStateUsing(fn ($state, $record) => filled($state) ? $state : $record?->webdav_password)
+                                ->helperText(function (string $operation) {
+                                    if ($operation === 'edit') {
+                                        return 'Leave blank to keep existing password';
+                                    }
+
+                                    return 'Password for WebDAV authentication';
+                                }),
+                        ])->visible(fn (callable $get) => $get('type') === 'webdav'),
 
                         TextInput::make('api_key')
-                            ->label('API Key')
+                            ->label('API Key/Token')
                             ->password()
                             ->revealable()
-                            ->required(fn (string $operation): bool => $operation === 'create')
+                            ->required(fn (string $operation, callable $get): bool => $operation === 'create' && ! in_array($get('type'), ['local', 'webdav']))
                             ->dehydrateStateUsing(fn ($state, $record) => filled($state) ? $state : $record?->api_key)
-                            ->helperText(fn (string $operation) => $operation === 'edit'
-                                ? 'Leave blank to keep existing API key'
-                                : 'Generate an API key in your media server\'s dashboard under Settings → API Keys'),
-                    ]),
+                            ->helperText(function (string $operation, callable $get) {
+                                if ($operation === 'edit') {
+                                    return 'Leave blank to keep existing API key';
+                                }
 
+                                return match ($get('type')) {
+                                    'plex' => new HtmlString('See <a class="text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300" href="https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/" target="_blank">Plex Docs</a> for instructions on finding your token'),
+                                    'local', 'webdav' => 'Not required for local media or WebDAV',
+                                    default => 'Generate an API key in your media server\'s dashboard under Settings → API Keys',
+                                };
+                            })->visible(fn (callable $get) => ! in_array($get('type'), ['local', 'webdav'])),
+
+                        Actions::make(self::getServerActions())
+                            ->visible(fn (callable $get) => ! in_array($get('type'), ['local', 'webdav']))
+                            ->fullWidth(),
+                    ]),
+            ],
+            'Import' => [
                 Section::make('Import Settings')
                     ->description('Control what content is synced from the media server')
                     ->schema([
+                        Toggle::make('enabled')
+                            ->label('Enabled')
+                            ->live()
+                            ->helperText('Disable to pause syncing without deleting the integration')
+                            ->default(true),
+
                         Grid::make(2)->schema([
                             Toggle::make('import_movies')
                                 ->label('Import Movies')
@@ -136,7 +275,7 @@ class MediaServerIntegrationResource extends Resource
                                 ->label('Import Series')
                                 ->helperText('Sync TV series with episodes')
                                 ->default(true),
-                        ]),
+                        ])->visible(fn (callable $get) => $get('enabled')),
 
                         Select::make('genre_handling')
                             ->label('Genre Handling')
@@ -146,19 +285,195 @@ class MediaServerIntegrationResource extends Resource
                             ])
                             ->default('primary')
                             ->helperText('How to handle content with multiple genres')
-                            ->native(false),
-
-                        Toggle::make('enabled')
-                            ->label('Enabled')
-                            ->helperText('Disable to pause syncing without deleting the integration')
-                            ->default(true),
+                            ->native(false)
+                            ->visible(fn (callable $get) => $get('enabled')),
                     ]),
 
+                // Local Media Configuration Section
+                Section::make(fn (callable $get) => $get('type') === 'webdav' ? 'WebDAV Media Libraries' : 'Local Media Libraries')
+                    ->description(fn (callable $get) => $get('type') === 'webdav'
+                        ? new HtmlString(
+                            '<p>Configure paths to your media files on the WebDAV server.</p>'.
+                            '<p class="mt-2"><strong>Example paths:</strong> <code>/movies</code>, <code>/tvshows</code>, <code>/media/movies</code></p>'
+                        )
+                        : new HtmlString(
+                            '<p>Configure paths to your local media files.</p>'.
+                            '<p class="mt-2 text-warning-600 dark:text-warning-400"><strong>Important:</strong> These paths must be accessible within the Docker container. '.
+                            'Mount your media directories in your <code>docker-compose.yml</code> file, e.g.:</p>'.
+                            '<pre class="mt-1 text-xs bg-gray-100 dark:bg-gray-800 p-2 rounded">volumes:'."\n".'  - /path/on/host/movies:/media/movies'."\n".'  - /path/on/host/tvshows:/media/tvshows</pre>'
+                        )
+                    )
+                    ->schema([
+                        Repeater::make('local_media_paths')
+                            ->label('Media Library Paths')
+                            ->schema([
+                                TextInput::make('name')
+                                    ->label('Library Name')
+                                    ->placeholder('e.g., Movies, TV Shows')
+                                    ->required(),
+
+                                TextInput::make('path')
+                                    ->label(fn (callable $get) => $get('../../type') === 'webdav' ? 'WebDAV Path' : 'Container Path')
+                                    ->placeholder(fn (callable $get) => $get('../../type') === 'webdav' ? '/movies' : '/media/movies')
+                                    ->required()
+                                    ->helperText(fn (callable $get) => $get('../../type') === 'webdav'
+                                        ? 'Path on the WebDAV server'
+                                        : 'Path inside the Docker container'),
+
+                                Select::make('type')
+                                    ->label('Content Type')
+                                    ->options([
+                                        'movies' => 'Movies',
+                                        'tvshows' => 'TV Shows',
+                                    ])
+                                    ->required()
+                                    ->default('movies')
+                                    ->native(false),
+                            ])
+                            ->columns(3)
+                            ->defaultItems(1)
+                            ->addActionLabel('Add Library Path')
+                            ->reorderable()
+                            ->collapsible()
+                            ->itemLabel(fn (array $state): ?string => $state['name'] ?? 'New Library'),
+
+                        Grid::make(2)->schema([
+                            Toggle::make('scan_recursive')
+                                ->label('Scan Recursively')
+                                ->helperText('Scan subdirectories for media files')
+                                ->default(true),
+
+                            Toggle::make('auto_fetch_metadata')
+                                ->label('Auto-Fetch Metadata')
+                                ->helperText('Automatically lookup TMDB metadata after sync completes (Local & WebDAV)')
+                                ->default(true),
+                        ]),
+
+                        Grid::make(1)->schema([
+                            Select::make('metadata_source')
+                                ->label('Metadata Source')
+                                ->options([
+                                    'filename_only' => 'Filename Only (No External Lookup)',
+                                    'tmdb' => 'TMDB (The Movie Database)',
+                                ])
+                                ->default('tmdb')
+                                ->helperText('Where to fetch metadata for discovered content (requires TMDB API key in Settings)')
+                                ->native(false),
+                        ]),
+
+                        TagsInput::make('video_extensions')
+                            ->label('Video File Extensions')
+                            ->placeholder('Add extension...')
+                            ->default(['mp4', 'mkv', 'avi', 'mov', 'wmv', 'ts', 'm4v'])
+                            ->helperText('File extensions to scan for (without dots)'),
+
+                        Actions::make(self::getLocalActions())->fullWidth(),
+                    ])->visible(fn (callable $get) => in_array($get('type'), ['local', 'webdav'])),
+
+                Section::make('Library Selection')
+                    ->description('Select which libraries to import from your media server')
+                    ->headerActions(self::getServerActions())
+                    ->schema([
+                        Hidden::make('available_libraries')
+                            ->dehydrateStateUsing(fn ($state) => $state)
+                            ->default([])
+                            ->rules([
+                                fn (callable $get): \Closure => function (string $attribute, $value, \Closure $fail) use ($get) {
+                                    $enabled = $get('enabled');
+                                    $importMovies = $get('import_movies');
+                                    $importSeries = $get('import_series');
+                                    $type = $get('type');
+
+                                    // For local media and webdav, paths are configured separately
+                                    if (in_array($type, ['local', 'webdav'])) {
+                                        return;
+                                    }
+
+                                    if ($enabled && ($importMovies || $importSeries) && empty($value)) {
+                                        $fail('Libraries must be discovered before saving. Use the test connection button above.');
+                                    }
+                                },
+                            ]),
+
+                        Placeholder::make('library_instructions')
+                            ->label('')
+                            ->content(function (callable $get) {
+                                $libraries = $get('available_libraries');
+                                $type = $get('type');
+
+                                if (empty($libraries)) {
+                                    $buttonLabel = in_array($type, ['local', 'webdav'])
+                                        ? 'Scan & Discover Libraries'
+                                        : 'Test Connection & Discover Libraries';
+
+                                    return new HtmlString(
+                                        '<div class="text-sm text-gray-500 dark:text-gray-400">'.
+                                        '<p class="font-medium text-warning-600 dark:text-warning-400">No libraries discovered yet.</p>'.
+                                        "<p class=\"mt-1\">Click \"{$buttonLabel}\" above to discover available libraries.</p>".
+                                        '</div>'
+                                    );
+                                }
+
+                                $libraryCount = count($libraries);
+                                $selectedCount = count($get('selected_library_ids') ?? []);
+
+                                return new HtmlString(
+                                    '<div class="text-sm text-gray-500 dark:text-gray-400">'.
+                                    "<p>Found <strong>{$libraryCount}</strong> libraries. <strong>{$selectedCount}</strong> selected for import.</p>".
+                                    '<p class="mt-1">Select the libraries you want to sync content from.</p>'.
+                                    '</div>'
+                                );
+                            }),
+
+                        CheckboxList::make('selected_library_ids')
+                            ->label('Libraries to Import')
+                            ->options(function (callable $get) {
+                                $libraries = $get('available_libraries');
+                                if (empty($libraries)) {
+                                    return [];
+                                }
+
+                                $options = [];
+                                foreach ($libraries as $library) {
+                                    $typeLabel = $library['type'] === 'movies' ? 'Movies' : 'TV Shows';
+                                    $itemCount = $library['item_count'] > 0 ? " ({$library['item_count']} items)" : '';
+                                    $options[$library['id']] = "{$library['name']} [{$typeLabel}]{$itemCount}";
+                                }
+
+                                return $options;
+                            })
+                            ->descriptions(function (callable $get) {
+                                $libraries = $get('available_libraries');
+                                if (empty($libraries)) {
+                                    return [];
+                                }
+
+                                $descriptions = [];
+                                foreach ($libraries as $library) {
+                                    if (! empty($library['path'])) {
+                                        $descriptions[$library['id']] = $library['path'];
+                                    }
+                                }
+
+                                return $descriptions;
+                            })
+                            ->columns(1)
+                            ->bulkToggleable()
+                            ->live()
+                            ->required(fn (callable $get) => $get('enabled') && ($get('import_movies') || $get('import_series')) && ! in_array($get('type'), ['local', 'webdav']))
+                            ->validationMessages([
+                                'required' => 'Please select at least one library to import.',
+                            ]),
+                    ])->visible(fn (callable $get) => ! in_array($get('type'), ['local', 'webdav'])),
+            ],
+            'Schedule' => [
                 Section::make('Sync Schedule')
                     ->description('Configure automatic sync schedule')
                     ->schema([
                         Grid::make(2)->schema([
                             Toggle::make('auto_sync')
+                                ->inline(false)
+                                ->live()
                                 ->label('Auto Sync')
                                 ->helperText('Automatically sync content on schedule')
                                 ->default(true),
@@ -174,10 +489,12 @@ class MediaServerIntegrationResource extends Resource
                                     '0 0 * * 0' => 'Once weekly (Sunday)',
                                 ])
                                 ->default('0 */6 * * *')
-                                ->native(false),
+                                ->native(false)
+                                ->disabled(fn (callable $get) => ! $get('auto_sync')),
                         ]),
                     ]),
-
+            ],
+            'Status' => [
                 Section::make('Sync Status')
                     ->description('Information about the last sync operation')
                     ->schema([
@@ -216,8 +533,73 @@ class MediaServerIntegrationResource extends Resource
                                 }),
                         ]),
                     ])
-                    ->visibleOn('edit'),
-            ]);
+                    ->visible(! $creating),
+            ],
+            'Networks' => [
+                Section::make('Networks (Pseudo-Live Channels)')
+                    ->description('Create live TV channels from your media server content')
+                    ->schema([
+                        TextInput::make('networks_playlist_url')
+                            ->label('Networks Playlist URL')
+                            ->disabled()
+                            ->dehydrated(false)
+                            ->formatStateUsing(fn ($record) => $record
+                                ? route('networks.playlist', ['user' => $record->user_id])
+                                : 'Save integration first'
+                            )
+                            ->hintAction(
+                                Action::make('qrCode')
+                                    ->label('QR Code')
+                                    ->icon('heroicon-o-qr-code')
+                                    ->modalHeading('Integration Playlist URL')
+                                    ->modalContent(fn ($record) => view('components.qr-code-display', ['text' => $record ? route('networks.playlist', ['user' => $record->user_id]) : 'Save integration first']))
+                                    ->modalWidth('sm')
+                                    ->modalSubmitAction(false)
+                                    ->modalCancelAction(fn ($action) => $action->label('Close'))
+                                    ->visible(fn ($record) => $record?->user_id !== null)
+                            )
+                            ->hint(fn ($record) => $record ? view('components.copy-to-clipboard', ['text' => route('networks.playlist', ['user' => $record->user_id]), 'position' => 'left']) : null)
+                            ->helperText('M3U playlist containing all your Networks as live channels'),
+
+                        TextInput::make('networks_epg_url')
+                            ->label('Networks EPG URL')
+                            ->disabled()
+                            ->dehydrated(false)
+                            ->formatStateUsing(fn ($record) => $record
+                                ? route('networks.epg', ['user' => $record->user_id])
+                                : 'Save integration first'
+                            )
+                            ->hintAction(
+                                Action::make('qrCode')
+                                    ->label('QR Code')
+                                    ->icon('heroicon-o-qr-code')
+                                    ->modalHeading('Integration EPG URL')
+                                    ->modalContent(fn ($record) => view('components.qr-code-display', ['text' => $record ? route('networks.epg', ['user' => $record->user_id]) : 'Save integration first']))
+                                    ->modalWidth('sm')
+                                    ->modalSubmitAction(false)
+                                    ->modalCancelAction(fn ($action) => $action->label('Close'))
+                                    ->visible(fn ($record) => $record?->user_id !== null)
+                            )
+                            ->hint(fn ($record) => $record ? view('components.copy-to-clipboard', ['text' => route('networks.epg', ['user' => $record->user_id]), 'position' => 'left']) : null)
+                            ->helperText('EPG data for your Networks'),
+
+                        TextInput::make('networks_count')
+                            ->label('Networks')
+                            ->disabled()
+                            ->dehydrated(false)
+                            ->formatStateUsing(function ($record) {
+                                if (! $record) {
+                                    return '0 networks';
+                                }
+                                $count = $record->networks()->where('enabled', true)->count();
+
+                                return $count.' '.str('network')->plural($count);
+                            })
+                            ->helperText('Create Networks in the Networks section to build pseudo-live channels'),
+                    ])
+                    ->visible(! $creating),
+            ],
+        ];
     }
 
     public static function table(Table $table): Table
@@ -236,7 +618,7 @@ class MediaServerIntegrationResource extends Resource
                             if (! $playlist) {
                                 return null;
                             }
-                            $playlistLink = route('filament.admin.resources.playlists.edit', $record->playlist_id);
+                            $playlistLink = PlaylistResource::getUrl('view', ['record' => $record->playlist_id]);
 
                             return new HtmlString('
                             <div class="flex items-center gap-1">
@@ -255,18 +637,45 @@ class MediaServerIntegrationResource extends Resource
                 TextColumn::make('type')
                     ->label('Type')
                     ->badge()
-                    ->formatStateUsing(fn (string $state): string => ucfirst($state))
+                    ->formatStateUsing(fn (string $state): string => match ($state) {
+                        'local' => 'Local Media',
+                        'webdav' => 'WebDAV',
+                        default => ucfirst($state),
+                    })
                     ->color(fn (string $state): string => match ($state) {
                         'emby' => 'success',
                         'jellyfin' => 'info',
+                        'plex' => 'warning',
+                        'local' => 'gray',
+                        'webdav' => 'purple',
                         default => 'gray',
                     }),
 
                 TextColumn::make('host')
                     ->label('Server')
-                    ->formatStateUsing(fn ($record): string => "{$record->host}:{$record->port}")
+                    ->formatStateUsing(fn ($record): string => match ($record->type) {
+                        'local' => 'Local filesystem',
+                        'webdav' => "{$record->host}:{$record->port}",
+                        default => "{$record->host}:{$record->port}",
+                    })
                     ->toggleable()
                     ->copyable(),
+
+                TextColumn::make('selected_library_ids')
+                    ->label('Libraries')
+                    ->formatStateUsing(function ($record, $state): string {
+                        $available = $record->available_libraries ?? [];
+
+                        if (empty($available)) {
+                            return 'Not configured';
+                        }
+
+                        return collect($available)
+                            ->where('id', '=', (string) $state)->first()['name'] ?? 'N/A';
+                    })
+                    ->toggleable()
+                    ->badge()
+                    ->color('success'),
 
                 TextColumn::make('status')
                     ->label('Status')
@@ -302,6 +711,8 @@ class MediaServerIntegrationResource extends Resource
                     ->options([
                         'emby' => 'Emby',
                         'jellyfin' => 'Jellyfin',
+                        'plex' => 'Plex',
+                        'local' => 'Local Media',
                     ]),
                 Tables\Filters\TernaryFilter::make('enabled')
                     ->label('Enabled'),
@@ -341,11 +752,27 @@ class MediaServerIntegrationResource extends Resource
                             $result = $service->testConnection();
 
                             if ($result['success']) {
-                                Notification::make()
-                                    ->success()
-                                    ->title('Connection Successful')
-                                    ->body("Connected to {$result['server_name']} (v{$result['version']})")
-                                    ->send();
+                                // Auto-fetch libraries on successful connection
+                                $libraries = $service->fetchLibraries();
+
+                                if ($libraries->isNotEmpty()) {
+                                    // Update the integration with available libraries
+                                    $record->update([
+                                        'available_libraries' => $libraries->toArray(),
+                                    ]);
+
+                                    Notification::make()
+                                        ->success()
+                                        ->title('Connection Successful')
+                                        ->body("Connected to {$result['server_name']} (v{$result['version']}). Found {$libraries->count()} libraries. Edit the integration to select which libraries to import.")
+                                        ->send();
+                                } else {
+                                    Notification::make()
+                                        ->success()
+                                        ->title('Connection Successful')
+                                        ->body("Connected to {$result['server_name']} (v{$result['version']}). No movie or TV show libraries found.")
+                                        ->send();
+                                }
                             } else {
                                 Notification::make()
                                     ->danger()
@@ -355,11 +782,51 @@ class MediaServerIntegrationResource extends Resource
                             }
                         }),
 
+                    Action::make('refreshLibraries')
+                        ->label('Refresh Libraries')
+                        ->icon('heroicon-o-arrow-path')
+                        ->action(function (MediaServerIntegration $record) {
+                            $service = MediaServerService::make($record);
+                            $libraries = $service->fetchLibraries();
+
+                            if ($libraries->isNotEmpty()) {
+                                // Preserve existing selections where possible
+                                $existingSelections = $record->selected_library_ids ?? [];
+                                $newLibraryIds = $libraries->pluck('id')->toArray();
+
+                                // Filter selections to only include libraries that still exist
+                                $validSelections = array_intersect($existingSelections, $newLibraryIds);
+
+                                $record->update([
+                                    'available_libraries' => $libraries->toArray(),
+                                    'selected_library_ids' => array_values($validSelections),
+                                ]);
+
+                                $removedCount = count($existingSelections) - count($validSelections);
+                                $message = "Found {$libraries->count()} libraries.";
+                                if ($removedCount > 0) {
+                                    $message .= " {$removedCount} previously selected libraries no longer exist.";
+                                }
+
+                                Notification::make()
+                                    ->success()
+                                    ->title('Libraries Refreshed')
+                                    ->body($message)
+                                    ->send();
+                            } else {
+                                Notification::make()
+                                    ->warning()
+                                    ->title('No Libraries Found')
+                                    ->body('No movie or TV show libraries were found on the server.')
+                                    ->send();
+                            }
+                        }),
+
                     Action::make('viewPlaylist')
                         ->label('View Playlist')
-                        ->icon('heroicon-o-queue-list')
+                        ->icon('heroicon-o-eye')
                         ->url(fn ($record) => $record->playlist_id
-                            ? route('filament.admin.resources.playlists.edit', $record->playlist_id)
+                            ? PlaylistResource::getUrl('view', ['record' => $record->playlist_id])
                             : null
                         )
                         ->visible(fn ($record) => $record->playlist_id !== null),
@@ -390,6 +857,33 @@ class MediaServerIntegrationResource extends Resource
                         })
                         ->visible(fn ($record) => $record->playlist_id !== null),
 
+                    Action::make('reset')
+                        ->label('Reset status')
+                        ->icon('heroicon-o-arrow-uturn-left')
+                        ->color('warning')
+                        ->action(function (MediaServerIntegration $record) {
+                            $record->update([
+                                'status' => 'idle',
+                                'progress' => 0,
+                                'movie_progress' => 0,
+                                'series_progress' => 0,
+                                'total_movies' => 0,
+                                'total_series' => 0,
+                            ]);
+                        })
+                        ->after(function () {
+                            Notification::make()
+                                ->success()
+                                ->title('Media server status reset')
+                                ->body('Media server status has been reset.')
+                                ->duration(3000)
+                                ->send();
+                        })
+                        ->requiresConfirmation()
+                        ->modalIcon('heroicon-o-arrow-uturn-left')
+                        ->modalDescription('Reset media server status so it can be synced again. Only perform this action if you are having problems with the media server syncing.')
+                        ->modalSubmitActionLabel('Yes, reset now'),
+
                     DeleteAction::make()
                         ->before(function (MediaServerIntegration $record) {
                             // Optionally delete the associated playlist
@@ -418,9 +912,47 @@ class MediaServerIntegrationResource extends Resource
                                 ->send();
                         }),
 
+                    BulkAction::make('reset')
+                        ->label('Reset status')
+                        ->icon('heroicon-o-arrow-uturn-left')
+                        ->color('warning')
+                        ->action(function ($records) {
+                            foreach ($records as $record) {
+                                $record->update([
+                                    'status' => 'idle',
+                                    'progress' => 0,
+                                    'movie_progress' => 0,
+                                    'series_progress' => 0,
+                                    'total_movies' => 0,
+                                    'total_series' => 0,
+                                ]);
+                            }
+                        })
+                        ->after(function () {
+                            Notification::make()
+                                ->success()
+                                ->title('Media server status reset')
+                                ->body('Status has been reset for the selected media servers.')
+                                ->duration(3000)
+                                ->send();
+                        })
+                        ->deselectRecordsAfterCompletion()
+                        ->requiresConfirmation()
+                        ->modalIcon('heroicon-o-arrow-uturn-left')
+                        ->modalDescription('Reset status for the selected media servers so they can be synced again.')
+                        ->modalSubmitActionLabel('Yes, reset now'),
+
                     DeleteBulkAction::make(),
                 ]),
             ]);
+    }
+
+    public static function getRelations(): array
+    {
+        return [
+            RelationManagers\MoviesRelationManager::class,
+            RelationManagers\SeriesRelationManager::class,
+        ];
     }
 
     public static function getPages(): array
@@ -542,5 +1074,150 @@ class MediaServerIntegrationResource extends Resource
         }
 
         return $stats;
+    }
+
+    private static function getLocalActions(): array
+    {
+        return [
+            Action::make('scanLocalMedia')
+                ->label('Scan & Discover Libraries')
+                ->icon('heroicon-o-folder-open')
+                ->action(function (callable $get, callable $set, $livewire) {
+                    $paths = $get('local_media_paths') ?? [];
+
+                    if (empty($paths)) {
+                        Notification::make()
+                            ->warning()
+                            ->title('No Paths Configured')
+                            ->body('Please add at least one media library path before scanning.')
+                            ->send();
+
+                        return;
+                    }
+
+                    // Create temporary model from form state
+                    $tempIntegration = new MediaServerIntegration([
+                        'type' => 'local',
+                        'local_media_paths' => $paths,
+                        'scan_recursive' => $get('scan_recursive') ?? true,
+                        'video_extensions' => $get('video_extensions') ?? null,
+                    ]);
+
+                    // Test connection (validates paths)
+                    $service = MediaServerService::make($tempIntegration);
+                    $result = $service->testConnection();
+
+                    if (! $result['success']) {
+                        Notification::make()
+                            ->danger()
+                            ->title('Path Validation Failed')
+                            ->body($result['message'])
+                            ->send();
+
+                        return;
+                    }
+
+                    // Fetch libraries (returns the configured paths with item counts)
+                    $libraries = $service->fetchLibraries();
+
+                    if ($libraries->isEmpty()) {
+                        Notification::make()
+                            ->warning()
+                            ->title('No Media Found')
+                            ->body('No video files were found in the configured paths.')
+                            ->send();
+                        $set('available_libraries', []);
+
+                        return;
+                    }
+
+                    // Store libraries in form state
+                    $set('available_libraries', $libraries->toArray());
+
+                    // Auto-select all libraries for local media
+                    $libraryIds = $libraries->pluck('id')->toArray();
+                    $set('selected_library_ids', $libraryIds);
+
+                    Notification::make()
+                        ->success()
+                        ->title('Scan Complete')
+                        ->body($result['message'])
+                        ->send();
+                }),
+        ];
+    }
+
+    private static function getServerActions(): array
+    {
+        return [
+            Action::make('testAndDiscover')
+                ->label('Test Connection & Discover Libraries')
+                ->icon('heroicon-o-signal')
+                ->action(function (callable $get, callable $set, $livewire) {
+                    // Create temporary model from form state
+                    $values = [
+                        'type' => $get('type'),
+                        'host' => $get('host'),
+                        'port' => $get('port'),
+                        'ssl' => $get('ssl') ?? false,
+                        'api_key' => $get('api_key') ?: $livewire->record?->api_key,
+                    ];
+
+                    if (array_filter($values, fn ($value) => empty($value) && ! is_bool($value))) {
+                        Notification::make()
+                            ->danger()
+                            ->title('Validation Error')
+                            ->body('Please fill in all required connection fields before testing the connection.')
+                            ->send();
+
+                        return;
+                    }
+
+                    $tempIntegration = new MediaServerIntegration($values);
+
+                    // Test connection
+                    $service = MediaServerService::make($tempIntegration);
+                    $result = $service->testConnection();
+
+                    if (! $result['success']) {
+                        Notification::make()
+                            ->danger()
+                            ->title('Connection Failed')
+                            ->body($result['message'])
+                            ->send();
+
+                        return;
+                    }
+
+                    // Fetch libraries
+                    $libraries = $service->fetchLibraries();
+
+                    if ($libraries->isEmpty()) {
+                        Notification::make()
+                            ->warning()
+                            ->title('Connected but No Libraries Found')
+                            ->body("Connected to {$result['server_name']}. No movie or TV show libraries were found.")
+                            ->send();
+                        $set('available_libraries', []);
+
+                        return;
+                    }
+
+                    // Store libraries in form state
+                    $set('available_libraries', $libraries->toArray());
+
+                    // Preserve existing selections if valid
+                    $existingSelections = $get('selected_library_ids') ?? [];
+                    $newLibraryIds = $libraries->pluck('id')->toArray();
+                    $validSelections = array_intersect($existingSelections, $newLibraryIds);
+                    $set('selected_library_ids', array_values($validSelections));
+
+                    Notification::make()
+                        ->success()
+                        ->title('Connection Successful')
+                        ->body("Connected to {$result['server_name']} (v{$result['version']}). Found {$libraries->count()} libraries.")
+                        ->send();
+                }),
+        ];
     }
 }

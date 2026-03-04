@@ -5,18 +5,18 @@ services:
     environment:
       # Timezone
       - TZ=Etc/UTC
-      
+
       # Application URL (change to your domain or IP)
       - APP_URL=${APP_URL:-http://localhost}
       - APP_PORT=${APP_PORT:-36400}
-      
+
       # Postgres Configuration
       - ENABLE_POSTGRES=true # Use embedded Postgres, disable to use your own Postgres service
       - PG_DATABASE=${PG_DATABASE:-m3ue}
       - PG_USER=${PG_USER:-m3ue}
       - PG_PASSWORD=${PG_PASSWORD:-changeme}
       - PG_PORT=${PG_PORT:-5432}
-      
+
       # Database Connection (m3u-editor)
       - DB_CONNECTION=pgsql
       - DB_HOST=localhost
@@ -27,9 +27,10 @@ services:
 
       # Redis configuration
       - REDIS_ENABLED=true # Enable embedded Redis
-      - REDIS_SERVER_PORT=${REDIS_PORT:-63790}
+      - REDIS_SERVER_PORT=${REDIS_PORT:-36790}
       - REDIS_HOST=${REDIS_HOST:-localhost}
-      
+      - REDIS_PASSWORD=${M3U_PROXY_TOKEN:-changeme} # Must match what start-container sets
+
       # M3U Proxy Configuration (External)
       - M3U_PROXY_ENABLED=true # Use embedded m3u-proxy instance
       - M3U_PROXY_PORT=${M3U_PROXY_PORT:-38085}
@@ -38,15 +39,15 @@ services:
     volumes:
       # Persistent configuration data
       - ./data:/var/www/config
-      
+
       # PostgreSQL data persistence
       - pgdata:/var/lib/postgresql/data
     restart: unless-stopped
     ports:
-      - "${APP_PORT:-36400}:${APP_PORT:-36400}"  # Main application port
+      - "${APP_PORT:-36400}:${APP_PORT:-36400}" # Main application port
       # - "${PG_PORT:-5432}:${PG_PORT:-5432}"  # Uncomment to expose PostgreSQL
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://127.0.0.1:${APP_PORT:-36400}/up"]
+      test: [ "CMD", "curl", "-f", "http://127.0.0.1:${APP_PORT:-36400}/up" ]
       interval: 30s
       timeout: 10s
       retries: 5

@@ -33,6 +33,11 @@ class Category extends Model
         return $this->belongsTo(Playlist::class);
     }
 
+    public function streamFileSetting(): BelongsTo
+    {
+        return $this->belongsTo(StreamFileSetting::class);
+    }
+
     public function series(): HasMany
     {
         return $this->hasMany(Series::class);

@@ -167,6 +167,11 @@ class EpgApiController extends Controller
             return response()->json(['Error' => 'Playlist Not Found'], 404);
         }
 
+        // Handle network playlists - they have networks with programmes instead of channels with EPG
+        if ($playlist instanceof \App\Models\Playlist && $playlist->is_network_playlist) {
+            return $this->getDataForNetworkPlaylist($playlist, $request);
+        }
+
         $cacheService = new EpgCacheService;
 
         // Pagination parameters
@@ -578,6 +583,173 @@ class EpgApiController extends Controller
             ]);
         } catch (Exception $e) {
             Log::error("Error retrieving EPG data for playlist {$playlist->name}: {$e->getMessage()}");
+
+            return response()->json([
+                'error' => 'Failed to retrieve EPG data: '.$e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Get EPG data for a network playlist.
+     * Networks act as channels, and their programmes provide the EPG schedule.
+     */
+    private function getDataForNetworkPlaylist(\App\Models\Playlist $playlist, Request $request)
+    {
+        // Pagination parameters
+        $page = (int) $request->get('page', 1);
+        $perPage = (int) $request->get('per_page', 50);
+        $skip = max(0, ($page - 1) * $perPage);
+        $search = $request->get('search', null);
+
+        // Get parsed date range
+        $dateRange = $this->parseDateRange($request);
+        $startDate = $dateRange['start'];
+        $endDate = $dateRange['end'];
+
+        Log::debug('EPG API Request for Network Playlist', [
+            'playlist_uuid' => $playlist->uuid,
+            'playlist_name' => $playlist->name,
+            'page' => $page,
+            'per_page' => $perPage,
+            'start_date' => $startDate,
+            'end_date' => $endDate,
+        ]);
+
+        try {
+            // Get enabled networks that output to this playlist
+            $networksQuery = $playlist->networks()
+                ->where('enabled', true)
+                ->when($search, function ($query) use ($search) {
+                    $search = Str::lower($search);
+
+                    return $query->whereRaw('LOWER(name) LIKE ?', ['%'.$search.'%']);
+                })
+                ->orderBy('channel_number')
+                ->orderBy('name');
+
+            $totalChannels = $networksQuery->count();
+            $networks = $networksQuery->skip($skip)->take($perPage)->get();
+
+            // Build channel data from networks
+            $channels = [];
+            $programmes = [];
+
+            foreach ($networks as $network) {
+                $channelNo = $network->channel_number ?? $network->id;
+
+                // Get the stream URL - use HLS if broadcasting, otherwise legacy endpoint
+                $url = $network->stream_url;
+
+                // Get network logo or placeholder
+                $icon = $network->logo ?? url('/placeholder.png');
+
+                // Calculate broadcast offset for EPG playhead alignment
+                $broadcastOffset = null;
+                if ($network->isBroadcasting() && $network->broadcast_started_at) {
+                    // Calculate how many seconds the broadcast has been running
+                    $broadcastElapsed = (int) $network->broadcast_started_at->diffInSeconds(now());
+                    // The actual media position is initial_offset + time since broadcast started
+                    $actualMediaPosition = ($network->broadcast_initial_offset ?? 0) + $broadcastElapsed;
+
+                    $broadcastOffset = [
+                        'started_at' => $network->broadcast_started_at->toIso8601String(),
+                        'initial_offset' => $network->broadcast_initial_offset ?? 0,
+                        'broadcast_elapsed' => $broadcastElapsed,
+                        'actual_media_position' => $actualMediaPosition,
+                    ];
+                }
+
+                // Build channel entry
+                $channels[$channelNo] = [
+                    'id' => $channelNo,
+                    'database_id' => null, // $network->id,
+                    'url' => $url,
+                    'format' => 'hls', // Network streams are HLS
+                    'tvg_id' => 'network_'.$network->id,
+                    'display_name' => $network->name,
+                    'title' => $network->name,
+                    'channel_number' => $network->channel_number ?? $channelNo,
+                    'group' => 'Networks',
+                    'icon' => $icon,
+                    'has_epg' => true, // Networks always have EPG from programmes
+                    'epg_channel_id' => 'network_'.$network->id,
+                    'tvg_shift' => 0,
+                    'sort_index' => $channelNo,
+                    'is_network' => true, // Flag to identify network channels
+                    'is_broadcasting' => $network->isBroadcasting(),
+                    'broadcast_offset' => $broadcastOffset, // For EPG playhead alignment
+                ];
+
+                // Get programmes for this network within the date range
+                $startDateTime = Carbon::parse($startDate)->startOfDay();
+                $endDateTime = Carbon::parse($endDate)->endOfDay();
+
+                $networkProgrammes = $network->programmes()
+                    ->where('end_time', '>=', $startDateTime)
+                    ->where('start_time', '<=', $endDateTime)
+                    ->orderBy('start_time')
+                    ->get();
+
+                // Convert to EPG programme format
+                $channelProgrammes = [];
+                foreach ($networkProgrammes as $programme) {
+                    $content = $programme->contentable;
+                    $title = $content?->title ?? $content?->name ?? 'Unknown Program';
+                    $desc = $content?->overview ?? $content?->description ?? '';
+
+                    // Get content icon if available
+                    $programmeIcon = null;
+                    if ($content) {
+                        $programmeIcon = $content->poster ?? $content->logo ?? null;
+                    }
+
+                    $channelProgrammes[] = [
+                        'start' => $programme->start_time->toIso8601String(),
+                        'stop' => $programme->end_time->toIso8601String(),
+                        'title' => $title,
+                        'desc' => $desc,
+                        'icon' => $programmeIcon,
+                        'category' => 'Network Content',
+                    ];
+                }
+
+                $programmes[$channelNo] = $channelProgrammes;
+            }
+
+            // Create pagination info
+            $pagination = [
+                'current_page' => $page,
+                'per_page' => $perPage,
+                'total_channels' => $totalChannels,
+                'returned_channels' => count($channels),
+                'has_more' => ($skip + $perPage) < $totalChannels,
+                'next_page' => ($skip + $perPage) < $totalChannels ? $page + 1 : null,
+            ];
+
+            return response()->json([
+                'playlist' => [
+                    'id' => $playlist->id,
+                    'name' => $playlist->name,
+                    'uuid' => $playlist->uuid,
+                    'type' => get_class($playlist),
+                    'is_network_playlist' => true,
+                ],
+                'date_range' => [
+                    'start' => $startDate,
+                    'end' => $endDate,
+                ],
+                'pagination' => $pagination,
+                'channels' => $channels,
+                'programmes' => $programmes,
+                'cache_info' => [
+                    'cached' => false, // Network programmes are fetched live
+                    'epg_count' => 0,
+                    'channels_with_epg' => count($channels), // All networks have EPG
+                ],
+            ]);
+        } catch (Exception $e) {
+            Log::error("Error retrieving EPG data for network playlist {$playlist->name}: {$e->getMessage()}");
 
             return response()->json([
                 'error' => 'Failed to retrieve EPG data: '.$e->getMessage(),

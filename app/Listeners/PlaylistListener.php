@@ -30,6 +30,23 @@ class PlaylistListener
     {
         $playlist = $event->playlist;
 
+        // Network playlists don't need M3U import - they get content from assigned networks
+        if ($playlist->is_network_playlist) {
+            \Illuminate\Support\Facades\Log::info('Network playlist created, skipping M3U import', [
+                'playlist_id' => $playlist->id,
+                'name' => $playlist->name,
+            ]);
+            $playlist->update(['status' => \App\Enums\Status::Completed]);
+
+            return;
+        }
+
+        \Illuminate\Support\Facades\Log::info('Regular playlist created, dispatching M3U import', [
+            'playlist_id' => $playlist->id,
+            'name' => $playlist->name,
+            'is_network_playlist' => $playlist->is_network_playlist,
+        ]);
+
         // Create primary profile if profiles are enabled on new playlist
         if ($playlist->profiles_enabled) {
             $this->ensurePrimaryProfileExists($playlist);

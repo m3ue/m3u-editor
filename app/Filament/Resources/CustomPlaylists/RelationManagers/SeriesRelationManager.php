@@ -114,7 +114,7 @@ class SeriesRelationManager extends RelationManager
         $defaultColumns = SeriesResource::getTableColumns(showCategory: true, showPlaylist: true);
 
         // Inject the custom group column after the group column
-        array_splice($defaultColumns, 6, 0, [$groupColumn]);
+        array_splice($defaultColumns, 7, 0, [$groupColumn]);
 
         return $table->persistFiltersInSession()
             ->persistFiltersInSession()
@@ -247,6 +247,7 @@ class SeriesRelationManager extends RelationManager
                     ->schema([
                         Select::make('category')
                             ->label('Select category')
+                            ->native(false)
                             ->options(
                                 $ownerRecord->categoryTags()->get()
                                     ->map(fn ($name) => [

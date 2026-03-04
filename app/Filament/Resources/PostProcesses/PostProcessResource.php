@@ -47,6 +47,15 @@ class PostProcessResource extends Resource
 
     protected static string|\UnitEnum|null $navigationGroup = 'Tools';
 
+    /**
+     * Check if the user can access this page.
+     * Only users with the "tools" permission can access this page.
+     */
+    public static function canAccess(): bool
+    {
+        return auth()->check() && auth()->user()->canUseTools();
+    }
+
     public static function getGloballySearchableAttributes(): array
     {
         return ['name'];

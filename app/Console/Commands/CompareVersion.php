@@ -41,6 +41,11 @@ class CompareVersion extends Command
             $this->info("✅ No updates available.\n");
         }
 
-        return 1;
+        // Also refresh and store recent releases to a flat file for the widget
+        $releases = VersionServiceProvider::fetchReleases(10, refresh: true);
+        $count = is_array($releases) ? count($releases) : 0;
+        $this->info("Fetched $count releases and saved to storage (for dashboard widget).");
+
+        return 0;
     }
 }

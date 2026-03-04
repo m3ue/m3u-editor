@@ -6,6 +6,8 @@ return new class extends SettingsMigration
 {
     public function up(): void
     {
-        $this->migrator->add('general.xtream_api_message', null);
+        if (! $this->migrator->exists('general.xtream_api_message')) {
+            $this->migrator->add('general.xtream_api_message', null);
+        }
     }
 };

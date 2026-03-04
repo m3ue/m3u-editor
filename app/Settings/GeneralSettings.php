@@ -46,11 +46,36 @@ class GeneralSettings extends Settings
 
     public ?int $default_vod_stream_profile_id = null;
 
+    // Default stream file setting profile IDs
+    public ?int $default_series_stream_file_setting_id = null;
+
+    public ?int $default_vod_stream_file_setting_id = null;
+
     public ?string $url_override = null;
 
     public ?bool $url_override_include_logos = true;
 
     public ?bool $proxy_stop_oldest_on_limit = false;
+
+    // Failover fail conditions - mark playlists invalid on specific HTTP status codes
+    public ?bool $failover_fail_conditions_enabled = false;
+
+    public ?array $failover_fail_conditions = null;
+
+    public ?int $failover_fail_conditions_timeout = 5;
+
+    // Logo cache and placeholders
+    public ?bool $logo_cache_permanent = false;
+
+    public ?string $logo_placeholder_url = null;
+
+    public ?string $episode_placeholder_url = null;
+
+    public ?string $vod_series_poster_placeholder_url = null;
+
+    public ?array $managed_logo_assets = null;
+
+    public ?bool $logo_repository_enabled = false;
 
     // SMTP settings
     public ?string $smtp_host = null;
@@ -178,6 +203,9 @@ class GeneralSettings extends Settings
     public ?string $tmdb_language = 'en-US';
 
     public ?int $tmdb_confidence_threshold = 80;
+
+    // Network broadcast settings
+    public ?int $broadcast_max_concurrent = 10;
 
     public static function group(): string
     {

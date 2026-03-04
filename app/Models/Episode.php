@@ -32,6 +32,7 @@ class Episode extends Model
         'season_id' => 'integer',
         'episode_num' => 'integer',
         'season' => 'integer',
+        'tmdb_id' => 'integer',
         'info' => 'array',
     ];
 

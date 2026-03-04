@@ -40,6 +40,11 @@ class EpgGenerateController extends Controller
             return response()->json(['Error' => 'Playlist Not Found'], 404);
         }
 
+        // Handle network playlists - generate EPG from networks
+        if ($playlist instanceof \App\Models\Playlist && $playlist->is_network_playlist) {
+            return $this->generateNetworkPlaylistEpg($playlist);
+        }
+
         // Check if we have a valid cached file
         if ($this->isCacheValid($playlist, false)) {
             return $this->serveCachedFile($playlist, false);
@@ -96,8 +101,16 @@ class EpgGenerateController extends Controller
         $proxyEnabled = $playlist->enable_proxy;
         $logoProxyEnabled = $playlist->enable_logo_proxy;
 
+        // Track network channels for programme output later
+        $networkChannelIds = [];
+
         // Generate `<channel>` tags for each channel
         foreach ($channels->cursor() as $channel) {
+            // Track network channels for special programme handling
+            if ($channel->network_id) {
+                $networkChannelIds[$channel->network_id] = $channel->stream_id ?? 'network-'.$channel->network_id;
+            }
+
             // Get/set the channel number
             $channelNo = $channel->channel;
             if (! $channelNo && ($playlist->auto_channel_increment || $idChannelBy === PlaylistChannelId::Number)) {
@@ -209,6 +222,10 @@ class EpgGenerateController extends Controller
                 echo PHP_EOL.'  </channel>'.PHP_EOL;
             }
         }
+
+        // Network channels are now included in the regular channel loop above
+        // (they are real Channel records with network_id set)
+        // We'll output their programmes after regular EPG programmes
 
         // Fetch the EPGs (channels are keyed by EPG ID)
         $epgs = Epg::whereIn('id', array_keys($epgChannels))
@@ -384,6 +401,40 @@ class EpgGenerateController extends Controller
                 }
                 // Single echo per channel instead of 600+ echoes
                 echo $buffer;
+            }
+        }
+
+        // Output Network programme schedules (from channels with network_id)
+        if (! empty($networkChannelIds)) {
+            $networks = \App\Models\Network::whereIn('id', array_keys($networkChannelIds))
+                ->with(['programmes' => function ($q) {
+                    $q->where('end_time', '>', Carbon::now()->subDay())
+                        ->orderBy('start_time');
+                }])
+                ->get();
+
+            foreach ($networks as $network) {
+                $tvgId = $networkChannelIds[$network->id];
+
+                foreach ($network->programmes as $programme) {
+                    $start = str_replace(':', '', $programme->start_time->format('YmdHis O'));
+                    $stop = str_replace(':', '', $programme->end_time->format('YmdHis O'));
+                    $title = htmlspecialchars($programme->title, ENT_XML1);
+                    $desc = $programme->description ? htmlspecialchars($programme->description, ENT_XML1) : '';
+                    $icon = $programme->image ? htmlspecialchars($programme->image, ENT_XML1) : '';
+                    $category = $programme->contentable_type === 'App\\Models\\Episode' ? 'Series' : 'Movie';
+
+                    echo '  <programme channel="'.$tvgId.'" start="'.$start.'" stop="'.$stop.'">'.PHP_EOL;
+                    echo '    <title>'.$title.'</title>'.PHP_EOL;
+                    if ($desc) {
+                        echo '    <desc>'.$desc.'</desc>'.PHP_EOL;
+                    }
+                    if ($icon) {
+                        echo '    <icon src="'.$icon.'"/>'.PHP_EOL;
+                    }
+                    echo '    <category>'.$category.'</category>'.PHP_EOL;
+                    echo '  </programme>'.PHP_EOL;
+                }
             }
         }
 
@@ -684,5 +735,35 @@ class EpgGenerateController extends Controller
         }
         // Close the XMLReader for this epg
         $programReader->close();
+    }
+
+    /**
+     * Generate EPG for a network playlist (outputs network programme schedules).
+     */
+    protected function generateNetworkPlaylistEpg(\App\Models\Playlist $playlist)
+    {
+        $networks = $playlist->networks()
+            ->where('enabled', true)
+            ->get();
+
+        if ($networks->isEmpty()) {
+            return response('<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE tv SYSTEM "xmltv.dtd">
+<tv generator-info-name="M3U Editor Networks">
+<!-- No networks assigned to this playlist -->
+</tv>', 200, [
+                'Content-Type' => 'application/xml',
+            ]);
+        }
+
+        $epgService = app(\App\Services\NetworkEpgService::class);
+
+        return response()->stream(function () use ($networks, $epgService) {
+            $epgService->streamXmltvForNetworks($networks);
+        }, 200, [
+            'Content-Type' => 'application/xml',
+            'Content-Disposition' => 'inline; filename="epg.xml"',
+            'Cache-Control' => 'no-cache, no-store, must-revalidate',
+        ]);
     }
 }

@@ -21,7 +21,98 @@
             @php($stats = $this->getStats())
             @if(!empty($stats))
                 <div class="">
-                    @if(isset($stats['proxy_enabled']) && $stats['proxy_enabled'])
+                    @if(isset($stats['is_network_playlist']) && $stats['is_network_playlist'])
+                        <!-- Network Playlist Info -->
+                        <div class="pb-4">
+                            <h3 class="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3 flex items-center">
+                                <div class="p-1 mr-1 bg-white ring-1 ring-gray-950/5 dark:bg-gray-900 dark:ring-white/10 rounded-lg">
+                                    <x-heroicon-s-tv class="text-purple-500 h-4 w-4" />
+                                </div>
+                                Network Playlist
+                            </h3>
+
+                            @if(!($stats['broadcast_service_enabled'] ?? false))
+                                <!-- Broadcast Service Warning -->
+                                <div class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md p-4 mb-4">
+                                    <div class="flex">
+                                        <div class="flex-shrink-0">
+                                            <x-heroicon-s-exclamation-circle class="h-5 w-5 text-red-400" />
+                                        </div>
+                                        <div class="ml-3">
+                                            <h3 class="text-sm font-medium text-red-800 dark:text-red-200">
+                                                Broadcast Service Not Enabled
+                                            </h3>
+                                            <div class="mt-2 text-sm text-red-700 dark:text-red-300">
+                                                <p>Add <code class="bg-red-100 dark:bg-red-800 px-1 rounded">NETWORK_BROADCAST_ENABLED=true</code> to your <code class="bg-red-100 dark:bg-red-800 px-1 rounded">.env</code> file and restart the container for network streams to work.</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            @endif
+
+                            @if(count($stats['networks']) > 0)
+                                <div class="space-y-2">
+                                    @foreach($stats['networks'] as $network)
+                                        <div class="bg-white ring-1 ring-gray-950/5 dark:bg-gray-900 dark:ring-white/10 rounded-md p-3">
+                                            <div class="flex items-center justify-between">
+                                                <div class="flex items-center gap-3">
+                                                    @if($network['channel_number'])
+                                                        <span class="text-xs font-mono bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded">
+                                                            Ch {{ $network['channel_number'] }}
+                                                        </span>
+                                                    @endif
+                                                    <span class="font-medium text-gray-900 dark:text-gray-100">
+                                                        {{ $network['name'] }}
+                                                    </span>
+                                                    @if($network['media_server'])
+                                                        <span class="text-xs text-gray-500 dark:text-gray-400">
+                                                            via {{ $network['media_server'] }}
+                                                        </span>
+                                                    @endif
+                                                </div>
+                                                <div class="flex items-center gap-2">
+                                                    @if($network['broadcast_enabled'])
+                                                        @if($network['is_broadcasting'])
+                                                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
+                                                                🟢 Broadcasting
+                                                            </span>
+                                                        @else
+                                                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200">
+                                                                ⚪ Not Broadcasting
+                                                            </span>
+                                                        @endif
+                                                    @else
+                                                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400">
+                                                            Broadcast Disabled
+                                                        </span>
+                                                    @endif
+                                                    <a href="/networks/{{ $network['id'] }}/edit" class="text-primary-600 hover:text-primary-500 text-sm">
+                                                        Edit
+                                                    </a>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    @endforeach
+                                </div>
+                            @else
+                                <div class="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-md p-4">
+                                    <div class="flex">
+                                        <div class="flex-shrink-0">
+                                            <x-heroicon-s-exclamation-triangle class="h-5 w-5 text-yellow-400" />
+                                        </div>
+                                        <div class="ml-3">
+                                            <h3 class="text-sm font-medium text-yellow-800 dark:text-yellow-200">
+                                                No Networks Assigned
+                                            </h3>
+                                            <div class="mt-2 text-sm text-yellow-700 dark:text-yellow-300">
+                                                <p>Go to <strong>Integrations → Networks</strong> and assign networks to this playlist using the "Output Playlist" field.</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            @endif
+                        </div>
+                    @elseif(isset($stats['proxy_enabled']) && $stats['proxy_enabled'])
                         <!-- Proxy Streams Section -->
                         <div class="pb-4">
                             <h3 class="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3 flex items-center">
@@ -30,7 +121,7 @@
                                 </div>
                                 Proxy Usage
                             </h3>
-                            
+
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <!-- Stream Count -->
                                 <div class="bg-white ring-1 ring-gray-950/5 dark:bg-gray-900 dark:ring-white/10 dark:bg-gray-900 rounded-md p-3">
@@ -43,7 +134,7 @@
                                         </div>
                                     </div>
                                 </div>
-                                
+
                                 <!-- Max Streams Status -->
                                 <div class="bg-white ring-1 ring-gray-950/5 dark:bg-gray-900 dark:ring-white/10 dark:bg-gray-900 rounded-md p-3">
                                     <div class="flex items-center justify-between">
@@ -70,7 +161,7 @@
                             </div>
                         </div>
                     @endif
-                    
+
                     @if(isset($stats['xtream_info']))
                         <!-- Xtream Info Section -->
                         <div class="pb-4">
@@ -80,7 +171,7 @@
                                 </div>
                                 Xtream Provider Details
                             </h3>
-                            
+
                             <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
                                 <!-- Active Connections -->
                                 <div class="bg-white ring-1 ring-gray-950/5 dark:bg-gray-900 dark:ring-white/10 dark:bg-gray-900 rounded-md p-3">
@@ -91,7 +182,7 @@
                                         </div>
                                     </div>
                                 </div>
-                                
+
                                 <!-- Expiration Info -->
                                 <div class="bg-white ring-1 ring-gray-950/5 dark:bg-gray-900 dark:ring-white/10 dark:bg-gray-900 rounded-md p-3">
                                     <div class="space-y-1">

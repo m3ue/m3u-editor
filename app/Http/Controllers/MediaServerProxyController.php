@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Facades\ProxyFacade;
 use App\Models\MediaServerIntegration;
+use App\Services\MediaServerService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Cache;
@@ -51,12 +52,11 @@ class MediaServerProxyController extends Controller
                 return response($cachedResponse['body'], 200, $cachedResponse['headers']);
             }
 
-            // Build the media server image URL with authentication
-            $imageUrl = "{$integration->base_url}/Items/{$itemId}/Images/{$imageType}";
+            $mediaServer = MediaServerService::make($integration);
+            $imageUrl = $mediaServer->getDirectImageUrl($itemId, $imageType);
 
             // Fetch the image with authentication
             $response = Http::withHeaders([
-                'X-Emby-Token' => $integration->api_key,
                 'Accept' => 'image/*',
             ])->timeout(30)->get($imageUrl);
 
@@ -130,6 +130,10 @@ class MediaServerProxyController extends Controller
     public function proxyStream(Request $request, int $integrationId, string $itemId, string $container = 'ts')
     {
         try {
+            // Ensure long-running streaming inside closure is not subject to the default timeout
+            set_time_limit(0);
+            ignore_user_abort(true);
+
             $integration = MediaServerIntegration::find($integrationId);
 
             if (! $integration) {
@@ -140,29 +144,14 @@ class MediaServerProxyController extends Controller
                 return response()->json(['error' => 'Integration is disabled'], 403);
             }
 
-            // Build the media server stream URL with authentication
-            $streamUrl = "{$integration->base_url}/Videos/{$itemId}/stream.{$container}";
-            $params = [
-                'static' => 'true',
-                'api_key' => $integration->api_key,
-            ];
-
-            // Add any additional query parameters from the request (seeking, etc.)
-            $forwardParams = ['StartTimeTicks', 'AudioStreamIndex', 'SubtitleStreamIndex'];
-            foreach ($forwardParams as $param) {
-                if ($request->has($param)) {
-                    $params[$param] = $request->input($param);
-                }
-            }
-
-            $fullUrl = $streamUrl.'?'.http_build_query($params);
+            $mediaServer = MediaServerService::make($integration);
+            $fullUrl = $mediaServer->getDirectStreamUrl($request, $itemId, $container);
 
             // Get content type based on container
             $contentType = $this->getContentTypeForContainer($container);
 
             // Handle range requests for seeking
             $headers = [
-                'X-Emby-Token' => $integration->api_key,
                 'Accept' => '*/*',
             ];
 
@@ -179,6 +168,7 @@ class MediaServerProxyController extends Controller
                 'Content-Type' => $contentType,
                 'Accept-Ranges' => 'bytes',
                 'X-Proxied-From' => 'MediaServer',
+                'Connection' => 'keep-alive',
             ];
 
             // Forward content-length if available
@@ -265,5 +255,355 @@ class MediaServerProxyController extends Controller
     public static function generateStreamProxyUrl(int $integrationId, string $itemId, string $container = 'ts'): string
     {
         return ProxyFacade::getBaseUrl()."/media-server/{$integrationId}/stream/{$itemId}.{$container}";
+    }
+
+    /**
+     * Stream a local media file.
+     *
+     * Route: /local-media/{integration}/stream/{item}
+     *
+     * This streams local video files that are mounted to the container.
+     * Supports range requests for seeking.
+     *
+     * @param  int  $integration  The integration ID
+     * @param  string  $item  Base64-encoded file path
+     * @return Response|StreamedResponse
+     */
+    public function streamLocalMedia(Request $request, int $integration, string $item)
+    {
+        try {
+            set_time_limit(0);
+            ignore_user_abort(true);
+
+            $mediaIntegration = MediaServerIntegration::find($integration);
+
+            if (! $mediaIntegration) {
+                return response()->json(['error' => 'Integration not found'], 404);
+            }
+
+            if (! $mediaIntegration->enabled) {
+                return response()->json(['error' => 'Integration is disabled'], 403);
+            }
+
+            if ($mediaIntegration->type !== 'local') {
+                return response()->json(['error' => 'Integration is not a local media type'], 400);
+            }
+
+            // Decode the file path from base64
+            $filePath = base64_decode($item);
+
+            if (! $filePath || ! file_exists($filePath)) {
+                Log::warning('Local media file not found', [
+                    'integration_id' => $integration,
+                    'item_id' => $item,
+                    'decoded_path' => $filePath,
+                ]);
+
+                return response()->json(['error' => 'File not found'], 404);
+            }
+
+            // Security check: ensure the file is within one of the configured paths
+            $configuredPaths = $mediaIntegration->local_media_paths ?? [];
+            $isAllowed = false;
+
+            foreach ($configuredPaths as $pathConfig) {
+                $allowedPath = realpath($pathConfig['path'] ?? '');
+                $realFilePath = realpath($filePath);
+
+                if ($allowedPath && $realFilePath && (str_starts_with($realFilePath, $allowedPath.DIRECTORY_SEPARATOR) || $realFilePath === $allowedPath)) {
+                    $isAllowed = true;
+                    break;
+                }
+            }
+
+            if (! $isAllowed) {
+                Log::warning('Local media access denied - file outside configured paths', [
+                    'integration_id' => $integration,
+                    'file_path' => $filePath,
+                ]);
+
+                return response()->json(['error' => 'Access denied'], 403);
+            }
+
+            $fileSize = filesize($filePath);
+            $extension = strtolower(pathinfo($filePath, PATHINFO_EXTENSION));
+            $contentType = $this->getContentTypeForContainer($extension);
+
+            // Handle range requests for video seeking
+            $start = 0;
+            $end = $fileSize - 1;
+            $statusCode = 200;
+
+            $headers = [
+                'Content-Type' => $contentType,
+                'Accept-Ranges' => 'bytes',
+                'Content-Disposition' => 'inline; filename="'.basename($filePath).'"',
+                'X-Content-Duration' => 'unknown',
+            ];
+
+            if ($request->hasHeader('Range')) {
+                $range = $request->header('Range');
+
+                if (preg_match('/bytes=(\d*)-(\d*)/', $range, $matches)) {
+                    $start = $matches[1] !== '' ? (int) $matches[1] : 0;
+                    $end = $matches[2] !== '' ? (int) $matches[2] : $fileSize - 1;
+
+                    // Validate range
+                    if ($start > $end || $start >= $fileSize) {
+                        return response('', 416, [
+                            'Content-Range' => "bytes */{$fileSize}",
+                        ]);
+                    }
+
+                    $end = min($end, $fileSize - 1);
+                    $statusCode = 206;
+                    $headers['Content-Range'] = "bytes {$start}-{$end}/{$fileSize}";
+                }
+            }
+
+            $length = $end - $start + 1;
+            $headers['Content-Length'] = $length;
+
+            Log::debug('Streaming local media file', [
+                'integration_id' => $integration,
+                'file_path' => $filePath,
+                'file_size' => $fileSize,
+                'range' => $request->header('Range'),
+                'start' => $start,
+                'end' => $end,
+                'length' => $length,
+            ]);
+
+            return new StreamedResponse(function () use ($filePath, $start, $end) {
+                $handle = fopen($filePath, 'rb');
+
+                if (! $handle) {
+                    return;
+                }
+
+                fseek($handle, $start);
+                $remaining = $end - $start + 1;
+                $bufferSize = 1024 * 1024; // 1MB chunks
+
+                while ($remaining > 0 && ! feof($handle) && connection_status() === CONNECTION_NORMAL) {
+                    $readSize = min($bufferSize, $remaining);
+                    $data = fread($handle, $readSize);
+
+                    if ($data === false) {
+                        break;
+                    }
+
+                    echo $data;
+                    flush();
+                    $remaining -= strlen($data);
+                }
+
+                fclose($handle);
+            }, $statusCode, $headers);
+        } catch (\Exception $e) {
+            Log::error('Exception in local media stream', [
+                'integration_id' => $integration,
+                'item_id' => $item,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'error' => 'Internal server error while streaming local media',
+            ], 500);
+        }
+    }
+
+    /**
+     * Generate a URL for streaming local media.
+     */
+    public static function generateLocalMediaStreamUrl(int $integrationId, string $itemId): string
+    {
+        return ProxyFacade::getBaseUrl()."/local-media/{$integrationId}/stream/{$itemId}";
+    }
+
+    /**
+     * Generate a URL for streaming WebDAV media.
+     */
+    public static function generateWebDavStreamUrl(int $integrationId, string $itemId): string
+    {
+        return ProxyFacade::getBaseUrl()."/webdav-media/{$integrationId}/stream/{$itemId}";
+    }
+
+    /**
+     * Stream media from a WebDAV server.
+     *
+     * Route: /webdav-media/{integration}/stream/{item}
+     *
+     * This proxies video files from a WebDAV server, handling authentication.
+     * Supports range requests for seeking.
+     *
+     * @param  int  $integration  The integration ID
+     * @param  string  $item  Base64-encoded file path on the WebDAV server
+     * @return Response|StreamedResponse
+     */
+    public function streamWebDavMedia(Request $request, int $integration, string $item)
+    {
+        try {
+            set_time_limit(0);
+            ignore_user_abort(true);
+
+            $mediaIntegration = MediaServerIntegration::find($integration);
+
+            if (! $mediaIntegration) {
+                return response()->json(['error' => 'Integration not found'], 404);
+            }
+
+            if (! $mediaIntegration->enabled) {
+                return response()->json(['error' => 'Integration is disabled'], 403);
+            }
+
+            if ($mediaIntegration->type !== 'webdav') {
+                return response()->json(['error' => 'Integration is not a WebDAV type'], 400);
+            }
+
+            // Decode the file path from base64
+            $filePath = base64_decode($item);
+
+            if (! $filePath) {
+                Log::warning('WebDAV media: Invalid item ID', [
+                    'integration_id' => $integration,
+                    'item_id' => $item,
+                ]);
+
+                return response()->json(['error' => 'Invalid item ID'], 400);
+            }
+
+            // Build the WebDAV URL with proper URL encoding for path segments
+            $protocol = $mediaIntegration->ssl ? 'https' : 'http';
+            $host = $mediaIntegration->host;
+            $port = $mediaIntegration->port;
+
+            $baseUrl = "{$protocol}://{$host}";
+            if ($port && $port !== 80 && $port !== 443) {
+                $baseUrl .= ":{$port}";
+            }
+
+            // URL-encode each path segment individually to handle spaces, brackets, etc.
+            $encodedPath = implode('/', array_map('rawurlencode', explode('/', $filePath)));
+            $fileUrl = rtrim($baseUrl, '/').'/'.ltrim($encodedPath, '/');
+
+            // Build curl auth options
+            $username = $mediaIntegration->webdav_username;
+            $password = $mediaIntegration->webdav_password;
+
+            // First, get the file size with a HEAD request via curl
+            $headCh = curl_init($fileUrl);
+            curl_setopt($headCh, CURLOPT_NOBODY, true);
+            curl_setopt($headCh, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($headCh, CURLOPT_FOLLOWLOCATION, true);
+            curl_setopt($headCh, CURLOPT_SSL_VERIFYPEER, false);
+            curl_setopt($headCh, CURLOPT_SSL_VERIFYHOST, false);
+            curl_setopt($headCh, CURLOPT_TIMEOUT, 30);
+
+            if ($username && $password) {
+                curl_setopt($headCh, CURLOPT_USERPWD, "{$username}:{$password}");
+            }
+
+            curl_exec($headCh);
+            $headStatus = curl_getinfo($headCh, CURLINFO_HTTP_CODE);
+            $fileSize = (int) curl_getinfo($headCh, CURLINFO_CONTENT_LENGTH_DOWNLOAD);
+            $curlError = curl_error($headCh);
+            curl_close($headCh);
+
+            if ($headStatus < 200 || $headStatus >= 300) {
+                Log::warning('WebDAV media: File not accessible', [
+                    'integration_id' => $integration,
+                    'file_path' => $filePath,
+                    'file_url' => $fileUrl,
+                    'status' => $headStatus,
+                    'curl_error' => $curlError,
+                ]);
+
+                return response()->json(['error' => 'File not accessible'], $headStatus ?: 502);
+            }
+
+            $extension = strtolower(pathinfo($filePath, PATHINFO_EXTENSION));
+            $contentType = $this->getContentTypeForContainer($extension);
+
+            // Handle range requests for video seeking
+            $start = 0;
+            $end = $fileSize > 0 ? $fileSize - 1 : 0;
+            $statusCode = 200;
+
+            $responseHeaders = [
+                'Content-Type' => $contentType,
+                'Accept-Ranges' => 'bytes',
+                'Content-Disposition' => 'inline; filename="'.basename($filePath).'"',
+                'Connection' => 'keep-alive',
+            ];
+
+            if ($request->hasHeader('Range') && $fileSize > 0) {
+                $range = $request->header('Range');
+
+                if (preg_match('/bytes=(\d*)-(\d*)/', $range, $matches)) {
+                    $start = $matches[1] !== '' ? (int) $matches[1] : 0;
+                    $end = $matches[2] !== '' ? (int) $matches[2] : $fileSize - 1;
+
+                    if ($start > $end || $start >= $fileSize) {
+                        return response('', 416, [
+                            'Content-Range' => "bytes */{$fileSize}",
+                        ]);
+                    }
+
+                    $end = min($end, $fileSize - 1);
+                    $statusCode = 206;
+                    $responseHeaders['Content-Range'] = "bytes {$start}-{$end}/{$fileSize}";
+                }
+            }
+
+            $length = $end - $start + 1;
+            $responseHeaders['Content-Length'] = $length;
+
+            Log::debug('Streaming WebDAV media file', [
+                'integration_id' => $integration,
+                'file_path' => $filePath,
+                'file_url' => $fileUrl,
+                'file_size' => $fileSize,
+                'range' => $request->header('Range'),
+                'start' => $start,
+                'end' => $end,
+                'length' => $length,
+            ]);
+
+            // Stream using curl to avoid loading entire file into memory
+            $rangeHeader = "bytes={$start}-{$end}";
+
+            return new StreamedResponse(function () use ($fileUrl, $rangeHeader, $username, $password) {
+                $ch = curl_init($fileUrl);
+                curl_setopt($ch, CURLOPT_HTTPHEADER, ["Range: {$rangeHeader}"]);
+                curl_setopt($ch, CURLOPT_WRITEFUNCTION, function ($ch, $data) {
+                    echo $data;
+                    flush();
+
+                    return strlen($data);
+                });
+                curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+                curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+                curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+                curl_setopt($ch, CURLOPT_TIMEOUT, 0);
+
+                if ($username && $password) {
+                    curl_setopt($ch, CURLOPT_USERPWD, "{$username}:{$password}");
+                }
+
+                curl_exec($ch);
+                curl_close($ch);
+            }, $statusCode, $responseHeaders);
+        } catch (\Exception $e) {
+            Log::error('Exception in WebDAV media stream', [
+                'integration_id' => $integration,
+                'item_id' => $item,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'error' => 'Internal server error while streaming WebDAV media',
+            ], 500);
+        }
     }
 }

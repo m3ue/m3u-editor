@@ -5,7 +5,7 @@ services:
     environment:
       # Timezone
       - TZ=Etc/UTC
-      
+
       # Application URL (change to your domain or IP)
       - APP_URL=${APP_URL:-http://localhost}
       - APP_PORT=${APP_PORT:-36400}
@@ -24,7 +24,7 @@ services:
       # Xtream API Endpoint Configuration
       - XTREAM_ONLY_ENABLED=true # Set to true to enable Xtream API endpoint
       - XTREAM_PORT=${XTREAM_PORT:-36401} # Port for Xtream API
-      
+
       # Database Connection (m3u-editor)
       - DB_CONNECTION=pgsql
       - DB_HOST=localhost
@@ -36,7 +36,8 @@ services:
       # Redis configuration
       - REDIS_ENABLED=true # Use embedded Redis
       - REDIS_SERVER_PORT=${REDIS_PORT:-6379}
-      
+      - REDIS_PASSWORD=${M3U_PROXY_TOKEN:-changeme} # Must match what start-container sets
+
       # M3U Proxy Configuration (External)
       - M3U_PROXY_ENABLED=false # Disable embedded and use external m3u-proxy
       - M3U_PROXY_PORT=${M3U_PROXY_PORT:-38085}
@@ -45,18 +46,18 @@ services:
     volumes:
       # Persistent configuration data
       - ./data:/var/www/config
-      
+
       # PostgreSQL data persistence
       - pgdata:/var/lib/postgresql/data
     restart: unless-stopped
     ports:
-      - "${APP_PORT:-36400}:${APP_PORT:-36400}"  # Main application port
-      - "${XTREAM_PORT:-36401}:${XTREAM_PORT:-36401}"  # Xtream API endpoint (when XTREAM_ONLY_ENABLED=true)
+      - "${APP_PORT:-36400}:${APP_PORT:-36400}" # Main application port
+      - "${XTREAM_PORT:-36401}:${XTREAM_PORT:-36401}" # Xtream API endpoint (when XTREAM_ONLY_ENABLED=true)
       # - "${PG_PORT:-5432}:${PG_PORT:-5432}"  # Uncomment to expose PostgreSQL
     networks:
       - m3u-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://127.0.0.1:${APP_PORT:-36400}/up"]
+      test: [ "CMD", "curl", "-f", "http://127.0.0.1:${APP_PORT:-36400}/up" ]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -76,13 +77,12 @@ services:
       - REDIS_HOST=m3u-editor # Connect to m3u-editor's embedded Redis instance
       - REDIS_DB=6 # 1-5 used by m3u-editor, so use 6 for m3u-proxy
       - ENABLE_REDIS_POOLING=true
-      
+
       # Logging
       - LOG_LEVEL=INFO
-
       # Note: ROOT_PATH=/m3u-proxy is now the default, no need to set it explicitly
       # Only set ROOT_PATH= (empty) if you need to use the root path instead
-      
+
       # Optional: Additional configuration
       # - REDIS_POOL_MAX_CONNECTIONS=50
       # - STREAM_TIMEOUT=300
@@ -99,12 +99,11 @@ services:
     #devices:
     #  - /dev/dri:/dev/dri
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://127.0.0.1:${PROXY_PORT:-38085}/health?api_token=${M3U_PROXY_TOKEN:-changeme}"]
+      test: [ "CMD", "curl", "-f", "http://127.0.0.1:${PROXY_PORT:-38085}/health?api_token=${M3U_PROXY_TOKEN:-changeme}" ]
       interval: 30s
       timeout: 2s
       retries: 12
       start_period: 10s
-    
     # Optional: Resource limits
     # deploy:
     #   resources:

@@ -114,6 +114,7 @@ class MergedPlaylistResource extends Resource
                     ->label('Proxy')
                     ->toggleable()
                     ->tooltip('Toggle proxy status')
+                    ->hidden(fn () => ! auth()->user()->canUseProxy())
                     ->sortable(),
                 TextColumn::make('created_at')
                     ->dateTime()
@@ -285,6 +286,7 @@ class MergedPlaylistResource extends Resource
                 ->collapsible()
                 ->collapsed($creating)
                 ->columns(2)
+                ->hidden(fn () => ! auth()->user()->canUseProxy())
                 ->schema([
                     Toggle::make('enable_proxy')
                         ->label('Enable Stream Proxy')
@@ -324,26 +326,45 @@ class MergedPlaylistResource extends Resource
                         ->default(0) // Default to 0 streams (for unlimted)
                         ->required()
                         ->hidden(fn (Get $get): bool => ! $get('enable_proxy')),
-                    TextInput::make('server_timezone')
-                        ->label('Provider Timezone')
-                        ->helperText('The portal/provider timezone (DST-aware). Needed to correctly use timeshift functionality when playlist proxy is enabled.')
-                        ->placeholder('Etc/UTC')
-                        ->hidden(fn (Get $get): bool => ! $get('enable_proxy')),
-                    Toggle::make('strict_live_ts')
-                        ->label('Enable Strict Live TS Handling')
-                        ->hintAction(
-                            Action::make('learn_more_strict_live_ts')
-                                ->label('Learn More')
-                                ->icon('heroicon-o-arrow-top-right-on-square')
-                                ->iconPosition('after')
-                                ->size('sm')
-                                ->url('https://github.com/sparkison/m3u-proxy/blob/master/docs/STRICT_LIVE_TS_MODE.md')
-                                ->openUrlInNewTab(true)
-                        )
-                        ->helperText('Enhanced stability for live MPEG-TS streams with PVR clients like Kodi and HDHomeRun (only used when not using transcoding profiles).')
-                        ->inline(false)
-                        ->default(false)
-                        ->hidden(fn (Get $get): bool => ! $get('enable_proxy')),
+
+                    Grid::make()
+                        ->columns(3)
+                        ->schema([
+                            TextInput::make('server_timezone')
+                                ->label('Provider Timezone')
+                                ->helperText('The portal/provider timezone (DST-aware). Needed to correctly use timeshift functionality when playlist proxy is enabled.')
+                                ->placeholder('Etc/UTC'),
+                            Toggle::make('strict_live_ts')
+                                ->label('Enable Strict Live TS Handling')
+                                ->hintAction(
+                                    Action::make('learn_more_strict_live_ts')
+                                        ->label('Learn More')
+                                        ->icon('heroicon-o-arrow-top-right-on-square')
+                                        ->iconPosition('after')
+                                        ->size('sm')
+                                        ->url('https://m3ue.sparkison.dev/docs/proxy/strict-live-ts')
+                                        ->openUrlInNewTab(true)
+                                )
+                                ->helperText('Enhanced stability for live MPEG-TS streams with PVR clients like Kodi and HDHomeRun (only used when not using transcoding profiles).')
+                                ->inline(false)
+                                ->default(false),
+                            Toggle::make('use_sticky_session')
+                                ->hintAction(
+                                    Action::make('learn_more_sticky_session')
+                                        ->label('Learn More')
+                                        ->icon('heroicon-o-arrow-top-right-on-square')
+                                        ->iconPosition('after')
+                                        ->size('sm')
+                                        ->url('https://m3ue.sparkison.dev/docs/proxy/sticky-sessions')
+                                        ->openUrlInNewTab(true)
+                                )
+                                ->label('Enable Sticky Session Handler')
+                                ->helperText('')
+                                ->inline(false)
+                                ->default(false)
+                                ->helperText('Lock clients to specific backend origins after redirects to prevent playback loops when load balancers bounce between origins. Disable if your provider doesn\'t use load balancing.'),
+                        ])->hidden(fn (Get $get): bool => ! $get('enable_proxy')),
+
                     Fieldset::make('Transcoding Settings (optional)')
                         ->columnSpanFull()
                         ->schema([

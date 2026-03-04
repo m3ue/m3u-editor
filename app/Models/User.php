@@ -44,6 +44,7 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
             // 'avatar_url' => 'array'
             'app_authentication_secret' => 'encrypted',
             'app_authentication_recovery_codes' => 'encrypted:array',
+            'permissions' => 'array',
         ];
     }
 
@@ -183,5 +184,66 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
     public function isAdmin(): bool
     {
         return in_array($this->email, config('dev.admin_emails', []));
+    }
+
+    /**
+     * Check if user has a specific permission.
+     * Admins always have all permissions.
+     */
+    public function hasPermission(string $permission): bool
+    {
+        // Admins have all permissions
+        if ($this->isAdmin()) {
+            return true;
+        }
+
+        $permissions = $this->permissions ?? [];
+
+        return in_array($permission, $permissions);
+    }
+
+    /**
+     * Check if user can use the proxy feature.
+     */
+    public function canUseProxy(): bool
+    {
+        return $this->hasPermission('use_proxy');
+    }
+
+    /**
+     * Check if user can use integrations.
+     */
+    public function canUseIntegrations(): bool
+    {
+        return $this->hasPermission('use_integrations');
+    }
+
+    /**
+     * Check if user can use tools.
+     */
+    public function canUseTools(): bool
+    {
+        return $this->hasPermission('use_tools');
+    }
+
+    /**
+     * Check if user can use stream file sync.
+     */
+    public function canUseStreamFileSync(): bool
+    {
+        return $this->hasPermission('use_stream_file_sync');
+    }
+
+    /**
+     * Get all available permissions.
+     */
+    public static function getAvailablePermissions(): array
+    {
+        return [
+            'use_proxy' => 'Use Proxy',
+            'use_integrations' => 'Use Integrations',
+            'use_tools' => 'Use Tools',
+            'use_stream_file_sync' => 'Use Stream File Sync',
+        ];
     }
 }

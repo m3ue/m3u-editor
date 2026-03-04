@@ -40,6 +40,8 @@ class ProcessM3uImportSeriesComplete implements ShouldQueue
             'status' => Status::Completed,
             'errors' => null,
             'series_progress' => 100,
+            'auto_retry_503_count' => 0,
+            'auto_retry_503_last_at' => null,
         ]);
         $message = "Series sync completed successfully for playlist \"{$this->playlist->name}\".";
         Notification::make()

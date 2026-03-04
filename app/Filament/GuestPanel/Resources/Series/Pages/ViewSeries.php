@@ -5,10 +5,7 @@ namespace App\Filament\GuestPanel\Resources\Series\Pages;
 use App\Filament\GuestPanel\Pages\Concerns\HasPlaylist;
 use App\Filament\GuestPanel\Resources\Series\SeriesResource;
 use Filament\Actions;
-use Filament\Infolists\Components\TextEntry;
 use Filament\Resources\Pages\ViewRecord;
-use Filament\Schemas;
-use Filament\Schemas\Components\Section;
 use Illuminate\Contracts\Support\Htmlable;
 
 class ViewSeries extends ViewRecord
@@ -17,9 +14,30 @@ class ViewSeries extends ViewRecord
 
     protected static string $resource = SeriesResource::class;
 
+    protected string $view = 'filament.resources.series.pages.view-series';
+
     public function getTitle(): string|Htmlable
     {
         return $this->record->name;
+    }
+
+    public function getSubheading(): string|Htmlable|null
+    {
+        $parts = [];
+
+        if ($this->record->release_date) {
+            $parts[] = $this->record->release_date;
+        }
+
+        if ($this->record->genre) {
+            $parts[] = $this->record->genre;
+        }
+
+        if ($this->record->rating) {
+            $parts[] = '★ '.$this->record->rating;
+        }
+
+        return implode(' • ', $parts) ?: null;
     }
 
     protected function getHeaderActions(): array
@@ -32,23 +50,5 @@ class ViewSeries extends ViewRecord
                 ->color('gray')
                 ->size('sm'),
         ];
-    }
-
-    public function infolist(Schemas\Schema $schema): Schemas\Schema
-    {
-        return $schema
-            ->components([
-                Section::make('Series info')
-                    ->icon('heroicon-m-information-circle')
-                    ->columnSpanFull()
-                    ->compact()
-                    ->collapsible(true)
-                    ->persistCollapsed(true)
-                    ->schema([
-                        TextEntry::make('plot')
-                            ->label('Description')
-                            ->columnSpanFull(),
-                    ]),
-            ]);
     }
 }

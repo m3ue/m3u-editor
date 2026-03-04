@@ -18,7 +18,7 @@
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             @foreach($results as $result)
                 <div
-                    wire:click="applyTmdbSelection({{ $result['id'] }}, '{{ $type }}', {{ $recordId }}, '{{ $recordType }}')"
+                    wire:click="applyTmdbSelection({{ $result['id'] }}, '{{ $type }}', {{ $recordId ?? 'null' }}, '{{ $recordType }}')"
                     wire:loading.class="opacity-50 pointer-events-none"
                     wire:target="applyTmdbSelection"
                     class="flex gap-4 p-4 border border-gray-200 dark:border-gray-700 rounded-lg cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
@@ -74,7 +74,7 @@
                     </div>
 
                     {{-- Loading indicator --}}
-                    <div wire:loading wire:target="applyTmdbSelection({{ $result['id'] }}, '{{ $type }}', {{ $recordId }}, '{{ $recordType }}')" class="flex-shrink-0 flex items-center">
+                    <div wire:loading wire:target="applyTmdbSelection({{ $result['id'] }}, '{{ $type }}', {{ $recordId ?? 'null' }}, '{{ $recordType }}')" class="flex-shrink-0 flex items-center">
                         <x-filament::loading-indicator class="w-5 h-5" />
                     </div>
                 </div>

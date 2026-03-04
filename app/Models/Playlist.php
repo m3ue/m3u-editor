@@ -53,12 +53,16 @@ class Playlist extends Model
         'emby_config' => 'array',
         'custom_headers' => 'array',
         'strict_live_ts' => 'boolean',
+        'use_sticky_session' => 'boolean',
         'profiles_enabled' => 'boolean',
+        'is_network_playlist' => 'boolean',
         'status' => Status::class,
         'id_channel_by' => PlaylistChannelId::class,
         'source_type' => PlaylistSourceType::class,
         'enable_channels' => 'boolean',
         'enable_series' => 'boolean',
+        'auto_retry_503_count' => 'integer',
+        'auto_retry_503_last_at' => 'datetime',
     ];
 
     public function getFolderPathAttribute(): string
@@ -96,6 +100,45 @@ class Playlist extends Model
         return $this->belongsTo(User::class);
     }
 
+    /**
+     * Get the media server integration that owns this playlist (if any).
+     */
+    public function mediaServerIntegration(): \Illuminate\Database\Eloquent\Relations\HasOne
+    {
+        return $this->hasOne(MediaServerIntegration::class);
+    }
+
+    /**
+     * Check if this playlist belongs to a media server integration.
+     */
+    public function isMediaServerPlaylist(): bool
+    {
+        return $this->mediaServerIntegration()->exists();
+    }
+
+    /**
+     * Get networks associated with this playlist's media server integration.
+     */
+    public function getNetworks(): \Illuminate\Database\Eloquent\Collection
+    {
+        $integration = $this->mediaServerIntegration;
+        if (! $integration) {
+            // Fallback: get user's networks not linked to any specific integration
+            return Network::where('user_id', $this->user_id)
+                ->whereNull('media_server_integration_id')
+                ->where('enabled', true)
+                ->orderBy('channel_number')
+                ->orderBy('name')
+                ->get();
+        }
+
+        return $integration->networks()
+            ->where('enabled', true)
+            ->orderBy('channel_number')
+            ->orderBy('name')
+            ->get();
+    }
+
     public function streamProfile(): BelongsTo
     {
         return $this->belongsTo(StreamProfile::class, 'stream_profile_id');
@@ -109,6 +152,14 @@ class Playlist extends Model
     public function channels(): HasMany
     {
         return $this->hasMany(Channel::class);
+    }
+
+    /**
+     * Get networks that output to this playlist (for network playlists).
+     */
+    public function networks(): HasMany
+    {
+        return $this->hasMany(Network::class, 'network_playlist_id');
     }
 
     public function enabled_channels(): HasMany
@@ -274,6 +325,22 @@ class Playlist extends Model
         }
 
         return collect($configs)->sortBy('priority')->values()->all();
+    }
+
+    public function enableProxy(): Attribute
+    {
+        return Attribute::make(
+            get: function ($value) {
+                if ($value) {
+                    // Check playlist user has access to proxy features
+                    if (! $this->user?->canUseProxy()) {
+                        return false;
+                    }
+                }
+
+                return $value;
+            }
+        );
     }
 
     public function xtreamStatus(): Attribute
