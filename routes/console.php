@@ -72,4 +72,9 @@ Schedule::command('networks:regenerate-schedules')
     ->hourly()
     ->withoutOverlapping();
 
+// Heal stale network broadcast processes (auto-restarts crashed FFmpeg processes)
+Schedule::command('network:broadcast:heal')
+    ->everyFiveMinutes()
+    ->withoutOverlapping();
+
 // Note: HLS broadcast files are managed by m3u-proxy service

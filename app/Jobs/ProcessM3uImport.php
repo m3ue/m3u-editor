@@ -161,7 +161,7 @@ class ProcessM3uImport implements ShouldQueue
 
         // Check if this is a media server playlist - these should not be processed via M3U import
         // Media server playlists should be synced via SyncMediaServer job instead
-        if (in_array($this->playlist->source_type, [PlaylistSourceType::Emby, PlaylistSourceType::Jellyfin])) {
+        if (in_array($this->playlist->source_type, [PlaylistSourceType::Emby, PlaylistSourceType::Jellyfin, PlaylistSourceType::Plex, PlaylistSourceType::LocalMedia])) {
             $integration = MediaServerIntegration::where('playlist_id', $this->playlist->id)->first();
             if ($integration) {
                 // Dispatch the correct job for media server playlists
