@@ -158,7 +158,12 @@ class EpgGenerateController extends Controller
                 if (! array_key_exists($epgData->epg_id, $epgChannels)) {
                     $epgChannels[$epgData->epg_id] = [];
                 }
-                $epgChannels[$epgData->epg_id][] = [$epgData->channel_id => $tvgId];
+                $epgChannels[$epgData->epg_id][] = [
+                    $epgData->channel_id => [
+                        'tvg_id' => $tvgId,
+                        'tvg_shift' => (int) ($channel->tvg_shift ?? 0),
+                    ],
+                ];
 
                 // Get the icon
                 $icon = '';
@@ -269,11 +274,11 @@ class EpgGenerateController extends Controller
                     // Pre-build channel mapping index for O(1) lookups
                     $channelMapping = [];
                     foreach ($channels as $channelMap) {
-                        foreach ($channelMap as $epgChannelId => $mappedId) {
+                        foreach ($channelMap as $epgChannelId => $mappedData) {
                             if (! isset($channelMapping[$epgChannelId])) {
                                 $channelMapping[$epgChannelId] = [];
                             }
-                            $channelMapping[$epgChannelId][] = $mappedId;
+                            $channelMapping[$epgChannelId][] = $mappedData;
                         }
                     }
 
@@ -285,11 +290,19 @@ class EpgGenerateController extends Controller
                         }
 
                         foreach ($programmes as $programme) {
-                            // Format times once per programme (not per channel mapping)
-                            $start = $this->formatXmltvDateTime($programme['start']);
-                            $stop = $this->formatXmltvDateTime($programme['stop']);
+                            foreach ($channelMapping[$channelId] as $mappedData) {
+                                $mappedChannelId = $mappedData['tvg_id'];
+                                $tvgShift = $mappedData['tvg_shift'];
 
-                            foreach ($channelMapping[$channelId] as $mappedChannelId) {
+                                // Apply tvg_shift offset to programme times if set
+                                if ($tvgShift !== 0) {
+                                    $start = Carbon::parse($programme['start'])->addHours($tvgShift)->format('YmdHis O');
+                                    $stop = Carbon::parse($programme['stop'])->addHours($tvgShift)->format('YmdHis O');
+                                } else {
+                                    $start = $this->formatXmltvDateTime($programme['start']);
+                                    $stop = $this->formatXmltvDateTime($programme['stop']);
+                                }
+
                                 // Build programme XML in buffer for batch output
                                 $progXml = '  <programme channel="'.htmlspecialchars($mappedChannelId).'"';
                                 if ($start) {
@@ -724,9 +737,42 @@ class EpgGenerateController extends Controller
 
                 // Get the item element
                 $item = $itemDom->documentElement;
+
+                // Save original time attributes before the loop so each iteration starts fresh
+                $originalStart = $item->getAttribute('start');
+                $originalStop = $item->getAttribute('stop');
+
                 foreach ($filtered as $ch) {
+                    $mappedData = $ch[$channelId];
+                    $tvgShift = $mappedData['tvg_shift'];
+
                     // Modify the channel attribute
-                    $item->setAttribute('channel', $ch[$channelId]);
+                    $item->setAttribute('channel', $mappedData['tvg_id']);
+
+                    // Apply tvg_shift to start/stop times if set
+                    if ($tvgShift !== 0) {
+                        if ($originalStart) {
+                            try {
+                                $shifted = Carbon::parse($originalStart)->addHours($tvgShift);
+                                $item->setAttribute('start', str_replace(':', '', $shifted->format('YmdHis O')));
+                            } catch (Exception $e) {
+                                $item->setAttribute('start', $originalStart);
+                            }
+                        }
+
+                        if ($originalStop) {
+                            try {
+                                $shifted = Carbon::parse($originalStop)->addHours($tvgShift);
+                                $item->setAttribute('stop', str_replace(':', '', $shifted->format('YmdHis O')));
+                            } catch (Exception $e) {
+                                $item->setAttribute('stop', $originalStop);
+                            }
+                        }
+                    } else {
+                        // Restore original times (in case a previous iteration applied a shift)
+                        $item->setAttribute('start', $originalStart);
+                        $item->setAttribute('stop', $originalStop);
+                    }
 
                     // Output modified line
                     echo '  '.$itemDom->saveXML($item).PHP_EOL;
