@@ -3,14 +3,15 @@
 namespace App\Filament\Resources\PlaylistViewers\RelationManagers;
 
 use App\Models\ViewerWatchProgress;
+use App\Services\LogoService;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Resources\RelationManagers\RelationManager;
+use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\ImageColumn;
 use Filament\Tables\Columns\TextColumn;
-use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
 
@@ -20,6 +21,23 @@ class WatchProgressRelationManager extends RelationManager
 
     protected static ?string $title = 'Watch History';
 
+    public function getTabs(): array
+    {
+        return [
+            'live' => Tab::make('Live TV')
+                ->icon('heroicon-o-signal')
+                ->query(fn ($query) => $query->where('content_type', 'live')),
+
+            'vod' => Tab::make('VOD')
+                ->icon('heroicon-o-film')
+                ->query(fn ($query) => $query->where('content_type', 'vod')),
+
+            'episode' => Tab::make('Series')
+                ->icon('heroicon-o-tv')
+                ->query(fn ($query) => $query->where('content_type', 'episode')),
+        ];
+    }
+
     public function form(Schema $schema): Schema
     {
         return $schema->components([]);
@@ -27,46 +45,113 @@ class WatchProgressRelationManager extends RelationManager
 
     public function table(Table $table): Table
     {
+        $activeTab = $this->activeTab ?? 'live';
+
         return $table
             ->persistSortInSession()
-            ->filtersTriggerAction(function ($action) {
-                return $action->button()->label('Filters');
-            })
+            ->filtersTriggerAction(fn ($action) => $action->button()->label('Filters'))
             ->deferLoading()
+            ->modifyQueryUsing(fn ($query) => match ($activeTab) {
+                'episode' => $query->with(['episode', 'episode.series', 'episode.playlist']),
+                default => $query->with(['channel', 'channel.epgChannel', 'channel.playlist']),
+            })
             ->paginated([10, 25, 50, 100])
             ->defaultPaginationPageOption(25)
             ->defaultSort('last_watched_at', 'desc')
             ->columns([
+
+                // ── Shared ────────────────────────────────────────────────
                 ImageColumn::make('content_logo')
                     ->label('')
-                    ->getStateUsing(fn (ViewerWatchProgress $record): ?string => $record->content_logo)
+                    ->getStateUsing(function (ViewerWatchProgress $record): string {
+                        if ($record->content_type === 'episode') {
+                            return LogoService::getEpisodeLogoUrl($record->episode);
+                        }
+
+                        return LogoService::getChannelLogoUrl($record->channel);
+                    })
                     ->height(50)
                     ->width(35)
-                    ->defaultImageUrl('/images/vod-series-poster-placeholder.png'),
+                    ->checkFileExistence(false),
 
-                TextColumn::make('content_type')
-                    ->label('Type')
-                    ->formatStateUsing(fn (string $state): string => match ($state) {
-                        'live' => 'Live',
-                        'vod' => 'VOD',
-                        'episode' => 'Episode',
-                        default => ucfirst($state),
+                // ── Live TV ───────────────────────────────────────────────
+                TextColumn::make('live_channel_name')
+                    ->label('Channel')
+                    ->getStateUsing(fn (ViewerWatchProgress $record): string => $record->channel?->title ?? $record->channel?->name ?? "Stream #{$record->stream_id}")
+                    ->wrap()
+                    ->searchable(false)
+                    ->visible(fn () => ($this->activeTab ?? 'live') === 'live'),
+
+                TextColumn::make('live_watch_count')
+                    ->label('Tunes In')
+                    ->getStateUsing(fn (ViewerWatchProgress $record): int => $record->watch_count)
+                    ->sortable(false)
+                    ->visible(fn () => ($this->activeTab ?? 'live') === 'live'),
+
+                // ── VOD ───────────────────────────────────────────────────
+                TextColumn::make('vod_title')
+                    ->label('Movie')
+                    ->getStateUsing(fn (ViewerWatchProgress $record): string => $record->channel?->title ?? $record->channel?->name ?? "Stream #{$record->stream_id}")
+                    ->wrap()
+                    ->searchable(false)
+                    ->visible(fn () => ($this->activeTab ?? 'live') === 'vod'),
+
+                TextColumn::make('vod_duration')
+                    ->label('Duration')
+                    ->getStateUsing(function (ViewerWatchProgress $record): ?string {
+                        $info = $record->channel?->info ?? [];
+
+                        return $info['duration'] ?? null;
+                    })
+                    ->visible(fn () => ($this->activeTab ?? 'live') === 'vod'),
+
+                TextColumn::make('vod_rating')
+                    ->label('Rating')
+                    ->getStateUsing(function (ViewerWatchProgress $record): ?string {
+                        $info = $record->channel?->info ?? [];
+
+                        return $info['rating'] ?? null;
                     })
                     ->badge()
-                    ->color(fn (string $state): string => match ($state) {
-                        'live' => 'danger',
-                        'vod' => 'primary',
-                        'episode' => 'info',
-                        default => 'gray',
-                    })
-                    ->sortable(),
+                    ->visible(fn () => ($this->activeTab ?? 'live') === 'vod'),
 
-                TextColumn::make('content_title')
-                    ->label('Title')
-                    ->getStateUsing(fn (ViewerWatchProgress $record): string => $record->content_title)
+                // ── Series / Episodes ──────────────────────────────────────
+                TextColumn::make('series_name')
+                    ->label('Series')
+                    ->getStateUsing(fn (ViewerWatchProgress $record): ?string => $record->episode?->series?->name)
                     ->wrap()
-                    ->searchable(false),
+                    ->searchable(false)
+                    ->visible(fn () => ($this->activeTab ?? 'live') === 'episode'),
 
+                TextColumn::make('season_number')
+                    ->label('Season')
+                    ->getStateUsing(fn (ViewerWatchProgress $record): ?int => $record->episode?->season)
+                    ->sortable(false)
+                    ->visible(fn () => ($this->activeTab ?? 'live') === 'episode'),
+
+                TextColumn::make('episode_number')
+                    ->label('Ep #')
+                    ->getStateUsing(fn (ViewerWatchProgress $record): ?int => $record->episode?->episode_num)
+                    ->sortable(false)
+                    ->visible(fn () => ($this->activeTab ?? 'live') === 'episode'),
+
+                TextColumn::make('episode_title')
+                    ->label('Episode Title')
+                    ->getStateUsing(fn (ViewerWatchProgress $record): ?string => $record->episode?->title)
+                    ->wrap()
+                    ->searchable(false)
+                    ->visible(fn () => ($this->activeTab ?? 'live') === 'episode'),
+
+                TextColumn::make('episode_duration')
+                    ->label('Duration')
+                    ->getStateUsing(function (ViewerWatchProgress $record): ?string {
+                        $info = $record->episode?->info ?? [];
+
+                        return $info['duration'] ?? null;
+                    })
+                    ->visible(fn () => ($this->activeTab ?? 'live') === 'episode'),
+
+                // ── VOD + Series ──────────────────────────────────────────
                 TextColumn::make('progress')
                     ->label('Progress')
                     ->getStateUsing(function (ViewerWatchProgress $record): string {
@@ -77,7 +162,7 @@ class WatchProgressRelationManager extends RelationManager
 
                         return "{$pct}% ({$this->formatSeconds($record->position_seconds)} / {$this->formatSeconds($record->duration_seconds)})";
                     })
-                    ->sortable(false),
+                    ->visible(fn () => in_array($this->activeTab ?? 'live', ['vod', 'episode'])),
 
                 IconColumn::make('completed')
                     ->label('Done')
@@ -86,13 +171,15 @@ class WatchProgressRelationManager extends RelationManager
                     ->falseIcon('heroicon-o-clock')
                     ->trueColor('success')
                     ->falseColor('gray')
-                    ->sortable(),
+                    ->sortable()
+                    ->visible(fn () => in_array($this->activeTab ?? 'live', ['vod', 'episode'])),
 
                 TextColumn::make('watch_count')
                     ->label('Plays')
                     ->sortable()
-                    ->toggleable(isToggledHiddenByDefault: true),
+                    ->visible(fn () => in_array($this->activeTab ?? 'live', ['vod', 'episode'])),
 
+                // ── Shared ────────────────────────────────────────────────
                 TextColumn::make('last_watched_at')
                     ->label('Last Watched')
                     ->dateTime()
@@ -100,16 +187,9 @@ class WatchProgressRelationManager extends RelationManager
                     ->sortable(),
             ])
             ->filters([
-                SelectFilter::make('content_type')
-                    ->label('Type')
-                    ->options([
-                        'live' => 'Live',
-                        'vod' => 'VOD',
-                        'episode' => 'Episode',
-                    ]),
-
                 TernaryFilter::make('completed')
-                    ->label('Completed'),
+                    ->label('Completed')
+                    ->hidden(fn () => ($this->activeTab ?? 'live') === 'live'),
             ])
             ->toolbarActions([
                 BulkActionGroup::make([
