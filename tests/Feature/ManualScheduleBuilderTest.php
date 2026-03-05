@@ -249,6 +249,176 @@ it('cascade-bumps on programme move (updateProgramme)', function () {
     expect($programmes[1]->start_time->format('H:i'))->toBe('12:30'); // Bumped
 });
 
+it('appends programme after the last programme of the day', function () {
+    $date = '2026-03-06';
+    $timezone = 'UTC';
+
+    // Create two programmes
+    NetworkProgramme::create([
+        'network_id' => $this->network->id,
+        'contentable_type' => Channel::class,
+        'contentable_id' => $this->channel->id,
+        'title' => 'First',
+        'start_time' => Carbon::parse("{$date} 10:00:00", 'UTC'),
+        'end_time' => Carbon::parse("{$date} 11:00:00", 'UTC'),
+        'duration_seconds' => 3600,
+    ]);
+
+    NetworkProgramme::create([
+        'network_id' => $this->network->id,
+        'contentable_type' => Channel::class,
+        'contentable_id' => $this->channel->id,
+        'title' => 'Second',
+        'start_time' => Carbon::parse("{$date} 12:00:00", 'UTC'),
+        'end_time' => Carbon::parse("{$date} 13:00:00", 'UTC'),
+        'duration_seconds' => 3600,
+    ]);
+
+    // Append — should place after "Second" ends at 13:00
+    Livewire::test(ManualScheduleBuilder::class, ['record' => $this->network->id])
+        ->call('appendProgramme', $date, $timezone, Channel::class, $this->channel->id, 1800);
+
+    $programmes = NetworkProgramme::where('network_id', $this->network->id)
+        ->orderBy('start_time')
+        ->get();
+
+    expect($programmes)->toHaveCount(3);
+    expect($programmes[2]->start_time->format('H:i'))->toBe('13:00');
+    expect($programmes[2]->end_time->format('H:i'))->toBe('13:30');
+});
+
+it('appends programme at midnight on an empty day', function () {
+    $date = '2026-03-06';
+    $timezone = 'UTC';
+
+    // No programmes exist for this day
+    Livewire::test(ManualScheduleBuilder::class, ['record' => $this->network->id])
+        ->call('appendProgramme', $date, $timezone, Channel::class, $this->channel->id, 1800);
+
+    $programme = NetworkProgramme::where('network_id', $this->network->id)->first();
+
+    expect($programme)->not->toBeNull();
+    expect($programme->start_time->format('Y-m-d H:i'))->toBe('2026-03-06 00:00');
+});
+
+it('appends programme respects schedule_gap_seconds', function () {
+    $this->network->update(['schedule_gap_seconds' => 300]); // 5 min gap
+    $date = '2026-03-06';
+    $timezone = 'UTC';
+
+    NetworkProgramme::create([
+        'network_id' => $this->network->id,
+        'contentable_type' => Channel::class,
+        'contentable_id' => $this->channel->id,
+        'title' => 'Existing',
+        'start_time' => Carbon::parse("{$date} 10:00:00", 'UTC'),
+        'end_time' => Carbon::parse("{$date} 11:00:00", 'UTC'),
+        'duration_seconds' => 3600,
+    ]);
+
+    Livewire::test(ManualScheduleBuilder::class, ['record' => $this->network->id])
+        ->call('appendProgramme', $date, $timezone, Channel::class, $this->channel->id, 1800);
+
+    $programmes = NetworkProgramme::where('network_id', $this->network->id)
+        ->orderBy('start_time')
+        ->get();
+
+    expect($programmes)->toHaveCount(2);
+    // Should be at 11:05 (11:00 end + 5 min gap)
+    expect($programmes[1]->start_time->format('H:i'))->toBe('11:05');
+});
+
+it('inserts programme after a specific programme', function () {
+    $date = '2026-03-06';
+    $timezone = 'UTC';
+
+    $progA = NetworkProgramme::create([
+        'network_id' => $this->network->id,
+        'contentable_type' => Channel::class,
+        'contentable_id' => $this->channel->id,
+        'title' => 'Prog A',
+        'start_time' => Carbon::parse("{$date} 10:00:00", 'UTC'),
+        'end_time' => Carbon::parse("{$date} 11:00:00", 'UTC'),
+        'duration_seconds' => 3600,
+    ]);
+
+    $progB = NetworkProgramme::create([
+        'network_id' => $this->network->id,
+        'contentable_type' => Channel::class,
+        'contentable_id' => $this->channel->id,
+        'title' => 'Prog B',
+        'start_time' => Carbon::parse("{$date} 11:00:00", 'UTC'),
+        'end_time' => Carbon::parse("{$date} 12:00:00", 'UTC'),
+        'duration_seconds' => 3600,
+    ]);
+
+    // Insert after Prog A — should go at 11:00, bumping Prog B to 12:00
+    Livewire::test(ManualScheduleBuilder::class, ['record' => $this->network->id])
+        ->call('insertAfterProgramme', $progA->id, $date, $timezone, Channel::class, $this->channel->id, 3600);
+
+    $programmes = NetworkProgramme::where('network_id', $this->network->id)
+        ->orderBy('start_time')
+        ->get();
+
+    expect($programmes)->toHaveCount(3);
+    expect($programmes[0]->title)->toBe('Prog A');
+    expect($programmes[0]->start_time->format('H:i'))->toBe('10:00'); // Untouched
+    expect($programmes[1]->start_time->format('H:i'))->toBe('11:00'); // New (inserted after A)
+    expect($programmes[2]->title)->toBe('Prog B');
+    expect($programmes[2]->start_time->format('H:i'))->toBe('12:00'); // Bumped
+});
+
+it('inserts after programme respects gap and cascade bumps', function () {
+    $this->network->update(['schedule_gap_seconds' => 600]); // 10 min gap
+    $date = '2026-03-06';
+    $timezone = 'UTC';
+
+    $progA = NetworkProgramme::create([
+        'network_id' => $this->network->id,
+        'contentable_type' => Channel::class,
+        'contentable_id' => $this->channel->id,
+        'title' => 'Prog A',
+        'start_time' => Carbon::parse("{$date} 10:00:00", 'UTC'),
+        'end_time' => Carbon::parse("{$date} 11:00:00", 'UTC'),
+        'duration_seconds' => 3600,
+    ]);
+
+    $progB = NetworkProgramme::create([
+        'network_id' => $this->network->id,
+        'contentable_type' => Channel::class,
+        'contentable_id' => $this->channel->id,
+        'title' => 'Prog B',
+        'start_time' => Carbon::parse("{$date} 11:00:00", 'UTC'),
+        'end_time' => Carbon::parse("{$date} 12:00:00", 'UTC'),
+        'duration_seconds' => 3600,
+    ]);
+
+    // Insert 30-min programme after Prog A with 10-min gap
+    // Should start at 11:10 (11:00 + 10min gap), end at 11:40
+    // Prog B at 11:00 overlaps, so bumped to 11:40 + 10min gap = 11:50
+    Livewire::test(ManualScheduleBuilder::class, ['record' => $this->network->id])
+        ->call('insertAfterProgramme', $progA->id, $date, $timezone, Channel::class, $this->channel->id, 1800);
+
+    $programmes = NetworkProgramme::where('network_id', $this->network->id)
+        ->orderBy('start_time')
+        ->get();
+
+    expect($programmes)->toHaveCount(3);
+    expect($programmes[0]->title)->toBe('Prog A');
+    expect($programmes[0]->start_time->format('H:i'))->toBe('10:00');
+    expect($programmes[1]->start_time->format('H:i'))->toBe('11:10'); // After A + 10min gap
+    expect($programmes[2]->title)->toBe('Prog B');
+    expect($programmes[2]->start_time->format('H:i'))->toBe('11:50'); // After new + 10min gap
+});
+
+it('insert after non-existent programme returns failure', function () {
+    $date = '2026-03-06';
+
+    Livewire::test(ManualScheduleBuilder::class, ['record' => $this->network->id])
+        ->call('insertAfterProgramme', 99999, $date, 'UTC', Channel::class, $this->channel->id, 1800)
+        ->assertNotified();
+});
+
 it('clears programmes for a specific day', function () {
     $date = '2026-03-06';
 

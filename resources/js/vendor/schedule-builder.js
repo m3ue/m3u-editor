@@ -35,11 +35,12 @@ function scheduleBuilder(config) {
         startDate: '',
         endDate: '',
 
-        // Time slots (48 half-hour slots)
+        // Time slots (288 five-minute slots per day)
         timeSlots: [],
 
-        // Slot height for visual programme block sizing (must match CSS min-height on slot rows)
-        SLOT_HEIGHT: 48,
+        // Slot config: 5-minute intervals, 28px per slot
+        SLOT_MINUTES: 5,
+        SLOT_HEIGHT: 28,
 
         init() {
             // Set initial date to today in the user's local timezone
@@ -145,22 +146,15 @@ function scheduleBuilder(config) {
         generateTimeSlots() {
             this.timeSlots = [];
             for (let hour = 0; hour < 24; hour++) {
-                // Hour mark
-                this.timeSlots.push({
-                    time: String(hour).padStart(2, '0') + ':00',
-                    label: this.formatTimeLabel(hour, 0),
-                    isHour: true,
-                    hour: hour,
-                    minute: 0,
-                });
-                // Half-hour mark
-                this.timeSlots.push({
-                    time: String(hour).padStart(2, '0') + ':30',
-                    label: this.formatTimeLabel(hour, 30),
-                    isHour: false,
-                    hour: hour,
-                    minute: 30,
-                });
+                for (let minute = 0; minute < 60; minute += this.SLOT_MINUTES) {
+                    this.timeSlots.push({
+                        time: String(hour).padStart(2, '0') + ':' + String(minute).padStart(2, '0'),
+                        label: this.formatTimeLabel(hour, minute),
+                        isHour: minute === 0,
+                        hour: hour,
+                        minute: minute,
+                    });
+                }
             }
         },
 
@@ -263,7 +257,7 @@ function scheduleBuilder(config) {
             // Parse the slot time (these are local-timezone hours from the backend)
             const [slotHour, slotMinute] = slotTime.split(':').map(Number);
             const slotStartMinutes = slotHour * 60 + slotMinute;
-            const slotEndMinutes = slotStartMinutes + 30;
+            const slotEndMinutes = slotStartMinutes + this.SLOT_MINUTES;
 
             return this.programmes.filter(prog => {
                 // start_hour and start_minute are returned in the user's
@@ -277,11 +271,10 @@ function scheduleBuilder(config) {
         },
 
         getProgrammeStyle(prog, slotTime) {
-            // Calculate how many slots this programme spans for visual height
+            // Calculate how many 5-minute slots this programme spans
             const durationMinutes = (prog.duration_seconds || 1800) / 60;
-            const slots = Math.max(1, Math.ceil(durationMinutes / 30));
-            // Each slot is SLOT_HEIGHT px tall; programme spans across multiple
-            const height = slots * this.SLOT_HEIGHT - 4; // subtract padding
+            const slots = Math.max(1, Math.ceil(durationMinutes / this.SLOT_MINUTES));
+            const height = slots * this.SLOT_HEIGHT - 2; // subtract small padding
             return `height: ${height}px; z-index: 10; pointer-events: none;`;
         },
 
@@ -493,6 +486,61 @@ function scheduleBuilder(config) {
                 }
             } catch (err) {
                 console.error('Failed to remove programme:', err);
+            }
+        },
+
+        async appendToEnd(item) {
+            this.loading = true;
+            try {
+                const result = await this.$wire.appendProgramme(
+                    this.currentDate,
+                    this.timezone,
+                    item.contentable_type,
+                    item.contentable_id,
+                    item.duration_seconds || null
+                );
+
+                if (result.success) {
+                    if (result.programmes) {
+                        this.programmes = result.programmes;
+                    } else if (result.programme) {
+                        this.programmes.push(result.programme);
+                        this.sortProgrammes();
+                    }
+                    this.loadNowPlaying();
+                }
+            } catch (err) {
+                console.error('Failed to append programme:', err);
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        async insertAfterProgramme(programmeId, item) {
+            this.loading = true;
+            try {
+                const result = await this.$wire.insertAfterProgramme(
+                    programmeId,
+                    this.currentDate,
+                    this.timezone,
+                    item.contentable_type,
+                    item.contentable_id,
+                    item.duration_seconds || null
+                );
+
+                if (result.success) {
+                    if (result.programmes) {
+                        this.programmes = result.programmes;
+                    } else if (result.programme) {
+                        this.programmes.push(result.programme);
+                        this.sortProgrammes();
+                    }
+                    this.loadNowPlaying();
+                }
+            } catch (err) {
+                console.error('Failed to insert programme:', err);
+            } finally {
+                this.loading = false;
             }
         },
 

@@ -209,9 +209,8 @@ class NetworkResource extends Resource
                                             ->suffix('seconds')
                                             ->minValue(0)
                                             ->maxValue(3600)
-                                            ->helperText('Configurable space between consecutive programmes (coming soon)')
-                                            ->visible(fn (Get $get): bool => $get('schedule_type') === 'manual')
-                                            ->disabled(),
+                                            ->helperText('Space between consecutive programmes during cascade bump (0 = no gap)')
+                                            ->visible(fn (Get $get): bool => $get('schedule_type') === 'manual'),
 
                                         Toggle::make('loop_content')
                                             ->label('Loop Content')
@@ -380,9 +379,8 @@ class NetworkResource extends Resource
                                     ->suffix('seconds')
                                     ->minValue(0)
                                     ->maxValue(3600)
-                                    ->helperText('Configurable space between consecutive programmes (coming soon)')
-                                    ->visible(fn (Get $get): bool => $get('schedule_type') === 'manual')
-                                    ->disabled(),
+                                    ->helperText('Space between consecutive programmes during cascade bump (0 = no gap)')
+                                    ->visible(fn (Get $get): bool => $get('schedule_type') === 'manual'),
 
                                 Toggle::make('loop_content')
                                     ->label('Loop Content')

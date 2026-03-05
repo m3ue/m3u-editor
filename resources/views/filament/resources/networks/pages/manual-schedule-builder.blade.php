@@ -141,59 +141,65 @@
                     @click="handleGridClick($event)"
                 >
                     <div class="relative">
-                        {{-- Time slots --}}
+                        {{-- Time slots (5-minute intervals) --}}
                         <template x-for="slot in timeSlots" :key="slot.time">
                             <div
-                                class="flex border-b border-gray-100 dark:border-gray-700/50 relative group slot-row"
+                                class="flex relative group slot-row"
                                 :class="{
-                                    'bg-primary-50/30 dark:bg-primary-900/10': slot.isHour && dropTarget !== slot.time,
-                                    'bg-gray-50/50 dark:bg-gray-800': !slot.isHour && dropTarget !== slot.time,
+                                    'border-b border-gray-200 dark:border-gray-600 bg-primary-50/30 dark:bg-primary-900/10': slot.isHour,
+                                    'border-b border-gray-100 dark:border-gray-700/30 bg-gray-50/30 dark:bg-gray-800': !slot.isHour && slot.minute === 30,
+                                    'border-b border-gray-50 dark:border-gray-700/10': !slot.isHour && slot.minute !== 30,
                                     'bg-primary-100 dark:bg-primary-900/30 ring-2 ring-inset ring-primary-400 dark:ring-primary-500': dropTarget === slot.time,
                                 }"
                                 :data-slot-time="slot.time"
-                                style="min-height: 48px;"
+                                style="min-height: 28px;"
                             >
-                                {{-- Time Label --}}
-                                <div class="w-16 shrink-0 flex items-start justify-end pr-2 pt-1.5 select-none"
-                                     :class="slot.isHour ? 'text-gray-700 dark:text-gray-300 font-medium text-sm' : 'text-gray-400 dark:text-gray-500 text-xs'">
-                                    <span x-text="slot.label"></span>
+                                {{-- Time Label: show on hour and half-hour marks only --}}
+                                <div class="w-16 shrink-0 flex items-start justify-end pr-2 pt-0.5 select-none">
+                                    <template x-if="slot.isHour">
+                                        <span class="text-[11px] font-medium text-gray-700 dark:text-gray-300" x-text="slot.label"></span>
+                                    </template>
+                                    <template x-if="!slot.isHour && slot.minute === 30">
+                                        <span class="text-[10px] text-gray-400 dark:text-gray-500" x-text="slot.label"></span>
+                                    </template>
                                 </div>
 
                                 {{-- Slot Content Area --}}
-                                <div class="flex-1 relative px-2 py-1 min-h-[48px]">
-                                    {{-- Programme Block — pointer-events:none is applied via
-                                         getProgrammeStyle() so drag/click events pass through
-                                         to the grid container beneath. --}}
+                                <div class="flex-1 relative px-1 min-h-[28px]">
+                                    {{-- Programme Block --}}
                                     <template x-for="prog in getProgrammesAtSlot(slot.time)" :key="prog.id">
                                         <div
-                                            class="absolute left-2 right-2 rounded-lg shadow-sm border overflow-hidden transition-all"
+                                            class="absolute left-1 right-1 rounded shadow-sm border overflow-hidden transition-all"
                                             :class="getTypeColor(prog.contentable_type)"
                                             :style="getProgrammeStyle(prog, slot.time)"
                                         >
-                                            <div class="flex items-start gap-2 p-2 h-full">
+                                            <div class="flex items-center gap-1.5 px-2 py-0.5 h-full">
                                                 <template x-if="prog.image">
-                                                    <img :src="prog.image" class="w-8 h-8 rounded object-cover shrink-0" loading="lazy" />
+                                                    <img :src="prog.image" class="w-5 h-5 rounded object-cover shrink-0" loading="lazy" />
                                                 </template>
                                                 <div class="flex-1 min-w-0">
-                                                    <p class="text-xs font-medium truncate" x-text="prog.title"></p>
-                                                    <p class="text-xs opacity-70" x-text="formatDuration(prog.duration_seconds)"></p>
+                                                    <p class="text-[11px] font-medium truncate leading-tight" x-text="prog.title"></p>
+                                                    <p class="text-[10px] opacity-70 leading-tight" x-text="formatDuration(prog.duration_seconds)"></p>
                                                 </div>
-                                                {{-- Remove button — re-enable pointer-events so it's clickable --}}
+                                                {{-- Insert-after button (+) --}}
+                                                <button
+                                                    x-show="selectedMediaItem"
+                                                    @click.stop="insertAfterProgramme(prog.id, selectedMediaItem); selectedMediaItem = null;"
+                                                    class="shrink-0 p-0.5 rounded bg-primary-500/20 hover:bg-primary-500/40 text-primary-700 dark:text-primary-300 transition"
+                                                    style="pointer-events: auto;"
+                                                    title="Insert selected media after this programme"
+                                                >
+                                                    <x-heroicon-o-plus class="w-3 h-3" />
+                                                </button>
+                                                {{-- Remove button --}}
                                                 <button
                                                     @click.stop="handleRemoveClick($event, prog.id)"
                                                     class="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded hover:bg-black/10"
                                                     style="pointer-events: auto;"
                                                 >
-                                                    <x-heroicon-o-x-mark class="w-3.5 h-3.5" />
+                                                    <x-heroicon-o-x-mark class="w-3 h-3" />
                                                 </button>
                                             </div>
-                                        </div>
-                                    </template>
-
-                                    {{-- Empty slot indicator --}}
-                                    <template x-if="getProgrammesAtSlot(slot.time).length === 0">
-                                        <div class="w-full h-full flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
-                                            <span class="text-xs text-gray-400 dark:text-gray-500 italic">Drop media here or click to assign</span>
                                         </div>
                                     </template>
                                 </div>
@@ -263,6 +269,14 @@
                                     <span class="text-[10px] text-gray-500 dark:text-gray-400" x-text="item.duration_display"></span>
                                 </div>
                             </div>
+                            {{-- Append to end button --}}
+                            <button
+                                @click.stop="appendToEnd(item)"
+                                class="shrink-0 p-1 rounded-lg text-gray-400 hover:text-primary-600 hover:bg-primary-50 dark:hover:text-primary-400 dark:hover:bg-primary-900/20 transition"
+                                title="Append to end of schedule"
+                            >
+                                <x-heroicon-o-arrow-down-on-square class="w-4 h-4" />
+                            </button>
                         </div>
                     </template>
                 </div>

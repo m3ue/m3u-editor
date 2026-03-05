@@ -371,6 +371,72 @@ class ManualScheduleBuilder extends Page
     }
 
     /**
+     * Append a programme after the last programme of the given day.
+     *
+     * If the day is empty, places at midnight (00:00) of that day.
+     */
+    public function appendProgramme(string $date, string $timezone, string $contentableType, int $contentableId, ?int $durationOverride = null): array
+    {
+        $network = $this->getRecord();
+        $tz = $this->resolveTimezone($timezone);
+        $gap = (int) ($network->schedule_gap_seconds ?? 0);
+
+        // Find the last programme of this day
+        $dayStart = Carbon::parse($date, $tz)->startOfDay()->utc();
+        $dayEnd = Carbon::parse($date, $tz)->endOfDay()->utc();
+
+        $lastProgramme = $network->programmes()
+            ->where('start_time', '>=', $dayStart)
+            ->where('start_time', '<', $dayEnd)
+            ->orderByDesc('end_time')
+            ->first();
+
+        if ($lastProgramme) {
+            // Place after the last programme ends, plus gap
+            $startTime = $lastProgramme->end_time->copy()->addSeconds($gap);
+        } else {
+            // Empty day — start at midnight in user's timezone
+            $startTime = Carbon::parse($date, $tz)->startOfDay()->utc();
+        }
+
+        // Convert start time back to local for addProgramme
+        $localStart = $startTime->copy()->setTimezone($tz);
+        $localTimeStr = $localStart->format('H:i');
+        $localDateStr = $localStart->format('Y-m-d');
+
+        return $this->addProgramme($localDateStr, $localTimeStr, $timezone, $contentableType, $contentableId, $durationOverride);
+    }
+
+    /**
+     * Insert a programme immediately after a specific programme (plus gap).
+     *
+     * Cascade bump will push any subsequent programmes forward.
+     */
+    public function insertAfterProgramme(int $afterProgrammeId, string $date, string $timezone, string $contentableType, int $contentableId, ?int $durationOverride = null): array
+    {
+        $network = $this->getRecord();
+        $tz = $this->resolveTimezone($timezone);
+        $gap = (int) ($network->schedule_gap_seconds ?? 0);
+
+        $afterProgramme = $network->programmes()->find($afterProgrammeId);
+
+        if (! $afterProgramme) {
+            Notification::make()->danger()->title('Programme not found')->send();
+
+            return ['success' => false];
+        }
+
+        // Place right after the target programme ends, plus gap
+        $startTime = $afterProgramme->end_time->copy()->addSeconds($gap);
+
+        $localStart = $startTime->copy()->setTimezone($tz);
+        $localTimeStr = $localStart->format('H:i');
+        $localDateStr = $localStart->format('Y-m-d');
+
+        return $this->addProgramme($localDateStr, $localTimeStr, $timezone, $contentableType, $contentableId, $durationOverride);
+    }
+
+    /**
      * Clear all programmes for a specific date (in user's local timezone).
      */
     public function clearDay(string $date, string $timezone = 'UTC'): array
