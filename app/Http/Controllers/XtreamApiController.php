@@ -11,6 +11,7 @@ use App\Models\Channel;
 use App\Models\CustomPlaylist;
 use App\Models\Epg;
 use App\Models\MergedPlaylist;
+use App\Models\Network;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
 use App\Models\PlaylistAuth;
@@ -1880,9 +1881,13 @@ class XtreamApiController extends Controller
             ->orderBy('channel_number')
             ->get();
 
+        // Build a mapping of group name -> stable category ID
+        $categoryMap = $this->buildNetworkCategoryMap($networks);
+
         $liveStreams = [];
         foreach ($networks as $network) {
             $streamIcon = $network->logo ?: $baseUrl.'/placeholder.png';
+            $categoryId = $categoryMap[$network->effective_group_name] ?? 'networks';
 
             // Use network ID as stream_id, channel_number as epg_channel_id
             $liveStreams[] = [
@@ -1893,8 +1898,8 @@ class XtreamApiController extends Controller
                 'stream_icon' => $streamIcon,
                 'epg_channel_id' => 'network-'.($network->channel_number ?? $network->id),
                 'added' => (string) $network->created_at->timestamp,
-                'category_id' => 'networks',
-                'category_ids' => [1],
+                'category_id' => $categoryId,
+                'category_ids' => [$categoryId],
                 'tv_archive' => 0,
                 'tv_archive_duration' => 0,
                 'custom_sid' => '',
@@ -1908,23 +1913,42 @@ class XtreamApiController extends Controller
 
     /**
      * Get live categories for a network playlist.
-     * Returns a single "Networks" category.
+     * Returns distinct categories based on each network's configured group name.
      */
     private function getNetworkLiveCategories(Playlist $playlist): \Illuminate\Http\JsonResponse
     {
-        $networkCount = $playlist->networks()->where('enabled', true)->count();
+        $networks = $playlist->networks()->where('enabled', true)->get();
 
-        if ($networkCount === 0) {
+        if ($networks->isEmpty()) {
             return response()->json([]);
         }
 
-        return response()->json([
-            [
-                'category_id' => 'networks',
-                'category_name' => 'Networks',
-                'parent_id' => 0,
-            ],
-        ]);
+        $categoryMap = $this->buildNetworkCategoryMap($networks);
+
+        $categories = collect($categoryMap)->map(fn (string $id, string $name) => [
+            'category_id' => $id,
+            'category_name' => $name,
+            'parent_id' => 0,
+        ])->values()->all();
+
+        return response()->json($categories);
+    }
+
+    /**
+     * Build a consistent mapping of network group name to category ID.
+     *
+     * @param  \Illuminate\Support\Collection<int, Network>  $networks
+     * @return array<string, string>
+     */
+    private function buildNetworkCategoryMap(\Illuminate\Support\Collection $networks): array
+    {
+        $index = 1;
+
+        return $networks
+            ->map(fn (Network $network) => $network->effective_group_name)
+            ->unique()
+            ->mapWithKeys(fn (string $name) => [$name => 'network-group-'.($index++)])
+            ->all();
     }
 
     /**

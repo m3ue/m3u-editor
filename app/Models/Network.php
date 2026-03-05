@@ -233,6 +233,15 @@ class Network extends Model
     }
 
     /**
+     * Get the effective group name for this network.
+     * Uses the configured group_name, falling back to "Networks".
+     */
+    public function getEffectiveGroupNameAttribute(): string
+    {
+        return $this->group_name ?: 'Networks';
+    }
+
+    /**
      * Get the remaining duration of the current programme in seconds.
      */
     public function getCurrentRemainingDuration(): int

@@ -670,7 +670,7 @@ class EpgApiController extends Controller
                     'display_name' => $network->name,
                     'title' => $network->name,
                     'channel_number' => $network->channel_number ?? $channelNo,
-                    'group' => 'Networks',
+                    'group' => $network->effective_group_name,
                     'icon' => $icon,
                     'has_epg' => true, // Networks always have EPG from programmes
                     'epg_channel_id' => 'network_'.$network->id,

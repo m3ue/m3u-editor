@@ -103,7 +103,7 @@ class NetworkChannelSyncService
      */
     protected function getOrCreateNetworksGroup(Playlist $playlist, ?Network $network = null): Group
     {
-        $groupName = $network?->group_name ?: 'Networks';
+        $groupName = $network?->effective_group_name ?? 'Networks';
 
         return Group::firstOrCreate(
             [
@@ -123,11 +123,17 @@ class NetworkChannelSyncService
      */
     public function refreshNetworkChannel(Network $network): void
     {
-        // Find all playlists that include this network
+        // Find all channels for this network
         $channels = Channel::where('network_id', $network->id)->get();
 
         foreach ($channels as $channel) {
-            // Update the channel with latest network data
+            // Resolve the correct group for this network in the channel's playlist
+            $group = $this->getOrCreateNetworksGroup(
+                Playlist::find($channel->playlist_id),
+                $network
+            );
+
+            // Update the channel with latest network data including group
             $channel->update([
                 'name' => $network->name,
                 'title' => $network->name,
@@ -135,6 +141,8 @@ class NetworkChannelSyncService
                 'logo' => $network->logo,
                 'channel' => $network->channel_number,
                 'enabled' => $network->enabled,
+                'group_id' => $group->id,
+                'group_internal' => $group->name,
             ]);
         }
     }
