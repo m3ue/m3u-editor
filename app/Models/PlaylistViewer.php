@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
 
@@ -23,6 +24,11 @@ class PlaylistViewer extends Model
     public function watchProgress(): HasMany
     {
         return $this->hasMany(ViewerWatchProgress::class);
+    }
+
+    public function playlistAuth(): BelongsTo
+    {
+        return $this->belongsTo(PlaylistAuth::class);
     }
 
     public function scopeAdmin($query)

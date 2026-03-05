@@ -1834,13 +1834,13 @@ class XtreamApiController extends Controller
         } elseif ($action === 'create_viewer') {
             return $this->createViewer($request, $playlist);
         } elseif ($action === 'get_progress') {
-            return $this->getProgress($request, $playlist);
+            return $this->getProgress($request, $playlist, $authMethod, $username, $password);
         } elseif ($action === 'update_progress') {
-            return $this->updateProgress($request, $playlist);
+            return $this->updateProgress($request, $playlist, $authMethod, $username, $password);
         } elseif ($action === 'get_series_progress') {
-            return $this->getSeriesProgress($request, $playlist);
+            return $this->getSeriesProgress($request, $playlist, $authMethod, $username, $password);
         } elseif ($action === 'get_recently_watched') {
-            return $this->getRecentlyWatched($request, $playlist);
+            return $this->getRecentlyWatched($request, $playlist, $authMethod, $username, $password);
         } else {
             return response()->json(['error' => 'Invalid action parameter'], 400);
         }
@@ -2063,6 +2063,51 @@ class XtreamApiController extends Controller
     }
 
     /**
+     * Resolve viewer from request context, with fallback based on auth method:
+     * - viewer_id param provided → use it
+     * - playlist_auth → find or create PlaylistViewer linked to the PlaylistAuth
+     * - owner_auth / alias_auth → use the admin viewer for this playlist
+     */
+    private function resolveContextViewer(Request $request, $playlist, string $authMethod, string $username, string $password): ?PlaylistViewer
+    {
+        if ($viewerUlid = $request->input('viewer_id')) {
+            return $this->resolveViewer($viewerUlid, $playlist);
+        }
+
+        if ($authMethod === 'playlist_auth') {
+            $playlistAuth = PlaylistAuth::where('username', $username)
+                ->where('password', $password)
+                ->first();
+
+            if ($playlistAuth) {
+                $viewer = PlaylistViewer::where('playlist_auth_id', $playlistAuth->id)
+                    ->where('viewerable_type', get_class($playlist))
+                    ->where('viewerable_id', $playlist->id)
+                    ->first();
+
+                if (! $viewer) {
+                    $viewer = PlaylistViewer::create([
+                        'ulid' => (string) Str::ulid(),
+                        'name' => $playlistAuth->name,
+                        'is_admin' => false,
+                        'playlist_auth_id' => $playlistAuth->id,
+                        'viewerable_type' => get_class($playlist),
+                        'viewerable_id' => $playlist->id,
+                    ]);
+                }
+
+                return $viewer;
+            }
+        }
+
+        // Fall back to admin viewer
+        return PlaylistViewer::where('viewerable_type', get_class($playlist))
+            ->where('viewerable_id', $playlist->id)
+            ->where('is_admin', true)
+            ->first();
+    }
+
+    /**
      * Return all viewers for the current playlist context.
      */
     private function getViewers($playlist): \Illuminate\Http\JsonResponse
@@ -2105,17 +2150,16 @@ class XtreamApiController extends Controller
     /**
      * Get watch progress for a specific piece of content.
      */
-    private function getProgress(Request $request, $playlist): \Illuminate\Http\JsonResponse
+    private function getProgress(Request $request, $playlist, string $authMethod = 'none', string $username = '', string $password = ''): \Illuminate\Http\JsonResponse
     {
-        $viewerUlid = $request->input('viewer_id');
         $contentType = $request->input('content_type');
         $streamId = (int) $request->input('stream_id');
 
-        if (! $viewerUlid || ! $contentType || ! $streamId) {
-            return response()->json(['error' => 'viewer_id, content_type, and stream_id are required'], 400);
+        if (! $contentType || ! $streamId) {
+            return response()->json(['error' => 'content_type and stream_id are required'], 400);
         }
 
-        $viewer = $this->resolveViewer($viewerUlid, $playlist);
+        $viewer = $this->resolveContextViewer($request, $playlist, $authMethod, $username, $password);
         if (! $viewer) {
             return response()->json(['error' => 'Viewer not found'], 404);
         }
@@ -2131,17 +2175,16 @@ class XtreamApiController extends Controller
     /**
      * Update (or create) watch progress for a piece of content.
      */
-    private function updateProgress(Request $request, $playlist): \Illuminate\Http\JsonResponse
+    private function updateProgress(Request $request, $playlist, string $authMethod = 'none', string $username = '', string $password = ''): \Illuminate\Http\JsonResponse
     {
-        $viewerUlid = $request->input('viewer_id');
         $contentType = $request->input('content_type');
         $streamId = (int) $request->input('stream_id');
 
-        if (! $viewerUlid || ! $contentType || ! $streamId) {
-            return response()->json(['error' => 'viewer_id, content_type, and stream_id are required'], 400);
+        if (! $contentType || ! $streamId) {
+            return response()->json(['error' => 'content_type and stream_id are required'], 400);
         }
 
-        $viewer = $this->resolveViewer($viewerUlid, $playlist);
+        $viewer = $this->resolveContextViewer($request, $playlist, $authMethod, $username, $password);
         if (! $viewer) {
             return response()->json(['error' => 'Viewer not found'], 404);
         }
@@ -2206,16 +2249,15 @@ class XtreamApiController extends Controller
     /**
      * Get all episode progress for a series.
      */
-    private function getSeriesProgress(Request $request, $playlist): \Illuminate\Http\JsonResponse
+    private function getSeriesProgress(Request $request, $playlist, string $authMethod = 'none', string $username = '', string $password = ''): \Illuminate\Http\JsonResponse
     {
-        $viewerUlid = $request->input('viewer_id');
         $seriesId = (int) $request->input('series_id');
 
-        if (! $viewerUlid || ! $seriesId) {
-            return response()->json(['error' => 'viewer_id and series_id are required'], 400);
+        if (! $seriesId) {
+            return response()->json(['error' => 'series_id is required'], 400);
         }
 
-        $viewer = $this->resolveViewer($viewerUlid, $playlist);
+        $viewer = $this->resolveContextViewer($request, $playlist, $authMethod, $username, $password);
         if (! $viewer) {
             return response()->json(['error' => 'Viewer not found'], 404);
         }
@@ -2233,14 +2275,9 @@ class XtreamApiController extends Controller
     /**
      * Get recently watched content for a viewer.
      */
-    private function getRecentlyWatched(Request $request, $playlist): \Illuminate\Http\JsonResponse
+    private function getRecentlyWatched(Request $request, $playlist, string $authMethod = 'none', string $username = '', string $password = ''): \Illuminate\Http\JsonResponse
     {
-        $viewerUlid = $request->input('viewer_id');
-        if (! $viewerUlid) {
-            return response()->json(['error' => 'viewer_id is required'], 400);
-        }
-
-        $viewer = $this->resolveViewer($viewerUlid, $playlist);
+        $viewer = $this->resolveContextViewer($request, $playlist, $authMethod, $username, $password);
         if (! $viewer) {
             return response()->json(['error' => 'Viewer not found'], 404);
         }

@@ -32,6 +32,11 @@ class PlaylistAuth extends Model
         return $this->belongsTo(User::class);
     }
 
+    public function viewer(): HasOne
+    {
+        return $this->hasOne(PlaylistViewer::class);
+    }
+
     /**
      * Determine whether this auth credential is expired.
      */

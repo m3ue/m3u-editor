@@ -28,6 +28,59 @@ class ViewerWatchProgress extends Model
         return $this->belongsTo(PlaylistViewer::class, 'playlist_viewer_id');
     }
 
+    /**
+     * Get the Channel associated with this progress record (live/vod).
+     * stream_id in viewer_watch_progress = Channel.id
+     */
+    public function channel(): BelongsTo
+    {
+        return $this->belongsTo(Channel::class, 'stream_id');
+    }
+
+    /**
+     * Get the Episode associated with this progress record (episode type).
+     * stream_id in viewer_watch_progress = Episode.id
+     */
+    public function episode(): BelongsTo
+    {
+        return $this->belongsTo(Episode::class, 'stream_id');
+    }
+
+    /**
+     * Get the display title for this progress record.
+     */
+    public function getContentTitleAttribute(): string
+    {
+        if ($this->content_type === 'episode') {
+            $episode = $this->episode;
+            if ($episode) {
+                $seriesName = $episode->series?->name ?? '';
+                $suffix = $episode->season ? "S{$episode->season}E{$episode->episode_num}" : "Ep {$episode->episode_num}";
+
+                return $seriesName ? "{$seriesName} – {$suffix}" : $episode->title;
+            }
+        } else {
+            $channel = $this->channel;
+            if ($channel) {
+                return $channel->title ?? $channel->name;
+            }
+        }
+
+        return "Stream #{$this->stream_id}";
+    }
+
+    /**
+     * Get the artwork URL for this progress record.
+     */
+    public function getContentLogoAttribute(): ?string
+    {
+        if ($this->content_type === 'episode') {
+            return $this->episode?->cover ?? $this->episode?->series?->cover ?? null;
+        }
+
+        return $this->channel?->logo ?? null;
+    }
+
     public function scopeLive($query)
     {
         return $query->where('content_type', 'live');
