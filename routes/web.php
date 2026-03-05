@@ -9,9 +9,14 @@ use App\Http\Controllers\NetworkEpgController;
 use App\Http\Controllers\NetworkPlaylistController;
 use App\Http\Controllers\NetworkStreamController;
 use App\Http\Controllers\PlaylistGenerateController;
+use App\Http\Controllers\WatchProgressController;
 use App\Http\Controllers\XtreamApiController;
 use App\Services\ExternalIpService;
 use Illuminate\Support\Facades\Route;
+
+// In-app watch progress tracking (admin panel + guest panel)
+Route::get('/api/watch-progress', [WatchProgressController::class, 'fetch'])->name('watch-progress.fetch');
+Route::post('/api/watch-progress', [WatchProgressController::class, 'update'])->name('watch-progress.update');
 
 // External IP refresh route for admin panel
 Route::post('/admin/refresh-external-ip', function (ExternalIpService $ipService) {

@@ -93,6 +93,11 @@ class Episode extends Model
 
         return [
             'id' => 'episode-'.$this->id,
+            'stream_id' => $this->id,
+            'content_type' => 'episode',
+            'playlist_id' => $this->playlist_id,
+            'series_id' => $this->series_id,
+            'season_number' => $this->season,
             'title' => $this->title,
             'url' => $url,
             'format' => $profile->format ?? $format,

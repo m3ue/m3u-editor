@@ -95,7 +95,7 @@
                 :style="getVideoStyle(player)"
             >
                 <!-- Video Element -->
-                <video 
+                <video
                     :id="player.id + '-video'"
                     class="w-full h-full"
                     controls
@@ -104,6 +104,11 @@
                     x-data="{ playerInstance: null }"
                     :data-stream-url="player.url"
                     :data-stream-format="player.format"
+                    :data-content-type="player.content_type || ''"
+                    :data-stream-id="player.stream_id || ''"
+                    :data-playlist-id="player.playlist_id || ''"
+                    :data-series-id="player.series_id || ''"
+                    :data-season-number="player.season_number || ''"
                     x-init="
                         if (window.streamPlayer && $el.dataset.streamUrl && $el.dataset.streamUrl !== '') {
                             playerInstance = window.streamPlayer();
@@ -194,6 +199,34 @@
                     </div>
                     <div :id="player.id + '-video-details'" class="space-y-1">
                         <div class="text-gray-400">Loading stream details...</div>
+                    </div>
+                </div>
+
+                <!-- Resume Prompt (VOD / Episode) -->
+                <div
+                    :id="player.id + '-video-resume'"
+                    class="absolute bottom-10 left-0 right-0 flex justify-center px-3 hidden z-20"
+                >
+                    <div class="bg-gray-900/95 text-white rounded-lg px-3 py-2 flex items-center gap-3 shadow-xl text-xs max-w-xs">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 text-blue-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg>
+                        <span :id="player.id + '-video-resume-time'" class="flex-1 truncate">Resume from 0:00</span>
+                        <button
+                            class="px-2 py-1 bg-blue-600 hover:bg-blue-700 rounded transition-colors flex-shrink-0"
+                            @click.stop="
+                                const v = document.getElementById(player.id + '-video');
+                                if (v && v._streamPlayer) v._streamPlayer.resumeFromSaved();
+                            "
+                        >Resume</button>
+                        <button
+                            class="text-gray-400 hover:text-white transition-colors flex-shrink-0"
+                            @click.stop="
+                                const v = document.getElementById(player.id + '-video');
+                                if (v && v._streamPlayer) v._streamPlayer.startOver();
+                            "
+                            title="Start from beginning"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" /></svg>
+                        </button>
                     </div>
                 </div>
 

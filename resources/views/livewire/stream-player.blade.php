@@ -84,7 +84,7 @@
                 <!-- Video Player -->
                 <div class="p-4">
                     <div class="relative bg-black rounded-lg overflow-hidden group" style="aspect-ratio: 16/9;">
-                        <video 
+                        <video
                             id="{{ $playerId }}"
                             class="w-full h-full"
                             controls
@@ -94,6 +94,11 @@
                             x-init="initPlayer('{{ $streamUrl }}', '{{ $streamFormat }}', '{{ $playerId }}')"
                             data-url="{{ $streamUrl }}"
                             data-format="{{ $streamFormat }}"
+                            data-content-type="{{ $contentType }}"
+                            data-stream-id="{{ $streamId }}"
+                            data-playlist-id="{{ $playlistId }}"
+                            data-series-id="{{ $seriesId }}"
+                            data-season-number="{{ $seasonNumber }}"
                             @cleanup-player.window="
                                 console.log('Video cleanup event:', $event.detail);
                                 if ($event.detail.playerId === '{{ $playerId }}') {
@@ -134,6 +139,30 @@
                                     class="mt-3 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-md transition-colors"
                                 >
                                     Retry
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Resume Prompt (VOD / Episode) -->
+                        <div
+                            id="{{ $playerId }}-resume"
+                            class="absolute bottom-14 left-0 right-0 flex justify-center px-4 hidden z-20"
+                        >
+                            <div class="bg-gray-900/95 text-white rounded-lg px-4 py-2 flex items-center gap-3 shadow-xl text-sm max-w-sm">
+                                <x-heroicon-o-clock class="w-4 h-4 text-blue-400 flex-shrink-0" />
+                                <span id="{{ $playerId }}-resume-time" class="flex-1">Resume from 0:00</span>
+                                <button
+                                    type="button"
+                                    onclick="document.getElementById('{{ $playerId }}')._streamPlayer?.resumeFromSaved()"
+                                    class="px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded text-xs transition-colors flex-shrink-0"
+                                >Resume</button>
+                                <button
+                                    type="button"
+                                    onclick="document.getElementById('{{ $playerId }}')._streamPlayer?.startOver()"
+                                    class="text-gray-400 hover:text-white transition-colors flex-shrink-0"
+                                    title="Start from beginning"
+                                >
+                                    <x-heroicon-o-x-mark class="w-4 h-4" />
                                 </button>
                             </div>
                         </div>

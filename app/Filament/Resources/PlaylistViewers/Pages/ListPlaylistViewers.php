@@ -8,4 +8,11 @@ use Filament\Resources\Pages\ListRecords;
 class ListPlaylistViewers extends ListRecords
 {
     protected static string $resource = PlaylistViewerResource::class;
+
+    protected ?string $subheading = 'Playlist viewers are used for in app viewing and M3U TV access. Viewers are created automatically via username used to access playlist or start playback. This could be your login username, or it could be a Playlist Auth username.';
+
+    public function getHeaderActions(): array
+    {
+        return [];
+    }
 }

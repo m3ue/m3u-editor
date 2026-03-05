@@ -165,6 +165,9 @@ class Channel extends Model
 
         return [
             'id' => $this->id,
+            'stream_id' => $this->id,
+            'content_type' => $this->is_vod ? 'vod' : 'live',
+            'playlist_id' => $this->playlist_id,
             'title' => $this->name_custom ?? $this->name,
             'url' => $url,
             'format' => $profile->format ?? $format,

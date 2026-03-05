@@ -20,6 +20,16 @@ class StreamPlayer extends Component
 
     public $playerId;
 
+    public $contentType = '';
+
+    public $streamId = null;
+
+    public $playlistId = null;
+
+    public $seriesId = null;
+
+    public $seasonNumber = null;
+
     protected $listeners = ['openStreamPlayer' => 'openPlayer'];
 
     public function mount()
@@ -36,6 +46,11 @@ class StreamPlayer extends Component
         $this->streamFormat = $channelData['format'] ?? 'ts';
         $this->channelTitle = Str::replace("'", '`', $channelData['title'] ?? ($channelData['name_custom'] ?? $channelData['name'] ?? 'Unknown Channel'));
         $this->channelLogo = $channelData['logo'] ?? $channelData['icon'] ?? '';
+        $this->contentType = $channelData['content_type'] ?? '';
+        $this->streamId = $channelData['stream_id'] ?? null;
+        $this->playlistId = $channelData['playlist_id'] ?? null;
+        $this->seriesId = $channelData['series_id'] ?? null;
+        $this->seasonNumber = $channelData['season_number'] ?? null;
         $this->showModal = true;
 
         // Debug the final component state
@@ -56,6 +71,11 @@ class StreamPlayer extends Component
         $this->streamFormat = 'ts';
         $this->channelTitle = '';
         $this->channelLogo = '';
+        $this->contentType = '';
+        $this->streamId = null;
+        $this->playlistId = null;
+        $this->seriesId = null;
+        $this->seasonNumber = null;
 
         // Dispatch event to cleanup player
         $this->dispatch('cleanupPlayer', playerId: $this->playerId);

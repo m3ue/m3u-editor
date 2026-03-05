@@ -17,7 +17,150 @@ function streamPlayer() {
         },
         availableAudioTracks: [],
         selectedAudioTrack: null,
-        
+
+        // ── Watch Progress ────────────────────────────────────────────────
+        progressConfig: null,   // { contentType, streamId, playlistId, seriesId, seasonNumber }
+        _progressTimer: null,
+        _lastSavedPosition: -1,
+        _resumePosition: 0,
+        _liveReported: false,
+
+        _getCsrfToken() {
+            return document.querySelector('meta[name="csrf-token"]')?.content ?? '';
+        },
+
+        _initProgress() {
+            if (! this.player) return;
+            const el = this.player;
+            const contentType = el.dataset.contentType;
+            const streamId = parseInt(el.dataset.streamId);
+            if (! contentType || ! streamId) return;
+
+            this.progressConfig = {
+                contentType,
+                streamId,
+                playlistId: parseInt(el.dataset.playlistId) || null,
+                seriesId: el.dataset.seriesId ? parseInt(el.dataset.seriesId) : null,
+                seasonNumber: el.dataset.seasonNumber ? parseInt(el.dataset.seasonNumber) : null,
+            };
+
+            if (contentType === 'live') {
+                this._reportLiveTuneIn();
+            } else {
+                this._fetchProgress();
+            }
+        },
+
+        async _reportLiveTuneIn() {
+            if (this._liveReported || ! this.progressConfig) return;
+            this._liveReported = true;
+            try {
+                await fetch('/api/watch-progress', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': this._getCsrfToken() },
+                    body: JSON.stringify({
+                        content_type: 'live',
+                        stream_id: this.progressConfig.streamId,
+                        playlist_id: this.progressConfig.playlistId,
+                    }),
+                });
+            } catch (e) {
+                console.warn('[WatchProgress] Failed to report live tune-in:', e);
+            }
+        },
+
+        async _fetchProgress() {
+            if (! this.progressConfig) return;
+            try {
+                const params = new URLSearchParams({
+                    content_type: this.progressConfig.contentType,
+                    stream_id: this.progressConfig.streamId,
+                    playlist_id: this.progressConfig.playlistId ?? '',
+                });
+                const res = await fetch(`/api/watch-progress?${params}`, {
+                    headers: { 'X-CSRF-TOKEN': this._getCsrfToken() },
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data && data.position_seconds > 30 && ! data.completed) {
+                        this._resumePosition = data.position_seconds;
+                        this._showResumePrompt(data.position_seconds);
+                    }
+                }
+            } catch (e) {
+                console.warn('[WatchProgress] Failed to fetch progress:', e);
+            }
+        },
+
+        _startProgressTimer() {
+            if (this._progressTimer || ! this.progressConfig || this.progressConfig.contentType === 'live') return;
+            this._progressTimer = setInterval(() => this._saveProgress(), 15000);
+        },
+
+        _stopProgressTimer() {
+            if (this._progressTimer) {
+                clearInterval(this._progressTimer);
+                this._progressTimer = null;
+            }
+        },
+
+        async _saveProgress(force = false) {
+            if (! this.progressConfig || ! this.player || this.progressConfig.contentType === 'live') return;
+            const position = Math.floor(this.player.currentTime || 0);
+            const duration = isFinite(this.player.duration) ? Math.floor(this.player.duration) : null;
+            if (! force && Math.abs(position - this._lastSavedPosition) < 5) return;
+            this._lastSavedPosition = position;
+            try {
+                await fetch('/api/watch-progress', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': this._getCsrfToken() },
+                    body: JSON.stringify({
+                        content_type: this.progressConfig.contentType,
+                        stream_id: this.progressConfig.streamId,
+                        playlist_id: this.progressConfig.playlistId,
+                        series_id: this.progressConfig.seriesId,
+                        season_number: this.progressConfig.seasonNumber,
+                        position_seconds: position,
+                        duration_seconds: duration,
+                    }),
+                });
+            } catch (e) {
+                console.warn('[WatchProgress] Failed to save progress:', e);
+            }
+        },
+
+        _showResumePrompt(positionSeconds) {
+            const playerId = this.player?.id;
+            if (! playerId) return;
+            const el = document.getElementById(playerId + '-resume');
+            const timeEl = document.getElementById(playerId + '-resume-time');
+            if (el) {
+                if (timeEl) timeEl.textContent = `Resume from ${this.formatSeconds(positionSeconds)}`;
+                el.classList.remove('hidden');
+                // Auto-dismiss after 8 seconds if no interaction
+                setTimeout(() => el.classList.add('hidden'), 8000);
+            }
+        },
+
+        hideResumePrompt() {
+            const el = document.getElementById((this.player?.id ?? '') + '-resume');
+            if (el) el.classList.add('hidden');
+        },
+
+        resumeFromSaved() {
+            if (this.player && this._resumePosition > 0) {
+                this.player.currentTime = this._resumePosition;
+                this.player.play();
+            }
+            this.hideResumePrompt();
+        },
+
+        startOver() {
+            this._resumePosition = 0;
+            this.hideResumePrompt();
+        },
+        // ─────────────────────────────────────────────────────────────────
+
         initPlayer(url, format, playerId) {
             if (!url) {
                 return
@@ -36,15 +179,18 @@ function streamPlayer() {
                         
             // Store reference to video element for cleanup
             this.player = video;
-            
+
             // Store reference to this stream player instance on the video element
             video._streamPlayer = this;
-            
+
             // Reset error counters
             this.fragmentErrorCount = 0;
-            
+
             // Clean up any existing players
             this.cleanup();
+
+            // Initialise progress tracking from data attributes
+            this._initProgress();
             
             // Update status
             !!statusEl && (statusEl.textContent = 'Connecting...');
@@ -373,11 +519,20 @@ function streamPlayer() {
             
             video.addEventListener('playing', () => {
                 this.updateStatus(playerId, 'Playing');
-                
+                this._startProgressTimer();
+
                 // Try to collect additional metadata once playing
                 setTimeout(() => {
                     this.collectVideoMetadata(video, playerId);
                 }, 1000); // Give it a second to establish the stream
+            });
+
+            video.addEventListener('pause', () => {
+                this._saveProgress(true);
+            });
+
+            video.addEventListener('ended', () => {
+                this._saveProgress(true);
             });
 
             video.addEventListener('progress', () => {
@@ -635,7 +790,17 @@ function streamPlayer() {
         
         cleanup() {
             console.log('Cleaning up stream player...');
-            
+
+            // Save final progress and stop timer
+            this._saveProgress(true);
+            this._stopProgressTimer();
+
+            // Reset progress state
+            this.progressConfig = null;
+            this._lastSavedPosition = -1;
+            this._resumePosition = 0;
+            this._liveReported = false;
+
             // Reset stream metadata
             this.streamMetadata = {
                 format: null,
