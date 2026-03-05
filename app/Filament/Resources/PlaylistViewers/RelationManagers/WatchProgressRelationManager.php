@@ -23,19 +23,27 @@ class WatchProgressRelationManager extends RelationManager
 
     protected static ?string $title = 'Watch History';
 
+    public function isReadOnly(): bool
+    {
+        return false;
+    }
+
     public function getTabs(): array
     {
         return [
             'live' => Tab::make('Live TV')
                 ->icon('heroicon-o-signal')
+                ->badge(fn () => $this->ownerRecord->watchProgress()->where('content_type', 'live')->count())
                 ->query(fn ($query) => $query->where('content_type', 'live')),
 
             'vod' => Tab::make('VOD')
                 ->icon('heroicon-o-film')
+                ->badge(fn () => $this->ownerRecord->watchProgress()->where('content_type', 'vod')->count())
                 ->query(fn ($query) => $query->where('content_type', 'vod')),
 
             'episode' => Tab::make('Series')
                 ->icon('heroicon-o-tv')
+                ->badge(fn () => $this->ownerRecord->watchProgress()->where('content_type', 'episode')->count())
                 ->query(fn ($query) => $query->where('content_type', 'episode')),
         ];
     }
@@ -98,15 +106,6 @@ class WatchProgressRelationManager extends RelationManager
                     ->searchable(false)
                     ->visible(fn () => ($this->activeTab ?? 'live') === 'vod'),
 
-                TextColumn::make('vod_duration')
-                    ->label('Duration')
-                    ->getStateUsing(function (ViewerWatchProgress $record): ?string {
-                        $info = $record->channel?->info ?? [];
-
-                        return $info['duration'] ?? null;
-                    })
-                    ->visible(fn () => ($this->activeTab ?? 'live') === 'vod'),
-
                 TextColumn::make('vod_rating')
                     ->label('Rating')
                     ->getStateUsing(function (ViewerWatchProgress $record): ?string {
@@ -142,15 +141,6 @@ class WatchProgressRelationManager extends RelationManager
                     ->getStateUsing(fn (ViewerWatchProgress $record): ?string => $record->episode?->title)
                     ->wrap()
                     ->searchable(false)
-                    ->visible(fn () => ($this->activeTab ?? 'live') === 'episode'),
-
-                TextColumn::make('episode_duration')
-                    ->label('Duration')
-                    ->getStateUsing(function (ViewerWatchProgress $record): ?string {
-                        $info = $record->episode?->info ?? [];
-
-                        return $info['duration'] ?? null;
-                    })
                     ->visible(fn () => ($this->activeTab ?? 'live') === 'episode'),
 
                 // ── VOD + Series ──────────────────────────────────────────

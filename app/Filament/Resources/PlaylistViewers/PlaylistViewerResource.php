@@ -119,8 +119,6 @@ class PlaylistViewerResource extends Resource
                     ->disabled(fn (PlaylistViewer $record) => $record->is_admin)
                     ->tooltip('Admin viewers cannot be deleted')
                     ->button()->hiddenLabel()->size('sm'),
-                ViewAction::make()
-                    ->button()->hiddenLabel()->size('sm'),
                 Action::make('clear_watch_progress')
                     ->label('Clear Watch Progress')
                     ->icon('heroicon-o-eye-slash')
@@ -130,6 +128,8 @@ class PlaylistViewerResource extends Resource
                     })
                     ->disabled(fn (PlaylistViewer $record) => $record->watchProgress()->count() === 0)
                     ->requiresConfirmation(true)
+                    ->button()->hiddenLabel()->size('sm'),
+                ViewAction::make()
                     ->button()->hiddenLabel()->size('sm'),
             ], position: RecordActionsPosition::BeforeCells)
             ->toolbarActions([
