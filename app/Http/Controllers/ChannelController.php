@@ -501,9 +501,7 @@ class ChannelController extends Controller
                 'integer',
                 Rule::exists('epg_channels', 'id')->where('user_id', $user->id),
             ],
-            'channel' => 'sometimes|nullable|integer|min:0',
             'channel_number' => 'sometimes|nullable|integer|min:0',
-            'sort' => 'sometimes|nullable|numeric|min:0',
             'sort_order' => 'sometimes|nullable|numeric|min:0',
             'logo_type' => 'sometimes|string|in:channel,epg',
             'use_epg_logo' => 'sometimes|boolean',
@@ -1209,19 +1207,15 @@ class ChannelController extends Controller
             $applied['epg_channel_id'] = $input['epg_channel_id'];
         }
 
-        if (array_key_exists('channel', $input) || array_key_exists('channel_number', $input)) {
-            $channelNumber = array_key_exists('channel', $input)
-                ? $input['channel']
-                : $input['channel_number'];
+        if (array_key_exists('channel_number', $input)) {
+            $channelNumber = $input['channel_number'];
 
             $updates['channel'] = $channelNumber;
             $applied['channel_number'] = $channelNumber;
         }
 
-        if (array_key_exists('sort', $input) || array_key_exists('sort_order', $input)) {
-            $sortOrder = array_key_exists('sort', $input)
-                ? $input['sort']
-                : $input['sort_order'];
+        if (array_key_exists('sort_order', $input)) {
+            $sortOrder = $input['sort_order'];
 
             $updates['sort'] = $sortOrder;
             $applied['sort_order'] = $sortOrder;
