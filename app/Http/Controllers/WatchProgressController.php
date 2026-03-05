@@ -10,12 +10,13 @@ use App\Models\PlaylistViewer;
 use App\Models\ViewerWatchProgress;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 
 class WatchProgressController extends Controller
 {
     /**
      * Fetch existing watch progress for a stream.
-     * Returns null (204) if no progress or viewer can't be resolved.
+     * Returns null if no progress or viewer can't be resolved.
      */
     public function fetch(Request $request): JsonResponse
     {
@@ -111,11 +112,11 @@ class WatchProgressController extends Controller
     }
 
     /**
-     * Resolve the current PlaylistViewer from the request.
+     * Resolve the current PlaylistViewer from the request, auto-creating if needed.
      *
      * Supports:
-     * - Admin users (standard Laravel web auth → admin PlaylistViewer)
-     * - Guest panel users (session-based playlist auth → their PlaylistViewer)
+     * - Admin users (standard Laravel web auth → admin PlaylistViewer, created on first watch)
+     * - Guest panel users (session PlaylistAuth → linked PlaylistViewer, created on first watch)
      */
     private function resolveViewer(Request $request): ?PlaylistViewer
     {
@@ -131,12 +132,21 @@ class WatchProgressController extends Controller
             return null;
         }
 
-        // Admin panel: standard Laravel auth
+        // Admin panel: standard Laravel auth — find or create the admin viewer
         if (auth()->check()) {
-            return PlaylistViewer::where('viewerable_type', Playlist::class)
-                ->where('viewerable_id', $playlist->id)
-                ->where('is_admin', true)
-                ->first();
+            $user = auth()->user();
+
+            return PlaylistViewer::firstOrCreate(
+                [
+                    'viewerable_type' => Playlist::class,
+                    'viewerable_id' => $playlist->id,
+                    'is_admin' => true,
+                ],
+                [
+                    'ulid' => (string) Str::ulid(),
+                    'name' => $user->name,
+                ]
+            );
         }
 
         // Guest panel: session-based auth keyed by playlist UUID
@@ -150,10 +160,18 @@ class WatchProgressController extends Controller
                 ->first();
 
             if ($playlistAuth) {
-                return PlaylistViewer::where('playlist_auth_id', $playlistAuth->id)
-                    ->where('viewerable_type', Playlist::class)
-                    ->where('viewerable_id', $playlist->id)
-                    ->first();
+                return PlaylistViewer::firstOrCreate(
+                    [
+                        'playlist_auth_id' => $playlistAuth->id,
+                        'viewerable_type' => Playlist::class,
+                        'viewerable_id' => $playlist->id,
+                    ],
+                    [
+                        'ulid' => (string) Str::ulid(),
+                        'name' => $playlistAuth->name,
+                        'is_admin' => false,
+                    ]
+                );
             }
         }
 

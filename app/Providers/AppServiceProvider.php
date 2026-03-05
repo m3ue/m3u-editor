@@ -425,6 +425,11 @@ class AppServiceProvider extends ServiceProvider
                 event(new PlaylistDeleted($playlist));
                 $playlist->postProcesses()->detach();
 
+                // Delete associated viewers (watch progress cascades via FK)
+                PlaylistViewer::where('viewerable_type', Playlist::class)
+                    ->where('viewerable_id', $playlist->id)
+                    ->delete();
+
                 return $playlist;
             });
 
@@ -488,6 +493,11 @@ class AppServiceProvider extends ServiceProvider
                 // Remove short URLs
                 $mergedPlaylist->removeShortUrls();
 
+                // Delete associated viewers (watch progress cascades via FK)
+                PlaylistViewer::where('viewerable_type', MergedPlaylist::class)
+                    ->where('viewerable_id', $mergedPlaylist->id)
+                    ->delete();
+
                 return $mergedPlaylist;
             });
 
@@ -531,6 +541,11 @@ class AppServiceProvider extends ServiceProvider
                 Tag::query()
                     ->where('type', $customPlaylist->uuid)
                     ->orWhere('type', $customPlaylist->uuid.'-category')
+                    ->delete();
+
+                // Delete associated viewers (watch progress cascades via FK)
+                PlaylistViewer::where('viewerable_type', CustomPlaylist::class)
+                    ->where('viewerable_id', $customPlaylist->id)
                     ->delete();
 
                 return $customPlaylist;
@@ -595,6 +610,11 @@ class AppServiceProvider extends ServiceProvider
             PlaylistAlias::deleting(function (PlaylistAlias $playlistAlias) {
                 // Remove short URLs
                 $playlistAlias->removeShortUrls();
+
+                // Delete associated viewers (watch progress cascades via FK)
+                PlaylistViewer::where('viewerable_type', PlaylistAlias::class)
+                    ->where('viewerable_id', $playlistAlias->id)
+                    ->delete();
 
                 return $playlistAlias;
             });
