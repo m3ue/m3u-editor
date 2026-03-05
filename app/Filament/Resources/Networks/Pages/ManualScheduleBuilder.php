@@ -609,6 +609,39 @@ class ManualScheduleBuilder extends Page
     }
 
     /**
+     * Get the currently-playing programme (if any) for the status indicator.
+     */
+    public function getNowPlaying(): ?array
+    {
+        $network = $this->getRecord();
+        $programme = $network->getCurrentProgramme();
+
+        if (! $programme) {
+            // Check for the next upcoming programme
+            $next = $network->programmes()
+                ->where('start_time', '>', Carbon::now())
+                ->orderBy('start_time')
+                ->first();
+
+            if ($next) {
+                return [
+                    'status' => 'gap',
+                    'next_title' => $next->title,
+                    'next_start' => $next->start_time->toIso8601String(),
+                ];
+            }
+
+            return ['status' => 'empty'];
+        }
+
+        return [
+            'status' => 'playing',
+            'title' => $programme->title,
+            'end_time' => $programme->end_time->toIso8601String(),
+        ];
+    }
+
+    /**
      * Get view data for the blade template.
      */
     public function getViewData(): array

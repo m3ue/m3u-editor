@@ -20,6 +20,9 @@ function scheduleBuilder(config) {
         showCopyModal: false,
         copyTargetDate: '',
 
+        // Now-playing status
+        nowPlaying: null, // { status: 'playing'|'gap'|'empty', title?, next_title?, ... }
+
         // Drag & drop state
         dragSource: null, // 'pool' or 'grid'
         dragData: null,
@@ -55,6 +58,10 @@ function scheduleBuilder(config) {
             // Load initial data
             this.loadSchedule();
             this.loadMediaPool();
+            this.loadNowPlaying();
+
+            // Refresh now-playing status every 60 seconds
+            setInterval(() => this.loadNowPlaying(), 60000);
         },
 
         // ── Date Helpers ──────────────────────────────────────────────
@@ -226,6 +233,15 @@ function scheduleBuilder(config) {
                 this.mediaPool = [];
             } finally {
                 this.loadingPool = false;
+            }
+        },
+
+        async loadNowPlaying() {
+            try {
+                this.nowPlaying = await this.$wire.getNowPlaying();
+            } catch (err) {
+                console.error('Failed to load now-playing:', err);
+                this.nowPlaying = null;
             }
         },
 
@@ -429,6 +445,7 @@ function scheduleBuilder(config) {
                         this.programmes.push(result.programme);
                         this.sortProgrammes();
                     }
+                    this.loadNowPlaying();
                 }
             } catch (err) {
                 console.error('Failed to add programme:', err);
@@ -458,6 +475,7 @@ function scheduleBuilder(config) {
                         }
                         this.sortProgrammes();
                     }
+                    this.loadNowPlaying();
                 }
             } catch (err) {
                 console.error('Failed to move programme:', err);
@@ -471,6 +489,7 @@ function scheduleBuilder(config) {
                 const result = await this.$wire.removeProgramme(programmeId);
                 if (result.success) {
                     this.programmes = this.programmes.filter(p => p.id !== programmeId);
+                    this.loadNowPlaying();
                 }
             } catch (err) {
                 console.error('Failed to remove programme:', err);
@@ -493,6 +512,7 @@ function scheduleBuilder(config) {
                 const result = await this.$wire.clearDay(this.currentDate, this.timezone);
                 if (result.success) {
                     this.programmes = [];
+                    this.loadNowPlaying();
                 }
             } catch (err) {
                 console.error('Failed to clear day:', err);
@@ -501,16 +521,25 @@ function scheduleBuilder(config) {
             }
         },
 
+        openCopyModal() {
+            // Pre-select the first available date that isn't the current day
+            const firstOther = this.availableDates.find(d => d.value !== this.currentDate);
+            this.copyTargetDate = firstOther ? firstOther.value : '';
+            this.showCopyModal = true;
+        },
+
         async copyDay() {
             if (!this.copyTargetDate || this.copyTargetDate === this.currentDate) return;
 
+            const targetDate = this.copyTargetDate;
             this.loading = true;
             this.showCopyModal = false;
             try {
-                const result = await this.$wire.copyDaySchedule(this.currentDate, this.copyTargetDate, this.timezone);
+                const result = await this.$wire.copyDaySchedule(this.currentDate, targetDate, this.timezone);
                 if (result.success) {
-                    // If user copies to the currently viewed day, reload
-                    // (they likely copied FROM current to target, so no reload needed)
+                    // Navigate to the target date so the user can see the copied schedule
+                    this.currentDate = targetDate;
+                    await this.loadSchedule();
                 }
             } catch (err) {
                 console.error('Failed to copy day:', err);

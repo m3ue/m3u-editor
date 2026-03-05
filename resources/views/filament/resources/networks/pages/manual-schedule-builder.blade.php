@@ -52,7 +52,7 @@
                 </button>
 
                 <button
-                    @click="showCopyModal = true"
+                    @click="openCopyModal()"
                     class="inline-flex items-center gap-1 rounded-lg px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition"
                 >
                     <x-heroicon-o-document-duplicate class="w-4 h-4" />
@@ -69,6 +69,45 @@
                     </button>
                 </template>
             </div>
+        </div>
+
+        {{-- Now-Playing Status Indicator --}}
+        <div class="mb-4 flex items-center gap-2 px-3 py-2 rounded-lg border text-sm"
+             :class="{
+                 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800 text-green-800 dark:text-green-200': nowPlaying?.status === 'playing',
+                 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-200': nowPlaying?.status === 'gap',
+                 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 text-red-800 dark:text-red-200': nowPlaying?.status === 'empty',
+                 'bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400': !nowPlaying,
+             }"
+        >
+            <template x-if="nowPlaying?.status === 'playing'">
+                <span class="flex items-center gap-2">
+                    <span class="relative flex h-2.5 w-2.5">
+                        <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                        <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-500"></span>
+                    </span>
+                    Now Playing: <strong x-text="nowPlaying.title"></strong>
+                </span>
+            </template>
+            <template x-if="nowPlaying?.status === 'gap'">
+                <span class="flex items-center gap-2">
+                    <span class="relative flex h-2.5 w-2.5">
+                        <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-500"></span>
+                    </span>
+                    No programme right now &mdash; Next: <strong x-text="nowPlaying.next_title"></strong>
+                </span>
+            </template>
+            <template x-if="nowPlaying?.status === 'empty'">
+                <span class="flex items-center gap-2">
+                    <span class="relative flex h-2.5 w-2.5">
+                        <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500"></span>
+                    </span>
+                    No programmes scheduled
+                </span>
+            </template>
+            <template x-if="!nowPlaying">
+                <span class="flex items-center gap-2">Loading status...</span>
+            </template>
         </div>
 
         {{-- Main Layout: Grid + Media Pool --}}
