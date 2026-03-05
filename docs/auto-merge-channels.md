@@ -269,6 +269,49 @@ Enable detailed logging by checking:
 
 ## API Integration
 
+### Trigger Merge via API
+
+You can trigger the merge job directly via authenticated API:
+
+- `POST /playlist/{uuid}/merge-channels`
+- Requires `auth:sanctum`
+
+Request body is optional. If omitted, the endpoint uses the playlist's saved auto-merge settings.
+
+Optional override fields:
+- `preferred_playlist_id` (or `playlist_id` compatibility alias)
+- `failover_playlists` (array of IDs or objects with `playlist_failover_id`)
+- `group_id` (limit merge to a specific group in this playlist)
+- `check_resolution` (or `by_resolution` compatibility alias)
+- `deactivate_failover_channels`
+- `force_complete_remerge`
+- `prefer_catchup_as_primary`
+- `new_channels_only`
+- `prefer_codec`, `priority_keywords`, `exclude_disabled_groups`
+- `group_priorities`, `priority_attributes`
+
+`priority_attributes` accepts either:
+- `["playlist_priority", "resolution"]`
+- `[{"attribute":"playlist_priority"},{"attribute":"resolution"}]`
+
+Queue behavior:
+- API-triggered merges follow the same queue behavior as existing UI-triggered merges.
+- Multiple merge requests can be queued and run in order by your queue workers.
+
+Example:
+
+```bash
+curl -X POST "https://your-host/playlist/<playlist-uuid>/merge-channels" \
+  -H "Authorization: Bearer <api-token>" \
+  -H "Accept: application/json" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "force_complete_remerge": true,
+    "new_channels_only": false,
+    "group_id": 123
+  }'
+```
+
 ### Job Dispatch
 ```php
 use App\Jobs\MergeChannels;

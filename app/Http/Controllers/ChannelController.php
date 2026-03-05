@@ -2,11 +2,14 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\ChannelLogoType;
 use App\Facades\PlaylistFacade;
 use App\Facades\ProxyFacade;
 use App\Models\Channel;
+use App\Models\Group;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 /**
  * @tags Channels
@@ -479,51 +482,43 @@ class ChannelController extends Controller
 
         // Validate the request
         $validated = $request->validate([
-            'title' => 'sometimes|string|max:500',
-            'name' => 'sometimes|string|max:500',
+            'title' => 'sometimes|nullable|string|max:500',
+            'name' => 'sometimes|nullable|string|max:500',
             'logo' => 'sometimes|nullable|string|max:2500',
             'url' => 'sometimes|nullable|url|max:2500',
-            'stream_id' => 'sometimes|string|max:500',
+            'stream_id' => 'sometimes|nullable|string|max:500',
             'enabled' => 'sometimes|boolean',
+            'group' => 'sometimes|nullable|string|max:500',
+            'group_id' => [
+                'sometimes',
+                'nullable',
+                'integer',
+                Rule::exists('groups', 'id')->where('user_id', $user->id),
+            ],
+            'epg_channel_id' => [
+                'sometimes',
+                'nullable',
+                'integer',
+                Rule::exists('epg_channels', 'id')->where('user_id', $user->id),
+            ],
+            'channel_number' => 'sometimes|nullable|integer|min:0',
+            'sort_order' => 'sometimes|nullable|numeric|min:0',
+            'logo_type' => 'sometimes|string|in:channel,epg',
+            'use_epg_logo' => 'sometimes|boolean',
+            'epg_map_enabled' => 'sometimes|boolean',
+            'tvg_shift' => 'sometimes|nullable|numeric',
         ]);
 
-        // Update the channel fields
-        // Similar to ChannelFindAndReplace, we update the custom fields
-        $updated = false;
+        // Build and apply normalized column updates from API input.
+        $group = $this->resolveUserGroup($validated, $user->id);
+        $resolvedUpdateData = $this->buildChannelUpdates($validated, $group);
 
-        if (array_key_exists('title', $validated)) {
-            $channel->title_custom = $validated['title'];
-            $updated = true;
+        foreach ($resolvedUpdateData['updates'] as $column => $value) {
+            $channel->{$column} = $value;
         }
 
-        if (array_key_exists('name', $validated)) {
-            $channel->name_custom = $validated['name'];
-            $updated = true;
-        }
-
-        if (array_key_exists('logo', $validated)) {
-            // Logo is the special case - update the `logo` field directly
-            $channel->logo = $validated['logo'];
-            $updated = true;
-        }
-
-        if (array_key_exists('url', $validated)) {
-            $channel->url_custom = $validated['url'];
-            $updated = true;
-        }
-
-        if (array_key_exists('stream_id', $validated)) {
-            $channel->stream_id_custom = $validated['stream_id'];
-            $updated = true;
-        }
-
-        if (array_key_exists('enabled', $validated)) {
-            $channel->enabled = $validated['enabled'];
-            $updated = true;
-        }
-
-        // Save if any updates were made
-        if ($updated) {
+        // Persist only when at least one column value actually changed.
+        if ($channel->isDirty()) {
             $channel->save();
         }
 
@@ -538,6 +533,15 @@ class ChannelController extends Controller
                 'url' => $channel->url_custom ?? $channel->url,
                 'stream_id' => $channel->stream_id_custom ?? $channel->stream_id,
                 'enabled' => $channel->enabled,
+                'channel_number' => $channel->channel,
+                'sort_order' => $channel->sort,
+                'group' => $channel->group,
+                'group_id' => $channel->group_id,
+                'epg_channel_id' => $channel->epg_channel_id,
+                'logo_type' => $channel->logo_type?->value,
+                'use_epg_logo' => $channel->logo_type === ChannelLogoType::Epg,
+                'epg_map_enabled' => $channel->epg_map_enabled ?? true,
+                'tvg_shift' => $channel->tvg_shift,
             ],
         ]);
     }
@@ -698,10 +702,17 @@ class ChannelController extends Controller
                 'enabled' => $channel->enabled,
                 'is_vod' => $channel->is_vod,
                 'channel_number' => $channel->channel,
+                'sort_order' => $channel->sort,
                 'catchup' => $channel->catchup ?? false,
                 'shift' => $channel->shift ?? 0,
+                'tvg_shift' => $channel->tvg_shift,
+                'logo_type' => $channel->logo_type?->value,
+                'use_epg_logo' => $channel->logo_type === ChannelLogoType::Epg,
+                'epg_map_enabled' => $channel->epg_map_enabled ?? true,
                 'proxy_url' => $proxyUrl,
                 'epg' => $epgInfo,
+                'epg_channel_id' => $channel->epg_channel_id,
+                'group_title' => $channel->group,
                 'group' => $groupInfo,
                 'playlist' => $playlistInfo,
                 'failovers' => $failovers,
@@ -813,9 +824,33 @@ class ChannelController extends Controller
             'filter.enabled' => 'sometimes|boolean',
             'filter.is_vod' => 'sometimes|boolean',
             'updates' => 'required|array|min:1',
+            'updates.title' => 'sometimes|nullable|string|max:500',
+            'updates.name' => 'sometimes|nullable|string|max:500',
+            'updates.url' => 'sometimes|nullable|url|max:2500',
+            'updates.stream_id' => 'sometimes|nullable|string|max:500',
             'updates.enabled' => 'sometimes|boolean',
-            'updates.group_id' => 'sometimes|integer|exists:groups,id',
+            'updates.group' => 'sometimes|nullable|string|max:500',
+            'updates.group_id' => [
+                'sometimes',
+                'nullable',
+                'integer',
+                Rule::exists('groups', 'id')->where('user_id', $user->id),
+            ],
             'updates.logo' => 'sometimes|nullable|string|max:2500',
+            'updates.epg_channel_id' => [
+                'sometimes',
+                'nullable',
+                'integer',
+                Rule::exists('epg_channels', 'id')->where('user_id', $user->id),
+            ],
+            'updates.channel' => 'sometimes|nullable|integer|min:0',
+            'updates.channel_number' => 'sometimes|nullable|integer|min:0',
+            'updates.sort' => 'sometimes|nullable|numeric|min:0',
+            'updates.sort_order' => 'sometimes|nullable|numeric|min:0',
+            'updates.logo_type' => 'sometimes|string|in:channel,epg',
+            'updates.use_epg_logo' => 'sometimes|boolean',
+            'updates.epg_map_enabled' => 'sometimes|boolean',
+            'updates.tvg_shift' => 'sometimes|nullable|numeric',
         ]);
 
         // Either ids or filter must be provided
@@ -859,23 +894,34 @@ class ChannelController extends Controller
         }
 
         // Build update array
-        $updates = [];
-        $appliedUpdates = [];
+        $updatesInput = $validated['updates'];
+        $group = $this->resolveUserGroup($updatesInput, $user->id);
+        $resolvedUpdateData = $this->buildChannelUpdates($updatesInput, $group);
+        $updates = $resolvedUpdateData['updates'];
+        $appliedUpdates = $resolvedUpdateData['applied'];
 
-        if (isset($validated['updates']['enabled'])) {
-            $updates['enabled'] = $validated['updates']['enabled'];
-            $appliedUpdates['enabled'] = $validated['updates']['enabled'];
+        if (empty($updates)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No valid updates were provided',
+            ], 422);
         }
 
-        if (isset($validated['updates']['group_id'])) {
-            $updates['group_id'] = $validated['updates']['group_id'];
-            $appliedUpdates['group_id'] = $validated['updates']['group_id'];
-        }
+        // Only update rows where at least one target column value is different.
+        $query->where(function ($differenceQuery) use ($updates) {
+            foreach ($updates as $column => $value) {
+                if ($value === null) {
+                    $differenceQuery->orWhereNotNull($column);
 
-        if (array_key_exists('logo', $validated['updates'])) {
-            $updates['logo'] = $validated['updates']['logo'];
-            $appliedUpdates['logo'] = $validated['updates']['logo'];
-        }
+                    continue;
+                }
+
+                $differenceQuery->orWhere(function ($columnQuery) use ($column, $value) {
+                    $columnQuery->whereNull($column)
+                        ->orWhere($column, '!=', $value);
+                });
+            }
+        });
 
         // Execute update
         $updatedCount = $query->update($updates);
@@ -1077,6 +1123,133 @@ class ChannelController extends Controller
                 'channels' => $results,
             ],
         ]);
+    }
+
+    /**
+     * Resolve the selected group for channel update payloads.
+     *
+     * @param  array<string, mixed>  $input
+     */
+    private function resolveUserGroup(array $input, int $userId): ?Group
+    {
+        if (! array_key_exists('group_id', $input) || $input['group_id'] === null) {
+            return null;
+        }
+
+        return Group::query()
+            ->select(['id', 'name'])
+            ->where('user_id', $userId)
+            ->find($input['group_id']);
+    }
+
+    /**
+     * Normalize API input into channel update columns and response metadata.
+     *
+     * @param  array<string, mixed>  $input
+     * @return array{updates: array<string, mixed>, applied: array<string, mixed>}
+     */
+    private function buildChannelUpdates(array $input, ?Group $group): array
+    {
+        $updates = [];
+        $applied = [];
+
+        if (array_key_exists('title', $input)) {
+            $updates['title_custom'] = $input['title'];
+            $applied['title'] = $input['title'];
+        }
+
+        if (array_key_exists('name', $input)) {
+            $updates['name_custom'] = $input['name'];
+            $applied['name'] = $input['name'];
+        }
+
+        if (array_key_exists('logo', $input)) {
+            $updates['logo'] = $input['logo'];
+            $applied['logo'] = $input['logo'];
+        }
+
+        if (array_key_exists('url', $input)) {
+            $updates['url_custom'] = $input['url'];
+            $applied['url'] = $input['url'];
+        }
+
+        if (array_key_exists('stream_id', $input)) {
+            $updates['stream_id_custom'] = $input['stream_id'];
+            $applied['stream_id'] = $input['stream_id'];
+        }
+
+        if (array_key_exists('enabled', $input)) {
+            $updates['enabled'] = $input['enabled'];
+            $applied['enabled'] = $input['enabled'];
+        }
+
+        if (array_key_exists('group_id', $input)) {
+            $updates['group_id'] = $input['group_id'];
+            $applied['group_id'] = $input['group_id'];
+
+            if ($input['group_id'] === null) {
+                // Keep existing group title unless an explicit override was provided.
+                if (array_key_exists('group', $input)) {
+                    $updates['group'] = $input['group'];
+                    $applied['group'] = $input['group'];
+                }
+            } elseif ($group) {
+                $updates['group'] = $group->name;
+                $applied['group'] = $group->name;
+            }
+        } elseif (array_key_exists('group', $input)) {
+            $updates['group'] = $input['group'];
+            $applied['group'] = $input['group'];
+        }
+
+        if (array_key_exists('epg_channel_id', $input)) {
+            $updates['epg_channel_id'] = $input['epg_channel_id'];
+            $applied['epg_channel_id'] = $input['epg_channel_id'];
+        }
+
+        if (array_key_exists('channel_number', $input)) {
+            $channelNumber = $input['channel_number'];
+
+            $updates['channel'] = $channelNumber;
+            $applied['channel_number'] = $channelNumber;
+        }
+
+        if (array_key_exists('sort_order', $input)) {
+            $sortOrder = $input['sort_order'];
+
+            $updates['sort'] = $sortOrder;
+            $applied['sort_order'] = $sortOrder;
+        }
+
+        if (array_key_exists('logo_type', $input) || array_key_exists('use_epg_logo', $input)) {
+            $logoType = $input['logo_type'] ?? null;
+            if ($logoType === null && array_key_exists('use_epg_logo', $input)) {
+                $logoType = $input['use_epg_logo']
+                    ? ChannelLogoType::Epg->value
+                    : ChannelLogoType::Channel->value;
+            }
+
+            if ($logoType !== null) {
+                $updates['logo_type'] = $logoType;
+                $applied['logo_type'] = $logoType;
+                $applied['use_epg_logo'] = $logoType === ChannelLogoType::Epg->value;
+            }
+        }
+
+        if (array_key_exists('epg_map_enabled', $input)) {
+            $updates['epg_map_enabled'] = $input['epg_map_enabled'];
+            $applied['epg_map_enabled'] = $input['epg_map_enabled'];
+        }
+
+        if (array_key_exists('tvg_shift', $input)) {
+            $updates['tvg_shift'] = $input['tvg_shift'];
+            $applied['tvg_shift'] = $input['tvg_shift'];
+        }
+
+        return [
+            'updates' => $updates,
+            'applied' => $applied,
+        ];
     }
 
     /**
