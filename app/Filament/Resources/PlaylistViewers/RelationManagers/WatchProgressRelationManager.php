@@ -4,6 +4,7 @@ namespace App\Filament\Resources\PlaylistViewers\RelationManagers;
 
 use App\Models\ViewerWatchProgress;
 use App\Services\LogoService;
+use Filament\Actions\Action;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
@@ -55,13 +56,11 @@ class WatchProgressRelationManager extends RelationManager
 
     public function table(Table $table): Table
     {
-        $activeTab = $this->activeTab ?? 'live';
-
         return $table
             ->persistSortInSession()
             ->filtersTriggerAction(fn ($action) => $action->button()->label('Filters'))
             ->deferLoading()
-            ->modifyQueryUsing(fn ($query) => match ($activeTab) {
+            ->modifyQueryUsing(fn ($query) => match ($this->activeTab ?? 'live') {
                 'episode' => $query->with(['episode', 'episode.series', 'episode.playlist']),
                 default => $query->with(['channel', 'channel.epgChannel', 'channel.playlist']),
             })
@@ -80,8 +79,18 @@ class WatchProgressRelationManager extends RelationManager
 
                         return LogoService::getChannelLogoUrl($record->channel);
                     })
-                    ->height(50)
-                    ->width(35)
+                    ->extraImgAttributes(fn ($record): array => match ($this->activeTab ?? 'live') {
+                        'live' => [
+                            'style' => 'height:2.5rem; width:auto; border-radius:4px;', // Live channel style
+                        ],
+                        'vod' => [
+                            'style' => 'width:80px; height:120px; border-radius:4px;', // VOD channel style
+                        ],
+                        'episode' => [
+                            'style' => 'width:120px; height:80px; border-radius:4px;', // Episode style
+                        ],
+                        default => [],
+                    })
                     ->checkFileExistence(false),
 
                 // ── Live TV ───────────────────────────────────────────────
@@ -181,6 +190,19 @@ class WatchProgressRelationManager extends RelationManager
             ->recordActions([
                 DeleteAction::make()
                     ->button()->hiddenLabel()->size('sm'),
+                Action::make('play')
+                    ->tooltip('Play')
+                    ->action(function ($record, $livewire) {
+                        $livewire->dispatch(
+                            'openFloatingStream',
+                            ($this->activeTab ?? 'live') === 'episode'
+                                ? $record->episode?->getFloatingPlayerAttributes()
+                                : $record->channel?->getFloatingPlayerAttributes()
+                        );
+                    })
+                    ->icon('heroicon-s-play-circle')
+                    ->button()
+                    ->hiddenLabel(),
             ], position: RecordActionsPosition::BeforeColumns)
             ->filters([
                 TernaryFilter::make('completed')
