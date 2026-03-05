@@ -17,6 +17,8 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
+use RyanChandler\FilamentProgressColumn\ProgressColumn;
 
 class WatchProgressRelationManager extends RelationManager
 {
@@ -98,7 +100,14 @@ class WatchProgressRelationManager extends RelationManager
                     ->label('Channel')
                     ->getStateUsing(fn (ViewerWatchProgress $record): string => $record->channel?->title ?? $record->channel?->name ?? "Stream #{$record->stream_id}")
                     ->wrap()
-                    ->searchable(false)
+                    ->searchable(query: function (Builder $query, string $search): Builder {
+                        if (($this->activeTab ?? 'live') !== 'live') {
+                            return $query;
+                        }
+                        $term = mb_strtolower($search);
+
+                        return $query->whereHas('channel', fn (Builder $q) => $q->whereRaw('LOWER(title) LIKE ?', ["%{$term}%"])->orWhereRaw('LOWER(name) LIKE ?', ["%{$term}%"]));
+                    })
                     ->visible(fn () => ($this->activeTab ?? 'live') === 'live'),
 
                 TextColumn::make('live_watch_count')
@@ -112,7 +121,14 @@ class WatchProgressRelationManager extends RelationManager
                     ->label('Movie')
                     ->getStateUsing(fn (ViewerWatchProgress $record): string => $record->channel?->title ?? $record->channel?->name ?? "Stream #{$record->stream_id}")
                     ->wrap()
-                    ->searchable(false)
+                    ->searchable(query: function (Builder $query, string $search): Builder {
+                        if (($this->activeTab ?? 'live') !== 'vod') {
+                            return $query;
+                        }
+                        $term = mb_strtolower($search);
+
+                        return $query->whereHas('channel', fn (Builder $q) => $q->whereRaw('LOWER(title) LIKE ?', ["%{$term}%"])->orWhereRaw('LOWER(name) LIKE ?', ["%{$term}%"]));
+                    })
                     ->visible(fn () => ($this->activeTab ?? 'live') === 'vod'),
 
                 TextColumn::make('vod_rating')
@@ -130,7 +146,14 @@ class WatchProgressRelationManager extends RelationManager
                     ->label('Series')
                     ->getStateUsing(fn (ViewerWatchProgress $record): ?string => $record->episode?->series?->name)
                     ->wrap()
-                    ->searchable(false)
+                    ->searchable(query: function (Builder $query, string $search): Builder {
+                        if (($this->activeTab ?? 'live') !== 'episode') {
+                            return $query;
+                        }
+                        $term = mb_strtolower($search);
+
+                        return $query->whereHas('episode.series', fn (Builder $q) => $q->whereRaw('LOWER(name) LIKE ?', ["%{$term}%"]));
+                    })
                     ->visible(fn () => ($this->activeTab ?? 'live') === 'episode'),
 
                 TextColumn::make('season_number')
@@ -149,19 +172,39 @@ class WatchProgressRelationManager extends RelationManager
                     ->label('Episode Title')
                     ->getStateUsing(fn (ViewerWatchProgress $record): ?string => $record->episode?->title)
                     ->wrap()
-                    ->searchable(false)
+                    ->searchable(query: function (Builder $query, string $search): Builder {
+                        if (($this->activeTab ?? 'live') !== 'episode') {
+                            return $query;
+                        }
+                        $term = mb_strtolower($search);
+
+                        return $query->whereHas('episode', fn (Builder $q) => $q->whereRaw('LOWER(title) LIKE ?', ["%{$term}%"]));
+                    })
                     ->visible(fn () => ($this->activeTab ?? 'live') === 'episode'),
 
                 // ── VOD + Series ──────────────────────────────────────────
-                TextColumn::make('progress')
+                ProgressColumn::make('progress')
+                    ->width('120px')
                     ->label('Progress')
+                    ->progress(function (ViewerWatchProgress $record): string {
+                        if (! $record->duration_seconds || $record->duration_seconds <= 0) {
+                            return 0;
+                        }
+
+                        return min(100, (int) round($record->position_seconds / $record->duration_seconds * 100));
+                    })
+                    ->visible(fn () => in_array($this->activeTab ?? 'live', ['vod', 'episode']))
+                    ->toggleable(),
+
+                TextColumn::make('duration')
+                    ->label('Position / Duration')
                     ->getStateUsing(function (ViewerWatchProgress $record): string {
                         if (! $record->duration_seconds || $record->duration_seconds <= 0) {
                             return $this->formatSeconds($record->position_seconds);
                         }
                         $pct = min(100, (int) round($record->position_seconds / $record->duration_seconds * 100));
 
-                        return "{$pct}% ({$this->formatSeconds($record->position_seconds)} / {$this->formatSeconds($record->duration_seconds)})";
+                        return "{$this->formatSeconds($record->position_seconds)} / {$this->formatSeconds($record->duration_seconds)}";
                     })
                     ->visible(fn () => in_array($this->activeTab ?? 'live', ['vod', 'episode'])),
 
