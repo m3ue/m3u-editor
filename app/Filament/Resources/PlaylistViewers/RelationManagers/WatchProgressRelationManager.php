@@ -35,17 +35,17 @@ class WatchProgressRelationManager extends RelationManager
     {
         return [
             'live' => Tab::make('Live TV')
-                ->icon('heroicon-o-signal')
+                ->icon('heroicon-s-tv')
                 ->badge(fn () => $this->ownerRecord->watchProgress()->where('content_type', 'live')->count())
                 ->query(fn ($query) => $query->where('content_type', 'live')),
 
             'vod' => Tab::make('VOD')
-                ->icon('heroicon-o-film')
+                ->icon('heroicon-s-film')
                 ->badge(fn () => $this->ownerRecord->watchProgress()->where('content_type', 'vod')->count())
                 ->query(fn ($query) => $query->where('content_type', 'vod')),
 
             'episode' => Tab::make('Series')
-                ->icon('heroicon-o-tv')
+                ->icon('heroicon-s-play')
                 ->badge(fn () => $this->ownerRecord->watchProgress()->where('content_type', 'episode')->count())
                 ->query(fn ($query) => $query->where('content_type', 'episode')),
         ];
