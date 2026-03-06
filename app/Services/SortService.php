@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\CustomPlaylist;
 use App\Models\Group;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
@@ -152,5 +153,119 @@ class SortService
         $casesSql = implode(' ', $cases);
 
         DB::statement("UPDATE channels SET channel = CASE id {$casesSql} END WHERE id IN ({$idsSql})");
+    }
+
+    /**
+     * Recount channel numbers INSIDE a CustomPlaylist only (pivot table),
+     * without touching channels.channel (global).
+     */
+    public function bulkRecountCustomPlaylistChannels(CustomPlaylist $playlist, Collection $channels, int $start = 1): void
+    {
+        $offset = max(0, $start - 1);
+        $driver = DB::getPdo()->getAttribute(\PDO::ATTR_DRIVER_NAME);
+
+        $ids = $channels->pluck('id')->map(fn ($id) => (int) $id)->unique()->values()->all();
+        if (empty($ids)) {
+            return;
+        }
+
+        $idsSql = implode(',', $ids);
+
+        // MySQL (8+)
+        if ($driver === 'mysql') {
+            DB::statement(
+                "UPDATE channel_custom_playlist ccp
+                 JOIN (
+                    SELECT ccp2.channel_id,
+                           ROW_NUMBER() OVER (ORDER BY c.sort, c.channel, c.id) AS rn
+                    FROM channel_custom_playlist ccp2
+                    JOIN channels c ON c.id = ccp2.channel_id
+                    WHERE ccp2.custom_playlist_id = ?
+                      AND ccp2.channel_id IN ({$idsSql})
+                 ) t ON t.channel_id = ccp.channel_id
+                 SET ccp.channel_number = t.rn + ?
+                 WHERE ccp.custom_playlist_id = ?
+                   AND ccp.channel_id IN ({$idsSql})",
+                [$playlist->id, $offset, $playlist->id]
+            );
+
+            return;
+        }
+
+        // Postgres
+        if (str_starts_with($driver, 'pgsql') || $driver === 'postgresql' || $driver === 'postgres') {
+            DB::statement(
+                "UPDATE channel_custom_playlist ccp
+                 SET channel_number = t.rn + ?
+                 FROM (
+                    SELECT ccp2.channel_id,
+                           ROW_NUMBER() OVER (ORDER BY c.sort, c.channel, c.id) AS rn
+                    FROM channel_custom_playlist ccp2
+                    JOIN channels c ON c.id = ccp2.channel_id
+                    WHERE ccp2.custom_playlist_id = ?
+                      AND ccp2.channel_id IN ({$idsSql})
+                 ) t
+                 WHERE ccp.custom_playlist_id = ?
+                   AND ccp.channel_id = t.channel_id
+                   AND ccp.channel_id IN ({$idsSql})",
+                [$offset, $playlist->id, $playlist->id]
+            );
+
+            return;
+        }
+
+        // SQLite
+        if ($driver === 'sqlite') {
+            DB::statement(
+                "WITH ranked AS (
+                    SELECT ccp2.channel_id AS channel_id,
+                           ROW_NUMBER() OVER (ORDER BY c.sort, c.channel, c.id) AS rn
+                    FROM channel_custom_playlist ccp2
+                    JOIN channels c ON c.id = ccp2.channel_id
+                    WHERE ccp2.custom_playlist_id = ?
+                      AND ccp2.channel_id IN ({$idsSql})
+                 )
+                 UPDATE channel_custom_playlist
+                 SET channel_number = (SELECT rn FROM ranked WHERE ranked.channel_id = channel_custom_playlist.channel_id) + ?
+                 WHERE custom_playlist_id = ?
+                   AND channel_id IN ({$idsSql})",
+                [$playlist->id, $offset, $playlist->id]
+            );
+
+            return;
+        }
+
+        // Fallback: CASE update (other DB drivers)
+        $orderedIds = DB::table('channel_custom_playlist as ccp')
+            ->join('channels as c', 'c.id', '=', 'ccp.channel_id')
+            ->where('ccp.custom_playlist_id', $playlist->id)
+            ->whereIn('ccp.channel_id', $ids)
+            ->orderBy('c.sort')
+            ->orderBy('c.channel')
+            ->orderBy('c.id')
+            ->pluck('ccp.channel_id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+
+        if (empty($orderedIds)) {
+            return;
+        }
+
+        $cases = [];
+        $i = $start;
+        foreach ($orderedIds as $id) {
+            $cases[] = "WHEN {$id} THEN {$i}";
+            $i++;
+        }
+
+        $casesSql = implode(' ', $cases);
+        $orderedIdsSql = implode(',', $orderedIds);
+
+        DB::statement(
+            "UPDATE channel_custom_playlist
+             SET channel_number = CASE channel_id {$casesSql} END
+             WHERE custom_playlist_id = {$playlist->id}
+               AND channel_id IN ({$orderedIdsSql})"
+        );
     }
 }

@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\CustomPlaylists\RelationManagers;
 
+use App\Facades\SortFacade;
 use App\Filament\Resources\Vods\VodResource;
 use App\Models\Channel;
 use Filament\Actions\AttachAction;
@@ -9,10 +10,12 @@ use Filament\Actions\BulkAction;
 use Filament\Actions\CreateAction;
 use Filament\Actions\DetachAction;
 use Filament\Forms\Components\Select;
+use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Schemas\Schema;
+use Filament\Tables;
 use Filament\Tables\Columns\SpatieTagsColumn;
 use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Filters\SelectFilter;
@@ -119,6 +122,31 @@ class VodRelationManager extends RelationManager
                     ->distinct();
             });
         $defaultColumns = VodResource::getTableColumns(showGroup: true, showPlaylist: true);
+
+        // Replace the global editable "channel" column with a custom-playlist pivot channel number column
+        foreach ($defaultColumns as $i => $column) {
+            if (method_exists($column, 'getName') && $column->getName() === 'channel') {
+                $defaultColumns[$i] = Tables\Columns\TextInputColumn::make('custom_channel_number')
+                    ->label('Channel')
+                    ->type('number')
+                    ->rules(['nullable', 'numeric', 'min:0'])
+                    ->placeholder(fn ($record) => (string) $record->channel)
+                    ->getStateUsing(function ($record) {
+                        return $record->pivot?->channel_number ?? null;
+                    })
+                    ->updateStateUsing(function ($record, $state) use ($ownerRecord): void {
+                        $ownerRecord->channels()->updateExistingPivot(
+                            $record->id,
+                            ['channel_number' => ($state !== '' && $state !== null) ? (int) $state : null]
+                        );
+                    })
+                    ->sortable(query: function (Builder $query, string $direction): Builder {
+                        return $query->orderBy('channel_custom_playlist.channel_number', $direction);
+                    });
+
+                break;
+            }
+        }
 
         // Inject the custom group column after the group column
         array_splice($defaultColumns, 14, 0, [$groupColumn]);
@@ -249,7 +277,32 @@ class VodRelationManager extends RelationManager
                 ...VodResource::getTableActions(),
             ], position: RecordActionsPosition::BeforeCells)
             ->toolbarActions([
-                ...VodResource::getTableBulkActions(addToCustom: false),
+                ...VodResource::getTableBulkActions(addToCustom: false, includeRecount: false),
+                BulkAction::make('recount_custom')
+                    ->label('Recount Channels')
+                    ->icon('heroicon-o-hashtag')
+                    ->schema([
+                        TextInput::make('start')
+                            ->label('Start Number')
+                            ->numeric()
+                            ->default(1)
+                            ->required(),
+                    ])
+                    ->action(function (Collection $records, array $data) use ($ownerRecord): void {
+                        $start = (int) $data['start'];
+                        SortFacade::bulkRecountCustomPlaylistChannels($ownerRecord, $records, $start);
+                    })
+                    ->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title('Custom Playlist Channels Recounted')
+                            ->body('The selected items were recounted for this custom playlist only.')
+                            ->send();
+                    })
+                    ->requiresConfirmation()
+                    ->modalIcon('heroicon-o-hashtag')
+                    ->modalDescription('Recount the selected items only inside this custom playlist. The original channel numbers will not change.')
+                    ->modalSubmitActionLabel('Recount now'),
                 BulkAction::make('detach')
                     ->label('Detach Selected')
                     ->action(function (Collection $records) use ($ownerRecord): void {

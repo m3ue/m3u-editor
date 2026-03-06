@@ -127,7 +127,11 @@ class PlaylistGenerateController extends Controller
                     // Use selected EPG fields (avoids N+1 query for epgChannel relation)
                     $epgIcon = $channel->epg_icon ?? null;
                     $epgIconCustom = $channel->epg_icon_custom ?? null;
-                    $channelNo = $channel->channel;
+                    $isCustomContext = ($type === 'custom') || ($type === 'alias' && ! empty($playlist->custom_playlist_id));
+
+                    $channelNo = ($isCustomContext && ! empty($channel->pivot?->channel_number))
+                        ? (int) $channel->pivot->channel_number
+                        : $channel->channel;
                     $timeshift = $channel->shift ?? 0;
                     $stationId = $channel->station_id ?? '';
                     $epgShift = $channel->tvg_shift ?? 0;
@@ -478,6 +482,8 @@ class PlaylistGenerateController extends Controller
         $idChannelBy = $playlist->id_channel_by;
         $autoIncrement = $playlist->auto_channel_increment;
         $channelNumber = $autoIncrement ? $playlist->channel_start - 1 : 0;
+        $isCustomContext = ($playlist instanceof CustomPlaylist) ||
+            ($playlist instanceof PlaylistAlias && ! empty($playlist->custom_playlist_id));
 
         // Stream the JSON response to avoid loading all channels into memory.
         $cursor = $channels->cursor();
@@ -485,7 +491,7 @@ class PlaylistGenerateController extends Controller
             'Content-Type' => 'application/json',
         ];
 
-        return response()->stream(function () use ($cursor, $username, $password, $idChannelBy, $autoIncrement, &$channelNumber) {
+        return response()->stream(function () use ($cursor, $username, $password, $idChannelBy, $autoIncrement, &$channelNumber, $isCustomContext) {
             $first = true;
             echo '[';
             foreach ($cursor as $channel) {
@@ -498,7 +504,10 @@ class PlaylistGenerateController extends Controller
                     $extension = $channel->container_extension ?? 'mkv';
                 }
                 $url = rtrim($baseUrl."/{$urlPath}/{$username}/{$password}/".$channel->id.'.'.$extension, '.');
-                $channelNo = $channel->channel;
+
+                $channelNo = ($isCustomContext && ! empty($channel->pivot?->channel_number))
+                    ? (int) $channel->pivot->channel_number
+                    : $channel->channel;
                 if (! $channelNo && ($autoIncrement || $idChannelBy === PlaylistChannelId::Number)) {
                     $channelNo = ++$channelNumber;
                 }
