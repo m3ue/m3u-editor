@@ -469,6 +469,9 @@ class M3uProxyApiController extends Controller
             'duration_streamed' => $durationStreamed,
         ]);
 
+        // Clean up Plex transcode session before transitioning to next programme
+        $service->cleanupTranscodeSession($network);
+
         // Update segment sequence for next programme
         $network->update([
             'broadcast_segment_sequence' => $finalSegment + 1,
@@ -477,6 +480,9 @@ class M3uProxyApiController extends Controller
             'broadcast_programme_id' => null,
             'broadcast_initial_offset_seconds' => null,
             'broadcast_error' => null,
+            'broadcast_fail_count' => 0,
+            'broadcast_last_exit_code' => null,
+            'broadcast_transcode_session_id' => null,
         ]);
 
         // Increment discontinuity sequence for transition
@@ -504,7 +510,21 @@ class M3uProxyApiController extends Controller
     }
 
     /**
-     * Handle broadcast failed callback - attempt recovery.
+     * Handle broadcast failed callback - attempt recovery with exit code awareness.
+     *
+     * Fatal exit codes (no retry):
+     *   127 = command not found (ffmpeg binary missing)
+     *   126 = permission denied on binary
+     *   125 = command itself fails (e.g. bad container setup)
+     *
+     * Transient exit codes (retry with backoff):
+     *   8  = generic FFmpeg error (often stream negotiation failure)
+     *   1  = generic error
+     *   69 = service unavailable
+     *   -1 = unknown / not reported
+     *
+     * Max retries: 5 with exponential backoff (10s, 20s, 40s, 80s, 120s).
+     * For 5XX server errors: longer base (15s, 30s, 60s, 120s, 120s).
      */
     protected function handleBroadcastFailed(Network $network, array $data, NetworkBroadcastService $service): void
     {
@@ -512,37 +532,100 @@ class M3uProxyApiController extends Controller
         $exitCode = $data['exit_code'] ?? -1;
         $finalSegment = $data['final_segment_number'] ?? 0;
 
+        $isFatal = in_array($exitCode, [125, 126, 127], true);
+        $maxRetries = 5;
+
         Log::warning('Broadcast failed via proxy', [
             'network_id' => $network->id,
             'network_name' => $network->name,
             'error' => $error,
             'exit_code' => $exitCode,
+            'fatal' => $isFatal,
             'final_segment' => $finalSegment,
         ]);
 
-        // Update network state with error
+        $failCount = ($network->broadcast_fail_count ?? 0) + 1;
+
+        // Clean up Plex transcode session (the old session is dead, free the slot)
+        $service->cleanupTranscodeSession($network);
+
+        // Update network state with error and retry tracking
         $network->update([
             'broadcast_segment_sequence' => max($finalSegment, $network->broadcast_segment_sequence ?? 0),
             'broadcast_started_at' => null,
             'broadcast_pid' => null,
             'broadcast_error' => $error,
+            'broadcast_fail_count' => $failCount,
+            'broadcast_last_failed_at' => now(),
+            'broadcast_last_exit_code' => $exitCode,
+            'broadcast_transcode_session_id' => null,
             // Keep programme reference for recovery
         ]);
 
-        // Attempt restart if broadcast was requested and programme is still valid
+        // Fatal exit code — stop retrying entirely
+        if ($isFatal) {
+            Log::error('Broadcast failed with fatal exit code — stopping retries', [
+                'network_id' => $network->id,
+                'exit_code' => $exitCode,
+                'error' => $error,
+            ]);
+
+            $network->update([
+                'broadcast_requested' => false,
+                'broadcast_error' => "Fatal error (exit code {$exitCode}): {$error}. Retries disabled — check your m3u-proxy container.",
+            ]);
+
+            return;
+        }
+
+        // Max retries exceeded — stop retrying
+        if ($failCount >= $maxRetries) {
+            Log::error('Broadcast exceeded max retries — stopping', [
+                'network_id' => $network->id,
+                'fail_count' => $failCount,
+                'max_retries' => $maxRetries,
+                'last_exit_code' => $exitCode,
+            ]);
+
+            $network->update([
+                'broadcast_requested' => false,
+                'broadcast_error' => "Failed after {$failCount} retries (last exit code {$exitCode}): {$error}",
+            ]);
+
+            return;
+        }
+
+        // Transient failure — retry with exponential backoff.
+        // The proxy has already burned through its own 3 rapid retries before
+        // calling this callback, so we start with a longer base delay to give
+        // the media server time to recover (especially for 5XX errors).
         $network->refresh();
         $currentProgramme = $network->getCurrentProgramme();
 
         if ($currentProgramme && $network->broadcast_requested) {
-            Log::info('Attempting broadcast recovery via proxy', [
+            // Acquire restart lock to prevent tick loop from also restarting
+            $network->update(['broadcast_restart_locked' => true]);
+
+            // Use a higher base for server errors (5XX) since the server is struggling
+            $isServerError = str_contains($error, '5XX') || str_contains($error, 'Server Error');
+            $baseDelay = $isServerError ? 15 : 10;
+            $backoffSeconds = min($baseDelay * (int) pow(2, $failCount - 1), 120);
+
+            Log::info('Attempting broadcast recovery via proxy with backoff', [
                 'network_id' => $network->id,
                 'programme_id' => $currentProgramme->id,
+                'fail_count' => $failCount,
+                'backoff_seconds' => $backoffSeconds,
             ]);
 
-            // Small delay before retry to avoid rapid restart loops
-            sleep(2);
+            sleep($backoffSeconds);
 
-            $service->start($network);
+            try {
+                $service->start($network);
+            } finally {
+                // Always release the lock
+                $network->update(['broadcast_restart_locked' => false]);
+            }
         }
     }
 }

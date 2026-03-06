@@ -469,7 +469,13 @@ class PlexService implements MediaServer
 
                         // Preferred flow: ask Plex's universal decision endpoint for the correct
                         // start URL (it will provide session, protocol, and other required params).
+                        //
+                        // IMPORTANT: The session ID must be generated BEFORE calling the decision
+                        // endpoint and included in its query parameters. Plex uses this call to
+                        // "prime" the transcode session on the server. If start.m3u8 is called
+                        // without a prior decision call using the same session, Plex returns 400.
                         try {
+                            $sessionId = bin2hex(random_bytes(8));
                             $decisionEndpoint = $this->baseUrl.'/video/:/transcode/universal/decision';
                             $decisionParams = [
                                 'path' => "/library/metadata/{$itemId}",
@@ -481,7 +487,13 @@ class PlexService implements MediaServer
                                 'fastSeek' => 1,
                                 'location' => 'lan',
                                 'hasMDE' => 1,
+                                'session' => $sessionId,
+                                'X-Plex-Client-Identifier' => 'm3u-proxy',
                             ];
+
+                            // Merge transcode params (bitrate, resolution) so the
+                            // decision endpoint actually applies the requested scaling.
+                            $decisionParams = array_merge($decisionParams, $transcodeParams);
 
                             // Include seek position if provided via StartTimeTicks
                             if ($request->has('StartTimeTicks')) {
@@ -531,23 +543,17 @@ class PlexService implements MediaServer
                                 }
                             }
 
-                            // If decision returned XML/200 but no redirect, construct start URL directly
+                            // If decision returned XML/200 but no redirect, construct start URL directly.
+                            // The decision call above (with session=$sessionId) has already "primed"
+                            // the transcode session on Plex. We MUST reuse the same session ID here.
                             // IMPORTANT: Do NOT make GET requests to start endpoints - that consumes the
                             // Plex session and causes HTTP 400 when FFmpeg tries to access the URL later.
                             if ($decisionResp->successful() && ! empty($decisionResp->body())) {
-                                $sessionId = bin2hex(random_bytes(8));
-
                                 // Build start URL directly - prefer HLS (start.m3u8) as it's more compatible with FFmpeg
                                 $startEndpoint = $this->baseUrl.'/video/:/transcode/universal/start.m3u8';
 
                                 $endpointParams = array_merge($decisionParams, [
-                                    'hasMDE' => 1,
-                                    'location' => 'lan',
-                                    'fastSeek' => 1,
-                                    'protocol' => 'hls',
-                                    'session' => $sessionId,
                                     'X-Plex-Token' => $this->apiKey,
-                                    'X-Plex-Client-Identifier' => 'm3u-proxy',
                                     'X-Plex-Client-Profile-Extra' => 'append-transcode-target-codec(type=videoProfile&context=streaming&videoCodec=h264&audioCodec=aac&protocol=hls)',
                                 ]);
 
@@ -600,6 +606,50 @@ class PlexService implements MediaServer
             ]);
 
             return '';
+        }
+    }
+
+    /**
+     * Stop an active Plex transcode session.
+     *
+     * This should be called when a broadcast is stopped to free up the
+     * transcode slot on the Plex server. Without this, the old session
+     * lingers and can cause 400 Bad Request errors when starting a new
+     * transcode session for the same content.
+     */
+    public function stopTranscodeSession(string $sessionId): bool
+    {
+        try {
+            $response = Http::timeout(10)
+                ->withHeaders([
+                    'X-Plex-Token' => $this->apiKey,
+                    'X-Plex-Client-Identifier' => 'm3u-proxy',
+                ])
+                ->get("{$this->baseUrl}/video/:/transcode/universal/stop", [
+                    'session' => $sessionId,
+                ]);
+
+            if ($response->successful()) {
+                Log::info('Plex transcode session stopped', [
+                    'session_id' => $sessionId,
+                ]);
+
+                return true;
+            }
+
+            Log::warning('Failed to stop Plex transcode session', [
+                'session_id' => $sessionId,
+                'status' => $response->status(),
+            ]);
+
+            return false;
+        } catch (Exception $e) {
+            Log::warning('Error stopping Plex transcode session (may already be stopped)', [
+                'session_id' => $sessionId,
+                'exception' => $e->getMessage(),
+            ]);
+
+            return false;
         }
     }
 
