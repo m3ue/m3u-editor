@@ -155,7 +155,11 @@ class ManualScheduleBuilder extends Page
         if ($time !== null && $time !== '') {
             // Pin to the specified local time, stored as UTC
             $pinnedUtc = Carbon::parse("{$date} {$time}", $tz)->utc();
-            $programme->update(['pinned_start_time' => $pinnedUtc]);
+            $programme->update([
+                'pinned_start_time' => $pinnedUtc,
+                'start_time' => $pinnedUtc,
+                'end_time' => $pinnedUtc->copy()->addSeconds($programme->duration_seconds),
+            ]);
         } else {
             // Unpin
             $programme->update(['pinned_start_time' => null]);
