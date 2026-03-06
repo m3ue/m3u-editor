@@ -204,8 +204,8 @@ class ProcessM3uImportSeriesEpisodes implements ShouldQueue
                 ->get();
 
             foreach ($seriesChunk as $series) {
-                // Pass dispatchSync: false to prevent per-series job dispatch
-                $this->fetchMetadataForSeries($series, $global_sync_settings, dispatchSync: false);
+                // Suppress per-series sync/TMDB dispatch — handled in bulk by CheckSeriesImportProgress
+                $this->fetchMetadataForSeries($series, $global_sync_settings, dispatchSync: false, dispatchTmdb: false);
                 $processedCount++;
             }
 
@@ -228,8 +228,9 @@ class ProcessM3uImportSeriesEpisodes implements ShouldQueue
      * Fetch metadata for a single series.
      *
      * @param  bool  $dispatchSync  Whether to dispatch sync job (false for bulk mode)
+     * @param  bool  $dispatchTmdb  Whether to dispatch TMDB fetch job (false for bulk mode)
      */
-    private function fetchMetadataForSeries($series, $settings, bool $dispatchSync = true)
+    private function fetchMetadataForSeries($series, $settings, bool $dispatchSync = true, bool $dispatchTmdb = true)
     {
         // Get the playlist
         $playlist = $series->playlist;
@@ -238,10 +239,11 @@ class ProcessM3uImportSeriesEpisodes implements ShouldQueue
         $shouldSync = $dispatchSync && $this->sync_stream_files;
 
         // Use provider throttling to limit concurrent requests and apply delay
-        $results = $this->withProviderThrottling(function () use ($series, $shouldSync) {
+        $results = $this->withProviderThrottling(function () use ($series, $shouldSync, $dispatchTmdb) {
             return $series->fetchMetadata(
                 refresh: $this->overwrite_existing,
-                sync: $shouldSync
+                sync: $shouldSync,
+                dispatchTmdb: $dispatchTmdb,
             );
         });
 

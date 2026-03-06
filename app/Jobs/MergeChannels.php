@@ -40,6 +40,13 @@ class MergeChannels implements ShouldQueue
     protected array $disabledGroupIds = [];
 
     /**
+     * Cache normalized priority order for scoring.
+     *
+     * @var array<int, string>|null
+     */
+    protected ?array $normalizedPriorityOrder = null;
+
+    /**
      * Create a new job instance.
      */
     public function __construct(
@@ -270,7 +277,7 @@ class MergeChannels implements ShouldQueue
     protected function calculateChannelScore($channel, array $playlistPriority): int
     {
         $score = 0;
-        $priorityOrder = $this->weightedConfig['priority_attributes'] ?? self::DEFAULT_PRIORITY_ORDER;
+        $priorityOrder = $this->getPriorityOrder();
 
         // Base multiplier decreases for each priority level
         $multiplier = count($priorityOrder) * 1000;
@@ -291,6 +298,52 @@ class MergeChannels implements ShouldQueue
         }
 
         return $score;
+    }
+
+    /**
+     * Get normalized priority order from config.
+     *
+     * Supports both string array format:
+     * ['playlist_priority', 'resolution']
+     * and object array format:
+     * [['attribute' => 'playlist_priority'], ['attribute' => 'resolution']]
+     *
+     * @return array<int, string>
+     */
+    protected function getPriorityOrder(): array
+    {
+        if ($this->normalizedPriorityOrder !== null) {
+            return $this->normalizedPriorityOrder;
+        }
+
+        $allowed = array_flip(self::DEFAULT_PRIORITY_ORDER);
+        $raw = $this->weightedConfig['priority_attributes'] ?? self::DEFAULT_PRIORITY_ORDER;
+
+        if (! is_array($raw) || empty($raw)) {
+            $this->normalizedPriorityOrder = self::DEFAULT_PRIORITY_ORDER;
+
+            return $this->normalizedPriorityOrder;
+        }
+
+        $normalized = [];
+        foreach ($raw as $item) {
+            $attribute = is_array($item) ? ($item['attribute'] ?? null) : $item;
+            if (! is_string($attribute)) {
+                continue;
+            }
+
+            $attribute = trim($attribute);
+            if ($attribute === '' || ! isset($allowed[$attribute])) {
+                continue;
+            }
+
+            $normalized[] = $attribute;
+        }
+
+        $normalized = array_values(array_unique($normalized));
+        $this->normalizedPriorityOrder = ! empty($normalized) ? $normalized : self::DEFAULT_PRIORITY_ORDER;
+
+        return $this->normalizedPriorityOrder;
     }
 
     /**

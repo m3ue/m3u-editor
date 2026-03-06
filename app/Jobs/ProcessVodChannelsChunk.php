@@ -63,7 +63,8 @@ class ProcessVodChannelsChunk implements ShouldQueue
         foreach ($channels->cursor() as $index => $channel) {
             try {
                 // Use provider throttling to limit concurrent requests and apply delay
-                $this->withProviderThrottling(fn () => $channel->fetchMetadata($xtream));
+                // skipTmdb=true: TMDB IDs are fetched in bulk from ProcessVodChannelsComplete
+                $this->withProviderThrottling(fn () => $channel->fetchMetadata($xtream, skipTmdb: true));
             } catch (\Exception $e) {
                 // Log the error and continue processing other channels
                 Log::error('Failed to process VOD data for channel ID '.$channel->id.' in chunk '.$this->chunkIndex.': '.$e->getMessage());

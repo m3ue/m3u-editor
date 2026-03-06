@@ -102,7 +102,7 @@ class Series extends Model
             || ! empty($this->metadata['imdb_id'] ?? null);
     }
 
-    public function fetchMetadata($refresh = false, $sync = true)
+    public function fetchMetadata($refresh = false, $sync = true, bool $dispatchTmdb = true)
     {
         try {
             $playlist = $this->playlist;
@@ -264,7 +264,7 @@ class Series extends Model
                 $this->update($update);
 
                 $jobs = [];
-                if ($settings->tmdb_auto_lookup_on_import && $this->enabled) {
+                if ($dispatchTmdb && $settings->tmdb_auto_lookup_on_import && $this->enabled) {
                     // If TMDB auto lookup enabled, dispatch job to fetch TMDB metadata for episodes
                     $jobs[] = new FetchTmdbIds(
                         seriesIds: [$this->id],

@@ -81,7 +81,7 @@ class ProcessM3uImportSeries implements ShouldQueue
                 playlist_id: $this->playlist->id,
                 overwrite_existing: false,
                 user_id: $this->playlist->user_id,
-                sync_stream_files: true,
+                sync_stream_files: (bool) $this->playlist->auto_sync_series_stream_files,
             ));
 
             Log::info('ProcessM3uImportSeries: Dispatched bulk series sync', [
@@ -113,7 +113,7 @@ class ProcessM3uImportSeries implements ShouldQueue
             ]);
 
             // Fire the playlist synced event
-            event(new SyncCompleted($playlist));
+            event(new SyncCompleted($this->playlist));
         }
     }
 }

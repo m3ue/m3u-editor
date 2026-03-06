@@ -59,20 +59,37 @@ class CheckSeriesImportProgress implements ShouldQueue
         ]);
 
         if ($seriesRemaining <= 0) {
-            // All done! Trigger STRM sync if needed
+            // All done! Trigger TMDB fetch and/or STRM sync if needed
             Log::info('Series Import: All metadata batches complete', [
                 'total_series' => $this->totalSeries,
+                'sync_stream_files' => $this->sync_stream_files,
             ]);
 
-            if ($this->sync_stream_files && $settings->stream_file_sync_enabled) {
-                Log::info('Series Import: Dispatching STRM sync');
-                dispatch(new SyncSeriesStrmFiles(
+            // Build post-processing chain: TMDB fetch (if enabled) → STRM sync (if enabled)
+            $postJobs = [];
+
+            if ($settings->tmdb_auto_lookup_on_import) {
+                Log::info('Series Import: Queuing bulk TMDB fetch for playlist');
+                $postJobs[] = new FetchTmdbIds(
+                    seriesPlaylistId: $this->playlist_id,
+                    overwriteExisting: $this->overwrite_existing,
+                    sendCompletionNotification: false,
+                );
+            }
+
+            if ($this->sync_stream_files) {
+                Log::info('Series Import: Queuing STRM sync');
+                $postJobs[] = new SyncSeriesStrmFiles(
                     series: null,
                     notify: true,
                     all_playlists: $this->all_playlists,
                     playlist_id: $this->playlist_id,
                     user_id: $this->user_id,
-                ));
+                );
+            }
+
+            if (! empty($postJobs)) {
+                Bus::chain($postJobs)->dispatch();
             }
 
             // Send completion notification

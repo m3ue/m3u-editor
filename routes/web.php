@@ -212,15 +212,30 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         ->name('api.channels.stability-test');
 
     // Group API routes
-    Route::get('groups/get', [\App\Http\Controllers\GroupController::class, 'index'])
-        ->name('api.groups.index');
-    Route::get('groups/{id}', [\App\Http\Controllers\GroupController::class, 'show'])
-        ->where('id', '[0-9]+')
-        ->name('api.groups.show');
+    Route::group(['prefix' => 'group'], function () {
+        Route::post('/', [\App\Http\Controllers\GroupController::class, 'store'])
+            ->name('api.groups.store');
+        Route::patch('{id}', [\App\Http\Controllers\GroupController::class, 'update'])
+            ->where('id', '[0-9]+')
+            ->name('api.groups.update');
+        Route::post('{id}/move-channels', [\App\Http\Controllers\GroupController::class, 'moveChannels'])
+            ->where('id', '[0-9]+')
+            ->name('api.groups.move-channels');
+        Route::delete('{id}', [\App\Http\Controllers\GroupController::class, 'destroy'])
+            ->where('id', '[0-9]+')
+            ->name('api.groups.destroy');
+        Route::get('get', [\App\Http\Controllers\GroupController::class, 'index'])
+            ->name('api.groups.index');
+        Route::get('{id}', [\App\Http\Controllers\GroupController::class, 'show'])
+            ->where('id', '[0-9]+')
+            ->name('api.groups.show');
+    });
 
     // Playlist API routes (authenticated)
     Route::get('playlist/{uuid}/stats', [\App\Http\Controllers\PlaylistController::class, 'stats'])
         ->name('api.playlist.stats');
+    Route::post('playlist/{uuid}/merge-channels', [\App\Http\Controllers\PlaylistController::class, 'mergeChannels'])
+        ->name('api.playlist.merge-channels');
 
     // Proxy API routes
     Route::get('proxy/status', [\App\Http\Controllers\ProxyController::class, 'status'])

@@ -110,10 +110,7 @@ ENV GIT_BRANCH=${GIT_BRANCH} \
     GIT_COMMIT=${GIT_COMMIT} \
     GIT_TAG=${GIT_TAG} \
     WWWGROUP="m3ue" \
-    WWWUSER="m3ue" \
-    # PHP/Laravel production settings
-    APP_ENV=production \
-    LOG_CHANNEL=stderr
+    WWWUSER="m3ue"
 
 # Add Alpine edge repositories and install ALL system packages in a single layer
 # This maximizes layer caching and reduces image size

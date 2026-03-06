@@ -706,6 +706,7 @@ class AppServiceProvider extends ServiceProvider
                     'user/',
                     'channel/',
                     'proxy/',
+                    'group/',
                     'player_api.php',
                 ]);
             })

@@ -4,7 +4,7 @@
             <img
                 src="{{ $asset->preview_url }}"
                 alt="{{ $asset->name }}"
-                class="p-2 w-auto max-h-20 rounded-lg border border-gray-200 object-contain bg-white dark:border-gray-700 dark:bg-gray-900"
+                class="w-auto max-h-80 rounded-lg border border-gray-200 object-contain bg-white dark:border-gray-700 dark:bg-gray-900"
             />
         @else
             <div class="rounded-lg border border-dashed border-gray-300 p-6 text-sm text-gray-600 dark:border-gray-700 dark:text-gray-300">

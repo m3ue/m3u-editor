@@ -206,9 +206,7 @@ class Channel extends Model
         }
         try {
             $url = $this->url_custom ?? $this->url;
-            $process = SymfonyProcess::fromShellCommandline(
-                "ffprobe -v quiet -print_format json -show_streams {$url}"
-            );
+            $process = new SymfonyProcess(['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_streams', $url]);
             $process->setTimeout(10);
             $output = '';
             $errors = '';
@@ -263,7 +261,7 @@ class Channel extends Model
         return [];
     }
 
-    public function fetchMetadata($xtream = null, $refresh = false)
+    public function fetchMetadata($xtream = null, $refresh = false, bool $skipTmdb = false)
     {
         try {
             $playlist = $this->playlist;
@@ -321,12 +319,12 @@ class Channel extends Model
 
             $this->update($update);
 
-            if ($settings->tmdb_auto_lookup_on_import && $this->enabled) {
+            if (! $skipTmdb && $settings->tmdb_auto_lookup_on_import && $this->enabled) {
                 dispatch(new FetchTmdbIds(
                     vodChannelIds: [$this->id],
                     overwriteExisting: $refresh ?? false,
                     sendCompletionNotification: false,
-                ));
+                ))->afterCommit();
             }
 
             return true;

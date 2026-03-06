@@ -446,7 +446,9 @@ class SyncVodStrmFiles implements ShouldQueue
             ];
 
             // Use intelligent sync with pre-loaded cache - handles create, rename, and URL updates
-            StrmFileMapping::syncFileWithCache(
+            // Capture the returned mapping so the NFO generator can use it for hash optimization,
+            // since $mappingCache was built before this sync and won't contain newly-created entries.
+            $channelMapping = StrmFileMapping::syncFileWithCache(
                 $channel,
                 $syncLocation,
                 $filePath,
@@ -457,7 +459,6 @@ class SyncVodStrmFiles implements ShouldQueue
 
             // Generate movie NFO file if enabled (pass mapping for hash optimization)
             if ($nfoService) {
-                $channelMapping = $mappingCache?->get($channel->id);
                 $nfoOptions = [
                     'name_filter_enabled' => $nameFilterEnabled,
                     'name_filter_patterns' => $nameFilterPatterns,

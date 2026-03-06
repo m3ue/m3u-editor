@@ -1969,26 +1969,35 @@ class PlaylistResource extends Resource
                 ->columnSpanFull()
                 ->collapsible()
                 ->collapsed($creating)
-                ->columns(2)
+                ->columns(3)
                 ->schema([
                     Toggle::make('auto_fetch_series_metadata')
-                        ->label('Fetch metadata & sync stream files')
+                        ->label('Fetch metadata')
                         ->inline(false)
                         ->hintIcon(
                             'heroicon-m-question-mark-circle',
-                            tooltip: 'Recommend leaving this disabled, unless you are including Series in the M3U output, or syncing stream files. When accessing via the Xtream API, metadata will be automatically fetched'
+                            tooltip: 'Recommend leaving this disabled unless you are including Series in the M3U output or syncing stream files. When accessing via the Xtream API, metadata will be automatically fetched.'
                         )
                         ->default(false)
-                        ->helperText('This will only fetch metadata/sync stream files for enabled series. When disabled, series metadata will be fetched automatically when access via the Xtream API for this playlist.'),
+                        ->helperText('Fetches episode metadata for enabled series after each sync. Required for stream file sync.'),
+                    Toggle::make('auto_sync_series_stream_files')
+                        ->label('Sync stream files')
+                        ->inline(false)
+                        ->hintIcon(
+                            'heroicon-m-question-mark-circle',
+                            tooltip: 'Requires "Fetch metadata" to be enabled. Stream files will be generated after metadata has been fully fetched.'
+                        )
+                        ->default(false)
+                        ->helperText('Generates .strm files for enabled series after metadata fetch completes. Requires "Fetch metadata" to be enabled.'),
                     Toggle::make('include_series_in_m3u')
                         ->label('Include series in M3U output')
                         ->inline(false)
                         ->hintIcon(
                             'heroicon-m-question-mark-circle',
-                            tooltip: 'Enable this to output your enabled series in the M3U file. It is recommended to enable the "Auto-fetch series metadata" option when enabled, otherwise you will need to manually fetch metadata for each series.'
+                            tooltip: 'Enable this to output your enabled series in the M3U file. It is recommended to enable the "Fetch metadata" option when enabled, otherwise you will need to manually fetch metadata for each series.'
                         )
                         ->default(false)
-                        ->helperText('When enabled, series will be included in the M3U output. It is recommended to enable the "Auto-fetch series metadata" option when enabled.'),
+                        ->helperText('When enabled, series will be included in the M3U output. It is recommended to enable the "Fetch metadata" option when enabled.'),
                 ])->hidden(fn (Get $get): bool => ! $get('xtream')),
 
             Section::make('VOD Processing')

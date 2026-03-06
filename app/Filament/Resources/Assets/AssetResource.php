@@ -51,7 +51,7 @@ class AssetResource extends Resource
                     ->label('Preview')
                     ->getStateUsing(fn (Asset $record): ?string => $record->is_image ? $record->preview_url : null)
                     ->square()
-                    ->size(40)
+                    ->extraImgAttributes(fn ($record): array => ['style' => 'height:2.5rem; width:auto; border-radius:4px;'])
                     ->defaultImageUrl(url('/placeholder.png')),
                 IconColumn::make('is_image')
                     ->label('Img')

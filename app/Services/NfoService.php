@@ -522,8 +522,9 @@ class NfoService
             $newHash = hash('sha256', $content);
 
             // If we have a mapping with a stored hash, compare hashes instead of reading file
-            if ($mapping && $mapping->nfo_hash === $newHash) {
-                // Hash matches - content is identical, skip write
+            // Also verify the file actually exists - if it was deleted, we must rewrite it regardless of hash match
+            if ($mapping && $mapping->nfo_hash === $newHash && file_exists($path)) {
+                // Hash matches and file exists - content is identical, skip write
                 return true;
             }
 

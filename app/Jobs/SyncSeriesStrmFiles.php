@@ -192,7 +192,7 @@ class SyncSeriesStrmFiles implements ShouldQueue
         foreach (array_chunk($seriesIds, 10) as $chunkIds) {
             $seriesChunk = Series::query()
                 ->whereIn('id', $chunkIds)
-                ->with(['enabled_episodes', 'playlist', 'user', 'category'])
+                ->with(['enabled_episodes', 'playlist.user', 'user', 'category', 'streamFileSetting', 'category.streamFileSetting'])
                 ->get();
 
             foreach ($seriesChunk as $series) {
@@ -588,8 +588,17 @@ class SyncSeriesStrmFiles implements ShouldQueue
             // Cache frequently accessed values to avoid repeated property lookups in the episode loop
             $seriesReleaseDate = $series->release_date;
             $seriesMetadata = $series->metadata ?? [];
-            $playlistUser = $playlist->user;
-            $playlistUuid = $playlist->uuid;
+            $playlistUser = $playlist?->user;
+            $playlistUuid = $playlist?->uuid;
+
+            if (! $playlistUser || ! $playlistUuid) {
+                Log::warning('STRM Sync: Series has no associated playlist user, skipping episode URL generation', [
+                    'series_id' => $series->id,
+                    'playlist_id' => $series->playlist_id,
+                ]);
+
+                return;
+            }
 
             // Loop through each episode
             foreach ($episodes as $ep) {
@@ -664,7 +673,9 @@ class SyncSeriesStrmFiles implements ShouldQueue
                 ];
 
                 // Use intelligent sync with pre-loaded cache - handles create, rename, and URL updates
-                StrmFileMapping::syncFileWithCache(
+                // Capture the returned mapping so the NFO generator can use it for hash optimization,
+                // since $mappingCache was built before this sync and won't contain newly-created entries.
+                $episodeMapping = StrmFileMapping::syncFileWithCache(
                     $ep,
                     $syncLocation,
                     $filePath,
@@ -676,7 +687,6 @@ class SyncSeriesStrmFiles implements ShouldQueue
                 // Generate episode NFO file if enabled (pass mapping for hash optimization)
                 // Pass name filter settings for consistent title filtering
                 if ($nfoService) {
-                    $episodeMapping = $mappingCache[$ep->id] ?? null;
                     $nfoService->generateEpisodeNfo($ep, $series, $filePath, $episodeMapping, $nameFilterEnabled, $nameFilterPatterns);
                 }
             }

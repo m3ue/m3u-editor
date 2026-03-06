@@ -109,9 +109,7 @@ class Episode extends Model
     {
         try {
             $url = $this->url;
-            $process = SymfonyProcess::fromShellCommandline(
-                "ffprobe -v quiet -print_format json -show_streams {$url}"
-            );
+            $process = new SymfonyProcess(['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_streams', $url]);
             $process->setTimeout(10);
             $output = '';
             $errors = '';

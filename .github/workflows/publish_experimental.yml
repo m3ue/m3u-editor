@@ -193,13 +193,8 @@ jobs:
       - name: Get previous experimental tag
         id: prev_tag
         run: |
-          PREV_TAG=$(git tag -l "v*-exp" --sort=-version:refname | head -n 1)
-          if [ -z "$PREV_TAG" ]; then
-            PREV_TAG=$(git tag -l "v*-experimental" --sort=-version:refname | head -n 1)
-          fi
-          if [ -z "$PREV_TAG" ]; then
-            PREV_TAG=$(git tag -l "v*" --sort=-version:refname | head -n 1)
-          fi
+          CURRENT_TAG="v${{ needs.get-version.outputs.version }}-exp"
+          PREV_TAG=$(git tag -l "v*-exp" --sort=-creatordate | grep -v "^${CURRENT_TAG}$" | head -n 1)
           if [ -z "$PREV_TAG" ]; then
             PREV_TAG=$(git rev-list --max-parents=0 HEAD)
           fi

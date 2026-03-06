@@ -131,6 +131,10 @@ class ProcessVodChannels implements ShouldQueue
                 'vod_progress' => 100,
             ]);
 
+            // Still dispatch the completion job so TMDB fetch and stream file sync run
+            // even when there are no new channels to fetch metadata for.
+            dispatch(new ProcessVodChannelsComplete(playlist: $playlist));
+
             return;
         }
 
