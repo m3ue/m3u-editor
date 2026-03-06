@@ -2,6 +2,23 @@
 
 set -euo pipefail
 
+IMAGE_NAME="${IMAGE_NAME:-m3u-editor:local}"
+PUSH_EXPERIMENTAL="${PUSH_EXPERIMENTAL:-0}"
+
+DOCKER_HUB_REPO="grimothy/m3u-editor"
+EXPERIMENTAL_TAG="${DOCKER_HUB_REPO}:experimental"
+
+log() {
+	echo "==> $1"
+}
+
+# Ask whether to push experimental image to Docker Hub
+read -rp "Push image to Docker Hub as ${EXPERIMENTAL_TAG}? [y/N]: " push_answer
+if [[ "${push_answer,,}" =~ ^(y|yes)$ ]]; then
+	PUSH_EXPERIMENTAL=1
+	log "Will push to Docker Hub as ${EXPERIMENTAL_TAG} after build"
+fi
+
 ENV_FILE=".env.docker"
 
 # We'll discover available compose files at runtime. Matches:
@@ -90,6 +107,14 @@ run_compose() {
 	local file="$1"
 	echo "Building ${file} (no-cache) and starting..."
 	docker compose --env-file "$ENV_FILE" -f "$file" build --no-cache --build-arg GIT_BRANCH=local --build-arg GIT_COMMIT=local --build-arg GIT_TAG=local
+
+	if [ "$PUSH_EXPERIMENTAL" -eq 1 ]; then
+		log "Tagging image as ${EXPERIMENTAL_TAG}"
+		docker tag "$IMAGE_NAME" "$EXPERIMENTAL_TAG"
+		log "Pushing image: ${EXPERIMENTAL_TAG}"
+		docker push "$EXPERIMENTAL_TAG"
+	fi
+
 	docker compose --env-file "$ENV_FILE" -f "$file" up --remove-orphans
 }
 

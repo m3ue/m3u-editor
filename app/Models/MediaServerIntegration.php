@@ -79,6 +79,8 @@ class MediaServerIntegration extends Model
      */
     protected $hidden = [
         'api_key',
+        'webdav_username',
+        'webdav_password',
     ];
 
     /**
@@ -171,12 +173,29 @@ class MediaServerIntegration extends Model
     }
 
     /**
+     * Check if this is a WebDAV media integration.
+     */
+    public function isWebDav(): bool
+    {
+        return $this->type === 'webdav';
+    }
+
+    /**
      * Check if this integration requires network connectivity.
      * Local media does not require network connectivity.
      */
     public function requiresNetwork(): bool
     {
         return ! $this->isLocal();
+    }
+
+    /**
+     * Check if this integration uses local-style path configuration.
+     * Both local and webdav use the same path configuration structure.
+     */
+    public function usesLocalPathConfig(): bool
+    {
+        return $this->isLocal() || $this->isWebDav();
     }
 
     /**

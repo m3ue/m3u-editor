@@ -14,6 +14,7 @@ class MediaServerService
             'emby', 'jellyfin' => new EmbyJellyfinService($integration),
             'plex' => new PlexService($integration),
             'local' => new LocalMediaService($integration),
+            'webdav' => new WebDavMediaService($integration),
             default => throw new InvalidArgumentException("Unsupported media server type: {$integration->type}"),
         };
     }

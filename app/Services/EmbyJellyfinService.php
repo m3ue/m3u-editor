@@ -426,9 +426,15 @@ class EmbyJellyfinService implements MediaServer
 
         // Base parameters
         $params = [
-            'static' => 'true',
             'api_key' => $this->apiKey,
         ];
+
+        // static=true means "send file as-is, no transcoding". Only use it when
+        // no server-side transcode options have been requested; otherwise the
+        // transcode parameters (VideoBitrate, MaxWidth, etc.) would be ignored.
+        if (empty($transcodeOptions)) {
+            $params['static'] = 'true';
+        }
 
         // Forward relevant parameters from the incoming request
         $forwardParams = ['StartTimeTicks', 'AudioStreamIndex', 'SubtitleStreamIndex'];

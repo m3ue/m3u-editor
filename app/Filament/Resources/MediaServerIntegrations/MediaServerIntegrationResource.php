@@ -145,18 +145,22 @@ class MediaServerIntegrationResource extends Resource
         return [
             'Connection' => [
                 Section::make('Server Configuration')
-                    ->description(fn (callable $get) => $get('type') === 'local'
-                        ? 'Configure your local media library paths'
-                        : 'Configure your media server connection')
+                    ->description(fn (callable $get) => match ($get('type')) {
+                        'local' => 'Configure your local media library paths',
+                        'webdav' => 'Configure your WebDAV server connection and media library paths',
+                        default => 'Configure your media server connection',
+                    })
                     ->collapsible(! $creating)
                     ->collapsed(! $creating)
                     ->schema([
                         Grid::make(2)->schema([
                             TextInput::make('name')
                                 ->label('Display Name')
-                                ->placeholder(fn (callable $get) => $get('type') === 'local'
-                                    ? 'e.g., My Local Movies'
-                                    : 'e.g., Living Room Jellyfin')
+                                ->placeholder(fn (callable $get) => match ($get('type')) {
+                                    'local' => 'e.g., My Local Movies',
+                                    'webdav' => 'e.g., My NAS Media',
+                                    default => 'e.g., Living Room Jellyfin',
+                                })
                                 ->required()
                                 ->maxLength(255),
 
@@ -167,6 +171,7 @@ class MediaServerIntegrationResource extends Resource
                                     'jellyfin' => 'Jellyfin',
                                     'plex' => 'Plex',
                                     'local' => 'Local Media',
+                                    'webdav' => 'WebDAV',
                                 ])
                                 ->required()
                                 ->default('emby')
@@ -180,15 +185,20 @@ class MediaServerIntegrationResource extends Resource
                             TextInput::make('host')
                                 ->label('Host / IP Address')
                                 ->prefix(fn (callable $get) => $get('ssl') ? 'https://' : 'http://')
-                                ->placeholder('192.168.1.100 or media.example.com')
+                                ->placeholder(fn (callable $get) => $get('type') === 'webdav'
+                                    ? '192.168.1.100 or nas.example.com'
+                                    : '192.168.1.100 or media.example.com')
                                 ->required(fn (callable $get) => $get('type') !== 'local')
                                 ->maxLength(255),
 
                             TextInput::make('port')
                                 ->label('Port')
                                 ->numeric()
-                                ->default(8096)
-                                ->helperText('e.g., 8096 for Emby/Jellyfin, 32400 for Plex')
+                                ->default(fn (callable $get) => $get('type') === 'webdav' ? 5005 : 8096)
+                                ->helperText(fn (callable $get) => match ($get('type')) {
+                                    'webdav' => 'e.g., 5005 for Synology, 80/443 for standard WebDAV',
+                                    default => 'e.g., 8096 for Emby/Jellyfin, 32400 for Plex',
+                                })
                                 ->required(fn (callable $get) => $get('type') !== 'local')
                                 ->minValue(1)
                                 ->maxValue(65535),
@@ -201,11 +211,32 @@ class MediaServerIntegrationResource extends Resource
                                 ->default(false),
                         ])->visible(fn (callable $get) => $get('type') !== 'local'),
 
+                        // WebDAV authentication (username/password)
+                        Grid::make(2)->schema([
+                            TextInput::make('webdav_username')
+                                ->label('WebDAV Username')
+                                ->placeholder('username')
+                                ->helperText('Username for WebDAV authentication'),
+
+                            TextInput::make('webdav_password')
+                                ->label('WebDAV Password')
+                                ->password()
+                                ->revealable()
+                                ->dehydrateStateUsing(fn ($state, $record) => filled($state) ? $state : $record?->webdav_password)
+                                ->helperText(function (string $operation) {
+                                    if ($operation === 'edit') {
+                                        return 'Leave blank to keep existing password';
+                                    }
+
+                                    return 'Password for WebDAV authentication';
+                                }),
+                        ])->visible(fn (callable $get) => $get('type') === 'webdav'),
+
                         TextInput::make('api_key')
                             ->label('API Key/Token')
                             ->password()
                             ->revealable()
-                            ->required(fn (string $operation, callable $get): bool => $operation === 'create' && $get('type') !== 'local')
+                            ->required(fn (string $operation, callable $get): bool => $operation === 'create' && ! in_array($get('type'), ['local', 'webdav']))
                             ->dehydrateStateUsing(fn ($state, $record) => filled($state) ? $state : $record?->api_key)
                             ->helperText(function (string $operation, callable $get) {
                                 if ($operation === 'edit') {
@@ -214,13 +245,13 @@ class MediaServerIntegrationResource extends Resource
 
                                 return match ($get('type')) {
                                     'plex' => new HtmlString('See <a class="text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300" href="https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/" target="_blank">Plex Docs</a> for instructions on finding your token'),
-                                    'local' => 'Not required for local media',
+                                    'local', 'webdav' => 'Not required for local media or WebDAV',
                                     default => 'Generate an API key in your media server\'s dashboard under Settings → API Keys',
                                 };
-                            })->visible(fn (callable $get) => $get('type') !== 'local'),
+                            })->visible(fn (callable $get) => ! in_array($get('type'), ['local', 'webdav'])),
 
                         Actions::make(self::getServerActions())
-                            ->visible(fn (callable $get) => $get('type') !== 'local')
+                            ->visible(fn (callable $get) => ! in_array($get('type'), ['local', 'webdav']))
                             ->fullWidth(),
                     ]),
             ],
@@ -259,13 +290,19 @@ class MediaServerIntegrationResource extends Resource
                     ]),
 
                 // Local Media Configuration Section
-                Section::make('Local Media Libraries')
-                    ->description(new HtmlString(
-                        '<p>Configure paths to your local media files.</p>'.
-                        '<p class="mt-2 text-warning-600 dark:text-warning-400"><strong>Important:</strong> These paths must be accessible within the Docker container. '.
-                        'Mount your media directories in your <code>docker-compose.yml</code> file, e.g.:</p>'.
-                        '<pre class="mt-1 text-xs bg-gray-100 dark:bg-gray-800 p-2 rounded">volumes:'."\n".'  - /path/on/host/movies:/media/movies'."\n".'  - /path/on/host/tvshows:/media/tvshows</pre>'
-                    ))
+                Section::make(fn (callable $get) => $get('type') === 'webdav' ? 'WebDAV Media Libraries' : 'Local Media Libraries')
+                    ->description(fn (callable $get) => $get('type') === 'webdav'
+                        ? new HtmlString(
+                            '<p>Configure paths to your media files on the WebDAV server.</p>'.
+                            '<p class="mt-2"><strong>Example paths:</strong> <code>/movies</code>, <code>/tvshows</code>, <code>/media/movies</code></p>'
+                        )
+                        : new HtmlString(
+                            '<p>Configure paths to your local media files.</p>'.
+                            '<p class="mt-2 text-warning-600 dark:text-warning-400"><strong>Important:</strong> These paths must be accessible within the Docker container. '.
+                            'Mount your media directories in your <code>docker-compose.yml</code> file, e.g.:</p>'.
+                            '<pre class="mt-1 text-xs bg-gray-100 dark:bg-gray-800 p-2 rounded">volumes:'."\n".'  - /path/on/host/movies:/media/movies'."\n".'  - /path/on/host/tvshows:/media/tvshows</pre>'
+                        )
+                    )
                     ->schema([
                         Repeater::make('local_media_paths')
                             ->label('Media Library Paths')
@@ -276,10 +313,12 @@ class MediaServerIntegrationResource extends Resource
                                     ->required(),
 
                                 TextInput::make('path')
-                                    ->label('Container Path')
-                                    ->placeholder('/media/movies')
+                                    ->label(fn (callable $get) => $get('../../type') === 'webdav' ? 'WebDAV Path' : 'Container Path')
+                                    ->placeholder(fn (callable $get) => $get('../../type') === 'webdav' ? '/movies' : '/media/movies')
                                     ->required()
-                                    ->helperText('Path inside the Docker container'),
+                                    ->helperText(fn (callable $get) => $get('../../type') === 'webdav'
+                                        ? 'Path on the WebDAV server'
+                                        : 'Path inside the Docker container'),
 
                                 Select::make('type')
                                     ->label('Content Type')
@@ -306,7 +345,7 @@ class MediaServerIntegrationResource extends Resource
 
                             Toggle::make('auto_fetch_metadata')
                                 ->label('Auto-Fetch Metadata')
-                                ->helperText('Automatically lookup TMDB metadata after sync completes')
+                                ->helperText('Automatically lookup TMDB metadata after sync completes (Local & WebDAV)')
                                 ->default(true),
                         ]),
 
@@ -329,7 +368,7 @@ class MediaServerIntegrationResource extends Resource
                             ->helperText('File extensions to scan for (without dots)'),
 
                         Actions::make(self::getLocalActions())->fullWidth(),
-                    ])->visible(fn (callable $get) => $get('type') === 'local'),
+                    ])->visible(fn (callable $get) => in_array($get('type'), ['local', 'webdav'])),
 
                 Section::make('Library Selection')
                     ->description('Select which libraries to import from your media server')
@@ -345,8 +384,8 @@ class MediaServerIntegrationResource extends Resource
                                     $importSeries = $get('import_series');
                                     $type = $get('type');
 
-                                    // For local media, paths are configured separately
-                                    if ($type === 'local') {
+                                    // For local media and webdav, paths are configured separately
+                                    if (in_array($type, ['local', 'webdav'])) {
                                         return;
                                     }
 
@@ -363,7 +402,7 @@ class MediaServerIntegrationResource extends Resource
                                 $type = $get('type');
 
                                 if (empty($libraries)) {
-                                    $buttonLabel = $type === 'local'
+                                    $buttonLabel = in_array($type, ['local', 'webdav'])
                                         ? 'Scan & Discover Libraries'
                                         : 'Test Connection & Discover Libraries';
 
@@ -421,11 +460,11 @@ class MediaServerIntegrationResource extends Resource
                             ->columns(1)
                             ->bulkToggleable()
                             ->live()
-                            ->required(fn (callable $get) => $get('enabled') && ($get('import_movies') || $get('import_series')) && $get('type') !== 'local')
+                            ->required(fn (callable $get) => $get('enabled') && ($get('import_movies') || $get('import_series')) && ! in_array($get('type'), ['local', 'webdav']))
                             ->validationMessages([
                                 'required' => 'Please select at least one library to import.',
                             ]),
-                    ])->visible(fn (callable $get) => $get('type') !== 'local'),
+                    ])->visible(fn (callable $get) => ! in_array($get('type'), ['local', 'webdav'])),
             ],
             'Schedule' => [
                 Section::make('Sync Schedule')
@@ -600,6 +639,7 @@ class MediaServerIntegrationResource extends Resource
                     ->badge()
                     ->formatStateUsing(fn (string $state): string => match ($state) {
                         'local' => 'Local Media',
+                        'webdav' => 'WebDAV',
                         default => ucfirst($state),
                     })
                     ->color(fn (string $state): string => match ($state) {
@@ -607,14 +647,17 @@ class MediaServerIntegrationResource extends Resource
                         'jellyfin' => 'info',
                         'plex' => 'warning',
                         'local' => 'gray',
+                        'webdav' => 'purple',
                         default => 'gray',
                     }),
 
                 TextColumn::make('host')
                     ->label('Server')
-                    ->formatStateUsing(fn ($record): string => $record->type === 'local'
-                        ? 'Local filesystem'
-                        : "{$record->host}:{$record->port}")
+                    ->formatStateUsing(fn ($record): string => match ($record->type) {
+                        'local' => 'Local filesystem',
+                        'webdav' => "{$record->host}:{$record->port}",
+                        default => "{$record->host}:{$record->port}",
+                    })
                     ->toggleable()
                     ->copyable(),
 

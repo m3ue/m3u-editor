@@ -31,6 +31,13 @@ class NetworkScheduleService
      */
     public function generateSchedule(Network $network, ?Carbon $startFrom = null): int
     {
+        // Manual schedules are managed by the Schedule Builder UI, not auto-generated
+        if ($network->schedule_type === 'manual') {
+            Log::info("Skipping auto-generation for manual schedule network {$network->name}");
+
+            return 0;
+        }
+
         $startFrom = $startFrom ?? Carbon::now();
         $scheduleWindowDays = $network->schedule_window_days ?? self::DEFAULT_SCHEDULE_WINDOW_DAYS;
         $endAt = $startFrom->copy()->addDays($scheduleWindowDays);
@@ -278,6 +285,7 @@ class NetworkScheduleService
         return match ($network->schedule_type) {
             'shuffle' => $this->shuffleContent($networkContent, $network),
             'sequential' => $networkContent->sortBy('sort_order')->pluck('contentable')->filter(),
+            'manual' => collect(), // Manual schedules are managed via Schedule Builder
             default => $networkContent->sortBy('sort_order')->pluck('contentable')->filter(),
         };
     }
@@ -503,7 +511,9 @@ class NetworkScheduleService
      */
     public function regenerateStaleSchedules(): void
     {
-        $networks = Network::where('enabled', true)->get();
+        $networks = Network::where('enabled', true)
+            ->where('schedule_type', '!=', 'manual')
+            ->get();
 
         foreach ($networks as $network) {
             if ($network->needsScheduleRegeneration()) {

@@ -208,6 +208,54 @@ it('returns custom video extensions when set', function () {
     expect($extensions)->not->toContain('avi');
 });
 
+it('uses library name as default genre for local movies', function () {
+    $basePath = '/tmp/test-media-genre-movies';
+    \Illuminate\Support\Facades\File::ensureDirectoryExists($basePath);
+    \Illuminate\Support\Facades\File::put($basePath.'/Test.Movie.2024.mkv', '');
+
+    $integration = MediaServerIntegration::create([
+        'name' => 'Local Media',
+        'type' => 'local',
+        'user_id' => $this->user->id,
+        'local_media_paths' => [
+            ['path' => $basePath, 'type' => 'movies', 'name' => 'Action'],
+        ],
+    ]);
+
+    $service = new \App\Services\LocalMediaService($integration);
+    $movies = $service->fetchMovies();
+
+    expect($movies)->toHaveCount(1);
+    expect($movies->first()['Genres'])->toBe(['Action']);
+
+    \Illuminate\Support\Facades\File::deleteDirectory($basePath);
+});
+
+it('uses library name as default genre for local series', function () {
+    $basePath = '/tmp/test-media-genre-series';
+    $seriesPath = $basePath.'/Breaking Bad/Season 1';
+
+    \Illuminate\Support\Facades\File::ensureDirectoryExists($seriesPath);
+    \Illuminate\Support\Facades\File::put($seriesPath.'/Breaking.Bad.S01E01.mkv', '');
+
+    $integration = MediaServerIntegration::create([
+        'name' => 'Local Media',
+        'type' => 'local',
+        'user_id' => $this->user->id,
+        'local_media_paths' => [
+            ['path' => $basePath, 'type' => 'tvshows', 'name' => 'Drama'],
+        ],
+    ]);
+
+    $service = new \App\Services\LocalMediaService($integration);
+    $series = $service->fetchSeries();
+
+    expect($series)->toHaveCount(1);
+    expect($series->first()['Genres'])->toBe(['Drama']);
+
+    \Illuminate\Support\Facades\File::deleteDirectory($basePath);
+});
+
 // Default Attributes Tests
 
 it('has correct default values for local media fields', function () {
@@ -693,4 +741,47 @@ it('does not dispatch FetchTmdbIds job for non-local integrations', function () 
     $method->invoke($job, $integration, $playlist);
 
     Queue::assertNotPushed(\App\Jobs\FetchTmdbIds::class);
+});
+
+it('dispatches FetchTmdbIds job for webdav integrations', function () {
+    Queue::fake([\App\Jobs\FetchTmdbIds::class]);
+
+    $this->mock(\App\Services\TmdbService::class, function ($mock) {
+        $mock->shouldReceive('isConfigured')->andReturn(true);
+    });
+
+    $integration = MediaServerIntegration::withoutEvents(function () {
+        return MediaServerIntegration::create([
+            'name' => 'WebDAV Server',
+            'type' => 'webdav',
+            'host' => 'webdav.local',
+            'port' => 80,
+            'user_id' => $this->user->id,
+            'auto_fetch_metadata' => true,
+        ]);
+    });
+
+    $playlist = \App\Models\Playlist::withoutEvents(function () {
+        return \App\Models\Playlist::factory()->create([
+            'user_id' => $this->user->id,
+        ]);
+    });
+
+    $job = new SyncMediaServer($integration->id);
+
+    $reflection = new ReflectionClass($job);
+    $statsProperty = $reflection->getProperty('stats');
+    $statsProperty->setValue($job, [
+        'movies_synced' => 4,
+        'series_synced' => 2,
+        'errors' => [],
+    ]);
+
+    $method = $reflection->getMethod('dispatchMetadataLookup');
+    $method->invoke($job, $integration, $playlist);
+
+    Queue::assertPushed(\App\Jobs\FetchTmdbIds::class, function ($job) use ($playlist) {
+        return $job->vodPlaylistId === $playlist->id
+            && $job->seriesPlaylistId === $playlist->id;
+    });
 });

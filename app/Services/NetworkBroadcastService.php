@@ -27,9 +27,16 @@ class NetworkBroadcastService
 
     public function __construct()
     {
-        // Initialize the M3uProxyService
-        // We'll use this to communicate with the proxy for broadcast management
         $this->proxyService = new M3uProxyService;
+    }
+
+    protected function getProxyService(): M3uProxyService
+    {
+        if (! isset($this->proxyService)) {
+            $this->proxyService = new M3uProxyService;
+        }
+
+        return $this->proxyService;
     }
 
     /**
@@ -171,8 +178,12 @@ class NetworkBroadcastService
         $result = $this->startViaProxy($network, $streamUrl, $seekPosition, $remainingDuration, $programme);
 
         if ($result === true) {
-            // Success - clear any previous error
-            $network->update(['broadcast_error' => null]);
+            // Success - clear any previous error and reset retry counters
+            $network->update([
+                'broadcast_error' => null,
+                'broadcast_fail_count' => 0,
+                'broadcast_last_exit_code' => null,
+            ]);
         } elseif ($result === null) {
             // Transient failure (proxy not reachable) - keep broadcast_requested = true
             // so the next tick will retry. Don't clear the request flag.
@@ -202,7 +213,7 @@ class NetworkBroadcastService
         $addDiscontinuity = $startNumber > 0;
 
         // Get the callback URL
-        $callbackUrl = $this->proxyService->getBroadcastCallbackUrl();
+        $callbackUrl = $this->getProxyService()->getBroadcastCallbackUrl();
 
         // Only trust URL-based seeking when using server-side transcoding (TranscodeMode::Server).
         // For direct streams (static=true), media servers like Emby/Jellyfin ignore StartTimeTicks,
@@ -248,38 +259,58 @@ class NetworkBroadcastService
             'callback_url' => $callbackUrl,
         ];
 
-        // Attach provider-specific headers if we can determine them (e.g., Plex requires X-Plex-* headers)
+        // Attach provider-specific headers for Plex.
+        // IMPORTANT: For direct file downloads (TranscodeMode::Direct / Local), Plex returns
+        // 503 if X-Plex-Client-Identifier is present — it tries to manage a playback session
+        // for the client but has no active session for a raw file request.
+        // Only send full Plex session headers when using server-side transcoding.
         try {
             $integration = $network->mediaServerIntegration;
             if ($integration && $integration->isPlex()) {
                 $parsed = parse_url($streamUrl);
                 parse_str($parsed['query'] ?? '', $qs);
 
-                $headers = [
-                    'X-Plex-Product' => 'Plex Web',
-                    'X-Plex-Client-Identifier' => 'm3u-proxy',
-                    'X-Plex-Platform' => 'Chrome',
-                    'X-Plex-Device' => 'OSX',
-                ];
+                $isServerTranscode = ($network->transcode_mode ?? null) === TranscodeMode::Server;
 
-                if (! empty($qs['X-Plex-Token'])) {
-                    $headers['X-Plex-Token'] = $qs['X-Plex-Token'];
-                }
+                if ($isServerTranscode) {
+                    // Server-side transcoding: full Plex session headers required
+                    $headers = [
+                        'X-Plex-Product' => 'Plex Web',
+                        'X-Plex-Client-Identifier' => 'm3u-proxy',
+                        'X-Plex-Platform' => 'Chrome',
+                        'X-Plex-Device' => 'OSX',
+                    ];
 
-                // Add playback session headers if present
-                if (! empty($qs['session'])) {
-                    $headers['X-Plex-Session-Identifier'] = $qs['session'];
-                    $headers['X-Plex-Playback-Session-Id'] = $qs['session'];
-                }
+                    if (! empty($qs['X-Plex-Token'])) {
+                        $headers['X-Plex-Token'] = $qs['X-Plex-Token'];
+                    }
 
-                // Set Accept header based on likely format
-                if (str_contains($streamUrl, 'start.mpd')) {
-                    $headers['Accept'] = 'application/dash+xml';
+                    // Add playback session headers if present
+                    if (! empty($qs['session'])) {
+                        $headers['X-Plex-Session-Identifier'] = $qs['session'];
+                        $headers['X-Plex-Playback-Session-Id'] = $qs['session'];
+                    }
+
+                    // Set Accept header based on stream format
+                    if (str_contains($streamUrl, 'start.mpd')) {
+                        $headers['Accept'] = 'application/dash+xml';
+                    } else {
+                        $headers['Accept'] = 'application/vnd.apple.mpegurl';
+                    }
+
+                    $payload['headers'] = $headers;
                 } else {
-                    $headers['Accept'] = 'application/vnd.apple.mpegurl';
-                }
+                    // Direct / Local mode: only send the token header, no session identifiers
+                    $headers = [];
 
-                $payload['headers'] = $headers;
+                    if (! empty($qs['X-Plex-Token'])) {
+                        $headers['X-Plex-Token'] = $qs['X-Plex-Token'];
+                    }
+
+                    if (! empty($headers)) {
+                        $payload['headers'] = $headers;
+                    }
+                }
             }
         } catch (\Exception $e) {
             Log::warning('Failed to attach provider-specific headers for broadcast', [
@@ -301,7 +332,7 @@ class NetworkBroadcastService
         ]);
 
         try {
-            $response = $this->proxyService->proxyRequest(
+            $response = $this->getProxyService()->proxyRequest(
                 'POST',
                 "/broadcast/{$network->uuid}/start",
                 $payload
@@ -310,6 +341,16 @@ class NetworkBroadcastService
             if ($response->successful()) {
                 $data = $response->json();
 
+                // Extract Plex transcode session ID from the stream URL so we can
+                // clean it up when the broadcast stops (prevents orphaned sessions
+                // causing 400 Bad Request on Plex).
+                $transcodeSessionId = null;
+                $parsed = parse_url($streamUrl);
+                parse_str($parsed['query'] ?? '', $qs);
+                if (! empty($qs['session'])) {
+                    $transcodeSessionId = $qs['session'];
+                }
+
                 // Update network with broadcast info
                 $network->update([
                     'broadcast_started_at' => Carbon::now(),
@@ -317,6 +358,7 @@ class NetworkBroadcastService
                     'broadcast_programme_id' => $programme->id,
                     'broadcast_initial_offset_seconds' => $seekPosition,
                     'broadcast_requested' => true,
+                    'broadcast_transcode_session_id' => $transcodeSessionId,
                 ]);
 
                 Log::info("🟢 BROADCAST STARTED VIA PROXY: {$network->name}", [
@@ -324,6 +366,7 @@ class NetworkBroadcastService
                     'uuid' => $network->uuid,
                     'ffmpeg_pid' => $data['ffmpeg_pid'] ?? null,
                     'status' => $data['status'] ?? 'unknown',
+                    'transcode_session_id' => $transcodeSessionId,
                 ]);
 
                 return true;
@@ -362,9 +405,12 @@ class NetworkBroadcastService
      */
     public function stop(Network $network): bool
     {
+        // Clean up Plex transcode session before stopping
+        $this->cleanupTranscodeSession($network);
+
         // First try to stop via proxy
         try {
-            $response = $this->proxyService->proxyRequest(
+            $response = $this->getProxyService()->proxyRequest(
                 'POST',
                 "/broadcast/{$network->uuid}/stop"
             );
@@ -396,11 +442,16 @@ class NetworkBroadcastService
             // Reset sequences on explicit stop - next start will be a fresh broadcast
             'broadcast_segment_sequence' => 0,
             'broadcast_discontinuity_sequence' => 0,
+            // Reset retry tracking
+            'broadcast_fail_count' => 0,
+            'broadcast_last_exit_code' => null,
+            'broadcast_restart_locked' => false,
+            'broadcast_transcode_session_id' => null,
         ]);
 
         // Clean up via proxy (removes files)
         try {
-            $this->proxyService->proxyRequest('DELETE', "/broadcast/{$network->uuid}");
+            $this->getProxyService()->proxyRequest('DELETE', "/broadcast/{$network->uuid}");
         } catch (\Exception $e) {
             Log::warning('Failed to cleanup broadcast files via proxy', [
                 'network_id' => $network->id,
@@ -417,7 +468,7 @@ class NetworkBroadcastService
     public function isProcessRunning(Network $network): bool
     {
         try {
-            $response = $this->proxyService->proxyRequest(
+            $response = $this->getProxyService()->proxyRequest(
                 'GET',
                 "/broadcast/{$network->uuid}/status"
             );
@@ -486,8 +537,20 @@ class NetworkBroadcastService
         }
 
         $service = MediaServerService::make($integration);
-        $request = request();
-        $request->merge(['static' => 'true']); // static stream for HLS
+
+        // IMPORTANT: Create a fresh Request object each time. Do NOT use request()
+        // (the global singleton) because in the long-running worker process it persists
+        // across ticks. Parameters like static=true and StartTimeTicks from a previous
+        // broadcast would leak into subsequent calls, causing 400 Bad Request errors
+        // when the transcode mode changes.
+        $request = new \Illuminate\Http\Request;
+
+        // static=true tells media servers to send the raw file without transcoding.
+        // Only set it when NOT using server-side transcoding, otherwise it contradicts
+        // the transcode parameters and can cause 400 Bad Request errors.
+        if (($network->transcode_mode ?? null) !== TranscodeMode::Server) {
+            $request->merge(['static' => 'true']); // static stream for HLS
+        }
 
         // Use media server's native seeking if we need to seek
         if ($seekSeconds > 0) {
@@ -523,6 +586,17 @@ class NetworkBroadcastService
                 if ($h) {
                     $transcodeOptions['max_height'] = (int) $h;
                 }
+            }
+
+            // Forward codec and preset hints so the media server can honour them
+            if (! empty($network->video_codec)) {
+                $transcodeOptions['video_codec'] = $network->video_codec;
+            }
+            if (! empty($network->audio_codec)) {
+                $transcodeOptions['audio_codec'] = $network->audio_codec;
+            }
+            if (! empty($network->transcode_preset)) {
+                $transcodeOptions['preset'] = $network->transcode_preset;
             }
         }
 
@@ -582,6 +656,37 @@ class NetworkBroadcastService
     }
 
     /**
+     * Clean up an active Plex transcode session for a network.
+     *
+     * This calls the Plex `/video/:/transcode/universal/stop` endpoint to
+     * release the server-side transcode slot. Without this, orphaned sessions
+     * linger and cause 400 Bad Request when starting a new session.
+     */
+    public function cleanupTranscodeSession(Network $network): void
+    {
+        $sessionId = $network->broadcast_transcode_session_id;
+        if (empty($sessionId)) {
+            return;
+        }
+
+        $integration = $network->mediaServerIntegration;
+        if (! $integration || ! $integration->isPlex()) {
+            return;
+        }
+
+        try {
+            $plexService = new PlexService($integration);
+            $plexService->stopTranscodeSession($sessionId);
+        } catch (\Exception $e) {
+            Log::warning('Failed to stop Plex transcode session during cleanup', [
+                'network_id' => $network->id,
+                'session_id' => $sessionId,
+                'exception' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
      * Get status information for a network's broadcast.
      */
     public function getStatus(Network $network): array
@@ -593,7 +698,7 @@ class NetworkBroadcastService
             'running' => $isRunning,
             'pid' => $network->broadcast_pid,
             'started_at' => $network->broadcast_started_at?->toIso8601String(),
-            'hls_url' => $this->proxyService->getProxyBroadcastHlsUrl($network),
+            'hls_url' => $this->getProxyService()->getProxyBroadcastHlsUrl($network),
         ];
 
         if ($isRunning) {
@@ -724,6 +829,13 @@ class NetworkBroadcastService
 
         // Should be running but isn't - start it (only if user requested it)
         if (! $isRunning && $network->broadcast_requested) {
+            // Skip if a callback handler is already restarting this broadcast
+            if ($network->broadcast_restart_locked) {
+                $result['action'] = 'restart_locked';
+
+                return $result;
+            }
+
             Log::info('🔄 BROADCAST RECOVERY: Restarting broadcast via proxy', [
                 'network_id' => $network->id,
                 'network_name' => $network->name,
@@ -796,6 +908,10 @@ class NetworkBroadcastService
                 'broadcast_pid' => null,
                 'broadcast_started_at' => null,
                 'broadcast_error' => null,
+                'broadcast_fail_count' => 0,
+                'broadcast_last_exit_code' => null,
+                'broadcast_restart_locked' => false,
+                'broadcast_transcode_session_id' => null,
             ]);
 
             $recovered++;

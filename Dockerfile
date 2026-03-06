@@ -136,8 +136,13 @@ RUN echo "@edge https://dl-cdn.alpinelinux.org/alpine/edge/main" >> /etc/apk/rep
     npm \
     # Redis server
     redis \
-    # FFmpeg 8.0 from Alpine edge
+    # FFmpeg 8.0 from Alpine edge (with matching edge deps to avoid symbol mismatches)
+    # glslang-libs, spirv-tools, and vulkan-loader must also come from edge
+    # to match the ABI that ffmpeg@edge was built against.
     ffmpeg@edge \
+    glslang-libs@edge \
+    spirv-tools@edge \
+    vulkan-loader@edge \
     # Nginx web server
     nginx \
     # PostgreSQL server & client

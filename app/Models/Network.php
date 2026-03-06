@@ -44,6 +44,14 @@ class Network extends Model
         // HLS continuity tracking
         'broadcast_segment_sequence' => 'integer',
         'broadcast_discontinuity_sequence' => 'integer',
+        // Retry tracking
+        'broadcast_fail_count' => 'integer',
+        'broadcast_last_failed_at' => 'datetime',
+        'broadcast_last_exit_code' => 'integer',
+        'broadcast_restart_locked' => 'boolean',
+        // Manual schedule
+        'manual_schedule_recurrence' => 'string',
+        'schedule_gap_seconds' => 'integer',
     ];
 
     /**
@@ -133,6 +141,11 @@ class Network extends Model
     {
         // If auto-regeneration is disabled, never auto-regenerate
         if ($this->auto_regenerate_schedule === false) {
+            return false;
+        }
+
+        // Manual schedules are never auto-regenerated
+        if ($this->schedule_type === 'manual') {
             return false;
         }
 
@@ -230,6 +243,15 @@ class Network extends Model
         }
 
         return (int) $current->start_time->diffInSeconds(now(), false);
+    }
+
+    /**
+     * Get the effective group name for this network.
+     * Uses the configured group_name, falling back to "Networks".
+     */
+    public function getEffectiveGroupNameAttribute(): string
+    {
+        return $this->group_name ?: 'Networks';
     }
 
     /**

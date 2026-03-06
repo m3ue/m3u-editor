@@ -1407,6 +1407,11 @@ class M3uProxyService
                         // Reset sequences on explicit stop - next start will be a fresh broadcast
                         'broadcast_segment_sequence' => 0,
                         'broadcast_discontinuity_sequence' => 0,
+                        // Reset retry tracking
+                        'broadcast_fail_count' => 0,
+                        'broadcast_last_exit_code' => null,
+                        'broadcast_restart_locked' => false,
+                        'broadcast_transcode_session_id' => null,
                     ]);
                 }
 

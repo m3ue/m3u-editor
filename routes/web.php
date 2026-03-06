@@ -314,3 +314,12 @@ Route::get('/local-media/{integration}/stream/{item}', [
     \App\Http\Controllers\MediaServerProxyController::class,
     'streamLocalMedia',
 ])->name('local-media.stream');
+
+/*
+ * WebDAV Media streaming routes
+ * Proxies video files from a WebDAV server
+ */
+Route::get('/webdav-media/{integration}/stream/{item}', [
+    \App\Http\Controllers\MediaServerProxyController::class,
+    'streamWebDavMedia',
+])->name('webdav-media.stream');

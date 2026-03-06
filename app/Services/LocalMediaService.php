@@ -218,6 +218,7 @@ class LocalMediaService implements MediaServer
 
         foreach ($paths as $pathConfig) {
             $path = $pathConfig['path'] ?? '';
+            $libraryGenre = $pathConfig['name'] ?? basename($path);
 
             if (empty($path) || ! File::exists($path)) {
                 continue;
@@ -229,7 +230,7 @@ class LocalMediaService implements MediaServer
             );
 
             foreach ($files as $file) {
-                $movieData = $this->parseMovieFile($file);
+                $movieData = $this->parseMovieFile($file, $libraryGenre);
                 if ($movieData) {
                     $movies->push($movieData);
                 }
@@ -252,6 +253,7 @@ class LocalMediaService implements MediaServer
 
         foreach ($paths as $pathConfig) {
             $path = $pathConfig['path'] ?? '';
+            $libraryGenre = $pathConfig['name'] ?? basename($path);
 
             if (empty($path) || ! File::exists($path)) {
                 continue;
@@ -260,7 +262,7 @@ class LocalMediaService implements MediaServer
             // For TV shows, we expect a folder structure:
             // /path/Show Name/Season 01/Episode.mkv
             // or /path/Show Name/S01E01.mkv
-            $this->scanSeriesDirectory($path, $seriesMap);
+            $this->scanSeriesDirectory($path, $seriesMap, $libraryGenre);
         }
 
         // Convert series map to collection
@@ -642,7 +644,7 @@ class LocalMediaService implements MediaServer
      * @param  string  $filePath  Full path to the video file
      * @return array|null Movie data array or null if parsing fails
      */
-    protected function parseMovieFile(string $filePath): ?array
+    protected function parseMovieFile(string $filePath, ?string $libraryGenre = null): ?array
     {
         $filename = basename($filePath);
         $title = null;
@@ -675,6 +677,7 @@ class LocalMediaService implements MediaServer
 
         // Generate a unique ID based on file path
         $itemId = base64_encode($filePath);
+        $genre = $libraryGenre ? trim($libraryGenre) : '';
 
         return [
             'Id' => $itemId,
@@ -684,7 +687,7 @@ class LocalMediaService implements MediaServer
             'Path' => $filePath,
             'Container' => strtolower($extension),
             'Type' => 'Movie',
-            'Genres' => ['Uncategorized'], // Would be enriched by metadata service
+            'Genres' => $genre !== '' ? [$genre] : ['Uncategorized'], // Would be enriched by metadata service
             'Overview' => null,
             'CommunityRating' => null,
             'RunTimeTicks' => null, // Could be extracted using ffprobe
@@ -791,7 +794,7 @@ class LocalMediaService implements MediaServer
      * @param  string  $basePath  Base path containing series folders
      * @param  array  &$seriesMap  Reference to series map to populate
      */
-    protected function scanSeriesDirectory(string $basePath, array &$seriesMap): void
+    protected function scanSeriesDirectory(string $basePath, array &$seriesMap, ?string $libraryGenre = null): void
     {
         if (! File::exists($basePath)) {
             return;
@@ -802,6 +805,7 @@ class LocalMediaService implements MediaServer
         foreach ($directories as $seriesDir) {
             $seriesName = basename($seriesDir);
             $seriesId = md5($seriesDir);
+            $genre = $libraryGenre ? trim($libraryGenre) : '';
 
             // Clean up series name
             $cleanName = preg_replace('/[._]+/', ' ', $seriesName);
@@ -821,7 +825,7 @@ class LocalMediaService implements MediaServer
                     'Path' => $seriesDir,
                     'ProductionYear' => $year,
                     'Type' => 'Series',
-                    'Genres' => ['Uncategorized'],
+                    'Genres' => $genre !== '' ? [$genre] : ['Uncategorized'],
                     'Overview' => null,
                     'CommunityRating' => null,
                 ];

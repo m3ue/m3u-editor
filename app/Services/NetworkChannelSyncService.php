@@ -31,14 +31,11 @@ class NetworkChannelSyncService
             return 0;
         }
 
-        // Get or create the "Networks" group
-        $group = $this->getOrCreateNetworksGroup($playlist);
-
         $synced = 0;
         $existingNetworkIds = [];
 
         foreach ($networks as $network) {
-            $this->syncNetworkAsChannel($playlist, $network, $group);
+            $this->syncNetworkAsChannel($playlist, $network);
             $existingNetworkIds[] = $network->id;
             $synced++;
         }
@@ -63,7 +60,7 @@ class NetworkChannelSyncService
     public function syncNetworkAsChannel(Playlist $playlist, Network $network, ?Group $group = null): Channel
     {
         if (! $group) {
-            $group = $this->getOrCreateNetworksGroup($playlist);
+            $group = $this->getOrCreateNetworksGroup($playlist, $network);
         }
 
         $channel = Channel::updateOrCreate(
@@ -78,7 +75,7 @@ class NetworkChannelSyncService
                 'url' => $network->stream_url,
                 'logo' => $network->logo,
                 'group_id' => $group->id,
-                'group_internal' => 'Networks',
+                'group_internal' => $group->name,
                 'channel' => $network->channel_number,
                 'enabled' => $network->enabled,
                 'is_vod' => false,
@@ -101,18 +98,21 @@ class NetworkChannelSyncService
     }
 
     /**
-     * Get or create the "Networks" group for a playlist.
+     * Get or create the group for a network within a playlist.
+     * Uses the network's configured group_name, falling back to "Networks".
      */
-    protected function getOrCreateNetworksGroup(Playlist $playlist): Group
+    protected function getOrCreateNetworksGroup(Playlist $playlist, ?Network $network = null): Group
     {
+        $groupName = $network?->effective_group_name ?? 'Networks';
+
         return Group::firstOrCreate(
             [
                 'playlist_id' => $playlist->id,
-                'name' => 'Networks',
+                'name' => $groupName,
             ],
             [
                 'user_id' => $playlist->user_id,
-                'name_internal' => 'Networks',
+                'name_internal' => $groupName,
                 'enabled' => true,
             ]
         );
@@ -123,11 +123,17 @@ class NetworkChannelSyncService
      */
     public function refreshNetworkChannel(Network $network): void
     {
-        // Find all playlists that include this network
+        // Find all channels for this network
         $channels = Channel::where('network_id', $network->id)->get();
 
         foreach ($channels as $channel) {
-            // Update the channel with latest network data
+            // Resolve the correct group for this network in the channel's playlist
+            $group = $this->getOrCreateNetworksGroup(
+                Playlist::find($channel->playlist_id),
+                $network
+            );
+
+            // Update the channel with latest network data including group
             $channel->update([
                 'name' => $network->name,
                 'title' => $network->name,
@@ -135,6 +141,8 @@ class NetworkChannelSyncService
                 'logo' => $network->logo,
                 'channel' => $network->channel_number,
                 'enabled' => $network->enabled,
+                'group_id' => $group->id,
+                'group_internal' => $group->name,
             ]);
         }
     }

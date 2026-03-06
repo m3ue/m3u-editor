@@ -400,6 +400,49 @@ class FetchTmdbIds implements ShouldQueue
             if (empty($channel->tmdb_id)) {
                 $channel->update(['tmdb_id' => $tmdbId]);
             }
+
+            // Check if genre/group needs TMDB enrichment (e.g., still set to library folder name)
+            $currentGenre = $info['genre'] ?? $channel->group ?? '';
+            if (! empty($currentGenre) && ! str_contains($currentGenre, ',') && strlen($currentGenre) <= 20) {
+                $details = $tmdb->getMovieDetails((int) $tmdbId);
+                if ($details && ! empty($details['genres'])) {
+                    $tmdbGenres = is_string($details['genres'])
+                        ? array_map('trim', explode(',', $details['genres']))
+                        : (array) $details['genres'];
+
+                    if (! in_array(trim($currentGenre), $tmdbGenres)) {
+                        Log::info('FetchTmdbIds: VOD genre appears to be a library name, updating from TMDB', [
+                            'channel_id' => $channel->id,
+                            'current_genre' => $currentGenre,
+                            'tmdb_genres' => $details['genres'],
+                        ]);
+
+                        $info['genre'] = $details['genres'];
+                        $updateData = ['info' => $info];
+
+                        $primaryGenre = $tmdbGenres[0] ?? null;
+                        if ($primaryGenre) {
+                            $group = Group::firstOrCreate(
+                                [
+                                    'playlist_id' => $channel->playlist_id,
+                                    'name' => $primaryGenre,
+                                ],
+                                [
+                                    'name_internal' => $primaryGenre,
+                                    'user_id' => $channel->user_id,
+                                    'type' => 'vod',
+                                ]
+                            );
+                            $updateData['group'] = $primaryGenre;
+                            $updateData['group_internal'] = $primaryGenre;
+                            $updateData['group_id'] = $group->id;
+                        }
+
+                        $channel->update($updateData);
+                    }
+                }
+            }
+
             $this->skippedCount++;
 
             return;
@@ -476,8 +519,8 @@ class FetchTmdbIds implements ShouldQueue
                     $info['plot'] = $details['overview'];
                 }
 
-                // Populate genre if not already set (treat 'Uncategorized' as empty)
-                if (! empty($details['genres']) && (empty($info['genre']) || ($info['genre'] ?? '') === 'Uncategorized')) {
+                // Populate genre if not already set (treat 'Uncategorized' and first-fetch as empty)
+                if (! empty($details['genres']) && (empty($info['genre']) || ($info['genre'] ?? '') === 'Uncategorized' || $channel->last_metadata_fetch === null)) {
                     $info['genre'] = $details['genres'];
 
                     // Update the channel's group to match the primary TMDB genre
@@ -485,7 +528,7 @@ class FetchTmdbIds implements ShouldQueue
                         ? explode(', ', $details['genres'])[0]
                         : (is_array($details['genres']) ? $details['genres'][0] : null);
 
-                    if ($primaryGenre && ($channel->group === 'Uncategorized' || $channel->group_internal === 'Uncategorized')) {
+                    if ($primaryGenre && ($channel->group === 'Uncategorized' || $channel->group_internal === 'Uncategorized' || $channel->last_metadata_fetch === null)) {
                         $group = Group::firstOrCreate(
                             [
                                 'playlist_id' => $channel->playlist_id,
@@ -634,13 +677,72 @@ class FetchTmdbIds implements ShouldQueue
         $hasMetadata = ! empty($series->plot) && ! empty($series->cover);
 
         if (($existingTvdbId || $existingTmdbId) && $hasMetadata && ! $this->overwriteExisting) {
-            Log::debug('FetchTmdbIds: Skipping series (already has IDs and metadata)', [
-                'series_id' => $series->id,
-                'name' => $series->name,
-                'existing_tmdb_id' => $existingTmdbId,
-                'existing_tvdb_id' => $existingTvdbId,
-                'overwrite_existing' => $this->overwriteExisting,
-            ]);
+            $needsEnrichment = false;
+
+            // Check if episodes need TMDB data
+            if ($existingTmdbId && $series->episodes()->whereNull('tmdb_id')->exists()) {
+                Log::info('FetchTmdbIds: Series metadata complete but episodes need enrichment', [
+                    'series_id' => $series->id,
+                    'tmdb_id' => $existingTmdbId,
+                ]);
+                $this->processSeriesEpisodes($tmdb, $series, (int) $existingTmdbId);
+                $needsEnrichment = true;
+            }
+
+            // Check if genre needs TMDB enrichment (e.g., still set to library folder name)
+            // A TMDB-enriched genre typically contains a comma (multiple genres) or matches known TMDB genres.
+            // If the genre is a single short word that doesn't contain a comma, it's likely a library name placeholder.
+            if ($existingTmdbId && ! empty($series->genre) && ! str_contains($series->genre, ',') && strlen($series->genre) <= 20) {
+                // Fetch TMDB details to check if the current genre matches a TMDB genre
+                $details = $tmdb->getTvSeriesDetails((int) $existingTmdbId);
+                if ($details && ! empty($details['genres'])) {
+                    $tmdbGenres = is_string($details['genres'])
+                        ? array_map('trim', explode(',', $details['genres']))
+                        : (array) $details['genres'];
+                    $currentGenreTrimmed = trim($series->genre);
+
+                    // If the current genre is NOT one of the TMDB genres, it's a placeholder — update it
+                    if (! in_array($currentGenreTrimmed, $tmdbGenres)) {
+                        Log::info('FetchTmdbIds: Series genre appears to be a library name, updating from TMDB', [
+                            'series_id' => $series->id,
+                            'current_genre' => $series->genre,
+                            'tmdb_genres' => $details['genres'],
+                        ]);
+
+                        $updateData = ['genre' => $details['genres']];
+
+                        // Update category to match the primary TMDB genre
+                        $primaryGenre = $tmdbGenres[0] ?? null;
+                        if ($primaryGenre) {
+                            $category = Category::firstOrCreate(
+                                [
+                                    'playlist_id' => $series->playlist_id,
+                                    'name' => $primaryGenre,
+                                ],
+                                [
+                                    'name_internal' => $primaryGenre,
+                                    'user_id' => $series->user_id,
+                                ]
+                            );
+                            $updateData['category_id'] = $category->id;
+                            $updateData['source_category_id'] = $category->id;
+                        }
+
+                        $series->update($updateData);
+                        $needsEnrichment = true;
+                    }
+                }
+            }
+
+            if (! $needsEnrichment) {
+                Log::debug('FetchTmdbIds: Skipping series (already has IDs and metadata)', [
+                    'series_id' => $series->id,
+                    'name' => $series->name,
+                    'existing_tmdb_id' => $existingTmdbId,
+                    'existing_tvdb_id' => $existingTvdbId,
+                    'overwrite_existing' => $this->overwriteExisting,
+                ]);
+            }
             $this->skippedCount++;
 
             return;
@@ -748,8 +850,8 @@ class FetchTmdbIds implements ShouldQueue
                     $updateData['plot'] = $details['overview'];
                 }
 
-                // Populate genre if not already set (treat 'Uncategorized' as empty)
-                if (! empty($details['genres']) && (empty($series->genre) || ($series->genre ?? '') === 'Uncategorized')) {
+                // Populate genre if not already set (treat 'Uncategorized' and first-fetch as empty)
+                if (! empty($details['genres']) && (empty($series->genre) || ($series->genre ?? '') === 'Uncategorized' || $series->last_metadata_fetch === null)) {
                     $updateData['genre'] = $details['genres'];
 
                     // Update the series' category to match the primary TMDB genre
@@ -759,7 +861,7 @@ class FetchTmdbIds implements ShouldQueue
 
                     if ($primaryGenre) {
                         $currentCategory = $series->category_id ? Category::find($series->category_id) : null;
-                        if (! $currentCategory || $currentCategory->name === 'Uncategorized') {
+                        if (! $currentCategory || $currentCategory->name === 'Uncategorized' || $series->last_metadata_fetch === null) {
                             $category = Category::firstOrCreate(
                                 [
                                     'playlist_id' => $series->playlist_id,
@@ -914,19 +1016,31 @@ class FetchTmdbIds implements ShouldQueue
                     $updateData = [];
                     $info = $episode->info ?? [];
 
-                    if (! empty($episodeData['name']) && (empty($episode->title) || $this->overwriteExisting)) {
+                    if (! empty($episodeData['name']) && (empty($episode->title) || $this->overwriteExisting || $episode->title !== $episodeData['name'])) {
                         $updateData['title'] = $episodeData['name'];
                     }
 
                     if (! empty($episodeData['id'])) {
-                        if (empty($info['tmdb_id'] ?? true) || $this->overwriteExisting) {
+                        // Set the dedicated tmdb_id column
+                        if (empty($episode->tmdb_id) || $this->overwriteExisting) {
+                            $updateData['tmdb_id'] = $episodeData['id'];
+                        }
+
+                        // Also store in the info array for backward compatibility
+                        if (empty($info['tmdb_id'] ?? null) || $this->overwriteExisting) {
                             $info['tmdb_id'] = $episodeData['id'];
                             $updateData['info'] = $info;
                         }
                     }
 
                     if (! empty($episodeData['overview'])) {
-                        if (empty($info['plot'] ?? true) || $this->overwriteExisting) {
+                        // Set the dedicated plot column
+                        if (empty($episode->plot) || $this->overwriteExisting) {
+                            $updateData['plot'] = $episodeData['overview'];
+                        }
+
+                        // Also store in the info array for backward compatibility
+                        if (empty($info['plot'] ?? null) || $this->overwriteExisting) {
                             $info['plot'] = $episodeData['overview'];
                             $updateData['info'] = $info;
                         }

@@ -420,4 +420,190 @@ class MediaServerProxyController extends Controller
     {
         return ProxyFacade::getBaseUrl()."/local-media/{$integrationId}/stream/{$itemId}";
     }
+
+    /**
+     * Generate a URL for streaming WebDAV media.
+     */
+    public static function generateWebDavStreamUrl(int $integrationId, string $itemId): string
+    {
+        return ProxyFacade::getBaseUrl()."/webdav-media/{$integrationId}/stream/{$itemId}";
+    }
+
+    /**
+     * Stream media from a WebDAV server.
+     *
+     * Route: /webdav-media/{integration}/stream/{item}
+     *
+     * This proxies video files from a WebDAV server, handling authentication.
+     * Supports range requests for seeking.
+     *
+     * @param  int  $integration  The integration ID
+     * @param  string  $item  Base64-encoded file path on the WebDAV server
+     * @return Response|StreamedResponse
+     */
+    public function streamWebDavMedia(Request $request, int $integration, string $item)
+    {
+        try {
+            set_time_limit(0);
+            ignore_user_abort(true);
+
+            $mediaIntegration = MediaServerIntegration::find($integration);
+
+            if (! $mediaIntegration) {
+                return response()->json(['error' => 'Integration not found'], 404);
+            }
+
+            if (! $mediaIntegration->enabled) {
+                return response()->json(['error' => 'Integration is disabled'], 403);
+            }
+
+            if ($mediaIntegration->type !== 'webdav') {
+                return response()->json(['error' => 'Integration is not a WebDAV type'], 400);
+            }
+
+            // Decode the file path from base64
+            $filePath = base64_decode($item);
+
+            if (! $filePath) {
+                Log::warning('WebDAV media: Invalid item ID', [
+                    'integration_id' => $integration,
+                    'item_id' => $item,
+                ]);
+
+                return response()->json(['error' => 'Invalid item ID'], 400);
+            }
+
+            // Build the WebDAV URL with proper URL encoding for path segments
+            $protocol = $mediaIntegration->ssl ? 'https' : 'http';
+            $host = $mediaIntegration->host;
+            $port = $mediaIntegration->port;
+
+            $baseUrl = "{$protocol}://{$host}";
+            if ($port && $port !== 80 && $port !== 443) {
+                $baseUrl .= ":{$port}";
+            }
+
+            // URL-encode each path segment individually to handle spaces, brackets, etc.
+            $encodedPath = implode('/', array_map('rawurlencode', explode('/', $filePath)));
+            $fileUrl = rtrim($baseUrl, '/').'/'.ltrim($encodedPath, '/');
+
+            // Build curl auth options
+            $username = $mediaIntegration->webdav_username;
+            $password = $mediaIntegration->webdav_password;
+
+            // First, get the file size with a HEAD request via curl
+            $headCh = curl_init($fileUrl);
+            curl_setopt($headCh, CURLOPT_NOBODY, true);
+            curl_setopt($headCh, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($headCh, CURLOPT_FOLLOWLOCATION, true);
+            curl_setopt($headCh, CURLOPT_SSL_VERIFYPEER, false);
+            curl_setopt($headCh, CURLOPT_SSL_VERIFYHOST, false);
+            curl_setopt($headCh, CURLOPT_TIMEOUT, 30);
+
+            if ($username && $password) {
+                curl_setopt($headCh, CURLOPT_USERPWD, "{$username}:{$password}");
+            }
+
+            curl_exec($headCh);
+            $headStatus = curl_getinfo($headCh, CURLINFO_HTTP_CODE);
+            $fileSize = (int) curl_getinfo($headCh, CURLINFO_CONTENT_LENGTH_DOWNLOAD);
+            $curlError = curl_error($headCh);
+            curl_close($headCh);
+
+            if ($headStatus < 200 || $headStatus >= 300) {
+                Log::warning('WebDAV media: File not accessible', [
+                    'integration_id' => $integration,
+                    'file_path' => $filePath,
+                    'file_url' => $fileUrl,
+                    'status' => $headStatus,
+                    'curl_error' => $curlError,
+                ]);
+
+                return response()->json(['error' => 'File not accessible'], $headStatus ?: 502);
+            }
+
+            $extension = strtolower(pathinfo($filePath, PATHINFO_EXTENSION));
+            $contentType = $this->getContentTypeForContainer($extension);
+
+            // Handle range requests for video seeking
+            $start = 0;
+            $end = $fileSize > 0 ? $fileSize - 1 : 0;
+            $statusCode = 200;
+
+            $responseHeaders = [
+                'Content-Type' => $contentType,
+                'Accept-Ranges' => 'bytes',
+                'Content-Disposition' => 'inline; filename="'.basename($filePath).'"',
+                'Connection' => 'keep-alive',
+            ];
+
+            if ($request->hasHeader('Range') && $fileSize > 0) {
+                $range = $request->header('Range');
+
+                if (preg_match('/bytes=(\d*)-(\d*)/', $range, $matches)) {
+                    $start = $matches[1] !== '' ? (int) $matches[1] : 0;
+                    $end = $matches[2] !== '' ? (int) $matches[2] : $fileSize - 1;
+
+                    if ($start > $end || $start >= $fileSize) {
+                        return response('', 416, [
+                            'Content-Range' => "bytes */{$fileSize}",
+                        ]);
+                    }
+
+                    $end = min($end, $fileSize - 1);
+                    $statusCode = 206;
+                    $responseHeaders['Content-Range'] = "bytes {$start}-{$end}/{$fileSize}";
+                }
+            }
+
+            $length = $end - $start + 1;
+            $responseHeaders['Content-Length'] = $length;
+
+            Log::debug('Streaming WebDAV media file', [
+                'integration_id' => $integration,
+                'file_path' => $filePath,
+                'file_url' => $fileUrl,
+                'file_size' => $fileSize,
+                'range' => $request->header('Range'),
+                'start' => $start,
+                'end' => $end,
+                'length' => $length,
+            ]);
+
+            // Stream using curl to avoid loading entire file into memory
+            $rangeHeader = "bytes={$start}-{$end}";
+
+            return new StreamedResponse(function () use ($fileUrl, $rangeHeader, $username, $password) {
+                $ch = curl_init($fileUrl);
+                curl_setopt($ch, CURLOPT_HTTPHEADER, ["Range: {$rangeHeader}"]);
+                curl_setopt($ch, CURLOPT_WRITEFUNCTION, function ($ch, $data) {
+                    echo $data;
+                    flush();
+
+                    return strlen($data);
+                });
+                curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+                curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+                curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+                curl_setopt($ch, CURLOPT_TIMEOUT, 0);
+
+                if ($username && $password) {
+                    curl_setopt($ch, CURLOPT_USERPWD, "{$username}:{$password}");
+                }
+
+                curl_exec($ch);
+                curl_close($ch);
+            }, $statusCode, $responseHeaders);
+        } catch (\Exception $e) {
+            Log::error('Exception in WebDAV media stream', [
+                'integration_id' => $integration,
+                'item_id' => $item,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'error' => 'Internal server error while streaming WebDAV media',
+            ], 500);
+        }
+    }
 }

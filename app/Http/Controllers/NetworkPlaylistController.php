@@ -93,7 +93,7 @@ class NetworkPlaylistController extends Controller
         $channelNumber = $network->channel_number ?? $network->id;
         $tvgId = "network-{$network->id}";
         $logo = $network->logo ?? "{$baseUrl}/placeholder.png";
-        $group = 'Networks';
+        $group = $network->effective_group_name;
         $streamUrl = $network->stream_url;
 
         // Build EXTINF line
