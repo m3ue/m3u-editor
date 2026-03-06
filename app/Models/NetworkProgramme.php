@@ -23,6 +23,8 @@ class NetworkProgramme extends Model
         'start_time' => 'datetime',
         'end_time' => 'datetime',
         'duration_seconds' => 'integer',
+        'sort_order' => 'integer',
+        'pinned_start_time' => 'datetime',
     ];
 
     /**

@@ -28,9 +28,13 @@ class NetworkBroadcastHeal extends Command
                 if (! $dryRun) {
                     $old = $network->broadcast_pid;
 
-                    // Clear pid but preserve broadcast_started_at and persisted reference so restart can resume position
+                    // Clear pid and started_at but preserve broadcast_programme_id and
+                    // initial_offset_seconds so restart can resume position
                     $network->update([
                         'broadcast_pid' => null,
+                        'broadcast_started_at' => null,
+                        'broadcast_restart_locked' => false,
+                        'broadcast_transcode_session_id' => null,
                     ]);
 
                     Log::warning('HLS_METRIC: broadcast_healed', ['network_id' => $network->id, 'uuid' => $network->uuid, 'old_pid' => $old]);
