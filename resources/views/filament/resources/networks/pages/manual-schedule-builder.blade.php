@@ -7,19 +7,23 @@
                     <p class="text-sm font-medium text-gray-900 dark:text-white">Schedule Builder is not active</p>
                     <p class="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
                         This network is currently using the <strong>{{ $network->schedule_type }}</strong> schedule type.
-                        To use the Schedule Builder, change the schedule type to <strong>Manual</strong> in the
-                        <strong>Schedule Settings</strong>.
+                        To use the Schedule Builder, change the <strong>Schedule Type</strong> to <strong>manual</strong> in
+                        the
+                        <a class="font-bold text-primary-600 dark:text-primary-400 hover:underline"
+                            href="{{ url('networks/' . $network->id . '/edit?tab=schedule-settings%3A%3Adata%3A%3Atab') }}">Schedule
+                            Settings
+                        </a>.
                     </p>
                 </div>
             </div>
         </x-filament::section>
     @else
         <div x-data="scheduleBuilder({
-                networkId: {{ $network->id }},
-                scheduleWindowDays: {{ $scheduleWindowDays }},
-                recurrenceMode: '{{ $recurrenceMode }}',
-                gapSeconds: {{ $gapSeconds }},
-            })" x-cloak class="schedule-builder">
+                                            networkId: {{ $network->id }},
+                                            scheduleWindowDays: {{ $scheduleWindowDays }},
+                                            recurrenceMode: '{{ $recurrenceMode }}',
+                                            gapSeconds: {{ $gapSeconds }},
+                                        })" x-cloak class="schedule-builder">
             {{-- Header bar: Day nav + Now playing + Actions --}}
             <div class="flex flex-wrap items-center gap-3 mb-4">
                 {{-- Day Navigation --}}
@@ -48,11 +52,11 @@
 
                 {{-- Now-Playing pill --}}
                 <div class="flex items-center gap-1.5 ml-auto text-xs rounded-full px-3 py-1.5 font-medium" :class="{
-                         'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300': nowPlaying?.status === 'playing',
-                         'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300': nowPlaying?.status === 'gap',
-                         'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300': nowPlaying?.status === 'empty',
-                         'bg-gray-100 dark:bg-gray-800 text-gray-400': !nowPlaying,
-                     }">
+                                                     'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300': nowPlaying?.status === 'playing',
+                                                     'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300': nowPlaying?.status === 'gap',
+                                                     'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300': nowPlaying?.status === 'empty',
+                                                     'bg-gray-100 dark:bg-gray-800 text-gray-400': !nowPlaying,
+                                                 }">
                     <template x-if="nowPlaying?.status === 'playing'">
                         <span class="flex items-center gap-1.5">
                             <span class="relative flex h-2 w-2">
@@ -124,7 +128,8 @@
                             <x-heroicon-o-queue-list class="w-12 h-12 text-gray-300 dark:text-gray-600 mb-3" />
                             <p class="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">No programmes scheduled</p>
                             <p class="text-xs text-gray-400 dark:text-gray-500">Drag items from the media pool or click the
-                                <strong>+</strong> button to add content</p>
+                                <strong>+</strong> button to add content
+                            </p>
                         </div>
                     </template>
 
@@ -150,23 +155,34 @@
                                 {{-- Programme Card --}}
                                 <div class="relative">
                                     <div class="group/card flex items-stretch rounded-xl border shadow-sm transition-all hover:shadow-md"
-                                        :class="getTypeColor(prog.contentable_type)">
-                                        {{-- Move up/down + position number --}}
-                                        <div
-                                            class="flex flex-col items-center justify-center w-10 shrink-0 border-r border-inherit gap-0.5 py-1">
-                                            <button @click.stop="moveUp(index)"
-                                                class="p-0.5 rounded text-gray-400 dark:text-gray-500 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/30 transition disabled:opacity-20 disabled:cursor-not-allowed"
-                                                :disabled="index === 0" title="Move up">
-                                                <x-heroicon-s-chevron-up class="w-3.5 h-3.5" />
-                                            </button>
-                                            <span
-                                                class="text-[10px] font-bold text-gray-400 dark:text-gray-500 select-none leading-none"
-                                                x-text="index + 1"></span>
-                                            <button @click.stop="moveDown(index)"
-                                                class="p-0.5 rounded text-gray-400 dark:text-gray-500 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/30 transition disabled:opacity-20 disabled:cursor-not-allowed"
-                                                :disabled="index >= programmes.length - 1" title="Move down">
-                                                <x-heroicon-s-chevron-down class="w-3.5 h-3.5" />
-                                            </button>
+                                        :class="[getTypeColor(prog.contentable_type), rowDragOverIndex === index ? 'ring-2 ring-primary-400 ring-offset-1 dark:ring-offset-gray-900' : '', rowDragIndex === index ? 'opacity-40' : '']"
+                                        @dragover="handleRowDragOver($event, index)"
+                                        @dragleave.self="rowDragOverIndex = null" @drop="handleRowDrop($event, index)">
+                                        {{-- Drag handle | Up/Down arrows + position number --}}
+                                        <div class="flex items-stretch shrink-0 border-r border-inherit">
+                                            {{-- Drag handle --}}
+                                            <div class="flex items-center justify-center w-7 border-r border-inherit cursor-grab active:cursor-grabbing"
+                                                draggable="true" @dragstart.stop="handleRowDragStart($event, index)"
+                                                @dragend.stop="handleRowDragEnd()" title="Drag to reorder">
+                                                <x-heroicon-m-bars-3
+                                                    class="w-4 h-4 text-gray-300 dark:text-gray-600 group-hover/card:text-gray-400 dark:group-hover/card:text-gray-500 transition" />
+                                            </div>
+                                            {{-- Up / number / Down --}}
+                                            <div class="flex flex-col items-center justify-center w-8 gap-0.5 py-1">
+                                                <button @click.stop="moveUp(index)"
+                                                    class="p-0.5 rounded text-gray-300 dark:text-gray-600 hover:text-gray-500 dark:hover:text-gray-400 disabled:opacity-30 disabled:cursor-not-allowed transition"
+                                                    :disabled="index === 0" title="Move up">
+                                                    <x-heroicon-s-chevron-up class="w-3.5 h-3.5" />
+                                                </button>
+                                                <span
+                                                    class="text-[10px] font-bold text-gray-400 dark:text-gray-500 select-none leading-none"
+                                                    x-text="index + 1"></span>
+                                                <button @click.stop="moveDown(index)"
+                                                    class="p-0.5 rounded text-gray-300 dark:text-gray-600 hover:text-gray-500 dark:hover:text-gray-400 disabled:opacity-30 disabled:cursor-not-allowed transition"
+                                                    :disabled="index >= programmes.length - 1" title="Move down">
+                                                    <x-heroicon-s-chevron-down class="w-3.5 h-3.5" />
+                                                </button>
+                                            </div>
                                         </div>
 
                                         {{-- Poster image --}}
@@ -246,20 +262,9 @@
                                             </template>
                                         </div>
 
-                                        {{-- Actions (insert-after, remove) --}}
+                                        {{-- Actions --}}
                                         <div
-                                            class="flex items-center gap-0.5 px-2 shrink-0 opacity-0 group-hover/card:opacity-100 transition-opacity">
-                                            <button @click.stop="insertAfterProgramme(prog.id, null)" x-show="false"
-                                                class="hidden"></button>
-                                            <div class="relative"
-                                                @dragover.prevent="$event.dataTransfer.dropEffect = 'copy'"
-                                                @drop.stop="handleInsertDrop($event, prog.id)">
-                                                <button @click.stop
-                                                    class="p-1.5 rounded-md text-gray-400 dark:text-gray-500 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/30 transition"
-                                                    title="Drop media here to insert after">
-                                                    <x-heroicon-o-plus class="w-4 h-4" />
-                                                </button>
-                                            </div>
+                                            class="flex items-center px-2 shrink-0 opacity-0 group-hover/card:opacity-100 transition-opacity">
                                             <button @click.stop="confirmRemoveProgramme(prog.id)"
                                                 class="p-1.5 rounded-md text-gray-400 dark:text-gray-500 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition"
                                                 title="Remove programme">
@@ -382,7 +387,8 @@
                 </x-slot>
                 <x-slot name="footer">
                     <div class="flex justify-end gap-2 w-full">
-                        <x-filament::button color="gray" @click="$dispatch('close-modal', { id: 'schedule-remove-programme' })">
+                        <x-filament::button color="gray"
+                            @click="$dispatch('close-modal', { id: 'schedule-remove-programme' })">
                             Cancel
                         </x-filament::button>
                         <x-filament::button color="danger" @click="removeProgramme()">
@@ -418,7 +424,8 @@
                 </x-slot>
                 <x-slot name="footer">
                     <div class="flex justify-end gap-2 w-full">
-                        <x-filament::button color="gray" @click="$dispatch('close-modal', { id: 'schedule-apply-template' })">
+                        <x-filament::button color="gray"
+                            @click="$dispatch('close-modal', { id: 'schedule-apply-template' })">
                             Cancel
                         </x-filament::button>
                         <x-filament::button color="primary" @click="confirmApplyTemplate()">

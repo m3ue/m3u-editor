@@ -23,6 +23,8 @@ function scheduleBuilder(config) {
         _mediaSearchTimer: null,
         copyTargetDate: '',
         pendingRemoveId: null,
+        rowDragIndex: null,
+        rowDragOverIndex: null,
 
         // Now-playing status
         nowPlaying: null,
@@ -338,6 +340,7 @@ function scheduleBuilder(config) {
 
         async handleListDrop(event) {
             event.preventDefault();
+            this.rowDragOverIndex = null;
             if (this.poolDragItem) {
                 const item = this.poolDragItem;
                 this.poolDragItem = null;
@@ -345,12 +348,49 @@ function scheduleBuilder(config) {
             }
         },
 
-        async handleInsertDrop(event, afterProgrammeId) {
+        // ── Row Drag (reorder) + Row Drop Target (pool insert) ───────
+
+        handleRowDragStart(event, index) {
+            this.rowDragIndex = index;
+            event.dataTransfer.effectAllowed = 'move';
+            event.dataTransfer.setData('text/plain', JSON.stringify({ source: 'row', index }));
+        },
+
+        handleRowDragEnd() {
+            this.rowDragIndex = null;
+            this.rowDragOverIndex = null;
+        },
+
+        handleRowDragOver(event, index) {
+            if (this.poolDragItem !== null || this.rowDragIndex !== null) {
+                event.preventDefault();
+                event.stopPropagation();
+                this.rowDragOverIndex = index;
+                event.dataTransfer.dropEffect = this.poolDragItem !== null ? 'copy' : 'move';
+            }
+        },
+
+        async handleRowDrop(event, index) {
             event.preventDefault();
-            if (this.poolDragItem) {
+            event.stopPropagation();
+            this.rowDragOverIndex = null;
+
+            if (this.poolDragItem !== null) {
                 const item = this.poolDragItem;
                 this.poolDragItem = null;
-                await this.insertAfterProgramme(afterProgrammeId, item);
+                await this.insertAfterProgramme(this.programmes[index].id, item);
+            } else if (this.rowDragIndex !== null && this.rowDragIndex !== index) {
+                const fromIndex = this.rowDragIndex;
+                this.rowDragIndex = null;
+
+                const newOrder = [...this.programmes];
+                const [moved] = newOrder.splice(fromIndex, 1);
+                newOrder.splice(index, 0, moved);
+                this.programmes = newOrder;
+
+                await this.reorderProgrammes(this.programmes.map(p => p.id));
+            } else {
+                this.rowDragIndex = null;
             }
         },
 
