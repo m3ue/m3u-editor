@@ -587,6 +587,17 @@ class NetworkBroadcastService
                     $transcodeOptions['max_height'] = (int) $h;
                 }
             }
+
+            // Forward codec and preset hints so the media server can honour them
+            if (! empty($network->video_codec)) {
+                $transcodeOptions['video_codec'] = $network->video_codec;
+            }
+            if (! empty($network->audio_codec)) {
+                $transcodeOptions['audio_codec'] = $network->audio_codec;
+            }
+            if (! empty($network->transcode_preset)) {
+                $transcodeOptions['preset'] = $network->transcode_preset;
+            }
         }
 
         $streamUrl = $service->getDirectStreamUrl($request, $itemId, 'ts', $transcodeOptions);

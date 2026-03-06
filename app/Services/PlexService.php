@@ -491,6 +491,10 @@ class PlexService implements MediaServer
                                 'X-Plex-Client-Identifier' => 'm3u-proxy',
                             ];
 
+                            // Merge transcode params (bitrate, resolution) so the
+                            // decision endpoint actually applies the requested scaling.
+                            $decisionParams = array_merge($decisionParams, $transcodeParams);
+
                             // Include seek position if provided via StartTimeTicks
                             if ($request->has('StartTimeTicks')) {
                                 $ticks = (int) $request->input('StartTimeTicks');
