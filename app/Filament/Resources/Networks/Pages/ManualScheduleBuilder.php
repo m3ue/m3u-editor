@@ -251,9 +251,11 @@ class ManualScheduleBuilder extends Page
         $perPage = 50;
         $offset = ($page - 1) * $perPage;
 
+        $searchLower = strtolower($search);
+
         $movies = Channel::where('playlist_id', $playlistId)
             ->whereNotNull('movie_data')
-            ->when($search !== '', fn ($q) => $q->where('title', 'like', "%{$search}%"))
+            ->when($search !== '', fn ($q) => $q->whereRaw('LOWER(title) LIKE ?', ["%{$searchLower}%"]))
             ->orderBy('title')
             ->offset($offset)
             ->limit($perPage)
@@ -263,10 +265,10 @@ class ManualScheduleBuilder extends Page
             $q->where('playlist_id', $playlistId);
         })
             ->with('series')
-            ->when($search !== '', function ($q) use ($search) {
-                $q->where(function ($inner) use ($search) {
-                    $inner->where('title', 'like', "%{$search}%")
-                        ->orWhereHas('series', fn ($sq) => $sq->where('name', 'like', "%{$search}%"));
+            ->when($search !== '', function ($q) use ($searchLower) {
+                $q->where(function ($inner) use ($searchLower) {
+                    $inner->whereRaw('LOWER(title) LIKE ?', ["%{$searchLower}%"])
+                        ->orWhereHas('series', fn ($sq) => $sq->whereRaw('LOWER(name) LIKE ?', ["%{$searchLower}%"]));
                 });
             })
             ->orderBy('title')
