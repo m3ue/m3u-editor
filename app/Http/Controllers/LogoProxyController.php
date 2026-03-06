@@ -109,6 +109,10 @@ class LogoProxyController extends Controller
      */
     private function fetchRemoteLogo(string $url): ?array
     {
+        if ($this->isPrivateUrl($url)) {
+            return null;
+        }
+
         try {
             /** @var HttpClientResponse $response */
             $response = Http::timeout(10)
@@ -203,6 +207,21 @@ class LogoProxyController extends Controller
             'Content-Type' => 'image/png',
             'Cache-Control' => 'public, max-age=86400', // 1 day
         ]);
+    }
+
+    /**
+     * Check if the given URL resolves to a private/reserved IP address.
+     */
+    private function isPrivateUrl(string $url): bool
+    {
+        $host = parse_url($url, PHP_URL_HOST);
+        if (! $host) {
+            return true;
+        }
+
+        $ip = gethostbyname($host);
+
+        return ! filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE);
     }
 
     /**

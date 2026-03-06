@@ -1339,14 +1339,17 @@ class ChannelController extends Controller
 
         for ($i = 0; $i < $numChecks; $i++) {
             try {
-                $command = sprintf(
-                    'ffprobe -v error -rw_timeout 5000000 -user_agent "%s" -read_intervals %%+%d -select_streams v:0 -count_frames -show_entries stream=nb_read_frames -of default=nw=1:nk=1 "%s" 2>&1',
-                    'Mozilla/5.0 (m3u-editor stability test)',
-                    $duration,
-                    $url
-                );
-
-                $process = \Symfony\Component\Process\Process::fromShellCommandline($command);
+                $process = new \Symfony\Component\Process\Process([
+                    'ffprobe', '-v', 'error',
+                    '-rw_timeout', '5000000',
+                    '-user_agent', 'Mozilla/5.0 (m3u-editor stability test)',
+                    '-read_intervals', "%+{$duration}",
+                    '-select_streams', 'v:0',
+                    '-count_frames',
+                    '-show_entries', 'stream=nb_read_frames',
+                    '-of', 'default=nw=1:nk=1',
+                    $url,
+                ]);
                 $process->setTimeout($duration + 10);
                 $process->run();
 

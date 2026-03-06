@@ -163,6 +163,11 @@ class RunPostProcess implements ShouldQueue
                 $post = ((bool) $metadata['post']) ?? false;
                 $method = $post ? 'post' : 'get';
                 $url = $metadata['path'];
+
+                if ($this->isPrivateUrl($url)) {
+                    Log::warning('RunPostProcess blocked SSRF attempt to private/reserved URL', ['url' => $url]);
+                    throw new Exception("Webhook URL '{$url}' resolves to a private or reserved address and cannot be used.");
+                }
                 $jsonBody = (bool) ($metadata['json_body'] ?? false);
                 $noBody = (bool) ($metadata['no_body'] ?? false);
                 $queryVars = [];
@@ -366,6 +371,21 @@ class RunPostProcess implements ShouldQueue
                     ->delete();
             }
         }
+    }
+
+    /**
+     * Check if the given URL resolves to a private/reserved IP address.
+     */
+    protected function isPrivateUrl(string $url): bool
+    {
+        $host = parse_url($url, PHP_URL_HOST);
+        if (! $host) {
+            return true;
+        }
+
+        $ip = gethostbyname($host);
+
+        return ! filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE);
     }
 
     /**
