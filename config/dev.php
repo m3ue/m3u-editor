@@ -3,7 +3,7 @@
 return [
     'author' => 'Shaun Parkison',
     'version' => '0.8.39',
-    'dev_version' => '0.9.14-dev',
+    'dev_version' => '0.9.15-dev',
     'experimental_version' => '0.9.15-exp',
     'repo' => 'm3ue/m3u-editor',
     'docs_url' => 'https://m3ue.sparkison.dev',
