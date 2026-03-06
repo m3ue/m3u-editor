@@ -126,10 +126,19 @@ class ChannelsRelationManager extends RelationManager
         // Replace the global editable "channel" column with a custom-playlist pivot channel number column
         foreach ($defaultColumns as $i => $column) {
             if (method_exists($column, 'getName') && $column->getName() === 'channel') {
-                $defaultColumns[$i] = Tables\Columns\TextColumn::make('custom_channel_number')
+                $defaultColumns[$i] = Tables\Columns\TextInputColumn::make('custom_channel_number')
                     ->label('Channel')
+                    ->type('number')
+                    ->rules(['nullable', 'numeric', 'min:0'])
+                    ->placeholder(fn ($record) => (string) $record->channel)
                     ->getStateUsing(function ($record) {
-                        return $record->pivot?->channel_number ?? $record->channel;
+                        return $record->pivot?->channel_number ?? null;
+                    })
+                    ->updateStateUsing(function ($record, $state) use ($ownerRecord): void {
+                        $ownerRecord->channels()->updateExistingPivot(
+                            $record->id,
+                            ['channel_number' => ($state !== '' && $state !== null) ? (int) $state : null]
+                        );
                     })
                     ->sortable(query: function (Builder $query, string $direction): Builder {
                         return $query->orderBy('channel_custom_playlist.channel_number', $direction);

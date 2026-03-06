@@ -10,10 +10,12 @@ use Filament\Actions\BulkAction;
 use Filament\Actions\CreateAction;
 use Filament\Actions\DetachAction;
 use Filament\Forms\Components\Select;
+use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Schemas\Schema;
+use Filament\Tables;
 use Filament\Tables\Columns\SpatieTagsColumn;
 use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Filters\SelectFilter;
@@ -124,10 +126,19 @@ class VodRelationManager extends RelationManager
         // Replace the global editable "channel" column with a custom-playlist pivot channel number column
         foreach ($defaultColumns as $i => $column) {
             if (method_exists($column, 'getName') && $column->getName() === 'channel') {
-                $defaultColumns[$i] = Tables\Columns\TextColumn::make('custom_channel_number')
+                $defaultColumns[$i] = Tables\Columns\TextInputColumn::make('custom_channel_number')
                     ->label('Channel')
+                    ->type('number')
+                    ->rules(['nullable', 'numeric', 'min:0'])
+                    ->placeholder(fn ($record) => (string) $record->channel)
                     ->getStateUsing(function ($record) {
-                        return $record->pivot?->channel_number ?? $record->channel;
+                        return $record->pivot?->channel_number ?? null;
+                    })
+                    ->updateStateUsing(function ($record, $state) use ($ownerRecord): void {
+                        $ownerRecord->channels()->updateExistingPivot(
+                            $record->id,
+                            ['channel_number' => ($state !== '' && $state !== null) ? (int) $state : null]
+                        );
                     })
                     ->sortable(query: function (Builder $query, string $direction): Builder {
                         return $query->orderBy('channel_custom_playlist.channel_number', $direction);
@@ -271,7 +282,7 @@ class VodRelationManager extends RelationManager
                     ->label('Recount Channels')
                     ->icon('heroicon-o-hashtag')
                     ->schema([
-                        Forms\Components\TextInput::make('start')
+                        TextInput::make('start')
                             ->label('Start Number')
                             ->numeric()
                             ->default(1)
