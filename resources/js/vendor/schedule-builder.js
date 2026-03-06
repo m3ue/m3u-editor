@@ -22,6 +22,7 @@ function scheduleBuilder(config) {
         showAllMedia: false,
         _mediaSearchTimer: null,
         copyTargetDate: '',
+        pendingRemoveId: null,
 
         // Now-playing status
         nowPlaying: null,
@@ -416,7 +417,15 @@ function scheduleBuilder(config) {
             }
         },
 
-        async removeProgramme(programmeId) {
+        confirmRemoveProgramme(programmeId) {
+            this.pendingRemoveId = programmeId;
+            window.dispatchEvent(new CustomEvent('open-modal', { detail: { id: 'schedule-remove-programme' } }));
+        },
+
+        async removeProgramme() {
+            const programmeId = this.pendingRemoveId;
+            this.pendingRemoveId = null;
+            window.dispatchEvent(new CustomEvent('close-modal', { detail: { id: 'schedule-remove-programme' } }));
             this.loading = true;
             try {
                 const result = await this.$wire.removeProgramme(programmeId, this.currentDate, this.timezone);

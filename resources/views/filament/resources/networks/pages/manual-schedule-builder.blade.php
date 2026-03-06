@@ -260,7 +260,7 @@
                                                     <x-heroicon-o-plus class="w-4 h-4" />
                                                 </button>
                                             </div>
-                                            <button @click.stop="removeProgramme(prog.id)"
+                                            <button @click.stop="confirmRemoveProgramme(prog.id)"
                                                 class="p-1.5 rounded-md text-gray-400 dark:text-gray-500 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition"
                                                 title="Remove programme">
                                                 <x-heroicon-o-trash class="w-4 h-4" />
@@ -355,12 +355,13 @@
                 <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">
                     Copy <strong class="text-gray-900 dark:text-white" x-text="currentDateDisplay"></strong> to:
                 </p>
-                <select x-model="copyTargetDate"
-                    class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm px-3 py-2 shadow-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500">
-                    <template x-for="date in availableDates" :key="date.value">
-                        <option :value="date.value" :disabled="date.value === currentDate" x-text="date.label"></option>
-                    </template>
-                </select>
+                <x-filament::input.wrapper class="w-full">
+                    <x-filament::input.select x-model="copyTargetDate">
+                        <template x-for="date in availableDates" :key="date.value">
+                            <option :value="date.value" :disabled="date.value === currentDate" x-text="date.label"></option>
+                        </template>
+                    </x-filament::input.select>
+                </x-filament::input.wrapper>
                 <x-slot name="footer">
                     <div class="flex justify-end gap-2 w-full">
                         <x-filament::button color="gray" @click="$dispatch('close-modal', { id: 'schedule-copy-day' })">
@@ -368,6 +369,24 @@
                         </x-filament::button>
                         <x-filament::button color="primary" @click="copyDay()">
                             Copy
+                        </x-filament::button>
+                    </div>
+                </x-slot>
+            </x-filament::modal>
+
+            {{-- Remove Programme Confirmation Modal --}}
+            <x-filament::modal id="schedule-remove-programme" icon="heroicon-o-trash" icon-color="danger" width="sm">
+                <x-slot name="heading">Remove Programme</x-slot>
+                <x-slot name="description">
+                    Remove this programme from the schedule?
+                </x-slot>
+                <x-slot name="footer">
+                    <div class="flex justify-end gap-2 w-full">
+                        <x-filament::button color="gray" @click="$dispatch('close-modal', { id: 'schedule-remove-programme' })">
+                            Cancel
+                        </x-filament::button>
+                        <x-filament::button color="danger" @click="removeProgramme()">
+                            Remove
                         </x-filament::button>
                     </div>
                 </x-slot>
