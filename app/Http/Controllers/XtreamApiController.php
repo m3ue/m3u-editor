@@ -498,7 +498,7 @@ class XtreamApiController extends Controller
                 ->where('channels.enabled', true)
                 ->where('channels.is_vod', false)
                 ->with(['epgChannel', 'tags', 'group'])
-                ->select('channels.*');
+                ->selectRaw('channels.*');
 
             // Apply category filtering if category_id is provided
             if ($categoryId && $categoryId !== 'all') {
@@ -600,7 +600,9 @@ class XtreamApiController extends Controller
                     }
 
                     $idChannelBy = $playlist->id_channel_by;
-                    $channelNo = $channel->channel;
+                    $channelNo = ($isCustomPlaylist && ! empty($channel->pivot?->channel_number))
+                        ? (int) $channel->pivot->channel_number
+                        : $channel->channel;
                     if (! $channelNo && ($playlist->auto_channel_increment || $idChannelBy === PlaylistChannelId::Number)) {
                         $channelNo = ++$channelNumber;
                     }
@@ -676,7 +678,7 @@ class XtreamApiController extends Controller
                 ->where('channels.enabled', true)
                 ->where('channels.is_vod', true)
                 ->with(['epgChannel', 'tags', 'group'])
-                ->select('channels.*');
+                ->selectRaw('channels.*');
 
             // Apply category filtering if category_id is provided
             if ($categoryId && $categoryId !== 'all') {
@@ -778,9 +780,12 @@ class XtreamApiController extends Controller
 
                     $extension = $channel->container_extension ?? 'mkv';
                     $tmdb = $channel->info['tmdb_id'] ?? $channel->movie_data['tmdb_id'] ?? 0;
+                    $vodChannelNo = ($isCustomPlaylist && ! empty($channel->pivot?->channel_number))
+                        ? (int) $channel->pivot->channel_number
+                        : ($channel->channel ?: $index + 1);
 
                     $vodStreams[] = [
-                        'num' => $index + 1,
+                        'num' => $vodChannelNo,
                         'name' => $channel->title_custom ?? $channel->title,
                         'title' => $channel->title_custom ?? $channel->title,
                         'year' => $channel->year ?? '',

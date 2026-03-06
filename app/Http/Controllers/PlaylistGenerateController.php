@@ -482,6 +482,8 @@ class PlaylistGenerateController extends Controller
         $idChannelBy = $playlist->id_channel_by;
         $autoIncrement = $playlist->auto_channel_increment;
         $channelNumber = $autoIncrement ? $playlist->channel_start - 1 : 0;
+        $isCustomContext = ($playlist instanceof CustomPlaylist) ||
+            ($playlist instanceof PlaylistAlias && ! empty($playlist->custom_playlist_id));
 
         // Stream the JSON response to avoid loading all channels into memory.
         $cursor = $channels->cursor();
@@ -489,7 +491,7 @@ class PlaylistGenerateController extends Controller
             'Content-Type' => 'application/json',
         ];
 
-        return response()->stream(function () use ($cursor, $username, $password, $idChannelBy, $autoIncrement, &$channelNumber) {
+        return response()->stream(function () use ($cursor, $username, $password, $idChannelBy, $autoIncrement, &$channelNumber, $isCustomContext) {
             $first = true;
             echo '[';
             foreach ($cursor as $channel) {
@@ -502,7 +504,6 @@ class PlaylistGenerateController extends Controller
                     $extension = $channel->container_extension ?? 'mkv';
                 }
                 $url = rtrim($baseUrl."/{$urlPath}/{$username}/{$password}/".$channel->id.'.'.$extension, '.');
-                $isCustomContext = ($type === 'custom') || ($type === 'alias' && ! empty($playlist->custom_playlist_id));
 
                 $channelNo = ($isCustomContext && ! empty($channel->pivot?->channel_number))
                     ? (int) $channel->pivot->channel_number
