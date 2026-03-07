@@ -35,6 +35,12 @@ class RegisterM3uProxyWebhook extends Command
         // because m3u-proxy needs to call back to Laravel, not to itself
         $webhookUrl = $service->getWebhookUrl();
 
+        if (! $webhookUrl) {
+            $this->error('❌ Proxy resolver URL is not configured. Please set the Resolver URL in Settings > Proxy for webhooks to register properly.');
+
+            return self::FAILURE;
+        }
+
         $this->info("Webhook URL: {$webhookUrl}");
 
         try {

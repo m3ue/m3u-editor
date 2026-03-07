@@ -2193,15 +2193,16 @@ class M3uProxyService
     /**
      * Get the webhook callback URL for m3u-proxy to send webhook events.
      *
-     * @return string The webhook callback endpoint URL
+     * @return string|null The webhook callback endpoint URL, or null if not configured
      */
-    public function getWebhookUrl(): string
+    public function getWebhookUrl(): ?string
     {
         if (! empty($this->failoverResolverUrl)) {
             // Use the configured failover resolver URL
             return "$this->failoverResolverUrl/api/m3u-proxy/webhooks";
         }
 
-        return ProxyFacade::getBaseUrl().'/api/m3u-proxy/webhooks';
+        // Return null if not configured, as webhooks are optional and may not be needed if the resolver URL is not set
+        return null;
     }
 }

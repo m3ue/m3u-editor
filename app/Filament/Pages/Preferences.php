@@ -319,7 +319,7 @@ class Preferences extends SettingsPage
                                                     ->live()
                                                     ->hintIcon(
                                                         'heroicon-m-question-mark-circle',
-                                                        tooltip: 'The resolver URL is used for advanced failover logic, and Network Broadcasting features. This URL should point to the m3u-editor instance that the proxy can access.'
+                                                        tooltip: 'The resolver URL is used for advanced failover logic, webhook registration for pooled providers, and Network Broadcasting features. This URL should point to the m3u-editor instance that the proxy can access.'
                                                     )
                                                     ->prefixIcon('heroicon-m-link')
                                                     ->disabled(fn () => ! empty(config('proxy.resolver_url')))
@@ -334,7 +334,7 @@ class Preferences extends SettingsPage
                                                     ->dehydrated(fn () => empty(config('proxy.resolver_url')))
                                                     ->placeholder(fn () => $embedded ? 'http://127.0.0.1:'.config('app.port') : 'http://m3u-editor:36400')
                                                     ->helperText(fn () => $embedded
-                                                        ? 'For embedded mode, you should use localhost, e.g.: "http://127.0.0.1:36400" or "http://localhost:36400".'
+                                                        ? 'Domain the proxy can use to access the editor for failover resolution and webhook registration, e.g.: "http://127.0.0.1:36400" or "http://localhost:36400".'
                                                         : 'Domain the proxy can use to access the editor for failover resolution and webhook registration, e.g.: "http://m3u-editor:36400", "http://192.168.0.101:36400", "http://your-domain.dev", etc.'),
 
                                                 Action::make('test_failover_connection')
