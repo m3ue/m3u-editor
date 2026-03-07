@@ -102,6 +102,20 @@
                     player.cleanup();
                 }
             });
+
+            window.addEventListener('pagehide', () => {
+                if (typeof player.cleanup === 'function') {
+                    player.cleanup();
+                }
+            });
+
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'hidden') {
+                    videoElement.pause();
+                } else if (document.visibilityState === 'visible') {
+                    videoElement.play().catch(() => {});
+                }
+            });
         });
     </script>
 </body>

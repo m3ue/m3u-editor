@@ -32,6 +32,11 @@
             cleanupAllStreams();
         }
     "
+    x-on:livewire:navigating.window="
+        if (typeof cleanupAllStreams === 'function') {
+            cleanupAllStreams();
+        }
+    "
     class="fixed inset-0 pointer-events-none z-[9999]"
 >
     <!-- Multiple Floating Players -->
@@ -111,6 +116,11 @@
                         }
                     "
                     x-on:beforeunload.window="
+                        if (playerInstance && typeof playerInstance.cleanup === 'function') {
+                            playerInstance.cleanup();
+                        }
+                    "
+                    x-on:pagehide.window="
                         if (playerInstance && typeof playerInstance.cleanup === 'function') {
                             playerInstance.cleanup();
                         }

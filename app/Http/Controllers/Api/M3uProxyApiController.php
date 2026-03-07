@@ -628,4 +628,39 @@ class M3uProxyApiController extends Controller
             }
         }
     }
+
+    /**
+     * Stop a proxy stream initiated by the in-app player.
+     *
+     * Called via sendBeacon from the browser when a floating/popout player is closed
+     * or when the user navigates away. This is a best-effort signal; the proxy will
+     * also detect the TCP connection drop independently.
+     */
+    public function stopPlayerStream(Request $request): Response
+    {
+        $id = $request->input('id');
+        $type = $request->input('type');
+
+        if (! $id || ! $type) {
+            return response()->noContent(422);
+        }
+
+        $field = match ($type) {
+            'channel' => 'channel_id',
+            'episode' => 'episode_id',
+            default => null,
+        };
+
+        if (! $field) {
+            return response()->noContent(422);
+        }
+
+        try {
+            M3uProxyService::stopStreamsByMetadata($field, (string) $id);
+        } catch (Exception $e) {
+            Log::warning("Failed to stop player stream ({$type}:{$id}): ".$e->getMessage());
+        }
+
+        return response()->noContent();
+    }
 }

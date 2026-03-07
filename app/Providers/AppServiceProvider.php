@@ -317,8 +317,21 @@ class AppServiceProvider extends ServiceProvider
     private function ensureJobsTableExists(): void
     {
         try {
-            if (! Schema::connection('jobs')->hasTable('jobs')) {
-                Schema::connection('jobs')->create('jobs', function (Blueprint $table) {
+            $connection = Schema::connection('jobs');
+            $hasTable = $connection->hasTable('jobs');
+
+            // If the table exists, verify it has the correct schema.
+            // The Laravel default queue migration (0001_01_01_000002) can create a
+            // wrong-schema 'jobs' table when `php artisan migrate --database=jobs`
+            // runs. Detect this by checking for our custom 'title' column.
+            if ($hasTable && ! $connection->hasColumn('jobs', 'title')) {
+                Log::warning('Jobs table has wrong schema (missing "title" column), recreating with correct schema');
+                $connection->dropIfExists('jobs');
+                $hasTable = false;
+            }
+
+            if (! $hasTable) {
+                $connection->create('jobs', function (Blueprint $table) {
                     $table->id();
                     $table->string('title');
                     $table->string('batch_no');

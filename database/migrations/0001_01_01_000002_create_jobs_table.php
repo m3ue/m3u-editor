@@ -8,9 +8,21 @@ return new class extends Migration
 {
     /**
      * Run the migrations.
+     *
+     * This migration creates Laravel's default queue tables (jobs, job_batches, failed_jobs).
+     * It must be skipped when running against the 'jobs' database connection
+     * (php artisan migrate --database=jobs), because that connection uses a separate
+     * SQLite database with a custom 'jobs' table schema for playlist/EPG import tracking.
+     * Without this guard, this migration would create the wrong-schema 'jobs' table first,
+     * preventing the custom migration (2025_02_13_215803) from creating the correct one.
      */
     public function up(): void
     {
+        // Skip when running on the custom 'jobs' SQLite connection to avoid schema conflicts.
+        if ($this->getConnection() === 'jobs' || config('database.default') === 'jobs') {
+            return;
+        }
+
         if (! Schema::hasTable('jobs')) {
 
             Schema::create('jobs', function (Blueprint $table) {
@@ -53,6 +65,10 @@ return new class extends Migration
      */
     public function down(): void
     {
+        if ($this->getConnection() === 'jobs' || config('database.default') === 'jobs') {
+            return;
+        }
+
         Schema::dropIfExists('jobs');
         Schema::dropIfExists('job_batches');
         Schema::dropIfExists('failed_jobs');

@@ -637,10 +637,59 @@ class ProfileService
         try {
             $streamIds = Redis::smembers($streamsKey);
 
+            if (empty($streamIds)) {
+                return 0;
+            }
+
+            // Get the playlist to query active streams from the proxy
+            $playlist = $profile->playlist;
+            if (! $playlist) {
+                return 0;
+            }
+
+            $activeStreams = M3uProxyService::getPlaylistActiveStreams($playlist);
+
+            // If API call failed, don't touch anything
+            if ($activeStreams === null) {
+                return 0;
+            }
+
+            // Build a set of active stream IDs from the proxy
+            $activeStreamIds = collect($activeStreams)
+                ->pluck('stream_id')
+                ->filter()
+                ->toArray();
+
+            // Remove any Redis-tracked streams that are no longer active in the proxy
             foreach ($streamIds as $streamId) {
-                // Check if stream is still active in the proxy
-                // This would need integration with m3u-proxy's stream tracking
-                // For now, we'll rely on stream end events
+                if (! in_array($streamId, $activeStreamIds)) {
+                    $streamKey = static::getStreamProfileKey($streamId);
+                    Redis::pipeline(function ($pipe) use ($streamsKey, $streamKey, $streamId) {
+                        $pipe->srem($streamsKey, $streamId);
+                        $pipe->del($streamKey);
+                    });
+                    $cleaned++;
+
+                    Log::debug('Cleaned up stale stream entry', [
+                        'profile_id' => $profile->id,
+                        'stream_id' => $streamId,
+                    ]);
+                }
+            }
+
+            // If we cleaned any, correct the connection count
+            if ($cleaned > 0) {
+                $countKey = static::getConnectionCountKey($profile);
+                $currentCount = (int) Redis::get($countKey);
+                $correctedCount = max(0, $currentCount - $cleaned);
+                Redis::set($countKey, $correctedCount);
+
+                Log::info('Corrected connection count after stale stream cleanup', [
+                    'profile_id' => $profile->id,
+                    'old_count' => $currentCount,
+                    'new_count' => $correctedCount,
+                    'cleaned' => $cleaned,
+                ]);
             }
         } catch (\Exception $e) {
             Log::error("Failed to cleanup stale streams for profile {$profile->id}", [
@@ -680,6 +729,28 @@ class ProfileService
                 'exception' => $e->getMessage(),
             ]);
         }
+    }
+
+    /**
+     * Reconcile and re-check if any profile has capacity.
+     *
+     * Called just before returning a 503 to give the system one last chance
+     * to correct stale Redis counts (e.g. from race conditions when switching
+     * channels where increment fires before the old stream's decrement webhook).
+     *
+     * Returns a profile with capacity if one is found after reconciliation, or null.
+     */
+    public static function reconcileAndSelectProfile(Playlist $playlist, ?int $excludeProfileId = null): ?PlaylistProfile
+    {
+        if (! $playlist->profiles_enabled) {
+            return null;
+        }
+
+        // Reconcile Redis counts against actual proxy state
+        static::reconcileFromProxy($playlist);
+
+        // Now retry profile selection with corrected counts
+        return static::selectProfile($playlist, $excludeProfileId);
     }
 
     /**
