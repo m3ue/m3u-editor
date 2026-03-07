@@ -656,7 +656,14 @@ class M3uProxyService
                 $selectedProfile = ProfileService::selectProfile($profileSourcePlaylist);
 
                 if (! $selectedProfile) {
-                    Log::warning('No profiles with capacity available for new stream', [
+                    // Reconcile Redis counts against actual proxy state before rejecting.
+                    // Fixes race condition where increment fires before the old stream's
+                    // decrement webhook when rapidly switching channels.
+                    $selectedProfile = ProfileService::reconcileAndSelectProfile($profileSourcePlaylist);
+                }
+
+                if (! $selectedProfile) {
+                    Log::warning('No profiles with capacity available for new stream (after reconciliation)', [
                         'playlist_id' => $profileSourcePlaylist->id,
                         'source_playlist' => $profileSourcePlaylist->name,
                         'channel_id' => $id,
@@ -791,7 +798,13 @@ class M3uProxyService
                 }
 
                 if (! $selectedProfile) {
-                    Log::warning('No profiles with capacity available', [
+                    // Last resort: reconcile Redis counts against actual proxy state.
+                    // Fixes race condition where increment fires before decrement webhook.
+                    $selectedProfile = ProfileService::reconcileAndSelectProfile($profileSourcePlaylist);
+                }
+
+                if (! $selectedProfile) {
+                    Log::warning('No profiles with capacity available (after reconciliation)', [
                         'playlist_id' => $profileSourcePlaylist->id,
                         'source_playlist' => $profileSourcePlaylist->name,
                         'channel_id' => $id,
@@ -961,8 +974,23 @@ class M3uProxyService
         // Get episode ID
         $id = $episode->id;
 
+        // Determine the source playlist for provider profiles
+        // When streaming through a CustomPlaylist, MergedPlaylist, or PlaylistAlias,
+        // we need to use the episode's source Playlist for provider profile selection
+        $profileSourcePlaylist = null;
+        if ($playlist instanceof Playlist && $playlist->profiles_enabled) {
+            $profileSourcePlaylist = $playlist;
+        } elseif ($episode->playlist instanceof Playlist && $episode->playlist->profiles_enabled) {
+            // Streaming through CustomPlaylist/MergedPlaylist/PlaylistAlias - use episode's source Playlist
+            $profileSourcePlaylist = $episode->playlist;
+        }
+
+        // IMPORTANT: Skip playlist-level limit check if using provider profiles
+        // When using provider profiles, each profile has its own connection limit
+        $usingProviderProfiles = $profileSourcePlaylist !== null;
+
         // Check if playlist has stream limits and if it's at capacity
-        if ($playlist->available_streams !== 0) {
+        if ($playlist->available_streams !== 0 && ! $usingProviderProfiles) {
             $activeStreams = self::getCachedActiveStreamsCountByMetadata('playlist_uuid', $playlist->uuid, 1);
 
             if ($activeStreams >= $playlist->available_streams) {
@@ -1010,9 +1038,10 @@ class M3uProxyService
         $headers = $playlist->custom_headers ?? [];
 
         // Provider Profile selection for Xtream playlists with profiles enabled
+        // Use profileSourcePlaylist which may be the episode's source playlist when streaming via CustomPlaylist
         $selectedProfile = null;
-        if ($playlist instanceof Playlist && $playlist->profiles_enabled) {
-            $selectedProfile = ProfileService::selectProfile($playlist);
+        if ($profileSourcePlaylist) {
+            $selectedProfile = ProfileService::selectProfile($profileSourcePlaylist);
 
             if (! $selectedProfile) {
                 // No profiles with capacity - try "stop oldest on limit" before giving up
@@ -1027,14 +1056,20 @@ class M3uProxyService
                         ]);
 
                         usleep(200000); // 200ms
-                        ProfileService::reconcileFromProxy($playlist);
-                        $selectedProfile = ProfileService::selectProfile($playlist);
+                        ProfileService::reconcileFromProxy($profileSourcePlaylist);
+                        $selectedProfile = ProfileService::selectProfile($profileSourcePlaylist);
                     }
                 }
 
                 if (! $selectedProfile) {
-                    Log::warning('No profiles with capacity available for episode', [
-                        'playlist_id' => $playlist->id,
+                    // Last resort: reconcile Redis counts against actual proxy state.
+                    // Fixes race condition where increment fires before decrement webhook.
+                    $selectedProfile = ProfileService::reconcileAndSelectProfile($profileSourcePlaylist);
+                }
+
+                if (! $selectedProfile) {
+                    Log::warning('No profiles with capacity available for episode (after reconciliation)', [
+                        'playlist_id' => $profileSourcePlaylist->id,
                         'episode_id' => $id,
                     ]);
                     abort(503, 'All provider profiles have reached their maximum stream limit. Please try again later.');
@@ -1044,7 +1079,7 @@ class M3uProxyService
             Log::debug('Selected profile for episode streaming', [
                 'profile_id' => $selectedProfile->id,
                 'profile_name' => $selectedProfile->name,
-                'playlist_id' => $playlist->id,
+                'playlist_id' => $profileSourcePlaylist->id,
                 'episode_id' => $id,
             ]);
 
