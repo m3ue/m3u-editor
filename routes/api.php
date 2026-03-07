@@ -22,6 +22,11 @@ Route::middleware(['proxy.throttle'])->prefix('m3u-proxy')->group(function () {
         ->name('m3u-proxy.failover-resolver')
         ->withoutMiddleware('proxy.throttle');
 
+    // Player stream stop - called via sendBeacon when in-app player is closed
+    Route::post('player-stream/stop', [\App\Http\Controllers\Api\M3uProxyApiController::class, 'stopPlayerStream'])
+        ->name('m3u-proxy.player-stream.stop')
+        ->withoutMiddleware('proxy.throttle');
+
     // Player preview routes
     Route::get('channel/{id}/player/{uuid?}', [\App\Http\Controllers\Api\M3uProxyApiController::class, 'channelPlayer'])
         ->name('m3u-proxy.channel.player');
