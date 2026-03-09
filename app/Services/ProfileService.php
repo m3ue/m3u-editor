@@ -27,6 +27,11 @@ class ProfileService
     protected const STREAM_TRACKING_TTL = 86400;
 
     /**
+     * Max wait time for the profile selection lock (seconds).
+     */
+    protected const PROFILE_LOCK_TIMEOUT = 2;
+
+    /**
      * Select the best available profile for streaming.
      *
      * Iterates through enabled profiles in priority order and returns
@@ -85,6 +90,123 @@ class ProfileService
         ]);
 
         return null;
+    }
+
+    /**
+     * Atomically select a profile and reserve a connection slot.
+     *
+     * Uses a per-playlist lock to prevent two concurrent requests from both
+     * selecting the same profile when only one slot remains (TOCTOU race).
+     *
+     * The connection count is immediately incremented using a reservation ID.
+     * After the real stream is created, call `finalizeReservation()` to update
+     * the stream mapping from reservation ID to real stream ID.
+     *
+     * Returns [PlaylistProfile, string $reservationId] on success, or [null, null].
+     *
+     * @return array{0: PlaylistProfile|null, 1: string|null}
+     */
+    public static function selectAndReserveProfile(
+        Playlist $playlist,
+        ?int $excludeProfileId = null,
+    ): array {
+        if (! $playlist->profiles_enabled) {
+            return [null, null];
+        }
+
+        $lockKey = "profile_select_lock:playlist:{$playlist->id}";
+        $reservationId = 'reservation:'.bin2hex(random_bytes(8));
+
+        // Acquire a short-lived atomic lock scoped to this playlist.
+        // block() waits up to PROFILE_LOCK_TIMEOUT seconds for the lock.
+        $lock = Cache::lock($lockKey, static::PROFILE_LOCK_TIMEOUT);
+
+        try {
+            // Wait for the lock with a timeout
+            if (! $lock->block(static::PROFILE_LOCK_TIMEOUT)) {
+                Log::warning('Failed to acquire profile selection lock', [
+                    'playlist_id' => $playlist->id,
+                ]);
+
+                return [null, null];
+            }
+
+            // Inside the lock: select + increment atomically
+            $profile = static::selectProfile($playlist, $excludeProfileId);
+
+            if ($profile) {
+                // Reserve the slot immediately so the next concurrent request
+                // sees the updated count and picks a different profile (or waits).
+                static::incrementConnections($profile, $reservationId);
+
+                return [$profile, $reservationId];
+            }
+
+            return [null, null];
+        } catch (\Exception $e) {
+            Log::error('Error in selectAndReserveProfile', [
+                'playlist_id' => $playlist->id,
+                'exception' => $e->getMessage(),
+            ]);
+
+            return [null, null];
+        } finally {
+            $lock->release();
+        }
+    }
+
+    /**
+     * Finalize a reservation by replacing the temporary reservation ID
+     * with the real stream ID from the proxy.
+     *
+     * Called after the proxy has created the stream and returned its ID.
+     */
+    public static function finalizeReservation(PlaylistProfile $profile, string $reservationId, string $realStreamId): void
+    {
+        $streamsKey = static::getProfileStreamsKey($profile);
+        $oldStreamKey = static::getStreamProfileKey($reservationId);
+        $newStreamKey = static::getStreamProfileKey($realStreamId);
+
+        try {
+            Redis::pipeline(function ($pipe) use ($streamsKey, $oldStreamKey, $newStreamKey, $reservationId, $realStreamId, $profile) {
+                // Remove the reservation entry
+                $pipe->srem($streamsKey, $reservationId);
+                $pipe->del($oldStreamKey);
+
+                // Add the real stream entry
+                $pipe->sadd($streamsKey, $realStreamId);
+                $pipe->expire($streamsKey, static::STREAM_TRACKING_TTL);
+                $pipe->set($newStreamKey, $profile->id);
+                $pipe->expire($newStreamKey, static::STREAM_TRACKING_TTL);
+            });
+
+            Log::debug('Finalized profile reservation', [
+                'profile_id' => $profile->id,
+                'reservation_id' => $reservationId,
+                'real_stream_id' => $realStreamId,
+            ]);
+        } catch (\Exception $e) {
+            Log::error("Failed to finalize reservation for profile {$profile->id}", [
+                'reservation_id' => $reservationId,
+                'real_stream_id' => $realStreamId,
+                'exception' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Cancel a reservation (e.g. when stream creation fails).
+     *
+     * Decrements the count and cleans up the reservation entries.
+     */
+    public static function cancelReservation(PlaylistProfile $profile, string $reservationId): void
+    {
+        static::decrementConnections($profile, $reservationId);
+
+        Log::debug('Cancelled profile reservation', [
+            'profile_id' => $profile->id,
+            'reservation_id' => $reservationId,
+        ]);
     }
 
     /**
@@ -166,6 +288,8 @@ class ProfileService
      * Decrement the connection count for a profile.
      *
      * Called when a stream ends.
+     * Uses a Lua script to atomically decrement only if count > 0,
+     * preventing TOCTOU races that could push the count negative.
      */
     public static function decrementConnections(PlaylistProfile $profile, string $streamId): void
     {
@@ -174,26 +298,29 @@ class ProfileService
         $streamsKey = static::getProfileStreamsKey($profile);
 
         try {
-            // Check count before decrementing to avoid race conditions
-            $currentCount = (int) Redis::get($countKey);
+            // Atomic decrement-if-positive via Lua script.
+            // Returns the new count (>= 0) or -1 if already at zero.
+            $lua = <<<'LUA'
+                local current = tonumber(redis.call('get', KEYS[1]) or 0)
+                if current > 0 then
+                    return redis.call('decr', KEYS[1])
+                end
+                return -1
+            LUA;
 
-            if ($currentCount > 0) {
-                Redis::pipeline(function ($pipe) use ($countKey, $streamKey, $streamsKey, $streamId) {
-                    $pipe->decr($countKey);
-                    $pipe->del($streamKey);
-                    $pipe->srem($streamsKey, $streamId);
-                });
-            } else {
-                // Just clean up the stream references
-                Redis::pipeline(function ($pipe) use ($streamKey, $streamsKey, $streamId) {
-                    $pipe->del($streamKey);
-                    $pipe->srem($streamsKey, $streamId);
-                });
+            $result = Redis::eval($lua, 1, $countKey);
 
+            if ($result == -1) {
                 Log::warning("Attempted to decrement connections for profile {$profile->id} but count was already 0", [
                     'stream_id' => $streamId,
                 ]);
             }
+
+            // Clean up stream references regardless
+            Redis::pipeline(function ($pipe) use ($streamKey, $streamsKey, $streamId) {
+                $pipe->del($streamKey);
+                $pipe->srem($streamsKey, $streamId);
+            });
 
             $newCount = static::getConnectionCount($profile);
 
@@ -394,18 +521,19 @@ class ProfileService
             if ($userInfo) {
                 $maxConnections = (int) ($userInfo['user_info']['max_connections'] ?? 1);
 
-                // Update max_streams if not manually set (null/0) OR if it was left at the default of 1
-                // This ensures auto-detection works for profiles that weren't properly configured
+                // Only auto-update max_streams if not explicitly set by the user.
+                // A positive value means the user (or initial auto-detection) has
+                // already configured it — respect that choice even if provider upgrades.
+                // Auto-update only when max_streams is null/0 (never configured).
                 $shouldUpdateMaxStreams = ! $profile->max_streams
-                    || $profile->max_streams <= 0
-                    || $profile->max_streams === 1;
+                    || $profile->max_streams <= 0;
 
                 $updateData = [
                     'provider_info' => $userInfo,
                     'provider_info_updated_at' => now(),
                 ];
 
-                if ($shouldUpdateMaxStreams && $maxConnections > 1) {
+                if ($shouldUpdateMaxStreams && $maxConnections > 0) {
                     $updateData['max_streams'] = $maxConnections;
                 }
 
@@ -581,6 +709,9 @@ class ProfileService
      *
      * Used inline (e.g. after stopping a stream) to immediately correct
      * Redis counts without waiting for the scheduled reconcile task.
+     *
+     * Iterates ALL profiles (including disabled ones) to ensure stale Redis
+     * counts on disabled profiles are also cleaned up.
      */
     public static function reconcileFromProxy(Playlist $playlist): void
     {
@@ -604,7 +735,10 @@ class ProfileService
             }
         }
 
-        foreach ($playlist->enabledProfiles()->get() as $profile) {
+        // Iterate ALL profiles (including disabled) to clean stale Redis counts.
+        // Disabled profiles should have 0 active streams; if Redis still shows
+        // a positive count from before the profile was disabled, correct it.
+        foreach ($playlist->profiles()->get() as $profile) {
             $redisCount = static::getConnectionCount($profile);
             $proxyCount = $profileStreamCounts[$profile->id] ?? 0;
 
@@ -614,6 +748,7 @@ class ProfileService
                     Redis::set($key, $proxyCount);
                     Log::debug('Quick reconciled profile connection count', [
                         'profile_id' => $profile->id,
+                        'enabled' => $profile->enabled,
                         'old_count' => $redisCount,
                         'new_count' => $proxyCount,
                     ]);
@@ -732,25 +867,27 @@ class ProfileService
     }
 
     /**
-     * Reconcile and re-check if any profile has capacity.
+     * Reconcile and atomically select+reserve a profile.
      *
      * Called just before returning a 503 to give the system one last chance
      * to correct stale Redis counts (e.g. from race conditions when switching
      * channels where increment fires before the old stream's decrement webhook).
      *
-     * Returns a profile with capacity if one is found after reconciliation, or null.
+     * Returns [PlaylistProfile, string $reservationId] on success, or [null, null].
+     *
+     * @return array{0: PlaylistProfile|null, 1: string|null}
      */
-    public static function reconcileAndSelectProfile(Playlist $playlist, ?int $excludeProfileId = null): ?PlaylistProfile
+    public static function reconcileAndSelectProfile(Playlist $playlist, ?int $excludeProfileId = null): array
     {
         if (! $playlist->profiles_enabled) {
-            return null;
+            return [null, null];
         }
 
         // Reconcile Redis counts against actual proxy state
         static::reconcileFromProxy($playlist);
 
-        // Now retry profile selection with corrected counts
-        return static::selectProfile($playlist, $excludeProfileId);
+        // Now retry profile selection with atomic reservation
+        return static::selectAndReserveProfile($playlist, $excludeProfileId);
     }
 
     /**

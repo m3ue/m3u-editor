@@ -161,7 +161,7 @@ test('cleanupStaleStreams handles empty Redis stream set gracefully', function (
 
 // ── Fix A2: reconcileAndSelectProfile() ────────────────────────────────────
 
-test('reconcileAndSelectProfile returns profile after correcting stale counts', function () {
+test('reconcileAndSelectProfile returns profile and reservation after correcting stale counts', function () {
     $playlist = Playlist::factory()->for($this->user)->create([
         'profiles_enabled' => true,
     ]);
@@ -184,19 +184,33 @@ test('reconcileAndSelectProfile returns profile after correcting stale counts', 
     ]);
 
     // reconcileFromProxy reads current count (stale: 2), then sets it to 0
-    // Then selectProfile reads count (now 0) and finds capacity
+    // Then selectAndReserveProfile -> selectProfile reads count (now 0) -> finds capacity
+    // Then incrementConnections uses a pipeline (which we allow via shouldReceive)
     Redis::shouldReceive('get')
         ->with($countKey)
-        ->andReturn(2, 0, 0); // reconcile read, set corrected, selectProfile read, hasCapacity read
+        ->andReturn(2, 0, 0, 0); // reconcile read, selectProfile read, hasCapacity read, post-increment read
 
     Redis::shouldReceive('set')
         ->once()
-        ->with($countKey, 0);
+        ->with($countKey, 0); // reconcile correction
 
-    $selected = ProfileService::reconcileAndSelectProfile($playlist);
+    // incrementConnections uses pipeline
+    Redis::shouldReceive('pipeline')
+        ->once()
+        ->andReturnUsing(function ($callback) {
+            $pipe = Mockery::mock();
+            $pipe->shouldReceive('incr')->andReturnSelf();
+            $pipe->shouldReceive('expire')->andReturnSelf();
+            $pipe->shouldReceive('set')->andReturnSelf();
+            $pipe->shouldReceive('sadd')->andReturnSelf();
+            $callback($pipe);
+        });
+
+    [$selected, $reservationId] = ProfileService::reconcileAndSelectProfile($playlist);
 
     expect($selected)->not->toBeNull();
     expect($selected->id)->toBe($profile->id);
+    expect($reservationId)->toStartWith('reservation:');
 });
 
 test('reconcileAndSelectProfile returns null when truly at capacity', function () {
@@ -230,14 +244,15 @@ test('reconcileAndSelectProfile returns null when truly at capacity', function (
         ]),
     ]);
 
-    // Count is 1 before and after reconcile (accurate)
+    // Count is 1 before and after reconcile (truly at capacity)
     Redis::shouldReceive('get')
         ->with($countKey)
         ->andReturn(1);
 
-    $selected = ProfileService::reconcileAndSelectProfile($playlist);
+    [$selected, $reservationId] = ProfileService::reconcileAndSelectProfile($playlist);
 
     expect($selected)->toBeNull();
+    expect($reservationId)->toBeNull();
 });
 
 test('reconcileAndSelectProfile returns null for non-profile playlists', function () {
@@ -245,14 +260,23 @@ test('reconcileAndSelectProfile returns null for non-profile playlists', functio
         'profiles_enabled' => false,
     ]);
 
-    $selected = ProfileService::reconcileAndSelectProfile($playlist);
+    [$selected, $reservationId] = ProfileService::reconcileAndSelectProfile($playlist);
 
     expect($selected)->toBeNull();
+    expect($reservationId)->toBeNull();
 });
 
 // ── Fix A3: Episode profile resolution via CustomPlaylist ──────────────────
 
 test('episode profile source is resolved from source playlist when streaming via custom playlist', function () {
+    // Fake HTTP before creating playlist to prevent real Xtream API calls
+    // triggered by PlaylistListener::ensurePrimaryProfileExists()
+    Http::fake([
+        '*/player_api.php*' => Http::response([
+            'user_info' => ['max_connections' => '5'],
+        ]),
+    ]);
+
     $sourcePlaylist = Playlist::factory()->for($this->user)->create([
         'profiles_enabled' => true,
         'xtream' => true,
