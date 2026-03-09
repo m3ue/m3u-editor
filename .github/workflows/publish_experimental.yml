@@ -2,6 +2,8 @@ name: Experimental
 on:
   push:
     branches: [experimental]
+    paths:
+      - 'config/dev.php'
   workflow_dispatch:
 
 concurrency:
@@ -25,6 +27,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       proxy_commit: ${{ steps.proxy.outputs.commit }}
+      tag_exists: ${{ steps.version.outputs.tag_exists }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -39,6 +42,13 @@ jobs:
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "📦 Experimental version: $VERSION"
+
+          if git ls-remote --tags origin "refs/tags/v${VERSION}-exp" | grep -q .; then
+            echo "tag_exists=true" >> $GITHUB_OUTPUT
+            echo "⚠️  Tag v${VERSION}-exp already exists — Docker build will be skipped"
+          else
+            echo "tag_exists=false" >> $GITHUB_OUTPUT
+          fi
 
       - name: Get m3u-proxy latest commit
         id: proxy
@@ -55,6 +65,7 @@ jobs:
     name: Build & Push (amd64)
     runs-on: ubuntu-latest
     needs: [ci-check, get-version]
+    if: needs.get-version.outputs.tag_exists != 'true'
     outputs:
       digest: ${{ steps.build.outputs.digest }}
     steps:
@@ -96,6 +107,7 @@ jobs:
     name: Build & Push (arm64)
     runs-on: ubuntu-22.04-arm
     needs: [ci-check, get-version]
+    if: needs.get-version.outputs.tag_exists != 'true'
     outputs:
       digest: ${{ steps.build.outputs.digest }}
     steps:
@@ -137,6 +149,7 @@ jobs:
     name: Create Multi-arch Manifest
     runs-on: ubuntu-latest
     needs: [get-version, push-amd64, push-arm64]
+    if: needs.get-version.outputs.tag_exists != 'true'
     steps:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -182,6 +195,7 @@ jobs:
     name: Create Experimental Pre-release
     runs-on: ubuntu-latest
     needs: [get-version, push-manifest]
+    if: always() && needs.get-version.result == 'success' && needs.get-version.outputs.tag_exists != 'true'
     permissions:
       contents: write
     steps:
@@ -190,37 +204,85 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Get previous experimental release commit
+      - name: Find release range via config/dev.php history
         id: prev_tag
         run: |
-          LATEST_TAG=$(git tag -l "v*-exp" --sort=-creatordate | head -n 1)
-          if [ -n "$LATEST_TAG" ]; then
-            PREV_COMMIT=$(git rev-list -n 1 "$LATEST_TAG")
-          else
-            PREV_COMMIT=$(git rev-list --max-parents=0 HEAD)
+          VERSION="${{ needs.get-version.outputs.version }}-exp"
+
+          # Build version map: scan config/dev.php first-parent history on experimental.
+          # Each distinct version → the oldest commit that first introduced it.
+          # Output: "version commit" lines, newest version first.
+          prev_ver="" last_hash="" curr_commit="" prev_commit="" prev_prev_commit=""
+          while IFS= read -r hash; do
+            ver=$(git show "${hash}:config/dev.php" 2>/dev/null \
+                  | grep "experimental_version" \
+                  | grep -oE "[0-9]+\.[0-9]+\.[0-9]+[-a-z]*" | head -1 || true)
+            [ -z "$ver" ] && continue
+
+            if [ "$ver" != "$prev_ver" ]; then
+              # Version block ended — last_hash is the oldest commit for prev_ver
+              if [ "$prev_ver" = "$VERSION" ]; then
+                curr_commit="$last_hash"
+              elif [ -n "$curr_commit" ] && [ -z "$prev_commit" ]; then
+                prev_commit="$last_hash"
+              elif [ -n "$prev_commit" ] && [ -z "$prev_prev_commit" ]; then
+                prev_prev_commit="$last_hash"
+                break
+              fi
+              prev_ver="$ver"
+            fi
+            last_hash="$hash"
+          done < <(git log HEAD --first-parent --format="%H" -- config/dev.php)
+
+          # Handle the final block (oldest version in history)
+          if [ "$prev_ver" = "$VERSION" ] && [ -z "$curr_commit" ]; then
+            curr_commit="$last_hash"
+          elif [ -n "$curr_commit" ] && [ -z "$prev_commit" ]; then
+            prev_commit="$last_hash"
           fi
-          echo "prev_commit=$PREV_COMMIT" >> $GITHUB_OUTPUT
-          echo "Previous commit: $PREV_COMMIT (from tag: ${LATEST_TAG:-none})"
+
+          # Fall back to repo root if previous release not found
+          [ -z "$prev_commit" ] && prev_commit=$(git rev-list --max-parents=0 HEAD)
+
+          echo "curr_commit=${curr_commit}" >> $GITHUB_OUTPUT
+          echo "prev_commit=${prev_commit}" >> $GITHUB_OUTPUT
+          echo "prev_prev_commit=${prev_prev_commit}" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION | curr: ${curr_commit:0:12} | prev: ${prev_commit:0:12} | dedup: ${prev_prev_commit:0:12}"
 
       - name: Generate changelog
         run: |
+          CURR="${{ steps.prev_tag.outputs.curr_commit }}"
           PREV="${{ steps.prev_tag.outputs.prev_commit }}"
+          PREV_PREV="${{ steps.prev_tag.outputs.prev_prev_commit }}"
 
-          git log "${PREV}..HEAD" --no-merges --pretty=format:"%s|%h" > commits.txt
+          # Build list of normalized messages from the PREVIOUS release to exclude cherry-pick duplicates
+          if [ -n "$PREV_PREV" ]; then
+            git log "${PREV_PREV}..${PREV}" --no-merges --pretty=tformat:"%s" \
+              | sed 's/^[^[:alnum:]]*//' | tr '[:upper:]' '[:lower:]' > prev_msgs.tmp
+          else
+            touch prev_msgs.tmp
+          fi
+
+          touch seen.tmp
+          git log "${PREV}..${CURR}" --no-merges --pretty=tformat:"%s|%h" > commits.txt
 
           while IFS='|' read -r msg hash; do
             [[ "$msg" =~ ^[Vv]ersion\ bump ]] && continue
-            if [[ "$msg" =~ ^feat ]]; then
+            norm=$(echo "$msg" | sed 's/^[^[:alnum:]]*//' | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//')
+            grep -qxF "$norm" seen.tmp && continue        # skip within-range duplicates
+            grep -qxF "$norm" prev_msgs.tmp && continue   # skip messages from previous release
+            echo "$norm" >> seen.tmp
+            if [[ "$norm" =~ ^feat ]]; then
               printf -- '- %s (`%s`)\n' "$msg" "$hash" >> features.tmp
-            elif [[ "$msg" =~ ^fix ]]; then
+            elif [[ "$norm" =~ ^fix ]]; then
               printf -- '- %s (`%s`)\n' "$msg" "$hash" >> fixes.tmp
-            elif [[ "$msg" =~ ^perf ]]; then
+            elif [[ "$norm" =~ ^perf ]]; then
               printf -- '- %s (`%s`)\n' "$msg" "$hash" >> perf.tmp
-            elif [[ "$msg" =~ ^refactor ]]; then
+            elif [[ "$norm" =~ ^refactor ]]; then
               printf -- '- %s (`%s`)\n' "$msg" "$hash" >> refactor.tmp
-            elif [[ "$msg" =~ ^docs ]]; then
+            elif [[ "$norm" =~ ^docs ]]; then
               printf -- '- %s (`%s`)\n' "$msg" "$hash" >> docs.tmp
-            elif [[ "$msg" =~ ^chore ]]; then
+            elif [[ "$norm" =~ ^chore ]]; then
               printf -- '- %s (`%s`)\n' "$msg" "$hash" >> chores.tmp
             else
               printf -- '- %s (`%s`)\n' "$msg" "$hash" >> other.tmp
@@ -275,7 +337,7 @@ jobs:
             echo '```'
           } > changelog.md
 
-          rm -f *.tmp commits.txt
+          rm -f *.tmp commits.txt seen.tmp prev_msgs.tmp
 
       - name: Create experimental pre-release
         uses: softprops/action-gh-release@v2
