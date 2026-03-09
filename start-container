@@ -40,6 +40,10 @@ export M3U_PROXY_PORT="${M3U_PROXY_PORT:-8085}"
 export M3U_PROXY_LOG_LEVEL="${M3U_PROXY_LOG_LEVEL:-ERROR}" # Default ERROR
 export M3U_PROXY_NGINX_TARGET="" # Will be set based on mode for nginx proxy_pass
 
+# Provider profile reconciliation worker
+# Continuously reconciles profile connection counts against m3u-proxy active streams
+export PROFILE_CONNECTION_WORKER_ENABLED="${PROFILE_CONNECTION_WORKER_ENABLED:-true}"
+
 # Run PHP as root (or m3ue)
 export SUPERVISOR_PHP_USER="root"
 
