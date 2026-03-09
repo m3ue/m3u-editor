@@ -208,8 +208,13 @@ jobs:
 
           git log "${PREV}..HEAD" --no-merges --pretty=format:"%s|%h" > commits.txt
 
+          declare -A seen_msgs
           while IFS='|' read -r msg hash; do
             [[ "$msg" =~ ^[Vv]ersion\ bump ]] && continue
+            # Normalize: strip leading emoji + space, lowercase for dedup key
+            norm=$(echo "$msg" | sed 's/^[^[:alnum:]]*//' | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//')
+            [[ -n "${seen_msgs[$norm]}" ]] && continue
+            seen_msgs[$norm]=1
             if [[ "$msg" =~ ^feat ]]; then
               printf -- '- %s (`%s`)\n' "$msg" "$hash" >> features.tmp
             elif [[ "$msg" =~ ^fix ]]; then
@@ -286,6 +291,14 @@ jobs:
           prerelease: true
           generate_release_notes: false
           make_latest: false
+
+      - name: Advance release tag to current commit
+        run: |
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git tag -f v${{ needs.get-version.outputs.version }}-exp ${{ github.sha }}
+          git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git \
+            "refs/tags/v${{ needs.get-version.outputs.version }}-exp" --force
 
   notify-failure:
     name: Notify on Failure
