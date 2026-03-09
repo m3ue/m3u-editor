@@ -66,10 +66,9 @@ test('decrementConnections uses Lua eval for atomic decrement-if-positive', func
             $callback($pipe);
         });
 
-    // getConnectionCount call after decrement
-    Redis::shouldReceive('get')
-        ->once()
-        ->andReturn(2);
+    // Two get calls: (1) channel reverse-key lookup → null (no mapping), (2) getConnectionCount.
+    Redis::shouldReceive('get')->once()->ordered()->andReturn(null);
+    Redis::shouldReceive('get')->once()->ordered()->andReturn(2);
 
     ProfileService::decrementConnections($profile, 'stream-123');
 });
@@ -101,10 +100,9 @@ test('decrementConnections logs warning when count is already zero', function ()
             $callback($pipe);
         });
 
-    // getConnectionCount after
-    Redis::shouldReceive('get')
-        ->once()
-        ->andReturn(0);
+    // Two get calls: (1) channel reverse-key lookup → null (no mapping), (2) getConnectionCount.
+    Redis::shouldReceive('get')->once()->ordered()->andReturn(null);
+    Redis::shouldReceive('get')->once()->ordered()->andReturn(0);
 
     // Should not throw, just log warning
     ProfileService::decrementConnections($profile, 'stream-456');
@@ -129,7 +127,7 @@ test('decrementConnections cleans up stream references even when Lua returns -1'
         ->once()
         ->andReturn(-1);
 
-    // Pipeline MUST still be called to clean up del + srem
+    // Pipeline MUST still be called to clean up del + srem + channel reverse-key del
     Redis::shouldReceive('pipeline')
         ->once()
         ->andReturnUsing(function ($callback) use ($streamId) {
@@ -138,13 +136,19 @@ test('decrementConnections cleans up stream references even when Lua returns -1'
                 ->with("stream:{$streamId}:profile_id")
                 ->once()
                 ->andReturnSelf();
+            $pipe->shouldReceive('del')
+                ->with("stream:{$streamId}:channel")
+                ->once()
+                ->andReturnSelf();
             $pipe->shouldReceive('srem')
                 ->once()
                 ->andReturnSelf();
             $callback($pipe);
         });
 
-    Redis::shouldReceive('get')->once()->andReturn(0);
+    // Two get calls: (1) channel reverse-key lookup → null, (2) getConnectionCount.
+    Redis::shouldReceive('get')->once()->ordered()->andReturn(null);
+    Redis::shouldReceive('get')->once()->ordered()->andReturn(0);
 
     ProfileService::decrementConnections($profile, $streamId);
 });
@@ -299,7 +303,9 @@ test('cancelReservation decrements connections and cleans up', function () {
             $callback($pipe);
         });
 
-    Redis::shouldReceive('get')->once()->andReturn(1);
+    // Two get calls: (1) channel reverse-key lookup → null (no mapping), (2) getConnectionCount.
+    Redis::shouldReceive('get')->once()->ordered()->andReturn(null);
+    Redis::shouldReceive('get')->once()->ordered()->andReturn(1);
 
     ProfileService::cancelReservation($profile, $reservationId);
 });

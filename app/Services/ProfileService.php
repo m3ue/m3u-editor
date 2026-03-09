@@ -27,6 +27,12 @@ class ProfileService
     protected const STREAM_TRACKING_TTL = 86400;
 
     /**
+     * TTL for pending channel stream reservations (seconds).
+     * Short TTL ensures stale pending keys self-expire if stream creation fails.
+     */
+    protected const CHANNEL_STREAM_PENDING_TTL = 30;
+
+    /**
      * Max wait time for the profile selection lock (seconds).
      */
     protected const PROFILE_LOCK_TIMEOUT = 2;
@@ -102,6 +108,12 @@ class ProfileService
      * After the real stream is created, call `finalizeReservation()` to update
      * the stream mapping from reservation ID to real stream ID.
      *
+     * When `$channelId` and `$channelPlaylistUuid` are provided, the method also
+     * performs channel reuse detection inside the lock: if the channel already has
+     * an active stream or pending reservation, no slot is allocated and [null, null]
+     * is returned. The caller should then check `isChannelStreamActive()` to
+     * distinguish this from genuine no-capacity and retry `findExistingPooledStream`.
+     *
      * Returns [PlaylistProfile, string $reservationId] on success, or [null, null].
      *
      * @return array{0: PlaylistProfile|null, 1: string|null}
@@ -109,6 +121,8 @@ class ProfileService
     public static function selectAndReserveProfile(
         Playlist $playlist,
         ?int $excludeProfileId = null,
+        ?int $channelId = null,
+        ?string $channelPlaylistUuid = null,
     ): array {
         if (! $playlist->profiles_enabled) {
             return [null, null];
@@ -131,6 +145,26 @@ class ProfileService
                 return [null, null];
             }
 
+            // Inside the lock: detect if this channel is already being served.
+            // Prevents two simultaneous requests for the same channel from both
+            // allocating a slot during the window before the first stream is visible
+            // in m3u-proxy (i.e. before findExistingPooledStream would find it).
+            if ($channelId !== null && $channelPlaylistUuid !== null) {
+                $channelStreamKey = static::getChannelStreamKey($channelId, $channelPlaylistUuid);
+
+                if (Redis::exists($channelStreamKey)) {
+                    Log::debug('Channel reuse detected inside lock — skipping profile allocation', [
+                        'channel_id' => $channelId,
+                        'playlist_uuid' => $channelPlaylistUuid,
+                        'playlist_id' => $playlist->id,
+                    ]);
+
+                    // Return [null, null]. Caller should check isChannelStreamActive()
+                    // to distinguish this from genuine no-capacity.
+                    return [null, null];
+                }
+            }
+
             // Inside the lock: select + increment atomically
             $profile = static::selectProfile($playlist, $excludeProfileId);
 
@@ -138,6 +172,18 @@ class ProfileService
                 // Reserve the slot immediately so the next concurrent request
                 // sees the updated count and picks a different profile (or waits).
                 static::incrementConnections($profile, $reservationId);
+
+                // Mark this channel as having a pending reservation (short TTL so
+                // it self-expires if stream creation fails before finalizeReservation).
+                if ($channelId !== null && $channelPlaylistUuid !== null) {
+                    $channelStreamKey = static::getChannelStreamKey($channelId, $channelPlaylistUuid);
+                    $reverseKey = static::getStreamChannelKey($reservationId);
+
+                    Redis::pipeline(function ($pipe) use ($channelStreamKey, $reverseKey, $reservationId, $channelId, $channelPlaylistUuid) {
+                        $pipe->setex($channelStreamKey, static::CHANNEL_STREAM_PENDING_TTL, $reservationId);
+                        $pipe->setex($reverseKey, static::CHANNEL_STREAM_PENDING_TTL, "{$channelId}:{$channelPlaylistUuid}");
+                    });
+                }
 
                 return [$profile, $reservationId];
             }
@@ -160,9 +206,17 @@ class ProfileService
      * with the real stream ID from the proxy.
      *
      * Called after the proxy has created the stream and returned its ID.
+     * When `$channelId` and `$channelPlaylistUuid` are provided, the channel→stream
+     * mapping is upgraded from the pending reservation ID to the real stream ID so
+     * subsequent requests can find the active stream via `getChannelActiveStreamId()`.
      */
-    public static function finalizeReservation(PlaylistProfile $profile, string $reservationId, string $realStreamId): void
-    {
+    public static function finalizeReservation(
+        PlaylistProfile $profile,
+        string $reservationId,
+        string $realStreamId,
+        ?int $channelId = null,
+        ?string $channelPlaylistUuid = null,
+    ): void {
         $streamsKey = static::getProfileStreamsKey($profile);
         $oldStreamKey = static::getStreamProfileKey($reservationId);
         $newStreamKey = static::getStreamProfileKey($realStreamId);
@@ -180,10 +234,30 @@ class ProfileService
                 $pipe->expire($newStreamKey, static::STREAM_TRACKING_TTL);
             });
 
+            // Upgrade the channel→stream mapping from pending reservation ID to real stream ID.
+            if ($channelId !== null && $channelPlaylistUuid !== null) {
+                $channelStreamKey = static::getChannelStreamKey($channelId, $channelPlaylistUuid);
+                $oldReverseKey = static::getStreamChannelKey($reservationId);
+                $newReverseKey = static::getStreamChannelKey($realStreamId);
+                $channelValue = "{$channelId}:{$channelPlaylistUuid}";
+
+                Redis::pipeline(function ($pipe) use ($channelStreamKey, $oldReverseKey, $newReverseKey, $realStreamId, $channelValue) {
+                    // Upgrade channel key to real stream ID (long TTL)
+                    $pipe->set($channelStreamKey, $realStreamId);
+                    $pipe->expire($channelStreamKey, static::STREAM_TRACKING_TTL);
+
+                    // Replace reservation reverse-mapping with real stream reverse-mapping
+                    $pipe->del($oldReverseKey);
+                    $pipe->set($newReverseKey, $channelValue);
+                    $pipe->expire($newReverseKey, static::STREAM_TRACKING_TTL);
+                });
+            }
+
             Log::debug('Finalized profile reservation', [
                 'profile_id' => $profile->id,
                 'reservation_id' => $reservationId,
                 'real_stream_id' => $realStreamId,
+                'channel_id' => $channelId,
             ]);
         } catch (\Exception $e) {
             Log::error("Failed to finalize reservation for profile {$profile->id}", [
@@ -290,12 +364,17 @@ class ProfileService
      * Called when a stream ends.
      * Uses a Lua script to atomically decrement only if count > 0,
      * preventing TOCTOU races that could push the count negative.
+     *
+     * Also clears the channel→stream mapping for this stream via the reverse
+     * lookup key, covering both normal stream-ended cleanup and reservation
+     * cancellation (where streamId is a reservation ID).
      */
     public static function decrementConnections(PlaylistProfile $profile, string $streamId): void
     {
         $countKey = static::getConnectionCountKey($profile);
         $streamKey = static::getStreamProfileKey($streamId);
         $streamsKey = static::getProfileStreamsKey($profile);
+        $channelReverseKey = static::getStreamChannelKey($streamId);
 
         try {
             // Atomic decrement-if-positive via Lua script.
@@ -316,11 +395,33 @@ class ProfileService
                 ]);
             }
 
-            // Clean up stream references regardless
-            Redis::pipeline(function ($pipe) use ($streamKey, $streamsKey, $streamId) {
+            // Look up the channel coordinates before deleting the reverse key.
+            $channelValue = Redis::get($channelReverseKey);
+
+            // Clean up stream references and the reverse channel-mapping key.
+            Redis::pipeline(function ($pipe) use ($streamKey, $streamsKey, $channelReverseKey, $streamId) {
                 $pipe->del($streamKey);
                 $pipe->srem($streamsKey, $streamId);
+                $pipe->del($channelReverseKey);
             });
+
+            // Clear the channel→stream key only when it still points to this stream.
+            // Guards against deleting a newer stream's entry when streams overlap
+            // (e.g. rapid channel switch where the new stream starts before the old
+            // stream's decrement webhook fires).
+            if ($channelValue !== null) {
+                $parts = explode(':', $channelValue, 2);
+
+                if (count($parts) === 2) {
+                    [$channelId, $playlistUuid] = $parts;
+                    $channelStreamKey = static::getChannelStreamKey((int) $channelId, $playlistUuid);
+                    $currentStreamValue = Redis::get($channelStreamKey);
+
+                    if ($currentStreamValue === $streamId) {
+                        Redis::del($channelStreamKey);
+                    }
+                }
+            }
 
             $newCount = static::getConnectionCount($profile);
 
@@ -891,6 +992,65 @@ class ProfileService
     }
 
     /**
+     * Get the active stream ID for a channel, if currently known to be streaming.
+     *
+     * Returns null when the key is absent or only a pending reservation exists
+     * (reservation IDs start with the 'reservation:' prefix).
+     */
+    public static function getChannelActiveStreamId(int $channelId, string $playlistUuid): ?string
+    {
+        $key = static::getChannelStreamKey($channelId, $playlistUuid);
+
+        try {
+            $value = Redis::get($key);
+
+            if ($value === null || str_starts_with($value, 'reservation:')) {
+                return null;
+            }
+
+            return $value;
+        } catch (\Exception $e) {
+            Log::warning("Failed to get channel active stream ID for channel {$channelId}", [
+                'exception' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
+    }
+
+    /**
+     * Check whether a channel has an active stream or pending reservation.
+     */
+    public static function isChannelStreamActive(int $channelId, string $playlistUuid): bool
+    {
+        $key = static::getChannelStreamKey($channelId, $playlistUuid);
+
+        try {
+            return Redis::exists($key) > 0;
+        } catch (\Exception $e) {
+            return false;
+        }
+    }
+
+    /**
+     * Clear the channel→stream mapping for a given channel.
+     *
+     * Called when a stale key is detected (e.g. stream died but key was not cleaned up).
+     */
+    public static function clearChannelStreamMapping(int $channelId, string $playlistUuid): void
+    {
+        $key = static::getChannelStreamKey($channelId, $playlistUuid);
+
+        try {
+            Redis::del($key);
+        } catch (\Exception $e) {
+            Log::warning("Failed to clear channel stream mapping for channel {$channelId}", [
+                'exception' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
      * Get the Redis key for a profile's connection count.
      */
     protected static function getConnectionCountKey(PlaylistProfile $profile): string
@@ -912,5 +1072,21 @@ class ProfileService
     protected static function getStreamProfileKey(string $streamId): string
     {
         return "stream:{$streamId}:profile_id";
+    }
+
+    /**
+     * Get the Redis key tracking which stream is serving a given channel.
+     */
+    protected static function getChannelStreamKey(int $channelId, string $playlistUuid): string
+    {
+        return "channel_stream:{$channelId}:{$playlistUuid}";
+    }
+
+    /**
+     * Get the Redis key for the reverse mapping: stream → channel coordinates.
+     */
+    protected static function getStreamChannelKey(string $streamId): string
+    {
+        return "stream:{$streamId}:channel";
     }
 }
