@@ -35,6 +35,7 @@ use App\Models\SourceGroup;
 use App\Models\StreamProfile;
 use App\Rules\CheckIfUrlOrLocalPath;
 use App\Rules\Cron;
+use App\Rules\UrlIsAllowed;
 use App\Services\EpgCacheService;
 use App\Services\M3uProxyService;
 use App\Services\ProfileService;
@@ -63,6 +64,7 @@ use Filament\Forms\Components\Toggle;
 use Filament\Forms\Components\ToggleButtons;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
+use Filament\Schemas\Components\Actions;
 use Filament\Schemas\Components\Fieldset;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Livewire;
@@ -1119,6 +1121,7 @@ class PlaylistResource extends Resource
                         ->live()
                         ->helperText('Enter the full url, using <url>:<port> format - without trailing slash (/).')
                         ->prefixIcon('heroicon-m-globe-alt')
+                        ->rules([new UrlIsAllowed])
                         ->maxLength(4000)
                         ->url()
                         ->columnSpan(2)
@@ -1177,7 +1180,10 @@ class PlaylistResource extends Resource
                         ->prefixIcon('heroicon-m-globe-alt')
                         ->helperText('Enter the URL of the playlist file. If this is a local file, you can enter a full or relative path. If changing URL, the playlist will be re-imported. Use with caution as this could lead to data loss if the new playlist differs from the old one.')
                         ->requiredWithout('uploads')
-                        ->rules([new CheckIfUrlOrLocalPath])
+                        ->rules([
+                            new CheckIfUrlOrLocalPath,
+                            new UrlIsAllowed,
+                        ])
                         ->maxLength(255)
                         ->hidden(fn (Get $get): bool => (bool) $get('xtream')),
                     FileUpload::make('uploads')
@@ -1260,8 +1266,8 @@ class PlaylistResource extends Resource
                                     return "Username: {$username} (Profile will be created when saved)";
                                 }),
 
-                            \Filament\Schemas\Components\Actions::make([
-                                \Filament\Actions\Action::make('test_primary_profile')
+                            Actions::make([
+                                Action::make('test_primary_profile')
                                     ->label('Test Primary')
                                     ->icon('heroicon-o-signal')
                                     ->color('info')
@@ -1342,6 +1348,7 @@ class PlaylistResource extends Resource
                             TextInput::make('url')
                                 ->label('Provider URL')
                                 ->placeholder(fn (Get $get, $livewire) => $livewire->getRecord()?->xtream_config['url'] ?? 'http://provider.com:port')
+                                ->rules([new UrlIsAllowed])
                                 ->helperText('Leave blank to use the same provider as the primary account.')
                                 ->columnSpan(2),
                             TextInput::make('username')

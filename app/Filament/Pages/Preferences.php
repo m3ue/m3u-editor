@@ -193,6 +193,26 @@ class Preferences extends SettingsPage
                                             ]),
 
                                     ]),
+                                Section::make('Allowed Playlist Domains')
+                                    ->description('Restrict playlist URLs to specific domains. Leave empty to allow all domains.')
+                                    ->schema([
+                                        TagsInput::make('allowed_urls')
+                                            ->label('Allowed domains')
+                                            ->columnSpanFull()
+                                            ->placeholder(fn () => config('dev.allowed_playlist_domains') ? null : '*.example.com*')
+                                            ->helperText('List of allowed domains (supports wildcards, e.g. *.example.com*). Press return to add each domain. When set, playlist URLs must match one of these patterns.')
+                                            ->disabled(fn () => ! empty(config('dev.allowed_playlist_domains')))
+                                            ->hint(fn () => ! empty(config('dev.allowed_playlist_domains')) ? 'Already set by environment variable!' : null)
+                                            ->default(fn () => ! empty(config('dev.allowed_playlist_domains'))
+                                                ? array_map('trim', explode(',', config('dev.allowed_playlist_domains')))
+                                                : [])
+                                            ->afterStateHydrated(function (TagsInput $component, $state) {
+                                                if (! empty(config('dev.allowed_playlist_domains'))) {
+                                                    $component->state(array_map('trim', explode(',', config('dev.allowed_playlist_domains'))));
+                                                }
+                                            })
+                                            ->dehydrated(fn () => empty(config('dev.allowed_playlist_domains'))),
+                                    ]),
                                 Section::make('Xtream API Panel Settings')
                                     ->schema([
                                         Grid::make()

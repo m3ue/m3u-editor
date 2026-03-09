@@ -31,42 +31,7 @@ return [
     'auto_retry_503_cooldown_minutes' => env('AUTO_RETRY_503_COOLDOWN_MINUTES', 10),
     'auto_retry_503_delay_min_seconds' => env('AUTO_RETRY_503_DELAY_MIN_SECONDS', 300),
     'auto_retry_503_delay_max_seconds' => env('AUTO_RETRY_503_DELAY_MAX_SECONDS', 900),
-    'crypto_addresses' => [
-        [
-            'name' => 'Bitcoin',
-            'symbol' => 'BTC',
-            'address' => '',
-            'icon' => '/images/crypto-icons/bitcoin.svg',
-        ],
-        [
-            'name' => 'Ethereum',
-            'symbol' => 'ETH',
-            'address' => '',
-            'icon' => '/images/crypto-icons/ethereum.svg',
-        ],
-        [
-            'name' => 'Solana',
-            'symbol' => 'SOL',
-            'address' => '',
-            'icon' => '/images/crypto-icons/solana.svg',
-        ],
-        [
-            'name' => 'Tether',
-            'symbol' => 'USDT',
-            'address' => '',
-            'icon' => '/images/crypto-icons/tether.svg',
-        ],
-        [
-            'name' => 'Litecoin',
-            'symbol' => 'LTC',
-            'address' => '',
-            'icon' => '/images/crypto-icons/litecoin.svg',
-        ],
-        [
-            'name' => 'Ripple',
-            'symbol' => 'XRP',
-            'address' => '',
-            'icon' => '/images/crypto-icons/ripple.svg',
-        ],
-    ],
+
+    // restrict playlists to specific domains (comma separated list, supports wildcards, e.g. *.example.com)
+    'allowed_playlist_domains' => env('ALLOWED_PLAYLIST_DOMAINS', null),
 ];

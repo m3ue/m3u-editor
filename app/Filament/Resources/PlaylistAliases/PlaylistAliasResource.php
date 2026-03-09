@@ -9,6 +9,7 @@ use App\Models\CustomPlaylist;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
 use App\Models\StreamProfile;
+use App\Rules\UrlIsAllowed;
 use App\Services\EpgCacheService;
 use App\Services\M3uProxyService;
 use App\Traits\HasUserFiltering;
@@ -340,6 +341,7 @@ class PlaylistAliasResource extends Resource
                                 ->prefixIcon('heroicon-m-globe-alt')
                                 ->maxLength(4000)
                                 ->url()
+                                ->rules([new UrlIsAllowed])
                                 ->columnSpan(2)
                                 ->required(),
                             Forms\Components\TextInput::make('username')

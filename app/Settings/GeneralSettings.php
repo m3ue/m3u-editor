@@ -207,6 +207,9 @@ class GeneralSettings extends Settings
     // Network broadcast settings
     public ?int $broadcast_max_concurrent = 10;
 
+    // Allowed playlist URL settings
+    public ?array $allowed_urls = null;
+
     public static function group(): string
     {
         return 'general';
