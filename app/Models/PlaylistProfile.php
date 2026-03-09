@@ -121,12 +121,22 @@ class PlaylistProfile extends Model
 
     /**
      * Get the max connections allowed by the provider.
+     *
+     * Returns PHP_INT_MAX when provider_info has not been fetched yet,
+     * so that effective_max_streams uses the user's explicit max_streams
+     * without being artificially capped to 1.
      */
     public function getProviderMaxConnectionsAttribute(): int
     {
         $info = $this->provider_info;
 
-        return (int) ($info['user_info']['max_connections'] ?? 1);
+        // If provider info hasn't been fetched yet, don't restrict
+        // the user's configured max_streams with an artificial cap of 1.
+        if (empty($info) || ! isset($info['user_info']['max_connections'])) {
+            return PHP_INT_MAX;
+        }
+
+        return (int) $info['user_info']['max_connections'];
     }
 
     /**
@@ -134,12 +144,17 @@ class PlaylistProfile extends Model
      */
     public function getEffectiveMaxStreamsAttribute(): int
     {
-        // Use user-defined max_streams if set, otherwise use provider's limit
+        $providerMax = $this->provider_max_connections;
+
+        // Use user-defined max_streams if set, capped by provider's limit
         if ($this->max_streams && $this->max_streams > 0) {
-            return min($this->max_streams, $this->provider_max_connections);
+            return $providerMax === PHP_INT_MAX
+                ? $this->max_streams
+                : min($this->max_streams, $providerMax);
         }
 
-        return $this->provider_max_connections;
+        // No user-defined limit: use provider's limit, or fall back to 1
+        return $providerMax === PHP_INT_MAX ? 1 : $providerMax;
     }
 
     /**

@@ -5,7 +5,7 @@ set -euo pipefail
 IMAGE_NAME="${IMAGE_NAME:-m3u-editor:local}"
 PUSH_EXPERIMENTAL="${PUSH_EXPERIMENTAL:-0}"
 
-DOCKER_HUB_REPO="grimothy/m3u-editor"
+DOCKER_HUB_REPO="sparkison/m3u-editor"
 EXPERIMENTAL_TAG="${DOCKER_HUB_REPO}:experimental"
 
 log() {

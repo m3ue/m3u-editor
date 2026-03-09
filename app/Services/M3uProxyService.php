@@ -632,8 +632,24 @@ class M3uProxyService
         //   - This prevents selecting a different profile and failing to detect existing pools
         $existingStreamId = null;
         $selectedProfile = null;
+        $reservationId = null;
 
         if ($profile) {
+            // Fast channel reuse check: if we already know this channel is streaming,
+            // return the cached stream URL without an HTTP round-trip to m3u-proxy.
+            $cachedStreamId = ProfileService::getChannelActiveStreamId($originalChannelId, $originalPlaylistUuid);
+
+            if ($cachedStreamId) {
+                Log::debug('Reusing existing transcoded stream via channel cache (fast path)', [
+                    'stream_id' => $cachedStreamId,
+                    'original_channel_id' => $originalChannelId,
+                    'original_playlist_uuid' => $originalPlaylistUuid,
+                    'profile_id' => $profile->id,
+                ]);
+
+                return $this->buildTranscodeStreamUrl($cachedStreamId, $profile->format ?? 'ts', $username);
+            }
+
             // Search for pooled stream by ORIGINAL channel ID (handles cross-provider failovers)
             // Pass NULL for provider_profile_id to search across ALL profiles
             $existingStreamId = $this->findExistingPooledStream($originalChannelId, $originalPlaylistUuid, $profile->id, null);
@@ -652,14 +668,25 @@ class M3uProxyService
 
             // Only select provider profile if we're creating a NEW stream (no pooled stream found)
             // Use profileSourcePlaylist which may be the channel's source playlist when streaming via CustomPlaylist
+            // Use selectAndReserveProfile() for atomic select+increment to prevent TOCTOU races
             if ($profileSourcePlaylist) {
-                $selectedProfile = ProfileService::selectProfile($profileSourcePlaylist);
+                [$selectedProfile, $reservationId] = ProfileService::selectAndReserveProfile($profileSourcePlaylist, null, $originalChannelId, $originalPlaylistUuid);
 
                 if (! $selectedProfile) {
+                    // Check if reuse was detected inside the lock (another request is creating this stream).
+                    if (ProfileService::isChannelStreamActive($originalChannelId, $originalPlaylistUuid)) {
+                        $existingStreamId = $this->findExistingPooledStream($originalChannelId, $originalPlaylistUuid, $profile->id, null);
+
+                        if ($existingStreamId) {
+                            return $this->buildTranscodeStreamUrl($existingStreamId, $profile->format ?? 'ts', $username);
+                        }
+                    }
+
                     // Reconcile Redis counts against actual proxy state before rejecting.
                     // Fixes race condition where increment fires before the old stream's
                     // decrement webhook when rapidly switching channels.
-                    $selectedProfile = ProfileService::reconcileAndSelectProfile($profileSourcePlaylist);
+                    ProfileService::reconcileFromProxy($profileSourcePlaylist);
+                    [$selectedProfile, $reservationId] = ProfileService::selectAndReserveProfile($profileSourcePlaylist, null, $originalChannelId, $originalPlaylistUuid);
                 }
 
                 if (! $selectedProfile) {
@@ -770,10 +797,23 @@ class M3uProxyService
         // Provider Profile selection for Xtream playlists with profiles enabled
         // Note: If we already selected a profile during pooled stream check, skip this
         // Use profileSourcePlaylist which may be the channel's source playlist when streaming via CustomPlaylist
+        // Use selectAndReserveProfile() for atomic select+increment to prevent TOCTOU races
         if (! $selectedProfile && $profileSourcePlaylist) {
-            $selectedProfile = ProfileService::selectProfile($profileSourcePlaylist);
+            [$selectedProfile, $reservationId] = ProfileService::selectAndReserveProfile($profileSourcePlaylist, null, $originalChannelId, $originalPlaylistUuid);
 
             if (! $selectedProfile) {
+                // Check if reuse was detected inside the lock (another request is creating this stream).
+                if (ProfileService::isChannelStreamActive($originalChannelId, $originalPlaylistUuid)) {
+                    $existingStreamId = $this->findExistingPooledStream($originalChannelId, $originalPlaylistUuid, null, null);
+
+                    if ($existingStreamId) {
+                        $format = pathinfo($primaryUrl ?? '', PATHINFO_EXTENSION);
+                        $format = $format === 'm3u8' ? 'hls' : $format;
+
+                        return $this->buildProxyUrl($existingStreamId, $format, $username);
+                    }
+                }
+
                 // No profiles with capacity - try "stop oldest on limit" before giving up
                 if ($this->stopOldestOnLimit) {
                     $stopResult = self::stopOldestPlaylistStream($playlist->uuid, $id);
@@ -793,14 +833,15 @@ class M3uProxyService
                         ProfileService::reconcileFromProxy($profileSourcePlaylist);
 
                         // Retry profile selection after freeing a slot
-                        $selectedProfile = ProfileService::selectProfile($profileSourcePlaylist);
+                        [$selectedProfile, $reservationId] = ProfileService::selectAndReserveProfile($profileSourcePlaylist, null, $originalChannelId, $originalPlaylistUuid);
                     }
                 }
 
                 if (! $selectedProfile) {
                     // Last resort: reconcile Redis counts against actual proxy state.
                     // Fixes race condition where increment fires before decrement webhook.
-                    $selectedProfile = ProfileService::reconcileAndSelectProfile($profileSourcePlaylist);
+                    ProfileService::reconcileFromProxy($profileSourcePlaylist);
+                    [$selectedProfile, $reservationId] = ProfileService::selectAndReserveProfile($profileSourcePlaylist, null, $originalChannelId, $originalPlaylistUuid);
                 }
 
                 if (! $selectedProfile) {
@@ -894,16 +935,24 @@ class M3uProxyService
                 'failover_count' => is_array($failovers) ? count($failovers) : ($failovers ? 'using_resolver' : 0),
             ]);
 
-            $streamId = $this->createTranscodedStream($primaryUrl, $profile, $failovers, $userAgent, $headers, $metadata);
+            try {
+                $streamId = $this->createTranscodedStream($primaryUrl, $profile, $failovers, $userAgent, $headers, $metadata);
+            } catch (Exception $e) {
+                if ($selectedProfile && $reservationId) {
+                    ProfileService::cancelReservation($selectedProfile, $reservationId);
+                }
+                throw $e;
+            }
 
-            Log::debug('Transcoded stream created, tracking connection', [
+            Log::debug('Transcoded stream created, finalizing reservation', [
                 'stream_id' => $streamId,
                 'provider_profile_id' => $selectedProfile?->id,
+                'reservation_id' => $reservationId,
             ]);
 
-            // Track connection for provider profile
-            if ($selectedProfile) {
-                ProfileService::incrementConnections($selectedProfile, $streamId);
+            // Finalize the reservation with the real stream ID
+            if ($selectedProfile && $reservationId) {
+                ProfileService::finalizeReservation($selectedProfile, $reservationId, $streamId, $originalChannelId, $originalPlaylistUuid);
             }
 
             // Return transcoded stream URL
@@ -934,16 +983,24 @@ class M3uProxyService
                 $metadata['provider_profile_id'] = $selectedProfile->id;
             }
 
-            $streamId = $this->createStream($primaryUrl, $failovers, $userAgent, $headers, $metadata);
+            try {
+                $streamId = $this->createStream($primaryUrl, $failovers, $userAgent, $headers, $metadata);
+            } catch (Exception $e) {
+                if ($selectedProfile && $reservationId) {
+                    ProfileService::cancelReservation($selectedProfile, $reservationId);
+                }
+                throw $e;
+            }
 
-            Log::debug('Direct stream created, tracking connection', [
+            Log::debug('Direct stream created, finalizing reservation', [
                 'stream_id' => $streamId,
                 'provider_profile_id' => $selectedProfile?->id,
+                'reservation_id' => $reservationId,
             ]);
 
-            // Track connection for provider profile
-            if ($selectedProfile) {
-                ProfileService::incrementConnections($selectedProfile, $streamId);
+            // Finalize the reservation with the real stream ID
+            if ($selectedProfile && $reservationId) {
+                ProfileService::finalizeReservation($selectedProfile, $reservationId, $streamId, $originalChannelId, $originalPlaylistUuid);
             }
 
             // Get the format from the URL
@@ -1039,9 +1096,11 @@ class M3uProxyService
 
         // Provider Profile selection for Xtream playlists with profiles enabled
         // Use profileSourcePlaylist which may be the episode's source playlist when streaming via CustomPlaylist
+        // Use selectAndReserveProfile() for atomic select+increment to prevent TOCTOU races
         $selectedProfile = null;
+        $reservationId = null;
         if ($profileSourcePlaylist) {
-            $selectedProfile = ProfileService::selectProfile($profileSourcePlaylist);
+            [$selectedProfile, $reservationId] = ProfileService::selectAndReserveProfile($profileSourcePlaylist);
 
             if (! $selectedProfile) {
                 // No profiles with capacity - try "stop oldest on limit" before giving up
@@ -1057,14 +1116,15 @@ class M3uProxyService
 
                         usleep(200000); // 200ms
                         ProfileService::reconcileFromProxy($profileSourcePlaylist);
-                        $selectedProfile = ProfileService::selectProfile($profileSourcePlaylist);
+                        [$selectedProfile, $reservationId] = ProfileService::selectAndReserveProfile($profileSourcePlaylist);
                     }
                 }
 
                 if (! $selectedProfile) {
                     // Last resort: reconcile Redis counts against actual proxy state.
                     // Fixes race condition where increment fires before decrement webhook.
-                    $selectedProfile = ProfileService::reconcileAndSelectProfile($profileSourcePlaylist);
+                    ProfileService::reconcileFromProxy($profileSourcePlaylist);
+                    [$selectedProfile, $reservationId] = ProfileService::selectAndReserveProfile($profileSourcePlaylist);
                 }
 
                 if (! $selectedProfile) {
@@ -1103,6 +1163,11 @@ class M3uProxyService
                     'provider_profile_id' => $selectedProfile?->id,
                 ]);
 
+                // Cancel reservation since we're reusing an existing stream
+                if ($selectedProfile && $reservationId) {
+                    ProfileService::cancelReservation($selectedProfile, $reservationId);
+                }
+
                 return $this->buildTranscodeStreamUrl($existingStreamId, $profile->format ?? 'ts', $username);
             }
 
@@ -1121,7 +1186,14 @@ class M3uProxyService
                 $metadata['provider_profile_id'] = $selectedProfile->id;
             }
 
-            $streamId = $this->createTranscodedStream($url, $profile, false, $userAgent, $headers, $metadata);
+            try {
+                $streamId = $this->createTranscodedStream($url, $profile, false, $userAgent, $headers, $metadata);
+            } catch (Exception $e) {
+                if ($selectedProfile && $reservationId) {
+                    ProfileService::cancelReservation($selectedProfile, $reservationId);
+                }
+                throw $e;
+            }
 
             Log::debug('Created transcoded episode stream with provider profile', [
                 'stream_id' => $streamId,
@@ -1130,9 +1202,9 @@ class M3uProxyService
                 'provider_profile_id' => $selectedProfile?->id,
             ]);
 
-            // Track connection for provider profile
-            if ($selectedProfile) {
-                ProfileService::incrementConnections($selectedProfile, $streamId);
+            // Finalize the reservation with the real stream ID
+            if ($selectedProfile && $reservationId) {
+                ProfileService::finalizeReservation($selectedProfile, $reservationId, $streamId);
             }
 
             // Return transcoded stream URL
@@ -1152,7 +1224,14 @@ class M3uProxyService
                 $metadata['provider_profile_id'] = $selectedProfile->id;
             }
 
-            $streamId = $this->createStream($url, false, $userAgent, $headers, $metadata);
+            try {
+                $streamId = $this->createStream($url, false, $userAgent, $headers, $metadata);
+            } catch (Exception $e) {
+                if ($selectedProfile && $reservationId) {
+                    ProfileService::cancelReservation($selectedProfile, $reservationId);
+                }
+                throw $e;
+            }
 
             Log::debug('Created direct episode stream with provider profile', [
                 'stream_id' => $streamId,
@@ -1160,9 +1239,9 @@ class M3uProxyService
                 'provider_profile_id' => $selectedProfile?->id,
             ]);
 
-            // Track connection for provider profile
-            if ($selectedProfile) {
-                ProfileService::incrementConnections($selectedProfile, $streamId);
+            // Finalize the reservation with the real stream ID
+            if ($selectedProfile && $reservationId) {
+                ProfileService::finalizeReservation($selectedProfile, $reservationId, $streamId);
             }
 
             // Get the format from the URL
