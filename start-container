@@ -24,6 +24,7 @@ export PG_DATABASE="${PG_DATABASE:-m3ue}"
 export PG_USER="${PG_USER:-root}"
 export PG_PASSWORD="${PG_PASSWORD:-root}"
 export PG_PORT="${PG_PORT:-5432}" # Default 5432
+export PG_MAX_WAIT_SECONDS="${PG_MAX_WAIT_SECONDS:-60}" # Default 60
 
 # Network Broadcast Worker
 # Enables continuous broadcasting for Networks (pseudo-TV channels)
@@ -440,7 +441,7 @@ if [ "${ENABLE_POSTGRES}" = "true" ]; then
 
     # Wait until it's ready
     dots=""
-    max_wait_seconds=60
+    max_wait_seconds=${PG_MAX_WAIT_SECONDS}
     wait_interval=1
     elapsed_wait=0
     echo "- Waiting for local Postgres to be ready (max ${max_wait_seconds}s)..."
