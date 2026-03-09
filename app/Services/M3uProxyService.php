@@ -106,7 +106,7 @@ class M3uProxyService
             ];
         }
 
-        if (empty(! $url || $this->failoverResolverUrl)) {
+        if (! $url && empty($this->failoverResolverUrl)) {
             return [
                 'success' => false,
                 'message' => 'Failover resolver URL is not configured',
