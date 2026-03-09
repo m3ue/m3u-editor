@@ -11,6 +11,7 @@ use App\Jobs\ChannelFindAndReplaceReset;
 use App\Jobs\MapPlaylistChannelsToEpg;
 use App\Models\Channel;
 use App\Models\Playlist;
+use App\Services\EpgCacheService;
 use App\Services\PlaylistService;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
@@ -113,6 +114,9 @@ class ListChannels extends ListRecords
                     ->action(function (array $data): void {
                         $playlist = Playlist::find($data['playlist_id']);
                         $playlist->live_channels()->update(['epg_channel_id' => null]);
+
+                        // Invalidate cached EPG XML files for the playlist to reflect unmapped channels immediately
+                        EpgCacheService::clearPlaylistEpgCacheFile($playlist);
                     })->after(function () {
                         Notification::make()
                             ->success()
