@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Settings\GeneralSettings;
+use Illuminate\Support\Str;
 
 /**
  * Service to handle proxy URL generation for channels and episodes.
@@ -34,12 +35,19 @@ class ProxyService
         }
 
         // Use the override URL or default to application URL
-        $url = $proxyUrlOverride && filter_var($proxyUrlOverride, FILTER_VALIDATE_URL)
-            ? $proxyUrlOverride
-            : url('');
+        if ($proxyUrlOverride && filter_var($proxyUrlOverride, FILTER_VALIDATE_URL)) {
+            $url = rtrim($proxyUrlOverride, '/');
+        } else {
+            // Manually construct base URL to ensure port is included (if not using HTTPS)
+            $url = rtrim(config('app.url'), '/');
+            $port = config('app.port');
+            if (! Str::contains($url, 'https') && $port) {
+                $url .= ':'.$port;
+            }
+        }
 
-        // Normalize the base url
-        $this->baseUrl = rtrim($url, '/');
+        // Set the base URL for the proxy service
+        $this->baseUrl = $url;
     }
 
     /**
