@@ -38,6 +38,7 @@ use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\HtmlString;
 use Illuminate\Support\Str;
+use Ramsey\Uuid\Guid\Fields;
 
 class Preferences extends SettingsPage
 {
@@ -241,339 +242,13 @@ class Preferences extends SettingsPage
                             ]),
                         Tab::make('Proxy')
                             ->schema([
-                                Section::make('M3U Proxy')
-                                    ->description('m3u proxy integration is enabled and will be used to proxy all streams when proxy is enabled')
+                                Section::make('URL & Connection')
+                                    ->description('Configure how the proxy is accessed and how stream URLs are resolved.')
                                     ->columnSpanFull()
-                                    ->columns(4)
-                                    ->schema([
-                                        Fieldset::make('URL resolution')
-                                            ->schema([
-                                                Toggle::make('m3u_proxy_public_url_auto_resolve')
-                                                    ->label('Resolve proxy public URL dynamically at request time')
-                                                    ->columnSpanFull()
-                                                    ->hintIcon(
-                                                        'heroicon-m-question-mark-circle',
-                                                        tooltip: 'When enabled, the application will resolve the public-facing proxy URL using the incoming request host/scheme instead of the Resolver URL.'
-                                                    )
-                                                    ->helperText('Useful for multi-host access (VPN/Tailscale/etc.)')
-                                                    ->default(false),
-
-                                                TextInput::make('url_override')
-                                                    ->label('Override URL')
-                                                    ->columnSpanFull()
-                                                    ->url()
-                                                    ->live()
-                                                    ->hintIcon(
-                                                        'heroicon-m-question-mark-circle',
-                                                        tooltip: 'If you would like the proxied streams to use a different base URL than the configured app url. Useful for local network access or when using a different domain for streaming.'
-                                                    )
-                                                    ->disabled(fn () => ! empty(config('proxy.url_override')))
-                                                    ->hint(fn () => ! empty(config('proxy.url_override')) ? 'Already set by environment variable!' : null)
-                                                    ->prefixIcon('heroicon-m-link')
-                                                    ->disabled(fn () => ! empty(config('proxy.url_override')))
-                                                    ->hint(fn () => ! empty(config('proxy.url_override')) ? 'Already set by environment variable!' : null)
-                                                    ->default(fn () => ! empty(config('proxy.url_override')) ? config('proxy.url_override') : '')
-                                                    ->afterStateHydrated(function (TextInput $component, $state) {
-                                                        if (! empty(config('proxy.url_override'))) {
-                                                            $component->state((string) config('proxy.url_override'));
-                                                        }
-                                                    })
-                                                    ->dehydrated(fn () => empty(config('proxy.url_override')))
-                                                    ->placeholder('http://192.168.0.123:36400')
-                                                    ->helperText(fn () => 'Leave empty to use the configured app url (default).'),
-
-                                                Toggle::make('url_override_include_logos')
-                                                    ->label('Include logos in proxy URL override')
-                                                    ->columnSpanFull()
-                                                    ->hintIcon(
-                                                        'heroicon-m-question-mark-circle',
-                                                        tooltip: 'This is useful for Plex which need HTTPS for logo images. When using a domain with HTTPS for the frontend, but proxy URL override points to a local HTTP address, Plex may not load the logos due to HTTPS requirements. By enabling this option you can keep the stream proxy override for local access while logos still use the HTTPS domain URL that Plex requires.'
-                                                    )
-                                                    ->disabled(fn () => config('proxy.url_override_include_logos') !== null)
-                                                    ->hint(fn () => config('proxy.url_override_include_logos') !== null ? 'Already set by environment variable!' : null)
-                                                    ->default(fn () => config('proxy.url_override_include_logos') !== null)
-                                                    ->afterStateHydrated(function (Toggle $component, $state) {
-                                                        if (config('proxy.url_override_include_logos') !== null) {
-                                                            $component->state((bool) config('proxy.url_override_include_logos'));
-                                                        }
-                                                    })
-                                                    ->hidden(fn ($get) => empty(config('proxy.url_override')) && empty($get('url_override')))
-                                                    ->dehydrated(fn () => empty(config('proxy.url_override_include_logos')))
-                                                    ->helperText('Whether or not to use the URL override for logos and images too (default is enabled).'),
-                                            ]),
-
-                                        Fieldset::make('Resolver settings')
-                                            ->schema([
-                                                Toggle::make('enable_failover_resolver')
-                                                    ->label('Enable advanced failover logic')
-                                                    ->columnSpanFull()
-                                                    ->hintAction(
-                                                        Action::make('learn_more_strict_live_ts')
-                                                            ->label('Learn More')
-                                                            ->icon('heroicon-o-arrow-top-right-on-square')
-                                                            ->iconPosition('after')
-                                                            ->size('sm')
-                                                            ->url('https://m3ue.sparkison.dev/docs/proxy/failover#advanced-failover-m3u-editor')
-                                                            ->openUrlInNewTab(true)
-                                                    )
-                                                    ->hintIcon(
-                                                        'heroicon-m-question-mark-circle',
-                                                        tooltip: 'When enabled, the proxy will make a call to the editor to determine which failover to use based on available capacity. When disabled, a list of failover URLs will be sent to the proxy and it will loop through them without any capacity checks when a stream failure occurs.'
-                                                    )
-                                                    ->live()
-                                                    ->disabled(fn () => ! empty(config('proxy.m3u_resolver_url')))
-                                                    ->hint(fn () => ! empty(config('proxy.m3u_resolver_url')) ? 'Already set by environment variable!' : null)
-                                                    ->default(false)
-                                                    ->afterStateHydrated(function (Toggle $component, $state) {
-                                                        if (! empty(config('proxy.m3u_resolver_url'))) {
-                                                            $component->state((bool) config('proxy.m3u_resolver_url'));
-                                                        }
-                                                    })
-                                                    ->dehydrated(fn () => empty(config('proxy.m3u_resolver_url')))
-                                                    ->helperText('Use to enable advanced failover checking and resolution.'),
-
-                                                TextInput::make('failover_resolver_url')
-                                                    ->label('Resolver URL')
-                                                    ->columnSpanFull()
-                                                    ->url()
-                                                    ->live()
-                                                    ->hintIcon(
-                                                        'heroicon-m-question-mark-circle',
-                                                        tooltip: 'The resolver URL is used for advanced failover logic, webhook registration for pooled providers, and Network Broadcasting features. This URL should point to the m3u-editor instance that the proxy can access.'
-                                                    )
-                                                    ->prefixIcon('heroicon-m-link')
-                                                    ->disabled(fn () => ! empty(config('proxy.m3u_resolver_url')))
-                                                    ->hint(fn () => ! empty(config('proxy.m3u_resolver_url')) ? 'Already set by environment variable!' : null)
-                                                    ->default(fn () => ! empty(config('proxy.m3u_resolver_url')) ? config('proxy.m3u_resolver_url') : '')
-                                                    ->afterStateHydrated(function (TextInput $component, $state) {
-                                                        if (! empty(config('proxy.m3u_resolver_url'))) {
-                                                            $component->state((string) config('proxy.m3u_resolver_url'));
-                                                        }
-                                                    })
-                                                    ->required(fn ($get) => (bool) $get('enable_failover_resolver'))
-                                                    ->dehydrated(fn () => empty(config('proxy.m3u_resolver_url')))
-                                                    ->placeholder(fn () => $embedded ? 'http://127.0.0.1:'.config('app.port') : 'http://m3u-editor:36400')
-                                                    ->helperText(fn () => $embedded
-                                                        ? 'Domain the proxy can use to access the editor for failover resolution and webhook registration, e.g.: "http://127.0.0.1:36400" or "http://localhost:36400".'
-                                                        : 'Domain the proxy can use to access the editor for failover resolution and webhook registration, e.g.: "http://m3u-editor:36400", "http://192.168.0.101:36400", "http://your-domain.dev", etc.'),
-
-                                                Action::make('test_failover_connection')
-                                                    ->label('Test resolver connection')
-                                                    ->icon('heroicon-m-signal')
-                                                    ->disabled(fn ($get) => empty($get('failover_resolver_url')))
-                                                    ->action(function ($get) use ($service) {
-                                                        $configUrl = config('proxy.m3u_resolver_url');
-                                                        $url = $configUrl ?? $get('failover_resolver_url');
-                                                        $url = rtrim($url, '/');
-                                                        $result = $service->testResolver($url);
-
-                                                        if ($result['success']) {
-                                                            Notification::make()
-                                                                ->success()
-                                                                ->title('Connection Successful')
-                                                                ->body(Str::markdown(
-                                                                    "**Proxy can reach the editor!**\n\n".
-                                                                        "URL tested: `{$result['url_tested']}`\n\n"
-                                                                ))
-                                                                ->duration(8000)
-                                                                ->send();
-                                                        } else {
-                                                            Notification::make()
-                                                                ->danger()
-                                                                ->title('Connection Failed')
-                                                                ->body(Str::markdown(
-                                                                    "**The proxy cannot reach the editor**\n\n".
-                                                                        $result['message']."\n\n".
-                                                                        'Please verify the Failover Resolver URL is correct and accessible from the proxy container/service.'
-                                                                ))
-                                                                ->duration(10000)
-                                                                ->send();
-                                                        }
-                                                    }),
-                                            ]),
-
-                                        Fieldset::make('Failover conditions')
-                                            ->hidden(fn ($get) => ! (bool) $get('enable_failover_resolver'))
-                                            ->schema([
-                                                Toggle::make('failover_fail_conditions_enabled')
-                                                    ->label('Enable playlist fail conditions')
-                                                    ->columnSpanFull()
-                                                    ->live()
-                                                    ->hintIcon(
-                                                        'heroicon-m-question-mark-circle',
-                                                        tooltip: 'When enabled, playlists returning specific HTTP status codes will be temporarily marked as invalid during failover resolution. This enables account-level failover by skipping all channels from a failing playlist/account.'
-                                                    )
-                                                    ->helperText('Mark playlists as temporarily unavailable when specific HTTP errors are encountered during failover.'),
-
-                                                TagsInput::make('failover_fail_conditions')
-                                                    ->label('HTTP status codes')
-                                                    ->columnSpanFull()
-                                                    ->hidden(fn ($get) => ! (bool) $get('failover_fail_conditions_enabled'))
-                                                    ->placeholder('e.g. 403, 404, 502, 503')
-                                                    ->helperText('HTTP response codes that should mark a playlist as temporarily unavailable. All channels from the affected playlist will be skipped during failover resolution.'),
-
-                                                TextInput::make('failover_fail_conditions_timeout')
-                                                    ->label('Invalid timeout (minutes)')
-                                                    ->columnSpanFull()
-                                                    ->hidden(fn ($get) => ! (bool) $get('failover_fail_conditions_enabled'))
-                                                    ->numeric()
-                                                    ->minValue(1)
-                                                    ->default(5)
-                                                    ->suffixIcon('heroicon-m-clock')
-                                                    ->helperText('How long (in minutes) a playlist remains marked as invalid before being retried.'),
-
-                                                Action::make('clear_failed_playlists')
-                                                    ->label('Clear failed playlists')
-                                                    ->icon('heroicon-o-arrow-path')
-                                                    ->color('warning')
-                                                    ->hidden(fn ($get) => ! (bool) $get('failover_fail_conditions_enabled'))
-                                                    ->requiresConfirmation()
-                                                    ->modalIcon('heroicon-o-arrow-path')
-                                                    ->modalDescription('This will clear all playlists currently marked as invalid, allowing them to be used for failover again immediately.')
-                                                    ->modalSubmitActionLabel('Clear all')
-                                                    ->action(function () {
-                                                        $count = Redis::hlen('playlist_invalid');
-                                                        if ($count > 0) {
-                                                            Redis::del('playlist_invalid');
-                                                        }
-
-                                                        Notification::make()
-                                                            ->success()
-                                                            ->title('Failed playlists cleared')
-                                                            ->body($count > 0
-                                                                ? "Cleared {$count} invalid playlist(s). They are now eligible for failover again."
-                                                                : 'No invalid playlists found.')
-                                                            ->duration(5000)
-                                                            ->send();
-                                                    }),
-                                            ]),
-
-                                        Fieldset::make('Stream limit settings')
-                                            ->schema([
-                                                Toggle::make('proxy_stop_oldest_on_limit')
-                                                    ->label('Stop oldest stream when limit reached')
-                                                    ->columnSpanFull()
-                                                    ->hintIcon(
-                                                        'heroicon-m-question-mark-circle',
-                                                        tooltip: 'When a playlist has a connection limit and it\'s reached, enabling this will automatically stop the oldest active stream to make room for the new request. This is useful for single-connection providers where you want instant channel switching. Note: This may cause issues if multiple clients share the same playlist - the newest request always wins.'
-                                                    )
-                                                    ->default(false)
-                                                    ->helperText('Enable to allow new stream requests to automatically stop the oldest stream when a playlist reaches its connection limit. Disabled by default.'),
-                                            ]),
-
-                                        Fieldset::make('Silence detection settings')
-                                            ->schema([
-                                                Toggle::make('enable_silence_detection')
-                                                    ->label('Enable silence detection')
-                                                    ->columnSpanFull()
-                                                    ->live()
-                                                    ->hintAction(
-                                                        Action::make('learn_more_strict_live_ts')
-                                                            ->label('Learn More')
-                                                            ->icon('heroicon-o-arrow-top-right-on-square')
-                                                            ->iconPosition('after')
-                                                            ->size('sm')
-                                                            ->url('https://m3ue.sparkison.dev/docs/proxy/silence-detection')
-                                                            ->openUrlInNewTab(true)
-                                                    )
-                                                    ->hintIcon(
-                                                        'heroicon-m-question-mark-circle',
-                                                        tooltip: 'When enabled, the proxy will monitor live streams for silent audio. If silence is detected for the configured number of consecutive checks, a failover is triggered.'
-                                                    )
-                                                    ->helperText('Automatically trigger failover when a stream\'s audio goes silent. Disabled by default.'),
-
-                                                TextInput::make('silence_threshold_db')
-                                                    ->label('Silence threshold (dB)')
-                                                    ->hidden(fn (Get $get) => ! (bool) $get('enable_silence_detection'))
-                                                    ->numeric()
-                                                    ->default(-50.0)
-                                                    ->step(0.1)
-                                                    ->suffix('dB')
-                                                    ->hintIcon(
-                                                        'heroicon-m-question-mark-circle',
-                                                        tooltip: 'Audio level below which audio is considered silent. -50 dB is a good default; raise to -40 dB for stricter detection.'
-                                                    )
-                                                    ->helperText('Audio level (in dB) below which audio is considered silent. Default: -50 dB.'),
-
-                                                TextInput::make('silence_duration')
-                                                    ->label('Silence duration (seconds)')
-                                                    ->hidden(fn (Get $get) => ! (bool) $get('enable_silence_detection'))
-                                                    ->numeric()
-                                                    ->default(3.0)
-                                                    ->step(0.5)
-                                                    ->suffix('s')
-                                                    ->helperText('Minimum continuous silence within a check window to count as a silent check. Default: 3 seconds.'),
-
-                                                TextInput::make('silence_check_interval')
-                                                    ->label('Check interval (seconds)')
-                                                    ->hidden(fn (Get $get) => ! (bool) $get('enable_silence_detection'))
-                                                    ->numeric()
-                                                    ->default(10.0)
-                                                    ->step(1)
-                                                    ->suffix('s')
-                                                    ->helperText('How often to run silence analysis. Each window buffers stream data and analyses it with ffmpeg. Default: 10 seconds.'),
-
-                                                TextInput::make('silence_failover_threshold')
-                                                    ->label('Consecutive silent checks before failover')
-                                                    ->hidden(fn (Get $get) => ! (bool) $get('enable_silence_detection'))
-                                                    ->numeric()
-                                                    ->integer()
-                                                    ->default(3)
-                                                    ->step(1)
-                                                    ->minValue(1)
-                                                    ->helperText('Number of consecutive silent checks required before triggering failover. Prevents failover on brief silent moments. Default: 3.'),
-
-                                                TextInput::make('silence_monitoring_grace_period')
-                                                    ->label('Monitoring grace period (seconds)')
-                                                    ->hidden(fn (Get $get) => ! (bool) $get('enable_silence_detection'))
-                                                    ->numeric()
-                                                    ->default(15.0)
-                                                    ->step(1)
-                                                    ->suffix('s')
-                                                    ->helperText('Delay after stream start before silence monitoring begins. Allows for initial buffering and audio decoder startup. Default: 15 seconds.'),
-                                            ]),
-
-                                        Fieldset::make('In-app player transcoding settings')
-                                            ->schema([
-                                                Select::make('default_stream_profile_id')
-                                                    ->label('Default Live Transcoding Profile')
-                                                    ->columnSpan(2)
-                                                    ->searchable()
-                                                    ->options(function () {
-                                                        return StreamProfile::where('user_id', auth()->id())->pluck('name', 'id');
-                                                    })
-                                                    ->hintAction(
-                                                        Action::make('manage_profiles')
-                                                            ->label('Manage Profiles')
-                                                            ->icon('heroicon-o-arrow-top-right-on-square')
-                                                            ->iconPosition('after')
-                                                            ->size('sm')
-                                                            ->url('/stream-profiles')
-                                                            ->openUrlInNewTab(false)
-                                                    )
-                                                    ->helperText('The default transcoding profile used for the in-app player for Live content. Leave empty to disable transcoding (some streams may not be playable in the player).'),
-                                                Select::make('default_vod_stream_profile_id')
-                                                    ->label('VOD and Series Transcoding Profile')
-                                                    ->columnSpan(2)
-                                                    ->searchable()
-                                                    ->options(function () {
-                                                        return StreamProfile::where('user_id', auth()->id())->pluck('name', 'id');
-                                                    })
-                                                    ->hintAction(
-                                                        Action::make('manage_profiles')
-                                                            ->label('Manage Profiles')
-                                                            ->icon('heroicon-o-arrow-top-right-on-square')
-                                                            ->iconPosition('after')
-                                                            ->size('sm')
-                                                            ->url('/stream-profiles')
-                                                            ->openUrlInNewTab(false)
-                                                    )
-                                                    ->helperText('The default transcoding profile used for the in-app player for VOD/Series content. Leave empty to disable transcoding (some streams may not be playable in the player).'),
-                                            ]),
-
+                                    ->headerActions([
                                         Action::make('test_connection')
                                             ->color('gray')
-                                            ->label('Test m3u proxy connection')
+                                            ->label('Test connection')
                                             ->icon('heroicon-m-signal')
                                             ->action(function () use ($service, $mode) {
                                                 try {
@@ -649,7 +324,7 @@ class Preferences extends SettingsPage
                                             }),
                                         Action::make('get_api_key')
                                             ->color('gray')
-                                            ->label('Get m3u proxy API key')
+                                            ->label('API key')
                                             ->icon('heroicon-m-key')
                                             ->action(function () use ($m3uToken) {
                                                 Notification::make()
@@ -659,15 +334,337 @@ class Preferences extends SettingsPage
                                                     ->send();
                                             })->hidden(! $m3uToken),
                                         Action::make('m3u_proxy_info')
-                                            ->label('m3u proxy API docs')
+                                            ->label('API docs')
+                                            ->color('gray')
                                             ->url($m3uProxyDocs)
                                             ->openUrlInNewTab(true)
                                             ->icon('heroicon-m-arrow-top-right-on-square'),
                                         Action::make('github')
-                                            ->label('m3u proxy GitHub')
+                                            ->label('GitHub')
+                                            ->color('gray')
                                             ->url('https://github.com/sparkison/m3u-proxy')
                                             ->openUrlInNewTab(true)
                                             ->icon('heroicon-m-arrow-top-right-on-square'),
+                                    ])
+                                    ->schema([
+                                        TextInput::make('url_override')
+                                            ->label('Override URL')
+                                            ->columnSpanFull()
+                                            ->url()
+                                            ->live()
+                                            ->hintIcon(
+                                                'heroicon-m-question-mark-circle',
+                                                tooltip: 'If you would like the proxied streams to use a different base URL than the configured app url. Useful for local network access or when using a TLD for access, but prefer LAN address for streaming.'
+                                            )
+                                            ->disabled(fn () => ! empty(config('proxy.url_override')))
+                                            ->hint(fn () => ! empty(config('proxy.url_override')) ? 'Already set by environment variable!' : null)
+                                            ->prefixIcon('heroicon-m-link')
+                                            ->default(fn () => ! empty(config('proxy.url_override')) ? config('proxy.url_override') : '')
+                                            ->afterStateHydrated(function (TextInput $component, $state) {
+                                                if (! empty(config('proxy.url_override'))) {
+                                                    $component->state((string) config('proxy.url_override'));
+                                                }
+                                            })
+                                            ->dehydrated(fn () => empty(config('proxy.url_override')))
+                                            ->placeholder('http://192.168.0.123:36400')
+                                            ->helperText(fn () => 'Leave empty to use the configured app url (default).'),
+
+                                        Toggle::make('m3u_proxy_public_url_auto_resolve')
+                                            ->label('Resolve proxy public URL dynamically at request time')
+                                            ->columnSpanFull()
+                                            ->hintIcon(
+                                                'heroicon-m-question-mark-circle',
+                                                tooltip: 'When enabled, the application will resolve the public-facing proxy URL using the incoming request host/scheme instead of the APP_URL or the configured Override URL (if set).'
+                                            )
+                                            ->helperText('Useful for multi-host access (VPN/Tailscale/etc.)')
+                                            ->default(false),
+
+                                        Toggle::make('proxy_stop_oldest_on_limit')
+                                            ->label('Stop oldest stream when limit reached')
+                                            ->columnSpanFull()
+                                            ->hintIcon(
+                                                'heroicon-m-question-mark-circle',
+                                                tooltip: 'When a playlist has a connection limit and it\'s reached, enabling this will automatically stop the oldest active stream to make room for the new request. This is useful for single-connection providers where you want instant channel switching. Note: This may cause issues if multiple clients share the same playlist - the newest request always wins.'
+                                            )
+                                            ->default(false)
+                                            ->helperText('Enable to allow new stream requests to automatically stop the oldest stream when a playlist reaches its connection limit. Disabled by default.'),
+
+                                        Toggle::make('url_override_include_logos')
+                                            ->label('Include logos in proxy URL override')
+                                            ->columnSpanFull()
+                                            ->hintIcon(
+                                                'heroicon-m-question-mark-circle',
+                                                tooltip: 'This is useful for Plex which need HTTPS for logo images. When using a domain with HTTPS for the frontend, but proxy URL override points to a local HTTP address, Plex may not load the logos due to HTTPS requirements. By enabling this option you can keep the stream proxy override for local access while logos still use the HTTPS domain URL that Plex requires.'
+                                            )
+                                            ->disabled(fn () => config('proxy.url_override_include_logos') !== null)
+                                            ->hint(fn () => config('proxy.url_override_include_logos') !== null ? 'Already set by environment variable!' : null)
+                                            ->default(fn () => config('proxy.url_override_include_logos') !== null)
+                                            ->afterStateHydrated(function (Toggle $component, $state) {
+                                                if (config('proxy.url_override_include_logos') !== null) {
+                                                    $component->state((bool) config('proxy.url_override_include_logos'));
+                                                }
+                                            })
+                                            ->hidden(fn ($get) => empty(config('proxy.url_override')) && empty($get('url_override')))
+                                            ->dehydrated(fn () => empty(config('proxy.url_override_include_logos')))
+                                            ->helperText('Whether or not to use the URL override for logos and images too (default is enabled).'),
+                                    ]),
+
+                                Section::make('Failover & Recovery')
+                                    ->description('Configure how the proxy handles stream failures, including advanced resolver logic and fail conditions.')
+                                    ->columnSpanFull()
+                                    ->headerActions([
+                                        Action::make('test_failover_connection')
+                                            ->label('Test resolver connection')
+                                            ->icon('heroicon-m-signal')
+                                            ->disabled(fn ($get) => empty($get('failover_resolver_url')))
+                                            ->action(function ($get) use ($service) {
+                                                $configUrl = config('proxy.m3u_resolver_url');
+                                                $url = $configUrl ?? $get('failover_resolver_url');
+                                                $url = rtrim($url, '/');
+                                                $result = $service->testResolver($url);
+
+                                                if ($result['success']) {
+                                                    Notification::make()
+                                                        ->success()
+                                                        ->title('Connection Successful')
+                                                        ->body(Str::markdown(
+                                                            "**Proxy can reach the editor!**\n\n".
+                                                                "URL tested: `{$result['url_tested']}`\n\n"
+                                                        ))
+                                                        ->duration(8000)
+                                                        ->send();
+                                                } else {
+                                                    Notification::make()
+                                                        ->danger()
+                                                        ->title('Connection Failed')
+                                                        ->body(Str::markdown(
+                                                            "**The proxy cannot reach the editor**\n\n".
+                                                                $result['message']."\n\n".
+                                                                'Please verify the Failover Resolver URL is correct and accessible from the proxy container/service.'
+                                                        ))
+                                                        ->duration(10000)
+                                                        ->send();
+                                                }
+                                            }),
+                                    ])
+                                    ->schema([
+                                        TextInput::make('failover_resolver_url')
+                                            ->label('Resolver URL')
+                                            ->columnSpanFull()
+                                            ->url()
+                                            ->live()
+                                            ->hintIcon(
+                                                'heroicon-m-question-mark-circle',
+                                                tooltip: 'This should be the LAN address of the editor for the proxy to access. The resolver URL is used for advanced failover logic, webhook registration for pooled providers, and Network Broadcasting features. This URL should point to the m3u-editor instance that the proxy can access.'
+                                            )
+                                            ->prefixIcon('heroicon-m-link')
+                                            ->disabled(fn () => ! empty(config('proxy.m3u_resolver_url')))
+                                            ->hint(fn () => ! empty(config('proxy.m3u_resolver_url')) ? 'Already set by environment variable!' : null)
+                                            ->default(fn () => ! empty(config('proxy.m3u_resolver_url')) ? config('proxy.m3u_resolver_url') : '')
+                                            ->afterStateHydrated(function (TextInput $component, $state) {
+                                                if (! empty(config('proxy.m3u_resolver_url'))) {
+                                                    $component->state((string) config('proxy.m3u_resolver_url'));
+                                                }
+                                            })
+                                            ->required(fn ($get) => (bool) $get('enable_failover_resolver'))
+                                            ->dehydrated(fn () => empty(config('proxy.m3u_resolver_url')))
+                                            ->placeholder(fn () => $embedded ? 'http://127.0.0.1:'.config('app.port') : 'http://m3u-editor:36400')
+                                            ->helperText(fn () => $embedded
+                                                ? 'Domain the proxy can use to access the editor for failover resolution and webhook registration, e.g.: "http://127.0.0.1:36400" or "http://localhost:36400".'
+                                                : 'Domain the proxy can use to access the editor for failover resolution and webhook registration, e.g.: "http://m3u-editor:36400", "http://192.168.0.101:36400", "http://your-domain.dev", etc.'),
+
+                                        Toggle::make('enable_failover_resolver')
+                                            ->label('Enable advanced failover logic')
+                                            ->columnSpanFull()
+                                            ->hintAction(
+                                                Action::make('learn_more_strict_live_ts')
+                                                    ->label('Learn More')
+                                                    ->icon('heroicon-o-arrow-top-right-on-square')
+                                                    ->iconPosition('after')
+                                                    ->size('sm')
+                                                    ->url('https://m3ue.sparkison.dev/docs/proxy/failover#advanced-failover-m3u-editor')
+                                                    ->openUrlInNewTab(true)
+                                            )
+                                            ->hintIcon(
+                                                'heroicon-m-question-mark-circle',
+                                                tooltip: 'When enabled, the proxy will make a call to the editor to determine which failover to use based on available capacity. When disabled, a list of failover URLs will be sent to the proxy and it will loop through them without any capacity checks when a stream failure occurs.'
+                                            )
+                                            ->live()
+                                            ->disabled(fn () => ! empty(config('proxy.m3u_resolver_url')))
+                                            ->hint(fn () => ! empty(config('proxy.m3u_resolver_url')) ? 'Already set by environment variable!' : null)
+                                            ->default(false)
+                                            ->afterStateHydrated(function (Toggle $component, $state) {
+                                                if (! empty(config('proxy.m3u_resolver_url'))) {
+                                                    $component->state((bool) config('proxy.m3u_resolver_url'));
+                                                }
+                                            })
+                                            ->dehydrated(fn () => empty(config('proxy.m3u_resolver_url')))
+                                            ->helperText('Use to enable advanced failover checking and resolution (Resolver URL is required).'),
+
+                                        Fieldset::make('Playlist fail conditions')
+                                            ->hidden(fn ($get) => ! (bool) $get('enable_failover_resolver'))
+                                            ->schema([
+                                                Toggle::make('failover_fail_conditions_enabled')
+                                                    ->label('Enable playlist fail conditions')
+                                                    ->columnSpanFull()
+                                                    ->live()
+                                                    ->hintIcon(
+                                                        'heroicon-m-question-mark-circle',
+                                                        tooltip: 'When enabled, playlists returning specific HTTP status codes will be temporarily marked as invalid during failover resolution. This enables account-level failover by skipping all channels from a failing playlist/account.'
+                                                    )
+                                                    ->helperText('Mark playlists as temporarily unavailable when specific HTTP errors are encountered during failover.'),
+
+                                                TagsInput::make('failover_fail_conditions')
+                                                    ->label('HTTP status codes')
+                                                    ->columnSpanFull()
+                                                    ->hidden(fn ($get) => ! (bool) $get('failover_fail_conditions_enabled'))
+                                                    ->placeholder('e.g. 403, 404, 502, 503')
+                                                    ->helperText('HTTP response codes that should mark a playlist as temporarily unavailable. All channels from the affected playlist will be skipped during failover resolution.'),
+
+                                                TextInput::make('failover_fail_conditions_timeout')
+                                                    ->label('Invalid timeout (minutes)')
+                                                    ->columnSpanFull()
+                                                    ->hidden(fn ($get) => ! (bool) $get('failover_fail_conditions_enabled'))
+                                                    ->numeric()
+                                                    ->minValue(1)
+                                                    ->default(5)
+                                                    ->suffixIcon('heroicon-m-clock')
+                                                    ->helperText('How long (in minutes) a playlist remains marked as invalid before being retried.'),
+
+                                                Action::make('clear_failed_playlists')
+                                                    ->label('Clear failed playlists')
+                                                    ->icon('heroicon-o-arrow-path')
+                                                    ->color('warning')
+                                                    ->hidden(fn ($get) => ! (bool) $get('failover_fail_conditions_enabled'))
+                                                    ->requiresConfirmation()
+                                                    ->modalIcon('heroicon-o-arrow-path')
+                                                    ->modalDescription('This will clear all playlists currently marked as invalid, allowing them to be used for failover again immediately.')
+                                                    ->modalSubmitActionLabel('Clear all')
+                                                    ->action(function () {
+                                                        $count = Redis::hlen('playlist_invalid');
+                                                        if ($count > 0) {
+                                                            Redis::del('playlist_invalid');
+                                                        }
+
+                                                        Notification::make()
+                                                            ->success()
+                                                            ->title('Failed playlists cleared')
+                                                            ->body($count > 0
+                                                                ? "Cleared {$count} invalid playlist(s). They are now eligible for failover again."
+                                                                : 'No invalid playlists found.')
+                                                            ->duration(5000)
+                                                            ->send();
+                                                    }),
+                                            ]),
+
+                                        Toggle::make('enable_silence_detection')
+                                            ->label('Enable silence detection')
+                                            ->columnSpanFull()
+                                            ->live()
+                                            ->hintAction(
+                                                Action::make('learn_more_strict_live_ts')
+                                                    ->label('Learn More')
+                                                    ->icon('heroicon-o-arrow-top-right-on-square')
+                                                    ->iconPosition('after')
+                                                    ->size('sm')
+                                                    ->url('https://m3ue.sparkison.dev/docs/proxy/silence-detection')
+                                                    ->openUrlInNewTab(true)
+                                            )
+                                            ->hintIcon(
+                                                'heroicon-m-question-mark-circle',
+                                                tooltip: 'When enabled, the proxy will monitor live streams for silent audio. If silence is detected for the configured number of consecutive checks, a failover is triggered.'
+                                            )
+                                            ->helperText('Automatically trigger failover when a stream\'s audio goes silent. Disabled by default.'),
+
+                                        Fieldset::make('Silence Detection Settings')
+                                            ->hidden(fn (Get $get) => ! (bool) $get('enable_silence_detection'))
+                                            ->schema([
+                                                TextInput::make('silence_threshold_db')
+                                                    ->label('Silence threshold (dB)')
+                                                    ->numeric()
+                                                    ->default(-50.0)
+                                                    ->step(0.1)
+                                                    ->suffix('dB')
+                                                    ->hintIcon(
+                                                        'heroicon-m-question-mark-circle',
+                                                        tooltip: 'Audio level below which audio is considered silent. -50 dB is a good default; raise to -40 dB for stricter detection.'
+                                                    )
+                                                    ->helperText('Audio level (in dB) below which audio is considered silent. Default: -50 dB.'),
+
+                                                TextInput::make('silence_duration')
+                                                    ->label('Silence duration (seconds)')
+                                                    ->numeric()
+                                                    ->default(3.0)
+                                                    ->step(0.5)
+                                                    ->suffix('s')
+                                                    ->helperText('Minimum continuous silence within a check window to count as a silent check. Default: 3 seconds.'),
+
+                                                TextInput::make('silence_check_interval')
+                                                    ->label('Check interval (seconds)')
+                                                    ->numeric()
+                                                    ->default(10.0)
+                                                    ->step(1)
+                                                    ->suffix('s')
+                                                    ->helperText('How often to run silence analysis. Each window buffers stream data and analyses it with ffmpeg. Default: 10 seconds.'),
+
+                                                TextInput::make('silence_failover_threshold')
+                                                    ->label('Consecutive silent checks before failover')
+                                                    ->numeric()
+                                                    ->integer()
+                                                    ->default(3)
+                                                    ->step(1)
+                                                    ->minValue(1)
+                                                    ->helperText('Number of consecutive silent checks required before triggering failover. Prevents failover on brief silent moments. Default: 3.'),
+
+                                                TextInput::make('silence_monitoring_grace_period')
+                                                    ->label('Monitoring grace period (seconds)')
+                                                    ->numeric()
+                                                    ->default(15.0)
+                                                    ->step(1)
+                                                    ->suffix('s')
+                                                    ->helperText('Delay after stream start before silence monitoring begins. Allows for initial buffering and audio decoder startup. Default: 15 seconds.'),
+                                            ])->hidden(fn (Get $get) => ! (bool) $get('enable_silence_detection')),
+                                    ]),
+
+                                Section::make('In-App Player Transcoding')
+                                    ->description('Select the default transcoding profiles used when playing streams in the in-app player.')
+                                    ->columnSpanFull()
+                                    ->columns(2)
+                                    ->collapsible()
+                                    ->collapsed()
+                                    ->schema([
+                                        Select::make('default_stream_profile_id')
+                                            ->label('Default Live Transcoding Profile')
+                                            ->searchable()
+                                            ->options(function () {
+                                                return StreamProfile::where('user_id', auth()->id())->pluck('name', 'id');
+                                            })
+                                            ->hintAction(
+                                                Action::make('manage_profiles')
+                                                    ->label('Manage Profiles')
+                                                    ->icon('heroicon-o-arrow-top-right-on-square')
+                                                    ->iconPosition('after')
+                                                    ->size('sm')
+                                                    ->url('/stream-profiles')
+                                                    ->openUrlInNewTab(false)
+                                            )
+                                            ->helperText('The default transcoding profile used for the in-app player for Live content. Leave empty to disable transcoding (some streams may not be playable in the player).'),
+                                        Select::make('default_vod_stream_profile_id')
+                                            ->label('VOD and Series Transcoding Profile')
+                                            ->searchable()
+                                            ->options(function () {
+                                                return StreamProfile::where('user_id', auth()->id())->pluck('name', 'id');
+                                            })
+                                            ->hintAction(
+                                                Action::make('manage_profiles')
+                                                    ->label('Manage Profiles')
+                                                    ->icon('heroicon-o-arrow-top-right-on-square')
+                                                    ->iconPosition('after')
+                                                    ->size('sm')
+                                                    ->url('/stream-profiles')
+                                                    ->openUrlInNewTab(false)
+                                            )
+                                            ->helperText('The default transcoding profile used for the in-app player for VOD/Series content. Leave empty to disable transcoding (some streams may not be playable in the player).'),
                                     ]),
                                 Section::make('MediaFlow Proxy')
                                     ->description('If you have MediaFlow Proxy installed, you can use it to proxy your m3u editor playlist streams. When enabled, the app will auto-generate URLs for you to use via MediaFlow Proxy.')
