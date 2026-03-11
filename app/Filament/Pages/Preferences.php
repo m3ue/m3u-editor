@@ -247,7 +247,6 @@ class Preferences extends SettingsPage
                                     ->columnSpanFull()
                                     ->headerActions([
                                         Action::make('test_connection')
-                                            ->color('gray')
                                             ->label('Test connection')
                                             ->icon('heroicon-m-signal')
                                             ->action(function () use ($service, $mode) {
@@ -323,7 +322,6 @@ class Preferences extends SettingsPage
                                                 }
                                             }),
                                         Action::make('get_api_key')
-                                            ->color('gray')
                                             ->label('API key')
                                             ->icon('heroicon-m-key')
                                             ->action(function () use ($m3uToken) {
