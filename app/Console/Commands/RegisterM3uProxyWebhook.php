@@ -36,9 +36,9 @@ class RegisterM3uProxyWebhook extends Command
         $webhookUrl = $service->getWebhookUrl();
 
         if (! $webhookUrl) {
-            $this->error('❌ Proxy resolver URL is not configured. Please set the Resolver URL in Settings > Proxy for webhooks to register properly.');
+            $this->info('ℹ️  Proxy resolver URL is not configured. Skipping webhook registration.');
 
-            return self::FAILURE;
+            return self::SUCCESS;
         }
 
         $this->info("Webhook URL: {$webhookUrl}");
