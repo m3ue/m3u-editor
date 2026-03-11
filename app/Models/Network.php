@@ -49,6 +49,7 @@ class Network extends Model
         'broadcast_last_failed_at' => 'datetime',
         'broadcast_last_exit_code' => 'integer',
         'broadcast_restart_locked' => 'boolean',
+        'broadcast_boot_recovery_until' => 'datetime',
         // Manual schedule
         'manual_schedule_recurrence' => 'string',
         'schedule_gap_seconds' => 'integer',

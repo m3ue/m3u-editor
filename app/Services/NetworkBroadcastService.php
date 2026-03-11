@@ -130,6 +130,20 @@ class NetworkBroadcastService
         }
 
         if (! $programme) {
+            // During the boot grace period, treat missing programme as transient —
+            // slow storage may not have loaded schedule data yet.
+            if ($network->broadcast_boot_recovery_until && now()->lt($network->broadcast_boot_recovery_until)) {
+                Log::warning('No programme found during boot grace period — will retry on next tick', [
+                    'network_id' => $network->id,
+                    'network_name' => $network->name,
+                    'grace_period_until' => $network->broadcast_boot_recovery_until->toIso8601String(),
+                ]);
+
+                $network->update(['broadcast_error' => 'Waiting for schedule data (boot recovery)...']);
+
+                return false;
+            }
+
             Log::warning('No current programme to broadcast', [
                 'network_id' => $network->id,
             ]);
@@ -149,6 +163,21 @@ class NetworkBroadcastService
         // Get stream URL with seek position built-in (media server handles seeking)
         $streamUrl = $this->getStreamUrl($network, $programme, $seekPosition);
         if (! $streamUrl) {
+            // During the boot grace period, treat a missing stream URL as transient —
+            // the media server integration or content data may not be available yet
+            // on slow storage.
+            if ($network->broadcast_boot_recovery_until && now()->lt($network->broadcast_boot_recovery_until)) {
+                Log::warning('Failed to get stream URL during boot grace period — will retry on next tick', [
+                    'network_id' => $network->id,
+                    'network_name' => $network->name,
+                    'grace_period_until' => $network->broadcast_boot_recovery_until->toIso8601String(),
+                ]);
+
+                $network->update(['broadcast_error' => 'Waiting for stream URL (boot recovery)...']);
+
+                return false;
+            }
+
             Log::error('Failed to get stream URL', [
                 'network_id' => $network->id,
             ]);
@@ -178,11 +207,12 @@ class NetworkBroadcastService
         $result = $this->startViaProxy($network, $streamUrl, $seekPosition, $remainingDuration, $programme);
 
         if ($result === true) {
-            // Success - clear any previous error and reset retry counters
+            // Success - clear any previous error, reset retry counters, and clear boot grace period
             $network->update([
                 'broadcast_error' => null,
                 'broadcast_fail_count' => 0,
                 'broadcast_last_exit_code' => null,
+                'broadcast_boot_recovery_until' => null,
             ]);
         } elseif ($result === null) {
             // Transient failure (proxy not reachable) - keep broadcast_requested = true
@@ -885,6 +915,10 @@ class NetworkBroadcastService
      * by a transient proxy failure, or stale process state (pid, started_at) may
      * linger. This method resets that state so the tick loop can restart broadcasts.
      *
+     * A boot grace period (broadcast_boot_recovery_until) is stamped so that
+     * transient failures during slow-storage startup — such as missing programme
+     * data or stream URL lookups — are retried rather than permanently giving up.
+     *
      * Call this ONCE before the continuous worker loop (not for --once mode).
      *
      * @param  Network|null  $network  If provided, recover only this network. Otherwise recover all broadcasting networks.
@@ -899,10 +933,12 @@ class NetworkBroadcastService
         }
 
         $recovered = 0;
+        $gracePeriodUntil = now()->addMinutes(2);
 
         foreach ($networks as $net) {
             // Set broadcast_requested = true so the tick loop will attempt to start it.
             // Clear stale process state that no longer reflects reality after a reboot.
+            // Stamp boot_recovery_until so transient startup failures are retried.
             $net->update([
                 'broadcast_requested' => true,
                 'broadcast_pid' => null,
@@ -912,6 +948,7 @@ class NetworkBroadcastService
                 'broadcast_last_exit_code' => null,
                 'broadcast_restart_locked' => false,
                 'broadcast_transcode_session_id' => null,
+                'broadcast_boot_recovery_until' => $gracePeriodUntil,
             ]);
 
             $recovered++;
@@ -919,6 +956,7 @@ class NetworkBroadcastService
             Log::info('🔄 BOOT RECOVERY: Marked network for broadcast restart', [
                 'network_id' => $net->id,
                 'network_name' => $net->name,
+                'grace_period_until' => $gracePeriodUntil->toIso8601String(),
             ]);
         }
 
