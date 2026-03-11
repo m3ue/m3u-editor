@@ -6,6 +6,11 @@ use App\Models\User;
 use BackedEnum;
 use Filament\Actions;
 use Filament\Forms;
+use Filament\Forms\Components\Select;
+use Filament\Forms\Components\Textarea;
+use Filament\Forms\Components\TextInput;
+use Filament\Forms\Components\Toggle;
+use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Fieldset;
 use Filament\Schemas\Schema;
@@ -14,6 +19,7 @@ use Filament\Tables;
 use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
 use STS\FilamentImpersonate\Actions\Impersonate;
 
 class UserResource extends Resource
@@ -127,17 +133,79 @@ class UserResource extends Resource
                 //
             ])
             ->recordActions([
-                Actions\DeleteAction::make()
-                    ->button()->hiddenLabel()->size('sm'),
+                Actions\ActionGroup::make([
+                    Actions\Action::make('notify')
+                        ->label('Notify User')
+                        ->icon('heroicon-o-bell-alert')
+                        ->modalIcon('heroicon-o-bell-alert')
+                        ->schema(self::getNotifySchema())
+                        ->action(function (User $record, array $data) {
+                            Notification::make()
+                                ->{$data['type']}()
+                                ->title($data['subject'])
+                                ->body($data['message'])
+                                ->broadcast($record)
+                                ->sendToDatabase($record);
+
+                            // See if sending to self to test notification
+                            if ($data['notify_self']) {
+                                Notification::make()
+                                    ->{$data['type']}()
+                                    ->title($data['subject'])
+                                    ->body($data['message'])
+                                    ->broadcast(auth()->user())
+                                    ->sendToDatabase(auth()->user());
+                            }
+                        })
+                        ->after(function (User $record, array $data) {
+                            Notification::make()
+                                ->success()
+                                ->title('Notifications Sent')
+                                ->body("Sent notification to {$record->name}.")
+                                ->send();
+                        }),
+                    Impersonate::make('Impersonate User')
+                        ->color('warning')
+                        ->tooltip('Login as this user'),
+                    Actions\DeleteAction::make(),
+                ])->button()->hiddenLabel()->size('sm'),
                 Actions\EditAction::make()
-                    ->button()->hiddenLabel()->size('sm'),
-                Impersonate::make('Impersonate User')
-                    ->color('warning')
-                    ->tooltip('Login as this user')
                     ->button()->hiddenLabel()->size('sm'),
             ], position: RecordActionsPosition::BeforeCells)
             ->toolbarActions([
                 Actions\BulkActionGroup::make([
+                    Actions\BulkAction::make('notify')
+                        ->label('Notify Users')
+                        ->icon('heroicon-o-bell-alert')
+                        ->modalIcon('heroicon-o-bell-alert')
+                        ->schema(self::getNotifySchema())
+                        ->action(function (Collection $records, array $data) {
+                            foreach ($records as $user) {
+                                Notification::make()
+                                    ->{$data['type']}()
+                                    ->title($data['subject'])
+                                    ->body($data['message'])
+                                    ->broadcast($user)
+                                    ->sendToDatabase($user);
+                            }
+
+                            // See if sending to self to test notification
+                            if ($data['notify_self']) {
+                                Notification::make()
+                                    ->{$data['type']}()
+                                    ->title($data['subject'])
+                                    ->body($data['message'])
+                                    ->broadcast(auth()->user())
+                                    ->sendToDatabase(auth()->user());
+                            }
+                        })
+                        ->after(function (Collection $records, array $data) {
+                            Notification::make()
+                                ->success()
+                                ->title('Notifications Sent')
+                                ->body("Sent notification to {$records->count()} users.")
+                                ->send();
+                        }),
                     Actions\DeleteBulkAction::make(),
                 ]),
             ]);
@@ -156,6 +224,34 @@ class UserResource extends Resource
             'index' => Pages\ListUsers::route('/'),
             // 'create' => Pages\CreateUser::route('/create'),
             // 'edit' => Pages\EditUser::route('/{record}/edit'),
+        ];
+    }
+
+    private static function getNotifySchema(): array
+    {
+        return [
+            TextInput::make('subject')
+                ->label('Notification Subject')
+                ->required()
+                ->maxLength(255),
+            Textarea::make('message')
+                ->label('Notification Message')
+                ->required()
+                ->maxLength(255),
+            Select::make('type')
+                ->label('Notification Type')
+                ->options([
+                    'info' => 'Info',
+                    'success' => 'Success',
+                    'warning' => 'Warning',
+                    'danger' => 'Danger',
+                ])
+                ->native(false)
+                ->default('info')
+                ->required(),
+            Toggle::make('notify_self')
+                ->label('Notify Myself')
+                ->helperText('Send the notification to yourself as well (for testing purposes)'),
         ];
     }
 }
