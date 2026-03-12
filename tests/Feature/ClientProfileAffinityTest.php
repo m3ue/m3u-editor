@@ -331,3 +331,84 @@ test('same IP with different usernames produces independent identifiers', functi
 
     expect($key1)->not->toBe($key2);
 });
+
+// ── Episode reuse detection ───────────────────────────────────────────────
+
+test('selectAndReserveProfile sets channel stream key when episode ID and playlist UUID are provided', function () {
+    $playlist = createAffinityPlaylist($this->user, profileCount: 2, maxStreams: 2);
+    $profiles = $playlist->enabledProfiles()->get();
+    $firstProfile = $profiles->first();
+    $clientIdentifier = '10.0.0.1:frank';
+    $episodeId = 42;
+    $playlistUuid = $playlist->uuid;
+
+    // No existing affinity
+    $affinityKey = ProfileService::getClientAffinityKey($clientIdentifier, $playlist->id);
+    Redis::shouldReceive('get')
+        ->with($affinityKey)
+        ->andReturn(null);
+
+    // No existing channel stream key (reuse check)
+    $channelStreamKey = "channel_stream:{$episodeId}:{$playlistUuid}";
+    Redis::shouldReceive('exists')
+        ->with($channelStreamKey)
+        ->once()
+        ->andReturn(false);
+
+    // Profile has capacity
+    Redis::shouldReceive('get')
+        ->with("playlist_profile:{$firstProfile->id}:connections")
+        ->andReturn(0);
+
+    // Expect increment pipeline (includes channel stream key creation)
+    Redis::shouldReceive('pipeline')->twice()->andReturnUsing(function ($callback) {
+        $pipe = Mockery::mock();
+        $pipe->shouldReceive('incr')->zeroOrMoreTimes();
+        $pipe->shouldReceive('expire')->zeroOrMoreTimes();
+        $pipe->shouldReceive('set')->zeroOrMoreTimes();
+        $pipe->shouldReceive('sadd')->zeroOrMoreTimes();
+        $pipe->shouldReceive('setex')->zeroOrMoreTimes();
+        $callback($pipe);
+    });
+
+    // Expect affinity to be stored
+    Redis::shouldReceive('setex')
+        ->with($affinityKey, 86400, $firstProfile->id)
+        ->once();
+
+    [$selectedProfile, $reservationId] = ProfileService::selectAndReserveProfile(
+        $playlist,
+        null,
+        $episodeId,
+        $playlistUuid,
+        clientIdentifier: $clientIdentifier,
+    );
+
+    expect($selectedProfile)->not->toBeNull()
+        ->and($selectedProfile->id)->toBe($firstProfile->id)
+        ->and($reservationId)->toStartWith('reservation:');
+});
+
+test('selectAndReserveProfile detects reuse when episode stream key already exists', function () {
+    $playlist = createAffinityPlaylist($this->user, profileCount: 2, maxStreams: 2);
+    $episodeId = 42;
+    $playlistUuid = $playlist->uuid;
+
+    // Channel stream key already exists (another request is creating this stream)
+    $channelStreamKey = "channel_stream:{$episodeId}:{$playlistUuid}";
+    Redis::shouldReceive('exists')
+        ->with($channelStreamKey)
+        ->once()
+        ->andReturn(true);
+
+    [$selectedProfile, $reservationId] = ProfileService::selectAndReserveProfile(
+        $playlist,
+        null,
+        $episodeId,
+        $playlistUuid,
+    );
+
+    // Should return [null, null] to signal reuse detection
+    expect($selectedProfile)->toBeNull()
+        ->and($reservationId)->toBeNull();
+});
