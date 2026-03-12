@@ -255,7 +255,7 @@ test('affinity is stored after successful selectAndReserveProfile', function () 
     Redis::shouldReceive('pipeline')->once()->andReturnUsing(function ($callback) {
         $pipe = Mockery::mock();
         $pipe->shouldReceive('incr')->once();
-        $pipe->shouldReceive('expire')->twice();
+        $pipe->shouldReceive('expire')->times(3);
         $pipe->shouldReceive('set')->once();
         $pipe->shouldReceive('sadd')->once();
         $callback($pipe);
