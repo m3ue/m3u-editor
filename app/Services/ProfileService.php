@@ -146,7 +146,7 @@ class ProfileService
             if ($affinityProfileId !== null) {
                 $affinityProfile = $profiles->firstWhere('id', $affinityProfileId);
 
-                if ($affinityProfile && (static::hasCapacity($affinityProfile) || $forceSelect)) {
+                if ($affinityProfile) {
                     Log::debug('Returning affinity profile for client', [
                         'client_identifier' => $clientIdentifier,
                         'profile_id' => $affinityProfile->id,
