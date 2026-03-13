@@ -164,6 +164,23 @@ HLS_GC_INTERVAL=600
 HLS_GC_AGE_THRESHOLD=7200
 ```
 
+### Broadcast HLS garbage collection
+
+During programme transitions in network broadcasts, the old FFmpeg process is stopped and a new one starts. The ~20 segments left by the old process are orphaned — they fall outside the new playlist's window and are never cleaned up by FFmpeg's `delete_segments` flag. Over time these orphans accumulate and fill storage.
+
+The broadcast GC runs as a background task inside the proxy and periodically scans broadcast directories to remove orphaned `.ts` files.
+
+```env
+# Enable/disable broadcast segment cleanup (default: true)
+BROADCAST_GC_ENABLED=true
+
+# How often to scan for orphaned broadcast segments in seconds (default: 300 = 5 minutes)
+BROADCAST_GC_INTERVAL=300
+
+# Remove stale inactive broadcast directories older than this in seconds (default: 600 = 10 minutes)
+BROADCAST_GC_AGE_THRESHOLD=600
+```
+
 ### Defaults & behavior (when env vars are not set)
 - **Defaults used by the system:**
   - `HLS_TEMP_DIR=/var/www/html/storage/app/hls-segments`
@@ -277,6 +294,11 @@ services:
       - HLS_GC_ENABLED=${HLS_GC_ENABLED:-true}
       - HLS_GC_INTERVAL=${HLS_GC_INTERVAL:-600}
       - HLS_GC_AGE_THRESHOLD=${HLS_GC_AGE_THRESHOLD:-7200}
+
+      # Broadcast HLS Garbage Collection (orphaned segment cleanup)
+      - BROADCAST_GC_ENABLED=${BROADCAST_GC_ENABLED:-true}
+      - BROADCAST_GC_INTERVAL=${BROADCAST_GC_INTERVAL:-300}
+      - BROADCAST_GC_AGE_THRESHOLD=${BROADCAST_GC_AGE_THRESHOLD:-600}
 ```
 
 > **Note:** When using embedded proxy (`M3U_PROXY_ENABLED=true`), the `start-container` script and Supervisor automatically pass these values to the proxy process — no extra configuration is needed.

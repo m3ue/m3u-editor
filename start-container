@@ -118,6 +118,12 @@ export HLS_GC_ENABLED="${HLS_GC_ENABLED:-true}"
 export HLS_GC_INTERVAL="${HLS_GC_INTERVAL:-600}"           # 10 minutes
 export HLS_GC_AGE_THRESHOLD="${HLS_GC_AGE_THRESHOLD:-7200}" # 2 hours (increased from default 1 hour)
 
+# Broadcast HLS garbage collection
+# Cleans orphaned .ts segments left behind during programme transitions
+export BROADCAST_GC_ENABLED="${BROADCAST_GC_ENABLED:-true}"
+export BROADCAST_GC_INTERVAL="${BROADCAST_GC_INTERVAL:-300}"      # 5 minutes
+export BROADCAST_GC_AGE_THRESHOLD="${BROADCAST_GC_AGE_THRESHOLD:-600}" # 10 minutes (stale inactive broadcast dirs)
+
 if [ "${M3U_PROXY_ENABLED}" = "true" ]; then
     # Only output configure HLS storage for embedded proxy mode
     # For external proxy, HLS storage is handled by the proxy container
@@ -128,6 +134,9 @@ if [ "${M3U_PROXY_ENABLED}" = "true" ]; then
     echo "   HLS_GC_ENABLED: ${HLS_GC_ENABLED}"
     echo "   HLS_GC_INTERVAL: ${HLS_GC_INTERVAL}s"
     echo "   HLS_GC_AGE_THRESHOLD: ${HLS_GC_AGE_THRESHOLD}s"
+    echo "   BROADCAST_GC_ENABLED: ${BROADCAST_GC_ENABLED}"
+    echo "   BROADCAST_GC_INTERVAL: ${BROADCAST_GC_INTERVAL}s"
+    echo "   BROADCAST_GC_AGE_THRESHOLD: ${BROADCAST_GC_AGE_THRESHOLD}s"
 
     # Create HLS storage directory if it doesn't exist
     if [ ! -d "$HLS_TEMP_DIR" ]; then
