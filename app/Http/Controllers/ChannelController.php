@@ -1419,6 +1419,7 @@ class ChannelController extends Controller
      * The order of the failover_channel_ids array determines priority (index 0 = highest priority).
      *
      * @bodyParam failover_channel_ids integer[] required Ordered array of channel IDs to use as failovers. Example: [101, 102, 103]
+     * @bodyParam deactivate_failover_channels boolean When true, failover channels will be disabled (enabled=false). Defaults to false. Example: true
      * @bodyParam metadata object Optional metadata to attach to each failover entry. Example: {"source": "epg-sync"}
      *
      * @response 200 {
@@ -1427,10 +1428,11 @@ class ChannelController extends Controller
      *   "data": {
      *     "channel_id": 100,
      *     "failovers": [
-     *       {"id": 101, "title": "Sky Sports HD", "priority": 0},
-     *       {"id": 102, "title": "Sky Sports SD", "priority": 1},
-     *       {"id": 103, "title": "Sky Sports RAW", "priority": 2}
-     *     ]
+     *       {"id": 101, "title": "Channel HD", "priority": 0},
+     *       {"id": 102, "title": "Channel SD", "priority": 1},
+     *       {"id": 103, "title": "Channel RAW", "priority": 2}
+     *     ],
+     *     "deactivated_count": 3
      *   }
      * }
      * @response 404 {
@@ -1462,10 +1464,12 @@ class ChannelController extends Controller
                 'distinct',
                 Rule::exists('channels', 'id')->where('user_id', $user->id),
             ],
+            'deactivate_failover_channels' => 'sometimes|boolean',
             'metadata' => 'sometimes|nullable|array',
         ]);
 
         $failoverIds = $validated['failover_channel_ids'];
+        $deactivateFailovers = (bool) ($validated['deactivate_failover_channels'] ?? false);
         $metadata = $validated['metadata'] ?? null;
 
         if (in_array($id, $failoverIds, true)) {
@@ -1475,7 +1479,9 @@ class ChannelController extends Controller
             ], 422);
         }
 
-        DB::transaction(function () use ($channel, $user, $failoverIds, $metadata) {
+        $deactivatedCount = 0;
+
+        DB::transaction(function () use ($channel, $user, $failoverIds, $deactivateFailovers, $metadata, &$deactivatedCount) {
             ChannelFailover::where('channel_id', $channel->id)
                 ->where('user_id', $user->id)
                 ->delete();
@@ -1494,6 +1500,13 @@ class ChannelController extends Controller
             }
 
             ChannelFailover::insert($records);
+
+            if ($deactivateFailovers) {
+                $deactivatedCount = Channel::where('user_id', $user->id)
+                    ->whereIn('id', $failoverIds)
+                    ->where('enabled', true)
+                    ->update(['enabled' => false]);
+            }
         });
 
         $channel->load('failoverChannels');
@@ -1510,6 +1523,7 @@ class ChannelController extends Controller
             'data' => [
                 'channel_id' => $channel->id,
                 'failovers' => $failovers,
+                'deactivated_count' => $deactivatedCount,
             ],
         ]);
     }
@@ -1568,13 +1582,15 @@ class ChannelController extends Controller
      * @bodyParam mappings[].primary_channel_id integer required The primary channel ID. Example: 100
      * @bodyParam mappings[].failover_channel_ids integer[] required Ordered failover channel IDs. Example: [101, 102, 103]
      * @bodyParam mappings[].metadata object Optional metadata for each failover entry. Example: {"source": "epg-sync"}
+     * @bodyParam deactivate_failover_channels boolean When true, failover channels will be disabled (enabled=false). Defaults to false. Example: true
      *
      * @response 200 {
      *   "success": true,
      *   "message": "Failovers set for 5 channel(s)",
      *   "data": {
      *     "mappings_applied": 5,
-     *     "total_failovers_created": 15
+     *     "total_failovers_created": 15,
+     *     "deactivated_count": 10
      *   }
      * }
      * @response 422 {
@@ -1601,9 +1617,11 @@ class ChannelController extends Controller
                 Rule::exists('channels', 'id')->where('user_id', $user->id),
             ],
             'mappings.*.metadata' => 'sometimes|nullable|array',
+            'deactivate_failover_channels' => 'sometimes|boolean',
         ]);
 
         $mappings = $validated['mappings'];
+        $deactivateFailovers = (bool) ($validated['deactivate_failover_channels'] ?? false);
 
         foreach ($mappings as $index => $mapping) {
             if (in_array($mapping['primary_channel_id'], $mapping['failover_channel_ids'], true)) {
@@ -1617,18 +1635,21 @@ class ChannelController extends Controller
         $primaryIds = array_column($mappings, 'primary_channel_id');
 
         $totalFailoversCreated = 0;
+        $deactivatedCount = 0;
 
-        DB::transaction(function () use ($mappings, $primaryIds, $user, &$totalFailoversCreated) {
+        DB::transaction(function () use ($mappings, $primaryIds, $user, $deactivateFailovers, &$totalFailoversCreated, &$deactivatedCount) {
             ChannelFailover::whereIn('channel_id', $primaryIds)
                 ->where('user_id', $user->id)
                 ->delete();
 
+            $allFailoverIds = [];
             $records = [];
             foreach ($mappings as $mapping) {
                 $metadata = $mapping['metadata'] ?? null;
                 $encodedMetadata = $metadata ? json_encode($metadata) : null;
 
                 foreach ($mapping['failover_channel_ids'] as $sort => $failoverChannelId) {
+                    $allFailoverIds[] = $failoverChannelId;
                     $records[] = [
                         'user_id' => $user->id,
                         'channel_id' => $mapping['primary_channel_id'],
@@ -1646,6 +1667,13 @@ class ChannelController extends Controller
             foreach (array_chunk($records, 500) as $chunk) {
                 ChannelFailover::insert($chunk);
             }
+
+            if ($deactivateFailovers) {
+                $deactivatedCount = Channel::where('user_id', $user->id)
+                    ->whereIn('id', array_unique($allFailoverIds))
+                    ->where('enabled', true)
+                    ->update(['enabled' => false]);
+            }
         });
 
         return response()->json([
@@ -1654,6 +1682,7 @@ class ChannelController extends Controller
             'data' => [
                 'mappings_applied' => count($mappings),
                 'total_failovers_created' => $totalFailoversCreated,
+                'deactivated_count' => $deactivatedCount,
             ],
         ]);
     }
