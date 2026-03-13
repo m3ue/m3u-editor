@@ -6,6 +6,7 @@ use App\Facades\LogoFacade;
 use App\Models\Channel;
 use App\Models\Episode;
 use App\Models\Network;
+use App\Models\PlaylistProfile;
 use App\Models\StreamProfile;
 use App\Services\M3uProxyService;
 use Carbon\Carbon;
@@ -286,6 +287,18 @@ class M3uProxyStreamMonitor extends Page
                     }
                 }
 
+                // Look up provider profile name from metadata
+                $providerProfileName = null;
+                $providerProfileId = $stream['metadata']['provider_profile_id'] ?? null;
+                if ($providerProfileId) {
+                    $providerProfile = PlaylistProfile::find($providerProfileId);
+                    if ($providerProfile) {
+                        $providerProfileName = $providerProfile->is_primary
+                            ? 'Primary'
+                            : ($providerProfile->name ?? "Profile #{$providerProfile->id}");
+                    }
+                }
+
                 $streams[] = [
                     'stream_id' => $streamId,
                     'source_url' => $this->truncateUrl($stream['original_url']),
@@ -305,6 +318,7 @@ class M3uProxyStreamMonitor extends Page
                     'segments_served' => $stream['total_segments_served'],
                     'transcoding' => $transcoding,
                     'transcoding_format' => $transcodingFormat,
+                    'provider_profile' => $providerProfileName,
                     // Failover details
                     'failover_urls' => $stream['failover_urls'] ?? [],
                     'failover_resolver_url' => $stream['failover_resolver_url'] ?? null,
