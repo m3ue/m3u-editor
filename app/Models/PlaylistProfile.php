@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 
 class PlaylistProfile extends Model
 {
@@ -311,9 +312,32 @@ class PlaylistProfile extends Model
             $streamType = $matches[1];
             $streamIdAndExtension = $matches[2];
 
-            // Use profile's URL (which may be different from source URL)
-            return "{$profileUrl}/{$streamType}/{$profileUsername}/{$profilePassword}/{$streamIdAndExtension}";
+            $transformedUrl = "{$profileUrl}/{$streamType}/{$profileUsername}/{$profilePassword}/{$streamIdAndExtension}";
+
+            Log::debug('Profile URL transformation matched', [
+                'profile_id' => $this->id,
+                'profile_name' => $this->name ?? 'N/A',
+                'stream_type' => $streamType,
+                'source_base_url' => $sourceBaseUrl,
+                'profile_base_url' => $profileUrl,
+                'source_user' => substr($sourceUsername, 0, 3).'***',
+                'profile_user' => substr($profileUsername, 0, 3).'***',
+                'stream_id' => $streamIdAndExtension,
+                'original_url' => preg_replace('#/[^/]+/[^/]+/(live|series|movie)/#', '/***/***/\1/', $originalUrl),
+                'transformed_url' => preg_replace('#/[^/]+/[^/]+/(live|series|movie)/#', '/***/***/\1/', $transformedUrl),
+            ]);
+
+            return $transformedUrl;
         }
+
+        Log::warning('Profile URL transformation did NOT match', [
+            'profile_id' => $this->id,
+            'profile_name' => $this->name ?? 'N/A',
+            'source_base_url' => $sourceBaseUrl,
+            'profile_base_url' => $profileUrl,
+            'original_url' => preg_replace('#/[^/]+/[^/]+/(live|series|movie)/#', '/***/***/\1/', $originalUrl),
+            'pattern' => $pattern,
+        ]);
 
         return $originalUrl;
     }

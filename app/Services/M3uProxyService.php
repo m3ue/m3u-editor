@@ -959,9 +959,13 @@ class M3uProxyService
             return $this->buildTranscodeStreamUrl($streamId, $profile->format ?? 'ts', $username);
         } else {
             // Use direct streaming endpoint
-            Log::debug('Creating direct stream with provider profile', [
+            Log::debug('Creating direct stream', [
                 'channel_id' => $id,
+                'is_vod' => $actualChannel->is_vod ?? false,
                 'provider_profile_id' => $selectedProfile?->id,
+                'provider_profile_name' => $selectedProfile?->name,
+                'primary_url' => preg_replace('#/[^/]+/[^/]+/(live|series|movie)/#', '/***/***/\1/', $primaryUrl),
+                'url_transformed' => $selectedProfile !== null,
             ]);
 
             // Determine if this is a failover stream
@@ -1100,9 +1104,30 @@ class M3uProxyService
         $selectedProfile = null;
         $reservationId = null;
         if ($profileSourcePlaylist) {
-            [$selectedProfile, $reservationId] = ProfileService::selectAndReserveProfile($profileSourcePlaylist);
+            [$selectedProfile, $reservationId] = ProfileService::selectAndReserveProfile($profileSourcePlaylist, null, $id, $playlist->uuid);
 
             if (! $selectedProfile) {
+                // Check if reuse was detected inside the lock (another request is creating this stream).
+                if (ProfileService::isChannelStreamActive($id, $playlist->uuid)) {
+                    $existingStreamId = $this->findExistingPooledStream($id, $playlist->uuid, $profile?->id, null);
+
+                    if ($existingStreamId) {
+                        Log::debug('Reusing existing pooled stream for episode', [
+                            'episode_id' => $id,
+                            'stream_id' => $existingStreamId,
+                        ]);
+
+                        if ($profile) {
+                            return $this->buildTranscodeStreamUrl($existingStreamId, $profile->format ?? 'ts', $username);
+                        }
+
+                        $format = pathinfo($url, PATHINFO_EXTENSION);
+                        $format = $format === 'm3u8' ? 'hls' : $format;
+
+                        return $this->buildProxyUrl($existingStreamId, $format, $username);
+                    }
+                }
+
                 // No profiles with capacity - try "stop oldest on limit" before giving up
                 if ($this->stopOldestOnLimit) {
                     $stopResult = self::stopOldestPlaylistStream($playlist->uuid, $id);
@@ -1116,7 +1141,7 @@ class M3uProxyService
 
                         usleep(200000); // 200ms
                         ProfileService::reconcileFromProxy($profileSourcePlaylist);
-                        [$selectedProfile, $reservationId] = ProfileService::selectAndReserveProfile($profileSourcePlaylist);
+                        [$selectedProfile, $reservationId] = ProfileService::selectAndReserveProfile($profileSourcePlaylist, null, $id, $playlist->uuid);
                     }
                 }
 
@@ -1124,7 +1149,7 @@ class M3uProxyService
                     // Last resort: reconcile Redis counts against actual proxy state.
                     // Fixes race condition where increment fires before decrement webhook.
                     ProfileService::reconcileFromProxy($profileSourcePlaylist);
-                    [$selectedProfile, $reservationId] = ProfileService::selectAndReserveProfile($profileSourcePlaylist);
+                    [$selectedProfile, $reservationId] = ProfileService::selectAndReserveProfile($profileSourcePlaylist, null, $id, $playlist->uuid);
                 }
 
                 if (! $selectedProfile) {
@@ -1927,30 +1952,35 @@ class M3uProxyService
             $data = $response->json();
             $matchingStreams = $data['matching_streams'] ?? [];
 
-            // Find a stream for this channel+playlist+profile that's transcoding
+            // Find a stream for this channel+playlist+profile
             foreach ($matchingStreams as $stream) {
                 $metadata = $stream['metadata'] ?? [];
 
                 // Check if this stream matches our criteria:
                 // 1. Same ORIGINAL channel ID (enables cross-provider failover pooling)
                 // 2. Same ORIGINAL playlist UUID (enables cross-provider failover pooling)
-                // 3. Is a transcoded stream (has transcoding metadata)
-                // 4. Same StreamProfile ID (transcoding profile, if specified)
-                // 5. Same PlaylistProfile ID (provider profile, if specified)
+                // 3. If profileId specified: must be a transcoded stream with matching StreamProfile ID
+                //    If profileId is null: must be a direct (non-transcoded) stream
+                // 4. Same PlaylistProfile ID (provider profile, if specified)
+                $isTranscoded = ($metadata['transcoding'] ?? null) === 'true';
+                $transcodingMatch = $profileId !== null
+                    ? ($isTranscoded && ($metadata['profile_id'] ?? null) == $profileId)
+                    : ! $isTranscoded;
+
                 if (
                     ($metadata['original_channel_id'] ?? null) == $channelId &&
                     ($metadata['original_playlist_uuid'] ?? null) === $playlistUuid &&
-                    ($metadata['transcoding'] ?? null) === 'true' &&
-                    ($profileId === null || ($metadata['profile_id'] ?? null) == $profileId) &&
+                    $transcodingMatch &&
                     ($providerProfileId === null || ($metadata['provider_profile_id'] ?? null) == $providerProfileId)
                 ) {
-                    Log::debug('Found existing pooled transcoded stream (cross-provider failover support)', [
+                    Log::debug('Found existing pooled stream (cross-provider failover support)', [
                         'stream_id' => $stream['stream_id'],
                         'original_channel_id' => $channelId,
                         'original_playlist_uuid' => $playlistUuid,
                         'actual_channel_id' => $metadata['id'] ?? null,
                         'actual_playlist_uuid' => $metadata['playlist_uuid'] ?? null,
                         'is_failover' => $metadata['is_failover'] ?? false,
+                        'is_transcoded' => $isTranscoded,
                         'profile_id' => $profileId,
                         'provider_profile_id' => $providerProfileId,
                         'client_count' => $stream['client_count'],

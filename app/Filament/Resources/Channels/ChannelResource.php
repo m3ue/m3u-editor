@@ -352,6 +352,7 @@ class ChannelResource extends Resource
                 ->sortable()
                 ->searchable(query: function (Builder $query, string $search): Builder {
                     $urlExpr = DB::getDriverName() === 'sqlite' ? 'channels.url' : 'channels.url::text';
+
                     return $query->orWhereRaw("LOWER({$urlExpr}) LIKE ?", ['%'.strtolower($search).'%']);
                 })
                 ->toggleable(isToggledHiddenByDefault: true),
