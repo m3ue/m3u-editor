@@ -1415,7 +1415,7 @@ class ChannelController extends Controller
     /**
      * Set failovers for a channel
      *
-     * Replace all failover channels for the given primary channel.
+     * Replace all failover associations for the given primary channel.
      * The order of the failover_channel_ids array determines priority (index 0 = highest priority).
      *
      * @bodyParam failover_channel_ids integer[] required Ordered array of channel IDs to use as failovers. Example: [101, 102, 103]
@@ -1517,7 +1517,7 @@ class ChannelController extends Controller
     /**
      * Clear failovers for a channel
      *
-     * Remove all failover channels from the given primary channel.
+     * Remove all failover associations from the given primary channel. The failover channels themselves are not deleted.
      *
      * @response 200 {
      *   "success": true,
