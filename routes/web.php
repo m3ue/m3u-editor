@@ -216,6 +216,16 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         ->where('id', '[0-9]+')
         ->name('api.channels.stability-test');
 
+    // Channel failover API routes
+    Route::post('channel/{id}/failovers', [\App\Http\Controllers\ChannelController::class, 'setFailovers'])
+        ->where('id', '[0-9]+')
+        ->name('api.channels.failovers.set');
+    Route::delete('channel/{id}/failovers', [\App\Http\Controllers\ChannelController::class, 'clearFailovers'])
+        ->where('id', '[0-9]+')
+        ->name('api.channels.failovers.clear');
+    Route::post('channel/bulk-set-failovers', [\App\Http\Controllers\ChannelController::class, 'bulkSetFailovers'])
+        ->name('api.channels.failovers.bulk-set');
+
     // Group API routes
     Route::group(['prefix' => 'group'], function () {
         Route::post('/', [\App\Http\Controllers\GroupController::class, 'store'])

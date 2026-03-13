@@ -6,9 +6,11 @@ use App\Enums\ChannelLogoType;
 use App\Facades\PlaylistFacade;
 use App\Facades\ProxyFacade;
 use App\Models\Channel;
+use App\Models\ChannelFailover;
 use App\Models\Group;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
 /**
@@ -1406,6 +1408,271 @@ class ChannelController extends Controller
                 'frame_counts' => $frameCounts,
                 'avg_frames_per_check' => $avgFrames,
                 'total_test_duration_ms' => $totalDuration,
+            ],
+        ]);
+    }
+
+    /**
+     * Set failovers for a channel
+     *
+     * Replace all failover channels for the given primary channel.
+     * The order of the failover_channel_ids array determines priority (index 0 = highest priority).
+     *
+     * @bodyParam failover_channel_ids integer[] required Ordered array of channel IDs to use as failovers. Example: [101, 102, 103]
+     * @bodyParam metadata object Optional metadata to attach to each failover entry. Example: {"source": "epg-sync"}
+     *
+     * @response 200 {
+     *   "success": true,
+     *   "message": "3 failover(s) set for channel 100",
+     *   "data": {
+     *     "channel_id": 100,
+     *     "failovers": [
+     *       {"id": 101, "title": "Sky Sports HD", "priority": 0},
+     *       {"id": 102, "title": "Sky Sports SD", "priority": 1},
+     *       {"id": 103, "title": "Sky Sports RAW", "priority": 2}
+     *     ]
+     *   }
+     * }
+     * @response 404 {
+     *   "success": false,
+     *   "message": "Channel not found"
+     * }
+     * @response 403 {
+     *   "success": false,
+     *   "message": "You do not have permission to update this channel"
+     * }
+     * @response 422 {
+     *   "message": "The given data was invalid.",
+     *   "errors": {}
+     * }
+     */
+    public function setFailovers(Request $request, int $id): JsonResponse
+    {
+        $user = $request->user();
+
+        $channel = Channel::find($id);
+
+        if (! $channel) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Channel not found',
+            ], 404);
+        }
+
+        if ($channel->user_id !== $user->id) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You do not have permission to update this channel',
+            ], 403);
+        }
+
+        $validated = $request->validate([
+            'failover_channel_ids' => 'required|array|min:1',
+            'failover_channel_ids.*' => [
+                'integer',
+                'distinct',
+                Rule::exists('channels', 'id')->where('user_id', $user->id),
+            ],
+            'metadata' => 'sometimes|nullable|array',
+        ]);
+
+        $failoverIds = $validated['failover_channel_ids'];
+        $metadata = $validated['metadata'] ?? null;
+
+        if (in_array($id, $failoverIds)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'A channel cannot be its own failover',
+            ], 422);
+        }
+
+        DB::transaction(function () use ($channel, $user, $failoverIds, $metadata) {
+            ChannelFailover::where('channel_id', $channel->id)->delete();
+
+            $records = [];
+            foreach ($failoverIds as $sort => $failoverChannelId) {
+                $records[] = [
+                    'user_id' => $user->id,
+                    'channel_id' => $channel->id,
+                    'channel_failover_id' => $failoverChannelId,
+                    'sort' => $sort,
+                    'metadata' => $metadata ? json_encode($metadata) : null,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ];
+            }
+
+            ChannelFailover::insert($records);
+        });
+
+        $channel->load('failoverChannels');
+
+        $failovers = $channel->failoverChannels->map(fn (Channel $failover) => [
+            'id' => $failover->id,
+            'title' => $failover->title_custom ?? $failover->title,
+            'priority' => $failover->pivot->sort ?? 0,
+        ])->toArray();
+
+        return response()->json([
+            'success' => true,
+            'message' => count($failovers) . ' failover(s) set for channel ' . $channel->id,
+            'data' => [
+                'channel_id' => $channel->id,
+                'failovers' => $failovers,
+            ],
+        ]);
+    }
+
+    /**
+     * Clear failovers for a channel
+     *
+     * Remove all failover channels from the given primary channel.
+     *
+     * @response 200 {
+     *   "success": true,
+     *   "message": "Failovers cleared for channel 100",
+     *   "data": {
+     *     "channel_id": 100,
+     *     "removed_count": 3
+     *   }
+     * }
+     * @response 404 {
+     *   "success": false,
+     *   "message": "Channel not found"
+     * }
+     * @response 403 {
+     *   "success": false,
+     *   "message": "You do not have permission to update this channel"
+     * }
+     */
+    public function clearFailovers(Request $request, int $id): JsonResponse
+    {
+        $user = $request->user();
+
+        $channel = Channel::find($id);
+
+        if (! $channel) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Channel not found',
+            ], 404);
+        }
+
+        if ($channel->user_id !== $user->id) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You do not have permission to update this channel',
+            ], 403);
+        }
+
+        $removedCount = ChannelFailover::where('channel_id', $channel->id)->delete();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Failovers cleared for channel ' . $channel->id,
+            'data' => [
+                'channel_id' => $channel->id,
+                'removed_count' => $removedCount,
+            ],
+        ]);
+    }
+
+    /**
+     * Bulk set failovers for multiple channels
+     *
+     * Replace failover channels for multiple primary channels in a single request.
+     * Each mapping specifies a primary channel and its ordered list of failover channel IDs.
+     * The order of failover_channel_ids determines priority (index 0 = highest priority).
+     *
+     * @bodyParam mappings array required Array of primary-to-failover mappings. Example: [{"primary_channel_id": 100, "failover_channel_ids": [101, 102]}]
+     * @bodyParam mappings[].primary_channel_id integer required The primary channel ID. Example: 100
+     * @bodyParam mappings[].failover_channel_ids integer[] required Ordered failover channel IDs. Example: [101, 102, 103]
+     * @bodyParam mappings[].metadata object Optional metadata for each failover entry. Example: {"source": "epg-sync"}
+     *
+     * @response 200 {
+     *   "success": true,
+     *   "message": "Failovers set for 5 channel(s)",
+     *   "data": {
+     *     "mappings_applied": 5,
+     *     "total_failovers_created": 15
+     *   }
+     * }
+     * @response 422 {
+     *   "message": "The given data was invalid.",
+     *   "errors": {}
+     * }
+     */
+    public function bulkSetFailovers(Request $request): JsonResponse
+    {
+        $user = $request->user();
+
+        $validated = $request->validate([
+            'mappings' => 'required|array|min:1',
+            'mappings.*.primary_channel_id' => [
+                'required',
+                'integer',
+                Rule::exists('channels', 'id')->where('user_id', $user->id),
+            ],
+            'mappings.*.failover_channel_ids' => 'required|array|min:1',
+            'mappings.*.failover_channel_ids.*' => [
+                'integer',
+                'distinct',
+                Rule::exists('channels', 'id')->where('user_id', $user->id),
+            ],
+            'mappings.*.metadata' => 'sometimes|nullable|array',
+        ]);
+
+        $mappings = $validated['mappings'];
+
+        foreach ($mappings as $index => $mapping) {
+            if (in_array($mapping['primary_channel_id'], $mapping['failover_channel_ids'])) {
+                return response()->json([
+                    'success' => false,
+                    'message' => "Mapping at index {$index}: a channel cannot be its own failover",
+                ], 422);
+            }
+        }
+
+        $primaryIds = array_column($mappings, 'primary_channel_id');
+
+        $totalFailoversCreated = 0;
+
+        DB::transaction(function () use ($mappings, $primaryIds, $user, &$totalFailoversCreated) {
+            ChannelFailover::whereIn('channel_id', $primaryIds)
+                ->where('user_id', $user->id)
+                ->delete();
+
+            $records = [];
+            foreach ($mappings as $mapping) {
+                $metadata = $mapping['metadata'] ?? null;
+                $encodedMetadata = $metadata ? json_encode($metadata) : null;
+
+                foreach ($mapping['failover_channel_ids'] as $sort => $failoverChannelId) {
+                    $records[] = [
+                        'user_id' => $user->id,
+                        'channel_id' => $mapping['primary_channel_id'],
+                        'channel_failover_id' => $failoverChannelId,
+                        'sort' => $sort,
+                        'metadata' => $encodedMetadata,
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ];
+                }
+            }
+
+            $totalFailoversCreated = count($records);
+
+            foreach (array_chunk($records, 500) as $chunk) {
+                ChannelFailover::insert($chunk);
+            }
+        });
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Failovers set for ' . count($mappings) . ' channel(s)',
+            'data' => [
+                'mappings_applied' => count($mappings),
+                'total_failovers_created' => $totalFailoversCreated,
             ],
         ]);
     }
