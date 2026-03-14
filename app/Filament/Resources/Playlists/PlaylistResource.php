@@ -1242,6 +1242,18 @@ class PlaylistResource extends Resource
                         ->inline(false)
                         ->default(false),
 
+                    Toggle::make('bypass_provider_limits')
+                        ->label('Bypass Provider Connection Limits')
+                        ->helperText('When enabled, the proxy will attempt to start streams even if the provider\'s reported connection limit has been reached. Only the "Available Streams" setting (Output tab) will determine when 503 errors are returned. Enable this if you use stream pooling or if your provider allows more connections than reported.')
+                        ->visible(fn (Get $get): bool => (bool) $get('profiles_enabled'))
+                        ->inline(false)
+                        ->default(false),
+
+                    Placeholder::make('bypass_provider_limits_warning')
+                        ->label('')
+                        ->content('⚠ Provider connection limits will not be enforced. If the provider strictly enforces its limit, streams may fail at the provider level rather than being blocked by the proxy.')
+                        ->visible(fn (Get $get): bool => (bool) $get('profiles_enabled') && (bool) $get('bypass_provider_limits')),
+
                     Grid::make()
                         ->columns(2)
                         ->visible(fn (Get $get): bool => $get('profiles_enabled'))
@@ -2370,11 +2382,11 @@ class PlaylistResource extends Resource
                             TextInput::make('available_streams')
                                 ->label('Available Streams')
                                 ->hint('Set to 0 for unlimited streams.')
-                                ->helperText('Number of streams available for this provider. If set to a value other than 0, will prevent any streams from starting if the number of active streams exceeds this value.')
+                                ->helperText('Maximum proxy streams allowed. Applies regardless of Provider Profiles — set to 0 for unlimited. When Provider Profiles are enabled, this is the authoritative proxy-level limit while provider limits control routing.')
                                 ->columnSpan(1)
-                                ->rules(['min:1'])
+                                ->rules(['min:0'])
                                 ->type('number')
-                                ->default(0) // Default to 0 streams (for unlimted)
+                                ->default(0) // Default to 0 streams (for unlimited)
                                 ->required(),
                             Toggle::make('strict_live_ts')
                                 ->label('Enable Strict Live TS Handling')

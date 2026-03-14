@@ -57,6 +57,7 @@ class Playlist extends Model
         'strict_live_ts' => 'boolean',
         'use_sticky_session' => 'boolean',
         'profiles_enabled' => 'boolean',
+        'bypass_provider_limits' => 'boolean',
         'is_network_playlist' => 'boolean',
         'status' => Status::class,
         'id_channel_by' => PlaylistChannelId::class,

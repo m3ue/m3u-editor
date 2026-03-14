@@ -611,6 +611,9 @@ class M3uProxyService
         $originalChannelId = $channel->id;
         $originalPlaylistUuid = $playlist->uuid;
 
+        // Build client identifier for profile affinity tracking
+        $clientIdentifier = ProfileService::buildClientIdentifier($request?->ip(), $username);
+
         // Determine the source playlist for provider profiles
         // When streaming through a CustomPlaylist, MergedPlaylist, or PlaylistAlias,
         // we need to use the channel's source Playlist for provider profile selection
@@ -635,23 +638,10 @@ class M3uProxyService
         $reservationId = null;
 
         if ($profile) {
-            // Fast channel reuse check: if we already know this channel is streaming,
-            // return the cached stream URL without an HTTP round-trip to m3u-proxy.
-            $cachedStreamId = ProfileService::getChannelActiveStreamId($originalChannelId, $originalPlaylistUuid);
-
-            if ($cachedStreamId) {
-                Log::debug('Reusing existing transcoded stream via channel cache (fast path)', [
-                    'stream_id' => $cachedStreamId,
-                    'original_channel_id' => $originalChannelId,
-                    'original_playlist_uuid' => $originalPlaylistUuid,
-                    'profile_id' => $profile->id,
-                ]);
-
-                return $this->buildTranscodeStreamUrl($cachedStreamId, $profile->format ?? 'ts', $username);
-            }
-
-            // Search for pooled stream by ORIGINAL channel ID (handles cross-provider failovers)
-            // Pass NULL for provider_profile_id to search across ALL profiles
+            // Search for pooled stream by ORIGINAL channel ID (handles cross-provider failovers).
+            // Pass NULL for provider_profile_id to search across ALL profiles.
+            // This also acts as proxy verification: if Redis has a key but the proxy has no
+            // active stream (e.g. after a proxy restart), the stale key is cleared below.
             $existingStreamId = $this->findExistingPooledStream($originalChannelId, $originalPlaylistUuid, $profile->id, null);
 
             if ($existingStreamId) {
@@ -666,11 +656,24 @@ class M3uProxyService
                 return $this->buildTranscodeStreamUrl($existingStreamId, $profile->format ?? 'ts', $username);
             }
 
+            // If Redis has a channel stream key but the proxy returned no active stream above,
+            // the key is stale (proxy was restarted, stream died, webhook missed). Clear it so
+            // the profile selection below can proceed without hitting "channel reuse detected".
+            if (ProfileService::isChannelStreamActive($originalChannelId, $originalPlaylistUuid)) {
+                Log::debug('Clearing stale channel stream key (transcode path, no proxy stream found)', [
+                    'original_channel_id' => $originalChannelId,
+                    'original_playlist_uuid' => $originalPlaylistUuid,
+                    'profile_id' => $profile->id,
+                ]);
+                ProfileService::clearChannelStreamMapping($originalChannelId, $originalPlaylistUuid);
+            }
+
             // Only select provider profile if we're creating a NEW stream (no pooled stream found)
             // Use profileSourcePlaylist which may be the channel's source playlist when streaming via CustomPlaylist
             // Use selectAndReserveProfile() for atomic select+increment to prevent TOCTOU races
             if ($profileSourcePlaylist) {
-                [$selectedProfile, $reservationId] = ProfileService::selectAndReserveProfile($profileSourcePlaylist, null, $originalChannelId, $originalPlaylistUuid);
+                $forceSelect = $profileSourcePlaylist->bypass_provider_limits ?? false;
+                [$selectedProfile, $reservationId] = ProfileService::selectAndReserveProfile($profileSourcePlaylist, null, $originalChannelId, $originalPlaylistUuid, $forceSelect, $clientIdentifier);
 
                 if (! $selectedProfile) {
                     // Check if reuse was detected inside the lock (another request is creating this stream).
@@ -680,13 +683,21 @@ class M3uProxyService
                         if ($existingStreamId) {
                             return $this->buildTranscodeStreamUrl($existingStreamId, $profile->format ?? 'ts', $username);
                         }
+
+                        // Channel stream key exists in Redis but the proxy has no actual stream —
+                        // the key is stale. Clear it so the reconciliation + retry below can proceed.
+                        Log::debug('Clearing stale channel stream key before reconciliation (transcode path)', [
+                            'channel_id' => $originalChannelId,
+                            'playlist_uuid' => $originalPlaylistUuid,
+                        ]);
+                        ProfileService::clearChannelStreamMapping($originalChannelId, $originalPlaylistUuid);
                     }
 
                     // Reconcile Redis counts against actual proxy state before rejecting.
                     // Fixes race condition where increment fires before the old stream's
                     // decrement webhook when rapidly switching channels.
                     ProfileService::reconcileFromProxy($profileSourcePlaylist);
-                    [$selectedProfile, $reservationId] = ProfileService::selectAndReserveProfile($profileSourcePlaylist, null, $originalChannelId, $originalPlaylistUuid);
+                    [$selectedProfile, $reservationId] = ProfileService::selectAndReserveProfile($profileSourcePlaylist, null, $originalChannelId, $originalPlaylistUuid, $forceSelect, $clientIdentifier);
                 }
 
                 if (! $selectedProfile) {
@@ -709,15 +720,12 @@ class M3uProxyService
 
         // Check if primary playlist has stream limits and if it's at capacity
         // Only check capacity if we're about to create a NEW stream (no existing pooled stream found)
-        // IMPORTANT: Skip playlist-level limit check if using provider profiles
-        // When using provider profiles, each profile has its own connection limit,
-        // and the total capacity is the sum of all profile limits, not the playlist's available_streams
+        // This check applies regardless of whether provider profiles are enabled —
+        // available_streams is the authoritative proxy-level limit.
         $primaryUrl = null;
         $actualChannel = $channel;  // Track the actual channel being used (may differ from original if failover)
-        // Use profileSourcePlaylist to check for provider profiles (may be channel's source playlist when streaming via CustomPlaylist)
-        $usingProviderProfiles = $profileSourcePlaylist !== null;
 
-        if ($playlist->available_streams !== 0 && ! $usingProviderProfiles) {
+        if ($playlist->available_streams !== 0) {
             $activeStreams = self::getActiveStreamsCountByMetadata('playlist_uuid', $playlist->uuid);
 
             // Keep track of original playlist in case we need to check failovers
@@ -799,19 +807,37 @@ class M3uProxyService
         // Use profileSourcePlaylist which may be the channel's source playlist when streaming via CustomPlaylist
         // Use selectAndReserveProfile() for atomic select+increment to prevent TOCTOU races
         if (! $selectedProfile && $profileSourcePlaylist) {
-            [$selectedProfile, $reservationId] = ProfileService::selectAndReserveProfile($profileSourcePlaylist, null, $originalChannelId, $originalPlaylistUuid);
+            $forceSelect = $profileSourcePlaylist->bypass_provider_limits ?? false;
+            [$selectedProfile, $reservationId] = ProfileService::selectAndReserveProfile($profileSourcePlaylist, null, $originalChannelId, $originalPlaylistUuid, $forceSelect, $clientIdentifier);
 
             if (! $selectedProfile) {
                 // Check if reuse was detected inside the lock (another request is creating this stream).
                 if (ProfileService::isChannelStreamActive($originalChannelId, $originalPlaylistUuid)) {
-                    $existingStreamId = $this->findExistingPooledStream($originalChannelId, $originalPlaylistUuid, null, null);
+                    // For non-transcoded streams, findExistingPooledStream only matches transcoded
+                    // streams (requires metadata.transcoding=true), so check the channel stream key
+                    // in Redis first. Then verify the proxy still has an active stream for this
+                    // channel — the Redis key can outlive the proxy stream (restart, timeout, etc.).
+                    $existingStreamId = ProfileService::getChannelActiveStreamId($originalChannelId, $originalPlaylistUuid)
+                        ?? $this->findExistingPooledStream($originalChannelId, $originalPlaylistUuid, null, null);
 
                     if ($existingStreamId) {
-                        $format = pathinfo($primaryUrl ?? '', PATHINFO_EXTENSION);
-                        $format = $format === 'm3u8' ? 'hls' : $format;
+                        $activeChannelStreams = self::getActiveStreamsCountByMetadata('original_channel_id', (string) $originalChannelId);
 
-                        return $this->buildProxyUrl($existingStreamId, $format, $username);
+                        if ($activeChannelStreams > 0) {
+                            $format = pathinfo($primaryUrl ?? '', PATHINFO_EXTENSION);
+                            $format = $format === 'm3u8' ? 'hls' : $format;
+
+                            return $this->buildProxyUrl($existingStreamId, $format, $username);
+                        }
                     }
+
+                    // Either no real stream ID in Redis (pending reservation that never completed),
+                    // or a real stream ID that no longer exists in the proxy — stale key, clear it.
+                    Log::debug('Clearing stale channel stream key before reconciliation', [
+                        'channel_id' => $originalChannelId,
+                        'playlist_uuid' => $originalPlaylistUuid,
+                    ]);
+                    ProfileService::clearChannelStreamMapping($originalChannelId, $originalPlaylistUuid);
                 }
 
                 // No profiles with capacity - try "stop oldest on limit" before giving up
@@ -833,7 +859,7 @@ class M3uProxyService
                         ProfileService::reconcileFromProxy($profileSourcePlaylist);
 
                         // Retry profile selection after freeing a slot
-                        [$selectedProfile, $reservationId] = ProfileService::selectAndReserveProfile($profileSourcePlaylist, null, $originalChannelId, $originalPlaylistUuid);
+                        [$selectedProfile, $reservationId] = ProfileService::selectAndReserveProfile($profileSourcePlaylist, null, $originalChannelId, $originalPlaylistUuid, $forceSelect, $clientIdentifier);
                     }
                 }
 
@@ -841,7 +867,7 @@ class M3uProxyService
                     // Last resort: reconcile Redis counts against actual proxy state.
                     // Fixes race condition where increment fires before decrement webhook.
                     ProfileService::reconcileFromProxy($profileSourcePlaylist);
-                    [$selectedProfile, $reservationId] = ProfileService::selectAndReserveProfile($profileSourcePlaylist, null, $originalChannelId, $originalPlaylistUuid);
+                    [$selectedProfile, $reservationId] = ProfileService::selectAndReserveProfile($profileSourcePlaylist, null, $originalChannelId, $originalPlaylistUuid, $forceSelect, $clientIdentifier);
                 }
 
                 if (! $selectedProfile) {
@@ -1026,7 +1052,7 @@ class M3uProxyService
      *
      * @throws Exception when base URL missing or API returns an error
      */
-    public function getEpisodeUrl($playlist, $episode, ?StreamProfile $profile = null, ?string $username = null): string
+    public function getEpisodeUrl($playlist, $episode, ?StreamProfile $profile = null, ?string $username = null, ?Request $request = null): string
     {
         if (empty($this->apiBaseUrl)) {
             throw new Exception('M3U Proxy base URL is not configured');
@@ -1034,6 +1060,9 @@ class M3uProxyService
 
         // Get episode ID
         $id = $episode->id;
+
+        // Build client identifier for profile affinity tracking
+        $clientIdentifier = ProfileService::buildClientIdentifier($request?->ip(), $username);
 
         // Determine the source playlist for provider profiles
         // When streaming through a CustomPlaylist, MergedPlaylist, or PlaylistAlias,
@@ -1046,12 +1075,10 @@ class M3uProxyService
             $profileSourcePlaylist = $episode->playlist;
         }
 
-        // IMPORTANT: Skip playlist-level limit check if using provider profiles
-        // When using provider profiles, each profile has its own connection limit
-        $usingProviderProfiles = $profileSourcePlaylist !== null;
-
         // Check if playlist has stream limits and if it's at capacity
-        if ($playlist->available_streams !== 0 && ! $usingProviderProfiles) {
+        // This check applies regardless of whether provider profiles are enabled —
+        // available_streams is the authoritative proxy-level limit.
+        if ($playlist->available_streams !== 0) {
             $activeStreams = self::getCachedActiveStreamsCountByMetadata('playlist_uuid', $playlist->uuid, 1);
 
             if ($activeStreams >= $playlist->available_streams) {
@@ -1104,7 +1131,8 @@ class M3uProxyService
         $selectedProfile = null;
         $reservationId = null;
         if ($profileSourcePlaylist) {
-            [$selectedProfile, $reservationId] = ProfileService::selectAndReserveProfile($profileSourcePlaylist, null, $id, $playlist->uuid);
+            $forceSelect = $profileSourcePlaylist->bypass_provider_limits ?? false;
+            [$selectedProfile, $reservationId] = ProfileService::selectAndReserveProfile($profileSourcePlaylist, null, $id, $playlist->uuid, $forceSelect, $clientIdentifier);
 
             if (! $selectedProfile) {
                 // Check if reuse was detected inside the lock (another request is creating this stream).
@@ -1141,7 +1169,7 @@ class M3uProxyService
 
                         usleep(200000); // 200ms
                         ProfileService::reconcileFromProxy($profileSourcePlaylist);
-                        [$selectedProfile, $reservationId] = ProfileService::selectAndReserveProfile($profileSourcePlaylist, null, $id, $playlist->uuid);
+                        [$selectedProfile, $reservationId] = ProfileService::selectAndReserveProfile($profileSourcePlaylist, null, $id, $playlist->uuid, $forceSelect, $clientIdentifier);
                     }
                 }
 
@@ -1149,7 +1177,7 @@ class M3uProxyService
                     // Last resort: reconcile Redis counts against actual proxy state.
                     // Fixes race condition where increment fires before decrement webhook.
                     ProfileService::reconcileFromProxy($profileSourcePlaylist);
-                    [$selectedProfile, $reservationId] = ProfileService::selectAndReserveProfile($profileSourcePlaylist, null, $id, $playlist->uuid);
+                    [$selectedProfile, $reservationId] = ProfileService::selectAndReserveProfile($profileSourcePlaylist, null, $id, $playlist->uuid, $forceSelect, $clientIdentifier);
                 }
 
                 if (! $selectedProfile) {

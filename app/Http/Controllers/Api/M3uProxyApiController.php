@@ -118,7 +118,8 @@ class M3uProxyApiController extends Controller
                 $playlist,
                 $episode,
                 $profile,
-                $username
+                $username,
+                $request
             );
 
         return redirect($url);
@@ -220,7 +221,9 @@ class M3uProxyApiController extends Controller
             ->getEpisodeUrl(
                 $playlist,
                 $episode,
-                $profile
+                $profile,
+                null,
+                $request
             );
 
         return redirect($url);

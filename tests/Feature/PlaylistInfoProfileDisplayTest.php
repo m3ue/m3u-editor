@@ -1,11 +1,10 @@
 <?php
 
 /**
- * Tests for PlaylistInfo component displaying correct profile stats across all playlist types.
+ * Tests for PlaylistInfo component displaying correct proxy usage stats across all playlist types.
  *
- * Goal 3 fix: PlaylistInfo was showing ∞ for CustomPlaylist/MergedPlaylist/PlaylistAlias
- * because resolveProfileSourcePlaylists() only handled the Playlist model. These tests
- * verify that profile capacity is correctly aggregated for all playlist types.
+ * Verifies that available_streams (the authoritative proxy-level limit) is displayed
+ * correctly regardless of whether Provider Profiles are enabled.
  */
 
 use App\Facades\PlaylistFacade;
@@ -21,7 +20,6 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
-use Illuminate\Support\Facades\Redis;
 
 uses(RefreshDatabase::class);
 
@@ -92,18 +90,28 @@ function callGetStats(Model $record, Model $resolvedPlaylist): array
 
 // ── Playlist with profiles: shows numeric capacity ────────────────────────
 
-test('getStats shows numeric available_streams for Playlist with profiles enabled', function () {
+test('getStats shows playlist available_streams for Playlist with profiles enabled', function () {
     $playlist = createSourcePlaylistWithProfiles($this->user, profileCount: 2, maxStreams: 5);
-
-    // Mock Redis: each profile has 0 active connections
-    Redis::shouldReceive('get')->andReturn(0);
+    $playlist->update(['available_streams' => 15]);
 
     $stats = callGetStats($playlist, $playlist);
 
     expect($stats['proxy_enabled'])->toBeTrue();
     expect($stats['active_streams'])->toBe(2); // from Http::fake
-    expect($stats['available_streams'])->toBe(10); // 2 profiles * 5 max each
-    expect($stats['active_connections'])->toBe('2/10');
+    // available_streams is the authoritative proxy limit, not pool capacity
+    expect($stats['available_streams'])->toBe(15);
+    expect($stats['active_connections'])->toBe('2/15');
+});
+
+test('getStats shows infinity for Playlist with profiles enabled and zero available_streams', function () {
+    $playlist = createSourcePlaylistWithProfiles($this->user, profileCount: 2, maxStreams: 5);
+    $playlist->update(['available_streams' => 0]);
+
+    $stats = callGetStats($playlist, $playlist);
+
+    expect($stats['proxy_enabled'])->toBeTrue();
+    expect($stats['active_streams'])->toBe(2);
+    expect($stats['available_streams'])->toBe('∞');
 });
 
 // ── Playlist without profiles: shows ∞ when available_streams is 0 ────────
@@ -123,7 +131,7 @@ test('getStats shows infinity for Playlist without profiles and zero available_s
 
 // ── CustomPlaylist with profiled source: shows numeric capacity ───────────
 
-test('getStats shows numeric available_streams for CustomPlaylist with profiled source playlists', function () {
+test('getStats shows playlist available_streams for CustomPlaylist with profiled source playlists', function () {
     $sourcePlaylist = createSourcePlaylistWithProfiles($this->user, profileCount: 1, maxStreams: 3);
 
     $channel = Channel::factory()->for($this->user)->for($sourcePlaylist)->create([
@@ -132,23 +140,22 @@ test('getStats shows numeric available_streams for CustomPlaylist with profiled 
 
     $customPlaylist = CustomPlaylist::factory()->for($this->user)->create([
         'enable_proxy' => true,
+        'available_streams' => 8,
     ]);
     $customPlaylist->channels()->attach($channel->id);
-
-    // Mock Redis: profile has 0 active connections
-    Redis::shouldReceive('get')->andReturn(0);
 
     $stats = callGetStats($customPlaylist, $customPlaylist);
 
     expect($stats['proxy_enabled'])->toBeTrue();
     expect($stats['active_streams'])->toBe(2); // from Http::fake
-    expect($stats['available_streams'])->toBe(3); // 1 profile * 3 max
-    expect($stats['active_connections'])->toBe('2/3');
+    // available_streams is the authoritative proxy limit, not pool capacity
+    expect($stats['available_streams'])->toBe(8);
+    expect($stats['active_connections'])->toBe('2/8');
 });
 
 // ── CustomPlaylist with multiple profiled sources: aggregates capacity ────
 
-test('getStats aggregates capacity from multiple profiled source playlists for CustomPlaylist', function () {
+test('getStats uses playlist available_streams for CustomPlaylist with multiple profiled sources', function () {
     $sourceA = createSourcePlaylistWithProfiles($this->user, profileCount: 1, maxStreams: 4);
     $sourceB = createSourcePlaylistWithProfiles($this->user, profileCount: 2, maxStreams: 3);
 
@@ -157,18 +164,16 @@ test('getStats aggregates capacity from multiple profiled source playlists for C
 
     $customPlaylist = CustomPlaylist::factory()->for($this->user)->create([
         'enable_proxy' => true,
+        'available_streams' => 20,
     ]);
     $customPlaylist->channels()->attach([$channelA->id, $channelB->id]);
-
-    // Mock Redis: all profiles have 0 active connections
-    Redis::shouldReceive('get')->andReturn(0);
 
     $stats = callGetStats($customPlaylist, $customPlaylist);
 
     expect($stats['proxy_enabled'])->toBeTrue();
-    // Source A: 1 profile * 4 max = 4; Source B: 2 profiles * 3 max = 6; Total = 10
-    expect($stats['available_streams'])->toBe(10);
-    expect($stats['active_connections'])->toBe('2/10');
+    // Uses playlist's available_streams, not aggregated pool capacity
+    expect($stats['available_streams'])->toBe(20);
+    expect($stats['active_connections'])->toBe('2/20');
 });
 
 // ── CustomPlaylist without profiled sources: shows ∞ ──────────────────────
@@ -196,22 +201,21 @@ test('getStats shows infinity for CustomPlaylist without profiled source playlis
 
 // ── MergedPlaylist with profiled source: shows numeric capacity ───────────
 
-test('getStats shows numeric available_streams for MergedPlaylist with profiled source playlists', function () {
+test('getStats shows playlist available_streams for MergedPlaylist with profiled source playlists', function () {
     $sourcePlaylist = createSourcePlaylistWithProfiles($this->user, profileCount: 2, maxStreams: 4);
 
     $mergedPlaylist = MergedPlaylist::factory()->for($this->user)->create([
         'enable_proxy' => true,
+        'available_streams' => 12,
     ]);
     $mergedPlaylist->playlists()->attach($sourcePlaylist->id);
-
-    // Mock Redis: profiles have 0 active connections
-    Redis::shouldReceive('get')->andReturn(0);
 
     $stats = callGetStats($mergedPlaylist, $mergedPlaylist);
 
     expect($stats['proxy_enabled'])->toBeTrue();
-    expect($stats['available_streams'])->toBe(8); // 2 profiles * 4 max
-    expect($stats['active_connections'])->toBe('2/8');
+    // Uses playlist's available_streams, not pool capacity
+    expect($stats['available_streams'])->toBe(12);
+    expect($stats['active_connections'])->toBe('2/12');
 });
 
 // ── MergedPlaylist without profiled sources: shows ∞ ──────────────────────
@@ -235,7 +239,7 @@ test('getStats shows infinity for MergedPlaylist without profiled source playlis
 
 // ── PlaylistAlias backed by Playlist with profiles ────────────────────────
 
-test('getStats shows numeric available_streams for PlaylistAlias backed by profiled Playlist', function () {
+test('getStats shows playlist available_streams for PlaylistAlias backed by profiled Playlist', function () {
     $sourcePlaylist = createSourcePlaylistWithProfiles($this->user, profileCount: 1, maxStreams: 6);
 
     $alias = PlaylistAlias::create([
@@ -246,22 +250,21 @@ test('getStats shows numeric available_streams for PlaylistAlias backed by profi
         'custom_playlist_id' => null,
         'xtream_config' => '[]',
         'enable_proxy' => true,
+        'available_streams' => 10,
         'enabled' => true,
     ]);
-
-    // Mock Redis: profile has 0 active connections
-    Redis::shouldReceive('get')->andReturn(0);
 
     $stats = callGetStats($alias, $alias);
 
     expect($stats['proxy_enabled'])->toBeTrue();
-    expect($stats['available_streams'])->toBe(6); // 1 profile * 6 max
-    expect($stats['active_connections'])->toBe('2/6');
+    // Uses alias's available_streams, not pool capacity
+    expect($stats['available_streams'])->toBe(10);
+    expect($stats['active_connections'])->toBe('2/10');
 });
 
 // ── PlaylistAlias backed by CustomPlaylist with profiled source ───────────
 
-test('getStats shows numeric available_streams for PlaylistAlias backed by CustomPlaylist with profiled sources', function () {
+test('getStats shows playlist available_streams for PlaylistAlias backed by CustomPlaylist with profiled sources', function () {
     $sourcePlaylist = createSourcePlaylistWithProfiles($this->user, profileCount: 1, maxStreams: 5);
 
     $channel = Channel::factory()->for($this->user)->for($sourcePlaylist)->create([
@@ -270,6 +273,7 @@ test('getStats shows numeric available_streams for PlaylistAlias backed by Custo
 
     $customPlaylist = CustomPlaylist::factory()->for($this->user)->create([
         'enable_proxy' => true,
+        'available_streams' => 7,
     ]);
     $customPlaylist->channels()->attach($channel->id);
 
@@ -281,22 +285,21 @@ test('getStats shows numeric available_streams for PlaylistAlias backed by Custo
         'custom_playlist_id' => $customPlaylist->id,
         'xtream_config' => '[]',
         'enable_proxy' => true,
+        'available_streams' => 7,
         'enabled' => true,
     ]);
-
-    // Mock Redis: profile has 0 active connections
-    Redis::shouldReceive('get')->andReturn(0);
 
     $stats = callGetStats($alias, $alias);
 
     expect($stats['proxy_enabled'])->toBeTrue();
-    expect($stats['available_streams'])->toBe(5); // 1 profile * 5 max
-    expect($stats['active_connections'])->toBe('2/5');
+    // Uses alias's available_streams, not pool capacity
+    expect($stats['available_streams'])->toBe(7);
+    expect($stats['active_connections'])->toBe('2/7');
 });
 
 // ── Mixed: CustomPlaylist with some profiled and some non-profiled sources ─
 
-test('getStats only counts capacity from profiled source playlists in CustomPlaylist', function () {
+test('getStats uses playlist available_streams for CustomPlaylist with mixed profiled and regular sources', function () {
     $profiledSource = createSourcePlaylistWithProfiles($this->user, profileCount: 1, maxStreams: 5);
     $regularSource = Playlist::factory()->for($this->user)->create([
         'profiles_enabled' => false,
@@ -307,16 +310,14 @@ test('getStats only counts capacity from profiled source playlists in CustomPlay
 
     $customPlaylist = CustomPlaylist::factory()->for($this->user)->create([
         'enable_proxy' => true,
+        'available_streams' => 15,
     ]);
     $customPlaylist->channels()->attach([$channelA->id, $channelB->id]);
-
-    // Mock Redis: profile has 0 active connections
-    Redis::shouldReceive('get')->andReturn(0);
 
     $stats = callGetStats($customPlaylist, $customPlaylist);
 
     expect($stats['proxy_enabled'])->toBeTrue();
-    // Only the profiled source's capacity counts: 1 profile * 5 max = 5
-    expect($stats['available_streams'])->toBe(5);
-    expect($stats['active_connections'])->toBe('2/5');
+    // Uses playlist's available_streams, not aggregated pool capacity
+    expect($stats['available_streams'])->toBe(15);
+    expect($stats['active_connections'])->toBe('2/15');
 });

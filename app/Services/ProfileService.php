@@ -33,17 +33,91 @@ class ProfileService
     protected const CHANNEL_STREAM_PENDING_TTL = 30;
 
     /**
+     * TTL for client-to-profile affinity keys (seconds).
+     * Matches STREAM_TRACKING_TTL (24 hours), refreshed on each use.
+     */
+    protected const CLIENT_AFFINITY_TTL = 86400;
+
+    /**
      * Max wait time for the profile selection lock (seconds).
      */
     protected const PROFILE_LOCK_TIMEOUT = 2;
 
     /**
+     * Build a client identifier from IP and optional username.
+     *
+     * Returns "{ip}:{username}" when both are available, "{ip}" when
+     * username is null, or null when IP is null.
+     */
+    public static function buildClientIdentifier(?string $clientIp, ?string $username): ?string
+    {
+        if ($clientIp === null) {
+            return null;
+        }
+
+        return $username !== null ? "{$clientIp}:{$username}" : $clientIp;
+    }
+
+    /**
+     * Get the Redis key for client-to-profile affinity.
+     */
+    public static function getClientAffinityKey(string $clientIdentifier, int $playlistId): string
+    {
+        return "client_affinity:{$clientIdentifier}:{$playlistId}";
+    }
+
+    /**
+     * Look up the affinity profile ID for a client+playlist pair.
+     */
+    public static function getClientAffinity(string $clientIdentifier, int $playlistId): ?int
+    {
+        $key = static::getClientAffinityKey($clientIdentifier, $playlistId);
+
+        try {
+            $value = Redis::get($key);
+
+            if ($value !== null) {
+                // Refresh TTL on read so active clients stay sticky
+                Redis::expire($key, static::CLIENT_AFFINITY_TTL);
+
+                return (int) $value;
+            }
+        } catch (\Exception $e) {
+            Log::warning('Failed to read client affinity', [
+                'key' => $key,
+                'exception' => $e->getMessage(),
+            ]);
+        }
+
+        return null;
+    }
+
+    /**
+     * Store client-to-profile affinity in Redis.
+     */
+    public static function storeClientAffinity(string $clientIdentifier, int $playlistId, int $profileId): void
+    {
+        $key = static::getClientAffinityKey($clientIdentifier, $playlistId);
+
+        try {
+            Redis::setex($key, static::CLIENT_AFFINITY_TTL, $profileId);
+        } catch (\Exception $e) {
+            Log::warning('Failed to store client affinity', [
+                'key' => $key,
+                'profile_id' => $profileId,
+                'exception' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
      * Select the best available profile for streaming.
      *
      * Iterates through enabled profiles in priority order and returns
-     * the first one with available capacity.
+     * the first one with available capacity. When a client identifier
+     * is provided, prefers the profile the client was previously assigned to.
      */
-    public static function selectProfile(Playlist $playlist, ?int $excludeProfileId = null): ?PlaylistProfile
+    public static function selectProfile(Playlist $playlist, ?int $excludeProfileId = null, bool $forceSelect = false, ?string $clientIdentifier = null): ?PlaylistProfile
     {
         if (! $playlist->profiles_enabled) {
             return null;
@@ -61,7 +135,28 @@ class ProfileService
             'playlist_id' => $playlist->id,
             'total_profiles' => $profiles->count(),
             'exclude_profile_id' => $excludeProfileId,
+            'force_select' => $forceSelect,
+            'client_identifier' => $clientIdentifier,
         ]);
+
+        // Check client affinity — prefer the profile the client used before
+        if ($clientIdentifier !== null) {
+            $affinityProfileId = static::getClientAffinity($clientIdentifier, $playlist->id);
+
+            if ($affinityProfileId !== null) {
+                $affinityProfile = $profiles->firstWhere('id', $affinityProfileId);
+
+                if ($affinityProfile && ($forceSelect || static::hasCapacity($affinityProfile))) {
+                    Log::debug('Returning affinity profile for client', [
+                        'client_identifier' => $clientIdentifier,
+                        'profile_id' => $affinityProfile->id,
+                        'profile_name' => $affinityProfile->name,
+                    ]);
+
+                    return $affinityProfile;
+                }
+            }
+        }
 
         foreach ($profiles as $profile) {
             $activeConnections = static::getConnectionCount($profile);
@@ -88,6 +183,23 @@ class ProfileService
 
                 return $profile;
             }
+        }
+
+        // When force-select is enabled (bypass provider limits), pick the least-loaded
+        // profile even though all are at capacity. This allows streams to start when
+        // available_streams hasn't been reached but provider limits have.
+        if ($forceSelect && $profiles->isNotEmpty()) {
+            $best = $profiles->sortBy(fn ($p) => static::getConnectionCount($p))->first();
+
+            Log::info('Force-selected profile (bypass provider limits)', [
+                'profile_id' => $best->id,
+                'profile_name' => $best->name,
+                'active_connections' => static::getConnectionCount($best),
+                'max_connections' => $best->effective_max_streams,
+                'playlist_id' => $playlist->id,
+            ]);
+
+            return $best;
         }
 
         Log::warning('No profiles with capacity available for playlist', [
@@ -123,6 +235,8 @@ class ProfileService
         ?int $excludeProfileId = null,
         ?int $channelId = null,
         ?string $channelPlaylistUuid = null,
+        bool $forceSelect = false,
+        ?string $clientIdentifier = null,
     ): array {
         if (! $playlist->profiles_enabled) {
             return [null, null];
@@ -166,7 +280,7 @@ class ProfileService
             }
 
             // Inside the lock: select + increment atomically
-            $profile = static::selectProfile($playlist, $excludeProfileId);
+            $profile = static::selectProfile($playlist, $excludeProfileId, $forceSelect, $clientIdentifier);
 
             if ($profile) {
                 // Reserve the slot immediately so the next concurrent request
@@ -183,6 +297,12 @@ class ProfileService
                         $pipe->setex($channelStreamKey, static::CHANNEL_STREAM_PENDING_TTL, $reservationId);
                         $pipe->setex($reverseKey, static::CHANNEL_STREAM_PENDING_TTL, "{$channelId}:{$channelPlaylistUuid}");
                     });
+                }
+
+                // Store client-to-profile affinity so the same client
+                // is preferentially assigned the same profile next time.
+                if ($clientIdentifier !== null) {
+                    static::storeClientAffinity($clientIdentifier, $playlist->id, $profile->id);
                 }
 
                 return [$profile, $reservationId];
@@ -978,7 +1098,7 @@ class ProfileService
      *
      * @return array{0: PlaylistProfile|null, 1: string|null}
      */
-    public static function reconcileAndSelectProfile(Playlist $playlist, ?int $excludeProfileId = null): array
+    public static function reconcileAndSelectProfile(Playlist $playlist, ?int $excludeProfileId = null, bool $forceSelect = false, ?string $clientIdentifier = null): array
     {
         if (! $playlist->profiles_enabled) {
             return [null, null];
@@ -988,7 +1108,7 @@ class ProfileService
         static::reconcileFromProxy($playlist);
 
         // Now retry profile selection with atomic reservation
-        return static::selectAndReserveProfile($playlist, $excludeProfileId);
+        return static::selectAndReserveProfile($playlist, $excludeProfileId, forceSelect: $forceSelect, clientIdentifier: $clientIdentifier);
     }
 
     /**
