@@ -129,12 +129,13 @@ test('selectProfile reuses affinity profile when it has capacity', function () {
         ->and($selected->id)->toBe($secondProfile->id);
 });
 
-// ── Affinity to at-capacity profile → falls back to next available ────────
+// ── Affinity to at-capacity profile → still uses affinity ─────────────────
+// The client's old stream likely hasn't been decremented yet, so the profile
+// appears full but the client already occupies one of those slots.
 
-test('selectProfile falls back when affinity profile is at capacity', function () {
+test('selectProfile still uses affinity profile even when it is at capacity', function () {
     $playlist = createAffinityPlaylist($this->user, profileCount: 2, maxStreams: 2);
     $profiles = $playlist->enabledProfiles()->get();
-    $firstProfile = $profiles->first();
     $secondProfile = $profiles->skip(1)->first();
 
     // Store affinity pointing to the SECOND profile
@@ -149,47 +150,10 @@ test('selectProfile falls back when affinity profile is at capacity', function (
         ->with($affinityKey, 86400)
         ->once()
         ->andReturn(true);
-
-    // Affinity profile is at capacity (count == max)
-    Redis::shouldReceive('get')
-        ->with("playlist_profile:{$secondProfile->id}:connections")
-        ->andReturn(2); // maxStreams = 2, so at capacity
-
-    // First profile has capacity for fallback
-    Redis::shouldReceive('get')
-        ->with("playlist_profile:{$firstProfile->id}:connections")
-        ->andReturn(0);
 
     $selected = ProfileService::selectProfile($playlist, clientIdentifier: '10.0.0.1:bob');
 
-    // Should fall back to the first (highest priority) profile with capacity
-    expect($selected)->not->toBeNull()
-        ->and($selected->id)->toBe($firstProfile->id);
-});
-
-// ── Affinity to at-capacity profile with forceSelect → still uses affinity ─
-
-test('selectProfile uses affinity profile at capacity when forceSelect is true', function () {
-    $playlist = createAffinityPlaylist($this->user, profileCount: 2, maxStreams: 2);
-    $profiles = $playlist->enabledProfiles()->get();
-    $secondProfile = $profiles->skip(1)->first();
-
-    // Store affinity pointing to the SECOND profile
-    $affinityKey = ProfileService::getClientAffinityKey('10.0.0.1:bob', $playlist->id);
-
-    Redis::shouldReceive('get')
-        ->with($affinityKey)
-        ->once()
-        ->andReturn((string) $secondProfile->id);
-
-    Redis::shouldReceive('expire')
-        ->with($affinityKey, 86400)
-        ->once()
-        ->andReturn(true);
-
-    $selected = ProfileService::selectProfile($playlist, forceSelect: true, clientIdentifier: '10.0.0.1:bob');
-
-    // forceSelect bypasses capacity — affinity profile should be returned even at capacity
+    // Should return the affinity profile even though it's at capacity
     expect($selected)->not->toBeNull()
         ->and($selected->id)->toBe($secondProfile->id);
 });
