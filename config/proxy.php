@@ -16,6 +16,9 @@ return [
     'm3u_proxy_public_url' => env('M3U_PROXY_PUBLIC_URL'), // Public URL for the proxy (auto-set in start-container)
     'm3u_resolver_url' => env('M3U_PROXY_FAILOVER_RESOLVER_URL', null), // Base URL for the editor that the proxy can use to resolve URLs if needed (for smart failover with capacity checks)
 
+    // Broadcast segment temp directory (written to RAM by default to avoid disk I/O)
+    'broadcast_temp_dir' => env('BROADCAST_TEMP_DIR', '/dev/shm'),
+
     // Logo Proxy Configuration
     'url_override' => env('PROXY_URL_OVERRIDE', null),
     'url_override_include_logos' => env('PROXY_URL_OVERRIDE_INCLUDE_LOGOS', default: null),

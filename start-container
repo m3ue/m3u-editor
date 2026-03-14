@@ -118,6 +118,17 @@ export HLS_GC_ENABLED="${HLS_GC_ENABLED:-true}"
 export HLS_GC_INTERVAL="${HLS_GC_INTERVAL:-600}"           # 10 minutes
 export HLS_GC_AGE_THRESHOLD="${HLS_GC_AGE_THRESHOLD:-7200}" # 2 hours (increased from default 1 hour)
 
+# Configure broadcast segment storage (RAM disk for low-latency live TV)
+# Network broadcasts write short-lived .ts segments that benefit from in-memory storage.
+# Default to /dev/shm (tmpfs) so segments are never written to disk.
+export BROADCAST_TEMP_DIR="${BROADCAST_TEMP_DIR:-/dev/shm}"
+
+# Broadcast HLS garbage collection
+# Cleans orphaned .ts segments left behind during programme transitions
+export BROADCAST_GC_ENABLED="${BROADCAST_GC_ENABLED:-true}"
+export BROADCAST_GC_INTERVAL="${BROADCAST_GC_INTERVAL:-300}"      # 5 minutes
+export BROADCAST_GC_AGE_THRESHOLD="${BROADCAST_GC_AGE_THRESHOLD:-600}" # 10 minutes (stale inactive broadcast dirs)
+
 if [ "${M3U_PROXY_ENABLED}" = "true" ]; then
     # Only output configure HLS storage for embedded proxy mode
     # For external proxy, HLS storage is handled by the proxy container
@@ -128,6 +139,9 @@ if [ "${M3U_PROXY_ENABLED}" = "true" ]; then
     echo "   HLS_GC_ENABLED: ${HLS_GC_ENABLED}"
     echo "   HLS_GC_INTERVAL: ${HLS_GC_INTERVAL}s"
     echo "   HLS_GC_AGE_THRESHOLD: ${HLS_GC_AGE_THRESHOLD}s"
+    echo "   BROADCAST_GC_ENABLED: ${BROADCAST_GC_ENABLED}"
+    echo "   BROADCAST_GC_INTERVAL: ${BROADCAST_GC_INTERVAL}s"
+    echo "   BROADCAST_GC_AGE_THRESHOLD: ${BROADCAST_GC_AGE_THRESHOLD}s"
 
     # Create HLS storage directory if it doesn't exist
     if [ ! -d "$HLS_TEMP_DIR" ]; then
@@ -166,6 +180,39 @@ if [ "${M3U_PROXY_ENABLED}" = "true" ]; then
     fi
 
     echo "✅ HLS storage configured"
+    echo ""
+
+    echo "📡 Configuring broadcast segment storage..."
+    echo "   BROADCAST_TEMP_DIR: ${BROADCAST_TEMP_DIR}"
+
+    # Create broadcast storage directory if it doesn't exist
+    # /dev/shm already exists on all Linux systems, but a custom path may not
+    if [ ! -d "$BROADCAST_TEMP_DIR" ]; then
+        echo "   Creating broadcast storage directory..."
+        mkdir -p "$BROADCAST_TEMP_DIR"
+        chown -R $WWWUSER:$WWWGROUP "$BROADCAST_TEMP_DIR"
+        chmod 755 "$BROADCAST_TEMP_DIR"
+        echo "   ✅ Created: $BROADCAST_TEMP_DIR"
+    else
+        echo "   ✅ Directory exists: $BROADCAST_TEMP_DIR"
+        chmod 755 "$BROADCAST_TEMP_DIR"
+    fi
+
+    # Check available space for broadcast storage
+    BROADCAST_SPACE_KB=$(df -k "$BROADCAST_TEMP_DIR" | tail -1 | awk '{print $4}')
+    BROADCAST_SPACE_MB=$((BROADCAST_SPACE_KB / 1024))
+    BROADCAST_SPACE_GB=$((BROADCAST_SPACE_MB / 1024))
+
+    echo "   Available space: ${BROADCAST_SPACE_GB}GB (${BROADCAST_SPACE_MB}MB)"
+
+    if [ "$BROADCAST_SPACE_MB" -lt 256 ]; then
+        echo "   ⚠️  WARNING: Low space for broadcast segments!"
+        echo "      Available: ${BROADCAST_SPACE_MB}MB"
+        echo "      Recommended: At least 256MB for network broadcasts"
+        echo "      Consider setting BROADCAST_TEMP_DIR to a larger tmpfs or disk path."
+    fi
+
+    echo "✅ Broadcast storage configured"
     echo ""
 fi
 

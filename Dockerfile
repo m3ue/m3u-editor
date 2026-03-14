@@ -64,6 +64,11 @@ RUN NODE_ENV=production npm run build && \
 
 ########################################
 # Stage 3: m3u-proxy builder - prepares Python proxy service
+#
+# Two source modes:
+#   1. Production (default): git clone from M3U_PROXY_REPO
+#   2. Local dev: use .local-proxy/ from build context
+#      Pass --build-arg USE_LOCAL_PROXY=true (test-build.sh does this)
 ########################################
 FROM alpine:3.21.3 AS proxy_builder
 
@@ -75,17 +80,28 @@ ARG M3U_PROXY_COMMIT=""
 ARG M3U_PROXY_REPO=https://github.com/sparkison/m3u-proxy.git
 ARG M3U_PROXY_BRANCH=master
 
+# Set to "true" to use .local-proxy/ from build context instead of git clone
+ARG USE_LOCAL_PROXY=false
+
 WORKDIR /opt/m3u-proxy
 
 # Install git for cloning
 RUN apk add --no-cache git
 
-# Clone m3u-proxy source code
-# The M3U_PROXY_COMMIT arg ensures cache invalidation when proxy is updated
-RUN echo "Cloning m3u-proxy from: ${M3U_PROXY_REPO} (branch: ${M3U_PROXY_BRANCH}, commit: ${M3U_PROXY_COMMIT})" && \
-    git clone -b ${M3U_PROXY_BRANCH} ${M3U_PROXY_REPO} . && \
-    # Remove .git to reduce image size
-    rm -rf .git
+# Copy local proxy source if present (character-class glob is a no-op when
+# .local-proxy/ doesn't exist — safe for production builds)
+COPY .local-prox[y] /tmp/local-proxy/
+
+# Use local source or clone from git
+RUN if [ "${USE_LOCAL_PROXY}" = "true" ] && [ -d /tmp/local-proxy/src ]; then \
+        echo "Using local m3u-proxy source from .local-proxy/" && \
+        cp -r /tmp/local-proxy/* . ; \
+    else \
+        echo "Cloning m3u-proxy from: ${M3U_PROXY_REPO} (branch: ${M3U_PROXY_BRANCH}, commit: ${M3U_PROXY_COMMIT})" && \
+        git clone -b ${M3U_PROXY_BRANCH} ${M3U_PROXY_REPO} . && \
+        rm -rf .git ; \
+    fi && \
+    rm -rf /tmp/local-proxy
 
 ########################################
 # Stage 4: Runtime image

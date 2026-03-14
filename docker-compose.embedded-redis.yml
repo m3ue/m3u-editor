@@ -83,6 +83,20 @@ services:
       # Note: ROOT_PATH=/m3u-proxy is now the default, no need to set it explicitly
       # Only set ROOT_PATH= (empty) if you need to use the root path instead
 
+      # HLS Segment Storage & Garbage Collection
+      - HLS_TEMP_DIR=${HLS_TEMP_DIR:-/var/www/html/storage/app/hls-segments}
+      - HLS_GC_ENABLED=${HLS_GC_ENABLED:-true}
+      - HLS_GC_INTERVAL=${HLS_GC_INTERVAL:-600}
+      - HLS_GC_AGE_THRESHOLD=${HLS_GC_AGE_THRESHOLD:-7200}
+
+      # Broadcast Segment Storage (network broadcasts write to RAM disk by default)
+      - BROADCAST_TEMP_DIR=${BROADCAST_TEMP_DIR:-/dev/shm}
+
+      # Broadcast HLS Garbage Collection (orphaned segment cleanup)
+      - BROADCAST_GC_ENABLED=${BROADCAST_GC_ENABLED:-true}
+      - BROADCAST_GC_INTERVAL=${BROADCAST_GC_INTERVAL:-300}
+      - BROADCAST_GC_AGE_THRESHOLD=${BROADCAST_GC_AGE_THRESHOLD:-600}
+
       # Optional: Additional configuration
       # - REDIS_POOL_MAX_CONNECTIONS=50
       # - STREAM_TIMEOUT=300
