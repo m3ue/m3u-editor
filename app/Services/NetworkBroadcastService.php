@@ -405,6 +405,9 @@ class NetworkBroadcastService
                 if ($network->broadcast_boot_recovery_until && now()->lt($network->broadcast_boot_recovery_until)) {
                     $logMessage = "🟢 BROADCAST RECOVERED VIA PROXY: {$network->name}";
                     $logData['recovery'] = 'boot_recovery';
+
+                    // Also log a prominent recovery message
+                    Log::info("🎉 BROADCAST RECOVERY COMPLETE: {$network->name} is back online after container restart");
                 }
 
                 Log::info($logMessage, $logData);
@@ -1122,6 +1125,7 @@ class NetworkBroadcastService
 
         if ($recovered > 0) {
             Log::info("BOOT RECOVERY: Recovered {$recovered} network(s) for broadcast");
+            Log::info('🚀 CONTAINER BOOT RECOVERY COMPLETE: Broadcasting systems are ready');
         }
 
         return $recovered;
