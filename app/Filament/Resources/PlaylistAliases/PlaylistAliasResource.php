@@ -413,7 +413,7 @@ class PlaylistAliasResource extends Resource
                                         ->body('Provider timezone not found in playlist status. Make sure the playlist is connected and has synced at least once to retrieve this information.')
                                         ->danger()
                                         ->send();
-                                })->hidden(fn ($record) => $record->playlist_id === null)
+                                })->hidden(fn ($record) => $record?->playlist_id === null)
                         ),
 
                     Grid::make()
