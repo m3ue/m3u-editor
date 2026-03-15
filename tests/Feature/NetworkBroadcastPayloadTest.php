@@ -4,7 +4,6 @@ use App\Enums\TranscodeMode;
 use App\Models\Network;
 use App\Models\NetworkProgramme;
 use App\Services\NetworkBroadcastService;
-use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Http;
 
 beforeEach(function () {
@@ -55,24 +54,17 @@ function invokeStartViaProxyAndCapturePayload(array $networkAttrs = []): array
     return $captured;
 }
 
-it('sends output_dir in the broadcast start payload', function () {
+it('does not send output_dir in the broadcast start payload', function () {
     $payload = invokeStartViaProxyAndCapturePayload();
 
-    expect($payload)->toHaveKey('output_dir');
+    expect($payload)->not->toHaveKey('output_dir');
 });
 
-it('sends output_dir defaulting to /dev/shm when BROADCAST_TEMP_DIR is not set', function () {
-    Config::set('proxy.broadcast_temp_dir', '/dev/shm');
-
+it('sends required broadcast fields in the payload', function () {
     $payload = invokeStartViaProxyAndCapturePayload();
 
-    expect($payload['output_dir'])->toBe('/dev/shm');
-});
-
-it('honors BROADCAST_TEMP_DIR env var and sends it as output_dir', function () {
-    Config::set('proxy.broadcast_temp_dir', '/run/broadcast-segments');
-
-    $payload = invokeStartViaProxyAndCapturePayload();
-
-    expect($payload['output_dir'])->toBe('/run/broadcast-segments');
+    expect($payload)
+        ->toHaveKey('stream_url')
+        ->toHaveKey('segment_start_number')
+        ->toHaveKey('callback_url');
 });

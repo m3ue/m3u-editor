@@ -6,13 +6,6 @@ This document explains the build arguments available when building the m3u-edito
 
 ## Available Build Arguments
 
-### **USE_LOCAL_PROXY**
-**Description:** Use a local `.local-proxy/` directory as the m3u-proxy source instead of git cloning  
-**Default:** `false`  
-**Purpose:** Speeds up local development by allowing you to test proxy changes without pushing to GitHub
-
-> **Note:** When `USE_LOCAL_PROXY=true`, Docker copies your local `.local-proxy/` directory (which must contain a `src/` subdirectory) into the build context instead of cloning the remote repository. The `.local-proxy/` directory is listed in `.gitignore` and is never committed.
-
 ### **M3U_PROXY_REPO**
 **Description:** The Git repository URL for m3u-proxy  
 **Default:** `https://github.com/sparkison/m3u-proxy.git` (upstream)  
@@ -54,21 +47,7 @@ This uses:
 
 ---
 
-### **2. Build with a Local m3u-proxy Source (Dev Only)**
-
-Place your local m3u-proxy source in `.local-proxy/src/` (never committed — it's in `.gitignore`), then:
-
-```bash
-docker build \
-  --build-arg USE_LOCAL_PROXY=true \
-  -t m3u-editor:local .
-```
-
-This copies `.local-proxy/` from the build context instead of cloning from GitHub, so you can iterate on proxy changes without pushing.
-
----
-
-### **3. Build with Your Fork of m3u-proxy**
+### **2. Build with Your Fork of m3u-proxy**
 
 ```bash
 docker build \
@@ -83,7 +62,7 @@ This uses:
 
 ---
 
-### **3. Build with a Specific Feature Branch**
+### **3. Build with a Specific Feature Branch (Dev)**
 
 ```bash
 docker build \
@@ -211,8 +190,7 @@ docker build --build-arg M3U_PROXY_REPO=... --progress=plain . 2>&1 | grep M3U_P
 
 ## Related Files
 
-- `Dockerfile` - Contains the ARG declarations and git clone / local-copy logic
-- `.gitignore` - Lists `.local-proxy/` so it is never accidentally committed
+- `Dockerfile` - Contains the ARG declarations and git clone logic
 - `.github/workflows/publish_dev.yml` - Dev branch CI/CD
 - `.github/workflows/publish_master.yml` - Master branch CI/CD
 - `.github/workflows/publish_experimental.yml` - Experimental branch CI/CD

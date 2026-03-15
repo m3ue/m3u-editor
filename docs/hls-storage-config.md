@@ -172,7 +172,7 @@ Network broadcasts (pseudo-TV channels) write short-lived `.ts` segments that ar
 # Where broadcast HLS segments are written (default: /dev/shm — RAM disk)
 # /dev/shm is a tmpfs mount available on all Linux containers.
 # Override with a host-mapped path or larger tmpfs if your /dev/shm is too small.
-BROADCAST_TEMP_DIR=/dev/shm
+HLS_BROADCAST_DIR=/dev/shm
 ```
 
 > **Tip:** If you run many concurrent networks or have a small `/dev/shm`, map a larger host tmpfs or bind-mount a fast local directory instead:
@@ -180,7 +180,7 @@ BROADCAST_TEMP_DIR=/dev/shm
 > volumes:
 >   - /run/m3u-broadcast:/broadcast-segments  # host tmpfs at /run
 > environment:
->   - BROADCAST_TEMP_DIR=/broadcast-segments
+>   - HLS_BROADCAST_DIR=/broadcast-segments
 > ```
 
 ### Broadcast HLS garbage collection
@@ -211,13 +211,13 @@ The broadcast GC performs two passes on each interval:
   - `HLS_GC_ENABLED=true`
   - `HLS_GC_INTERVAL=600` (seconds)
   - `HLS_GC_AGE_THRESHOLD=7200` (seconds)
-  - `BROADCAST_TEMP_DIR=/dev/shm` (RAM disk — all Linux containers have this)
+  - `HLS_BROADCAST_DIR=/dev/shm` (RAM disk — all Linux containers have this)
   - `BROADCAST_GC_ENABLED=true`
   - `BROADCAST_GC_INTERVAL=300` (seconds)
   - `BROADCAST_GC_AGE_THRESHOLD=600` (seconds)
-- **Startup behavior:** If `HLS_TEMP_DIR` is not set the startup script uses the default path, **creates the directory if missing**, sets permissions, and **checks available disk space** (warns if <2GB, critical if <512MB). The same directory-creation logic applies to `BROADCAST_TEMP_DIR` (warns if <256MB).
+- **Startup behavior:** If `HLS_TEMP_DIR` is not set the startup script uses the default path, **creates the directory if missing**, sets permissions, and **checks available disk space** (warns if <2GB, critical if <512MB). The same directory-creation logic applies to `HLS_BROADCAST_DIR` (warns if <256MB).
 - **Garbage collector behavior:** All GC runs inside the proxy as async background tasks. The proxy also performs pre-start cleanup — when a fresh broadcast begins (`segment_start_number=0`), any leftover `.ts`/`.m3u8` files are removed before FFmpeg starts.
-- **Recommendation:** For production explicitly set these env vars and **volume map** `HLS_TEMP_DIR` to a host path (or tmpfs) so you control capacity and retention. `BROADCAST_TEMP_DIR` defaults to `/dev/shm` which is ideal for ephemeral broadcast segments.
+- **Recommendation:** For production explicitly set these env vars and **volume map** `HLS_TEMP_DIR` to a host path (or tmpfs) so you control capacity and retention. `HLS_BROADCAST_DIR` defaults to `/dev/shm` which is ideal for ephemeral broadcast segments.
 
 **Tips:**
 - Use `HLS_GC_ENABLED=false` to disable automatic GC (useful for local development or debugging).
@@ -247,7 +247,7 @@ services:
       - HLS_GC_AGE_THRESHOLD=${HLS_GC_AGE_THRESHOLD:-7200}
 
       # Broadcast Segment Storage (network broadcasts write to RAM disk by default)
-      - BROADCAST_TEMP_DIR=${BROADCAST_TEMP_DIR:-/dev/shm}
+      - HLS_BROADCAST_DIR=${HLS_BROADCAST_DIR:-/dev/shm}
 
       # Broadcast HLS Garbage Collection (orphaned segment cleanup)
       - BROADCAST_GC_ENABLED=${BROADCAST_GC_ENABLED:-true}

@@ -60,5 +60,3 @@ fast-build.sh
 .opencode/
 .tmp/
 
-# Local proxy source (created by test-build.sh, never commit)
-.local-proxy/

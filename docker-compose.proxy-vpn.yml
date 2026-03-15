@@ -127,12 +127,10 @@ services:
       - HLS_GC_AGE_THRESHOLD=${HLS_GC_AGE_THRESHOLD:-7200}
 
       # Broadcast Segment Storage (network broadcasts write to RAM disk by default)
-      - BROADCAST_TEMP_DIR=${BROADCAST_TEMP_DIR:-/dev/shm}
+      - HLS_BROADCAST_DIR=${HLS_BROADCAST_DIR:-/dev/shm}
 
       # Broadcast HLS Garbage Collection (orphaned segment cleanup)
       - BROADCAST_GC_ENABLED=${BROADCAST_GC_ENABLED:-true}
-      - BROADCAST_GC_INTERVAL=${BROADCAST_GC_INTERVAL:-300}
-      - BROADCAST_GC_AGE_THRESHOLD=${BROADCAST_GC_AGE_THRESHOLD:-600}
 
       # Optional: Additional configuration
       # - REDIS_POOL_MAX_CONNECTIONS=50
