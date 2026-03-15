@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 ########################################
 # Build Arguments - Configurable at build time
 ########################################
@@ -9,6 +10,13 @@
 #           --build-arg M3U_PROXY_BRANCH=dev
 ARG M3U_PROXY_REPO=https://github.com/sparkison/m3u-proxy.git
 ARG M3U_PROXY_BRANCH=master
+
+# Optional: use a local m3u-proxy directory instead of cloning from git.
+# Must be a path relative to the Docker build context.
+# Example (monorepo): docker build -f m3u-editor/Dockerfile .. \
+#                       --build-arg M3U_PROXY_LOCAL_DIR=m3u-proxy
+# Example (compose):  build: { context: .., args: { M3U_PROXY_LOCAL_DIR: m3u-proxy } }
+ARG M3U_PROXY_LOCAL_DIR=""
 
 ########################################
 # Stage 1: Composer builder - installs PHP dependencies
@@ -74,17 +82,24 @@ ARG M3U_PROXY_COMMIT=""
 # Re-declare ARGs for this stage
 ARG M3U_PROXY_REPO=https://github.com/sparkison/m3u-proxy.git
 ARG M3U_PROXY_BRANCH=master
+ARG M3U_PROXY_LOCAL_DIR=""
 
 WORKDIR /opt/m3u-proxy
 
-# Install git for cloning
+# Install git for cloning (only needed when M3U_PROXY_LOCAL_DIR is not set)
 RUN apk add --no-cache git
 
-# Clone m3u-proxy source code
-# The M3U_PROXY_COMMIT arg ensures cache invalidation when proxy is updated
-RUN echo "Cloning m3u-proxy from: ${M3U_PROXY_REPO} (branch: ${M3U_PROXY_BRANCH}, commit: ${M3U_PROXY_COMMIT})" && \
-    git clone -b ${M3U_PROXY_BRANCH} ${M3U_PROXY_REPO} . && \
-    # Remove .git to reduce image size
+# Use a local directory from the build context if M3U_PROXY_LOCAL_DIR is set,
+# otherwise clone from git. The --mount=type=bind makes the entire build context
+# available at /build-context without copying files into the image layer.
+RUN --mount=type=bind,target=/build-context \
+    if [ -n "${M3U_PROXY_LOCAL_DIR}" ]; then \
+        echo "Using local m3u-proxy source from build context: ${M3U_PROXY_LOCAL_DIR}" && \
+        cp -r "/build-context/${M3U_PROXY_LOCAL_DIR}/." . ; \
+    else \
+        echo "Cloning m3u-proxy from: ${M3U_PROXY_REPO} (branch: ${M3U_PROXY_BRANCH}, commit: ${M3U_PROXY_COMMIT})" && \
+        git clone -b ${M3U_PROXY_BRANCH} ${M3U_PROXY_REPO} . ; \
+    fi && \
     rm -rf .git
 
 ########################################
