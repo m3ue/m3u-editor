@@ -1223,36 +1223,60 @@ class PlaylistResource extends Resource
                 ->collapsed(fn (?Playlist $record): bool => ! ($record?->profiles_enabled ?? false))
                 ->hidden(fn (Get $get): bool => ! $get('xtream'))
                 ->schema([
-                    Toggle::make('profiles_enabled')
-                        ->label('Enable Provider Profiles')
-                        ->helperText('When enabled, proxy mode is required for accurate connection tracking.')
-                        ->live()
-                        ->afterStateUpdated(function (Set $set, $state) {
-                            if ($state) {
-                                $set('enable_proxy', true);
-                            }
-                        })
-                        ->rules([
-                            fn (): \Closure => function (string $attribute, $value, \Closure $fail) {
-                                if ($value && ! config('proxy.m3u_proxy_token')) {
-                                    $fail('Provider Profiles require the m3u-proxy to be configured. Please ensure M3U_PROXY_TOKEN is set.');
-                                }
-                            },
-                        ])
-                        ->inline(false)
-                        ->default(false),
+                    Grid::make()
+                        ->columns(3)
+                        ->columnSpanFull()
+                        ->schema([
+                            Toggle::make('profiles_enabled')
+                                ->label('Enable Provider Profiles')
+                                ->helperText('When enabled, proxy mode is required for accurate connection tracking.')
+                                ->live()
+                                ->afterStateUpdated(function (Set $set, $state) {
+                                    if ($state) {
+                                        $set('enable_proxy', true);
+                                    }
+                                })
+                                ->rules([
+                                    fn (): \Closure => function (string $attribute, $value, \Closure $fail) {
+                                        if ($value && ! config('proxy.m3u_proxy_token')) {
+                                            $fail('Provider Profiles require the m3u-proxy to be configured. Please ensure M3U_PROXY_TOKEN is set.');
+                                        }
+                                    },
+                                ])
+                                ->inline(false)
+                                ->default(false),
 
-                    Toggle::make('bypass_provider_limits')
-                        ->label('Bypass Provider Connection Limits')
-                        ->helperText('When enabled, the proxy will attempt to start streams even if the provider\'s reported connection limit has been reached. Only the "Available Streams" setting (Output tab) will determine when 503 errors are returned. Enable this if you use stream pooling or if your provider allows more connections than reported.')
-                        ->visible(fn (Get $get): bool => (bool) $get('profiles_enabled'))
-                        ->inline(false)
-                        ->default(false),
+                            Grid::make()
+                                ->columns(1)
+                                ->columnSpan(1)
+                                ->schema([
+                                    Toggle::make('bypass_provider_limits')
+                                        ->label('Bypass Provider Connection Limits')
+                                        ->hintIcon(
+                                            'heroicon-m-question-mark-circle',
+                                            tooltip: 'Only the "Available Streams" setting (Output tab) will determine when 503 errors are returned. Enable this if you use stream pooling or if your provider allows more connections than reported.'
+                                        )
+                                        ->helperText('When enabled, the proxy will attempt to start streams even if the provider\'s reported connection limit has been reached.')
+                                        ->visible(fn (Get $get): bool => (bool) $get('profiles_enabled'))
+                                        ->inline(false)
+                                        ->default(false),
+                                    Placeholder::make('bypass_provider_limits_warning')
+                                        ->label('')
+                                        ->content('⚠ Provider connection limits will not be enforced. If the provider strictly enforces its limit, streams may fail at the provider level rather than being blocked by the proxy.')
+                                        ->visible(fn (Get $get): bool => (bool) $get('profiles_enabled') && (bool) $get('bypass_provider_limits')),
+                                ]),
 
-                    Placeholder::make('bypass_provider_limits_warning')
-                        ->label('')
-                        ->content('⚠ Provider connection limits will not be enforced. If the provider strictly enforces its limit, streams may fail at the provider level rather than being blocked by the proxy.')
-                        ->visible(fn (Get $get): bool => (bool) $get('profiles_enabled') && (bool) $get('bypass_provider_limits')),
+                            Toggle::make('enable_provider_affinity')
+                                ->label('Enable Provider Affinity')
+                                ->hintIcon(
+                                    'heroicon-m-question-mark-circle',
+                                    tooltip: 'When enabled, the proxy will remember which provider profile a client was assigned to and prefer it on subsequent requests. This prevents unnecessary profile switches during channel changes.'
+                                )
+                                ->helperText('Remember which provider profile a client was assigned to and prefer it on subsequent requests.')
+                                ->visible(fn (Get $get): bool => (bool) $get('profiles_enabled'))
+                                ->inline(false)
+                                ->default(false),
+                        ]),
 
                     Grid::make()
                         ->columns(2)

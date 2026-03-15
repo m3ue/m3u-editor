@@ -139,14 +139,15 @@ class ProfileService
             'client_identifier' => $clientIdentifier,
         ]);
 
-        // Check client affinity — prefer the profile the client used before
-        if ($clientIdentifier !== null) {
+        // Check client affinity — prefer the profile the client used before.
+        // Only active when enable_provider_affinity is set on the playlist.
+        if ($clientIdentifier !== null && $playlist->enable_provider_affinity) {
             $affinityProfileId = static::getClientAffinity($clientIdentifier, $playlist->id);
 
             if ($affinityProfileId !== null) {
                 $affinityProfile = $profiles->firstWhere('id', $affinityProfileId);
 
-                if ($affinityProfile && ($forceSelect || static::hasCapacity($affinityProfile))) {
+                if ($affinityProfile) {
                     Log::debug('Returning affinity profile for client', [
                         'client_identifier' => $clientIdentifier,
                         'profile_id' => $affinityProfile->id,
@@ -301,7 +302,7 @@ class ProfileService
 
                 // Store client-to-profile affinity so the same client
                 // is preferentially assigned the same profile next time.
-                if ($clientIdentifier !== null) {
+                if ($clientIdentifier !== null && $playlist->enable_provider_affinity) {
                     static::storeClientAffinity($clientIdentifier, $playlist->id, $profile->id);
                 }
 
