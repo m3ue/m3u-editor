@@ -2302,22 +2302,16 @@ class PlaylistResource extends Resource
                     Repeater::make('find_replace_rules')
                         ->label('')
                         ->schema([
-                            TextInput::make('name')
-                                ->label('Rule Name')
-                                ->required()
-                                ->placeholder('e.g. Remove country prefix')
-                                ->columnSpan(2),
                             Toggle::make('enabled')
                                 ->label('Enabled')
                                 ->default(true)
                                 ->inline(false)
                                 ->columnSpan(1),
-                            Toggle::make('use_regex')
-                                ->label('Use Regex')
-                                ->default(true)
-                                ->inline(false)
-                                ->live()
-                                ->columnSpan(1),
+                            TextInput::make('name')
+                                ->label('Rule Name')
+                                ->required()
+                                ->placeholder('e.g. Remove country prefix')
+                                ->columnSpan(2),
                             Select::make('target')
                                 ->label('Target')
                                 ->options([
@@ -2327,7 +2321,7 @@ class PlaylistResource extends Resource
                                 ->default('channels')
                                 ->required()
                                 ->live()
-                                ->columnSpan(1),
+                                ->columnSpan(2),
                             Select::make('column')
                                 ->label('Column to modify')
                                 ->options(fn (Get $get): array => match ($get('target')) {
@@ -2345,6 +2339,13 @@ class PlaylistResource extends Resource
                                 })
                                 ->default('title')
                                 ->required()
+                                ->columnSpan(2),
+
+                            Toggle::make('use_regex')
+                                ->label('Use Regex')
+                                ->default(true)
+                                ->inline(false)
+                                ->live()
                                 ->columnSpan(1),
                             TextInput::make('find_replace')
                                 ->label(fn (Get $get): string => ($get('use_regex') ?? true) ? 'Pattern to find' : 'String to find')
@@ -2356,7 +2357,7 @@ class PlaylistResource extends Resource
                                 ->placeholder('Leave empty to remove')
                                 ->columnSpan(3),
                         ])
-                        ->columns(6)
+                        ->columns(7)
                         ->reorderable()
                         ->reorderableWithButtons()
                         ->collapsible()

@@ -700,6 +700,7 @@ class SeriesResource extends Resource
                         return [
                             Select::make('saved_pattern')
                                 ->label('Load saved pattern')
+                                ->searchable()
                                 ->placeholder('Select a saved pattern...')
                                 ->options($savedPatterns)
                                 ->hidden(empty($savedPatterns))
