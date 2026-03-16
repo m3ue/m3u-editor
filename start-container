@@ -191,7 +191,16 @@ if [ "${M3U_PROXY_ENABLED}" = "true" ]; then
         echo "   ✅ Created: $HLS_BROADCAST_DIR"
     else
         echo "   ✅ Directory exists: $HLS_BROADCAST_DIR"
-        chmod 755 "$HLS_BROADCAST_DIR"
+
+        if [ "$HLS_BROADCAST_DIR" = "/dev/shm" ]; then
+            # Preserve /dev/shm as world-writable sticky dir so PostgreSQL can
+            # create shared memory segments. 755 here breaks embedded Postgres startup.
+            chmod 1777 "$HLS_BROADCAST_DIR"
+            echo "   ✅ Preserved shared memory permissions for /dev/shm (1777)"
+        else
+            chown -R $WWWUSER:$WWWGROUP "$HLS_BROADCAST_DIR"
+            chmod 755 "$HLS_BROADCAST_DIR"
+        fi
     fi
 
     # Check available space for broadcast storage
