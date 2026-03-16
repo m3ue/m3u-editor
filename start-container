@@ -120,7 +120,7 @@ export HLS_GC_AGE_THRESHOLD="${HLS_GC_AGE_THRESHOLD:-7200}" # 2 hours (increased
 
 # Configure broadcast segment storage (RAM disk for low-latency live TV)
 # Network broadcasts write short-lived .ts segments that benefit from in-memory storage.
-export HLS_BROADCAST_DIR="${HLS_BROADCAST_DIR:-/var/www/html/storage/app/hls-broadcast}"
+export HLS_BROADCAST_DIR="${HLS_BROADCAST_DIR:-${HLS_TEMP_DIR}}"
 
 # Broadcast HLS garbage collection
 # Cleans orphaned .ts segments left behind during programme transitions
