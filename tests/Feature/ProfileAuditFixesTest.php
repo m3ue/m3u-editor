@@ -168,6 +168,15 @@ test('selectAndReserveProfile returns profile and reservation ID on success', fu
         ->withProviderInfo(0, 5)
         ->create();
 
+    // hasCapacity queries proxy API for upstream connection count
+    Http::fake([
+        '*/streams/by-metadata*' => Http::response([
+            'matching_streams' => [],
+            'total_matching' => 0,
+            'total_clients' => 0,
+        ]),
+    ]);
+
     // selectProfile reads connection count => 0 (has capacity)
     // hasCapacity also reads count => 0
     // incrementConnections reads count after pipeline
@@ -206,6 +215,15 @@ test('selectAndReserveProfile returns null tuple when no capacity', function () 
         ->withMaxStreams(1)
         ->withProviderInfo(0, 1)
         ->create();
+
+    // hasCapacity queries proxy API — profile at capacity
+    Http::fake([
+        '*/streams/by-metadata*' => Http::response([
+            'matching_streams' => [],
+            'total_matching' => 1,
+            'total_clients' => 1,
+        ]),
+    ]);
 
     // Connection count is at max (1)
     Redis::shouldReceive('get')
@@ -551,6 +569,7 @@ test('reconcileAndSelectProfile returns array with profile and reservation on su
     Http::fake([
         '*/streams/by-metadata*' => Http::response([
             'matching_streams' => [],
+            'total_matching' => 0,
             'total_clients' => 0,
         ]),
     ]);
@@ -627,6 +646,7 @@ test('reconcileAndSelectProfile returns null tuple when truly at capacity after 
                     ],
                 ],
             ],
+            'total_matching' => 1,
             'total_clients' => 1,
         ]),
     ]);
@@ -670,6 +690,7 @@ test('reconcileFromProxy corrects stale count on disabled profile', function () 
     Http::fake([
         '*/streams/by-metadata*' => Http::response([
             'matching_streams' => [],
+            'total_matching' => 0,
             'total_clients' => 0,
         ]),
     ]);
@@ -727,6 +748,7 @@ test('reconcileFromProxy corrects both enabled and disabled profiles', function 
                     ],
                 ],
             ],
+            'total_matching' => 1,
             'total_clients' => 1,
         ]),
     ]);

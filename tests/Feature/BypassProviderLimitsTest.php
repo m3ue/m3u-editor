@@ -15,6 +15,7 @@ use App\Models\PlaylistProfile;
 use App\Models\User;
 use App\Services\ProfileService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Redis;
 
@@ -29,6 +30,15 @@ beforeEach(function () {
     config(['proxy.m3u_proxy_host' => 'http://localhost:8765']);
     config(['proxy.m3u_proxy_token' => 'test-token']);
     config(['cache.default' => 'array']);
+
+    // Default: proxy reports 0 active streams (hasCapacity uses proxy API)
+    Http::fake([
+        '*/streams/by-metadata*' => Http::response([
+            'matching_streams' => [],
+            'total_matching' => 0,
+            'total_clients' => 0,
+        ]),
+    ]);
 });
 
 /**

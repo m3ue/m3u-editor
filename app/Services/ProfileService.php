@@ -147,7 +147,7 @@ class ProfileService
             if ($affinityProfileId !== null) {
                 $affinityProfile = $profiles->firstWhere('id', $affinityProfileId);
 
-                if ($affinityProfile) {
+                if ($affinityProfile && static::hasCapacity($affinityProfile)) {
                     Log::debug('Returning affinity profile for client', [
                         'client_identifier' => $clientIdentifier,
                         'profile_id' => $affinityProfile->id,
@@ -155,6 +155,16 @@ class ProfileService
                     ]);
 
                     return $affinityProfile;
+                }
+
+                if ($affinityProfile) {
+                    Log::info('Affinity profile at capacity, selecting next available', [
+                        'client_identifier' => $clientIdentifier,
+                        'affinity_profile_id' => $affinityProfile->id,
+                        'affinity_profile_name' => $affinityProfile->name,
+                        'active_connections' => static::getConnectionCount($affinityProfile),
+                        'max_connections' => $affinityProfile->effective_max_streams,
+                    ]);
                 }
             }
         }
@@ -406,6 +416,10 @@ class ProfileService
 
     /**
      * Check if a profile has available capacity.
+     *
+     * Uses the proxy API as the source of truth for upstream connection
+     * count (not the Redis counter, which can drift when pooled streams
+     * outlive the client that originally created them).
      */
     public static function hasCapacity(PlaylistProfile $profile): bool
     {
@@ -413,7 +427,17 @@ class ProfileService
             return false;
         }
 
-        $activeConnections = static::getConnectionCount($profile);
+        $proxyCount = M3uProxyService::getActiveStreamsCountByMetadata(
+            'provider_profile_id',
+            (string) $profile->id
+        );
+        $redisCount = static::getConnectionCount($profile);
+
+        // Use the higher of proxy or Redis count. Redis may include a
+        // just-reserved slot that the proxy hasn't registered yet; the
+        // proxy count reflects actual upstream connections including
+        // pooled streams inherited by subscribers.
+        $activeConnections = max($proxyCount, $redisCount);
         $maxConnections = $profile->effective_max_streams;
 
         return $activeConnections < $maxConnections;
@@ -948,12 +972,14 @@ class ProfileService
             return;
         }
 
-        // Build map of profile_id => active stream count
+        // Build map of profile_id => active stream count.
+        // Each stream entry represents one upstream provider connection,
+        // regardless of how many proxy clients are pooling from it.
         $profileStreamCounts = [];
         foreach ($activeStreams as $stream) {
             $profileId = $stream['metadata']['provider_profile_id'] ?? null;
             if ($profileId) {
-                $profileStreamCounts[$profileId] = ($profileStreamCounts[$profileId] ?? 0) + ($stream['client_count'] ?? 1);
+                $profileStreamCounts[$profileId] = ($profileStreamCounts[$profileId] ?? 0) + 1;
             }
         }
 

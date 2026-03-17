@@ -13,6 +13,7 @@ use App\Models\PlaylistProfile;
 use App\Models\User;
 use App\Services\ProfileService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Redis;
 
@@ -27,6 +28,15 @@ beforeEach(function () {
     config(['proxy.m3u_proxy_host' => 'http://localhost:8765']);
     config(['proxy.m3u_proxy_token' => 'test-token']);
     config(['cache.default' => 'array']);
+
+    // Default: proxy reports 0 active streams per profile (hasCapacity uses proxy API)
+    Http::fake([
+        '*/streams/by-metadata*' => Http::response([
+            'matching_streams' => [],
+            'total_matching' => 0,
+            'total_clients' => 0,
+        ]),
+    ]);
 });
 
 /**
@@ -130,11 +140,12 @@ test('selectProfile reuses affinity profile when it has capacity', function () {
         ->and($selected->id)->toBe($secondProfile->id);
 });
 
-// ── Affinity to at-capacity profile → still uses affinity (capacity ignored) ─
+// ── Affinity to at-capacity profile → falls back to next available ────────
 
-test('selectProfile uses affinity profile even when it is at capacity', function () {
+test('selectProfile falls back when affinity profile is at capacity', function () {
     $playlist = createAffinityPlaylist($this->user, profileCount: 2, maxStreams: 2);
     $profiles = $playlist->enabledProfiles()->get();
+    $firstProfile = $profiles->first();
     $secondProfile = $profiles->skip(1)->first();
 
     // Store affinity pointing to the SECOND profile
@@ -150,12 +161,40 @@ test('selectProfile uses affinity profile even when it is at capacity', function
         ->once()
         ->andReturn(true);
 
-    // Affinity profile is at capacity — but affinity always wins when enable_provider_affinity is true
+    // Affinity profile is at capacity (proxy reports 2 streams, max is 2)
+    Http::fake([
+        '*/streams/by-metadata*' => function ($request) use ($secondProfile) {
+            $profileId = $request['value'] ?? '';
+            if ((string) $profileId === (string) $secondProfile->id) {
+                return Http::response([
+                    'matching_streams' => [],
+                    'total_matching' => 2,
+                    'total_clients' => 2,
+                ]);
+            }
+
+            return Http::response([
+                'matching_streams' => [],
+                'total_matching' => 0,
+                'total_clients' => 0,
+            ]);
+        },
+    ]);
+
+    // Redis counts for capacity checks in the fallback loop
+    Redis::shouldReceive('get')
+        ->with("playlist_profile:{$secondProfile->id}:connections")
+        ->andReturn(2);
+
+    Redis::shouldReceive('get')
+        ->with("playlist_profile:{$firstProfile->id}:connections")
+        ->andReturn(0);
+
     $selected = ProfileService::selectProfile($playlist, clientIdentifier: '10.0.0.1:bob');
 
-    // Capacity is not checked for the affinity profile — it is always returned
+    // Affinity profile is at capacity, so falls back to priority-based selection
     expect($selected)->not->toBeNull()
-        ->and($selected->id)->toBe($secondProfile->id);
+        ->and($selected->id)->toBe($firstProfile->id);
 });
 
 // ── forceSelect does not affect affinity behaviour ────────────────────────

@@ -75,6 +75,7 @@ test('cleanupStaleStreams removes Redis entries for streams no longer active in 
                     ],
                 ],
             ],
+            'total_matching' => 1,
             'total_clients' => 1,
         ]),
     ]);
@@ -179,6 +180,7 @@ test('reconcileAndSelectProfile returns profile and reservation after correcting
     Http::fake([
         '*/streams/by-metadata*' => Http::response([
             'matching_streams' => [],
+            'total_matching' => 0,
             'total_clients' => 0,
         ]),
     ]);
@@ -240,6 +242,7 @@ test('reconcileAndSelectProfile returns null when truly at capacity', function (
                     ],
                 ],
             ],
+            'total_matching' => 1,
             'total_clients' => 1,
         ]),
     ]);
@@ -401,6 +404,7 @@ test('reconcileFromProxy corrects Redis counts to match actual proxy state', fun
                     ],
                 ],
             ],
+            'total_matching' => 1,
             'total_clients' => 1,
         ]),
     ]);
