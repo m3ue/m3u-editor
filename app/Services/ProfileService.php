@@ -142,7 +142,7 @@ class ProfileService
             if ($affinityProfileId !== null) {
                 $affinityProfile = $profiles->firstWhere('id', $affinityProfileId);
 
-                if ($affinityProfile) {
+                if ($affinityProfile && static::hasCapacity($affinityProfile)) {
                     Log::debug('Returning affinity profile for client', [
                         'client_identifier' => $clientIdentifier,
                         'profile_id' => $affinityProfile->id,
@@ -150,6 +150,16 @@ class ProfileService
                     ]);
 
                     return $affinityProfile;
+                }
+
+                if ($affinityProfile) {
+                    Log::info('Affinity profile at capacity, selecting next available', [
+                        'client_identifier' => $clientIdentifier,
+                        'affinity_profile_id' => $affinityProfile->id,
+                        'affinity_profile_name' => $affinityProfile->name,
+                        'active_connections' => static::getEffectiveConnectionCount($affinityProfile),
+                        'max_connections' => $affinityProfile->effective_max_streams,
+                    ]);
                 }
             }
         }
