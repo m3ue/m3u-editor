@@ -4,7 +4,6 @@ namespace App\Services;
 
 use App\Models\Playlist;
 use App\Models\PlaylistProfile;
-use App\Services\M3uProxyService;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Redis;
