@@ -8,6 +8,8 @@ use Exception;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Support\Facades\Log;
 use Symfony\Component\Process\Process as SymfonyProcess;
@@ -63,6 +65,23 @@ class Episode extends Model
     public function season(): BelongsTo
     {
         return $this->belongsTo(Season::class);
+    }
+
+    public function failovers(): HasMany
+    {
+        return $this->hasMany(EpisodeFailover::class, 'episode_id');
+    }
+
+    public function failoverEpisodes(): HasManyThrough
+    {
+        return $this->hasManyThrough(
+            Episode::class,
+            EpisodeFailover::class,
+            'episode_id',
+            'id',
+            'id',
+            'episode_failover_id'
+        )->orderBy('episode_failovers.sort');
     }
 
     /**

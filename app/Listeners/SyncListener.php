@@ -6,6 +6,7 @@ use App\Enums\Status;
 use App\Events\SyncCompleted;
 use App\Jobs\GenerateEpgCache;
 use App\Jobs\MergeChannels;
+use App\Jobs\MergeSeries;
 use App\Jobs\RunPlaylistFindReplaceRules;
 use App\Jobs\RunPostProcess;
 use App\Models\Epg;
@@ -100,6 +101,11 @@ class SyncListener
             // Build weighted config if any weighted priority options are set
             $weightedConfig = $this->buildWeightedConfig($config);
 
+            // Title-based merge settings
+            $mergeVodByTitle = $config['merge_vod_by_title'] ?? false;
+            $mergeSeriesByTitle = $config['merge_series_by_title'] ?? false;
+            $titleSimilarityThreshold = (float) ($config['title_similarity_threshold'] ?? 85);
+
             // Dispatch the merge job
             dispatch(new MergeChannels(
                 user: $playlist->user,
@@ -111,7 +117,21 @@ class SyncListener
                 preferCatchupAsPrimary: $preferCatchupAsPrimary,
                 weightedConfig: $weightedConfig,
                 newChannelsOnly: $newChannelsOnly,
+                mergeByTitle: $mergeVodByTitle,
+                titleSimilarityThreshold: $titleSimilarityThreshold,
             ));
+
+            // Dispatch series merge job if title-based series merge is enabled
+            if ($mergeSeriesByTitle) {
+                dispatch(new MergeSeries(
+                    user: $playlist->user,
+                    playlists: $playlists,
+                    playlistId: $effectivePlaylistId,
+                    titleSimilarityThreshold: $titleSimilarityThreshold,
+                    deactivateFailoverEpisodes: $deactivateFailover,
+                    forceCompleteRemerge: $forceCompleteRemerge,
+                ));
+            }
         } catch (Throwable $e) {
             // Log error and send notification
             logger()->error('Auto-merge failed for playlist: '.$playlist->name, [

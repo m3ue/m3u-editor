@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Models\Channel;
 use App\Models\ChannelFailover;
 use App\Models\Group;
+use App\Services\TitleNormalizer;
 use Filament\Notifications\Notification;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -60,6 +61,8 @@ class MergeChannels implements ShouldQueue
         public ?int $groupId = null,
         public ?array $weightedConfig = null,
         public ?bool $newChannelsOnly = null,
+        public bool $mergeByTitle = false,
+        public float $titleSimilarityThreshold = 85.0,
     ) {}
 
     /**
@@ -133,48 +136,143 @@ class MergeChannels implements ShouldQueue
                 continue; // Skip single channels
             }
 
-            // Select master channel based on weighted priority or legacy criteria
-            $master = $this->selectMasterChannel($group, $playlistPriority);
-            if (! $master) {
-                continue; // Skip if no valid master found
-            }
+            [$mergedCount, $deactivated] = $this->processChannelGroup($group, $playlistPriority);
+            $processed += $mergedCount;
+            $deactivatedCount += $deactivated;
+        }
 
-            // Ensure master is enabled in case it was previously disabled
-            if (! $master->enabled) {
-                $master->update(['enabled' => true]);
-            }
-
-            // Create failover relationships for remaining channels
-            $failoverChannels = $group->where('id', '!=', $master->id);
-
-            // Sort failovers using the same scoring system (descending score)
-            $failoverChannels = $this->sortChannelsByScore($failoverChannels, $playlistPriority);
-
-            // Create failover relationships using updateOrCreate for compatibility
-            $sortOrder = 1;
-            foreach ($failoverChannels as $failover) {
-                ChannelFailover::updateOrCreate(
-                    [
-                        'channel_id' => $master->id,
-                        'channel_failover_id' => $failover->id,
-                    ],
-                    [
-                        'user_id' => $this->user->id,
-                        'sort' => $sortOrder++,
-                    ]
-                );
-
-                // Deactivate failover channel if requested
-                if ($this->deactivateFailoverChannels && $failover->enabled) {
-                    $failover->update(['enabled' => false]);
-                    $deactivatedCount++;
-                }
-
-                $processed++;
-            }
+        // Title-based merge for VOD channels that weren't matched by stream_id
+        if ($this->mergeByTitle) {
+            [$titleMerged, $titleDeactivated] = $this->mergeVodByTitle($playlistIds, $playlistPriority, $shouldExcludeExistingFailovers ? $existingFailoverChannelIds : []);
+            $processed += $titleMerged;
+            $deactivatedCount += $titleDeactivated;
         }
 
         $this->sendCompletionNotification($processed, $deactivatedCount);
+    }
+
+    /**
+     * Process a group of channels: select master and create failover relationships.
+     *
+     * @return array{0: int, 1: int} [processed count, deactivated count]
+     */
+    protected function processChannelGroup($group, array $playlistPriority): array
+    {
+        $processed = 0;
+        $deactivatedCount = 0;
+
+        $master = $this->selectMasterChannel($group, $playlistPriority);
+        if (! $master) {
+            return [0, 0];
+        }
+
+        if (! $master->enabled) {
+            $master->update(['enabled' => true]);
+        }
+
+        $failoverChannels = $group->where('id', '!=', $master->id);
+        $failoverChannels = $this->sortChannelsByScore($failoverChannels, $playlistPriority);
+
+        $sortOrder = 1;
+        foreach ($failoverChannels as $failover) {
+            ChannelFailover::updateOrCreate(
+                [
+                    'channel_id' => $master->id,
+                    'channel_failover_id' => $failover->id,
+                ],
+                [
+                    'user_id' => $this->user->id,
+                    'sort' => $sortOrder++,
+                ]
+            );
+
+            if ($this->deactivateFailoverChannels && $failover->enabled) {
+                $failover->update(['enabled' => false]);
+                $deactivatedCount++;
+            }
+
+            $processed++;
+        }
+
+        return [$processed, $deactivatedCount];
+    }
+
+    /**
+     * Merge VOD channels by title similarity when stream_ids don't match.
+     *
+     * Finds VOD channels that are not yet part of a failover group and
+     * groups them by normalized title similarity.
+     *
+     * @return array{0: int, 1: int} [processed count, deactivated count]
+     */
+    protected function mergeVodByTitle(array $playlistIds, array $playlistPriority, array $excludeFailoverIds): array
+    {
+        $processed = 0;
+        $deactivatedCount = 0;
+
+        $normalizer = app(TitleNormalizer::class);
+
+        // Get VOD channels that already have failover relationships (as master or failover)
+        $alreadyMergedIds = ChannelFailover::where('user_id', $this->user->id)
+            ->pluck('channel_id')
+            ->merge(
+                ChannelFailover::where('user_id', $this->user->id)->pluck('channel_failover_id')
+            )
+            ->unique()
+            ->toArray();
+
+        // Get unmerged VOD channels across the selected playlists
+        $vodChannels = Channel::where([
+            ['user_id', $this->user->id],
+            ['can_merge', true],
+            ['is_vod', true],
+        ])
+            ->whereIn('playlist_id', $playlistIds)
+            ->when(! $this->forceCompleteRemerge && ! empty($alreadyMergedIds), function ($query) use ($alreadyMergedIds) {
+                $query->whereNotIn('id', $alreadyMergedIds);
+            })
+            ->when(! $this->forceCompleteRemerge && ! empty($excludeFailoverIds), function ($query) use ($excludeFailoverIds) {
+                $query->whereNotIn('id', $excludeFailoverIds);
+            })
+            ->when($this->groupId, function ($query) {
+                $query->where('group_id', $this->groupId);
+            })
+            ->when($this->newChannelsOnly, function ($query) {
+                $query->where('new', true);
+            })
+            ->get();
+
+        if ($vodChannels->count() < 2) {
+            return [0, 0];
+        }
+
+        // Build items array for the normalizer
+        $items = $vodChannels->map(fn (Channel $ch) => [
+            'id' => $ch->id,
+            'title' => $ch->title_custom ?? $ch->title ?? $ch->name_custom ?? $ch->name ?? '',
+        ])->filter(fn ($item) => $item['title'] !== '')->values()->toArray();
+
+        $groups = $normalizer->groupBySimilarity($items, $this->titleSimilarityThreshold);
+
+        foreach ($groups as $group) {
+            if (count($group) <= 1) {
+                continue;
+            }
+
+            // Collect the actual Channel models for this group
+            $groupIds = collect($group)->pluck('id')->toArray();
+            $channelGroup = $vodChannels->whereIn('id', $groupIds);
+
+            if ($channelGroup->count() <= 1) {
+                continue;
+            }
+
+            [$mergedCount, $deactivated] = $this->processChannelGroup($channelGroup, $playlistPriority);
+            $processed += $mergedCount;
+            $deactivatedCount += $deactivated;
+        }
+
+        return [$processed, $deactivatedCount];
     }
 
     /**

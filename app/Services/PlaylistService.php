@@ -3,7 +3,9 @@
 namespace App\Services;
 
 use App\Jobs\MergeChannels;
+use App\Jobs\MergeSeries;
 use App\Jobs\UnmergeChannels;
+use App\Models\Category;
 use App\Models\CustomPlaylist;
 use App\Models\Group;
 use App\Models\MergedPlaylist;
@@ -931,6 +933,24 @@ class PlaylistService
                 ])
                 ->columns(2)
                 ->columnSpanFull(),
+            Fieldset::make('Title-based VOD Merge')
+                ->schema([
+                    Toggle::make('merge_by_title')
+                        ->label('Merge VOD by title similarity')
+                        ->helperText('When enabled, VOD entries with similar titles across providers will be merged even if their stream IDs differ.')
+                        ->default(false)
+                        ->live(),
+                    TextInput::make('title_similarity_threshold')
+                        ->label('Title similarity threshold (%)')
+                        ->numeric()
+                        ->default(85)
+                        ->minValue(50)
+                        ->maxValue(100)
+                        ->helperText('Minimum similarity percentage (recommended: 80-90). Higher = stricter matching.')
+                        ->hidden(fn (Get $get): bool => ! $get('merge_by_title')),
+                ])
+                ->columns(2)
+                ->columnSpanFull(),
             Fieldset::make('Advanced Priority Scoring (optional)')
                 ->schema([
                     Select::make('prefer_codec')
@@ -1095,6 +1115,8 @@ class PlaylistService
                             preferCatchupAsPrimary: $data['prefer_catchup_as_primary'] ?? false,
                             groupId: $record->id,
                             weightedConfig: self::buildMergeWeightedConfig($data),
+                            mergeByTitle: $data['merge_by_title'] ?? false,
+                            titleSimilarityThreshold: (float) ($data['title_similarity_threshold'] ?? 85),
                         ));
                 });
         } else {
@@ -1111,6 +1133,8 @@ class PlaylistService
                             forceCompleteRemerge: $data['force_complete_remerge'] ?? false,
                             preferCatchupAsPrimary: $data['prefer_catchup_as_primary'] ?? false,
                             weightedConfig: self::buildMergeWeightedConfig($data),
+                            mergeByTitle: $data['merge_by_title'] ?? false,
+                            titleSimilarityThreshold: (float) ($data['title_similarity_threshold'] ?? 85),
                         ));
                 });
         }
@@ -1172,6 +1196,200 @@ class PlaylistService
                             playlistId: $data['playlist_id'] ?? null,
                             reactivateChannels: $data['reactivate_channels'] ?? false,
                         ));
+                });
+        }
+
+        return $action;
+    }
+
+    /**
+     * Get the form schema for the series merge modal.
+     *
+     * @return array<int, mixed>
+     */
+    public static function getSeriesMergeFormSchema(): array
+    {
+        return [
+            Fieldset::make('Merge source configuration')
+                ->schema([
+                    Select::make('playlist_id')
+                        ->label('Preferred Playlist')
+                        ->options(Playlist::where('user_id', auth()->id())->pluck('name', 'id'))
+                        ->required()
+                        ->searchable()
+                        ->helperText('Series from this playlist will be treated as the "master" (primary).'),
+                    Repeater::make('failover_playlists')
+                        ->label('Failover Playlists (in priority order)')
+                        ->helperText('Select additional playlists in failover priority order.')
+                        ->simple(
+                            Select::make('playlist_failover_id')
+                                ->label('Failover Playlist')
+                                ->options(Playlist::where('user_id', auth()->id())->pluck('name', 'id'))
+                                ->required()
+                                ->searchable()
+                                ->distinct()
+                        )
+                        ->minItems(1)
+                        ->maxItems(10)
+                        ->reorderable()
+                        ->addActionLabel('Add failover playlist'),
+                ])
+                ->columns(2)
+                ->columnSpanFull(),
+            Fieldset::make('Merge behavior')
+                ->schema([
+                    TextInput::make('title_similarity_threshold')
+                        ->label('Title similarity threshold (%)')
+                        ->numeric()
+                        ->default(85)
+                        ->minValue(50)
+                        ->maxValue(100)
+                        ->helperText('Minimum similarity percentage to consider two series as the same show. Higher = stricter matching (recommended: 80-90).'),
+                    Toggle::make('deactivate_failover_episodes')
+                        ->label('Deactivate failover episodes')
+                        ->helperText('Disable episodes from failover playlists after merging, keeping only the master enabled.')
+                        ->default(false),
+                    Toggle::make('force_complete_remerge')
+                        ->label('Force complete re-merge')
+                        ->helperText('Remove all existing episode failover relationships and re-merge from scratch.')
+                        ->default(false),
+                ])
+                ->columns(2)
+                ->columnSpanFull(),
+        ];
+    }
+
+    /**
+     * Get the "Merge Series by Title" action.
+     *
+     * @param  bool  $categoryScoped  Whether this action operates on a single category (receives $record as Category)
+     */
+    public static function getSeriesMergeAction(bool $categoryScoped = false): Action
+    {
+        $action = Action::make('merge_series')
+            ->label('Merge Series by Title')
+            ->schema(self::getSeriesMergeFormSchema())
+            ->requiresConfirmation()
+            ->icon('heroicon-o-arrows-pointing-in')
+            ->modalIcon('heroicon-o-arrows-pointing-in')
+            ->modalWidth(Width::FourExtraLarge)
+            ->modalSubmitActionLabel('Merge now');
+
+        if ($categoryScoped) {
+            $action
+                ->modalDescription('Merge series with similar titles in this category, creating episode failover relationships.')
+                ->action(function (Category $record, array $data): void {
+                    app('Illuminate\Contracts\Bus\Dispatcher')
+                        ->dispatch(new MergeSeries(
+                            user: auth()->user(),
+                            playlists: collect($data['failover_playlists']),
+                            playlistId: $data['playlist_id'],
+                            titleSimilarityThreshold: (float) ($data['title_similarity_threshold'] ?? 85),
+                            deactivateFailoverEpisodes: $data['deactivate_failover_episodes'] ?? false,
+                            forceCompleteRemerge: $data['force_complete_remerge'] ?? false,
+                            categoryId: $record->id,
+                        ));
+                });
+        } else {
+            $action
+                ->modalDescription('Merge series with similar titles across providers, creating episode failover relationships.')
+                ->action(function (array $data): void {
+                    app('Illuminate\Contracts\Bus\Dispatcher')
+                        ->dispatch(new MergeSeries(
+                            user: auth()->user(),
+                            playlists: collect($data['failover_playlists']),
+                            playlistId: $data['playlist_id'],
+                            titleSimilarityThreshold: (float) ($data['title_similarity_threshold'] ?? 85),
+                            deactivateFailoverEpisodes: $data['deactivate_failover_episodes'] ?? false,
+                            forceCompleteRemerge: $data['force_complete_remerge'] ?? false,
+                        ));
+                });
+        }
+
+        return $action;
+    }
+
+    /**
+     * Get the "Unmerge Series" action.
+     *
+     * @param  bool  $categoryScoped  Whether this action operates on a single category
+     */
+    public static function getSeriesUnmergeAction(bool $categoryScoped = false): Action
+    {
+        $action = Action::make('unmerge_series')
+            ->label('Unmerge Series')
+            ->requiresConfirmation()
+            ->icon('heroicon-o-arrows-pointing-out')
+            ->color('warning')
+            ->modalIcon('heroicon-o-arrows-pointing-out')
+            ->modalSubmitActionLabel('Unmerge now');
+
+        if ($categoryScoped) {
+            $action
+                ->schema([
+                    Toggle::make('reactivate_episodes')
+                        ->label('Reactivate disabled episodes')
+                        ->helperText('Enable episodes that were previously disabled during merge.')
+                        ->default(false),
+                ])
+                ->modalDescription('Remove all episode failover relationships for series in this category.')
+                ->action(function (Category $record, array $data): void {
+                    \App\Models\EpisodeFailover::whereHas('episode.series', function ($query) use ($record) {
+                        $query->where('category_id', $record->id);
+                    })->where('user_id', auth()->id())->delete();
+
+                    if ($data['reactivate_episodes'] ?? false) {
+                        \App\Models\Episode::whereHas('series', function ($query) use ($record) {
+                            $query->where('category_id', $record->id);
+                        })->where(['user_id' => auth()->id(), 'enabled' => false])
+                            ->update(['enabled' => true]);
+                    }
+
+                    Notification::make()
+                        ->success()
+                        ->title('Series unmerged')
+                        ->body('All episode failover relationships in this category have been removed.')
+                        ->send();
+                });
+        } else {
+            $action
+                ->schema([
+                    Select::make('playlist_id')
+                        ->label('Unmerge Playlist')
+                        ->options(Playlist::where('user_id', auth()->id())->pluck('name', 'id'))
+                        ->live()
+                        ->searchable()
+                        ->helperText('Playlist to unmerge series from (or leave empty to unmerge all).'),
+                    Toggle::make('reactivate_episodes')
+                        ->label('Reactivate disabled episodes')
+                        ->helperText('Enable episodes that were previously disabled during merge.')
+                        ->default(false),
+                ])
+                ->modalDescription('Remove all episode failover relationships, unmerging series.')
+                ->action(function (array $data): void {
+                    $query = \App\Models\EpisodeFailover::where('user_id', auth()->id());
+
+                    if ($playlistId = $data['playlist_id'] ?? null) {
+                        $query->whereHas('episode', function ($q) use ($playlistId) {
+                            $q->where('playlist_id', $playlistId);
+                        });
+                    }
+
+                    $query->delete();
+
+                    if ($data['reactivate_episodes'] ?? false) {
+                        $episodeQuery = \App\Models\Episode::where(['user_id' => auth()->id(), 'enabled' => false]);
+                        if ($playlistId) {
+                            $episodeQuery->where('playlist_id', $playlistId);
+                        }
+                        $episodeQuery->update(['enabled' => true]);
+                    }
+
+                    Notification::make()
+                        ->success()
+                        ->title('Series unmerged')
+                        ->body('Episode failover relationships have been removed.')
+                        ->send();
                 });
         }
 

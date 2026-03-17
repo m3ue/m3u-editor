@@ -13,6 +13,7 @@ use App\Models\Channel;
 use App\Models\Group;
 use App\Models\Playlist;
 use App\Models\Series;
+use App\Services\PlaylistService;
 use App\Services\TmdbService;
 use App\Settings\GeneralSettings;
 use Filament\Actions\Action;
@@ -221,6 +222,22 @@ class ListSeries extends ListRecords
                     ->modalIcon('heroicon-o-document-arrow-down')
                     ->modalDescription('Sync .strm files now? This will generate .strm files for enabled series.')
                     ->modalSubmitActionLabel('Yes, sync now'),
+                PlaylistService::getSeriesMergeAction()
+                    ->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title('Series merge started')
+                            ->body('Merging series by title in the background. You will be notified once the process is complete.')
+                            ->send();
+                    }),
+                PlaylistService::getSeriesUnmergeAction()
+                    ->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title('Series unmerge started')
+                            ->body('Unmerging series in the background. You will be notified once the process is complete.')
+                            ->send();
+                    }),
                 Action::make('find-replace')
                     ->label('Find & Replace')
                     ->schema(function (): array {

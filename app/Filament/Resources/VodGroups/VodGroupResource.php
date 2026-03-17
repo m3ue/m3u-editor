@@ -311,6 +311,23 @@ class VodGroupResource extends Resource
                         ->modalDescription('Sync group VOD channels .strm files now? This will generate .strm files for the group channels.')
                         ->modalSubmitActionLabel('Yes, sync now'),
 
+                    PlaylistService::getMergeAction(groupScoped: true)
+                        ->after(function () {
+                            Notification::make()
+                                ->success()
+                                ->title('VOD merge started')
+                                ->body('Merging VOD channels in the background. You will be notified once the process is complete.')
+                                ->send();
+                        }),
+                    PlaylistService::getUnmergeAction(groupScoped: true)
+                        ->after(function () {
+                            Notification::make()
+                                ->success()
+                                ->title('VOD unmerge started')
+                                ->body('Unmerging VOD channels in the background. You will be notified once the process is complete.')
+                                ->send();
+                        }),
+
                     Action::make('enable')
                         ->label('Enable group channels')
                         ->action(function ($record): void {

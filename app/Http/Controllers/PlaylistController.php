@@ -368,6 +368,9 @@ class PlaylistController extends Controller
         $groupId = array_key_exists('group_id', $validated) ? $validated['group_id'] : null;
         $weightedConfig = $this->buildMergeWeightedConfig($config);
 
+        $mergeByTitle = (bool) ($config['merge_vod_by_title'] ?? false);
+        $titleSimilarityThreshold = (float) ($config['title_similarity_threshold'] ?? 85);
+
         dispatch(new MergeChannels(
             user: $user,
             playlists: $playlists,
@@ -379,6 +382,8 @@ class PlaylistController extends Controller
             groupId: $groupId,
             weightedConfig: $weightedConfig,
             newChannelsOnly: $newChannelsOnly,
+            mergeByTitle: $mergeByTitle,
+            titleSimilarityThreshold: $titleSimilarityThreshold,
         ));
 
         return response()->json([

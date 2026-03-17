@@ -2184,6 +2184,32 @@ class PlaylistResource extends Resource
                                 ->default(false),
                         ]),
 
+                    Fieldset::make('Title-based VOD & Series Merge')
+                        ->columnSpanFull()
+                        ->columns(2)
+                        ->hidden(fn (Get $get): bool => ! $get('auto_merge_channels_enabled'))
+                        ->schema([
+                            Toggle::make('auto_merge_config.merge_vod_by_title')
+                                ->label('Merge VOD by title similarity')
+                                ->inline(false)
+                                ->helperText('When enabled, VOD entries with similar titles across providers will be merged even if their stream IDs differ.')
+                                ->default(false)
+                                ->live(),
+                            Toggle::make('auto_merge_config.merge_series_by_title')
+                                ->label('Merge Series by title similarity')
+                                ->inline(false)
+                                ->helperText('When enabled, series with similar titles across providers will have their episodes matched and merged with failover.')
+                                ->default(false),
+                            TextInput::make('auto_merge_config.title_similarity_threshold')
+                                ->label('Title similarity threshold (%)')
+                                ->numeric()
+                                ->default(85)
+                                ->minValue(50)
+                                ->maxValue(100)
+                                ->helperText('Minimum similarity percentage to consider two titles as the same content. Higher = stricter matching (recommended: 80-90).')
+                                ->hidden(fn (Get $get): bool => ! $get('auto_merge_config.merge_vod_by_title') && ! $get('auto_merge_config.merge_series_by_title')),
+                        ]),
+
                     Fieldset::make('Advanced Priority Scoring (optional)')
                         ->columnSpanFull()
                         ->columns(2)

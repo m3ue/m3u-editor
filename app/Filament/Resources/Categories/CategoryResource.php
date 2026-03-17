@@ -231,6 +231,22 @@ class CategoryResource extends Resource
                         ->modalIcon('heroicon-o-document-arrow-down')
                         ->modalDescription('Sync selected category series .strm files now? This will generate .strm files for the enabled series at the path set for the series.')
                         ->modalSubmitActionLabel('Yes, sync now'),
+                    PlaylistService::getSeriesMergeAction(categoryScoped: true)
+                        ->after(function () {
+                            Notification::make()
+                                ->success()
+                                ->title('Series merge started')
+                                ->body('Merging series by title in the background. You will be notified once the process is complete.')
+                                ->send();
+                        }),
+                    PlaylistService::getSeriesUnmergeAction(categoryScoped: true)
+                        ->after(function () {
+                            Notification::make()
+                                ->success()
+                                ->title('Series unmerge started')
+                                ->body('Unmerging series in the background. You will be notified once the process is complete.')
+                                ->send();
+                        }),
                     Action::make('enable')
                         ->label('Enable Category Series')
                         ->action(function ($record): void {
