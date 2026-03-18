@@ -12,7 +12,9 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('playlist_aliases', function (Blueprint $table) {
+            $table->dropIndex(['playlist_id', 'enabled']);
             $table->dropColumn('enabled');
+            $table->index(['playlist_id']);
         });
     }
 
@@ -22,7 +24,9 @@ return new class extends Migration
     public function down(): void
     {
         Schema::table('playlist_aliases', function (Blueprint $table) {
+            $table->dropIndex(['playlist_id']);
             $table->boolean('enabled')->default(true);
+            $table->index(['playlist_id', 'enabled']);
         });
     }
 };

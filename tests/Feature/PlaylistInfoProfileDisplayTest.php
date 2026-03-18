@@ -252,7 +252,6 @@ test('getStats shows playlist available_streams for PlaylistAlias backed by prof
         'xtream_config' => '[]',
         'enable_proxy' => true,
         'available_streams' => 10,
-        'enabled' => true,
     ]);
 
     $stats = callGetStats($alias, $alias);
@@ -287,7 +286,6 @@ test('getStats shows playlist available_streams for PlaylistAlias backed by Cust
         'xtream_config' => '[]',
         'enable_proxy' => true,
         'available_streams' => 7,
-        'enabled' => true,
     ]);
 
     $stats = callGetStats($alias, $alias);
