@@ -831,6 +831,52 @@ class ProfileService
     }
 
     /**
+     * Ensure the primary profile exists and its credentials match the playlist's xtream_config.
+     *
+     * Creates the primary profile if it doesn't exist, or updates its URL/username/password
+     * when the playlist's provider has changed (e.g. the user re-pointed the playlist to a
+     * new provider). Without this sync the primary profile retains the old provider's domain
+     * and credentials, causing streams to be directed to the removed provider.
+     */
+    public static function syncPrimaryProfile(Playlist $playlist): void
+    {
+        if (! $playlist->xtream_config) {
+            return;
+        }
+
+        $config = $playlist->xtream_config;
+        $newUrl = $config['url'] ?? $config['server'] ?? '';
+        $newUsername = $config['username'] ?? '';
+        $newPassword = $config['password'] ?? '';
+
+        $primaryProfile = $playlist->profiles()->where('is_primary', true)->first();
+
+        if (! $primaryProfile) {
+            static::createPrimaryProfile($playlist);
+
+            return;
+        }
+
+        // Only write to the DB when something has actually drifted.
+        if (
+            $primaryProfile->url !== $newUrl ||
+            $primaryProfile->username !== $newUsername ||
+            $primaryProfile->password !== $newPassword
+        ) {
+            $primaryProfile->update([
+                'url' => $newUrl,
+                'username' => $newUsername,
+                'password' => $newPassword,
+            ]);
+
+            Log::info('Synced primary profile credentials to playlist xtream_config', [
+                'playlist_id' => $playlist->id,
+                'profile_id' => $primaryProfile->id,
+            ]);
+        }
+    }
+
+    /**
      * Clean up stale stream entries for a profile.
      *
      * Called periodically to remove orphaned stream records.

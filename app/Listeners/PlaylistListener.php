@@ -65,10 +65,11 @@ class PlaylistListener
     {
         $playlist = $event->playlist;
 
-        // Handle primary profile creation when profiles are enabled
-        // Check both when the setting changes AND when it's already enabled (to fix missing profiles)
+        // Sync the primary profile whenever profiles are enabled.
+        // This creates the profile if missing, and updates its URL/credentials
+        // when the playlist's provider has changed — fixing stale stream URLs.
         if ($playlist->profiles_enabled) {
-            $this->ensurePrimaryProfileExists($playlist);
+            ProfileService::syncPrimaryProfile($playlist);
         }
 
         // Handle playlist updated event
