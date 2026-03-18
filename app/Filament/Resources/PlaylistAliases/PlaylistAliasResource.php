@@ -516,7 +516,14 @@ class PlaylistAliasResource extends Resource
                 ->schema([
                     Forms\Components\TextInput::make('username')
                         ->label('Username')
-                        ->helperText('Optional: Set credentials to access this alias via Xtream API.')
+                        ->helperText('Optional: Set credentials to access this alias via Xtream API. Must be unique across all aliases and playlist auths.')
+                        ->rules(function ($record) {
+                            return [
+                                'nullable',
+                                Rule::unique('playlist_aliases', 'username')->ignore($record?->id),
+                                Rule::unique('playlist_auths', 'username'),
+                            ];
+                        })
                         ->columnSpan(1),
                     Forms\Components\TextInput::make('password')
                         ->label('Password')

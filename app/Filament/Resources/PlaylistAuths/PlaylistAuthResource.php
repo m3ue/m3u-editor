@@ -8,6 +8,7 @@ use App\Filament\Resources\PlaylistAuths\Pages\ListPlaylistAuths;
 use App\Models\CustomPlaylist;
 use App\Models\MergedPlaylist;
 use App\Models\Playlist;
+use App\Models\PlaylistAlias;
 use App\Models\PlaylistAuth;
 use App\Traits\HasUserFiltering;
 use Filament\Actions\ActionGroup;
@@ -30,6 +31,7 @@ use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Validation\Rule;
 
 class PlaylistAuthResource extends Resource
 {
@@ -139,6 +141,12 @@ class PlaylistAuthResource extends Resource
             TextInput::make('username')
                 ->label('Username')
                 ->required()
+                ->rules(function ($record) {
+                    return [
+                        Rule::unique('playlist_auths', 'username')->ignore($record?->id),
+                        Rule::unique('playlist_aliases', 'username'),
+                    ];
+                })
                 ->columnSpan(1),
             TextInput::make('password')
                 ->label('Password')
@@ -177,6 +185,7 @@ class PlaylistAuthResource extends Resource
                                         Playlist::class => 'Playlist',
                                         CustomPlaylist::class => 'Custom Playlist',
                                         MergedPlaylist::class => 'Merged Playlist',
+                                        PlaylistAlias::class => 'Playlist Alias',
                                         default => 'Unknown'
                                     };
                                     $key = get_class($assignedModel).'|'.$assignedModel->id;
@@ -211,6 +220,15 @@ class PlaylistAuthResource extends Resource
                                 $key = MergedPlaylist::class.'|'.$playlist->id;
                                 if (! isset($options[$key])) {
                                     $options[$key] = $playlist->name.' (Merged Playlist)';
+                                }
+                            }
+
+                            // Playlist Aliases
+                            $aliases = PlaylistAlias::where('user_id', $userId)->get();
+                            foreach ($aliases as $alias) {
+                                $key = PlaylistAlias::class.'|'.$alias->id;
+                                if (! isset($options[$key])) {
+                                    $options[$key] = $alias->name.' (Playlist Alias)';
                                 }
                             }
 

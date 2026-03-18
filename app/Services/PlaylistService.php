@@ -439,8 +439,7 @@ class PlaylistService
         // Method 1b: Direct authentication with PlaylistAlias credentials
         // Only check if Method 1 didn't find a result
         if (! $playlist) {
-            $alias = PlaylistAlias::where('enabled', true)
-                ->where('username', $username)
+            $alias = PlaylistAlias::where('username', $username)
                 ->where('password', $password)
                 ->with(['user', 'playlist', 'customPlaylist'])
                 ->first();
@@ -507,7 +506,6 @@ class PlaylistService
                                 'playlist',
                                 'customPlaylist',
                             ])->where('uuid', $password)
-                                ->where('enabled', true)
                                 ->firstOrFail();
 
                             // Verify username matches playlist alias owner's name
