@@ -68,6 +68,7 @@ class MapPlaylistChannelsToEpgChunk implements ShouldQueue
         $patterns = $this->settings['exclude_prefixes'] ?? [];
         $useRegex = $this->settings['use_regex'] ?? false;
         $skipMissing = $this->settings['skip_missing'] ?? false;
+        $setEpgIcon = $this->settings['set_epg_icon'] ?? false;
         $mappedChannels = [];
 
         foreach ($channels->cursor() as $channel) {
@@ -233,6 +234,10 @@ class MapPlaylistChannelsToEpgChunk implements ShouldQueue
 
             // If EPG channel found, link it to the Playlist channel
             if ($epgChannel) {
+                if ($setEpgIcon) {
+                    $channel->logo_type = 'epg';
+                }
+
                 $mappedChannels[] = [
                     'title' => $this->sanitizeUtf8($channel->title),
                     'name' => $this->sanitizeUtf8($channel->name),
@@ -241,6 +246,7 @@ class MapPlaylistChannelsToEpgChunk implements ShouldQueue
                     'playlist_id' => $channel->playlist_id,
                     'source_id' => $channel->source_id,
                     'epg_channel_id' => $epgChannel->id,
+                    'logo_type' => $channel->logo_type,
                 ];
             }
         }

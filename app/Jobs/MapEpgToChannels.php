@@ -59,7 +59,8 @@ class MapEpgToChannels implements ShouldQueue
 
             // Upsert the channels
             Channel::upsert($bulk, uniqueBy: ['source_id', 'playlist_id'], update: [
-                'epg_channel_id', // this is the only field we want to update...
+                'epg_channel_id',
+                'logo_type',
             ]);
         }
     }
