@@ -150,12 +150,12 @@ echo $totalBandwidth > 1000 ? round($totalBandwidth / 1000, 1) . ' Mbps' : $tota
                                             </div>
                                         </div>
                                     @endif
-                                    <div>
+                                    <div class="min-w-0">
                                         <h3 class="text-lg font-semibold text-gray-900 dark:text-white">
                                             Stream {{ substr($stream['stream_id'], -8) }}
                                         </h3>
                                         <p class="text-sm text-gray-500 dark:text-gray-400 font-mono">{{ $stream['model']['title'] ?? 'N/A' }}</p>
-                                        <p class="text-sm text-gray-500 dark:text-gray-400 font-mono">{{ $stream['source_url'] }}</p>
+                                        <p class="text-sm text-gray-500 dark:text-gray-400 font-mono truncate">{{ $stream['source_url'] }}</p>
                                     </div>
                                 </div>
                                 
@@ -370,11 +370,11 @@ echo $totalBandwidth > 1000 ? round($totalBandwidth / 1000, 1) . ' Mbps' : $tota
                                                             Stream is using a failover source
                                                         </p>
                                                         <p class="text-xs text-orange-600 dark:text-orange-300 mt-1">
-                                                            Original URL: <span class="font-mono">{{ Str::limit($stream['source_url'], 60) }}</span>
+                                                            Original URL: <span class="font-mono break-all">{{ $stream['source_url'] }}</span>
                                                         </p>
                                                         @if($stream['current_url'] && $stream['current_url'] !== $stream['source_url'])
                                                             <p class="text-xs text-orange-600 dark:text-orange-300">
-                                                                Current URL: <span class="font-mono">{{ Str::limit($stream['current_url'], 60) }}</span>
+                                                                Current URL: <span class="font-mono break-all">{{ $stream['current_url'] }}</span>
                                                             </p>
                                                         @endif
                                                     </div>
@@ -395,7 +395,7 @@ echo $totalBandwidth > 1000 ? round($totalBandwidth / 1000, 1) . ' Mbps' : $tota
                                                                     {{ $index + 1 }}
                                                                 </span>
                                                                 <span class="{{ $stream['current_failover_index'] === $index + 1 ? 'text-orange-600 dark:text-orange-400 font-medium' : '' }}">
-                                                                    {{ Str::limit($url, 70) }}
+                                                                    {{ $url }}
                                                                 </span>
                                                                 @if($stream['current_failover_index'] === $index + 1)
                                                                     <span class="ml-2 text-orange-500">(active)</span>

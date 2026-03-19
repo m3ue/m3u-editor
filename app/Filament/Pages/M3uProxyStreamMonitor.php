@@ -334,7 +334,7 @@ class M3uProxyStreamMonitor extends Page
 
                 $streams[] = [
                     'stream_id' => $streamId,
-                    'source_url' => $this->truncateUrl($stream['original_url']),
+                    'source_url' => $stream['original_url'],
                     'current_url' => $stream['current_url'],
                     'format' => strtoupper($stream['stream_type']),
                     'status' => $stream['is_active'] && $stream['client_count'] > 0 ? 'active' : 'idle',
