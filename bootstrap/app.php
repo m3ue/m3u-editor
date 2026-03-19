@@ -28,6 +28,8 @@ return Application::configure(basePath: dirname(__DIR__))
                 'webhook/test',
                 'channel',
                 'channel/*',
+                'group',
+                'group/*',
                 'player_api.php',
                 'get.php',
             ])
