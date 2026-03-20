@@ -50,6 +50,8 @@ class M3uProxyStreamMonitor extends Page
 
     public $systemStats = [];
 
+    public $vpnStatus = null;
+
     public $refreshInterval = 5; // seconds
 
     public $connectionError = null;
@@ -85,6 +87,10 @@ class M3uProxyStreamMonitor extends Page
         ];
 
         $this->systemStats = []; // populate if external API provides system metrics
+
+        // Fetch VPN watchdog status (non-blocking, null if not enabled)
+        $vpnResult = $this->apiService->fetchVpnStatus();
+        $this->vpnStatus = ($vpnResult['success'] ?? false) ? ($vpnResult['vpn'] ?? null) : null;
     }
 
     protected function getHeaderActions(): array
@@ -177,6 +183,33 @@ class M3uProxyStreamMonitor extends Page
         } catch (Exception $e) {
             Notification::make()
                 ->title('Error stopping stream.')
+                ->body($e->getMessage())
+                ->danger()
+                ->send();
+        }
+
+        $this->refreshData();
+    }
+
+    public function rotateVpn(): void
+    {
+        try {
+            $result = $this->apiService->triggerVpnRotation();
+            if ($result['success'] ?? false) {
+                Notification::make()
+                    ->title('VPN rotation triggered successfully.')
+                    ->success()
+                    ->send();
+            } else {
+                Notification::make()
+                    ->title('VPN rotation failed.')
+                    ->body($result['error'] ?? 'Unknown error')
+                    ->danger()
+                    ->send();
+            }
+        } catch (Exception $e) {
+            Notification::make()
+                ->title('Error rotating VPN.')
                 ->body($e->getMessage())
                 ->danger()
                 ->send();

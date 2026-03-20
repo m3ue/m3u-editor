@@ -314,6 +314,16 @@ class M3uProxyApiController extends Controller
             case 'stream_stopped':
                 $this->invalidateStreamCaches($data);
                 break;
+
+            case 'vpn_health_changed':
+            case 'vpn_rotation_started':
+            case 'vpn_rotation_completed':
+            case 'vpn_rotation_failed':
+                Log::info('VPN watchdog event received', [
+                    'event_type' => $eventType,
+                    'data' => $data,
+                ]);
+                break;
         }
 
         return response()->json(['status' => 'ok']);

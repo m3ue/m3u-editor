@@ -67,6 +67,65 @@ echo $totalBandwidth > 1000 ? round($totalBandwidth / 1000, 1) . ' Mbps' : $tota
             </x-filament::card>
         </div>
 
+        {{-- VPN Watchdog Status Card --}}
+        @if($vpnStatus)
+            <div class="mb-6">
+                <x-filament::card class="p-4">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-4">
+                            <div class="p-2 rounded-lg
+                                @switch($vpnStatus['state'] ?? 'unknown')
+                                    @case('healthy') bg-green-100 dark:bg-green-900 @break
+                                    @case('degraded') bg-yellow-100 dark:bg-yellow-900 @break
+                                    @case('unhealthy') bg-orange-100 dark:bg-orange-900 @break
+                                    @case('down') bg-red-100 dark:bg-red-900 @break
+                                    @default bg-gray-100 dark:bg-gray-900
+                                @endswitch
+                            ">
+                                <x-heroicon-s-shield-check class="h-6 w-6" />
+                            </div>
+                            <div>
+                                <p class="text-sm font-medium text-gray-600 dark:text-gray-400">VPN Status</p>
+                                <div class="flex items-center gap-2">
+                                    <span class="text-lg font-bold text-gray-900 dark:text-white capitalize">{{ $vpnStatus['state'] ?? 'Unknown' }}</span>
+                                    @if($vpnStatus['public_ip'] ?? null)
+                                        <x-filament::badge size="sm" color="info">{{ $vpnStatus['public_ip'] }}</x-filament::badge>
+                                    @endif
+                                    @if($vpnStatus['country'] ?? null)
+                                        <x-filament::badge size="sm">{{ $vpnStatus['country'] }}</x-filament::badge>
+                                    @endif
+                                </div>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-4">
+                            @if($vpnStatus['latency_ms'] ?? null)
+                                <div class="text-right">
+                                    <p class="text-xs text-gray-500 dark:text-gray-400">Latency</p>
+                                    <p class="text-sm font-semibold {{ ($vpnStatus['latency_ms'] ?? 0) > 200 ? 'text-yellow-600' : 'text-gray-900 dark:text-white' }}">
+                                        {{ round($vpnStatus['latency_ms']) }} ms
+                                    </p>
+                                </div>
+                            @endif
+                            @if($vpnStatus['total_rotations'] ?? 0)
+                                <div class="text-right">
+                                    <p class="text-xs text-gray-500 dark:text-gray-400">Rotations</p>
+                                    <p class="text-sm font-semibold text-gray-900 dark:text-white">{{ $vpnStatus['total_rotations'] }}</p>
+                                </div>
+                            @endif
+                            <x-filament::button
+                                size="sm"
+                                color="warning"
+                                wire:click="rotateVpn"
+                                wire:confirm="Are you sure you want to rotate the VPN connection?"
+                            >
+                                Rotate VPN
+                            </x-filament::button>
+                        </div>
+                    </div>
+                </x-filament::card>
+            </div>
+        @endif
+
         <!-- Auto-refresh toggle -->
         <div class="mb-4 flex items-center justify-between">
             <div class="flex items-center space-x-4">
