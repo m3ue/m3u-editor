@@ -182,6 +182,14 @@ class EpgApiController extends Controller
         $skip = max(0, ($page - 1) * $perPage);
         $search = $request->get('search', null);
         $vod = (bool) $request->get('vod', false);
+        $username = $request->get('username', null);
+        $password = $request->get('password', null);
+
+        // If not username/password provided, use playlist credentials
+        if (! $username || ! $password) {
+            $username = $user->name ?? 'admin';
+            $password = $playlist->uuid;
+        }
 
         // Get parsed date range
         $dateRange = $this->parseDateRange($request);
@@ -333,7 +341,7 @@ class EpgApiController extends Controller
                 }
 
                 // Get the channel URL and format from the computed attribute, which handles proxy logic
-                [$url, $channelFormat] = $channel->getProxyUrl(withFormat: true);
+                [$url, $channelFormat] = $channel->getProxyUrl(withFormat: true, username: $username, password: $password);
 
                 // Get the icon
                 $icon = '';

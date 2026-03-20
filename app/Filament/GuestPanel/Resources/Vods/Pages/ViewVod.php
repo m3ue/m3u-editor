@@ -21,6 +21,11 @@ class ViewVod extends ViewRecord
         return $this->record->title_custom ?? $this->record->title ?? $this->record->name;
     }
 
+    public function getAuth(): ?array
+    {
+        return self::getCurrentAuth();
+    }
+
     public function getSubheading(): string|Htmlable|null
     {
         $parts = [];

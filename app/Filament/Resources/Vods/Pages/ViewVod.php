@@ -18,6 +18,11 @@ class ViewVod extends ViewRecord
         return $this->record->title_custom ?? $this->record->title ?? $this->record->name;
     }
 
+    public function getAuth(): ?array
+    {
+        return null; // No auth for VODs in the admin panel, will use admin auth
+    }
+
     public function getSubheading(): string|Htmlable|null
     {
         $parts = [];

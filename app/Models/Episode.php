@@ -75,7 +75,7 @@ class Episode extends Model
         return $this->morphMany(StrmFileMapping::class, 'syncable');
     }
 
-    public function getFloatingPlayerAttributes(): array
+    public function getFloatingPlayerAttributes(?string $username, ?string $password): array
     {
         $settings = app(GeneralSettings::class);
 
@@ -87,7 +87,9 @@ class Episode extends Model
         // This also prevents CORS and mixed-content issues
         [$url, $episodeFormat] = $this->getProxyUrl(
             withFormat: true,
-            profileFormat: $profile->format ?? null
+            profileFormat: $profile->format ?? null,
+            username: $username,
+            password: $password
         );
 
         return [
@@ -109,7 +111,7 @@ class Episode extends Model
      *
      * @var string|array
      */
-    public function getProxyUrl(?bool $withFormat = false, ?string $profileFormat = null)
+    public function getProxyUrl(?bool $withFormat = false, ?string $profileFormat = null, ?string $username = null, ?string $password = null)
     {
         // Load the effective playlist to determine proxy settings and get UUID for authentication
         $playlist = $this->getEffectivePlaylist();
@@ -137,10 +139,18 @@ class Episode extends Model
             $episodeFormat = $profileFormat;
         }
 
+        // Determine the username and password to use for proxy authentication
+        if ($username && $password) {
+            $username = urlencode($username);
+            $password = urlencode($password);
+        } else {
+            $username = urlencode($user->name ?? 'admin');
+            $password = urlencode($playlist->uuid);
+        }
+
         // Always proxy the internal proxy so we can attempt to transcode the stream for better compatibility
         // This also prevents CORS and mixed-content issues
-        $username = urlencode($user->name ?? 'admin');
-        $url = rtrim(url("/series/{$username}/{$playlist->uuid}/".$this->id.'.'.$episodeFormat), '.');
+        $url = rtrim(url("/series/{$username}/{$password}/".$this->id.'.'.$episodeFormat), '.');
 
         // Append query parameter so our Xtream Stream controller knows to proxy the stream regardless of playlist settings
         $url .= '?'.http_build_query([

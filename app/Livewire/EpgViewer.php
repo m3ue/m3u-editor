@@ -36,6 +36,10 @@ class EpgViewer extends Component implements HasActions, HasForms
 
     public $viewOnly = false;
 
+    public $username = null;
+
+    public $password = null;
+
     public $vod = true;
 
     // Use static cache to prevent Livewire from clearing it
@@ -254,6 +258,8 @@ class EpgViewer extends Component implements HasActions, HasForms
         return view('livewire.epg-viewer', [
             'route' => $route,
             'vod' => $this->vod,
+            'username' => $this->username,
+            'password' => $this->password,
         ]);
     }
 }

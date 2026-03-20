@@ -21,6 +21,11 @@ class ViewSeries extends ViewRecord
         return $this->record->name;
     }
 
+    public function getAuth(): ?array
+    {
+        return self::getCurrentAuth();
+    }
+
     public function getSubheading(): string|Htmlable|null
     {
         $parts = [];
