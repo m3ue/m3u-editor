@@ -218,7 +218,7 @@ class XtreamStreamController extends Controller
         }
 
         if ($channel instanceof Channel) {
-            if ($playlist->enable_proxy) {
+            if ($playlist->enable_proxy || $request->input('proxy') === 'true') {
                 // Timeshift handled in proxy controller (if needed)
                 // Add username to request for proxy traceability
                 $request->merge(['username' => $username]);
@@ -263,7 +263,7 @@ class XtreamStreamController extends Controller
         $format = $format ?? 'ts'; // Default to 'ts' if no format provided
         [$playlist, $channel] = $this->findAuthenticatedPlaylistAndStreamModel($username, $password, $streamId, 'vod');
         if ($channel instanceof Channel) {
-            if ($playlist->enable_proxy) {
+            if ($playlist->enable_proxy || $request->input('proxy') === 'true') {
                 // Add username to request for proxy traceability
                 $request->merge(['username' => $username]);
 
@@ -292,7 +292,7 @@ class XtreamStreamController extends Controller
         $format = $format ?? 'mp4'; // Default to 'mp4' if no format provided
         [$playlist, $episode] = $this->findAuthenticatedPlaylistAndStreamModel($username, $password, $streamId, 'episode');
         if ($episode instanceof Episode) {
-            if ($playlist->enable_proxy) {
+            if ($playlist->enable_proxy || $request->input('proxy') === 'true') {
                 // Add username to request for proxy traceability
                 $request->merge(['username' => $username]);
 

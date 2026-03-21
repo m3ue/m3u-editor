@@ -10,6 +10,8 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\URL;
+use Illuminate\Support\Str;
 use Symfony\Component\Process\Process as SymfonyProcess;
 
 class Episode extends Model
@@ -73,7 +75,7 @@ class Episode extends Model
         return $this->morphMany(StrmFileMapping::class, 'syncable');
     }
 
-    public function getFloatingPlayerAttributes(): array
+    public function getFloatingPlayerAttributes(?string $username, ?string $password): array
     {
         $settings = app(GeneralSettings::class);
 
@@ -81,15 +83,14 @@ class Episode extends Model
         $profileId = $settings->default_vod_stream_profile_id ?? null;
         $profile = $profileId ? StreamProfile::find($profileId) : null;
 
-        // Always proxy the internal proxy so we can attempt to transcode the stream for better compatibility
-        $url = route('m3u-proxy.episode.player', ['id' => $this->id]);
-
-        // Determine the channel format based on URL or container extension
-        $originalUrl = $this->url;
-        $format = pathinfo($originalUrl, PATHINFO_EXTENSION);
-        if (empty($format)) {
-            $format = $this->container_extension ?? 'ts';
-        }
+        // Always proxy the internal player so we can attempt to transcode the stream for better compatibility
+        // This also prevents CORS and mixed-content issues
+        [$url, $episodeFormat] = $this->getProxyUrl(
+            withFormat: true,
+            profileFormat: $profile->format ?? null,
+            username: $username,
+            password: $password
+        );
 
         return [
             'id' => 'episode-'.$this->id,
@@ -100,9 +101,63 @@ class Episode extends Model
             'season_number' => $this->season,
             'title' => $this->title,
             'url' => $url,
-            'format' => $profile->format ?? $format,
+            'format' => $episodeFormat,
             'type' => 'episode',
         ];
+    }
+
+    /**
+     * The attributes that are mass assignable.
+     *
+     * @var string|array
+     */
+    public function getProxyUrl(?bool $withFormat = false, ?string $profileFormat = null, ?string $username = null, ?string $password = null)
+    {
+        // Load the effective playlist to determine proxy settings and get UUID for authentication
+        $playlist = $this->getEffectivePlaylist();
+        $user = $this->user;
+        $originalUrl = $this->url;
+
+        // Extract the filename from the URL to determine the format (extension)
+        $filename = parse_url($originalUrl, PHP_URL_PATH);
+
+        // Determine the channel format based on URL or container extension
+        if (Str::endsWith($filename, '.m3u8')) {
+            $episodeFormat = 'm3u8';
+        } elseif (Str::endsWith($filename, '.ts')) {
+            $episodeFormat = 'ts';
+        } else {
+            if ($playlist->xtream ?? false) {
+                $episodeFormat = $playlist->xtream_config['output'] ?? 'mkv'; // Default to 'mkv' if not set
+            } else {
+                $episodeFormat = $this->container_extension ?? 'mkv';
+            }
+        }
+
+        // If a specific format is provided (e.g. from a StreamProfile), use that instead of the detected format
+        if ($profileFormat) {
+            $episodeFormat = $profileFormat;
+        }
+
+        // Determine the username and password to use for proxy authentication
+        if ($username && $password) {
+            $username = urlencode($username);
+            $password = urlencode($password);
+        } else {
+            $username = urlencode($user->name ?? 'admin');
+            $password = urlencode($playlist->uuid);
+        }
+
+        // Always proxy the internal proxy so we can attempt to transcode the stream for better compatibility
+        // This also prevents CORS and mixed-content issues
+        $url = rtrim(url("/series/{$username}/{$password}/".$this->id.'.'.$episodeFormat), '.');
+
+        // Append query parameter so our Xtream Stream controller knows to proxy the stream regardless of playlist settings
+        $url .= '?'.http_build_query([
+            'proxy' => 'true',
+        ]);
+
+        return $withFormat ? [$url, $episodeFormat] : $url;
     }
 
     /**

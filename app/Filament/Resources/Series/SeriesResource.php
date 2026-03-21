@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\Series;
 
 use App\Facades\LogoFacade;
+use App\Filament\Actions\AssetPickerAction;
 use App\Filament\Resources\Playlists\PlaylistResource;
 use App\Filament\Resources\Series\Pages\CreateSeries;
 use App\Filament\Resources\Series\Pages\EditSeries;
@@ -573,7 +574,11 @@ class SeriesResource extends Resource
                             ->label('Series poster URL')
                             ->url()
                             ->nullable()
-                            ->helperText('Leave empty to remove custom poster URL and use placeholder fallback.'),
+                            ->helperText('Leave empty to remove custom poster URL and use placeholder fallback.')
+                            ->suffixActions([
+                                AssetPickerAction::upload('cover'),
+                                AssetPickerAction::browse('cover'),
+                            ]),
                     ])
                     ->action(function (Collection $records, array $data): void {
                         Series::whereIn('id', $records->pluck('id')->toArray())
@@ -879,7 +884,11 @@ class SeriesResource extends Resource
                                     Select::make('category_id')
                                         ->relationship('category', 'name'),
                                     TextInput::make('cover')
-                                        ->maxLength(255),
+                                        ->maxLength(255)
+                                        ->suffixActions([
+                                            AssetPickerAction::upload('cover'),
+                                            AssetPickerAction::browse('cover'),
+                                        ]),
                                     Textarea::make('plot')
                                         ->columnSpanFull(),
                                     TextInput::make('genre')

@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\EpgChannels;
 
+use App\Filament\Actions\AssetPickerAction;
 use App\Filament\Resources\EpgChannelResource\Pages;
 use App\Filament\Resources\EpgChannels\Pages\ListEpgChannels;
 use App\Jobs\EpgChannelFindAndReplace;
@@ -260,7 +261,11 @@ class EpgChannelResource extends Resource
                 ->prefixIcon('heroicon-m-globe-alt')
                 ->placeholder(fn ($record) => $record?->icon)
                 ->helperText('Leave empty to use provider icon.')
-                ->type('url'),
+                ->type('url')
+                ->suffixActions([
+                    AssetPickerAction::upload('icon_custom'),
+                    AssetPickerAction::browse('icon_custom'),
+                ]),
             TextInput::make('display_name_custom')
                 ->label('Display Name')
                 ->columnSpan(1)

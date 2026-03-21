@@ -28,13 +28,15 @@
         <div class="flex items-end justify-end fixed z-50 top-4 right-4">
             {{-- Display current playlist name --}}
             {{-- Logout button --}}
-            <x-filament::button type="button" size="sm" color="gray" icon="heroicon-o-arrow-left-on-rectangle" wire:click="logout" class="">
+            <x-filament::button type="button" size="sm" color="gray" icon="heroicon-o-arrow-left-on-rectangle"
+                wire:click="logout" class="">
                 Sign out
             </x-filament::button>
         </div>
         {{-- Authenticated dashboard content goes here --}}
         <div>
-            <livewire:epg-viewer :record="$playlist" :view-only="true" :vod="false" />
+            <livewire:epg-viewer :record="$playlist" :view-only="true" :vod="false" :username="$guestUsername"
+                :password="$guestPassword" />
         </div>
     @endif
 </div>

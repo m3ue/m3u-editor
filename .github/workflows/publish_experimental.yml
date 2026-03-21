@@ -195,7 +195,7 @@ jobs:
     name: Create Experimental Pre-release
     runs-on: ubuntu-latest
     needs: [get-version, push-manifest]
-    if: always() && needs.get-version.result == 'success' && needs.get-version.outputs.tag_exists != 'true'
+    if: always() && needs.get-version.result == 'success' && needs.push-manifest.result == 'success' && needs.get-version.outputs.tag_exists != 'true'
     permissions:
       contents: write
     steps:

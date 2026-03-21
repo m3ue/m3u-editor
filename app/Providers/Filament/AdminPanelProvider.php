@@ -201,6 +201,12 @@ class AdminPanelProvider extends PanelProvider
             );
         }
 
+        // Force password change modal — shown to any authenticated user with must_change_password = true
+        FilamentView::registerRenderHook(
+            PanelsRenderHook::BODY_START,
+            fn (): string => auth()->check() ? Blade::render("@livewire('force-password-change')") : ''
+        );
+
         // Register our custom app js
         FilamentView::registerRenderHook('panels::body.end', fn () => Blade::render("@vite('resources/js/app.js')"));
 

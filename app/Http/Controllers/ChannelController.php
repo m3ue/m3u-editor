@@ -4,7 +4,6 @@ namespace App\Http\Controllers;
 
 use App\Enums\ChannelLogoType;
 use App\Facades\PlaylistFacade;
-use App\Facades\ProxyFacade;
 use App\Models\Channel;
 use App\Models\ChannelFailover;
 use App\Models\Group;
@@ -198,9 +197,6 @@ class ChannelController extends Controller
                     ];
                 }
 
-                // Generate proxy URL
-                $proxyUrl = ProxyFacade::getProxyUrlForChannel($channel->id, $playlist?->uuid);
-
                 return [
                     'id' => $channel->id,
                     'title' => $channel->title_custom ?? $channel->title,
@@ -212,7 +208,7 @@ class ChannelController extends Controller
                     'is_vod' => $channel->is_vod,
                     'channel_number' => $channel->channel,
                     'group' => $groupInfo,
-                    'proxy_url' => $proxyUrl,
+                    'proxy_url' => $channel->getProxyUrl(), // Include proxy URL in the response
                     'playlist' => $playlistInfo,
                 ];
             });
@@ -678,9 +674,6 @@ class ChannelController extends Controller
             ];
         })->toArray();
 
-        // Generate proxy URL
-        $proxyUrl = ProxyFacade::getProxyUrlForChannel($channel->id, $playlist?->uuid);
-
         // Build metadata info
         $metadata = [
             'year' => $channel->year,
@@ -713,7 +706,7 @@ class ChannelController extends Controller
                 'logo_type' => $channel->logo_type?->value,
                 'use_epg_logo' => $channel->logo_type === ChannelLogoType::Epg,
                 'epg_map_enabled' => $channel->epg_map_enabled ?? true,
-                'proxy_url' => $proxyUrl,
+                'proxy_url' => $channel->getProxyUrl(),
                 'epg' => $epgInfo,
                 'epg_channel_id' => $channel->epg_channel_id,
                 'group_title' => $channel->group,

@@ -73,6 +73,10 @@ class UserResource extends Resource
                             ->gridDirection('row')
                             ->columns(2),
                     ]),
+                Toggle::make('must_change_password')
+                    ->label('Force password change on next login')
+                    ->helperText('When enabled, the user will be prompted to set a new password before they can use the application.')
+                    ->columnSpanFull(),
                 Toggle::make('update_password')
                     ->label('Update Password')
                     ->default(false)

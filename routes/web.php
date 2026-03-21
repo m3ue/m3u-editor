@@ -173,24 +173,6 @@ Route::get('/network/{network}/{segment}.ts', [NetworkHlsController::class, 'seg
     ->where('segment', 'live[0-9]+');
 
 /*
- * Proxy routes (redirects to m3u-proxy API)
- */
-
-// Deprecated route for episode - redirect to m3u-proxy API
-Route::get('/shared/stream/e/{encodedId}.{format?}', function (string $encodedId) {
-    $id = base64_decode($encodedId);
-
-    return redirect()->route('m3u-proxy.episode', ['id' => $id]);
-})->name('shared.stream.episode');
-
-// Deprecated route for channel - redirect to m3u-proxy API
-Route::get('/shared/stream/{encodedId}.{format?}', function (string $encodedId) {
-    $id = base64_decode($encodedId);
-
-    return redirect()->route('m3u-proxy.channel', ['id' => $id]);
-})->name('shared.stream.channel');
-
-/*
  * API routes
  */
 

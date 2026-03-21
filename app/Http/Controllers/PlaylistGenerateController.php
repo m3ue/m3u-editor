@@ -280,18 +280,17 @@ class PlaylistGenerateController extends Controller
                             if ($logoProxyEnabled) {
                                 $icon = LogoProxyController::generateProxyUrl($icon);
                             }
-                            if (! (config('app.disable_m3u_xtream_format') ?? false)) {
+                            if (! (config('app.disable_m3u_xtream_format') ?? false) || $proxyEnabled) {
                                 $containerExtension = $episode->container_extension ?? 'mp4';
                                 $url = $baseUrl."/series/{$username}/{$password}/".$episode->id.".{$containerExtension}";
-                            } elseif ($proxyEnabled) {
-                                // Get the proxy URL
-                                // Pass the playlist UUID for merged/custom playlists so the correct context is used
-                                $url = ProxyFacade::getProxyUrlForEpisode(
-                                    $episode->id,
-                                    $playlist->uuid,
-                                );
                             }
                             $url = rtrim($url, '.');
+
+                            if ($proxyEnabled) {
+                                $url .= '?'.http_build_query([
+                                    'proxy' => 'true',
+                                ]);
+                            }
 
                             // Get the TVG ID
                             switch ($idChannelBy) {
