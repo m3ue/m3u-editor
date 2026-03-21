@@ -1,5 +1,7 @@
 <?php
 
+use Filament\Support\Commands\FileGenerators\FileGenerationFlag;
+
 return [
 
     /*
@@ -98,9 +100,9 @@ return [
 
     'file_generation' => [
         'flags' => [
-            \Filament\Support\Commands\FileGenerators\FileGenerationFlag::EMBEDDED_PANEL_RESOURCE_SCHEMAS,
-            \Filament\Support\Commands\FileGenerators\FileGenerationFlag::EMBEDDED_PANEL_RESOURCE_TABLES,
-            \Filament\Support\Commands\FileGenerators\FileGenerationFlag::PARTIAL_IMPORTS,
+            FileGenerationFlag::EMBEDDED_PANEL_RESOURCE_SCHEMAS,
+            FileGenerationFlag::EMBEDDED_PANEL_RESOURCE_TABLES,
+            FileGenerationFlag::PARTIAL_IMPORTS,
         ],
     ],
 

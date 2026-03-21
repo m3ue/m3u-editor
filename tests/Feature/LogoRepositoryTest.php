@@ -3,15 +3,16 @@
 use App\Models\Channel;
 use App\Services\LogoRepositoryService;
 use App\Settings\GeneralSettings;
+use Tests\TestCase;
 
 beforeEach(function () {
-    $mockSettings = \Mockery::mock(GeneralSettings::class);
+    $mockSettings = Mockery::mock(GeneralSettings::class);
     $mockSettings->logo_repository_enabled = true;
     app()->instance(GeneralSettings::class, $mockSettings);
 });
 
 it('returns a logo repository index payload', function () {
-    /** @var \Tests\TestCase $this */
+    /** @var TestCase $this */
     Channel::factory()->create([
         'enabled' => true,
         'is_vod' => false,
@@ -31,7 +32,7 @@ it('returns a logo repository index payload', function () {
 });
 
 it('resolves repository logo filenames to logo urls', function () {
-    /** @var \Tests\TestCase $this */
+    /** @var TestCase $this */
     Channel::factory()->create([
         'enabled' => true,
         'is_vod' => false,
@@ -48,8 +49,8 @@ it('resolves repository logo filenames to logo urls', function () {
 });
 
 it('returns 404 when logo repository is disabled', function () {
-    /** @var \Tests\TestCase $this */
-    $mockSettings = \Mockery::mock(GeneralSettings::class);
+    /** @var TestCase $this */
+    $mockSettings = Mockery::mock(GeneralSettings::class);
     $mockSettings->logo_repository_enabled = false;
     app()->instance(GeneralSettings::class, $mockSettings);
 

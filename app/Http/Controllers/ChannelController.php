@@ -4,14 +4,15 @@ namespace App\Http\Controllers;
 
 use App\Enums\ChannelLogoType;
 use App\Facades\PlaylistFacade;
-use App\Facades\ProxyFacade;
 use App\Models\Channel;
 use App\Models\ChannelFailover;
 use App\Models\Group;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Validation\Rule;
+use Symfony\Component\Process\Process;
 
 /**
  * @tags Channels
@@ -196,9 +197,6 @@ class ChannelController extends Controller
                     ];
                 }
 
-                // Generate proxy URL
-                $proxyUrl = ProxyFacade::getProxyUrlForChannel($channel->id, $playlist?->uuid);
-
                 return [
                     'id' => $channel->id,
                     'title' => $channel->title_custom ?? $channel->title,
@@ -210,7 +208,7 @@ class ChannelController extends Controller
                     'is_vod' => $channel->is_vod,
                     'channel_number' => $channel->channel,
                     'group' => $groupInfo,
-                    'proxy_url' => $proxyUrl,
+                    'proxy_url' => $channel->getProxyUrl(), // Include proxy URL in the response
                     'playlist' => $playlistInfo,
                 ];
             });
@@ -676,9 +674,6 @@ class ChannelController extends Controller
             ];
         })->toArray();
 
-        // Generate proxy URL
-        $proxyUrl = ProxyFacade::getProxyUrlForChannel($channel->id, $playlist?->uuid);
-
         // Build metadata info
         $metadata = [
             'year' => $channel->year,
@@ -711,7 +706,7 @@ class ChannelController extends Controller
                 'logo_type' => $channel->logo_type?->value,
                 'use_epg_logo' => $channel->logo_type === ChannelLogoType::Epg,
                 'epg_map_enabled' => $channel->epg_map_enabled ?? true,
-                'proxy_url' => $proxyUrl,
+                'proxy_url' => $channel->getProxyUrl(),
                 'epg' => $epgInfo,
                 'epg_channel_id' => $channel->epg_channel_id,
                 'group_title' => $channel->group,
@@ -984,7 +979,7 @@ class ChannelController extends Controller
         $startTime = microtime(true);
 
         try {
-            $response = \Illuminate\Support\Facades\Http::timeout(5)
+            $response = Http::timeout(5)
                 ->withHeaders([
                     'User-Agent' => 'Mozilla/5.0 (m3u-editor availability check)',
                 ])
@@ -1075,7 +1070,7 @@ class ChannelController extends Controller
             $startTime = microtime(true);
 
             try {
-                $response = \Illuminate\Support\Facades\Http::timeout(5)
+                $response = Http::timeout(5)
                     ->withHeaders([
                         'User-Agent' => 'Mozilla/5.0 (m3u-editor availability check)',
                     ])
@@ -1316,7 +1311,7 @@ class ChannelController extends Controller
         // Measure connect time
         $connectStart = microtime(true);
         try {
-            $connectResponse = \Illuminate\Support\Facades\Http::timeout(5)
+            $connectResponse = Http::timeout(5)
                 ->withHeaders(['User-Agent' => 'Mozilla/5.0 (m3u-editor stability test)'])
                 ->head($url);
             $connectTime = round((microtime(true) - $connectStart) * 1000);
@@ -1341,7 +1336,7 @@ class ChannelController extends Controller
 
         for ($i = 0; $i < $numChecks; $i++) {
             try {
-                $process = new \Symfony\Component\Process\Process([
+                $process = new Process([
                     'ffprobe', '-v', 'error',
                     '-rw_timeout', '5000000',
                     '-user_agent', 'Mozilla/5.0 (m3u-editor stability test)',

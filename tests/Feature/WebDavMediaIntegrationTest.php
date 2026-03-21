@@ -1,6 +1,10 @@
 <?php
 
+use App\Interfaces\MediaServer;
 use App\Jobs\SyncMediaServer;
+use App\Models\Category;
+use App\Models\Channel;
+use App\Models\Group;
 use App\Models\MediaServerIntegration;
 use App\Models\Playlist;
 use App\Models\Series;
@@ -8,6 +12,7 @@ use App\Models\User;
 use App\Services\MediaServerService;
 use App\Services\WebDavMediaService;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 
@@ -349,7 +354,7 @@ it('prevents duplicate series via unique database constraint', function () {
         'source_series_id' => 12345,
         'user_id' => $this->user->id,
         'import_batch_no' => 'batch-2',
-    ]))->toThrow(\Illuminate\Database\QueryException::class);
+    ]))->toThrow(QueryException::class);
 });
 
 it('preserves TMDB-enriched genre on series re-sync', function () {
@@ -364,7 +369,7 @@ it('preserves TMDB-enriched genre on series re-sync', function () {
     });
 
     // Create a category for the TMDB-enriched genre
-    $tmdbCategory = \App\Models\Category::create([
+    $tmdbCategory = Category::create([
         'playlist_id' => $playlist->id,
         'user_id' => $this->user->id,
         'name' => 'Drama',
@@ -386,7 +391,7 @@ it('preserves TMDB-enriched genre on series re-sync', function () {
     ]);
 
     // Mock the MediaServer service
-    $service = Mockery::mock(\App\Interfaces\MediaServer::class);
+    $service = Mockery::mock(MediaServer::class);
     $service->shouldReceive('fetchSeriesDetails')->with('series-123')->andReturn([]);
     $service->shouldReceive('extractGenres')->andReturn(['tv']);
     $service->shouldReceive('getImageUrl')->andReturn('');
@@ -427,7 +432,7 @@ it('preserves TMDB-enriched group on movie re-sync', function () {
     });
 
     // Create the library group
-    $libraryGroup = \App\Models\Group::create([
+    $libraryGroup = Group::create([
         'playlist_id' => $playlist->id,
         'user_id' => $this->user->id,
         'name' => 'Movies',
@@ -436,7 +441,7 @@ it('preserves TMDB-enriched group on movie re-sync', function () {
     ]);
 
     // Create the TMDB-enriched group
-    $tmdbGroup = \App\Models\Group::create([
+    $tmdbGroup = Group::create([
         'playlist_id' => $playlist->id,
         'user_id' => $this->user->id,
         'name' => 'Action',
@@ -446,7 +451,7 @@ it('preserves TMDB-enriched group on movie re-sync', function () {
 
     // Create an existing channel that has been TMDB-enriched
     $sourceId = "media-server-{$integration->id}-movie-456";
-    $channel = \App\Models\Channel::create([
+    $channel = Channel::create([
         'playlist_id' => $playlist->id,
         'source_id' => $sourceId,
         'user_id' => $this->user->id,
@@ -466,7 +471,7 @@ it('preserves TMDB-enriched group on movie re-sync', function () {
     ]);
 
     // Mock the MediaServer service
-    $service = Mockery::mock(\App\Interfaces\MediaServer::class);
+    $service = Mockery::mock(MediaServer::class);
     $service->shouldReceive('extractGenres')->andReturn(['Movies']);
     $service->shouldReceive('getContainerExtension')->andReturn('mkv');
     $service->shouldReceive('getStreamUrl')->andReturn('http://example.com/new-stream');
@@ -513,7 +518,7 @@ it('overwrites genre on new series (not TMDB-enriched)', function () {
     });
 
     // Mock the MediaServer service
-    $service = Mockery::mock(\App\Interfaces\MediaServer::class);
+    $service = Mockery::mock(MediaServer::class);
     $service->shouldReceive('fetchSeriesDetails')->with('new-series-789')->andReturn([]);
     $service->shouldReceive('extractGenres')->andReturn(['tv']);
     $service->shouldReceive('getImageUrl')->andReturn('');

@@ -2,10 +2,13 @@
 
 namespace App\Models;
 
+use App\Services\NetworkBroadcastService;
+use App\Services\NetworkEpgService;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
+use Illuminate\Support\Facades\Log;
 
 class NetworkContent extends Model
 {
@@ -49,7 +52,7 @@ class NetworkContent extends Model
             $remainingContent = $network->networkContent()->count();
 
             if ($remainingContent === 0) {
-                \Illuminate\Support\Facades\Log::info('Last content removed from network, triggering cleanup', [
+                Log::info('Last content removed from network, triggering cleanup', [
                     'network_id' => $network->id,
                     'network_name' => $network->name,
                 ]);
@@ -57,9 +60,9 @@ class NetworkContent extends Model
                 // Stop any active broadcast
                 if ($network->broadcast_enabled && $network->broadcast_pid) {
                     try {
-                        app(\App\Services\NetworkBroadcastService::class)->stop($network);
+                        app(NetworkBroadcastService::class)->stop($network);
                     } catch (\Throwable $e) {
-                        \Illuminate\Support\Facades\Log::warning('Failed to stop broadcast after content removal', [
+                        Log::warning('Failed to stop broadcast after content removal', [
                             'network_id' => $network->id,
                             'error' => $e->getMessage(),
                         ]);
@@ -72,9 +75,9 @@ class NetworkContent extends Model
 
                 // Regenerate EPG (will be empty but keep structure valid)
                 try {
-                    app(\App\Services\NetworkEpgService::class)->generateEpg($network);
+                    app(NetworkEpgService::class)->generateEpg($network);
                 } catch (\Throwable $e) {
-                    \Illuminate\Support\Facades\Log::warning('Failed to regenerate EPG after content removal', [
+                    Log::warning('Failed to regenerate EPG after content removal', [
                         'network_id' => $network->id,
                         'error' => $e->getMessage(),
                     ]);

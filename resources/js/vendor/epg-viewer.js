@@ -3,6 +3,8 @@ function epgViewer(config) {
     return {
         apiUrl: config.apiUrl,
         vod: config.vod || false,
+        username: config.username || null,
+        password: config.password || null,
         loading: false,
         loadingMore: false,
         error: null,
@@ -152,6 +154,11 @@ function epgViewer(config) {
             try {
                 console.log(`Loading page ${page} of EPG data...`);
                 let url = `${this.apiUrl}?start_date=${this.currentDate}&end_date=${this.getEndDate()}&page=${page}&per_page=${this.perPage}&vod=${this.vod ? '1' : '0'}`;
+
+                // Append authentication parameters if available
+                if (this.username && this.password) {
+                    url += `&username=${encodeURIComponent(this.username)}&password=${encodeURIComponent(this.password)}`;
+                }
 
                 // Add search parameter if active
                 if (this.isSearchActive && this.searchTerm.trim()) {

@@ -72,7 +72,7 @@ class WatchProgressController extends Controller
             $progress->increment('watch_count');
             $progress->update(['last_watched_at' => now()]);
 
-            return response()->json($progress->fresh(['watch_count', 'last_watched_at']));
+            return response()->json($progress->only(['watch_count', 'last_watched_at']));
         }
 
         $positionSeconds = (int) $request->input('position_seconds', 0);
@@ -108,7 +108,7 @@ class WatchProgressController extends Controller
             $progress->increment('watch_count');
         }
 
-        return response()->json($progress->fresh(['position_seconds', 'duration_seconds', 'completed', 'watch_count']));
+        return response()->json($progress->only(['position_seconds', 'duration_seconds', 'completed', 'watch_count']));
     }
 
     /**

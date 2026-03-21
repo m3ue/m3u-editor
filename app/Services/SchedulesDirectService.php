@@ -200,7 +200,7 @@ class SchedulesDirectService
     public function authenticateFromEpg(Epg $epg): array
     {
         if (! $epg->sd_username || ! $epg->sd_password) {
-            throw new \Exception('SchedulesDirect credentials not configured');
+            throw new Exception('SchedulesDirect credentials not configured');
         }
 
         // Set the current EPG for debug header tracking
@@ -465,7 +465,7 @@ class SchedulesDirectService
             ]);
 
             return $allArtwork;
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
             Log::error('Exception while fetching program artwork', [
                 'error' => $e->getMessage(),
                 'program_count' => count($programIds),
@@ -699,7 +699,7 @@ class SchedulesDirectService
                     }
                 }
             }
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
             Log::warning('Failed to extract station artwork from lineup', ['error' => $e->getMessage()]);
         }
 
@@ -750,7 +750,7 @@ class SchedulesDirectService
 
             // Get lineup data
             if (! $epg->hasSchedulesDirectLineup()) {
-                throw new \Exception('No lineup configured for SchedulesDirect EPG');
+                throw new Exception('No lineup configured for SchedulesDirect EPG');
             }
 
             // Set the metadata fetching flag
@@ -855,7 +855,7 @@ class SchedulesDirectService
         // Open file for writing
         $file = fopen($filePath, 'w');
         if (! $file) {
-            throw new \Exception("Cannot open file for writing: {$filePath}");
+            throw new Exception("Cannot open file for writing: {$filePath}");
         }
         try {
             // Extract station artwork from lineup data (logos are included in lineup response)
@@ -870,7 +870,7 @@ class SchedulesDirectService
 
             // Write XML footer
             fwrite($file, "</tv>\n");
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
             Log::error('Failed to stream process to XMLTV', [
                 'epg_id' => $epg->id,
                 'error' => $e->getMessage(),
@@ -1013,7 +1013,7 @@ class SchedulesDirectService
                     // Update progress
                     $progress = min(100, (int) (($chunkIndex / $totalChunks) * 100));
                     $epg->update(['sd_progress' => $progress]);
-                } catch (\Exception $e) {
+                } catch (Exception $e) {
                     Log::error('Error processing chunk programs', [
                         'chunk' => $chunkIndex,
                         'error' => $e->getMessage(),
@@ -1049,7 +1049,7 @@ class SchedulesDirectService
     {
         $handle = fopen($programIdFile, 'r');
         if (! $handle) {
-            throw new \Exception("Cannot open program ID file: {$programIdFile}");
+            throw new Exception("Cannot open program ID file: {$programIdFile}");
         }
 
         $batch = [];
@@ -1175,7 +1175,7 @@ class SchedulesDirectService
                     'status' => $response->status(),
                 ]);
             }
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
             Log::error('Error processing program batch directly', [
                 'chunk' => $chunkIndex,
                 'batch' => $batchIndex + 1,
@@ -1344,7 +1344,7 @@ class SchedulesDirectService
                 'status_code' => $response->status(),
                 'response_size' => strlen($response->body()),
             ]);
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
             Log::error('SchedulesDirect API request failed', [
                 'method' => $method,
                 'endpoint' => $endpoint,

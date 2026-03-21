@@ -3,12 +3,14 @@
 namespace App\Filament\Resources\Series;
 
 use App\Facades\LogoFacade;
+use App\Filament\Actions\AssetPickerAction;
 use App\Filament\Resources\Playlists\PlaylistResource;
 use App\Filament\Resources\Series\Pages\CreateSeries;
 use App\Filament\Resources\Series\Pages\EditSeries;
 use App\Filament\Resources\Series\Pages\ListSeries;
 use App\Filament\Resources\Series\Pages\ViewSeries;
 use App\Filament\Resources\Series\RelationManagers\EpisodesRelationManager;
+use App\Forms\Components\TmdbSearchResults;
 use App\Jobs\FetchTmdbIds;
 use App\Jobs\ProcessM3uImportSeriesEpisodes;
 use App\Jobs\SeriesFindAndReplace;
@@ -19,6 +21,7 @@ use App\Models\Series;
 use App\Rules\CheckIfUrlOrLocalPath;
 use App\Services\LogoCacheService;
 use App\Services\PlaylistService;
+use App\Services\TmdbService;
 use App\Services\XtreamService;
 use App\Settings\GeneralSettings;
 use App\Traits\HasUserFiltering;
@@ -389,10 +392,10 @@ class SeriesResource extends Resource
                                             }
 
                                             try {
-                                                $tmdbService = app(\App\Services\TmdbService::class);
+                                                $tmdbService = app(TmdbService::class);
                                                 $results = $tmdbService->searchTvSeriesManual($query, $year);
                                                 $set('search_results', $results);
-                                            } catch (\Exception $e) {
+                                            } catch (Exception $e) {
                                                 Notification::make()
                                                     ->danger()
                                                     ->title('Search Error')
@@ -406,7 +409,7 @@ class SeriesResource extends Resource
                             ->description('Click on a result to apply the TMDB IDs')
                             ->schema([
                                 Forms\Components\Hidden::make('series_id'),
-                                \App\Forms\Components\TmdbSearchResults::make('search_results')
+                                TmdbSearchResults::make('search_results')
                                     ->type('tv')
                                     ->default([]),
                             ]),
@@ -571,7 +574,11 @@ class SeriesResource extends Resource
                             ->label('Series poster URL')
                             ->url()
                             ->nullable()
-                            ->helperText('Leave empty to remove custom poster URL and use placeholder fallback.'),
+                            ->helperText('Leave empty to remove custom poster URL and use placeholder fallback.')
+                            ->suffixActions([
+                                AssetPickerAction::upload('cover'),
+                                AssetPickerAction::browse('cover'),
+                            ]),
                     ])
                     ->action(function (Collection $records, array $data): void {
                         Series::whereIn('id', $records->pluck('id')->toArray())
@@ -877,7 +884,11 @@ class SeriesResource extends Resource
                                     Select::make('category_id')
                                         ->relationship('category', 'name'),
                                     TextInput::make('cover')
-                                        ->maxLength(255),
+                                        ->maxLength(255)
+                                        ->suffixActions([
+                                            AssetPickerAction::upload('cover'),
+                                            AssetPickerAction::browse('cover'),
+                                        ]),
                                     Textarea::make('plot')
                                         ->columnSpanFull(),
                                     TextInput::make('genre')

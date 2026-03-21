@@ -13,6 +13,7 @@ use App\Models\PlaylistProfile;
 use App\Models\User;
 use App\Services\ProfileService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Redis;
 
@@ -84,11 +85,20 @@ test('selectProfile uses normal priority selection when no affinity exists', fun
     $playlist = createAffinityPlaylist($this->user, profileCount: 2, maxStreams: 2);
     $profiles = $playlist->enabledProfiles()->get();
 
-    // All profiles have capacity
+    // No existing affinity for this client
+    $affinityKey = ProfileService::getClientAffinityKey('10.0.0.1:bob', $playlist->id);
     Redis::shouldReceive('get')
-        ->andReturn(0);
-    Redis::shouldReceive('expire')
-        ->andReturn(true);
+        ->with($affinityKey)
+        ->andReturn(null);
+
+    // getEffectiveConnectionCount: proxy returns 0 active streams, no pending reservations
+    Http::fake([
+        '*/streams/by-metadata*' => Http::response([
+            'matching_streams' => [],
+            'total_clients' => 0,
+        ]),
+    ]);
+    Redis::shouldReceive('smembers')->andReturn([]);
 
     $selected = ProfileService::selectProfile($playlist, clientIdentifier: '10.0.0.1:bob');
 
@@ -117,12 +127,7 @@ test('selectProfile reuses affinity profile when it has capacity', function () {
         ->once()
         ->andReturn(true);
 
-    // The affinity profile has capacity
-    $countKey = "playlist_profile:{$secondProfile->id}:connections";
-    Redis::shouldReceive('get')
-        ->with($countKey)
-        ->andReturn(0);
-
+    // Affinity profile is returned immediately — no capacity check needed
     $selected = ProfileService::selectProfile($playlist, clientIdentifier: '10.0.0.1:bob');
 
     // Should pick the affinity profile, NOT the highest priority
@@ -213,10 +218,14 @@ test('selectProfile falls back when affinity profile is disabled', function () {
         ->once()
         ->andReturn(true);
 
-    // The enabled profiles have capacity
-    Redis::shouldReceive('get')
-        ->with("playlist_profile:{$firstProfile->id}:connections")
-        ->andReturn(0);
+    // Falls back to normal selection — proxy says 0 active, no pending reservations
+    Http::fake([
+        '*/streams/by-metadata*' => Http::response([
+            'matching_streams' => [],
+            'total_clients' => 0,
+        ]),
+    ]);
+    Redis::shouldReceive('smembers')->andReturn([]);
 
     $selected = ProfileService::selectProfile($playlist, clientIdentifier: '10.0.0.1:bob');
 
@@ -246,10 +255,14 @@ test('selectProfile falls back when affinity profile is excluded', function () {
         ->once()
         ->andReturn(true);
 
-    // Second profile has capacity
-    Redis::shouldReceive('get')
-        ->with("playlist_profile:{$secondProfile->id}:connections")
-        ->andReturn(0);
+    // Falls back to normal selection — proxy says 0 active, no pending reservations
+    Http::fake([
+        '*/streams/by-metadata*' => Http::response([
+            'matching_streams' => [],
+            'total_clients' => 0,
+        ]),
+    ]);
+    Redis::shouldReceive('smembers')->andReturn([]);
 
     // Exclude the affinity profile
     $selected = ProfileService::selectProfile($playlist, excludeProfileId: $firstProfile->id, clientIdentifier: '10.0.0.1:bob');
@@ -273,18 +286,20 @@ test('affinity is stored after successful selectAndReserveProfile', function () 
         ->with($affinityKey)
         ->andReturn(null);
 
-    // Profile has capacity
-    Redis::shouldReceive('get')
-        ->with("playlist_profile:{$firstProfile->id}:connections")
-        ->andReturn(0);
+    // getEffectiveConnectionCount uses proxy API (0 active) + smembers (no reservations)
+    Http::fake([
+        '*/streams/by-metadata*' => Http::response([
+            'matching_streams' => [],
+            'total_clients' => 0,
+        ]),
+    ]);
+    Redis::shouldReceive('smembers')->andReturn([]);
 
-    // Expect increment pipeline
+    // Expect increment pipeline: sadd + expire
     Redis::shouldReceive('pipeline')->once()->andReturnUsing(function ($callback) {
         $pipe = Mockery::mock();
-        $pipe->shouldReceive('incr')->once();
-        $pipe->shouldReceive('expire')->times(3);
-        $pipe->shouldReceive('set')->once();
         $pipe->shouldReceive('sadd')->once();
+        $pipe->shouldReceive('expire')->once();
         $callback($pipe);
     });
 
@@ -348,7 +363,6 @@ test('selectProfile ignores affinity when enable_provider_affinity is false', fu
     $playlist = createAffinityPlaylist($this->user, profileCount: 2, maxStreams: 2, enableAffinity: false);
     $profiles = $playlist->enabledProfiles()->get();
     $firstProfile = $profiles->first();
-    $secondProfile = $profiles->skip(1)->first();
 
     // Store affinity pointing to the SECOND profile
     $affinityKey = ProfileService::getClientAffinityKey('10.0.0.1:bob', $playlist->id);
@@ -358,10 +372,14 @@ test('selectProfile ignores affinity when enable_provider_affinity is false', fu
         ->with($affinityKey)
         ->never();
 
-    // First profile has capacity for normal priority-based selection
-    Redis::shouldReceive('get')
-        ->with("playlist_profile:{$firstProfile->id}:connections")
-        ->andReturn(0);
+    // Falls through to normal priority selection — proxy says 0 active, no reservations
+    Http::fake([
+        '*/streams/by-metadata*' => Http::response([
+            'matching_streams' => [],
+            'total_clients' => 0,
+        ]),
+    ]);
+    Redis::shouldReceive('smembers')->andReturn([]);
 
     $selected = ProfileService::selectProfile($playlist, clientIdentifier: '10.0.0.1:bob');
 

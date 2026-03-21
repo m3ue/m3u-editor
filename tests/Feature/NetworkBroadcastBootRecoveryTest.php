@@ -1,8 +1,11 @@
 <?php
 
+use App\Models\MediaServerIntegration;
 use App\Models\Network;
 use App\Models\NetworkProgramme;
 use App\Services\NetworkBroadcastService;
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\Factory;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
 
@@ -127,8 +130,8 @@ it('cleans up Plex transcode session during boot recovery', function () {
         '*' => Http::response([], 200),
     ]);
 
-    $integration = \App\Models\MediaServerIntegration::withoutEvents(function () {
-        return \App\Models\MediaServerIntegration::factory()->create([
+    $integration = MediaServerIntegration::withoutEvents(function () {
+        return MediaServerIntegration::factory()->create([
             'type' => 'plex',
             'host' => 'plex',
             'port' => 32400,
@@ -217,10 +220,10 @@ it('continues boot recovery even when proxy is unreachable for cleanup calls', f
     Http::fake([
         '*/health' => Http::response(['status' => 'ok'], 200),
         '*/broadcast/*/stop' => function () {
-            throw new \Illuminate\Http\Client\ConnectionException('Connection refused');
+            throw new ConnectionException('Connection refused');
         },
         '*' => function () {
-            throw new \Illuminate\Http\Client\ConnectionException('Connection refused');
+            throw new ConnectionException('Connection refused');
         },
     ]);
 
@@ -270,7 +273,7 @@ it('returns null from startViaProxy on connection exception', function () {
     Http::fake([
         '*/broadcast/*/status' => Http::response(['status' => 'stopped'], 404),
         '*/broadcast/*/start' => function () {
-            throw new \Illuminate\Http\Client\ConnectionException('Connection refused');
+            throw new ConnectionException('Connection refused');
         },
         '*' => Http::response([], 200),
     ]);
@@ -587,7 +590,7 @@ it('treats proxy 500 as transient during boot grace period and preserves broadca
     // Replace the Http facade root with a fresh Factory to clear beforeEach stubs.
     // Http::fake stacks callbacks (first match wins), so we need a clean slate
     // to ensure the 500 response is returned instead of beforeEach's 200.
-    Http::swap(new \Illuminate\Http\Client\Factory);
+    Http::swap(new Factory);
 
     Http::fake([
         '*/broadcast/*/status' => Http::response(['status' => 'stopped'], 404),
@@ -637,7 +640,7 @@ it('treats proxy 500 as transient during boot grace period and preserves broadca
 
 it('treats proxy 500 as permanent failure when NOT in boot grace period', function () {
     // Replace the Http facade root with a fresh Factory to clear beforeEach stubs
-    Http::swap(new \Illuminate\Http\Client\Factory);
+    Http::swap(new Factory);
 
     Http::fake([
         '*/broadcast/*/status' => Http::response(['status' => 'stopped'], 404),
@@ -683,7 +686,7 @@ it('treats proxy 500 as permanent failure when NOT in boot grace period', functi
 
 it('treats proxy 500 as permanent failure when boot grace period has expired', function () {
     // Replace the Http facade root with a fresh Factory to clear beforeEach stubs
-    Http::swap(new \Illuminate\Http\Client\Factory);
+    Http::swap(new Factory);
 
     Http::fake([
         '*/broadcast/*/status' => Http::response(['status' => 'stopped'], 404),

@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Channel;
 use App\Models\Episode;
 use App\Models\Series;
+use App\Models\StrmFileMapping;
 use Illuminate\Support\Facades\Log;
 
 class NfoService
@@ -14,7 +15,7 @@ class NfoService
      *
      * @param  Series  $series  The series to generate NFO for
      * @param  string  $path  Directory path where tvshow.nfo should be written
-     * @param  \App\Models\StrmFileMapping|null  $mapping  Optional mapping to check/update hash
+     * @param  StrmFileMapping|null  $mapping  Optional mapping to check/update hash
      * @param  bool  $nameFilterEnabled  Whether name filtering is enabled
      * @param  array  $nameFilterPatterns  Patterns to filter from names
      * @return bool Success status
@@ -141,7 +142,7 @@ class NfoService
      * @param  Episode  $episode  The episode to generate NFO for
      * @param  Series  $series  The parent series
      * @param  string  $filePath  Path to the .strm file (will be converted to .nfo)
-     * @param  \App\Models\StrmFileMapping|null  $mapping  Optional mapping to check/update hash
+     * @param  StrmFileMapping|null  $mapping  Optional mapping to check/update hash
      * @param  bool  $nameFilterEnabled  Whether name filtering is enabled
      * @param  array  $nameFilterPatterns  Patterns to filter from names
      * @return bool Success status
@@ -241,7 +242,7 @@ class NfoService
      *
      * @param  Channel  $channel  The channel/movie to generate NFO for
      * @param  string  $filePath  Path to the .strm file (will be converted to .nfo)
-     * @param  \App\Models\StrmFileMapping|null  $mapping  Optional mapping to check/update hash
+     * @param  StrmFileMapping|null  $mapping  Optional mapping to check/update hash
      * @param  array  $options  Optional options including name_filter_enabled and name_filter_patterns
      * @return bool Success status
      */
@@ -501,7 +502,7 @@ class NfoService
      *
      * @param  string  $path  Full path to write the file
      * @param  string  $content  Content to write
-     * @param  \App\Models\StrmFileMapping|null  $mapping  Optional mapping to check/update hash
+     * @param  StrmFileMapping|null  $mapping  Optional mapping to check/update hash
      * @return bool Success status
      */
     private function writeFileWithHash(string $path, string $content, $mapping = null): bool

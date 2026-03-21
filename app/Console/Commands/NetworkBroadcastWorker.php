@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Models\Network;
 use App\Services\NetworkBroadcastService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
@@ -50,7 +51,7 @@ class NetworkBroadcastWorker extends Command
         bool $runOnce,
         int $interval
     ): int {
-        $network = \App\Models\Network::where('uuid', $uuid)->first();
+        $network = Network::where('uuid', $uuid)->first();
 
         if (! $network) {
             $this->error("Network not found: {$uuid}");

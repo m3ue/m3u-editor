@@ -1,16 +1,29 @@
 <?php
 
 use App\Http\Controllers\AssetPreviewController;
+use App\Http\Controllers\ChannelController;
+use App\Http\Controllers\EpgController;
 use App\Http\Controllers\EpgFileController;
 use App\Http\Controllers\EpgGenerateController;
+use App\Http\Controllers\GroupController;
 use App\Http\Controllers\LogoProxyController;
 use App\Http\Controllers\LogoRepositoryController;
+use App\Http\Controllers\MediaServerProxyController;
 use App\Http\Controllers\NetworkEpgController;
+use App\Http\Controllers\NetworkHlsController;
 use App\Http\Controllers\NetworkPlaylistController;
 use App\Http\Controllers\NetworkStreamController;
+use App\Http\Controllers\PlayerController;
+use App\Http\Controllers\PlaylistController;
 use App\Http\Controllers\PlaylistGenerateController;
+use App\Http\Controllers\ProxyController;
+use App\Http\Controllers\SchedulesDirectImageProxyController;
+use App\Http\Controllers\ShortURLController;
+use App\Http\Controllers\UserController;
 use App\Http\Controllers\WatchProgressController;
+use App\Http\Controllers\WebhookTestController;
 use App\Http\Controllers\XtreamApiController;
+use App\Http\Controllers\XtreamStreamController;
 use App\Services\ExternalIpService;
 use Illuminate\Support\Facades\Route;
 
@@ -30,7 +43,7 @@ Route::post('/admin/refresh-external-ip', function (ExternalIpService $ipService
  * Short URL forwarding route
  * This allows short URLs to forward to a target URL while preserving any additional path segments (e.g. for device.xml forwarding)
  */
-Route::get('/s/{shortUrlKey}/{path?}', \App\Http\Controllers\ShortURLController::class)
+Route::get('/s/{shortUrlKey}/{path?}', ShortURLController::class)
     ->where('shortUrlKey', '[A-Za-z0-9\-]+')
     ->where('path', '.*')
     ->name('shorturl.forward');
@@ -38,7 +51,7 @@ Route::get('/s/{shortUrlKey}/{path?}', \App\Http\Controllers\ShortURLController:
 /*
  * In-app player route
  */
-Route::get('/player/popout', [\App\Http\Controllers\PlayerController::class, 'popout'])
+Route::get('/player/popout', [PlayerController::class, 'popout'])
     ->name('player.popout');
 
 /*
@@ -46,9 +59,9 @@ Route::get('/player/popout', [\App\Http\Controllers\PlayerController::class, 'po
  */
 
 // Test webhook endpoint
-Route::post('/webhook/test', \App\Http\Controllers\WebhookTestController::class)
+Route::post('/webhook/test', WebhookTestController::class)
     ->name('webhook.test.post');
-Route::get('/webhook/test', \App\Http\Controllers\WebhookTestController::class)
+Route::get('/webhook/test', WebhookTestController::class)
     ->name('webhook.test.get');
 
 // If local env, show PHP info screen
@@ -92,27 +105,27 @@ Route::get('/{uuid}/playlist.m3u', PlaylistGenerateController::class)
     ->name('playlist.generate');
 
 // Auth-aware HDHR routes (path-based auth to support clients that ignore query string auth)
-Route::get('/{uuid}/hdhr/{username}/{password}/device.xml', [\App\Http\Controllers\PlaylistGenerateController::class, 'hdhr'])
+Route::get('/{uuid}/hdhr/{username}/{password}/device.xml', [PlaylistGenerateController::class, 'hdhr'])
     ->name('playlist.hdhr.auth_device');
-Route::get('/{uuid}/hdhr/{username}/{password}', [\App\Http\Controllers\PlaylistGenerateController::class, 'hdhrOverview'])
+Route::get('/{uuid}/hdhr/{username}/{password}', [PlaylistGenerateController::class, 'hdhrOverview'])
     ->name('playlist.hdhr.overview.auth');
-Route::get('/{uuid}/hdhr/{username}/{password}/discover.json', [\App\Http\Controllers\PlaylistGenerateController::class, 'hdhrDiscover'])
+Route::get('/{uuid}/hdhr/{username}/{password}/discover.json', [PlaylistGenerateController::class, 'hdhrDiscover'])
     ->name('playlist.hdhr.discover.auth');
-Route::get('/{uuid}/hdhr/{username}/{password}/lineup.json', [\App\Http\Controllers\PlaylistGenerateController::class, 'hdhrLineup'])
+Route::get('/{uuid}/hdhr/{username}/{password}/lineup.json', [PlaylistGenerateController::class, 'hdhrLineup'])
     ->name('playlist.hdhr.lineup.auth');
-Route::get('/{uuid}/hdhr/{username}/{password}/lineup_status.json', [\App\Http\Controllers\PlaylistGenerateController::class, 'hdhrLineupStatus'])
+Route::get('/{uuid}/hdhr/{username}/{password}/lineup_status.json', [PlaylistGenerateController::class, 'hdhrLineupStatus'])
     ->name('playlist.hdhr.lineup_status.auth');
 
 // Legacy/non-auth HDHR routes (keep for backwards compatibility and query-var auth)
-Route::get('/{uuid}/hdhr/device.xml', [\App\Http\Controllers\PlaylistGenerateController::class, 'hdhr'])
+Route::get('/{uuid}/hdhr/device.xml', [PlaylistGenerateController::class, 'hdhr'])
     ->name('playlist.hdhr');
-Route::get('/{uuid}/hdhr', [\App\Http\Controllers\PlaylistGenerateController::class, 'hdhrOverview'])
+Route::get('/{uuid}/hdhr', [PlaylistGenerateController::class, 'hdhrOverview'])
     ->name('playlist.hdhr.overview');
-Route::get('/{uuid}/hdhr/discover.json', [\App\Http\Controllers\PlaylistGenerateController::class, 'hdhrDiscover'])
+Route::get('/{uuid}/hdhr/discover.json', [PlaylistGenerateController::class, 'hdhrDiscover'])
     ->name('playlist.hdhr.discover');
-Route::get('/{uuid}/hdhr/lineup.json', [\App\Http\Controllers\PlaylistGenerateController::class, 'hdhrLineup'])
+Route::get('/{uuid}/hdhr/lineup.json', [PlaylistGenerateController::class, 'hdhrLineup'])
     ->name('playlist.hdhr.lineup');
-Route::get('/{uuid}/hdhr/lineup_status.json', [\App\Http\Controllers\PlaylistGenerateController::class, 'hdhrLineupStatus'])
+Route::get('/{uuid}/hdhr/lineup_status.json', [PlaylistGenerateController::class, 'hdhrLineupStatus'])
     ->name('playlist.hdhr.lineup_status');
 
 // Generate EPG playlist from the playlist configuration
@@ -153,29 +166,11 @@ Route::get('/media-integration/{integration}/networks/epg.xml', [NetworkPlaylist
     ->name('media-integration.networks.epg');
 
 // Network HLS broadcast routes (for continuous live broadcasting)
-Route::get('/network/{network}/live.m3u8', [\App\Http\Controllers\NetworkHlsController::class, 'playlist'])
+Route::get('/network/{network}/live.m3u8', [NetworkHlsController::class, 'playlist'])
     ->name('network.hls.playlist');
-Route::get('/network/{network}/{segment}.ts', [\App\Http\Controllers\NetworkHlsController::class, 'segment'])
+Route::get('/network/{network}/{segment}.ts', [NetworkHlsController::class, 'segment'])
     ->name('network.hls.segment')
     ->where('segment', 'live[0-9]+');
-
-/*
- * Proxy routes (redirects to m3u-proxy API)
- */
-
-// Deprecated route for episode - redirect to m3u-proxy API
-Route::get('/shared/stream/e/{encodedId}.{format?}', function (string $encodedId) {
-    $id = base64_decode($encodedId);
-
-    return redirect()->route('m3u-proxy.episode', ['id' => $id]);
-})->name('shared.stream.episode');
-
-// Deprecated route for channel - redirect to m3u-proxy API
-Route::get('/shared/stream/{encodedId}.{format?}', function (string $encodedId) {
-    $id = base64_decode($encodedId);
-
-    return redirect()->route('m3u-proxy.channel', ['id' => $id]);
-})->name('shared.stream.channel');
 
 /*
  * API routes
@@ -185,89 +180,89 @@ Route::get('/shared/stream/{encodedId}.{format?}', function (string $encodedId) 
 Route::group(['middleware' => ['auth:sanctum']], function () {
     // Get the authenticated user
     Route::group(['prefix' => 'user'], function () {
-        Route::get('playlists', [\App\Http\Controllers\UserController::class, 'playlists'])
+        Route::get('playlists', [UserController::class, 'playlists'])
             ->name('api.user.playlists');
-        Route::get('epgs', [\App\Http\Controllers\UserController::class, 'epgs'])
+        Route::get('epgs', [UserController::class, 'epgs'])
             ->name('api.user.epgs');
     });
 
     // Channel API routes
-    Route::get('channel/get', [\App\Http\Controllers\ChannelController::class, 'index'])
+    Route::get('channel/get', [ChannelController::class, 'index'])
         ->name('api.channels.index');
-    Route::get('channel/{id}', [\App\Http\Controllers\ChannelController::class, 'show'])
+    Route::get('channel/{id}', [ChannelController::class, 'show'])
         ->where('id', '[0-9]+')
         ->name('api.channels.show');
-    Route::patch('channel/{id}', [\App\Http\Controllers\ChannelController::class, 'update'])
+    Route::patch('channel/{id}', [ChannelController::class, 'update'])
         ->name('api.channels.update');
-    Route::post('channel/toggle', [\App\Http\Controllers\ChannelController::class, 'toggle'])
+    Route::post('channel/toggle', [ChannelController::class, 'toggle'])
         ->name('api.channels.toggle');
-    Route::post('channel/bulk-update', [\App\Http\Controllers\ChannelController::class, 'bulkUpdate'])
+    Route::post('channel/bulk-update', [ChannelController::class, 'bulkUpdate'])
         ->name('api.channels.bulk-update');
-    Route::get('channel/{id}/health', [\App\Http\Controllers\ChannelController::class, 'healthcheck'])
+    Route::get('channel/{id}/health', [ChannelController::class, 'healthcheck'])
         ->name('api.channels.healthcheck');
-    Route::get('channel/playlist/{uuid}/health/{search}', [\App\Http\Controllers\ChannelController::class, 'healthcheckByPlaylist'])
+    Route::get('channel/playlist/{uuid}/health/{search}', [ChannelController::class, 'healthcheckByPlaylist'])
         ->name('api.channels.healthcheck.search');
-    Route::get('channel/{id}/availability', [\App\Http\Controllers\ChannelController::class, 'checkAvailability'])
+    Route::get('channel/{id}/availability', [ChannelController::class, 'checkAvailability'])
         ->where('id', '[0-9]+')
         ->name('api.channels.availability');
-    Route::post('channel/check-availability', [\App\Http\Controllers\ChannelController::class, 'batchCheckAvailability'])
+    Route::post('channel/check-availability', [ChannelController::class, 'batchCheckAvailability'])
         ->name('api.channels.batch-availability');
-    Route::post('channel/{id}/stability-test', [\App\Http\Controllers\ChannelController::class, 'stabilityTest'])
+    Route::post('channel/{id}/stability-test', [ChannelController::class, 'stabilityTest'])
         ->where('id', '[0-9]+')
         ->name('api.channels.stability-test');
 
     // Channel failover API routes
-    Route::post('channel/{id}/failovers', [\App\Http\Controllers\ChannelController::class, 'setFailovers'])
+    Route::post('channel/{id}/failovers', [ChannelController::class, 'setFailovers'])
         ->where('id', '[0-9]+')
         ->name('api.channels.failovers.set');
-    Route::delete('channel/{id}/failovers', [\App\Http\Controllers\ChannelController::class, 'clearFailovers'])
+    Route::delete('channel/{id}/failovers', [ChannelController::class, 'clearFailovers'])
         ->where('id', '[0-9]+')
         ->name('api.channels.failovers.clear');
-    Route::post('channel/bulk-set-failovers', [\App\Http\Controllers\ChannelController::class, 'bulkSetFailovers'])
+    Route::post('channel/bulk-set-failovers', [ChannelController::class, 'bulkSetFailovers'])
         ->name('api.channels.failovers.bulk-set');
 
     // Group API routes
     Route::group(['prefix' => 'group'], function () {
-        Route::post('/', [\App\Http\Controllers\GroupController::class, 'store'])
+        Route::post('/', [GroupController::class, 'store'])
             ->name('api.groups.store');
-        Route::patch('{id}', [\App\Http\Controllers\GroupController::class, 'update'])
+        Route::patch('{id}', [GroupController::class, 'update'])
             ->where('id', '[0-9]+')
             ->name('api.groups.update');
-        Route::post('{id}/move-channels', [\App\Http\Controllers\GroupController::class, 'moveChannels'])
+        Route::post('{id}/move-channels', [GroupController::class, 'moveChannels'])
             ->where('id', '[0-9]+')
             ->name('api.groups.move-channels');
-        Route::delete('{id}', [\App\Http\Controllers\GroupController::class, 'destroy'])
+        Route::delete('{id}', [GroupController::class, 'destroy'])
             ->where('id', '[0-9]+')
             ->name('api.groups.destroy');
-        Route::get('get', [\App\Http\Controllers\GroupController::class, 'index'])
+        Route::get('get', [GroupController::class, 'index'])
             ->name('api.groups.index');
-        Route::get('{id}', [\App\Http\Controllers\GroupController::class, 'show'])
+        Route::get('{id}', [GroupController::class, 'show'])
             ->where('id', '[0-9]+')
             ->name('api.groups.show');
     });
 
     // Playlist API routes (authenticated)
-    Route::get('playlist/{uuid}/stats', [\App\Http\Controllers\PlaylistController::class, 'stats'])
+    Route::get('playlist/{uuid}/stats', [PlaylistController::class, 'stats'])
         ->name('api.playlist.stats');
-    Route::post('playlist/{uuid}/merge-channels', [\App\Http\Controllers\PlaylistController::class, 'mergeChannels'])
+    Route::post('playlist/{uuid}/merge-channels', [PlaylistController::class, 'mergeChannels'])
         ->name('api.playlist.merge-channels');
 
     // Proxy API routes
-    Route::get('proxy/status', [\App\Http\Controllers\ProxyController::class, 'status'])
+    Route::get('proxy/status', [ProxyController::class, 'status'])
         ->name('api.proxy.status');
-    Route::get('proxy/streams/active', [\App\Http\Controllers\ProxyController::class, 'streams'])
+    Route::get('proxy/streams/active', [ProxyController::class, 'streams'])
         ->name('api.proxy.streams');
 });
 
 // Playlist API routes (public with UUID auth)
 Route::group(['prefix' => 'playlist'], function () {
-    Route::get('{uuid}/sync', [\App\Http\Controllers\PlaylistController::class, 'refreshPlaylist'])
+    Route::get('{uuid}/sync', [PlaylistController::class, 'refreshPlaylist'])
         ->name('api.playlist.sync');
 });
 
 // EPG API routes
 Route::group(['prefix' => 'epg'], function () {
-    Route::get('{uuid}/sync', [\App\Http\Controllers\EpgController::class, 'refreshEpg'])
+    Route::get('{uuid}/sync', [EpgController::class, 'refreshEpg'])
         ->name('api.epg.sync');
 });
 
@@ -281,24 +276,24 @@ Route::match(['get', 'post'], '/get.php', [XtreamApiController::class, 'handle']
 Route::get('/xmltv.php', [XtreamApiController::class, 'epg'])->name('xtream.api.epg');
 
 // Stream endpoints
-Route::get('/live/{username}/{password}/{streamId}.{format?}', [App\Http\Controllers\XtreamStreamController::class, 'handleLive'])
+Route::get('/live/{username}/{password}/{streamId}.{format?}', [XtreamStreamController::class, 'handleLive'])
     ->name('xtream.stream.live.root');
-Route::get('/movie/{username}/{password}/{streamId}.{format?}', [App\Http\Controllers\XtreamStreamController::class, 'handleVod'])
+Route::get('/movie/{username}/{password}/{streamId}.{format?}', [XtreamStreamController::class, 'handleVod'])
     ->name('xtream.stream.vod.root');
-Route::get('/series/{username}/{password}/{streamId}.{format?}', [App\Http\Controllers\XtreamStreamController::class, 'handleSeries'])
+Route::get('/series/{username}/{password}/{streamId}.{format?}', [XtreamStreamController::class, 'handleSeries'])
     ->name('xtream.stream.series.root');
 
 // Timeshift endpoints
-Route::get('/timeshift/{username}/{password}/{duration}/{date}/{streamId}.{format?}', [App\Http\Controllers\XtreamStreamController::class, 'handleTimeshift'])
+Route::get('/timeshift/{username}/{password}/{duration}/{date}/{streamId}.{format?}', [XtreamStreamController::class, 'handleTimeshift'])
     ->name('xtream.stream.timeshift.root');
 
 // (Fallback) direct stream access (without /live/ or /movie/ prefix)
-Route::get('/{username}/{password}/{streamId}.{format?}', [App\Http\Controllers\XtreamStreamController::class, 'handleDirect'])
+Route::get('/{username}/{password}/{streamId}.{format?}', [XtreamStreamController::class, 'handleDirect'])
     ->name('xtream.stream.direct');
 
 // Add this route for the image proxy
 Route::get('/schedules-direct/{epg}/image/{imageHash}', [
-    \App\Http\Controllers\SchedulesDirectImageProxyController::class,
+    SchedulesDirectImageProxyController::class,
     'proxyImage',
 ])->name('schedules-direct.image.proxy');
 
@@ -307,12 +302,12 @@ Route::get('/schedules-direct/{epg}/image/{imageHash}', [
  * These hide the API key from external clients
  */
 Route::get('/media-server/{integrationId}/image/{itemId}/{imageType?}', [
-    \App\Http\Controllers\MediaServerProxyController::class,
+    MediaServerProxyController::class,
     'proxyImage',
 ])->name('media-server.image.proxy');
 
 Route::get('/media-server/{integrationId}/stream/{itemId}.{container}', [
-    \App\Http\Controllers\MediaServerProxyController::class,
+    MediaServerProxyController::class,
     'proxyStream',
 ])->name('media-server.stream.proxy');
 
@@ -321,7 +316,7 @@ Route::get('/media-server/{integrationId}/stream/{itemId}.{container}', [
  * Streams local video files mounted to the container
  */
 Route::get('/local-media/{integration}/stream/{item}', [
-    \App\Http\Controllers\MediaServerProxyController::class,
+    MediaServerProxyController::class,
     'streamLocalMedia',
 ])->name('local-media.stream');
 
@@ -330,6 +325,6 @@ Route::get('/local-media/{integration}/stream/{item}', [
  * Proxies video files from a WebDAV server
  */
 Route::get('/webdav-media/{integration}/stream/{item}', [
-    \App\Http\Controllers\MediaServerProxyController::class,
+    MediaServerProxyController::class,
     'streamWebDavMedia',
 ])->name('webdav-media.stream');

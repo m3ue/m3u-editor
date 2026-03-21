@@ -2,12 +2,13 @@
 
 namespace Database\Factories;
 
+use App\Models\Channel;
 use App\Models\Network;
 use App\Models\NetworkProgramme;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
- * @extends \Illuminate\Database\Eloquent\Factories\Factory<\App\Models\NetworkProgramme>
+ * @extends Factory<NetworkProgramme>
  */
 class NetworkProgrammeFactory extends Factory
 {
@@ -29,7 +30,7 @@ class NetworkProgrammeFactory extends Factory
             'start_time' => $start,
             'end_time' => $start->copy()->addMinutes($duration),
             'duration_seconds' => $duration * 60,
-            'contentable_type' => \App\Models\Channel::class,
+            'contentable_type' => Channel::class,
             'contentable_id' => 1, // Dummy ID - tests should override with real content
         ];
     }

@@ -3,13 +3,14 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
+use Illuminate\View\View;
 
 class PlayerController extends Controller
 {
     /**
      * Display the popout player view.
      *
-     * @return \Illuminate\View\View
+     * @return View
      */
     public function popout(Request $request)
     {

@@ -3,7 +3,6 @@
 namespace App\Livewire;
 
 use App\Enums\ChannelLogoType;
-use App\Facades\ProxyFacade;
 use App\Filament\Resources\Channels\ChannelResource;
 use App\Filament\Resources\EpgChannels\EpgChannelResource;
 use App\Models\Channel;
@@ -36,6 +35,10 @@ class EpgViewer extends Component implements HasActions, HasForms
     public $editingChannelId = null;
 
     public $viewOnly = false;
+
+    public $username = null;
+
+    public $password = null;
 
     public $vod = true;
 
@@ -112,9 +115,7 @@ class EpgViewer extends Component implements HasActions, HasForms
 
                         // Get the URL based on proxy settings
                         if ($proxyEnabled) {
-                            $url = ProxyFacade::getProxyUrlForChannel(
-                                id: $updated->id,
-                            );
+                            $url = $record->getProxyUrl();
                         }
 
                         if (Str::endsWith($url, '.m3u8')) {
@@ -122,7 +123,7 @@ class EpgViewer extends Component implements HasActions, HasForms
                         } elseif (Str::endsWith($url, '.ts')) {
                             $channelFormat = 'ts';
                         } else {
-                            $channelFormat = $channel->container_extension ?? 'ts';
+                            $channelFormat = $updated->container_extension ?? 'ts';
                         }
 
                         // MKV compatibility hack
@@ -257,6 +258,8 @@ class EpgViewer extends Component implements HasActions, HasForms
         return view('livewire.epg-viewer', [
             'route' => $route,
             'vod' => $this->vod,
+            'username' => $this->username,
+            'password' => $this->password,
         ]);
     }
 }

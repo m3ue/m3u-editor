@@ -14,7 +14,7 @@ use Illuminate\Support\Facades\Facade;
  * @method static bool isOnBranch(string $branch)
  * @method static bool isProduction()
  *
- * @see \App\Services\GitInfoService
+ * @see GitInfoService
  */
 class GitInfo extends Facade
 {

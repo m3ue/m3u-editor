@@ -417,7 +417,7 @@ describe('StrmFileMapping helper methods', function () {
         $strmPath = '/path/to/movie.strm';
         $expectedNfoPath = '/path/to/movie.nfo';
 
-        $reflection = new \ReflectionClass(StrmFileMapping::class);
+        $reflection = new ReflectionClass(StrmFileMapping::class);
         $method = $reflection->getMethod('strmPathToNfoPath');
         $method->setAccessible(true);
 
@@ -430,7 +430,7 @@ describe('StrmFileMapping helper methods', function () {
         $strmPath = '/path/to/MOVIE.STRM';
         $expectedNfoPath = '/path/to/MOVIE.nfo';
 
-        $reflection = new \ReflectionClass(StrmFileMapping::class);
+        $reflection = new ReflectionClass(StrmFileMapping::class);
         $method = $reflection->getMethod('strmPathToNfoPath');
         $method->setAccessible(true);
 
@@ -442,7 +442,7 @@ describe('StrmFileMapping helper methods', function () {
     it('does not convert non-STRM paths', function () {
         $nonStrmPath = '/path/to/video.mp4';
 
-        $reflection = new \ReflectionClass(StrmFileMapping::class);
+        $reflection = new ReflectionClass(StrmFileMapping::class);
         $method = $reflection->getMethod('strmPathToNfoPath');
         $method->setAccessible(true);
 

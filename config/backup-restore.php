@@ -1,6 +1,7 @@
 <?php
 
 declare(strict_types=1);
+use Wnx\LaravelBackupRestore\HealthChecks\Checks\DatabaseHasTables;
 
 return [
 
@@ -13,6 +14,6 @@ return [
      * The restore command will fail, if any health checks fail.
      */
     'health-checks' => [
-        \Wnx\LaravelBackupRestore\HealthChecks\Checks\DatabaseHasTables::class,
+        DatabaseHasTables::class,
     ],
 ];

@@ -166,14 +166,14 @@ class XtreamService
         return $this->call($this->makeUrl('get_series', ['category_id' => $catId])) ?? [];
     }
 
-    public function getVodInfo(string $vodId): array
+    public function getVodInfo(string $vodId, int $timeout = 60): array
     {
-        return $this->call($this->makeUrl('get_vod_info', ['vod_id' => $vodId])) ?? [];
+        return $this->call($this->makeUrl('get_vod_info', ['vod_id' => $vodId]), $timeout) ?? [];
     }
 
-    public function getSeriesInfo(string $seriesId): array
+    public function getSeriesInfo(string $seriesId, int $timeout = 60): array
     {
-        return $this->call($this->makeUrl('get_series_info', ['series_id' => $seriesId])) ?? [];
+        return $this->call($this->makeUrl('get_series_info', ['series_id' => $seriesId]), $timeout) ?? [];
     }
 
     public function buildMovieUrl(string $id, ?string $ext): string

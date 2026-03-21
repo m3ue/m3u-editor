@@ -68,7 +68,7 @@ class SyncListener
     /**
      * Handle auto-merge channels after playlist sync.
      */
-    private function handleAutoMergeChannels(\App\Models\Playlist $playlist): void
+    private function handleAutoMergeChannels(Playlist $playlist): void
     {
         try {
             // Get auto-merge configuration

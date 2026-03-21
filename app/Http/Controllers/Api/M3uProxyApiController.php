@@ -15,6 +15,7 @@ use App\Services\NetworkBroadcastService;
 use App\Services\ProfileService;
 use App\Settings\GeneralSettings;
 use Exception;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Symfony\Component\HttpFoundation\RedirectResponse;
@@ -243,7 +244,7 @@ class M3uProxyApiController extends Controller
      *   }
      * }
      *
-     * @return \Illuminate\Http\JsonResponse
+     * @return JsonResponse
      */
     public function resolveFailoverUrl(Request $request)
     {
@@ -358,16 +359,13 @@ class M3uProxyApiController extends Controller
                 return;
             }
 
-            // Only decrement on stream_stopped events
-            // This ensures we decrement exactly once per stream, avoiding race conditions
+            // Only clean up on stream_stopped events
             if ($eventType === 'stream_stopped') {
                 ProfileService::decrementConnections($profile, $streamId);
 
-                Log::debug('Decremented profile connections via webhook', [
+                Log::debug('Cleaned up stream tracking via webhook', [
                     'profile_id' => $profileId,
                     'stream_id' => $streamId,
-                    'event_type' => $eventType,
-                    'new_count' => ProfileService::getConnectionCount($profile),
                 ]);
             }
         } catch (Exception $e) {

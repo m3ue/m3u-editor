@@ -7,6 +7,7 @@ use App\Services\XtreamService;
 use App\Traits\ProviderRequestDelay;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 class SyncXtreamSeries implements ShouldQueue
@@ -69,46 +70,58 @@ class SyncXtreamSeries implements ShouldQueue
                 ->toArray());
         }
         foreach ($this->series as $seriesId) {
-            // Check if the series exists for the playlist
-            $playlistSeries = $playlist->series()
-                ->where('source_series_id', $seriesId)
-                ->first();
-            if (! $playlistSeries) {
-                // Get the series info from the API with provider throttling
-                $seriesInfo = $this->withProviderThrottling(fn () => $xtream->getSeriesInfo($seriesId)['info']);
+            try {
+                // Check if the series exists for the playlist
+                $playlistSeries = $playlist->series()
+                    ->where('source_series_id', $seriesId)
+                    ->first();
+                if (! $playlistSeries) {
+                    // Get the series info from the API with provider throttling.
+                    // Use a 60s per-request timeout so a hanging provider series
+                    // does not stall the entire job for 15 minutes.
+                    $seriesInfo = $this->withProviderThrottling(fn () => $xtream->getSeriesInfo($seriesId, timeout: 60)['info'] ?? []);
 
-                // Create new series
-                $playlistSeries = $playlist->series()->create([
-                    'enabled' => true, // Enable the series by default
-                    'name' => $seriesInfo['name'],
-                    'source_series_id' => $seriesId,
-                    'source_category_id' => $this->catId,
-                    'import_batch_no' => $batchNo,
-                    'user_id' => $playlist->user_id,
+                    // Create new series
+                    $playlistSeries = $playlist->series()->create([
+                        'enabled' => true, // Enable the series by default
+                        'name' => $seriesInfo['name'],
+                        'source_series_id' => $seriesId,
+                        'source_category_id' => $this->catId,
+                        'import_batch_no' => $batchNo,
+                        'user_id' => $playlist->user_id,
+                        'playlist_id' => $playlist->id,
+                        'category_id' => $playlistCategory->id,
+                        'sort' => $seriesInfo['num'] ?? null,
+                        'cover' => $seriesInfo['cover'] ?? null,
+                        'plot' => $seriesInfo['plot'] ?? null,
+                        'genre' => $seriesInfo['genre'] ?? null,
+                        'release_date' => $seriesInfo['releaseDate'] ?? $seriesInfo['release_date'] ?? null,
+                        'cast' => $seriesInfo['cast'] ?? null,
+                        'director' => $seriesInfo['director'] ?? null,
+                        'rating' => $seriesInfo['rating'] ?? null,
+                        'rating_5based' => (float) ($seriesInfo['rating_5based'] ?? 0),
+                        'backdrop_path' => $seriesInfo['backdrop_path'] ?? null,
+                        'youtube_trailer' => $seriesInfo['youtube_trailer'] ?? null,
+                    ]);
+                } else {
+                    // Update the series if it exists
+                    $playlistSeries->update([
+                        'new' => false,
+                        'source_category_id' => $this->catId,
+                        'import_batch_no' => $batchNo,
+                    ]);
+                }
+                if ($playlistSeries->enabled) {
+                    dispatch(new ProcessM3uImportSeriesEpisodes($playlistSeries));
+                }
+            } catch (\Throwable $e) {
+                // Skip this series and continue — a single bad or hung provider
+                // series should not abort the entire category import.
+                Log::warning('SyncXtreamSeries: skipping series due to error', [
+                    'series_id' => $seriesId,
                     'playlist_id' => $playlist->id,
-                    'category_id' => $playlistCategory->id,
-                    'sort' => $seriesInfo['num'] ?? null,
-                    'cover' => $seriesInfo['cover'] ?? null,
-                    'plot' => $seriesInfo['plot'] ?? null,
-                    'genre' => $seriesInfo['genre'] ?? null,
-                    'release_date' => $seriesInfo['releaseDate'] ?? $item['release_date'] ?? null,
-                    'cast' => $seriesInfo['cast'] ?? null,
-                    'director' => $seriesInfo['director'],
-                    'rating' => $seriesInfo['rating'] ?? null,
-                    'rating_5based' => (float) $seriesInfo['rating_5based'] ?? null,
-                    'backdrop_path' => $seriesInfo['backdrop_path'] ?? null,
-                    'youtube_trailer' => $seriesInfo['youtube_trailer'] ?? null,
+                    'error' => $e->getMessage(),
                 ]);
-            } else {
-                // Update the series if it exists
-                $playlistSeries->update([
-                    'new' => false,
-                    'source_category_id' => $this->catId,
-                    'import_batch_no' => $batchNo,
-                ]);
-            }
-            if ($playlistSeries->enabled) {
-                dispatch(new ProcessM3uImportSeriesEpisodes($playlistSeries));
             }
         }
     }

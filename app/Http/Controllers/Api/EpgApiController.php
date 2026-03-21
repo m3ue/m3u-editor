@@ -18,6 +18,7 @@ use Exception;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
 
 class EpgApiController extends Controller
@@ -168,11 +169,12 @@ class EpgApiController extends Controller
         }
 
         // Handle network playlists - they have networks with programmes instead of channels with EPG
-        if ($playlist instanceof \App\Models\Playlist && $playlist->is_network_playlist) {
+        if ($playlist instanceof Playlist && $playlist->is_network_playlist) {
             return $this->getDataForNetworkPlaylist($playlist, $request);
         }
 
         $cacheService = new EpgCacheService;
+        $user = $playlist->user;
 
         // Pagination parameters
         $page = (int) $request->get('page', 1);
@@ -180,6 +182,14 @@ class EpgApiController extends Controller
         $skip = max(0, ($page - 1) * $perPage);
         $search = $request->get('search', null);
         $vod = (bool) $request->get('vod', false);
+        $username = $request->get('username', null);
+        $password = $request->get('password', null);
+
+        // If not username/password provided, use playlist credentials
+        if (! $username || ! $password) {
+            $username = $user->name ?? 'admin';
+            $password = $playlist->uuid;
+        }
 
         // Get parsed date range
         $dateRange = $this->parseDateRange($request);
@@ -330,31 +340,19 @@ class EpgApiController extends Controller
                         break;
                 }
 
-                // Always proxy the internal proxy so we can attempt to transcode the stream for better compatibility
-                $url = route('m3u-proxy.channel.player', [
-                    'id' => $channel->id,
-                    'uuid' => $playlist->uuid,
-                ]);
-
-                // Determine the channel format based on URL or container extension
-                $originalUrl = $channel->url_custom ?? $channel->url;
-                if (Str::endsWith($originalUrl, '.m3u8')) {
-                    $channelFormat = 'm3u8';
-                } elseif (Str::endsWith($originalUrl, '.ts')) {
-                    $channelFormat = 'ts';
-                } else {
-                    $channelFormat = $channel->container_extension ?? 'ts';
-                }
+                // Get the channel URL and format from the computed attribute, which handles proxy logic
+                [$url, $channelFormat] = $channel->getProxyUrl(withFormat: true, username: $username, password: $password);
 
                 // Get the icon
                 $icon = '';
                 if ($channel->logo) {
                     // Logo override takes precedence
                     $icon = $channel->logo;
-                } elseif ($channel->logo_type === ChannelLogoType::Epg) {
-                    $icon = $epgData->icon ?? '';
-                } elseif ($channel->logo_type === ChannelLogoType::Channel) {
+                } elseif ($channel->logo_type === ChannelLogoType::Epg && ($channel->epg_icon || $channel->epg_icon_custom)) {
+                    $icon = $channel->epg_icon_custom ?? $channel->epg_icon ?? '';
+                } elseif ($channel->logo_type === ChannelLogoType::Channel && ($channel->logo || $channel->logo_internal)) {
                     $icon = $channel->logo ?? $channel->logo_internal ?? '';
+                    $icon = filter_var($icon, FILTER_VALIDATE_URL) ? $icon : url('/placeholder.png');
                 }
                 if (empty($icon)) {
                     $icon = url('/placeholder.png');
@@ -597,7 +595,7 @@ class EpgApiController extends Controller
      * Get EPG data for a network playlist.
      * Networks act as channels, and their programmes provide the EPG schedule.
      */
-    private function getDataForNetworkPlaylist(\App\Models\Playlist $playlist, Request $request)
+    private function getDataForNetworkPlaylist(Playlist $playlist, Request $request)
     {
         // Pagination parameters
         $page = (int) $request->get('page', 1);

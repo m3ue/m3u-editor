@@ -57,6 +57,7 @@ class PlaylistAuth extends Model
                 CustomPlaylist::class,
                 MergedPlaylist::class,
                 Playlist::class,
+                PlaylistAlias::class,
             ]);
     }
 
@@ -85,8 +86,8 @@ class PlaylistAuth extends Model
      */
     public function assignTo(Model $model): void
     {
-        if (! in_array(get_class($model), [Playlist::class, CustomPlaylist::class, MergedPlaylist::class])) {
-            throw new InvalidArgumentException('PlaylistAuth can only be assigned to Playlist, CustomPlaylist, or MergedPlaylist models');
+        if (! in_array(get_class($model), [Playlist::class, CustomPlaylist::class, MergedPlaylist::class, PlaylistAlias::class])) {
+            throw new InvalidArgumentException('PlaylistAuth can only be assigned to Playlist, CustomPlaylist, MergedPlaylist, or PlaylistAlias models');
         }
 
         // Remove any existing assignment

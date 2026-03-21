@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Asset;
 use Carbon\CarbonImmutable;
+use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -189,7 +190,7 @@ class AssetInventoryService
         return str_ends_with(strtolower($path), '.json');
     }
 
-    protected function deleteCompanionLogoMetadata(\Illuminate\Contracts\Filesystem\Filesystem $disk, string $path): void
+    protected function deleteCompanionLogoMetadata(Filesystem $disk, string $path): void
     {
         $metaPath = $this->companionLogoMetadataPath($path);
 

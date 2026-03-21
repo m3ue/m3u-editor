@@ -2,16 +2,16 @@
     {{-- Filter tabs --}}
     <div class="flex flex-wrap gap-2 mb-4">
         @php
-            $tabs = [
-                'all' => ['label' => 'All Releases', 'color' => 'gray'],
-                'latest' => ['label' => 'Latest', 'color' => 'primary'],
-                'dev' => ['label' => 'Dev', 'color' => 'warning'],
-                'experimental' => ['label' => 'Experimental', 'color' => 'danger'],
-            ];
+$tabs = [
+    'all' => ['label' => 'All Releases', 'color' => 'gray'],
+    'master' => ['label' => 'Latest', 'color' => 'primary'],
+    'dev' => ['label' => 'Dev', 'color' => 'warning'],
+    'experimental' => ['label' => 'Experimental', 'color' => 'danger'],
+];
         @endphp
 
         @foreach ($tabs as $key => $tab)
-            <x-filament::button wire:click="setFilter('{{ $key }}')" color="{{ $tab['color'] }}">
+            <x-filament::button wire:click="setFilter('{{ $key }}')" color="{{ $tab['color'] }}" icon="{{ $this->filter === $key ? 'heroicon-s-check-circle' : '' }}" size="sm" class="flex items-center gap-1">
                 {{ $tab['label'] }}
                 <x-filament::badge size="sm" color="{{ $tab['color'] }}">
                     {{ $counts[$key] ?? 0 }}
@@ -26,7 +26,8 @@
         @if (!empty($releases))
             <div class="divide-y divide-gray-200 dark:divide-gray-700">
                 @foreach ($releases as $release)
-                    <div x-data="{ open: {{ $release['is_current'] ? 'true' : 'false' }} }" class="group">
+                    <div wire:key="release-{{ $filter }}-{{ $release['tag'] }}"
+                        x-data="{ open: {{ $release['is_current'] ? 'true' : 'false' }} }" class="group">
                         {{-- Row header --}}
                         <button type="button" x-on:click="open = ! open"
                             class="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-gray-50 dark:hover:bg-gray-800/60 transition-colors">
@@ -49,16 +50,16 @@
 
                             {{-- Type badge --}}
                             @php
-                                $typeColor = match ($release['type']) {
-                                    'dev' => 'warning',
-                                    'experimental' => 'danger',
-                                    default => 'primary',
-                                };
-                                $typeLabel = match ($release['type']) {
-                                    'dev' => 'Dev',
-                                    'experimental' => 'Experimental',
-                                    default => 'Latest',
-                                };
+        $typeColor = match ($release['type']) {
+            'dev' => 'warning',
+            'experimental' => 'danger',
+            default => 'primary',
+        };
+        $typeLabel = match ($release['type']) {
+            'dev' => 'Dev',
+            'experimental' => 'Experimental',
+            default => 'Latest',
+        };
                             @endphp
                             <x-filament::badge :color="$typeColor" size="sm">
                                 {{ $typeLabel }}

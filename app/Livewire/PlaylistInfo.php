@@ -12,6 +12,7 @@ use App\Services\M3uProxyService;
 use App\Services\ProfileService;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Collection;
 use Livewire\Component;
 
 class PlaylistInfo extends Component
@@ -157,7 +158,7 @@ class PlaylistInfo extends Component
      * For a PlaylistAlias, delegates to the effective playlist (Playlist or CustomPlaylist).
      * For other playlist types, returns an empty collection.
      */
-    private function resolveProfileSourcePlaylists(Model $playlist): \Illuminate\Support\Collection
+    private function resolveProfileSourcePlaylists(Model $playlist): Collection
     {
         if ($playlist instanceof Playlist && $playlist->profiles_enabled) {
             return collect([$playlist]);

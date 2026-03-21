@@ -2,6 +2,7 @@
 
 use App\Jobs\MergeChannels;
 use App\Models\Channel;
+use App\Models\ChannelFailover;
 use App\Models\Group;
 use App\Models\Playlist;
 use App\Models\User;
@@ -180,7 +181,7 @@ it('sorts failover channels by sort order', function () {
 
     // Failovers should be in insertion order: channel2 (sort=2.0) before channel3 (sort=3.0)
     // MergeChannels inserts failovers in sorted order, so we check by insertion (id) order
-    $failovers = \App\Models\ChannelFailover::where('channel_id', $channel1->id)
+    $failovers = ChannelFailover::where('channel_id', $channel1->id)
         ->orderBy('id')
         ->pluck('channel_failover_id')
         ->toArray();

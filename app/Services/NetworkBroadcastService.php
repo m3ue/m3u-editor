@@ -7,6 +7,8 @@ use App\Models\MediaServerIntegration;
 use App\Models\Network;
 use App\Models\NetworkProgramme;
 use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -635,7 +637,7 @@ class NetworkBroadcastService
         // across ticks. Parameters like static=true and StartTimeTicks from a previous
         // broadcast would leak into subsequent calls, causing 400 Bad Request errors
         // when the transcode mode changes.
-        $request = new \Illuminate\Http\Request;
+        $request = new Request;
 
         // static=true tells media servers to send the raw file without transcoding.
         // Only set it when NOT using server-side transcoding, otherwise it contradicts
@@ -1041,7 +1043,7 @@ class NetworkBroadcastService
     /**
      * Get all networks that should be broadcasting.
      *
-     * @return \Illuminate\Database\Eloquent\Collection
+     * @return Collection
      */
     public function getBroadcastingNetworks()
     {

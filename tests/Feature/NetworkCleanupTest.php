@@ -1,7 +1,11 @@
 <?php
 
+use App\Models\Channel;
 use App\Models\Network;
+use App\Models\NetworkContent;
+use App\Models\NetworkProgramme;
 use App\Services\NetworkBroadcastService;
+use App\Services\NetworkEpgService;
 use Illuminate\Support\Facades\Http;
 
 use function Pest\Laravel\mock;
@@ -86,10 +90,10 @@ it('deleted network endpoints return 404', function () {
 
 it('stops broadcast and clears schedule when last content is removed', function () {
     $network = Network::factory()->activeBroadcast()->create();
-    $channel = \App\Models\Channel::factory()->create();
+    $channel = Channel::factory()->create();
 
     // Add content to the network
-    $networkContent = \App\Models\NetworkContent::create([
+    $networkContent = NetworkContent::create([
         'network_id' => $network->id,
         'contentable_type' => get_class($channel),
         'contentable_id' => $channel->id,
@@ -97,7 +101,7 @@ it('stops broadcast and clears schedule when last content is removed', function 
     ]);
 
     // Create some programmes
-    \App\Models\NetworkProgramme::create([
+    NetworkProgramme::create([
         'network_id' => $network->id,
         'title' => 'Test Programme',
         'start_time' => now(),
@@ -110,12 +114,12 @@ it('stops broadcast and clears schedule when last content is removed', function 
     expect($network->programmes()->count())->toBe(1);
 
     // Mock the services
-    mock(\App\Services\NetworkBroadcastService::class)
+    mock(NetworkBroadcastService::class)
         ->shouldReceive('stop')
         ->once()
         ->withArgs(fn ($arg) => $arg->id === $network->id);
 
-    mock(\App\Services\NetworkEpgService::class)
+    mock(NetworkEpgService::class)
         ->shouldReceive('generateEpg')
         ->once()
         ->withArgs(fn ($arg) => $arg->id === $network->id);

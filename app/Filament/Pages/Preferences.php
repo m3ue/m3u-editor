@@ -4,6 +4,7 @@ namespace App\Filament\Pages;
 
 use App\Filament\Resources\Assets\AssetResource;
 use App\Jobs\RestartQueue;
+use App\Models\StreamFileSetting;
 use App\Models\StreamProfile;
 use App\Rules\Cron;
 use App\Services\M3uProxyService;
@@ -201,7 +202,7 @@ class Preferences extends SettingsPage
                                             ->label('Allowed domains')
                                             ->columnSpanFull()
                                             ->placeholder(fn () => config('dev.allowed_playlist_domains') ? null : '*.example.com*')
-                                            ->helperText('List of allowed domains (supports wildcards, e.g. *.example.com*). Press return to add each domain. When set, playlist URLs must match one of these patterns.')
+                                            ->helperText('List of allowed domains (supports wildcards, e.g. *.example.com*). Press [tab] or [return] to add item. When set, playlist URLs must match one of these patterns.')
                                             ->disabled(fn () => ! empty(config('dev.allowed_playlist_domains')))
                                             ->hint(fn () => ! empty(config('dev.allowed_playlist_domains')) ? 'Already set by environment variable!' : null)
                                             ->default(fn () => ! empty(config('dev.allowed_playlist_domains'))
@@ -802,7 +803,7 @@ class Preferences extends SettingsPage
                                                 tooltip: 'Stream File Settings can be created and managed in Playlist > Stream File Settings. Settings can be overridden at the Category level or per-Series.'
                                             )
                                             ->options(function () {
-                                                return \App\Models\StreamFileSetting::where('user_id', auth()->id())
+                                                return StreamFileSetting::where('user_id', auth()->id())
                                                     ->forSeries()
                                                     ->pluck('name', 'id');
                                             })
@@ -831,7 +832,7 @@ class Preferences extends SettingsPage
                                                 tooltip: 'Stream File Settings can be created and managed in Playlist > Stream File Settings. Settings can be overridden at the Group level or per-VOD channel.'
                                             )
                                             ->options(function () {
-                                                return \App\Models\StreamFileSetting::where('user_id', auth()->id())
+                                                return StreamFileSetting::where('user_id', auth()->id())
                                                     ->forVod()
                                                     ->pluck('name', 'id');
                                             })
@@ -1115,7 +1116,7 @@ class Preferences extends SettingsPage
                                                             ->body("TMDB API returned an error: {$error}")
                                                             ->send();
                                                     }
-                                                } catch (\Exception $e) {
+                                                } catch (Exception $e) {
                                                     Notification::make()
                                                         ->danger()
                                                         ->title('Connection Failed')

@@ -2,9 +2,11 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\MediaServerIntegration;
 use App\Models\Network;
 use App\Models\User;
 use App\Services\M3uProxyService;
+use App\Services\NetworkEpgService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -124,7 +126,7 @@ class NetworkPlaylistController extends Controller
             abort(404, 'No enabled networks found');
         }
 
-        $epgService = app(\App\Services\NetworkEpgService::class);
+        $epgService = app(NetworkEpgService::class);
 
         return response()->stream(function () use ($networks, $epgService) {
             $epgService->streamXmltvForNetworks($networks);
@@ -140,7 +142,7 @@ class NetworkPlaylistController extends Controller
      *
      * Route: /media-integration/{integration}/networks/playlist.m3u
      */
-    public function forIntegration(Request $request, \App\Models\MediaServerIntegration $integration): StreamedResponse
+    public function forIntegration(Request $request, MediaServerIntegration $integration): StreamedResponse
     {
         $networks = Network::where('media_server_integration_id', $integration->id)
             ->where('enabled', true)
@@ -175,7 +177,7 @@ class NetworkPlaylistController extends Controller
      *
      * Route: /media-integration/{integration}/networks/epg.xml
      */
-    public function epgForIntegration(Request $request, \App\Models\MediaServerIntegration $integration): StreamedResponse
+    public function epgForIntegration(Request $request, MediaServerIntegration $integration): StreamedResponse
     {
         $networks = Network::where('media_server_integration_id', $integration->id)
             ->where('enabled', true)
@@ -185,7 +187,7 @@ class NetworkPlaylistController extends Controller
             abort(404, 'No enabled networks found for this integration');
         }
 
-        $epgService = app(\App\Services\NetworkEpgService::class);
+        $epgService = app(NetworkEpgService::class);
         $integrationName = $integration->name;
 
         return response()->stream(function () use ($networks, $epgService) {
@@ -208,7 +210,7 @@ class NetworkPlaylistController extends Controller
     /**
      * Generate a playlist URL for networks of a media server integration.
      */
-    public static function generateIntegrationPlaylistUrl(\App\Models\MediaServerIntegration $integration): string
+    public static function generateIntegrationPlaylistUrl(MediaServerIntegration $integration): string
     {
         return route('media-integration.networks.playlist', ['integration' => $integration->id]);
     }

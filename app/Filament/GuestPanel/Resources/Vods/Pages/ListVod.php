@@ -10,7 +10,7 @@ class ListVod extends ListRecords
 {
     use HasPlaylist;
 
-    protected static string $resource = VodResource::class;
+    protected static string $resource = VODResource::class;
 
     protected static ?string $title = '';
 

@@ -6,6 +6,7 @@ use App\Http\Controllers\MediaServerProxyController;
 use App\Interfaces\MediaServer;
 use App\Models\MediaServerIntegration;
 use Exception;
+use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Http;
@@ -83,7 +84,7 @@ class WebDavMediaService implements MediaServer
     /**
      * Get HTTP client with authentication configured.
      */
-    protected function getHttpClient(): \Illuminate\Http\Client\PendingRequest
+    protected function getHttpClient(): PendingRequest
     {
         $client = Http::timeout(30)
             ->withOptions(['verify' => false]);

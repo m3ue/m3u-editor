@@ -8,11 +8,13 @@ use App\Enums\Status;
 use App\Jobs\UpdateXtreamStats;
 use App\Traits\ShortUrlTrait;
 use Illuminate\Database\Eloquent\Casts\Attribute;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Support\Facades\Cache;
@@ -123,7 +125,7 @@ class Playlist extends Model
     /**
      * Get the media server integration that owns this playlist (if any).
      */
-    public function mediaServerIntegration(): \Illuminate\Database\Eloquent\Relations\HasOne
+    public function mediaServerIntegration(): HasOne
     {
         return $this->hasOne(MediaServerIntegration::class);
     }
@@ -131,7 +133,7 @@ class Playlist extends Model
     /**
      * Get networks associated with this playlist's media server integration.
      */
-    public function getNetworks(): \Illuminate\Database\Eloquent\Collection
+    public function getNetworks(): Collection
     {
         $integration = $this->mediaServerIntegration;
         if (! $integration) {

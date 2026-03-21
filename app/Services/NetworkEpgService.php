@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\Episode;
 use App\Models\Network;
 use App\Models\NetworkProgramme;
 use Carbon\Carbon;
@@ -268,7 +269,7 @@ class NetworkEpgService
                 ?? $info['stream_icon'] ?? null;
 
             // For episodes, try series cover as last resort
-            if (empty($imageUrl) && $content instanceof \App\Models\Episode && $content->series) {
+            if (empty($imageUrl) && $content instanceof Episode && $content->series) {
                 $imageUrl = $content->series->cover ?? null;
             }
         }

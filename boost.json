@@ -7,7 +7,16 @@
         "cursor"
     ],
     "guidelines": true,
+    "herd_mcp": false,
+    "mcp": true,
+    "nightwatch_mcp": false,
     "packages": [
         "filament/filament"
+    ],
+    "sail": false,
+    "skills": [
+        "configuring-horizon",
+        "pest-testing",
+        "tailwindcss-development"
     ]
 }

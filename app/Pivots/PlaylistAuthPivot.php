@@ -5,6 +5,7 @@ namespace App\Pivots;
 use App\Models\CustomPlaylist;
 use App\Models\MergedPlaylist;
 use App\Models\Playlist;
+use App\Models\PlaylistAlias;
 use App\Models\PlaylistAuth;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
@@ -27,6 +28,8 @@ class PlaylistAuthPivot extends Pivot
                 return 'Custom Playlist';
             case MergedPlaylist::class:
                 return 'Merged Playlist';
+            case PlaylistAlias::class:
+                return 'Playlist Alias';
             default:
                 return 'Playlist';
         }
@@ -39,6 +42,8 @@ class PlaylistAuthPivot extends Pivot
                 return $this->belongsTo(CustomPlaylist::class, 'authenticatable_id');
             case MergedPlaylist::class:
                 return $this->belongsTo(MergedPlaylist::class, 'authenticatable_id');
+            case PlaylistAlias::class:
+                return $this->belongsTo(PlaylistAlias::class, 'authenticatable_id');
             default:
                 return $this->belongsTo(Playlist::class, 'authenticatable_id');
         }

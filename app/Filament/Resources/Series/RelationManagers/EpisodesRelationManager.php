@@ -9,6 +9,7 @@ use Filament\Infolists\Components\ImageEntry;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Notifications\Notification;
 use Filament\Resources\RelationManagers\RelationManager;
+use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\ImageColumn;
@@ -247,7 +248,7 @@ class EpisodesRelationManager extends RelationManager
                                 return $info['movie_image'] ?? $info['cover_big'] ?? null;
                             }),
 
-                        \Filament\Schemas\Components\Grid::make()
+                        Grid::make()
                             ->columns(2)
                             ->columnSpan(2)
                             ->schema([

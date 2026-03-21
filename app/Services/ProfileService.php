@@ -16,11 +16,6 @@ class ProfileService
     protected const REDIS_PREFIX = 'playlist_profile:';
 
     /**
-     * Cache TTL for connection counts (seconds).
-     */
-    protected const CONNECTION_CACHE_TTL = 60;
-
-    /**
      * TTL for stream tracking keys (seconds).
      * Set to 24 hours - stale keys will auto-expire.
      */
@@ -139,6 +134,12 @@ class ProfileService
             'client_identifier' => $clientIdentifier,
         ]);
 
+        // Pre-fetch proxy counts for all profiles in one request, then add
+        // per-profile pending reservations from Redis. This replaces N individual
+        // proxy calls with a single batch call.
+        $profileIds = $profiles->pluck('id')->map(fn ($id) => (string) $id)->all();
+        $proxyCounts = M3uProxyService::getActiveStreamsCountsBatch('provider_profile_id', $profileIds);
+
         // Check client affinity — prefer the profile the client used before.
         // Only active when enable_provider_affinity is set on the playlist.
         if ($clientIdentifier !== null && $playlist->enable_provider_affinity) {
@@ -148,21 +149,38 @@ class ProfileService
                 $affinityProfile = $profiles->firstWhere('id', $affinityProfileId);
 
                 if ($affinityProfile) {
-                    Log::debug('Returning affinity profile for client', [
-                        'client_identifier' => $clientIdentifier,
-                        'profile_id' => $affinityProfile->id,
-                        'profile_name' => $affinityProfile->name,
-                    ]);
+                    $affinityCount = ((int) ($proxyCounts[(string) $affinityProfile->id] ?? 0))
+                        + static::countPendingReservations($affinityProfile);
 
-                    return $affinityProfile;
+                    if ($affinityCount < $affinityProfile->effective_max_streams) {
+                        Log::debug('Returning affinity profile for client', [
+                            'client_identifier' => $clientIdentifier,
+                            'profile_id' => $affinityProfile->id,
+                            'profile_name' => $affinityProfile->name,
+                        ]);
+
+                        return $affinityProfile;
+                    }
+
+                    Log::info('Affinity profile at capacity, selecting next available', [
+                        'client_identifier' => $clientIdentifier,
+                        'affinity_profile_id' => $affinityProfile->id,
+                        'affinity_profile_name' => $affinityProfile->name,
+                        'active_connections' => $affinityCount,
+                        'max_connections' => $affinityProfile->effective_max_streams,
+                    ]);
                 }
             }
         }
 
+        $connectionCounts = [];
+
         foreach ($profiles as $profile) {
-            $activeConnections = static::getConnectionCount($profile);
+            $connectionCounts[$profile->id] = ((int) ($proxyCounts[(string) $profile->id] ?? 0))
+                + static::countPendingReservations($profile);
+            $activeConnections = $connectionCounts[$profile->id];
             $maxConnections = $profile->effective_max_streams;
-            $hasCapacity = static::hasCapacity($profile);
+            $hasCapacity = $activeConnections < $maxConnections;
 
             Log::debug('Checking profile capacity', [
                 'profile_id' => $profile->id,
@@ -190,12 +208,12 @@ class ProfileService
         // profile even though all are at capacity. This allows streams to start when
         // available_streams hasn't been reached but provider limits have.
         if ($forceSelect && $profiles->isNotEmpty()) {
-            $best = $profiles->sortBy(fn ($p) => static::getConnectionCount($p))->first();
+            $best = $profiles->sortBy(fn ($p) => $connectionCounts[$p->id])->first();
 
             Log::info('Force-selected profile (bypass provider limits)', [
                 'profile_id' => $best->id,
                 'profile_name' => $best->name,
-                'active_connections' => static::getConnectionCount($best),
+                'active_connections' => $connectionCounts[$best->id],
                 'max_connections' => $best->effective_max_streams,
                 'playlist_id' => $playlist->id,
             ]);
@@ -339,20 +357,13 @@ class ProfileService
         ?string $channelPlaylistUuid = null,
     ): void {
         $streamsKey = static::getProfileStreamsKey($profile);
-        $oldStreamKey = static::getStreamProfileKey($reservationId);
-        $newStreamKey = static::getStreamProfileKey($realStreamId);
 
         try {
-            Redis::pipeline(function ($pipe) use ($streamsKey, $oldStreamKey, $newStreamKey, $reservationId, $realStreamId, $profile) {
-                // Remove the reservation entry
+            Redis::pipeline(function ($pipe) use ($streamsKey, $reservationId, $realStreamId) {
+                // Replace reservation entry with real stream ID
                 $pipe->srem($streamsKey, $reservationId);
-                $pipe->del($oldStreamKey);
-
-                // Add the real stream entry
                 $pipe->sadd($streamsKey, $realStreamId);
                 $pipe->expire($streamsKey, static::STREAM_TRACKING_TTL);
-                $pipe->set($newStreamKey, $profile->id);
-                $pipe->expire($newStreamKey, static::STREAM_TRACKING_TTL);
             });
 
             // Upgrade the channel→stream mapping from pending reservation ID to real stream ID.
@@ -413,27 +424,28 @@ class ProfileService
             return false;
         }
 
-        $activeConnections = static::getConnectionCount($profile);
+        $activeConnections = static::getEffectiveConnectionCount($profile);
         $maxConnections = $profile->effective_max_streams;
 
         return $activeConnections < $maxConnections;
     }
 
     /**
-     * Get the current connection count for a profile.
+     * Count in-flight reservations for a profile.
      *
-     * Uses Redis for real-time tracking.
+     * Reservations are stream set entries prefixed with "reservation:" — they
+     * represent slots claimed inside the lock but not yet visible to the proxy.
      */
-    public static function getConnectionCount(PlaylistProfile $profile): int
+    public static function countPendingReservations(PlaylistProfile $profile): int
     {
-        $key = static::getConnectionCountKey($profile);
+        $streamsKey = static::getProfileStreamsKey($profile);
 
         try {
-            $count = Redis::get($key);
+            $streamIds = Redis::smembers($streamsKey);
 
-            return $count ? (int) $count : 0;
+            return count(array_filter($streamIds, fn ($id) => str_starts_with($id, 'reservation:')));
         } catch (\Exception $e) {
-            Log::error("Failed to get connection count for profile {$profile->id}", [
+            Log::warning("Failed to count pending reservations for profile {$profile->id}", [
                 'exception' => $e->getMessage(),
             ]);
 
@@ -442,37 +454,49 @@ class ProfileService
     }
 
     /**
-     * Increment the connection count for a profile.
+     * Get the effective connection count for capacity enforcement.
      *
-     * Called when a new stream starts using this profile.
+     * Uses the proxy API as ground truth (actual upstream connections), plus any
+     * in-flight reservations tracked in Redis that are not yet visible in the proxy.
+     *
+     * This prevents two problems:
+     *   - Stale Redis INCR counts after a proxy restart blocking new streams.
+     *   - TOCTOU races where concurrent requests both see capacity before the first
+     *     stream appears in the proxy (reservations fill the gap).
+     */
+    public static function getEffectiveConnectionCount(PlaylistProfile $profile): int
+    {
+        $proxyCount = M3uProxyService::getActiveStreamsCountByMetadata(
+            'provider_profile_id',
+            (string) $profile->id
+        );
+
+        return $proxyCount + static::countPendingReservations($profile);
+    }
+
+    /**
+     * Track a stream (or reservation) against a profile.
+     *
+     * Adds the stream ID to the profile's streams set so in-flight reservations
+     * are visible to getEffectiveConnectionCount() during capacity checks.
      */
     public static function incrementConnections(PlaylistProfile $profile, string $streamId): void
     {
-        $countKey = static::getConnectionCountKey($profile);
-        $streamKey = static::getStreamProfileKey($streamId);
         $streamsKey = static::getProfileStreamsKey($profile);
 
         try {
-            Redis::pipeline(function ($pipe) use ($countKey, $streamKey, $streamsKey, $profile, $streamId) {
-                $pipe->incr($countKey);
-                $pipe->expire($countKey, static::STREAM_TRACKING_TTL);
-                $pipe->set($streamKey, $profile->id);
-                $pipe->expire($streamKey, static::STREAM_TRACKING_TTL);
+            Redis::pipeline(function ($pipe) use ($streamsKey, $streamId) {
                 $pipe->sadd($streamsKey, $streamId);
                 $pipe->expire($streamsKey, static::STREAM_TRACKING_TTL);
             });
 
-            $newCount = static::getConnectionCount($profile);
-
-            Log::info('Incremented connections for profile', [
+            Log::info('Tracking stream for profile', [
                 'profile_id' => $profile->id,
                 'profile_name' => $profile->name,
                 'stream_id' => $streamId,
-                'new_count' => $newCount,
-                'max_connections' => $profile->effective_max_streams,
             ]);
         } catch (\Exception $e) {
-            Log::error("Failed to increment connections for profile {$profile->id}", [
+            Log::error("Failed to track stream for profile {$profile->id}", [
                 'stream_id' => $streamId,
                 'exception' => $e->getMessage(),
             ]);
@@ -480,129 +504,51 @@ class ProfileService
     }
 
     /**
-     * Decrement the connection count for a profile.
+     * Remove a stream (or reservation) from a profile's tracking set and clean up
+     * the channel→stream mapping so the next request can acquire a new stream.
      *
-     * Called when a stream ends.
-     * Uses a Lua script to atomically decrement only if count > 0,
-     * preventing TOCTOU races that could push the count negative.
-     *
-     * Also clears the channel→stream mapping for this stream via the reverse
-     * lookup key, covering both normal stream-ended cleanup and reservation
-     * cancellation (where streamId is a reservation ID).
+     * Covers both normal stream-ended cleanup and reservation cancellation
+     * (where streamId has the 'reservation:' prefix).
      */
     public static function decrementConnections(PlaylistProfile $profile, string $streamId): void
     {
-        $countKey = static::getConnectionCountKey($profile);
-        $streamKey = static::getStreamProfileKey($streamId);
         $streamsKey = static::getProfileStreamsKey($profile);
         $channelReverseKey = static::getStreamChannelKey($streamId);
 
         try {
-            // Atomic decrement-if-positive via Lua script.
-            // Returns the new count (>= 0) or -1 if already at zero.
-            $lua = <<<'LUA'
-                local current = tonumber(redis.call('get', KEYS[1]) or 0)
-                if current > 0 then
-                    return redis.call('decr', KEYS[1])
-                end
-                return -1
-            LUA;
-
-            $result = Redis::eval($lua, 1, $countKey);
-
-            if ($result == -1) {
-                Log::warning("Attempted to decrement connections for profile {$profile->id} but count was already 0", [
-                    'stream_id' => $streamId,
-                ]);
-            }
-
-            // Look up the channel coordinates before deleting the reverse key.
+            // Look up channel coordinates before deleting the reverse key.
             $channelValue = Redis::get($channelReverseKey);
 
-            // Clean up stream references and the reverse channel-mapping key.
-            Redis::pipeline(function ($pipe) use ($streamKey, $streamsKey, $channelReverseKey, $streamId) {
-                $pipe->del($streamKey);
+            Redis::pipeline(function ($pipe) use ($streamsKey, $channelReverseKey, $streamId) {
                 $pipe->srem($streamsKey, $streamId);
                 $pipe->del($channelReverseKey);
             });
 
-            // Clear the channel→stream key only when it still points to this stream.
-            // Guards against deleting a newer stream's entry when streams overlap
-            // (e.g. rapid channel switch where the new stream starts before the old
-            // stream's decrement webhook fires).
+            // Clear the channel→stream key only when it still points to this stream,
+            // to avoid clobbering a newer stream on rapid channel switches.
             if ($channelValue !== null) {
                 $parts = explode(':', $channelValue, 2);
 
                 if (count($parts) === 2) {
                     [$channelId, $playlistUuid] = $parts;
                     $channelStreamKey = static::getChannelStreamKey((int) $channelId, $playlistUuid);
-                    $currentStreamValue = Redis::get($channelStreamKey);
 
-                    if ($currentStreamValue === $streamId) {
+                    if (Redis::get($channelStreamKey) === $streamId) {
                         Redis::del($channelStreamKey);
                     }
                 }
             }
 
-            $newCount = static::getConnectionCount($profile);
-
-            Log::info('Decremented connections for profile', [
+            Log::info('Cleaned up stream tracking for profile', [
                 'profile_id' => $profile->id,
                 'profile_name' => $profile->name,
                 'stream_id' => $streamId,
-                'new_count' => $newCount,
-                'max_connections' => $profile->effective_max_streams,
             ]);
         } catch (\Exception $e) {
-            Log::error("Failed to decrement connections for profile {$profile->id}", [
+            Log::error("Failed to clean up stream for profile {$profile->id}", [
                 'stream_id' => $streamId,
                 'exception' => $e->getMessage(),
             ]);
-        }
-    }
-
-    /**
-     * Decrement connection by stream ID (when profile is unknown).
-     *
-     * Looks up which profile the stream was using and decrements accordingly.
-     */
-    public static function decrementConnectionsByStreamId(string $streamId): void
-    {
-        $streamKey = static::getStreamProfileKey($streamId);
-
-        try {
-            $profileId = Redis::get($streamKey);
-
-            if ($profileId) {
-                $profile = PlaylistProfile::find($profileId);
-                if ($profile) {
-                    static::decrementConnections($profile, $streamId);
-                }
-            }
-        } catch (\Exception $e) {
-            Log::error("Failed to decrement connections by stream ID {$streamId}", [
-                'exception' => $e->getMessage(),
-            ]);
-        }
-    }
-
-    /**
-     * Get the profile ID for a given stream.
-     */
-    public static function getProfileIdForStream(string $streamId): ?int
-    {
-        $key = static::getStreamProfileKey($streamId);
-
-        try {
-            $profileId = Redis::get($key);
-
-            return $profileId ? (int) $profileId : null;
-        } catch (\Exception $e) {
-            Log::error("Failed to get profile ID for stream {$streamId}", [
-                'exception' => $e->getMessage(),
-            ]);
-
-            return null;
         }
     }
 
@@ -621,24 +567,9 @@ class ProfileService
     }
 
     /**
-     * Get total active connections across all profiles for a playlist.
-     */
-    public static function getTotalActiveConnections(Playlist $playlist): int
-    {
-        if (! $playlist->profiles_enabled) {
-            return 0;
-        }
-
-        $total = 0;
-        foreach ($playlist->enabledProfiles()->get() as $profile) {
-            $total += static::getConnectionCount($profile);
-        }
-
-        return $total;
-    }
-
-    /**
      * Get pool status summary for a playlist.
+     *
+     * Cached for 5 seconds to avoid hammering the proxy API on table renders.
      */
     public static function getPoolStatus(Playlist $playlist): array
     {
@@ -652,50 +583,54 @@ class ProfileService
             ];
         }
 
-        $profiles = [];
-        $totalCapacity = 0;
-        $totalActive = 0;
+        return Cache::remember("pool_status_{$playlist->id}", 5, function () use ($playlist) {
+            $allProfiles = $playlist->profiles()->get();
+            $profileIds = $allProfiles->pluck('id')->map(fn ($id) => (string) $id)->all();
+            $proxyCounts = M3uProxyService::getActiveStreamsCountsBatch('provider_profile_id', $profileIds);
 
-        foreach ($playlist->profiles()->get() as $profile) {
-            $activeCount = static::getConnectionCount($profile);
-            $maxStreams = $profile->effective_max_streams;
+            $profiles = [];
+            $totalCapacity = 0;
+            $totalActive = 0;
 
-            // Get expiration date from provider_info (stored in database)
-            $providerInfo = $profile->provider_info;
-            $expDate = $providerInfo['user_info']['exp_date'] ?? null;
+            foreach ($allProfiles as $profile) {
+                $activeCount = (int) ($proxyCounts[(string) $profile->id] ?? 0);
+                $maxStreams = $profile->effective_max_streams;
 
-            // Convert Unix timestamp to date string for Carbon compatibility
-            if ($expDate && is_numeric($expDate)) {
-                $expDate = date('Y-m-d H:i:s', $expDate);
+                $providerInfo = $profile->provider_info;
+                $expDate = $providerInfo['user_info']['exp_date'] ?? null;
+
+                if ($expDate && is_numeric($expDate)) {
+                    $expDate = date('Y-m-d H:i:s', $expDate);
+                }
+
+                $profiles[] = [
+                    'id' => $profile->id,
+                    'name' => $profile->name ?? "Profile #{$profile->id}",
+                    'username' => $profile->username,
+                    'enabled' => $profile->enabled,
+                    'priority' => $profile->priority,
+                    'is_primary' => $profile->is_primary,
+                    'max_streams' => $maxStreams,
+                    'active_connections' => $activeCount,
+                    'available' => max(0, $maxStreams - $activeCount),
+                    'provider_info_updated_at' => $profile->provider_info_updated_at?->toIso8601String(),
+                    'exp_date' => $expDate,
+                ];
+
+                if ($profile->enabled) {
+                    $totalCapacity += $maxStreams;
+                    $totalActive += $activeCount;
+                }
             }
 
-            $profiles[] = [
-                'id' => $profile->id,
-                'name' => $profile->name ?? "Profile #{$profile->id}",
-                'username' => $profile->username,
-                'enabled' => $profile->enabled,
-                'priority' => $profile->priority,
-                'is_primary' => $profile->is_primary,
-                'max_streams' => $maxStreams,
-                'active_connections' => $activeCount,
-                'available' => max(0, $maxStreams - $activeCount),
-                'provider_info_updated_at' => $profile->provider_info_updated_at?->toIso8601String(),
-                'exp_date' => $expDate, // Add expiration date for PlaylistInfo component (as date string)
+            return [
+                'enabled' => true,
+                'profiles' => $profiles,
+                'total_capacity' => $totalCapacity,
+                'total_active' => $totalActive,
+                'available' => max(0, $totalCapacity - $totalActive),
             ];
-
-            if ($profile->enabled) {
-                $totalCapacity += $maxStreams;
-                $totalActive += $activeCount;
-            }
-        }
-
-        return [
-            'enabled' => true,
-            'profiles' => $profiles,
-            'total_capacity' => $totalCapacity,
-            'total_active' => $totalActive,
-            'available' => max(0, $totalCapacity - $totalActive),
-        ];
+        });
     }
 
     /**
@@ -896,88 +831,48 @@ class ProfileService
     }
 
     /**
-     * Reconcile Redis connection counts with provider API.
+     * Ensure the primary profile exists and its credentials match the playlist's xtream_config.
      *
-     * Useful for correcting drift between tracked and actual connections.
+     * Creates the primary profile if it doesn't exist, or updates its URL/username/password
+     * when the playlist's provider has changed (e.g. the user re-pointed the playlist to a
+     * new provider). Without this sync the primary profile retains the old provider's domain
+     * and credentials, causing streams to be directed to the removed provider.
      */
-    public static function reconcileConnections(PlaylistProfile $profile): void
+    public static function syncPrimaryProfile(Playlist $playlist): void
     {
-        try {
-            // Refresh provider info to get current active_cons
-            static::refreshProfile($profile);
+        if (! $playlist->xtream_config) {
+            return;
+        }
 
-            $providerActive = $profile->current_connections;
-            $redisActive = static::getConnectionCount($profile);
+        $config = $playlist->xtream_config;
+        $newUrl = $config['url'] ?? $config['server'] ?? '';
+        $newUsername = $config['username'] ?? '';
+        $newPassword = $config['password'] ?? '';
 
-            if ($providerActive !== $redisActive) {
-                Log::info("Reconciling connection count for profile {$profile->id}", [
-                    'redis_count' => $redisActive,
-                    'provider_count' => $providerActive,
-                ]);
+        $primaryProfile = $playlist->profiles()->where('is_primary', true)->first();
 
-                // Note: We can't simply set Redis to provider count because
-                // provider count includes ALL connections (not just from m3u-editor).
-                // Instead, we log the discrepancy for monitoring.
-            }
-        } catch (\Exception $e) {
-            Log::error("Failed to reconcile connections for profile {$profile->id}", [
-                'exception' => $e->getMessage(),
+        if (! $primaryProfile) {
+            static::createPrimaryProfile($playlist);
+
+            return;
+        }
+
+        // Only write to the DB when something has actually drifted.
+        if (
+            $primaryProfile->url !== $newUrl ||
+            $primaryProfile->username !== $newUsername ||
+            $primaryProfile->password !== $newPassword
+        ) {
+            $primaryProfile->update([
+                'url' => $newUrl,
+                'username' => $newUsername,
+                'password' => $newPassword,
             ]);
-        }
-    }
 
-    /**
-     * Quick reconcile of profile connection counts from proxy active streams.
-     *
-     * Used inline (e.g. after stopping a stream) to immediately correct
-     * Redis counts without waiting for the scheduled reconcile task.
-     *
-     * Iterates ALL profiles (including disabled ones) to ensure stale Redis
-     * counts on disabled profiles are also cleaned up.
-     */
-    public static function reconcileFromProxy(Playlist $playlist): void
-    {
-        if (! $playlist->profiles_enabled) {
-            return;
-        }
-
-        $activeStreams = M3uProxyService::getPlaylistActiveStreams($playlist);
-
-        // If API call failed, don't touch counts
-        if ($activeStreams === null) {
-            return;
-        }
-
-        // Build map of profile_id => active stream count
-        $profileStreamCounts = [];
-        foreach ($activeStreams as $stream) {
-            $profileId = $stream['metadata']['provider_profile_id'] ?? null;
-            if ($profileId) {
-                $profileStreamCounts[$profileId] = ($profileStreamCounts[$profileId] ?? 0) + ($stream['client_count'] ?? 1);
-            }
-        }
-
-        // Iterate ALL profiles (including disabled) to clean stale Redis counts.
-        // Disabled profiles should have 0 active streams; if Redis still shows
-        // a positive count from before the profile was disabled, correct it.
-        foreach ($playlist->profiles()->get() as $profile) {
-            $redisCount = static::getConnectionCount($profile);
-            $proxyCount = $profileStreamCounts[$profile->id] ?? 0;
-
-            if ($redisCount !== $proxyCount) {
-                $key = static::getConnectionCountKey($profile);
-                try {
-                    Redis::set($key, $proxyCount);
-                    Log::debug('Quick reconciled profile connection count', [
-                        'profile_id' => $profile->id,
-                        'enabled' => $profile->enabled,
-                        'old_count' => $redisCount,
-                        'new_count' => $proxyCount,
-                    ]);
-                } catch (\Exception $e) {
-                    Log::error("Failed to quick reconcile profile {$profile->id}: {$e->getMessage()}");
-                }
-            }
+            Log::info('Synced primary profile credentials to playlist xtream_config', [
+                'playlist_id' => $playlist->id,
+                'profile_id' => $primaryProfile->id,
+            ]);
         }
     }
 
@@ -1020,11 +915,7 @@ class ProfileService
             // Remove any Redis-tracked streams that are no longer active in the proxy
             foreach ($streamIds as $streamId) {
                 if (! in_array($streamId, $activeStreamIds)) {
-                    $streamKey = static::getStreamProfileKey($streamId);
-                    Redis::pipeline(function ($pipe) use ($streamsKey, $streamKey, $streamId) {
-                        $pipe->srem($streamsKey, $streamId);
-                        $pipe->del($streamKey);
-                    });
+                    Redis::srem($streamsKey, $streamId);
                     $cleaned++;
 
                     Log::debug('Cleaned up stale stream entry', [
@@ -1032,21 +923,6 @@ class ProfileService
                         'stream_id' => $streamId,
                     ]);
                 }
-            }
-
-            // If we cleaned any, correct the connection count
-            if ($cleaned > 0) {
-                $countKey = static::getConnectionCountKey($profile);
-                $currentCount = (int) Redis::get($countKey);
-                $correctedCount = max(0, $currentCount - $cleaned);
-                Redis::set($countKey, $correctedCount);
-
-                Log::info('Corrected connection count after stale stream cleanup', [
-                    'profile_id' => $profile->id,
-                    'old_count' => $currentCount,
-                    'new_count' => $correctedCount,
-                    'cleaned' => $cleaned,
-                ]);
             }
         } catch (\Exception $e) {
             Log::error("Failed to cleanup stale streams for profile {$profile->id}", [
@@ -1064,20 +940,9 @@ class ProfileService
      */
     public static function resetConnectionTracking(PlaylistProfile $profile): void
     {
-        $countKey = static::getConnectionCountKey($profile);
         $streamsKey = static::getProfileStreamsKey($profile);
 
         try {
-            // Get all stream IDs for this profile
-            $streamIds = Redis::smembers($streamsKey);
-
-            // Delete stream->profile mappings
-            foreach ($streamIds as $streamId) {
-                Redis::del(static::getStreamProfileKey($streamId));
-            }
-
-            // Reset count and streams set
-            Redis::del($countKey);
             Redis::del($streamsKey);
 
             Log::info("Reset connection tracking for profile {$profile->id}");
@@ -1105,10 +970,6 @@ class ProfileService
             return [null, null];
         }
 
-        // Reconcile Redis counts against actual proxy state
-        static::reconcileFromProxy($playlist);
-
-        // Now retry profile selection with atomic reservation
         return static::selectAndReserveProfile($playlist, $excludeProfileId, forceSelect: $forceSelect, clientIdentifier: $clientIdentifier);
     }
 
@@ -1172,27 +1033,11 @@ class ProfileService
     }
 
     /**
-     * Get the Redis key for a profile's connection count.
-     */
-    protected static function getConnectionCountKey(PlaylistProfile $profile): string
-    {
-        return static::REDIS_PREFIX."{$profile->id}:connections";
-    }
-
-    /**
      * Get the Redis key for a profile's stream set.
      */
     protected static function getProfileStreamsKey(PlaylistProfile $profile): string
     {
         return static::REDIS_PREFIX."{$profile->id}:streams";
-    }
-
-    /**
-     * Get the Redis key for stream->profile mapping.
-     */
-    protected static function getStreamProfileKey(string $streamId): string
-    {
-        return "stream:{$streamId}:profile_id";
     }
 
     /**

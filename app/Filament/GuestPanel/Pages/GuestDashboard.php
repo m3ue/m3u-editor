@@ -29,7 +29,9 @@ class GuestDashboard extends Page implements HasSchemas
         array $parameters = [],
         bool $isAbsolute = true,
         ?string $panel = null,
-        $tenant = null
+        $tenant = null,
+        bool $shouldGuessMissingParameters = false,
+        ?string $configuration = null
     ): string {
         $parameters['uuid'] = static::getCurrentUuid();
 

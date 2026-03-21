@@ -2,6 +2,8 @@
 
 namespace App\Providers;
 
+use App\Console\Commands\NetworkBroadcastEnsure;
+use App\Console\Commands\NetworkBroadcastHeal;
 use App\Events\EpgCreated;
 use App\Events\EpgDeleted;
 use App\Events\EpgUpdated;
@@ -38,7 +40,14 @@ use Dedoc\Scramble\Scramble;
 use Dedoc\Scramble\Support\Generator\OpenApi;
 use Dedoc\Scramble\Support\Generator\SecurityScheme;
 use Exception;
+use Filament\Forms\Components\Field;
+use Filament\Forms\Components\FileUpload;
+use Filament\Infolists\Components\ImageEntry;
+use Filament\Schemas\Components\Fieldset;
+use Filament\Schemas\Components\Grid;
+use Filament\Schemas\Components\Section;
 use Filament\Support\Facades\FilamentView;
+use Filament\Tables\Columns\ImageColumn;
 use Filament\View\PanelsRenderHook;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Database\Eloquent\Model;
@@ -78,8 +87,8 @@ class AppServiceProvider extends ServiceProvider
             }
 
             $this->commands([
-                \App\Console\Commands\NetworkBroadcastHeal::class,
-                \App\Console\Commands\NetworkBroadcastEnsure::class,
+                NetworkBroadcastHeal::class,
+                NetworkBroadcastEnsure::class,
             ]);
         }
     }
@@ -817,13 +826,13 @@ class AppServiceProvider extends ServiceProvider
     private function configureFilamentV3Compatibility(): void
     {
         // Preserve v3 file upload behavior (public visibility)
-        \Filament\Forms\Components\FileUpload::configureUsing(fn (\Filament\Forms\Components\FileUpload $fileUpload) => $fileUpload
+        FileUpload::configureUsing(fn (FileUpload $fileUpload) => $fileUpload
             ->visibility('public'));
 
-        \Filament\Tables\Columns\ImageColumn::configureUsing(fn (\Filament\Tables\Columns\ImageColumn $imageColumn) => $imageColumn
+        ImageColumn::configureUsing(fn (ImageColumn $imageColumn) => $imageColumn
             ->visibility('public'));
 
-        \Filament\Infolists\Components\ImageEntry::configureUsing(fn (\Filament\Infolists\Components\ImageEntry $imageEntry) => $imageEntry
+        ImageEntry::configureUsing(fn (ImageEntry $imageEntry) => $imageEntry
             ->visibility('public'));
 
         // // Preserve v3 table filter behavior (not deferred)
@@ -832,17 +841,17 @@ class AppServiceProvider extends ServiceProvider
         //     ->paginationPageOptions([5, 10, 25, 50, 'all']));
 
         // Preserve v3 layout component behavior (column span full)
-        \Filament\Schemas\Components\Fieldset::configureUsing(fn (\Filament\Schemas\Components\Fieldset $fieldset) => $fieldset
+        Fieldset::configureUsing(fn (Fieldset $fieldset) => $fieldset
             ->columnSpanFull());
 
-        \Filament\Schemas\Components\Grid::configureUsing(fn (\Filament\Schemas\Components\Grid $grid) => $grid
+        Grid::configureUsing(fn (Grid $grid) => $grid
             ->columnSpanFull());
 
-        \Filament\Schemas\Components\Section::configureUsing(fn (\Filament\Schemas\Components\Section $section) => $section
+        Section::configureUsing(fn (Section $section) => $section
             ->columnSpanFull());
 
         // Preserve v3 unique validation behavior (not ignoring record by default)
-        \Filament\Forms\Components\Field::configureUsing(fn (\Filament\Forms\Components\Field $field) => $field
+        Field::configureUsing(fn (Field $field) => $field
             ->uniqueValidationIgnoresRecordByDefault(false));
     }
 }

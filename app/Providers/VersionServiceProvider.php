@@ -98,10 +98,11 @@ class VersionServiceProvider extends ServiceProvider
     }
 
     /**
-     * Fetch the latest releases from GitHub and store them in a flat file.
-     * Returns an array of releases (decoded JSON).
+     * Fetch the latest releases from GitHub, paginating until each branch type
+     * (latest / dev / experimental) has $perBranchLimit entries, then stop.
+     * Results are stored in a flat file and returned.
      */
-    public static function fetchReleases(int $perPage = 5, bool $refresh = false): array
+    public static function fetchReleases(int $perBranchLimit = 15, bool $refresh = false): array
     {
         $path = storage_path(self::$releasesFile);
 
@@ -124,23 +125,70 @@ class VersionServiceProvider extends ServiceProvider
             'User-Agent' => 'm3u-editor',
         ];
 
-        try {
-            $response = Http::withHeaders($headers)->get('https://api.github.com/repos/m3ue/m3u-editor/releases', [
-                'per_page' => $perPage,
-            ]);
-            if ($response->ok()) {
-                $results = $response->json();
-                // Ensure storage directory exists
-                $dir = dirname($path);
-                if (! is_dir($dir)) {
-                    @mkdir($dir, 0755, true);
-                }
-                file_put_contents($path, json_encode($results));
+        $buckets = ['latest' => [], 'dev' => [], 'experimental' => []];
+        $page = 1;
+        $pageFetchSize = 30; // items per API page
+        $maxPages = 10;      // hard stop: 300 releases max regardless of bucket state
 
-                return is_array($results) ? $results : [];
+        $isFull = function () use (&$buckets, $perBranchLimit): bool {
+            return count($buckets['latest']) >= $perBranchLimit
+                && count($buckets['dev']) >= $perBranchLimit
+                && count($buckets['experimental']) >= $perBranchLimit;
+        };
+
+        try {
+            while (! $isFull() && $page <= $maxPages) {
+                $response = Http::withHeaders($headers)->timeout(15)->get('https://api.github.com/repos/m3ue/m3u-editor/releases', [
+                    'per_page' => $pageFetchSize,
+                    'page' => $page,
+                ]);
+
+                if (! $response->ok()) {
+                    break;
+                }
+
+                $pageResults = $response->json();
+
+                if (! is_array($pageResults) || empty($pageResults)) {
+                    break; // no more releases
+                }
+
+                foreach ($pageResults as $r) {
+                    $tag = $r['tag_name'] ?? '';
+                    if (str_ends_with($tag, '-dev')) {
+                        $type = 'dev';
+                    } elseif (str_ends_with($tag, '-exp')) {
+                        $type = 'experimental';
+                    } else {
+                        $type = 'latest';
+                    }
+
+                    if (count($buckets[$type]) < $perBranchLimit) {
+                        $buckets[$type][] = $r;
+                    }
+                }
+
+                if (count($pageResults) < $pageFetchSize) {
+                    break; // last page reached
+                }
+
+                $page++;
             }
         } catch (Exception $e) {
-            // ignore
+            // ignore — fall through to file fallback
+        }
+
+        $results = array_merge($buckets['latest'], $buckets['dev'], $buckets['experimental']);
+
+        if (! empty($results)) {
+            // Ensure storage directory exists
+            $dir = dirname($path);
+            if (! is_dir($dir)) {
+                @mkdir($dir, 0755, true);
+            }
+            file_put_contents($path, json_encode($results));
+
+            return $results;
         }
 
         // Fallback: attempt to read existing file

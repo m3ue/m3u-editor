@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\MediaServerIntegration;
 use App\Models\Network;
 use App\Models\NetworkProgramme;
 use App\Services\NetworkBroadcastService;
@@ -389,7 +390,7 @@ it('saves transcode session ID from stream URL on successful start', function ()
         '*' => Http::response([], 200),
     ]);
 
-    $integration = \App\Models\MediaServerIntegration::factory()->create([
+    $integration = MediaServerIntegration::factory()->create([
         'type' => 'plex',
         'host' => 'plex',
         'port' => 32400,

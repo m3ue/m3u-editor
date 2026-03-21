@@ -1,9 +1,12 @@
 <?php
 
+use App\Models\Channel;
 use App\Models\MediaServerIntegration;
 use App\Models\Playlist;
+use App\Models\Series;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Queue;
 
 uses(RefreshDatabase::class);
@@ -194,7 +197,7 @@ it('casts last_synced_at to datetime', function () {
         'last_synced_at' => now(),
     ]);
 
-    expect($integration->last_synced_at)->toBeInstanceOf(\Illuminate\Support\Carbon::class);
+    expect($integration->last_synced_at)->toBeInstanceOf(Carbon::class);
 });
 
 it('hides api_key from serialization', function () {
@@ -560,13 +563,13 @@ it('can access channels through playlist via HasManyThrough', function () {
         'playlist_id' => $playlist->id,
     ]);
 
-    $channel1 = \App\Models\Channel::factory()->create([
+    $channel1 = Channel::factory()->create([
         'playlist_id' => $playlist->id,
         'user_id' => $this->user->id,
         'name' => 'Movie Channel 1',
     ]);
 
-    $channel2 = \App\Models\Channel::factory()->create([
+    $channel2 = Channel::factory()->create([
         'playlist_id' => $playlist->id,
         'user_id' => $this->user->id,
         'name' => 'Movie Channel 2',
@@ -574,7 +577,7 @@ it('can access channels through playlist via HasManyThrough', function () {
 
     // Channel on a different playlist should not be included
     $otherPlaylist = Playlist::withoutEvents(fn () => Playlist::factory()->create(['user_id' => $this->user->id]));
-    \App\Models\Channel::factory()->create([
+    Channel::factory()->create([
         'playlist_id' => $otherPlaylist->id,
         'user_id' => $this->user->id,
         'name' => 'Other Channel',
@@ -600,13 +603,13 @@ it('can access series through playlist via HasManyThrough', function () {
         'playlist_id' => $playlist->id,
     ]);
 
-    $series1 = \App\Models\Series::factory()->create([
+    $series1 = Series::factory()->create([
         'playlist_id' => $playlist->id,
         'user_id' => $this->user->id,
         'name' => 'Breaking Bad',
     ]);
 
-    $series2 = \App\Models\Series::factory()->create([
+    $series2 = Series::factory()->create([
         'playlist_id' => $playlist->id,
         'user_id' => $this->user->id,
         'name' => 'The Wire',
@@ -614,7 +617,7 @@ it('can access series through playlist via HasManyThrough', function () {
 
     // Series on a different playlist should not be included
     $otherPlaylist = Playlist::withoutEvents(fn () => Playlist::factory()->create(['user_id' => $this->user->id]));
-    \App\Models\Series::factory()->create([
+    Series::factory()->create([
         'playlist_id' => $otherPlaylist->id,
         'user_id' => $this->user->id,
         'name' => 'Other Series',

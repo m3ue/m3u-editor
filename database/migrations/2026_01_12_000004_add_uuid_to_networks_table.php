@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\Network;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
@@ -17,7 +18,7 @@ return new class extends Migration
         });
 
         // Generate UUIDs for existing networks
-        \App\Models\Network::whereNull('uuid')->each(function ($network) {
+        Network::whereNull('uuid')->each(function ($network) {
             $network->update(['uuid' => Str::uuid()->toString()]);
         });
     }

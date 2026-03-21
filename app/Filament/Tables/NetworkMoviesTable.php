@@ -4,6 +4,7 @@ namespace App\Filament\Tables;
 
 use App\Models\Channel;
 use App\Models\Group;
+use Filament\Actions\BulkActionGroup;
 use Filament\Tables\Columns\ImageColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
@@ -88,7 +89,7 @@ class NetworkMoviesTable
                 //
             ])
             ->toolbarActions([
-                \Filament\Actions\BulkActionGroup::make([
+                BulkActionGroup::make([
                     //
                 ]),
             ]);

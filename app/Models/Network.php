@@ -115,7 +115,7 @@ class Network extends Model
      */
     public function networkPlaylist(): BelongsTo
     {
-        return $this->belongsTo(\App\Models\Playlist::class, 'network_playlist_id');
+        return $this->belongsTo(Playlist::class, 'network_playlist_id');
     }
 
     /**

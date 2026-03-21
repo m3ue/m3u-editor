@@ -4,6 +4,7 @@ namespace Tests\Unit;
 
 use App\Jobs\MergeChannels;
 use App\Models\Channel;
+use App\Models\ChannelFailover;
 use App\Models\Playlist;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -69,7 +70,7 @@ class MergeChannelsTest extends TestCase
         ]);
 
         // Existing failover relationship (old master had a failover)
-        \App\Models\ChannelFailover::create([
+        ChannelFailover::create([
             'user_id' => $user->id,
             'channel_id' => $oldMaster->id,
             'channel_failover_id' => $failover->id,

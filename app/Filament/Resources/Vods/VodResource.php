@@ -3,11 +3,12 @@
 namespace App\Filament\Resources\Vods;
 
 use App\Facades\LogoFacade;
-use App\Facades\ProxyFacade;
 use App\Facades\SortFacade;
+use App\Filament\Actions\AssetPickerAction;
 use App\Filament\Resources\VodResource\Pages;
 use App\Filament\Resources\Vods\Pages\ListVod;
 use App\Filament\Resources\Vods\Pages\ViewVod;
+use App\Forms\Components\TmdbSearchResults;
 use App\Jobs\ChannelFindAndReplace;
 use App\Jobs\ChannelFindAndReplaceReset;
 use App\Jobs\FetchTmdbIds;
@@ -21,6 +22,7 @@ use App\Models\Playlist;
 use App\Rules\CheckIfUrlOrLocalPath;
 use App\Services\LogoCacheService;
 use App\Services\PlaylistService;
+use App\Services\TmdbService;
 use App\Settings\GeneralSettings;
 use App\Traits\HasUserFiltering;
 use Exception;
@@ -32,7 +34,6 @@ use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
 use Filament\Actions\ViewAction;
-use Filament\Forms;
 use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
@@ -537,11 +538,11 @@ class VodResource extends Resource
                             ->schema([
                                 Grid::make(2)
                                     ->schema([
-                                        Forms\Components\TextInput::make('current_tmdb_id')
+                                        TextInput::make('current_tmdb_id')
                                             ->label('TMDB ID')
                                             ->disabled()
                                             ->placeholder('Not set'),
-                                        Forms\Components\TextInput::make('current_imdb_id')
+                                        TextInput::make('current_imdb_id')
                                             ->label('IMDB ID')
                                             ->disabled()
                                             ->placeholder('Not set'),
@@ -554,12 +555,12 @@ class VodResource extends Resource
                             ->schema([
                                 Grid::make(3)
                                     ->schema([
-                                        Forms\Components\TextInput::make('search_query')
+                                        TextInput::make('search_query')
                                             ->label('Search Query')
                                             ->placeholder('Enter movie name...')
                                             ->required()
                                             ->columnSpan(2),
-                                        Forms\Components\TextInput::make('search_year')
+                                        TextInput::make('search_year')
                                             ->label('Year (optional)')
                                             ->numeric()
                                             ->minValue(1900)
@@ -584,10 +585,10 @@ class VodResource extends Resource
                                             }
 
                                             try {
-                                                $tmdbService = app(\App\Services\TmdbService::class);
+                                                $tmdbService = app(TmdbService::class);
                                                 $results = $tmdbService->searchMovieManual($query, $year);
                                                 $set('search_results', $results);
-                                            } catch (\Exception $e) {
+                                            } catch (Exception $e) {
                                                 Notification::make()
                                                     ->danger()
                                                     ->title('Search Error')
@@ -600,8 +601,8 @@ class VodResource extends Resource
                         Section::make('Search Results')
                             ->description('Click on a result to apply the TMDB IDs')
                             ->schema([
-                                Forms\Components\Hidden::make('vod_id'),
-                                \App\Forms\Components\TmdbSearchResults::make('search_results')
+                                Hidden::make('vod_id'),
+                                TmdbSearchResults::make('search_results')
                                     ->type('movie')
                                     ->default([]),
                             ]),
@@ -780,7 +781,11 @@ class VodResource extends Resource
                             ->label('Logo override URL')
                             ->url()
                             ->nullable()
-                            ->helperText('Leave empty to remove the custom logo and use provider/EPG logo.'),
+                            ->helperText('Leave empty to remove the custom logo and use provider/EPG logo.')
+                            ->suffixActions([
+                                AssetPickerAction::upload('logo'),
+                                AssetPickerAction::browse('logo'),
+                            ]),
                     ])
                     ->action(function (Collection $records, array $data): void {
                         Channel::whereIn('id', $records->pluck('id')->toArray())
@@ -1492,7 +1497,13 @@ class VodResource extends Resource
                         ->formatStateUsing(fn ($record) => $record?->logo_internal)
                         ->disabled(fn (Get $get) => ! $get('is_custom')) // make it read-only but copyable for non-custom channels
                         ->dehydrated(fn (Get $get) => $get('is_custom')) // don't save the value in the database for custom channels
-                        ->type('url'),
+                        ->type('url')
+                        ->suffixActions([
+                            AssetPickerAction::upload('logo_internal')
+                                ->visible(fn (Get $get): bool => $get('is_custom')),
+                            AssetPickerAction::browse('logo_internal')
+                                ->visible(fn (Get $get): bool => $get('is_custom')),
+                        ]),
                     TextInput::make('logo')
                         ->label('Logo Override')
                         ->columnSpan(1)
@@ -1505,8 +1516,12 @@ class VodResource extends Resource
                         ->helperText('Leave empty to use provider logo.')
                         ->rules(['min:1'])
                         ->type('url')
-                        ->hidden(fn (Get $get) => $get('is_custom')),
-                    TextInput::make('url_proxy')
+                        ->hidden(fn (Get $get) => $get('is_custom'))
+                        ->suffixActions([
+                            AssetPickerAction::upload('logo'),
+                            AssetPickerAction::browse('logo'),
+                        ]),
+                    TextInput::make('proxy_url')
                         ->label('Proxy URL')
                         ->columnSpan(2)
                         ->prefixIcon('heroicon-m-globe-alt')
@@ -1514,18 +1529,7 @@ class VodResource extends Resource
                             'heroicon-m-question-mark-circle',
                             tooltip: 'Use m3u editor proxy to access this channel.'
                         )
-                        ->formatStateUsing(function ($record) {
-                            if (! $record || ! $record->id) {
-                                return null;
-                            }
-                            try {
-                                return ProxyFacade::getProxyUrlForChannel(
-                                    $record->id,
-                                );
-                            } catch (Exception $e) {
-                                return null;
-                            }
-                        })
+                        ->formatStateUsing(fn ($record) => $record?->getProxyUrl())
                         ->helperText('m3u editor proxy url.')
                         ->disabled() // make it read-only but copyable
                         ->dehydrated(false) // don't save the value in the database

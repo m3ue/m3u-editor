@@ -4,6 +4,7 @@ use App\Models\StreamFileSetting;
 use App\Models\User;
 use App\Settings\GeneralSettings;
 use Illuminate\Database\Migrations\Migration;
+use Spatie\LaravelSettings\SettingsMapper;
 
 return new class extends Migration
 {
@@ -17,7 +18,7 @@ return new class extends Migration
         }
 
         // Read existing settings directly from the repository to avoid instantiating GeneralSettings during migrations (prevents MissingSettings in tests)
-        $settingsMapper = app(\Spatie\LaravelSettings\SettingsMapper::class);
+        $settingsMapper = app(SettingsMapper::class);
         $config = $settingsMapper->initialize(GeneralSettings::class);
         $repo = $config->getRepository();
         $existing = $repo->getPropertiesInGroup($config->getGroup());
@@ -85,7 +86,7 @@ return new class extends Migration
         StreamFileSetting::where('name', 'like', '% (Migrated)')->delete();
 
         // Reset the default IDs using the repository (avoid instantiating GeneralSettings during rollback)
-        $settingsMapper = app(\Spatie\LaravelSettings\SettingsMapper::class);
+        $settingsMapper = app(SettingsMapper::class);
         $config = $settingsMapper->initialize(GeneralSettings::class);
         $repo = $config->getRepository();
 

@@ -3,16 +3,19 @@
 namespace App\Filament\Resources\Networks;
 
 use App\Enums\TranscodeMode;
+use App\Filament\Actions\AssetPickerAction;
 use App\Filament\Resources\Networks\Pages\CreateNetwork;
 use App\Filament\Resources\Networks\Pages\EditNetwork;
 use App\Filament\Resources\Networks\Pages\ListNetworks;
 use App\Filament\Resources\Networks\Pages\ManualScheduleBuilder;
+use App\Filament\Resources\Playlists\PlaylistResource;
 use App\Models\Network;
-use App\Services\AssetInventoryService;
+use App\Models\Playlist;
 use App\Services\LogoCacheService;
 use App\Services\NetworkBroadcastService;
 use App\Services\NetworkScheduleService;
 use App\Traits\HasUserFiltering;
+use Carbon\Carbon;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Actions\BulkAction;
@@ -21,7 +24,6 @@ use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
 use Filament\Forms\Components\DateTimePicker;
-use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
@@ -36,7 +38,6 @@ use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Tabs;
 use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Schemas\Components\Utilities\Get;
-use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Components\Wizard\Step;
 use Filament\Schemas\Schema;
 use Filament\Tables;
@@ -50,7 +51,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 
 class NetworkResource extends Resource
 {
@@ -167,25 +168,10 @@ class NetworkResource extends Resource
                                         ->placeholder('https://example.com/logo.png')
                                         ->url()
                                         ->maxLength(500)
-                                        ->suffixAction(
-                                            Action::make('uploadLogo')
-                                                ->label('Upload')
-                                                ->icon('heroicon-o-arrow-up-tray')
-                                                ->schema([
-                                                    FileUpload::make('logo_file')
-                                                        ->label('Logo image')
-                                                        ->image()
-                                                        ->required()
-                                                        ->disk('public')
-                                                        ->directory('assets/library')
-                                                        ->visibility('public'),
-                                                ])
-                                                ->action(function (array $data, Set $schemaSet): void {
-                                                    $path = $data['logo_file'];
-                                                    $schemaSet('logo', Storage::disk('public')->url($path));
-                                                    app(AssetInventoryService::class)->indexFile('public', $path, 'upload');
-                                                })
-                                        ),
+                                        ->suffixActions([
+                                            AssetPickerAction::upload('logo'),
+                                            AssetPickerAction::browse('logo'),
+                                        ]),
 
                                     TextInput::make('group_name')
                                         ->label('Group Name')
@@ -261,9 +247,9 @@ class NetworkResource extends Resource
                                                 ->required(),
                                         ])
                                         ->createOptionUsing(function (array $data): int {
-                                            $playlist = \App\Models\Playlist::create([
+                                            $playlist = Playlist::create([
                                                 'name' => $data['name'],
-                                                'uuid' => (string) \Illuminate\Support\Str::uuid(),
+                                                'uuid' => (string) Str::uuid(),
                                                 'user_id' => Auth::id(),
                                                 'is_network_playlist' => true,
                                             ]);
@@ -357,25 +343,10 @@ class NetworkResource extends Resource
                                 ->placeholder('https://example.com/logo.png')
                                 ->url()
                                 ->maxLength(500)
-                                ->suffixAction(
-                                    Action::make('uploadLogo')
-                                        ->label('Upload')
-                                        ->icon('heroicon-o-arrow-up-tray')
-                                        ->schema([
-                                            FileUpload::make('logo_file')
-                                                ->label('Logo image')
-                                                ->image()
-                                                ->required()
-                                                ->disk('public')
-                                                ->directory('assets/library')
-                                                ->visibility('public'),
-                                        ])
-                                        ->action(function (array $data, Set $schemaSet): void {
-                                            $path = $data['logo_file'];
-                                            $schemaSet('logo', Storage::disk('public')->url($path));
-                                            app(AssetInventoryService::class)->indexFile('public', $path, 'upload');
-                                        })
-                                ),
+                                ->suffixActions([
+                                    AssetPickerAction::upload('logo'),
+                                    AssetPickerAction::browse('logo'),
+                                ]),
 
                             TextInput::make('group_name')
                                 ->label('Group Name')
@@ -448,9 +419,9 @@ class NetworkResource extends Resource
                                         ->required(),
                                 ])
                                 ->createOptionUsing(function (array $data): int {
-                                    $playlist = \App\Models\Playlist::create([
+                                    $playlist = Playlist::create([
                                         'name' => $data['name'],
-                                        'uuid' => (string) \Illuminate\Support\Str::uuid(),
+                                        'uuid' => (string) Str::uuid(),
                                         'user_id' => Auth::id(),
                                         'is_network_playlist' => true,
                                     ]);
@@ -674,7 +645,7 @@ class NetworkResource extends Resource
                                 ->visible(fn (Get $get): bool => $get('broadcast_enabled') && $get('broadcast_schedule_enabled'))
                                 ->afterStateUpdated(function ($state, $record) {
                                     if ($state && $record) {
-                                        $scheduledTime = \Carbon\Carbon::parse($state);
+                                        $scheduledTime = Carbon::parse($state);
                                         if ($scheduledTime->isPast()) {
                                             Notification::make()
                                                 ->warning()
@@ -1014,7 +985,7 @@ class NetworkResource extends Resource
                         ->label('View Playlist')
                         ->icon('heroicon-o-eye')
                         ->visible(fn (Network $record): bool => $record->network_playlist_id !== null)
-                        ->url(fn (Network $record): string => \App\Filament\Resources\Playlists\PlaylistResource::getUrl('view', ['record' => $record->network_playlist_id])),
+                        ->url(fn (Network $record): string => PlaylistResource::getUrl('view', ['record' => $record->network_playlist_id])),
 
                     DeleteAction::make(),
                 ])->button()->hiddenLabel()->size('sm'),

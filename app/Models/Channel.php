@@ -4,7 +4,6 @@ namespace App\Models;
 
 use App\Enums\ChannelLogoType;
 use App\Enums\PlaylistSourceType;
-use App\Facades\ProxyFacade;
 use App\Jobs\FetchTmdbIds;
 use App\Services\XtreamService;
 use App\Settings\GeneralSettings;
@@ -18,6 +17,8 @@ use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\URL;
+use Illuminate\Support\Str;
 use Spatie\Tags\HasTags;
 use Symfony\Component\Process\Process as SymfonyProcess;
 
@@ -141,7 +142,7 @@ class Channel extends Model
         )->orderBy('channel_failovers.sort');
     }
 
-    public function getFloatingPlayerAttributes(): array
+    public function getFloatingPlayerAttributes(?string $username, ?string $password): array
     {
         $settings = app(GeneralSettings::class);
 
@@ -154,14 +155,12 @@ class Channel extends Model
 
         // Always proxy the internal player so we can attempt to transcode the stream for better compatibility
         // This also prevents CORS and mixed-content issues
-        $url = route('m3u-proxy.channel.player', ['id' => $this->id]);
-
-        // Determine the channel format based on URL or container extension
-        $originalUrl = $this->url_custom ?? $this->url;
-        $format = pathinfo($originalUrl, PATHINFO_EXTENSION);
-        if (empty($format)) {
-            $format = $this->container_extension ?? 'ts';
-        }
+        [$url, $format] = $this->getProxyUrl(
+            withFormat: true,
+            profileFormat: $profile->format ?? null,
+            username: $username,
+            password: $password
+        );
 
         return [
             'id' => $this->id,
@@ -187,13 +186,61 @@ class Channel extends Model
     /**
      * The attributes that are mass assignable.
      *
-     * @var string
+     * @var string|array
      */
-    public function getProxyUrlAttribute(): string
+    public function getProxyUrl(?bool $withFormat = false, ?string $profileFormat = null, ?string $username = null, ?string $password = null)
     {
-        return ProxyFacade::getProxyUrlForChannel(
-            $this->id,
-        );
+        // Load the effective playlist to determine proxy settings and get UUID for authentication
+        $playlist = $this->getEffectivePlaylist();
+        $user = $this->user;
+        $originalUrl = $this->url_custom ?? $this->url;
+
+        // Extract the filename from the URL to determine the format (extension)
+        $filename = parse_url($originalUrl, PHP_URL_PATH);
+
+        // Determine the channel format based on URL or container extension
+        if (Str::endsWith($filename, '.m3u8')) {
+            $channelFormat = 'm3u8';
+        } elseif (Str::endsWith($filename, '.ts')) {
+            $channelFormat = 'ts';
+        } else {
+            if ($playlist->xtream ?? false) {
+                $channelFormat = $playlist->xtream_config['output'] ?? 'ts'; // Default to 'ts' if not set
+            } else {
+                $channelFormat = $this->container_extension ?? 'ts';
+            }
+        }
+        $urlPath = 'live';
+        if ($this->is_vod) {
+            $urlPath = 'movie';
+            $channelFormat = $this->container_extension ?? $channelFormat ?? 'mkv';
+        }
+
+        // If a specific format is provided (e.g. from a StreamProfile), use that instead of the detected format
+        if ($profileFormat) {
+            $channelFormat = $profileFormat;
+        }
+
+        // Determine the username and password to use for proxy authentication
+        if ($username && $password) {
+            $username = urlencode($username);
+            $password = urlencode($password);
+
+        } else {
+            $username = urlencode($user->name ?? 'admin');
+            $password = urlencode($playlist->uuid);
+        }
+
+        // Always proxy the internal proxy so we can attempt to transcode the stream for better compatibility
+        // This also prevents CORS and mixed-content issues
+        $url = rtrim(url("/{$urlPath}/{$username}/{$password}/".$this->id.'.'.$channelFormat), '.');
+
+        // Append query parameter so our Xtream Stream controller knows to proxy the stream regardless of playlist settings
+        $url .= '?'.http_build_query([
+            'proxy' => 'true',
+        ]);
+
+        return $withFormat ? [$url, $channelFormat] : $url;
     }
 
     /**
@@ -266,6 +313,16 @@ class Channel extends Model
 
     public function fetchMetadata($xtream = null, $refresh = false, bool $skipTmdb = false)
     {
+        if (! $this->is_vod) {
+            return false;
+        }
+
+        // Custom channels should not fetch metadata
+        if ($this->is_custom) {
+            // Return true to indicate that we "succeeded" in fetching metadata, even though we intentionally did not fetch anything
+            return true;
+        }
+
         try {
             $playlist = $this->playlist;
 
@@ -291,10 +348,8 @@ class Channel extends Model
 
                 return false;
             }
-            if (! $this->is_vod) {
-                return false;
-            }
-            $movieData = $xtream->getVodInfo($this->source_id);
+
+            $movieData = $xtream->getVodInfo($this->source_id, timeout: 60);
             $releaseDate = $movieData['info']['release_date'] ?? null;
             $releaseDateAlt = $movieData['info']['releasedate'] ?? null;
             $year = $this->year;
@@ -309,7 +364,7 @@ class Channel extends Model
                 try {
                     $date = new \DateTime($dateToParse);
                     $year = (int) $date->format('Y');
-                } catch (\Exception $e) {
+                } catch (Exception $e) {
                     Log::warning("Unable to parse release date \"{$dateToParse}\" for VOD {$this->id}");
                 }
             }
@@ -331,7 +386,7 @@ class Channel extends Model
             }
 
             return true;
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
             Log::error('Failed to fetch metadata for VOD '.$this->id, ['exception' => $e]);
         }
 

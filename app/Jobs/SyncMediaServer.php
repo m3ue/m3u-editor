@@ -13,6 +13,7 @@ use App\Models\MediaServerIntegration;
 use App\Models\Playlist;
 use App\Models\Season;
 use App\Models\Series;
+use App\Services\LocalMediaService;
 use App\Services\MediaServerService;
 use App\Services\TmdbService;
 use Exception;
@@ -173,7 +174,7 @@ class SyncMediaServer implements ShouldBeUnique, ShouldQueue
             // Send success notification
             $body = "Synced {$this->stats['movies_synced']} movies and {$this->stats['series_synced']} series from {$integration->name}";
 
-            if ($integration->usesLocalPathConfig() && $this->stats['series_synced'] === 0 && $service instanceof \App\Services\LocalMediaService) {
+            if ($integration->usesLocalPathConfig() && $this->stats['series_synced'] === 0 && $service instanceof LocalMediaService) {
                 $flatWarnings = $service->getSeriesPathWarnings();
 
                 if (! empty($flatWarnings)) {

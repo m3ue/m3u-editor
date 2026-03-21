@@ -12,7 +12,7 @@ class ProxyRateLimitMiddleware
     /**
      * Handle an incoming request with early termination rate limiting.
      *
-     * @param  \Closure(\Illuminate\Http\Request): (\Symfony\Component\HttpFoundation\Response)  $next
+     * @param  Closure(Request): (Response)  $next
      */
     public function handle(Request $request, Closure $next): Response
     {

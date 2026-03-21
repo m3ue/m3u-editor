@@ -2,13 +2,14 @@
 
 namespace Database\Factories;
 
+use App\Enums\TranscodeMode;
 use App\Models\Network;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Support\Str;
 
 /**
- * @extends \Illuminate\Database\Eloquent\Factories\Factory<\App\Models\Network>
+ * @extends Factory<Network>
  */
 class NetworkFactory extends Factory
 {
@@ -34,7 +35,7 @@ class NetworkFactory extends Factory
             'output_format' => 'hls',
             'segment_duration' => 6,
             'hls_list_size' => 10,
-            'transcode_mode' => \App\Enums\TranscodeMode::Direct->value,
+            'transcode_mode' => TranscodeMode::Direct->value,
             'audio_bitrate' => 192,
             'video_codec' => null,
             'audio_codec' => null,

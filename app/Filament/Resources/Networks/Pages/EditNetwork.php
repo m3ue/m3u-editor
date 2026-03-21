@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\Networks\Pages;
 
 use App\Filament\Resources\Networks\NetworkResource;
+use App\Filament\Resources\Playlists\PlaylistResource;
 use App\Models\Network;
 use App\Services\NetworkBroadcastService;
 use App\Services\NetworkScheduleService;
@@ -133,7 +134,7 @@ class EditNetwork extends EditRecord
                     ->label('View Playlist')
                     ->icon('heroicon-o-eye')
                     ->visible(fn (Network $record): bool => $record->network_playlist_id !== null)
-                    ->url(fn (Network $record): string => \App\Filament\Resources\Playlists\PlaylistResource::getUrl('view', ['record' => $record->network_playlist_id])),
+                    ->url(fn (Network $record): string => PlaylistResource::getUrl('view', ['record' => $record->network_playlist_id])),
 
             ])->button(),
         ];

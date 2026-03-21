@@ -714,7 +714,7 @@ class PlexService implements MediaServer
                         'active_sessions' => count($sessions),
                     ]);
                 }
-            } catch (\Exception $e) {
+            } catch (Exception $e) {
                 Log::debug('Error polling Plex transcode sessions', [
                     'session_id' => $sessionId,
                     'attempt' => $attempt,

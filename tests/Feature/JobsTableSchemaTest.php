@@ -10,6 +10,7 @@
  */
 
 use App\Models\Job;
+use App\Providers\AppServiceProvider;
 use Illuminate\Support\Facades\Schema;
 
 test('custom jobs table has correct schema with title column', function () {
@@ -101,7 +102,7 @@ test('ensureJobsTableExists recreates table when wrong schema detected', functio
     expect(Schema::connection('jobs')->hasColumn('jobs', 'title'))->toBeFalse();
 
     // Call the safety net method via reflection
-    $provider = app(\App\Providers\AppServiceProvider::class, ['app' => app()]);
+    $provider = app(AppServiceProvider::class, ['app' => app()]);
     $method = new ReflectionMethod($provider, 'ensureJobsTableExists');
     $method->invoke($provider);
 

@@ -1,5 +1,8 @@
 <?php
 
+use App\Models\CustomPlaylist;
+use App\Models\MergedPlaylist;
+use App\Models\Playlist;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
@@ -28,17 +31,17 @@ return new class extends Migration
         });
 
         // Need to update the existing playlists to have this enabled when they have proxy enabled
-        $playlists = \App\Models\Playlist::where('enable_proxy', true);
+        $playlists = Playlist::where('enable_proxy', true);
         foreach ($playlists->cursor() as $playlist) {
             $playlist->enable_logo_proxy = true;
             $playlist->save();
         }
-        $custom_playlists = \App\Models\CustomPlaylist::where('enable_proxy', true);
+        $custom_playlists = CustomPlaylist::where('enable_proxy', true);
         foreach ($custom_playlists->cursor() as $playlist) {
             $playlist->enable_logo_proxy = true;
             $playlist->save();
         }
-        $merged_playlists = \App\Models\MergedPlaylist::where('enable_proxy', true);
+        $merged_playlists = MergedPlaylist::where('enable_proxy', true);
         foreach ($merged_playlists->cursor() as $playlist) {
             $playlist->enable_logo_proxy = true;
             $playlist->save();

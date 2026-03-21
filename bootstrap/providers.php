@@ -1,10 +1,17 @@
 <?php
 
+use App\Providers\AppServiceProvider;
+use App\Providers\Filament\AdminPanelProvider;
+use App\Providers\Filament\GuestPanelPanelProvider;
+use App\Providers\HorizonServiceProvider;
+use App\Providers\LogoServiceProvider;
+use App\Providers\VersionServiceProvider;
+
 return [
-    App\Providers\AppServiceProvider::class,
-    App\Providers\Filament\AdminPanelProvider::class,
-    App\Providers\Filament\GuestPanelPanelProvider::class,
-    App\Providers\HorizonServiceProvider::class,
-    App\Providers\LogoServiceProvider::class,
-    App\Providers\VersionServiceProvider::class,
+    AppServiceProvider::class,
+    AdminPanelProvider::class,
+    GuestPanelPanelProvider::class,
+    HorizonServiceProvider::class,
+    LogoServiceProvider::class,
+    VersionServiceProvider::class,
 ];

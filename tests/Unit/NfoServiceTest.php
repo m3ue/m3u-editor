@@ -5,7 +5,7 @@ use App\Services\NfoService;
 describe('NfoService getScalarValue', function () {
     it('returns scalar values unchanged', function () {
         $service = new NfoService;
-        $reflection = new \ReflectionClass($service);
+        $reflection = new ReflectionClass($service);
         $method = $reflection->getMethod('getScalarValue');
         $method->setAccessible(true);
 
@@ -17,7 +17,7 @@ describe('NfoService getScalarValue', function () {
 
     it('extracts first element from arrays', function () {
         $service = new NfoService;
-        $reflection = new \ReflectionClass($service);
+        $reflection = new ReflectionClass($service);
         $method = $reflection->getMethod('getScalarValue');
         $method->setAccessible(true);
 
@@ -36,7 +36,7 @@ describe('NfoService getScalarValue', function () {
 
     it('returns null for empty arrays', function () {
         $service = new NfoService;
-        $reflection = new \ReflectionClass($service);
+        $reflection = new ReflectionClass($service);
         $method = $reflection->getMethod('getScalarValue');
         $method->setAccessible(true);
 
@@ -45,7 +45,7 @@ describe('NfoService getScalarValue', function () {
 
     it('returns null for objects', function () {
         $service = new NfoService;
-        $reflection = new \ReflectionClass($service);
+        $reflection = new ReflectionClass($service);
         $method = $reflection->getMethod('getScalarValue');
         $method->setAccessible(true);
 
@@ -55,7 +55,7 @@ describe('NfoService getScalarValue', function () {
 
     it('handles TMDB image path arrays correctly', function () {
         $service = new NfoService;
-        $reflection = new \ReflectionClass($service);
+        $reflection = new ReflectionClass($service);
         $method = $reflection->getMethod('getScalarValue');
         $method->setAccessible(true);
 
@@ -70,7 +70,7 @@ describe('NfoService getScalarValue', function () {
 describe('NfoService applyNameFilter', function () {
     it('returns name unchanged when filtering disabled', function () {
         $service = new NfoService;
-        $reflection = new \ReflectionClass($service);
+        $reflection = new ReflectionClass($service);
         $method = $reflection->getMethod('applyNameFilter');
         $method->setAccessible(true);
 
@@ -82,7 +82,7 @@ describe('NfoService applyNameFilter', function () {
 
     it('returns name unchanged when patterns array is empty', function () {
         $service = new NfoService;
-        $reflection = new \ReflectionClass($service);
+        $reflection = new ReflectionClass($service);
         $method = $reflection->getMethod('applyNameFilter');
         $method->setAccessible(true);
 
@@ -94,7 +94,7 @@ describe('NfoService applyNameFilter', function () {
 
     it('removes single pattern from name', function () {
         $service = new NfoService;
-        $reflection = new \ReflectionClass($service);
+        $reflection = new ReflectionClass($service);
         $method = $reflection->getMethod('applyNameFilter');
         $method->setAccessible(true);
 
@@ -106,7 +106,7 @@ describe('NfoService applyNameFilter', function () {
 
     it('removes multiple patterns from name', function () {
         $service = new NfoService;
-        $reflection = new \ReflectionClass($service);
+        $reflection = new ReflectionClass($service);
         $method = $reflection->getMethod('applyNameFilter');
         $method->setAccessible(true);
 
@@ -119,7 +119,7 @@ describe('NfoService applyNameFilter', function () {
 
     it('trims whitespace after pattern removal', function () {
         $service = new NfoService;
-        $reflection = new \ReflectionClass($service);
+        $reflection = new ReflectionClass($service);
         $method = $reflection->getMethod('applyNameFilter');
         $method->setAccessible(true);
 
@@ -131,7 +131,7 @@ describe('NfoService applyNameFilter', function () {
 
     it('handles non-string patterns gracefully', function () {
         $service = new NfoService;
-        $reflection = new \ReflectionClass($service);
+        $reflection = new ReflectionClass($service);
         $method = $reflection->getMethod('applyNameFilter');
         $method->setAccessible(true);
 
@@ -147,7 +147,7 @@ describe('NfoService applyNameFilter', function () {
 
     it('ignores empty string patterns', function () {
         $service = new NfoService;
-        $reflection = new \ReflectionClass($service);
+        $reflection = new ReflectionClass($service);
         $method = $reflection->getMethod('applyNameFilter');
         $method->setAccessible(true);
 
@@ -161,7 +161,7 @@ describe('NfoService applyNameFilter', function () {
 
     it('handles multiple occurrences of same pattern', function () {
         $service = new NfoService;
-        $reflection = new \ReflectionClass($service);
+        $reflection = new ReflectionClass($service);
         $method = $reflection->getMethod('applyNameFilter');
         $method->setAccessible(true);
 

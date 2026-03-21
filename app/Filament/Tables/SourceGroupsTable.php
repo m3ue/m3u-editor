@@ -3,6 +3,7 @@
 namespace App\Filament\Tables;
 
 use App\Models\SourceGroup;
+use Filament\Actions\BulkActionGroup;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
@@ -44,7 +45,7 @@ class SourceGroupsTable
                 //
             ])
             ->toolbarActions([
-                \Filament\Actions\BulkActionGroup::make([
+                BulkActionGroup::make([
                     //
                 ]),
             ]);

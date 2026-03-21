@@ -160,9 +160,9 @@ it('releases slot even on exception', function () {
 
     try {
         $testClass->callWithThrottling(function () {
-            throw new \Exception('Test exception');
+            throw new Exception('Test exception');
         });
-    } catch (\Exception $e) {
+    } catch (Exception $e) {
         // Expected
     }
 
@@ -178,7 +178,7 @@ it('validates milliseconds as integer', function () {
     expect($settings->provider_request_delay_ms)->toBeInt();
 
     // Verify the type in the property
-    $reflection = new \ReflectionClass($settings);
+    $reflection = new ReflectionClass($settings);
     $property = $reflection->getProperty('provider_request_delay_ms');
     $type = $property->getType();
 

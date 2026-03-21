@@ -1429,7 +1429,7 @@ class PlaylistResource extends Resource
                         ->collapsible()
                         ->itemLabel(fn (array $state): ?string => $state['name'] ?? $state['username'] ?? 'New Profile')
                         ->extraItemActions([
-                            \Filament\Actions\Action::make('test_profile')
+                            Action::make('test_profile')
                                 ->label('Test')
                                 ->icon('heroicon-o-signal')
                                 ->color('info')

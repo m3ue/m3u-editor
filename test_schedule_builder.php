@@ -10,6 +10,7 @@ require '/var/www/html/vendor/autoload.php';
 $app = require '/var/www/html/bootstrap/app.php';
 $app->make('Illuminate\Contracts\Console\Kernel')->bootstrap();
 
+use App\Filament\Resources\Networks\Pages\ManualScheduleBuilder;
 use App\Models\Channel;
 use App\Models\Network;
 use App\Models\NetworkProgramme;
@@ -111,9 +112,9 @@ $testDate = '2030-01-15';
 
 // ── Helper: Instantiate the Livewire page ──────────────────────────────
 
-function getBuilder(Network $network): \App\Filament\Resources\Networks\Pages\ManualScheduleBuilder
+function getBuilder(Network $network): ManualScheduleBuilder
 {
-    $builder = new \App\Filament\Resources\Networks\Pages\ManualScheduleBuilder;
+    $builder = new ManualScheduleBuilder;
     // Use reflection to set the record
     $ref = new ReflectionProperty($builder, 'record');
     $ref->setAccessible(true);

@@ -1,5 +1,21 @@
 <?php
 
+use Blueprint\Generators\ControllerGenerator;
+use Blueprint\Generators\FactoryGenerator;
+use Blueprint\Generators\MigrationGenerator;
+use Blueprint\Generators\ModelGenerator;
+use Blueprint\Generators\PhpUnitTestGenerator;
+use Blueprint\Generators\PolicyGenerator;
+use Blueprint\Generators\RouteGenerator;
+use Blueprint\Generators\SeederGenerator;
+use Blueprint\Generators\Statements\EventGenerator;
+use Blueprint\Generators\Statements\FormRequestGenerator;
+use Blueprint\Generators\Statements\JobGenerator;
+use Blueprint\Generators\Statements\MailGenerator;
+use Blueprint\Generators\Statements\NotificationGenerator;
+use Blueprint\Generators\Statements\ResourceGenerator;
+use Blueprint\Generators\Statements\ViewGenerator;
+
 return [
 
     /*
@@ -141,22 +157,22 @@ return [
     |
     */
     'generators' => [
-        'controller' => \Blueprint\Generators\ControllerGenerator::class,
-        'factory' => \Blueprint\Generators\FactoryGenerator::class,
-        'migration' => \Blueprint\Generators\MigrationGenerator::class,
-        'model' => \Blueprint\Generators\ModelGenerator::class,
-        'route' => \Blueprint\Generators\RouteGenerator::class,
-        'seeder' => \Blueprint\Generators\SeederGenerator::class,
-        'test' => \Blueprint\Generators\PhpUnitTestGenerator::class,
+        'controller' => ControllerGenerator::class,
+        'factory' => FactoryGenerator::class,
+        'migration' => MigrationGenerator::class,
+        'model' => ModelGenerator::class,
+        'route' => RouteGenerator::class,
+        'seeder' => SeederGenerator::class,
+        'test' => PhpUnitTestGenerator::class,
         // 'test' => \Blueprint\Generators\PestTestGenerator::class,
-        'event' => \Blueprint\Generators\Statements\EventGenerator::class,
-        'form_request' => \Blueprint\Generators\Statements\FormRequestGenerator::class,
-        'job' => \Blueprint\Generators\Statements\JobGenerator::class,
-        'mail' => \Blueprint\Generators\Statements\MailGenerator::class,
-        'notification' => \Blueprint\Generators\Statements\NotificationGenerator::class,
-        'resource' => \Blueprint\Generators\Statements\ResourceGenerator::class,
-        'view' => \Blueprint\Generators\Statements\ViewGenerator::class,
-        'policy' => \Blueprint\Generators\PolicyGenerator::class,
+        'event' => EventGenerator::class,
+        'form_request' => FormRequestGenerator::class,
+        'job' => JobGenerator::class,
+        'mail' => MailGenerator::class,
+        'notification' => NotificationGenerator::class,
+        'resource' => ResourceGenerator::class,
+        'view' => ViewGenerator::class,
+        'policy' => PolicyGenerator::class,
     ],
 
 ];

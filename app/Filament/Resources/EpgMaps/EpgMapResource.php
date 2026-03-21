@@ -23,6 +23,8 @@ use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Fieldset;
+use Filament\Schemas\Components\Grid;
+use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\TextColumn;
@@ -258,16 +260,25 @@ class EpgMapResource extends Resource
                 ->options(Playlist::where(['user_id' => Auth::id()])->get(['name', 'id'])->pluck('name', 'id'))
                 ->hidden(! $showPlaylist)
                 ->searchable(),
-            Toggle::make('override')
-                ->label('Overwrite')
-                ->helperText('Overwrite channels with existing mappings?')
-                ->default(false),
-            Toggle::make('recurring')
-                ->label('Recurring')
-                ->helperText('Re-run this mapping everytime the EPG is synced?')
-                ->default(false),
-            Fieldset::make('Advanced Settings')
+            Grid::make()
+                ->columnSpanFull()
                 ->columns(2)
+                ->schema([
+                    Toggle::make('override')
+                        ->label('Overwrite')
+                        ->helperText('Overwrite channels with existing mappings?')
+                        ->default(false),
+                    Toggle::make('recurring')
+                        ->label('Recurring')
+                        ->helperText('Re-run this mapping everytime the EPG is synced?')
+                        ->default(false),
+                ]),
+            Section::make('Advanced Settings')
+                ->columns(2)
+                ->icon('heroicon-s-cog-6-tooth')
+                ->compact()
+                ->collapsible()
+                ->collapsed(true)
                 ->columnSpanFull()
                 ->schema([
                     Toggle::make('settings.skip_missing')
@@ -296,7 +307,14 @@ class EpgMapResource extends Resource
                         ->columnSpanFull()
                         ->inline(true)
                         ->default(false)
-                        ->helperText('When enabled, exact matches on channel name/display name will be prioritized over channel_id matches. Enable this if your EPG has duplicate channel_ids for different quality versions (e.g., DasErsteHD for "Das Erste HDraw", "Das Erste HDraw²", etc.). Disable if your EPG uses unique channel_ids.'),
+                        ->helperText('When enabled, exact matches on channel name/display name will be prioritized over channel_id matches. Enable this if your EPG has duplicate channel_ids for different quality versions (e.g., BBCOHD for "BBC One HD", "BBC One HD²", etc.). Disable if your EPG uses unique channel_ids.'),
+
+                    Toggle::make('settings.set_epg_icon')
+                        ->label('Set preferred icon to EPG')
+                        ->columnSpanFull()
+                        ->inline(true)
+                        ->default(false)
+                        ->helperText('When enabled, matched channels will have their preferred icon set to "EPG" instead of "Channel". This uses the EPG channel icon as the preferred logo source.'),
 
                     Fieldset::make('Matching Thresholds')
                         ->schema([
@@ -327,22 +345,21 @@ class EpgMapResource extends Resource
                         ])
                         ->columns(3)
                         ->columnSpanFull(),
-
-                    TagsInput::make('settings.exclude_prefixes')
-                        ->label(fn (Get $get) => ! $get('settings.use_regex') ? 'Channel prefixes to remove before matching' : 'Regex patterns to remove before matching')
-                        ->helperText('Press [tab] or [return] to add item. Leave empty to disable.')
-                        ->columnSpanFull()
-                        ->suggestions([
-                            'US: ',
-                            'UK: ',
-                            'CA: ',
-                            '^(US|UK|CA): ',
-                            '\s*(FHD|HD)\s*',
-                            '\s+(FHD|HD).*$',
-                            '\[.*\]',
-                        ])
-                        ->splitKeys(['Tab', 'Return']),
                 ]),
+            TagsInput::make('settings.exclude_prefixes')
+                ->label(fn (Get $get) => ! $get('settings.use_regex') ? 'Channel prefixes to remove before matching' : 'Regex patterns to remove before matching')
+                ->helperText('Press [tab] or [return] to add item. Leave empty to disable.')
+                ->columnSpanFull()
+                ->suggestions([
+                    'US: ',
+                    'UK: ',
+                    'CA: ',
+                    '^(US|UK|CA): ',
+                    '\s*(FHD|HD)\s*',
+                    '\s+(FHD|HD).*$',
+                    '\[.*\]',
+                ])
+                ->splitKeys(['Tab', 'Return']),
         ];
     }
 }

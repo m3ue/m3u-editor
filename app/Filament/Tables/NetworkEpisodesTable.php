@@ -5,6 +5,7 @@ namespace App\Filament\Tables;
 use App\Models\Category;
 use App\Models\Episode;
 use App\Models\Series;
+use Filament\Actions\BulkActionGroup;
 use Filament\Tables\Columns\ImageColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
@@ -118,7 +119,7 @@ class NetworkEpisodesTable
                 //
             ])
             ->toolbarActions([
-                \Filament\Actions\BulkActionGroup::make([
+                BulkActionGroup::make([
                     //
                 ]),
             ]);

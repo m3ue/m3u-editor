@@ -89,7 +89,7 @@ class MergedPlaylist extends Model
         return $this->channels()->where('enabled', true);
     }
 
-    public function series(): hasManyThrough
+    public function series(): HasManyThrough
     {
         return $this->hasManyThrough(
             Series::class,
@@ -101,12 +101,12 @@ class MergedPlaylist extends Model
         );
     }
 
-    public function enabled_series(): hasManyThrough
+    public function enabled_series(): HasManyThrough
     {
         return $this->series()->where('enabled', true);
     }
 
-    public function seasons(): hasManyThrough
+    public function seasons(): HasManyThrough
     {
         return $this->hasManyThrough(
             Season::class,
@@ -118,7 +118,7 @@ class MergedPlaylist extends Model
         );
     }
 
-    public function episodes(): hasManyThrough
+    public function episodes(): HasManyThrough
     {
         return $this->hasManyThrough(
             Episode::class,
@@ -130,25 +130,25 @@ class MergedPlaylist extends Model
         );
     }
 
-    public function live_channels(): hasManyThrough
+    public function live_channels(): HasManyThrough
     {
         return $this->channels()
             ->where('is_vod', false);
     }
 
-    public function enabled_live_channels(): hasManyThrough
+    public function enabled_live_channels(): HasManyThrough
     {
         return $this->live_channels()
             ->where('enabled', true);
     }
 
-    public function vod_channels(): hasManyThrough
+    public function vod_channels(): HasManyThrough
     {
         return $this->channels()
             ->where('is_vod', true);
     }
 
-    public function enabled_vod_channels(): hasManyThrough
+    public function enabled_vod_channels(): HasManyThrough
     {
         return $this->vod_channels()
             ->where('enabled', true);

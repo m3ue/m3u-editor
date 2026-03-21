@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
 use Throwable;
@@ -53,13 +54,13 @@ class StrmFileMapping extends Model
      * @param  string  $syncableType  The model class name (e.g., Episode::class)
      * @param  array  $syncableIds  Array of syncable IDs to load
      * @param  string  $syncLocation  Base sync location path
-     * @return \Illuminate\Support\Collection<int, self>
+     * @return Collection<int, self>
      */
     public static function bulkLoadForSyncables(
         string $syncableType,
         array $syncableIds,
         string $syncLocation
-    ): \Illuminate\Support\Collection {
+    ): Collection {
         if (empty($syncableIds)) {
             return collect();
         }
@@ -80,7 +81,7 @@ class StrmFileMapping extends Model
      * @param  string  $expectedPath  The expected full path for the .strm file
      * @param  string  $url  The URL to store in the .strm file
      * @param  array  $pathOptions  The options used to generate the path
-     * @param  \Illuminate\Support\Collection|null  $mappingCache  Pre-loaded mappings keyed by syncable_id
+     * @param  Collection|null  $mappingCache  Pre-loaded mappings keyed by syncable_id
      * @return self The mapping record
      */
     public static function syncFileWithCache(
@@ -89,7 +90,7 @@ class StrmFileMapping extends Model
         string $expectedPath,
         string $url,
         array $pathOptions = [],
-        ?\Illuminate\Support\Collection $mappingCache = null
+        ?Collection $mappingCache = null
     ): self {
         // Try to get mapping from cache first, fall back to DB query
         $mapping = null;
@@ -707,7 +708,7 @@ class StrmFileMapping extends Model
                             if ($nfoPath !== $p && file_exists($nfoPath)) {
                                 @unlink($nfoPath);
                             }
-                        } catch (\Throwable $e) {
+                        } catch (Throwable $e) {
                             Log::debug('STRM Sync: Failed to unlink orphaned file during bulk cleanup', ['path' => $p, 'error' => $e->getMessage()]);
                         }
                     }
@@ -715,7 +716,7 @@ class StrmFileMapping extends Model
                     // Bulk delete DB rows
                     try {
                         self::whereIn('id', $idsToDelete)->delete();
-                    } catch (\Throwable $e) {
+                    } catch (Throwable $e) {
                         Log::warning('STRM Sync: Bulk delete of orphaned mappings failed', ['error' => $e->getMessage()]);
                     }
 
@@ -735,14 +736,14 @@ class StrmFileMapping extends Model
                     if ($nfoPath !== $p && file_exists($nfoPath)) {
                         @unlink($nfoPath);
                     }
-                } catch (\Throwable $e) {
+                } catch (Throwable $e) {
                     Log::debug('STRM Sync: Failed to unlink orphaned file during final bulk cleanup', ['path' => $p, 'error' => $e->getMessage()]);
                 }
             }
 
             try {
                 self::whereIn('id', $idsToDelete)->delete();
-            } catch (\Throwable $e) {
+            } catch (Throwable $e) {
                 Log::warning('STRM Sync: Final bulk delete of orphaned mappings failed', ['error' => $e->getMessage()]);
             }
         }

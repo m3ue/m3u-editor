@@ -10,6 +10,7 @@ use App\Models\Category;
 use App\Models\Channel;
 use App\Models\CustomPlaylist;
 use App\Models\Epg;
+use App\Models\Group;
 use App\Models\MergedPlaylist;
 use App\Models\Network;
 use App\Models\Playlist;
@@ -21,15 +22,16 @@ use App\Models\ViewerWatchProgress;
 use App\Services\EpgCacheService;
 use App\Services\LogoCacheService;
 use App\Services\M3uProxyService;
+use App\Settings\GeneralSettings;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Collection;
-use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Redirect;
 use Illuminate\Support\Str;
 use Spatie\Tags\Tag;
+use Symfony\Component\HttpFoundation\JsonResponse;
 
 class XtreamApiController extends Controller
 {
@@ -426,9 +428,12 @@ class XtreamApiController extends Controller
             }
             $outputFormats = ['m3u8', 'ts'];
             if ($playlist->enable_proxy) {
-                if ($playlist->xtream_config ?? false) {
-                    // We'll restrict the format to the format the playlist was imported in
-                    $proxyOutput = $playlist->xtream_config['output'] ?? 'ts';
+                // For PlaylistAlias, xtream_config is a list of configs — use effective playlist's config for output format
+                $xtreamConfig = $playlist instanceof PlaylistAlias
+                    ? ($playlist->getEffectivePlaylist()?->xtream_config ?? null)
+                    : ($playlist->xtream_config ?? null);
+                if ($xtreamConfig) {
+                    $proxyOutput = $xtreamConfig['output'] ?? 'ts';
                     $outputFormats = $proxyOutput === 'hls' ? ['m3u8'] : [$proxyOutput];
                 }
                 $activeConnections = M3uProxyService::getPlaylistActiveStreamsCount($playlist);
@@ -445,7 +450,7 @@ class XtreamApiController extends Controller
                 $expDate = $expires;
             }
 
-            $settings = app(\App\Settings\GeneralSettings::class);
+            $settings = app(GeneralSettings::class);
             $message = $settings->xtream_api_message ?? '';
 
             $userInfo = [
@@ -957,7 +962,7 @@ class XtreamApiController extends Controller
                 }
 
                 // Metadata fetched successfully
-                $seriesItem->fresh('seasons.episodes', 'category'); // Refresh to get the latest metadata
+                $seriesItem = $seriesItem->fresh(['seasons.episodes', 'category']) ?? $seriesItem;
             }
 
             $cover = $seriesItem->cover ? (filter_var($seriesItem->cover, FILTER_VALIDATE_URL) ? $seriesItem->cover : $baseUrl."/$seriesItem->cover") : LogoCacheService::getPlaceholderUrl('poster');
@@ -1109,7 +1114,7 @@ class XtreamApiController extends Controller
                 $channelsWithoutTags = $channelIds->diff($channelsWithTags);
 
                 if ($channelsWithoutTags->isNotEmpty()) {
-                    $fallbackGroups = \App\Models\Group::whereIn('id', function ($query) use ($channelsWithoutTags) {
+                    $fallbackGroups = Group::whereIn('id', function ($query) use ($channelsWithoutTags) {
                         $query->select('group_id')
                             ->from('channels')
                             ->whereIn('id', $channelsWithoutTags)
@@ -1215,7 +1220,7 @@ class XtreamApiController extends Controller
                 $channelsWithoutTags = $channelIds->diff($channelsWithTags);
 
                 if ($channelsWithoutTags->isNotEmpty()) {
-                    $fallbackGroups = \App\Models\Group::whereIn('id', function ($query) use ($channelsWithoutTags) {
+                    $fallbackGroups = Group::whereIn('id', function ($query) use ($channelsWithoutTags) {
                         $query->select('group_id')
                             ->from('channels')
                             ->whereIn('id', $channelsWithoutTags)
@@ -1403,7 +1408,6 @@ class XtreamApiController extends Controller
                 if ($results === false) {
                     return response()->json(['error' => 'Failed to fetch VOD metadata'], 500);
                 }
-                $channel->fresh(); // Refresh to get the latest metadata
             }
 
             // Build info section - use channel's info field if available, otherwise build from channel data
@@ -1874,7 +1878,7 @@ class XtreamApiController extends Controller
      * This method handles the EPG request by authenticating the user and redirecting
      * to the appropriate EPG generation URL based on the playlist UUID.
      *
-     * @return RedirectResponse
+     * @return Response|JsonResponse
      */
     public function epg(Request $request)
     {
@@ -1890,8 +1894,10 @@ class XtreamApiController extends Controller
             return response()->json(['error' => 'Unauthorized'], 401);
         }
 
-        // If here, user is authenticated
-        return redirect()->to(route('epg.generate', ['uuid' => $playlist->uuid]));
+        // Serve EPG directly instead of redirecting, so it works on the Xtream-only port
+        return app()->call('App\\Http\\Controllers\\EpgGenerateController@__invoke', [
+            'uuid' => $playlist->uuid,
+        ]);
     }
 
     /**

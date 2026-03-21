@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\Channel;
 use App\Models\Network;
 use App\Services\NetworkBroadcastService;
 use App\Services\NetworkScheduleService;
@@ -17,7 +18,7 @@ it('enables network, generates schedule and starts broadcast via ensure command'
             // create a simple programme
             $n->programmes()->create([
                 'title' => 'Test Programme',
-                'contentable_type' => \App\Models\Channel::class,
+                'contentable_type' => Channel::class,
                 'contentable_id' => 1,
                 'start_time' => Carbon::now()->subMinutes(1),
                 'end_time' => Carbon::now()->addMinutes(30),

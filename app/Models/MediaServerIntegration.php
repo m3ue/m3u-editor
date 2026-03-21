@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 
 class MediaServerIntegration extends Model
@@ -231,7 +232,7 @@ class MediaServerIntegration extends Model
     /**
      * Get networks associated with this integration.
      */
-    public function networks(): \Illuminate\Database\Eloquent\Relations\HasMany
+    public function networks(): HasMany
     {
         return $this->hasMany(Network::class);
     }

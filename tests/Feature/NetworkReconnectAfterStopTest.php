@@ -2,6 +2,7 @@
 
 use App\Models\Network;
 use App\Models\User;
+use App\Services\NetworkBroadcastService;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
 
@@ -28,7 +29,7 @@ it('playlist returns 503 after broadcast is stopped', function () {
     ]);
 
     // Stop the broadcast
-    app(\App\Services\NetworkBroadcastService::class)->stop($network);
+    app(NetworkBroadcastService::class)->stop($network);
 
     // Verify playlist returns 503/404 (proxy returns 404)
     $playlistResp = $this->followingRedirects()->get(route('network.hls.playlist', ['network' => $network->uuid]));
@@ -56,7 +57,7 @@ it('segment returns error after broadcast is stopped', function () {
     ]);
 
     // Stop the broadcast
-    app(\App\Services\NetworkBroadcastService::class)->stop($network);
+    app(NetworkBroadcastService::class)->stop($network);
 
     // Verify segment returns error (proxy returns 404)
     $segmentResp = $this->followingRedirects()->get(route('network.hls.segment', ['network' => $network->uuid, 'segment' => 'live000001']));

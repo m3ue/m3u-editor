@@ -1,14 +1,12 @@
 <?php
 
 /**
- * Tests for the 6 audit findings from PR #801 code review.
+ * Tests for the audit findings from PR #801 code review.
  *
- * Fix #1: Atomic decrement via Lua script (prevents negative counts)
  * Fix #2: Reservation pattern (selectAndReserveProfile, finalizeReservation, cancelReservation)
  * Fix #3: PHP_INT_MAX default when provider_info is null
  * Fix #4: Auto-update max_streams only when null/0
  * Fix #5: reconcileAndSelectProfile returns reservation tuple
- * Fix #6: reconcileFromProxy cleans disabled profiles
  */
 
 use App\Models\Playlist;
@@ -31,9 +29,9 @@ beforeEach(function () {
     config(['cache.default' => 'array']);
 });
 
-// ── Fix #1: Atomic decrement via Lua script ────────────────────────────────
+// ── Fix #1: decrementConnections cleans up stream set and channel mapping ──
 
-test('decrementConnections uses Lua eval for atomic decrement-if-positive', function () {
+test('decrementConnections removes stream from set and cleans up channel reverse key', function () {
     $playlist = Playlist::factory()->for($this->user)->create([
         'profiles_enabled' => true,
     ]);
@@ -45,110 +43,124 @@ test('decrementConnections uses Lua eval for atomic decrement-if-positive', func
         ->withMaxStreams(5)
         ->create();
 
-    // The Lua script should be called with eval, 1 key
-    Redis::shouldReceive('eval')
-        ->once()
-        ->withArgs(function ($lua, $numKeys, $key) use ($profile) {
-            return str_contains($lua, 'current > 0')
-                && str_contains($lua, "redis.call('decr'")
-                && $numKeys === 1
-                && str_contains($key, "playlist_profile:{$profile->id}:connections");
-        })
-        ->andReturn(2); // simulating count went from 3 to 2
+    $streamId = 'stream-123';
 
-    // Cleanup pipeline for stream references
+    // First get: channel reverse-key lookup → null (no channel mapping)
+    Redis::shouldReceive('get')
+        ->once()
+        ->with("stream:{$streamId}:channel")
+        ->andReturn(null);
+
+    // Pipeline: srem from streams set + del the reverse key
     Redis::shouldReceive('pipeline')
         ->once()
-        ->andReturnUsing(function ($callback) {
+        ->andReturnUsing(function ($callback) use ($profile, $streamId) {
             $pipe = Mockery::mock();
-            $pipe->shouldReceive('del')->andReturnSelf();
-            $pipe->shouldReceive('srem')->andReturnSelf();
-            $callback($pipe);
-        });
-
-    // Two get calls: (1) channel reverse-key lookup → null (no mapping), (2) getConnectionCount.
-    Redis::shouldReceive('get')->once()->ordered()->andReturn(null);
-    Redis::shouldReceive('get')->once()->ordered()->andReturn(2);
-
-    ProfileService::decrementConnections($profile, 'stream-123');
-});
-
-test('decrementConnections logs warning when count is already zero', function () {
-    $playlist = Playlist::factory()->for($this->user)->create([
-        'profiles_enabled' => true,
-    ]);
-
-    $profile = PlaylistProfile::factory()
-        ->for($playlist)
-        ->for($this->user)
-        ->primary()
-        ->withMaxStreams(5)
-        ->create();
-
-    // Lua script returns -1 indicating count was already 0
-    Redis::shouldReceive('eval')
-        ->once()
-        ->andReturn(-1);
-
-    // Cleanup pipeline still runs
-    Redis::shouldReceive('pipeline')
-        ->once()
-        ->andReturnUsing(function ($callback) {
-            $pipe = Mockery::mock();
-            $pipe->shouldReceive('del')->andReturnSelf();
-            $pipe->shouldReceive('srem')->andReturnSelf();
-            $callback($pipe);
-        });
-
-    // Two get calls: (1) channel reverse-key lookup → null (no mapping), (2) getConnectionCount.
-    Redis::shouldReceive('get')->once()->ordered()->andReturn(null);
-    Redis::shouldReceive('get')->once()->ordered()->andReturn(0);
-
-    // Should not throw, just log warning
-    ProfileService::decrementConnections($profile, 'stream-456');
-});
-
-test('decrementConnections cleans up stream references even when Lua returns -1', function () {
-    $playlist = Playlist::factory()->for($this->user)->create([
-        'profiles_enabled' => true,
-    ]);
-
-    $profile = PlaylistProfile::factory()
-        ->for($playlist)
-        ->for($this->user)
-        ->primary()
-        ->withMaxStreams(2)
-        ->create();
-
-    $streamId = 'stream-orphan';
-
-    // Lua says already at zero
-    Redis::shouldReceive('eval')
-        ->once()
-        ->andReturn(-1);
-
-    // Pipeline MUST still be called to clean up del + srem + channel reverse-key del
-    Redis::shouldReceive('pipeline')
-        ->once()
-        ->andReturnUsing(function ($callback) use ($streamId) {
-            $pipe = Mockery::mock();
-            $pipe->shouldReceive('del')
-                ->with("stream:{$streamId}:profile_id")
+            $pipe->shouldReceive('srem')
+                ->with("playlist_profile:{$profile->id}:streams", $streamId)
                 ->once()
                 ->andReturnSelf();
             $pipe->shouldReceive('del')
                 ->with("stream:{$streamId}:channel")
                 ->once()
                 ->andReturnSelf();
-            $pipe->shouldReceive('srem')
-                ->once()
-                ->andReturnSelf();
             $callback($pipe);
         });
 
-    // Two get calls: (1) channel reverse-key lookup → null, (2) getConnectionCount.
-    Redis::shouldReceive('get')->once()->ordered()->andReturn(null);
-    Redis::shouldReceive('get')->once()->ordered()->andReturn(0);
+    // Should not throw
+    ProfileService::decrementConnections($profile, $streamId);
+});
+
+test('decrementConnections cleans up channel stream key when reverse mapping exists', function () {
+    $playlist = Playlist::factory()->for($this->user)->create([
+        'profiles_enabled' => true,
+    ]);
+
+    $profile = PlaylistProfile::factory()
+        ->for($playlist)
+        ->for($this->user)
+        ->primary()
+        ->withMaxStreams(5)
+        ->create();
+
+    $streamId = 'stream-456';
+    $channelId = 42;
+    $playlistUuid = 'uuid-abc';
+    $channelStreamKey = "channel_stream:{$channelId}:{$playlistUuid}";
+
+    // Reverse key lookup returns channel coordinates
+    Redis::shouldReceive('get')
+        ->once()
+        ->with("stream:{$streamId}:channel")
+        ->andReturn("{$channelId}:{$playlistUuid}");
+
+    // Pipeline: srem + del
+    Redis::shouldReceive('pipeline')
+        ->once()
+        ->andReturnUsing(function ($callback) {
+            $pipe = Mockery::mock();
+            $pipe->shouldReceive('srem')->andReturnSelf();
+            $pipe->shouldReceive('del')->andReturnSelf();
+            $callback($pipe);
+        });
+
+    // Channel stream key lookup confirms this stream still owns the channel key
+    Redis::shouldReceive('get')
+        ->once()
+        ->with($channelStreamKey)
+        ->andReturn($streamId);
+
+    // Channel stream key deleted since it still points to this stream
+    Redis::shouldReceive('del')
+        ->once()
+        ->with($channelStreamKey);
+
+    ProfileService::decrementConnections($profile, $streamId);
+});
+
+test('decrementConnections does not delete channel stream key when it points to a different stream', function () {
+    $playlist = Playlist::factory()->for($this->user)->create([
+        'profiles_enabled' => true,
+    ]);
+
+    $profile = PlaylistProfile::factory()
+        ->for($playlist)
+        ->for($this->user)
+        ->primary()
+        ->withMaxStreams(5)
+        ->create();
+
+    $streamId = 'stream-orphan';
+    $channelId = 99;
+    $playlistUuid = 'uuid-xyz';
+    $channelStreamKey = "channel_stream:{$channelId}:{$playlistUuid}";
+
+    // Reverse key lookup returns channel coordinates
+    Redis::shouldReceive('get')
+        ->once()
+        ->with("stream:{$streamId}:channel")
+        ->andReturn("{$channelId}:{$playlistUuid}");
+
+    // Pipeline runs
+    Redis::shouldReceive('pipeline')
+        ->once()
+        ->andReturnUsing(function ($callback) {
+            $pipe = Mockery::mock();
+            $pipe->shouldReceive('srem')->andReturnSelf();
+            $pipe->shouldReceive('del')->andReturnSelf();
+            $callback($pipe);
+        });
+
+    // Channel stream key now points to a DIFFERENT (newer) stream — do not delete
+    Redis::shouldReceive('get')
+        ->once()
+        ->with($channelStreamKey)
+        ->andReturn('stream-newer');
+
+    // del on channelStreamKey must NOT be called
+    Redis::shouldReceive('del')
+        ->with($channelStreamKey)
+        ->never();
 
     ProfileService::decrementConnections($profile, $streamId);
 });
@@ -164,25 +176,31 @@ test('selectAndReserveProfile returns profile and reservation ID on success', fu
         ->for($playlist)
         ->for($this->user)
         ->primary()
-        ->withMaxStreams(3)
+        ->withMaxStreams(5)
         ->withProviderInfo(0, 5)
         ->create();
 
-    // selectProfile reads connection count => 0 (has capacity)
-    // hasCapacity also reads count => 0
-    // incrementConnections reads count after pipeline
-    Redis::shouldReceive('get')
-        ->andReturn(0);
+    // selectProfile uses batch endpoint; getEffectiveConnectionCount uses per-profile endpoint
+    Http::fake([
+        '*/streams/counts-by-metadata*' => Http::response([
+            'field' => 'provider_profile_id',
+            'counts' => [(string) $profile->id => 0],
+        ]),
+        '*/streams/by-metadata*' => Http::response([
+            'matching_streams' => [],
+            'total_clients' => 0,
+        ]),
+    ]);
 
-    // incrementConnections uses pipeline
+    Redis::shouldReceive('smembers')->andReturn([]);
+
+    // incrementConnections uses pipeline with sadd + expire
     Redis::shouldReceive('pipeline')
         ->once()
         ->andReturnUsing(function ($callback) {
             $pipe = Mockery::mock();
-            $pipe->shouldReceive('incr')->andReturnSelf();
-            $pipe->shouldReceive('expire')->andReturnSelf();
-            $pipe->shouldReceive('set')->andReturnSelf();
             $pipe->shouldReceive('sadd')->andReturnSelf();
+            $pipe->shouldReceive('expire')->andReturnSelf();
             $callback($pipe);
         });
 
@@ -199,7 +217,7 @@ test('selectAndReserveProfile returns null tuple when no capacity', function () 
         'profiles_enabled' => true,
     ]);
 
-    PlaylistProfile::factory()
+    $profile = PlaylistProfile::factory()
         ->for($playlist)
         ->for($this->user)
         ->primary()
@@ -207,9 +225,15 @@ test('selectAndReserveProfile returns null tuple when no capacity', function () 
         ->withProviderInfo(0, 1)
         ->create();
 
-    // Connection count is at max (1)
-    Redis::shouldReceive('get')
-        ->andReturn(1);
+    // Proxy confirms 1 active stream = profile at max_streams=1
+    Http::fake([
+        '*/streams/counts-by-metadata*' => Http::response([
+            'field' => 'provider_profile_id',
+            'counts' => [(string) $profile->id => 1],
+        ]),
+        '*/streams/by-metadata*' => Http::response(['matching_streams' => [], 'total_matching' => 1, 'total_clients' => 1]),
+    ]);
+    Redis::shouldReceive('smembers')->andReturn([]);
 
     [$selected, $reservationId] = ProfileService::selectAndReserveProfile($playlist);
 
@@ -242,29 +266,22 @@ test('finalizeReservation swaps reservation ID for real stream ID in pipeline', 
 
     $reservationId = 'reservation:abc123def456';
     $realStreamId = 'proxy-stream-789';
+    $streamsKey = "playlist_profile:{$profile->id}:streams";
 
-    // Pipeline should: srem old, del old key, sadd new, expire, set new key, expire
+    // Pipeline should: srem old reservation, sadd new stream id, expire
     Redis::shouldReceive('pipeline')
         ->once()
-        ->andReturnUsing(function ($callback) use ($reservationId, $realStreamId, $profile) {
+        ->andReturnUsing(function ($callback) use ($streamsKey, $reservationId, $realStreamId) {
             $pipe = Mockery::mock();
             $pipe->shouldReceive('srem')
-                ->with("playlist_profile:{$profile->id}:streams", $reservationId)
-                ->once()
-                ->andReturnSelf();
-            $pipe->shouldReceive('del')
-                ->with("stream:{$reservationId}:profile_id")
+                ->with($streamsKey, $reservationId)
                 ->once()
                 ->andReturnSelf();
             $pipe->shouldReceive('sadd')
-                ->with("playlist_profile:{$profile->id}:streams", $realStreamId)
+                ->with($streamsKey, $realStreamId)
                 ->once()
                 ->andReturnSelf();
             $pipe->shouldReceive('expire')
-                ->twice()
-                ->andReturnSelf();
-            $pipe->shouldReceive('set')
-                ->with("stream:{$realStreamId}:profile_id", $profile->id)
                 ->once()
                 ->andReturnSelf();
             $callback($pipe);
@@ -274,7 +291,7 @@ test('finalizeReservation swaps reservation ID for real stream ID in pipeline', 
     ProfileService::finalizeReservation($profile, $reservationId, $realStreamId);
 });
 
-test('cancelReservation decrements connections and cleans up', function () {
+test('cancelReservation delegates to decrementConnections', function () {
     $playlist = Playlist::factory()->for($this->user)->create([
         'profiles_enabled' => true,
     ]);
@@ -288,24 +305,21 @@ test('cancelReservation decrements connections and cleans up', function () {
 
     $reservationId = 'reservation:cancel123';
 
-    // cancelReservation calls decrementConnections which uses Lua eval
-    Redis::shouldReceive('eval')
+    // decrementConnections: get channel reverse key (no mapping)
+    Redis::shouldReceive('get')
         ->once()
-        ->andReturn(1); // count went from 2 to 1
+        ->with("stream:{$reservationId}:channel")
+        ->andReturn(null);
 
     // Cleanup pipeline
     Redis::shouldReceive('pipeline')
         ->once()
         ->andReturnUsing(function ($callback) {
             $pipe = Mockery::mock();
-            $pipe->shouldReceive('del')->andReturnSelf();
             $pipe->shouldReceive('srem')->andReturnSelf();
+            $pipe->shouldReceive('del')->andReturnSelf();
             $callback($pipe);
         });
-
-    // Two get calls: (1) channel reverse-key lookup → null (no mapping), (2) getConnectionCount.
-    Redis::shouldReceive('get')->once()->ordered()->andReturn(null);
-    Redis::shouldReceive('get')->once()->ordered()->andReturn(1);
 
     ProfileService::cancelReservation($profile, $reservationId);
 });
@@ -547,35 +561,28 @@ test('reconcileAndSelectProfile returns array with profile and reservation on su
         ->withProviderInfo(0, 5)
         ->create();
 
-    // Mock proxy returning 0 active streams
+    // selectProfile uses batch endpoint; proxy returns 0 active streams → profile has capacity
     Http::fake([
+        '*/streams/counts-by-metadata*' => Http::response([
+            'field' => 'provider_profile_id',
+            'counts' => [(string) $profile->id => 0],
+        ]),
         '*/streams/by-metadata*' => Http::response([
             'matching_streams' => [],
             'total_clients' => 0,
         ]),
     ]);
 
-    // reconcileFromProxy reads count (stale: 1), sets to 0
-    // selectProfile reads count (0), hasCapacity reads count (0), post-increment reads count
-    Redis::shouldReceive('get')
-        ->andReturn(1, 0, 0, 0);
+    // No pending reservations in Redis
+    Redis::shouldReceive('smembers')->andReturn([]);
 
-    Redis::shouldReceive('set')
-        ->once()
-        ->andReturnUsing(function ($key, $value) use ($profile) {
-            expect($key)->toBe("playlist_profile:{$profile->id}:connections");
-            expect($value)->toBe(0);
-        });
-
-    // incrementConnections pipeline
+    // incrementConnections pipeline: sadd + expire
     Redis::shouldReceive('pipeline')
         ->once()
         ->andReturnUsing(function ($callback) {
             $pipe = Mockery::mock();
-            $pipe->shouldReceive('incr')->andReturnSelf();
-            $pipe->shouldReceive('expire')->andReturnSelf();
-            $pipe->shouldReceive('set')->andReturnSelf();
             $pipe->shouldReceive('sadd')->andReturnSelf();
+            $pipe->shouldReceive('expire')->andReturnSelf();
             $callback($pipe);
         });
 
@@ -612,10 +619,12 @@ test('reconcileAndSelectProfile returns null tuple when truly at capacity after 
         ->withProviderInfo(0, 1)
         ->create();
 
-    $countKey = "playlist_profile:{$profile->id}:connections";
-
-    // Proxy confirms 1 active stream
+    // Proxy confirms 1 active stream (at max capacity)
     Http::fake([
+        '*/streams/counts-by-metadata*' => Http::response([
+            'field' => 'provider_profile_id',
+            'counts' => [(string) $profile->id => 1],
+        ]),
         '*/streams/by-metadata*' => Http::response([
             'matching_streams' => [
                 [
@@ -627,143 +636,16 @@ test('reconcileAndSelectProfile returns null tuple when truly at capacity after 
                     ],
                 ],
             ],
+            'total_matching' => 1,
             'total_clients' => 1,
         ]),
     ]);
 
-    // Count stays at 1 throughout (accurate, truly at capacity)
-    Redis::shouldReceive('get')
-        ->with($countKey)
-        ->andReturn(1);
+    // No pending reservations
+    Redis::shouldReceive('smembers')->andReturn([]);
 
     [$selected, $reservationId] = ProfileService::reconcileAndSelectProfile($playlist);
 
     expect($selected)->toBeNull();
     expect($reservationId)->toBeNull();
-});
-
-// ── Fix #6: reconcileFromProxy iterates ALL profiles (including disabled) ──
-
-test('reconcileFromProxy corrects stale count on disabled profile', function () {
-    $playlist = Playlist::factory()->for($this->user)->create([
-        'profiles_enabled' => true,
-    ]);
-
-    // Create an enabled profile
-    $enabledProfile = PlaylistProfile::factory()
-        ->for($playlist)
-        ->for($this->user)
-        ->primary()
-        ->withMaxStreams(5)
-        ->create();
-
-    // Create a disabled profile with stale Redis count
-    $disabledProfile = PlaylistProfile::factory()
-        ->for($playlist)
-        ->for($this->user)
-        ->disabled()
-        ->withMaxStreams(3)
-        ->withPriority(1)
-        ->create();
-
-    // Proxy says no streams active for either profile
-    Http::fake([
-        '*/streams/by-metadata*' => Http::response([
-            'matching_streams' => [],
-            'total_clients' => 0,
-        ]),
-    ]);
-
-    $enabledCountKey = "playlist_profile:{$enabledProfile->id}:connections";
-    $disabledCountKey = "playlist_profile:{$disabledProfile->id}:connections";
-
-    // Redis::get will be called for both profiles (enabled has 0, disabled has stale 2)
-    Redis::shouldReceive('get')
-        ->with($enabledCountKey)
-        ->andReturn(0);
-
-    Redis::shouldReceive('get')
-        ->with($disabledCountKey)
-        ->andReturn(2); // Stale count on disabled profile
-
-    // Only the disabled profile needs correction (0 != 2)
-    Redis::shouldReceive('set')
-        ->once()
-        ->with($disabledCountKey, 0);
-
-    ProfileService::reconcileFromProxy($playlist);
-});
-
-test('reconcileFromProxy corrects both enabled and disabled profiles', function () {
-    $playlist = Playlist::factory()->for($this->user)->create([
-        'profiles_enabled' => true,
-    ]);
-
-    $enabledProfile = PlaylistProfile::factory()
-        ->for($playlist)
-        ->for($this->user)
-        ->primary()
-        ->withMaxStreams(5)
-        ->create();
-
-    $disabledProfile = PlaylistProfile::factory()
-        ->for($playlist)
-        ->for($this->user)
-        ->disabled()
-        ->withMaxStreams(3)
-        ->withPriority(1)
-        ->create();
-
-    // Proxy says 1 stream active on enabled profile, 0 on disabled
-    Http::fake([
-        '*/streams/by-metadata*' => Http::response([
-            'matching_streams' => [
-                [
-                    'stream_id' => 'active-1',
-                    'client_count' => 1,
-                    'metadata' => [
-                        'provider_profile_id' => $enabledProfile->id,
-                        'playlist_uuid' => $playlist->uuid,
-                    ],
-                ],
-            ],
-            'total_clients' => 1,
-        ]),
-    ]);
-
-    $enabledCountKey = "playlist_profile:{$enabledProfile->id}:connections";
-    $disabledCountKey = "playlist_profile:{$disabledProfile->id}:connections";
-
-    // Both have stale counts
-    Redis::shouldReceive('get')
-        ->with($enabledCountKey)
-        ->andReturn(3); // Stale: should be 1
-
-    Redis::shouldReceive('get')
-        ->with($disabledCountKey)
-        ->andReturn(1); // Stale: should be 0
-
-    // Both need correction
-    Redis::shouldReceive('set')
-        ->once()
-        ->with($enabledCountKey, 1);
-
-    Redis::shouldReceive('set')
-        ->once()
-        ->with($disabledCountKey, 0);
-
-    ProfileService::reconcileFromProxy($playlist);
-});
-
-test('reconcileFromProxy skips when profiles_enabled is false', function () {
-    $playlist = Playlist::factory()->for($this->user)->create([
-        'profiles_enabled' => false,
-    ]);
-
-    // Should not make any HTTP or Redis calls
-    Http::fake();
-
-    ProfileService::reconcileFromProxy($playlist);
-
-    Http::assertNothingSent();
 });

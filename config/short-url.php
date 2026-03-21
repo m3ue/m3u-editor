@@ -1,5 +1,12 @@
 <?php
 
+use AshAllenDesign\ShortURL\Classes\KeyGenerator;
+use AshAllenDesign\ShortURL\Classes\UserAgent\ParserPhpDriver;
+use AshAllenDesign\ShortURL\Models\Factories\ShortURLFactory;
+use AshAllenDesign\ShortURL\Models\Factories\ShortURLVisitFactory;
+use AshAllenDesign\ShortURL\Models\ShortURL;
+use AshAllenDesign\ShortURL\Models\ShortURLVisit;
+
 return [
 
     /*
@@ -46,8 +53,8 @@ return [
     |
     */
     'factories' => [
-        \AshAllenDesign\ShortURL\Models\ShortURL::class => \AshAllenDesign\ShortURL\Models\Factories\ShortURLFactory::class,
-        \AshAllenDesign\ShortURL\Models\ShortURLVisit::class => \AshAllenDesign\ShortURL\Models\Factories\ShortURLVisitFactory::class,
+        ShortURL::class => ShortURLFactory::class,
+        ShortURLVisit::class => ShortURLVisitFactory::class,
     ],
 
     /*
@@ -210,7 +217,7 @@ return [
     | AshAllenDesign\ShortURL\Interfaces\UserAgentDriver.
     |
     */
-    'user_agent_driver' => \AshAllenDesign\ShortURL\Classes\UserAgent\ParserPhpDriver::class,
+    'user_agent_driver' => ParserPhpDriver::class,
 
     /*
     |--------------------------------------------------------------------------
@@ -222,5 +229,5 @@ return [
     | AshAllenDesign\ShortURL\Interfaces\UrlKeyGenerator.
     |
     */
-    'url_key_generator' => \AshAllenDesign\ShortURL\Classes\KeyGenerator::class,
+    'url_key_generator' => KeyGenerator::class,
 ];

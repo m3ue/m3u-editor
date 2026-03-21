@@ -28,7 +28,7 @@ return new class extends Migration
             // Drop foreign if exists, then drop columns if present
             try {
                 $table->dropForeign(['broadcast_programme_id']);
-            } catch (\Throwable $e) {
+            } catch (Throwable $e) {
                 // ignore missing foreign
             }
 

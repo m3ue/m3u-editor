@@ -6,6 +6,8 @@ use App\Facades\LogoFacade;
 use App\Models\Channel;
 use App\Models\Episode;
 use App\Models\Network;
+use App\Models\Playlist;
+use App\Models\PlaylistAlias;
 use App\Models\PlaylistProfile;
 use App\Models\StreamProfile;
 use App\Services\M3uProxyService;
@@ -212,6 +214,20 @@ class M3uProxyStreamMonitor extends Page
                 ->groupBy('stream_id')
                 ->toArray();
 
+            // Pre-fetch alias and playlist data for all playlist UUIDs to avoid N+1
+            $playlistUuids = collect($apiStreams['streams'])
+                ->pluck('metadata.playlist_uuid')
+                ->filter()
+                ->unique()
+                ->values();
+            $aliasNamesByUuid = PlaylistAlias::whereIn('uuid', $playlistUuids)
+                ->with('playlist:id,name,profiles_enabled')
+                ->get()
+                ->keyBy('uuid');
+            $playlistsByUuid = Playlist::whereIn('uuid', $playlistUuids)
+                ->get(['id', 'uuid', 'name', 'profiles_enabled'])
+                ->keyBy('uuid');
+
             foreach ($apiStreams['streams'] as $stream) {
                 $streamId = $stream['stream_id'];
                 $streamClients = $clientsByStream[$streamId] ?? [];
@@ -287,6 +303,23 @@ class M3uProxyStreamMonitor extends Page
                     }
                 }
 
+                // Resolve playlist name, profiles_enabled, and alias name from metadata
+                $playlistUuid = $stream['metadata']['playlist_uuid'] ?? '';
+                $aliasName = null;
+                $playlistName = null;
+                $profilesEnabled = false;
+
+                $alias = $aliasNamesByUuid[$playlistUuid] ?? null;
+                if ($alias) {
+                    $aliasName = $alias->name;
+                } else {
+                    $playlist = $playlistsByUuid[$playlistUuid] ?? null;
+                    if ($playlist) {
+                        $playlistName = $playlist->name;
+                        $profilesEnabled = (bool) $playlist->profiles_enabled;
+                    }
+                }
+
                 // Look up provider profile name from metadata
                 $providerProfileName = null;
                 $providerProfileId = $stream['metadata']['provider_profile_id'] ?? null;
@@ -294,14 +327,14 @@ class M3uProxyStreamMonitor extends Page
                     $providerProfile = PlaylistProfile::find($providerProfileId);
                     if ($providerProfile) {
                         $providerProfileName = $providerProfile->is_primary
-                            ? 'Primary'
+                            ? 'Primary profile'
                             : ($providerProfile->name ?? "Profile #{$providerProfile->id}");
                     }
                 }
 
                 $streams[] = [
                     'stream_id' => $streamId,
-                    'source_url' => $this->truncateUrl($stream['original_url']),
+                    'source_url' => $stream['original_url'],
                     'current_url' => $stream['current_url'],
                     'format' => strtoupper($stream['stream_type']),
                     'status' => $stream['is_active'] && $stream['client_count'] > 0 ? 'active' : 'idle',
@@ -318,7 +351,10 @@ class M3uProxyStreamMonitor extends Page
                     'segments_served' => $stream['total_segments_served'],
                     'transcoding' => $transcoding,
                     'transcoding_format' => $transcodingFormat,
+                    'playlist_name' => $playlistName,
+                    'profiles_enabled' => $profilesEnabled,
                     'provider_profile' => $providerProfileName,
+                    'alias_name' => $aliasName,
                     // Failover details
                     'failover_urls' => $stream['failover_urls'] ?? [],
                     'failover_resolver_url' => $stream['failover_resolver_url'] ?? null,
@@ -364,6 +400,7 @@ class M3uProxyStreamMonitor extends Page
                     'transcoding_format' => null,
                     'using_failover' => false,
                     'broadcast' => true,
+                    'alias_name' => null,
                 ];
             }
         }

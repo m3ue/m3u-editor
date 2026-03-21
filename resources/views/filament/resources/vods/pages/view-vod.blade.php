@@ -2,6 +2,13 @@
     'fi-resource-view-record-page',
     'fi-resource-' . str_replace('/', '-', $this->getResource()::getSlug()),
 ])>
+    {{-- Check auth --}}
+    @php
+        $auth = $this->getAuth();
+        $username = $auth['username'] ?? null;
+        $password = $auth['password'] ?? null;
+    @endphp
+
     @php
         try {
             $record = $this->record;
@@ -71,9 +78,11 @@
             'content_type' => 'vod',
             'playlist_id' => $record->playlist_id,
             'title' => $title,
-            'url' => route('m3u-proxy.channel.player', ['id' => $record->id]),
+            'url' => $record->getProxyUrl(username: $username, password: $password), // pass guest auth (if set)
             'format' => $record->container_extension ?? 'ts',
             'type' => 'channel',
+            'username' => $username,
+            'password' => $password,
         ]);
     @endphp
 
@@ -295,7 +304,7 @@
                 <div class="col-span-full">
                     <span class="text-sm text-gray-500">Proxy URL</span>
                     <div class="font-mono text-sm bg-gray-100 dark:bg-gray-800 p-2 rounded mt-1 overflow-x-auto">
-                        {{ $record->proxy_url }}
+                        {{ $record->getProxyUrl(username: $username, password: $password) }}
                     </div>
                 </div>
             </div>

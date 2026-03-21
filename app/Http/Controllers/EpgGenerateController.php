@@ -8,9 +8,11 @@ use App\Facades\PlaylistFacade;
 use App\Models\CustomPlaylist;
 use App\Models\Epg;
 use App\Models\MergedPlaylist;
+use App\Models\Network;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
 use App\Services\EpgCacheService;
+use App\Services\NetworkEpgService;
 use Carbon\Carbon;
 use DOMDocument;
 use Exception;
@@ -41,7 +43,7 @@ class EpgGenerateController extends Controller
         }
 
         // Handle network playlists - generate EPG from networks
-        if ($playlist instanceof \App\Models\Playlist && $playlist->is_network_playlist) {
+        if ($playlist instanceof Playlist && $playlist->is_network_playlist) {
             return $this->generateNetworkPlaylistEpg($playlist);
         }
 
@@ -419,7 +421,7 @@ class EpgGenerateController extends Controller
 
         // Output Network programme schedules (from channels with network_id)
         if (! empty($networkChannelIds)) {
-            $networks = \App\Models\Network::whereIn('id', array_keys($networkChannelIds))
+            $networks = Network::whereIn('id', array_keys($networkChannelIds))
                 ->with(['programmes' => function ($q) {
                     $q->where('end_time', '>', Carbon::now()->subDay())
                         ->orderBy('start_time');
@@ -786,7 +788,7 @@ class EpgGenerateController extends Controller
     /**
      * Generate EPG for a network playlist (outputs network programme schedules).
      */
-    protected function generateNetworkPlaylistEpg(\App\Models\Playlist $playlist)
+    protected function generateNetworkPlaylistEpg(Playlist $playlist)
     {
         $networks = $playlist->networks()
             ->where('enabled', true)
@@ -802,7 +804,7 @@ class EpgGenerateController extends Controller
             ]);
         }
 
-        $epgService = app(\App\Services\NetworkEpgService::class);
+        $epgService = app(NetworkEpgService::class);
 
         return response()->stream(function () use ($networks, $epgService) {
             $epgService->streamXmltvForNetworks($networks);

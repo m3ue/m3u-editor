@@ -2,13 +2,14 @@
 
 use App\Settings\GeneralSettings;
 use Illuminate\Support\Facades\Storage;
+use Tests\TestCase;
 
 it('skips expired cleanup when permanent cache is enabled', function () {
-    /** @var \Tests\TestCase $this */
+    /** @var TestCase $this */
     Storage::fake('local');
     Storage::disk('local')->put('cached-logos/logo_test.png', 'content');
 
-    $mockSettings = \Mockery::mock(GeneralSettings::class);
+    $mockSettings = Mockery::mock(GeneralSettings::class);
     $mockSettings->logo_cache_permanent = true;
     app()->instance(GeneralSettings::class, $mockSettings);
 
@@ -20,11 +21,11 @@ it('skips expired cleanup when permanent cache is enabled', function () {
 });
 
 it('still allows full cleanup when all option is passed', function () {
-    /** @var \Tests\TestCase $this */
+    /** @var TestCase $this */
     Storage::fake('local');
     Storage::disk('local')->put('cached-logos/logo_test.png', 'content');
 
-    $mockSettings = \Mockery::mock(GeneralSettings::class);
+    $mockSettings = Mockery::mock(GeneralSettings::class);
     $mockSettings->logo_cache_permanent = true;
     app()->instance(GeneralSettings::class, $mockSettings);
 

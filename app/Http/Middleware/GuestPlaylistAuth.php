@@ -15,11 +15,11 @@ class GuestPlaylistAuth extends Middleware
     /**
      * Handle an incoming request.
      *
-     * @param  \Illuminate\Http\Request  $request
+     * @param  Request  $request
      * @param  string  ...$guards
      * @return mixed
      *
-     * @throws \Illuminate\Auth\AuthenticationException
+     * @throws AuthenticationException
      */
     public function handle($request, Closure $next, ...$guards)
     {
@@ -31,10 +31,10 @@ class GuestPlaylistAuth extends Middleware
     /**
      * Determine if the user is logged in to any of the given guards.
      *
-     * @param  \Illuminate\Http\Request  $request
+     * @param  Request  $request
      * @return void
      *
-     * @throws \Illuminate\Auth\AuthenticationException
+     * @throws AuthenticationException
      */
     protected function authenticate($request, array $guards)
     {
@@ -51,11 +51,8 @@ class GuestPlaylistAuth extends Middleware
         }
         $playlist = PlaylistFacade::resolvePlaylistByUuid($uuid);
         if (! $playlist) {
-            throw new AuthenticationException(
-                'Invalid playlist unique identifier',
-                $guards,
-                $this->redirectTo($request)
-            );
+            // Abort with 404 instead of redirecting to prevent infinite redirect loops
+            abort(404, 'Playlist not found');
         }
         if (! $this->checkExistingAuth($uuid)) {
             // Only return 403 if not authenticated and not on the dashboard/landing page

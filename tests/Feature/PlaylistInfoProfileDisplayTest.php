@@ -36,10 +36,11 @@ beforeEach(function () {
     // Force array cache driver to avoid Redis dependency
     config(['cache.default' => 'array']);
 
-    // Mock proxy API to return 2 active clients by default
+    // Mock proxy API to return 2 active streams by default
     Http::fake([
         '*/streams/by-metadata*' => Http::response([
             'matching_streams' => [],
+            'total_matching' => 2,
             'total_clients' => 2,
         ]),
     ]);
@@ -251,7 +252,6 @@ test('getStats shows playlist available_streams for PlaylistAlias backed by prof
         'xtream_config' => '[]',
         'enable_proxy' => true,
         'available_streams' => 10,
-        'enabled' => true,
     ]);
 
     $stats = callGetStats($alias, $alias);
@@ -286,7 +286,6 @@ test('getStats shows playlist available_streams for PlaylistAlias backed by Cust
         'xtream_config' => '[]',
         'enable_proxy' => true,
         'available_streams' => 7,
-        'enabled' => true,
     ]);
 
     $stats = callGetStats($alias, $alias);

@@ -5,6 +5,7 @@ namespace App\Filament\Pages;
 use App\Facades\GitInfo;
 use App\Providers\VersionServiceProvider;
 use Filament\Actions\Action;
+use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Illuminate\Support\Str;
 
@@ -38,8 +39,21 @@ class ReleaseLogs extends Page
                 ->label('Refresh')
                 ->icon('heroicon-o-arrow-path')
                 ->action(function () {
-                    VersionServiceProvider::fetchReleases(50, refresh: true);
-                    $this->loadReleases();
+                    try {
+                        VersionServiceProvider::fetchReleases(perBranchLimit: 15, refresh: true);
+                        $this->loadReleases();
+                    } catch (\Exception $e) {
+                        Notification::make()
+                            ->title('Failed to refresh release logs')
+                            ->body($e->getMessage())
+                            ->danger()
+                            ->send();
+                    }
+                })->after(function () {
+                    Notification::make()
+                        ->title('Release logs refreshed')
+                        ->success()
+                        ->send();
                 }),
         ];
     }
@@ -48,13 +62,14 @@ class ReleaseLogs extends Page
     {
         $this->currentVersion = VersionServiceProvider::getVersion();
         $this->currentBranch = GitInfo::getBranch() ?? 'master';
+        $this->filter = $this->currentBranch; // Default filter to current branch
         $this->loadReleases();
     }
 
     protected function loadReleases(): void
     {
         $stored = VersionServiceProvider::getStoredReleases();
-        $releases = ! empty($stored) ? $stored : VersionServiceProvider::fetchReleases(50);
+        $releases = ! empty($stored) ? $stored : VersionServiceProvider::fetchReleases(perBranchLimit: 15);
 
         $normalizedCurrent = ltrim((string) $this->currentVersion, 'v');
 
@@ -67,7 +82,7 @@ class ReleaseLogs extends Page
             } elseif (str_ends_with($normalizedTag, '-exp')) {
                 $type = 'experimental';
             } else {
-                $type = 'latest';
+                $type = 'master';
             }
 
             return [
@@ -104,7 +119,7 @@ class ReleaseLogs extends Page
 
     public function getCounts(): array
     {
-        $counts = ['all' => \count($this->allReleases), 'latest' => 0, 'dev' => 0, 'experimental' => 0];
+        $counts = ['all' => \count($this->allReleases), 'master' => 0, 'dev' => 0, 'experimental' => 0];
         foreach ($this->allReleases as $r) {
             $counts[$r['type']] = ($counts[$r['type']] ?? 0) + 1;
         }

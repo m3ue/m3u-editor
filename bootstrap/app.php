@@ -1,5 +1,7 @@
 <?php
 
+use App\Http\Middleware\AutoLoginMiddleware;
+use App\Http\Middleware\ProxyRateLimitMiddleware;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -15,10 +17,10 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware) {
         $middleware
             ->use([
-                \App\Http\Middleware\AutoLoginMiddleware::class,
+                AutoLoginMiddleware::class,
             ])
             ->alias([
-                'proxy.throttle' => \App\Http\Middleware\ProxyRateLimitMiddleware::class,
+                'proxy.throttle' => ProxyRateLimitMiddleware::class,
             ])
             ->redirectGuestsTo('login')
             ->trustProxies(at: ['*'])
@@ -26,6 +28,8 @@ return Application::configure(basePath: dirname(__DIR__))
                 'webhook/test',
                 'channel',
                 'channel/*',
+                'group',
+                'group/*',
                 'player_api.php',
                 'get.php',
             ])

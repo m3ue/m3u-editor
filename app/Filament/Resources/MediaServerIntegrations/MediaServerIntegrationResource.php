@@ -13,6 +13,7 @@ use App\Models\Season;
 use App\Models\Series;
 use App\Services\MediaServerService;
 use App\Traits\HasUserFiltering;
+use Carbon\Carbon;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Actions\BulkAction;
@@ -508,7 +509,7 @@ class MediaServerIntegrationResource extends Resource
                                         return 'Never';
                                     }
                                     if (is_string($state)) {
-                                        $state = \Carbon\Carbon::parse($state);
+                                        $state = Carbon::parse($state);
                                     }
 
                                     return $state->diffForHumans();

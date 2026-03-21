@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\PlaylistAlias;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
@@ -18,7 +19,7 @@ return new class extends Migration
         });
 
         // Need to update the existing aliases to have this enabled when they have proxy enabled
-        $playlist_aliases = \App\Models\PlaylistAlias::where('enable_proxy', true);
+        $playlist_aliases = PlaylistAlias::where('enable_proxy', true);
         foreach ($playlist_aliases->cursor() as $playlist) {
             $playlist->enable_logo_proxy = true;
             $playlist->save();

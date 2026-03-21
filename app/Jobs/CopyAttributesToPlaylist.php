@@ -8,6 +8,7 @@ use App\Models\Playlist;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -428,7 +429,7 @@ class CopyAttributesToPlaylist implements ShouldQueue
      * Build WHERE conditions for efficiently querying matching source channels
      * Returns an array mapping each match attribute to the set of values from target channels
      *
-     * @param  \Illuminate\Support\Collection  $targetChannels
+     * @param  Collection  $targetChannels
      * @return array<string, array<string>> Map of attribute => unique values
      */
     private function buildMatchConditions($targetChannels, array $matchAttributes): array

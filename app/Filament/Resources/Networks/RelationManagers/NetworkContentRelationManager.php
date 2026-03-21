@@ -17,6 +17,7 @@ use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Schema;
+use Filament\Tables\Columns\Column;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Table;
@@ -80,7 +81,7 @@ class NetworkContentRelationManager extends RelationManager
     /**
      * Return the columns used in the table.
      *
-     * @return array<int, \Filament\Tables\Columns\Column>
+     * @return array<int, Column>
      */
     protected function getColumns(): array
     {
@@ -266,7 +267,7 @@ class NetworkContentRelationManager extends RelationManager
     /**
      * Get record actions for the table.
      *
-     * @return array<int, \Filament\Actions\Action>
+     * @return array<int, Action>
      */
     protected function getRecordActions(): array
     {
@@ -281,7 +282,7 @@ class NetworkContentRelationManager extends RelationManager
     /**
      * Get toolbar actions for the table.
      *
-     * @return array<int, \Filament\Actions\Action>
+     * @return array<int, Action>
      */
     protected function getToolbarActions(): array
     {

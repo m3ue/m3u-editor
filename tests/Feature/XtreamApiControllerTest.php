@@ -3,6 +3,8 @@
 namespace Tests\Feature;
 
 use App\Enums\ChannelLogoType;
+use App\Jobs\MergeChannels;
+use App\Jobs\UnmergeChannels;
 use App\Models\Channel;
 use App\Models\Group;
 use App\Models\Playlist;
@@ -384,7 +386,7 @@ class XtreamApiControllerTest extends TestCase
 
         // Run the merge job with required arguments: user, playlists (as collection with playlist_failover_id), playlistId
         $playlists = collect([['playlist_failover_id' => $this->playlist->id]]);
-        (new \App\Jobs\MergeChannels($this->user, $playlists, $this->playlist->id))->handle();
+        (new MergeChannels($this->user, $playlists, $this->playlist->id))->handle();
 
         // Assert that failover records were created
         $this->assertDatabaseCount('channel_failovers', 2);
@@ -392,7 +394,7 @@ class XtreamApiControllerTest extends TestCase
         $this->assertDatabaseHas('channel_failovers', ['channel_id' => $channel1->id, 'channel_failover_id' => $channel3->id]);
 
         // Run the unmerge job - UnmergeChannels expects (user, playlistId)
-        (new \App\Jobs\UnmergeChannels($this->user, $this->playlist->id))->handle();
+        (new UnmergeChannels($this->user, $this->playlist->id))->handle();
 
         // Assert that failover records were deleted
         $this->assertDatabaseCount('channel_failovers', 0);

@@ -15,6 +15,7 @@ use Filament\Tables;
 use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Str;
 
 class SeriesResource extends Resource
@@ -40,8 +41,9 @@ class SeriesResource extends Resource
         array $parameters = [],
         bool $isAbsolute = true,
         ?string $panel = null,
-        ?\Illuminate\Database\Eloquent\Model $tenant = null,
-        bool $shouldGuessMissingParameters = false
+        ?Model $tenant = null,
+        bool $shouldGuessMissingParameters = false,
+        ?string $configuration = null
     ): string {
         $parameters['uuid'] = static::getCurrentUuid();
 

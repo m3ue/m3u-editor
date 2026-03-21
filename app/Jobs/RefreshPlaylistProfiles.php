@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Models\Playlist;
 use App\Models\PlaylistProfile;
 use App\Services\ProfileService;
+use Carbon\Carbon;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -152,9 +153,9 @@ class RefreshPlaylistProfiles implements ShouldQueue
 
         // If exp_date is a Unix timestamp
         if (is_numeric($expDate)) {
-            $expiresAt = \Carbon\Carbon::createFromTimestamp($expDate);
+            $expiresAt = Carbon::createFromTimestamp($expDate);
         } else {
-            $expiresAt = \Carbon\Carbon::parse($expDate);
+            $expiresAt = Carbon::parse($expDate);
         }
 
         $daysUntilExpiry = now()->diffInDays($expiresAt, false);

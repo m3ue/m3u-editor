@@ -187,7 +187,7 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
         // Bulk insert the series in chunks with logging on failure
         collect($bulk)->chunk(100)->each(function ($chunk) {
             try {
-                Series::insert($chunk->toArray());
+                Series::insertOrIgnore($chunk->toArray());
             } catch (\Throwable $e) {
                 Log::error('Series bulk insert failed', [
                     'exception' => $e->getMessage(),

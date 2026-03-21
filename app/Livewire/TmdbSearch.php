@@ -7,6 +7,7 @@ use App\Models\Series;
 use App\Services\TmdbService;
 use Filament\Notifications\Notification;
 use Illuminate\Support\Facades\Log;
+use Livewire\Attributes\On;
 use Livewire\Component;
 
 class TmdbSearch extends Component
@@ -29,7 +30,7 @@ class TmdbSearch extends Component
 
     public ?string $originalTitle = null;
 
-    #[\Livewire\Attributes\On('openTmdbSearch')]
+    #[On('openTmdbSearch')]
     public function openSearch(array $data = []): void
     {
         $this->searchQuery = $data['query'] ?? '';

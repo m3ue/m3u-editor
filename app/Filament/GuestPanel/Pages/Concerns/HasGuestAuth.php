@@ -15,6 +15,10 @@ trait HasGuestAuth
 
     public $playlist = null;
 
+    public $guestUsername = null;
+
+    public $guestPassword = null;
+
     public $playlistName = null;
 
     public $playlistUuid = null;
@@ -39,11 +43,19 @@ trait HasGuestAuth
         $this->playlistName = $playlist->name ?? 'Playlist';
         $this->playlistUuid = $playlist->uuid ?? null;
 
-        // Pre-fill form with session data if available
+        // Get the username and password from the session if available
         $prefix = $this->playlistUuid ? base64_encode($this->playlistUuid).'_' : '';
+        $username = session("{$prefix}guest_auth_username", '');
+        $password = session("{$prefix}guest_auth_password", '');
+
+        // Store them in properties for use in the Livewire component and pre-fill the form
+        $this->guestUsername = $username;
+        $this->guestPassword = $password;
+
+        // Pre-fill form with session data if available
         $this->form->fill([
-            'username' => session("{$prefix}guest_auth_username", ''),
-            'password' => session("{$prefix}guest_auth_password", ''),
+            'username' => $username,
+            'password' => $password,
         ]);
     }
 

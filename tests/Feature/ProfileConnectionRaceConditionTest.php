@@ -53,9 +53,7 @@ test('cleanupStaleStreams removes Redis entries for streams no longer active in 
         ->withMaxStreams(5)
         ->create();
 
-    // Mock Redis: profile has 3 tracked streams, counter at 3
     $streamsKey = "playlist_profile:{$profile->id}:streams";
-    $countKey = "playlist_profile:{$profile->id}:connections";
 
     Redis::shouldReceive('smembers')
         ->once()
@@ -79,26 +77,14 @@ test('cleanupStaleStreams removes Redis entries for streams no longer active in 
         ]),
     ]);
 
-    // Pipeline called twice: once for stream-aaa, once for stream-ccc
-    Redis::shouldReceive('pipeline')
-        ->twice()
-        ->andReturnUsing(function ($callback) {
-            // Create a mock pipe that accepts any calls
-            $pipe = Mockery::mock();
-            $pipe->shouldReceive('srem')->andReturnSelf();
-            $pipe->shouldReceive('del')->andReturnSelf();
-            $callback($pipe);
-        });
+    // srem called directly for each stale stream (stream-aaa and stream-ccc)
+    Redis::shouldReceive('srem')
+        ->with($streamsKey, 'stream-aaa')
+        ->once();
 
-    // After cleanup: get current count (3), set corrected count (3 - 2 = 1)
-    Redis::shouldReceive('get')
-        ->once()
-        ->with($countKey)
-        ->andReturn(3);
-
-    Redis::shouldReceive('set')
-        ->once()
-        ->with($countKey, 1);
+    Redis::shouldReceive('srem')
+        ->with($streamsKey, 'stream-ccc')
+        ->once();
 
     $cleaned = ProfileService::cleanupStaleStreams($profile);
 
@@ -173,36 +159,28 @@ test('reconcileAndSelectProfile returns profile and reservation after correcting
         ->withMaxStreams(2)
         ->create();
 
-    $countKey = "playlist_profile:{$profile->id}:connections";
-
-    // Mock proxy returning 0 active streams for this playlist
+    // selectProfile uses batch endpoint; proxy returns 0 active streams → profile has capacity
     Http::fake([
+        '*/streams/counts-by-metadata*' => Http::response([
+            'field' => 'provider_profile_id',
+            'counts' => [(string) $profile->id => 0],
+        ]),
         '*/streams/by-metadata*' => Http::response([
             'matching_streams' => [],
             'total_clients' => 0,
         ]),
     ]);
 
-    // reconcileFromProxy reads current count (stale: 2), then sets it to 0
-    // Then selectAndReserveProfile -> selectProfile reads count (now 0) -> finds capacity
-    // Then incrementConnections uses a pipeline (which we allow via shouldReceive)
-    Redis::shouldReceive('get')
-        ->with($countKey)
-        ->andReturn(2, 0, 0, 0); // reconcile read, selectProfile read, hasCapacity read, post-increment read
+    // No pending reservations in the streams set
+    Redis::shouldReceive('smembers')->andReturn([]);
 
-    Redis::shouldReceive('set')
-        ->once()
-        ->with($countKey, 0); // reconcile correction
-
-    // incrementConnections uses pipeline
+    // incrementConnections pipeline: sadd + expire
     Redis::shouldReceive('pipeline')
         ->once()
         ->andReturnUsing(function ($callback) {
             $pipe = Mockery::mock();
-            $pipe->shouldReceive('incr')->andReturnSelf();
-            $pipe->shouldReceive('expire')->andReturnSelf();
-            $pipe->shouldReceive('set')->andReturnSelf();
             $pipe->shouldReceive('sadd')->andReturnSelf();
+            $pipe->shouldReceive('expire')->andReturnSelf();
             $callback($pipe);
         });
 
@@ -225,10 +203,12 @@ test('reconcileAndSelectProfile returns null when truly at capacity', function (
         ->withMaxStreams(1)
         ->create();
 
-    $countKey = "playlist_profile:{$profile->id}:connections";
-
     // Mock proxy confirming 1 active stream (truly at capacity)
     Http::fake([
+        '*/streams/counts-by-metadata*' => Http::response([
+            'field' => 'provider_profile_id',
+            'counts' => [(string) $profile->id => 1],
+        ]),
         '*/streams/by-metadata*' => Http::response([
             'matching_streams' => [
                 [
@@ -240,14 +220,13 @@ test('reconcileAndSelectProfile returns null when truly at capacity', function (
                     ],
                 ],
             ],
+            'total_matching' => 1,
             'total_clients' => 1,
         ]),
     ]);
 
-    // Count is 1 before and after reconcile (truly at capacity)
-    Redis::shouldReceive('get')
-        ->with($countKey)
-        ->andReturn(1);
+    // No pending reservations in Redis
+    Redis::shouldReceive('smembers')->andReturn([]);
 
     [$selected, $reservationId] = ProfileService::reconcileAndSelectProfile($playlist);
 
@@ -363,56 +342,17 @@ test('getPoolStatus returns profile capacity data correctly', function () {
         ->withProviderInfo(0, 10) // provider allows 10, user caps at 3
         ->create();
 
-    // getPoolStatus calls getConnectionCount for each profile, which calls Redis::get
-    Redis::shouldReceive('get')
-        ->andReturn(0);
+    // getPoolStatus calls M3uProxyService::getActiveStreamsCountByMetadata for each profile
+    Http::fake([
+        '*/streams/by-metadata*' => Http::response([
+            'matching_streams' => [],
+            'total_clients' => 0,
+        ]),
+    ]);
 
     $poolStatus = ProfileService::getPoolStatus($playlist);
 
     expect($poolStatus['enabled'])->toBeTrue();
     expect($poolStatus['total_capacity'])->toBe(5); // 2 + 3
     expect($poolStatus['profiles'])->toHaveCount(2);
-});
-
-test('reconcileFromProxy corrects Redis counts to match actual proxy state', function () {
-    $playlist = Playlist::factory()->for($this->user)->create([
-        'profiles_enabled' => true,
-    ]);
-
-    $profile = PlaylistProfile::factory()
-        ->for($playlist)
-        ->for($this->user)
-        ->primary()
-        ->withMaxStreams(5)
-        ->create();
-
-    $countKey = "playlist_profile:{$profile->id}:connections";
-
-    // Mock proxy saying only 1 stream is active for this profile
-    Http::fake([
-        '*/streams/by-metadata*' => Http::response([
-            'matching_streams' => [
-                [
-                    'stream_id' => 'active-stream-1',
-                    'client_count' => 1,
-                    'metadata' => [
-                        'provider_profile_id' => $profile->id,
-                        'playlist_uuid' => $playlist->uuid,
-                    ],
-                ],
-            ],
-            'total_clients' => 1,
-        ]),
-    ]);
-
-    // Redis has inflated count of 3, reconcile should set it to 1
-    Redis::shouldReceive('get')
-        ->with($countKey)
-        ->andReturn(3);
-
-    Redis::shouldReceive('set')
-        ->once()
-        ->with($countKey, 1);
-
-    ProfileService::reconcileFromProxy($playlist);
 });
