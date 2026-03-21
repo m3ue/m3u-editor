@@ -2449,4 +2449,93 @@ class M3uProxyService
         // Return null if not configured, as webhooks are optional and may not be needed if the resolver URL is not set
         return null;
     }
+
+    /**
+     * Fetch VPN watchdog status from m3u-proxy.
+     *
+     * @return array{success: bool, error?: string, vpn?: array}
+     */
+    public function fetchVpnStatus(): array
+    {
+        if (empty($this->apiBaseUrl)) {
+            return [
+                'success' => false,
+                'error' => 'M3U Proxy base URL is not configured',
+            ];
+        }
+
+        try {
+            $endpoint = $this->apiBaseUrl.'/vpn/status';
+            $response = Http::timeout(5)->acceptJson()
+                ->withHeaders($this->apiToken ? [
+                    'X-API-Token' => $this->apiToken,
+                ] : [])
+                ->get($endpoint);
+
+            if ($response->status() === 404) {
+                return [
+                    'success' => true,
+                    'vpn' => null,
+                ];
+            }
+
+            if ($response->successful()) {
+                return [
+                    'success' => true,
+                    'vpn' => $response->json() ?: [],
+                ];
+            }
+
+            return [
+                'success' => false,
+                'error' => 'M3U Proxy returned status '.$response->status(),
+            ];
+        } catch (Exception $e) {
+            return [
+                'success' => false,
+                'error' => 'Unable to connect to m3u-proxy: '.$e->getMessage(),
+            ];
+        }
+    }
+
+    /**
+     * Trigger a manual VPN rotation via m3u-proxy.
+     *
+     * @return array{success: bool, error?: string}
+     */
+    public function triggerVpnRotation(): array
+    {
+        if (empty($this->apiBaseUrl)) {
+            return [
+                'success' => false,
+                'error' => 'M3U Proxy base URL is not configured',
+            ];
+        }
+
+        try {
+            $endpoint = $this->apiBaseUrl.'/vpn/rotate';
+            $response = Http::timeout(30)->acceptJson()
+                ->withHeaders($this->apiToken ? [
+                    'X-API-Token' => $this->apiToken,
+                ] : [])
+                ->post($endpoint);
+
+            if ($response->successful()) {
+                return [
+                    'success' => true,
+                    'data' => $response->json() ?: [],
+                ];
+            }
+
+            return [
+                'success' => false,
+                'error' => $response->json()['detail'] ?? 'VPN rotation failed',
+            ];
+        } catch (Exception $e) {
+            return [
+                'success' => false,
+                'error' => 'Unable to connect to m3u-proxy: '.$e->getMessage(),
+            ];
+        }
+    }
 }
