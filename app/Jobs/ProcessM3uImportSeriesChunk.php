@@ -176,6 +176,7 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
                 'rating_5based' => (float) ($item->rating_5based ?? 0),
                 'backdrop_path' => json_encode($item->backdrop_path ?? []),
                 'youtube_trailer' => $item->youtube_trailer ?? null,
+                'tmdb_id' => $item->tmdb_id ?? null,
             ];
         }
 

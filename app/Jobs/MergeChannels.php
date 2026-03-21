@@ -5,7 +5,6 @@ namespace App\Jobs;
 use App\Models\Channel;
 use App\Models\ChannelFailover;
 use App\Models\Group;
-use App\Services\TitleNormalizer;
 use Filament\Notifications\Notification;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -61,8 +60,7 @@ class MergeChannels implements ShouldQueue
         public ?int $groupId = null,
         public ?array $weightedConfig = null,
         public ?bool $newChannelsOnly = null,
-        public bool $mergeByTitle = false,
-        public float $titleSimilarityThreshold = 85.0,
+        public bool $mergeVodByTmdbId = false,
     ) {}
 
     /**
@@ -141,11 +139,11 @@ class MergeChannels implements ShouldQueue
             $deactivatedCount += $deactivated;
         }
 
-        // Title-based merge for VOD channels that weren't matched by stream_id
-        if ($this->mergeByTitle) {
-            [$titleMerged, $titleDeactivated] = $this->mergeVodByTitle($playlistIds, $playlistPriority, $shouldExcludeExistingFailovers ? $existingFailoverChannelIds : []);
-            $processed += $titleMerged;
-            $deactivatedCount += $titleDeactivated;
+        // TMDB ID-based merge for VOD channels that weren't matched by stream_id
+        if ($this->mergeVodByTmdbId) {
+            [$tmdbMerged, $tmdbDeactivated] = $this->mergeVodByTmdbId($playlistIds, $playlistPriority, $shouldExcludeExistingFailovers ? $existingFailoverChannelIds : []);
+            $processed += $tmdbMerged;
+            $deactivatedCount += $tmdbDeactivated;
         }
 
         $this->sendCompletionNotification($processed, $deactivatedCount);
@@ -198,19 +196,17 @@ class MergeChannels implements ShouldQueue
     }
 
     /**
-     * Merge VOD channels by title similarity when stream_ids don't match.
+     * Merge VOD channels by TMDB ID when stream_ids don't match.
      *
      * Finds VOD channels that are not yet part of a failover group and
-     * groups them by normalized title similarity.
+     * groups them by their TMDB ID for exact matching.
      *
      * @return array{0: int, 1: int} [processed count, deactivated count]
      */
-    protected function mergeVodByTitle(array $playlistIds, array $playlistPriority, array $excludeFailoverIds): array
+    protected function mergeVodByTmdbId(array $playlistIds, array $playlistPriority, array $excludeFailoverIds): array
     {
         $processed = 0;
         $deactivatedCount = 0;
-
-        $normalizer = app(TitleNormalizer::class);
 
         // Get VOD channels that already have failover relationships (as master or failover)
         $alreadyMergedIds = ChannelFailover::where('user_id', $this->user->id)
@@ -221,12 +217,13 @@ class MergeChannels implements ShouldQueue
             ->unique()
             ->toArray();
 
-        // Get unmerged VOD channels across the selected playlists
+        // Get unmerged VOD channels with a TMDB ID across the selected playlists
         $vodChannels = Channel::where([
             ['user_id', $this->user->id],
             ['can_merge', true],
             ['is_vod', true],
         ])
+            ->whereNotNull('tmdb_id')
             ->whereIn('playlist_id', $playlistIds)
             ->when(! $this->forceCompleteRemerge && ! empty($alreadyMergedIds), function ($query) use ($alreadyMergedIds) {
                 $query->whereNotIn('id', $alreadyMergedIds);
@@ -246,27 +243,10 @@ class MergeChannels implements ShouldQueue
             return [0, 0];
         }
 
-        // Build items array for the normalizer
-        $items = $vodChannels->map(fn (Channel $ch) => [
-            'id' => $ch->id,
-            'title' => $ch->title_custom ?? $ch->title ?? $ch->name_custom ?? $ch->name ?? '',
-        ])->filter(fn ($item) => $item['title'] !== '')->values()->toArray();
+        // Group by TMDB ID — channels with the same TMDB ID are the same content
+        $groups = $vodChannels->groupBy('tmdb_id')->filter(fn ($g) => $g->count() > 1);
 
-        $groups = $normalizer->groupBySimilarity($items, $this->titleSimilarityThreshold);
-
-        foreach ($groups as $group) {
-            if (count($group) <= 1) {
-                continue;
-            }
-
-            // Collect the actual Channel models for this group
-            $groupIds = collect($group)->pluck('id')->toArray();
-            $channelGroup = $vodChannels->whereIn('id', $groupIds);
-
-            if ($channelGroup->count() <= 1) {
-                continue;
-            }
-
+        foreach ($groups as $channelGroup) {
             [$mergedCount, $deactivated] = $this->processChannelGroup($channelGroup, $playlistPriority);
             $processed += $mergedCount;
             $deactivatedCount += $deactivated;

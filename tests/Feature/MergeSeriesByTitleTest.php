@@ -18,22 +18,24 @@ beforeEach(function () {
     Notification::fake();
 });
 
-test('it merges series episodes by title similarity across providers', function () {
+test('it merges series episodes by TMDB ID across providers', function () {
     $user = User::factory()->create();
     $playlist1 = Playlist::factory()->for($user)->createQuietly(['name' => 'Provider 1']);
     $playlist2 = Playlist::factory()->for($user)->createQuietly(['name' => 'Provider 2']);
 
-    // Same series from different providers
+    // Same series from different providers with the same TMDB ID
     $series1 = Series::factory()->create([
         'name' => 'DK | Breaking Bad',
         'user_id' => $user->id,
         'playlist_id' => $playlist1->id,
+        'tmdb_id' => 1396,
     ]);
 
     $series2 = Series::factory()->create([
         'name' => 'SC - Breaking Bad (2008)',
         'user_id' => $user->id,
         'playlist_id' => $playlist2->id,
+        'tmdb_id' => 1396,
     ]);
 
     $season1 = Season::factory()->create([
@@ -104,7 +106,6 @@ test('it merges series episodes by title similarity across providers', function 
         $user,
         $playlists,
         $playlist1->id,
-        titleSimilarityThreshold: 80.0,
     );
 
     // Should have 2 episode failover entries (ep1 and ep2)
@@ -123,7 +124,7 @@ test('it merges series episodes by title similarity across providers', function 
     )->toBeTrue();
 });
 
-test('it does not merge unrelated series', function () {
+test('it does not merge series with different TMDB IDs', function () {
     $user = User::factory()->create();
     $playlist1 = Playlist::factory()->for($user)->createQuietly();
     $playlist2 = Playlist::factory()->for($user)->createQuietly();
@@ -132,12 +133,14 @@ test('it does not merge unrelated series', function () {
         'name' => 'Breaking Bad',
         'user_id' => $user->id,
         'playlist_id' => $playlist1->id,
+        'tmdb_id' => 1396,
     ]);
 
     $series2 = Series::factory()->create([
         'name' => 'The Mandalorian',
         'user_id' => $user->id,
         'playlist_id' => $playlist2->id,
+        'tmdb_id' => 82856,
     ]);
 
     $season1 = Season::factory()->create([
@@ -177,7 +180,68 @@ test('it does not merge unrelated series', function () {
         ['playlist_failover_id' => $playlist2->id],
     ]);
 
-    MergeSeries::dispatchSync($user, $playlists, $playlist1->id, titleSimilarityThreshold: 80.0);
+    MergeSeries::dispatchSync($user, $playlists, $playlist1->id);
+
+    expect(EpisodeFailover::where('user_id', $user->id)->count())->toBe(0);
+});
+
+test('it does not merge series without TMDB IDs', function () {
+    $user = User::factory()->create();
+    $playlist1 = Playlist::factory()->for($user)->createQuietly();
+    $playlist2 = Playlist::factory()->for($user)->createQuietly();
+
+    $series1 = Series::factory()->create([
+        'name' => 'Breaking Bad',
+        'user_id' => $user->id,
+        'playlist_id' => $playlist1->id,
+        'tmdb_id' => null,
+    ]);
+
+    $series2 = Series::factory()->create([
+        'name' => 'Breaking Bad',
+        'user_id' => $user->id,
+        'playlist_id' => $playlist2->id,
+        'tmdb_id' => null,
+    ]);
+
+    $season1 = Season::factory()->create([
+        'series_id' => $series1->id,
+        'season_number' => 1,
+        'user_id' => $user->id,
+        'playlist_id' => $playlist1->id,
+    ]);
+
+    $season2 = Season::factory()->create([
+        'series_id' => $series2->id,
+        'season_number' => 1,
+        'user_id' => $user->id,
+        'playlist_id' => $playlist2->id,
+    ]);
+
+    Episode::factory()->create([
+        'series_id' => $series1->id,
+        'season_id' => $season1->id,
+        'season' => 1,
+        'episode_num' => 1,
+        'user_id' => $user->id,
+        'playlist_id' => $playlist1->id,
+    ]);
+
+    Episode::factory()->create([
+        'series_id' => $series2->id,
+        'season_id' => $season2->id,
+        'season' => 1,
+        'episode_num' => 1,
+        'user_id' => $user->id,
+        'playlist_id' => $playlist2->id,
+    ]);
+
+    $playlists = collect([
+        ['playlist_failover_id' => $playlist1->id],
+        ['playlist_failover_id' => $playlist2->id],
+    ]);
+
+    MergeSeries::dispatchSync($user, $playlists, $playlist1->id);
 
     expect(EpisodeFailover::where('user_id', $user->id)->count())->toBe(0);
 });

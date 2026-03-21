@@ -642,6 +642,7 @@ class ProcessM3uImport implements ShouldQueue
                             'year' => $item->year ?? null, // new field for year
                             'rating' => $item->rating ?? null, // new field for rating
                             'rating_5based' => $item->rating_5based ?? null, // new field for 5-based rating
+                            'tmdb_id' => $item->tmdb_id ?? null, // TMDB ID from provider
                         ];
                         if ($autoSort) {
                             $channel['sort'] = $localChannelNo;

@@ -935,21 +935,12 @@ class PlaylistService
                 ])
                 ->columns(2)
                 ->columnSpanFull(),
-            Fieldset::make('Title-based VOD Merge')
+            Fieldset::make('TMDB-based VOD Merge')
                 ->schema([
-                    Toggle::make('merge_by_title')
-                        ->label('Merge VOD by title similarity')
-                        ->helperText('When enabled, VOD entries with similar titles across providers will be merged even if their stream IDs differ.')
-                        ->default(false)
-                        ->live(),
-                    TextInput::make('title_similarity_threshold')
-                        ->label('Title similarity threshold (%)')
-                        ->numeric()
-                        ->default(85)
-                        ->minValue(50)
-                        ->maxValue(100)
-                        ->helperText('Minimum similarity percentage (recommended: 80-90). Higher = stricter matching.')
-                        ->hidden(fn (Get $get): bool => ! $get('merge_by_title')),
+                    Toggle::make('merge_vod_by_tmdb_id')
+                        ->label('Merge VOD by TMDB ID')
+                        ->helperText('When enabled, VOD entries with the same TMDB ID across providers will be merged even if their stream IDs differ. Requires TMDB IDs (fetched automatically or from provider metadata).')
+                        ->default(false),
                 ])
                 ->columns(2)
                 ->columnSpanFull(),
@@ -1117,8 +1108,7 @@ class PlaylistService
                             preferCatchupAsPrimary: $data['prefer_catchup_as_primary'] ?? false,
                             groupId: $record->id,
                             weightedConfig: self::buildMergeWeightedConfig($data),
-                            mergeByTitle: $data['merge_by_title'] ?? false,
-                            titleSimilarityThreshold: (float) ($data['title_similarity_threshold'] ?? 85),
+                            mergeVodByTmdbId: $data['merge_vod_by_tmdb_id'] ?? false,
                         ));
                 });
         } else {
@@ -1135,8 +1125,7 @@ class PlaylistService
                             forceCompleteRemerge: $data['force_complete_remerge'] ?? false,
                             preferCatchupAsPrimary: $data['prefer_catchup_as_primary'] ?? false,
                             weightedConfig: self::buildMergeWeightedConfig($data),
-                            mergeByTitle: $data['merge_by_title'] ?? false,
-                            titleSimilarityThreshold: (float) ($data['title_similarity_threshold'] ?? 85),
+                            mergeVodByTmdbId: $data['merge_vod_by_tmdb_id'] ?? false,
                         ));
                 });
         }
@@ -1240,13 +1229,6 @@ class PlaylistService
                 ->columnSpanFull(),
             Fieldset::make('Merge behavior')
                 ->schema([
-                    TextInput::make('title_similarity_threshold')
-                        ->label('Title similarity threshold (%)')
-                        ->numeric()
-                        ->default(85)
-                        ->minValue(50)
-                        ->maxValue(100)
-                        ->helperText('Minimum similarity percentage to consider two series as the same show. Higher = stricter matching (recommended: 80-90).'),
                     Toggle::make('deactivate_failover_episodes')
                         ->label('Deactivate failover episodes')
                         ->helperText('Disable episodes from failover playlists after merging, keeping only the master enabled.')
@@ -1262,14 +1244,14 @@ class PlaylistService
     }
 
     /**
-     * Get the "Merge Series by Title" action.
+     * Get the "Merge Series by TMDB ID" action.
      *
      * @param  bool  $categoryScoped  Whether this action operates on a single category (receives $record as Category)
      */
     public static function getSeriesMergeAction(bool $categoryScoped = false): Action
     {
         $action = Action::make('merge_series')
-            ->label('Merge Series by Title')
+            ->label('Merge Series by TMDB ID')
             ->schema(self::getSeriesMergeFormSchema())
             ->requiresConfirmation()
             ->icon('heroicon-o-arrows-pointing-in')
@@ -1279,14 +1261,13 @@ class PlaylistService
 
         if ($categoryScoped) {
             $action
-                ->modalDescription('Merge series with similar titles in this category, creating episode failover relationships.')
+                ->modalDescription('Merge series with the same TMDB ID in this category, creating episode failover relationships.')
                 ->action(function (Category $record, array $data): void {
                     app('Illuminate\Contracts\Bus\Dispatcher')
                         ->dispatch(new MergeSeries(
                             user: auth()->user(),
                             playlists: collect($data['failover_playlists']),
                             playlistId: $data['playlist_id'],
-                            titleSimilarityThreshold: (float) ($data['title_similarity_threshold'] ?? 85),
                             deactivateFailoverEpisodes: $data['deactivate_failover_episodes'] ?? false,
                             forceCompleteRemerge: $data['force_complete_remerge'] ?? false,
                             categoryId: $record->id,
@@ -1294,14 +1275,13 @@ class PlaylistService
                 });
         } else {
             $action
-                ->modalDescription('Merge series with similar titles across providers, creating episode failover relationships.')
+                ->modalDescription('Merge series with the same TMDB ID across providers, creating episode failover relationships.')
                 ->action(function (array $data): void {
                     app('Illuminate\Contracts\Bus\Dispatcher')
                         ->dispatch(new MergeSeries(
                             user: auth()->user(),
                             playlists: collect($data['failover_playlists']),
                             playlistId: $data['playlist_id'],
-                            titleSimilarityThreshold: (float) ($data['title_similarity_threshold'] ?? 85),
                             deactivateFailoverEpisodes: $data['deactivate_failover_episodes'] ?? false,
                             forceCompleteRemerge: $data['force_complete_remerge'] ?? false,
                         ));

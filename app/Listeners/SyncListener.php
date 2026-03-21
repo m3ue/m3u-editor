@@ -101,10 +101,9 @@ class SyncListener
             // Build weighted config if any weighted priority options are set
             $weightedConfig = $this->buildWeightedConfig($config);
 
-            // Title-based merge settings
-            $mergeVodByTitle = $config['merge_vod_by_title'] ?? false;
-            $mergeSeriesByTitle = $config['merge_series_by_title'] ?? false;
-            $titleSimilarityThreshold = (float) ($config['title_similarity_threshold'] ?? 85);
+            // TMDB-based merge settings
+            $mergeVodByTmdbId = $config['merge_vod_by_tmdb_id'] ?? false;
+            $mergeSeriesByTmdbId = $config['merge_series_by_tmdb_id'] ?? false;
 
             // Dispatch the merge job
             dispatch(new MergeChannels(
@@ -117,17 +116,15 @@ class SyncListener
                 preferCatchupAsPrimary: $preferCatchupAsPrimary,
                 weightedConfig: $weightedConfig,
                 newChannelsOnly: $newChannelsOnly,
-                mergeByTitle: $mergeVodByTitle,
-                titleSimilarityThreshold: $titleSimilarityThreshold,
+                mergeVodByTmdbId: $mergeVodByTmdbId,
             ));
 
-            // Dispatch series merge job if title-based series merge is enabled
-            if ($mergeSeriesByTitle) {
+            // Dispatch series merge job if TMDB-based series merge is enabled
+            if ($mergeSeriesByTmdbId) {
                 dispatch(new MergeSeries(
                     user: $playlist->user,
                     playlists: $playlists,
                     playlistId: $effectivePlaylistId,
-                    titleSimilarityThreshold: $titleSimilarityThreshold,
                     deactivateFailoverEpisodes: $deactivateFailover,
                     forceCompleteRemerge: $forceCompleteRemerge,
                 ));

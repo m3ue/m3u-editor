@@ -5,7 +5,6 @@ namespace App\Jobs;
 use App\Models\Episode;
 use App\Models\EpisodeFailover;
 use App\Models\Series;
-use App\Services\TitleNormalizer;
 use Filament\Notifications\Notification;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -25,7 +24,6 @@ class MergeSeries implements ShouldQueue
         public $user,
         public Collection $playlists,
         public int $playlistId,
-        public float $titleSimilarityThreshold = 85.0,
         public bool $deactivateFailoverEpisodes = false,
         public bool $forceCompleteRemerge = false,
         public ?int $categoryId = null,
@@ -36,7 +34,6 @@ class MergeSeries implements ShouldQueue
      */
     public function handle(): void
     {
-        $normalizer = app(TitleNormalizer::class);
         $processed = 0;
         $deactivatedCount = 0;
 
@@ -51,9 +48,10 @@ class MergeSeries implements ShouldQueue
         $playlistIds = $playlistIds->unique()->values()->toArray();
         $playlistPriority = array_flip($playlistIds);
 
-        // Get all series across the selected playlists
+        // Get all series with a TMDB ID across the selected playlists
         $allSeries = Series::where('user_id', $this->user->id)
             ->whereIn('playlist_id', $playlistIds)
+            ->whereNotNull('tmdb_id')
             ->when($this->categoryId, function ($query) {
                 $query->where('category_id', $this->categoryId);
             })
@@ -66,22 +64,10 @@ class MergeSeries implements ShouldQueue
             return;
         }
 
-        // Build items for title matching
-        $items = $allSeries->map(fn (Series $s) => [
-            'id' => $s->id,
-            'title' => $s->name ?? '',
-        ])->filter(fn ($item) => $item['title'] !== '')->values()->toArray();
+        // Group by TMDB ID — series with the same TMDB ID are the same show
+        $groups = $allSeries->groupBy('tmdb_id')->filter(fn ($g) => $g->count() > 1);
 
-        $groups = $normalizer->groupBySimilarity($items, $this->titleSimilarityThreshold);
-
-        foreach ($groups as $group) {
-            if (count($group) <= 1) {
-                continue;
-            }
-
-            $groupSeriesIds = collect($group)->pluck('id')->toArray();
-            $groupSeries = $allSeries->whereIn('id', $groupSeriesIds);
-
+        foreach ($groups as $groupSeries) {
             // Select the "master" series based on playlist priority
             $masterSeries = $this->selectMasterSeries($groupSeries, $playlistPriority);
             if (! $masterSeries) {
