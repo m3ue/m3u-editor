@@ -7,6 +7,8 @@ use App\Jobs\MergeSeries;
 use App\Jobs\UnmergeChannels;
 use App\Models\Category;
 use App\Models\CustomPlaylist;
+use App\Models\Episode;
+use App\Models\EpisodeFailover;
 use App\Models\Group;
 use App\Models\MergedPlaylist;
 use App\Models\Playlist;
@@ -1316,12 +1318,12 @@ class PlaylistService
                 ])
                 ->modalDescription('Remove all episode failover relationships for series in this category.')
                 ->action(function (Category $record, array $data): void {
-                    \App\Models\EpisodeFailover::whereHas('episode.series', function ($query) use ($record) {
+                    EpisodeFailover::whereHas('episode.series', function ($query) use ($record) {
                         $query->where('category_id', $record->id);
                     })->where('user_id', auth()->id())->delete();
 
                     if ($data['reactivate_episodes'] ?? false) {
-                        \App\Models\Episode::whereHas('series', function ($query) use ($record) {
+                        Episode::whereHas('series', function ($query) use ($record) {
                             $query->where('category_id', $record->id);
                         })->where(['user_id' => auth()->id(), 'enabled' => false])
                             ->update(['enabled' => true]);
@@ -1349,7 +1351,7 @@ class PlaylistService
                 ])
                 ->modalDescription('Remove all episode failover relationships, unmerging series.')
                 ->action(function (array $data): void {
-                    $query = \App\Models\EpisodeFailover::where('user_id', auth()->id());
+                    $query = EpisodeFailover::where('user_id', auth()->id());
 
                     if ($playlistId = $data['playlist_id'] ?? null) {
                         $query->whereHas('episode', function ($q) use ($playlistId) {
@@ -1360,7 +1362,7 @@ class PlaylistService
                     $query->delete();
 
                     if ($data['reactivate_episodes'] ?? false) {
-                        $episodeQuery = \App\Models\Episode::where(['user_id' => auth()->id(), 'enabled' => false]);
+                        $episodeQuery = Episode::where(['user_id' => auth()->id(), 'enabled' => false]);
                         if ($playlistId) {
                             $episodeQuery->where('playlist_id', $playlistId);
                         }
