@@ -6,6 +6,7 @@ use App\Enums\Status;
 use App\Events\SyncCompleted;
 use App\Jobs\GenerateEpgCache;
 use App\Jobs\MergeChannels;
+use App\Jobs\MergeSeries;
 use App\Jobs\RunPlaylistFindReplaceRules;
 use App\Jobs\RunPostProcess;
 use App\Models\Epg;
@@ -100,6 +101,10 @@ class SyncListener
             // Build weighted config if any weighted priority options are set
             $weightedConfig = $this->buildWeightedConfig($config);
 
+            // TMDB-based merge settings
+            $mergeVodByTmdbId = $config['merge_vod_by_tmdb_id'] ?? false;
+            $mergeSeriesByTmdbId = $config['merge_series_by_tmdb_id'] ?? false;
+
             // Dispatch the merge job
             dispatch(new MergeChannels(
                 user: $playlist->user,
@@ -111,7 +116,19 @@ class SyncListener
                 preferCatchupAsPrimary: $preferCatchupAsPrimary,
                 weightedConfig: $weightedConfig,
                 newChannelsOnly: $newChannelsOnly,
+                mergeVodByTmdbId: $mergeVodByTmdbId,
             ));
+
+            // Dispatch series merge job if TMDB-based series merge is enabled
+            if ($mergeSeriesByTmdbId) {
+                dispatch(new MergeSeries(
+                    user: $playlist->user,
+                    playlists: $playlists,
+                    playlistId: $effectivePlaylistId,
+                    deactivateFailoverEpisodes: $deactivateFailover,
+                    forceCompleteRemerge: $forceCompleteRemerge,
+                ));
+            }
         } catch (Throwable $e) {
             // Log error and send notification
             logger()->error('Auto-merge failed for playlist: '.$playlist->name, [

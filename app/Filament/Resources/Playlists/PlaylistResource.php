@@ -2184,6 +2184,23 @@ class PlaylistResource extends Resource
                                 ->default(false),
                         ]),
 
+                    Fieldset::make('TMDB-based VOD & Series Merge')
+                        ->columnSpanFull()
+                        ->columns(2)
+                        ->hidden(fn (Get $get): bool => ! $get('auto_merge_channels_enabled'))
+                        ->schema([
+                            Toggle::make('auto_merge_config.merge_vod_by_tmdb_id')
+                                ->label('Merge VOD by TMDB ID')
+                                ->inline(false)
+                                ->helperText('When enabled, VOD entries with the same TMDB ID across providers will be merged even if their stream IDs differ. Requires TMDB IDs (fetched automatically or from provider metadata).')
+                                ->default(false),
+                            Toggle::make('auto_merge_config.merge_series_by_tmdb_id')
+                                ->label('Merge Series by TMDB ID')
+                                ->inline(false)
+                                ->helperText('When enabled, series with the same TMDB ID across providers will have their episodes matched and merged with failover.')
+                                ->default(false),
+                        ]),
+
                     Fieldset::make('Advanced Priority Scoring (optional)')
                         ->columnSpanFull()
                         ->columns(2)

@@ -368,12 +368,17 @@ class Channel extends Model
                     Log::warning("Unable to parse release date \"{$dateToParse}\" for VOD {$this->id}");
                 }
             }
+            $tmdbIdFromProvider = $movieData['info']['tmdb_id'] ?? $movieData['movie_data']['tmdb_id'] ?? null;
             $update = [
                 'year' => $year,
                 'info' => $movieData['info'] ?? null,
                 'movie_data' => $movieData['movie_data'] ?? null,
                 'last_metadata_fetch' => now(),
             ];
+
+            if ($tmdbIdFromProvider && empty($this->tmdb_id)) {
+                $update['tmdb_id'] = (int) $tmdbIdFromProvider;
+            }
 
             $this->update($update);
 

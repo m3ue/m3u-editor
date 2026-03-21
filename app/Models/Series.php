@@ -139,6 +139,11 @@ class Series extends Model
                 'last_metadata_fetch' => now(),
                 'metadata' => $info, // Store raw metadata
             ];
+
+            $tmdbIdFromProvider = $info['tmdb_id'] ?? null;
+            if ($tmdbIdFromProvider && empty($this->tmdb_id)) {
+                $update['tmdb_id'] = (int) $tmdbIdFromProvider;
+            }
             if ($refresh) {
                 $item = $detail['info'] ?? null;
                 if ($item) {
