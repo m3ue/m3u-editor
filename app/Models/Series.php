@@ -278,7 +278,7 @@ class Series extends Model
                 }
 
                 if (count($jobs) > 0) {
-                    Bus::chain($jobs)->dispatch()->afterCommit();
+                    Bus::chain($jobs)->dispatch();
                 }
 
                 return $episodeCount;
