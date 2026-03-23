@@ -1058,6 +1058,7 @@ class ChannelResource extends Resource
                         TextEntry::make('url')
                             ->label('URL')->columnSpanFull(),
                         TextEntry::make('proxy_url')
+                            ->state(fn ($record) => $record?->getProxyUrl())
                             ->label('Proxy URL')->columnSpanFull(),
                         TextEntry::make('stream_id')
                             ->label('ID'),
