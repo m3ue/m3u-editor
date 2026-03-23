@@ -255,12 +255,12 @@ class Preferences extends SettingsPage
                                                     ->label('Application Timezone')
                                                     ->placeholder('UTC')
                                                     ->helperText('Override the application timezone. Leave empty to use the server default (UTC). Takes effect for all date/time output throughout the app.')
-                                                    ->disabled(fn () => ! empty(getenv('TZ')))
-                                                    ->hint(fn () => ! empty(getenv('TZ')) ? 'Already set by environment variable!' : null)
-                                                    ->dehydrated(fn () => empty(getenv('TZ')))
+                                                    ->disabled(fn () => ! empty(config('dev.timezone')))
+                                                    ->hint(fn () => ! empty(config('dev.timezone')) ? 'Already set by environment variable!' : null)
+                                                    ->dehydrated(fn () => empty(config('dev.timezone')))
                                                     ->afterStateHydrated(function (TextInput $component, $state) {
-                                                        if (! empty(getenv('TZ'))) {
-                                                            $component->state(getenv('TZ'));
+                                                        if (! empty(config('dev.timezone'))) {
+                                                            $component->state(config('dev.timezone'));
                                                         }
                                                     })
                                                     ->hintAction(

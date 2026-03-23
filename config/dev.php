@@ -18,6 +18,7 @@ return [
     'tvgid' => [
         'regex' => env('TVGID_REGEX', '/[^a-zA-Z0-9_\-\.]/'),
     ],
+    'timezone' => env('TZ', null), // Override application timezone (e.g. "America/Detroit"). Leave empty to use server default (UTC).
     'cleanup_source_groups' => env('CLEANUP_SOURCE_GROUPS', true), // Clean up source groups that are no longer used (allow ability to disable for new installs)
     'disable_sync_logs' => env('DISABLE_SYNC_LOGS', false), // Disable sync logs for performance
     'max_channels' => env('MAX_CHANNELS', 50000), // Maximum number of channels allowed for m3u import
