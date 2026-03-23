@@ -791,7 +791,7 @@ class M3uProxyService
                 ]);
 
                 $url = PlaylistUrlService::getChannelUrl($channel, $playlist);
-                $format = pathinfo($url, PATHINFO_EXTENSION);
+                $format = pathinfo(parse_url($url, PHP_URL_PATH) ?? $url, PATHINFO_EXTENSION);
                 $format = $format === 'm3u8' ? 'hls' : $format;
 
                 return $this->buildProxyUrl($existingStreamId, $format, $username);
@@ -915,7 +915,7 @@ class M3uProxyService
                         $activeChannelStreams = self::getActiveStreamsCountByMetadata('original_channel_id', (string) $originalChannelId);
 
                         if ($activeChannelStreams > 0) {
-                            $format = pathinfo($primaryUrl ?? '', PATHINFO_EXTENSION);
+                            $format = pathinfo(parse_url($primaryUrl ?? '', PHP_URL_PATH) ?? $primaryUrl ?? '', PATHINFO_EXTENSION);
                             $format = $format === 'm3u8' ? 'hls' : $format;
 
                             return $this->buildProxyUrl($existingStreamId, $format, $username);
@@ -1114,8 +1114,8 @@ class M3uProxyService
                 ProfileService::finalizeReservation($selectedProfile, $reservationId, $streamId, $originalChannelId, $originalPlaylistUuid);
             }
 
-            // Get the format from the URL
-            $format = pathinfo($primaryUrl, PATHINFO_EXTENSION);
+            // Get the format from the URL (strip query string before extracting extension)
+            $format = pathinfo(parse_url($primaryUrl, PHP_URL_PATH) ?? $primaryUrl, PATHINFO_EXTENSION);
             $format = $format === 'm3u8' ? 'hls' : $format;
 
             // Return the direct proxy URL using the stream ID
@@ -1230,7 +1230,7 @@ class M3uProxyService
                             return $this->buildTranscodeStreamUrl($existingStreamId, $profile->format ?? 'ts', $username);
                         }
 
-                        $format = pathinfo($url, PATHINFO_EXTENSION);
+                        $format = pathinfo(parse_url($url, PHP_URL_PATH) ?? $url, PATHINFO_EXTENSION);
                         $format = $format === 'm3u8' ? 'hls' : $format;
 
                         return $this->buildProxyUrl($existingStreamId, $format, $username);
@@ -1370,8 +1370,8 @@ class M3uProxyService
                 ProfileService::finalizeReservation($selectedProfile, $reservationId, $streamId);
             }
 
-            // Get the format from the URL
-            $format = pathinfo($url, PATHINFO_EXTENSION);
+            // Get the format from the URL (strip query string before extracting extension)
+            $format = pathinfo(parse_url($url, PHP_URL_PATH) ?? $url, PATHINFO_EXTENSION);
             $format = $format === 'm3u8' ? 'hls' : $format;
 
             // Return the direct proxy URL using the stream ID
