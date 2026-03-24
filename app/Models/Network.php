@@ -41,6 +41,8 @@ class Network extends Model
         'broadcast_initial_offset_seconds' => 'integer',
         'broadcast_scheduled_start' => 'datetime',
         'broadcast_schedule_enabled' => 'boolean',
+        'broadcast_on_demand' => 'boolean',
+        'broadcast_last_connection_at' => 'datetime',
         // HLS continuity tracking
         'broadcast_segment_sequence' => 'integer',
         'broadcast_discontinuity_sequence' => 'integer',
@@ -177,7 +179,7 @@ class Network extends Model
      */
     public function getStreamUrlAttribute(): string
     {
-        if ($this->broadcast_enabled && $this->isBroadcasting()) {
+        if ($this->broadcast_enabled && ($this->isBroadcasting() || $this->broadcast_requested)) {
             return route('network.hls.playlist', ['network' => $this->uuid]);
         }
 
@@ -209,6 +211,61 @@ class Network extends Model
             && $this->broadcast_schedule_enabled
             && $this->broadcast_scheduled_start !== null
             && now()->lt($this->broadcast_scheduled_start);
+    }
+
+    /**
+     * Check if this network is configured for on-demand broadcast startup.
+     */
+    public function isOnDemandBroadcast(): bool
+    {
+        return $this->broadcast_enabled && (bool) $this->broadcast_on_demand;
+    }
+
+    /**
+     * Check if there has been a recent connection to this network's broadcast.
+     */
+    public function hasRecentBroadcastConnection(int $windowSeconds = 30): bool
+    {
+        if (! $this->broadcast_last_connection_at) {
+            return false;
+        }
+
+        return $this->broadcast_last_connection_at->gte(now()->subSeconds($windowSeconds));
+    }
+
+    /**
+     * Resolve the on-demand connection freshness window from configuration.
+     */
+    public function getBroadcastConnectionWindowSeconds(): int
+    {
+        $disconnectSeconds = (int) config('proxy.broadcast_on_demand_disconnect_seconds', 120);
+        $overlapSeconds = (int) config('proxy.broadcast_on_demand_overlap_seconds', 30);
+
+        return max(1, $disconnectSeconds + $overlapSeconds);
+    }
+
+    /**
+     * Check if the network should remain in waiting-for-connection state.
+     */
+    public function isWaitingForConnection(?int $windowSeconds = null): bool
+    {
+        if (! $this->isOnDemandBroadcast()) {
+            return false;
+        }
+
+        if (! $this->broadcast_requested) {
+            return false;
+        }
+
+        if ($this->isBroadcasting()) {
+            return false;
+        }
+
+        $effectiveWindowSeconds = $windowSeconds && $windowSeconds > 0
+            ? $windowSeconds
+            : $this->getBroadcastConnectionWindowSeconds();
+
+        return ! $this->hasRecentBroadcastConnection($effectiveWindowSeconds);
     }
 
     /**

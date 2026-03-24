@@ -48,6 +48,46 @@ class NetworkBroadcastService
      */
     public function start(Network $network): bool
     {
+        return $this->startRequested($network);
+    }
+
+    /**
+     * Start broadcasting for a requested network.
+     *
+     * If on-demand mode is enabled and no recent connection has been seen,
+     * this method waits for a viewer connection instead of starting immediately.
+     */
+    public function startRequested(Network $network): bool
+    {
+        return $this->startInternal($network, false);
+    }
+
+    /**
+     * Force immediate start regardless of on-demand waiting state.
+     */
+    public function startNow(Network $network): bool
+    {
+        return $this->startInternal($network, true);
+    }
+
+    /**
+     * Mark that a viewer connection was seen for this network.
+     */
+    public function markConnectionSeen(Network $network): void
+    {
+        $network->update([
+            'broadcast_last_connection_at' => now(),
+        ]);
+    }
+
+    /**
+     * Start broadcasting for a network via the proxy.
+     *
+     * @param  bool  $forceStart  When true, bypass on-demand waiting behavior.
+     * @return bool True if broadcast started successfully
+     */
+    protected function startInternal(Network $network, bool $forceStart = false): bool
+    {
         if (! $network->enabled) {
             Log::warning('Cannot start broadcast: network not enabled', [
                 'network_id' => $network->id,
@@ -59,6 +99,15 @@ class NetworkBroadcastService
 
         if (! $network->broadcast_enabled) {
             Log::warning('Cannot start broadcast: broadcast not enabled', [
+                'network_id' => $network->id,
+                'network_name' => $network->name,
+            ]);
+
+            return false;
+        }
+
+        if (! $forceStart && $network->isWaitingForConnection()) {
+            Log::info('Broadcast start deferred - waiting for viewer connection', [
                 'network_id' => $network->id,
                 'network_name' => $network->name,
             ]);
@@ -296,6 +345,10 @@ class NetworkBroadcastService
             'preset' => $network->transcode_preset,
             'hwaccel' => $network->hwaccel,
             'callback_url' => $callbackUrl,
+            // Tell the proxy exactly where to write broadcast segments.
+            // Honors BROADCAST_TEMP_DIR (default /dev/shm) so ephemeral .ts files
+            // are written to RAM and never touch persistent disk.
+            'output_dir' => config('proxy.broadcast_temp_dir'),
         ];
 
         // Attach provider-specific headers for Plex.
@@ -411,10 +464,8 @@ class NetworkBroadcastService
                     // Also log a prominent recovery message that will show in console
                     Log::info("🎉 BROADCAST RECOVERY COMPLETE: {$network->name} is back online after container restart");
 
-                    // Direct console output to ensure it shows up in container logs (not during tests)
-                    if (app()->isProduction()) {
-                        echo "🎉 [RECOVERY] {$network->name} is now broadcasting again after container restart\n";
-                    }
+                    // Direct console output to ensure it shows up in container logs
+                    echo "🎉 [RECOVERY] {$network->name} is now broadcasting again after container restart\n";
                 }
 
                 Log::info($logMessage, $logData);
@@ -497,8 +548,43 @@ class NetworkBroadcastService
     /**
      * Stop broadcasting for a network via the proxy.
      */
-    public function stop(Network $network): bool
-    {
+    public function stop(
+        Network $network,
+        bool $keepRequested = false,
+        bool $preservePlaybackReference = false
+    ): bool {
+        $resumeOffset = null;
+        $resumeProgrammeId = $network->broadcast_programme_id;
+
+        if ($preservePlaybackReference) {
+            $resumeOffset = $network->getPersistedBroadcastSeekForNow();
+
+            if ($resumeOffset === null) {
+                // No persisted reference — fall back to the live programme position.
+                // Resolve getCurrentProgramme() once so we can both warn and compute
+                // the offset without issuing two separate queries.
+                $currentProgramme = $network->getCurrentProgramme();
+
+                if (! $currentProgramme) {
+                    Log::warning('No active programme when preserving broadcast playback reference; seek offset will reset to 0', [
+                        'network_id' => $network->id,
+                        'network_name' => $network->name,
+                        'resume_programme_id' => $resumeProgrammeId,
+                    ]);
+                }
+
+                $resumeOffset = $currentProgramme
+                    ? (int) $currentProgramme->start_time->diffInSeconds(now(), false)
+                    : 0;
+
+                if (! $resumeProgrammeId) {
+                    $resumeProgrammeId = $currentProgramme?->id;
+                }
+            } elseif (! $resumeProgrammeId) {
+                $resumeProgrammeId = $network->getCurrentProgramme()?->id;
+            }
+        }
+
         // Clean up Plex transcode session before stopping
         $this->cleanupTranscodeSession($network);
 
@@ -526,22 +612,37 @@ class NetworkBroadcastService
             ]);
         }
 
-        // Always update local state
-        $network->update([
-            'broadcast_started_at' => null,
+        $stateUpdate = [
             'broadcast_pid' => null,
-            'broadcast_programme_id' => null,
-            'broadcast_initial_offset_seconds' => null,
-            'broadcast_requested' => false,
-            // Reset sequences on explicit stop - next start will be a fresh broadcast
-            'broadcast_segment_sequence' => 0,
-            'broadcast_discontinuity_sequence' => 0,
+            'broadcast_requested' => $keepRequested,
             // Reset retry tracking
             'broadcast_fail_count' => 0,
             'broadcast_last_exit_code' => null,
             'broadcast_restart_locked' => false,
             'broadcast_transcode_session_id' => null,
-        ]);
+        ];
+
+        if ($preservePlaybackReference && $resumeProgrammeId) {
+            $stateUpdate = array_merge($stateUpdate, [
+                // Re-anchor the persisted playback reference at stop time so reconnect
+                // can resume from the latest timeline position instead of rewinding.
+                'broadcast_started_at' => Carbon::now(),
+                'broadcast_programme_id' => $resumeProgrammeId,
+                'broadcast_initial_offset_seconds' => max(0, (int) $resumeOffset),
+            ]);
+        } else {
+            $stateUpdate = array_merge($stateUpdate, [
+                'broadcast_started_at' => null,
+                'broadcast_programme_id' => null,
+                'broadcast_initial_offset_seconds' => null,
+                // Reset sequences on explicit/full stop - next start is fresh
+                'broadcast_segment_sequence' => 0,
+                'broadcast_discontinuity_sequence' => 0,
+            ]);
+        }
+
+        // Always update local state
+        $network->update($stateUpdate);
 
         // Clean up via proxy (removes files)
         try {
@@ -561,6 +662,16 @@ class NetworkBroadcastService
      */
     public function isProcessRunning(Network $network): bool
     {
+        // Trust local state briefly after startup to avoid false negatives while
+        // proxy status catches up (cold starts can report 404 for a few seconds).
+        $startupGraceSeconds = max(0, (int) config('proxy.broadcast_on_demand_startup_grace_seconds', 30));
+        if ($startupGraceSeconds > 0
+            && $network->broadcast_pid
+            && $network->broadcast_started_at
+            && $network->broadcast_started_at->gte(now()->subSeconds($startupGraceSeconds))) {
+            return true;
+        }
+
         try {
             $response = $this->getProxyService()->proxyRequest(
                 'GET',
@@ -865,6 +976,7 @@ class NetworkBroadcastService
         $status = [
             'enabled' => $network->broadcast_enabled,
             'running' => $isRunning,
+            'waiting_for_connection' => $network->isWaitingForConnection(),
             'pid' => $network->broadcast_pid,
             'started_at' => $network->broadcast_started_at?->toIso8601String(),
             'hls_url' => $this->getProxyService()->getProxyBroadcastHlsUrl($network),
@@ -916,7 +1028,7 @@ class NetworkBroadcastService
         $network->refresh();
 
         // Start fresh
-        return $this->start($network);
+        return $this->startRequested($network);
     }
 
     /**
@@ -1005,6 +1117,12 @@ class NetworkBroadcastService
                 return $result;
             }
 
+            if ($network->isWaitingForConnection()) {
+                $result['action'] = 'waiting_for_connection';
+
+                return $result;
+            }
+
             Log::info('🔄 BROADCAST RECOVERY: Restarting broadcast via proxy', [
                 'network_id' => $network->id,
                 'network_name' => $network->name,
@@ -1012,13 +1130,13 @@ class NetworkBroadcastService
                 'programme_title' => $programme->title,
             ]);
 
-            $success = $this->start($network);
+            $success = $this->startRequested($network);
             $result['action'] = 'started';
             $result['success'] = $success;
             $result['programme'] = $programme->title;
 
-            // Direct console output for recovery success (not during tests)
-            if ($success && app()->isProduction()) {
+            // Direct console output for recovery success
+            if ($success && ! app()->runningUnitTests()) {
                 echo "🔄 [TICK RECOVERY] {$network->name} broadcast restarted successfully\n";
             }
 
@@ -1028,6 +1146,18 @@ class NetworkBroadcastService
         // broadcast_requested is false and not running - just report idle
         if (! $isRunning) {
             $result['action'] = 'idle';
+
+            return $result;
+        }
+
+        $startupGraceSeconds = max(0, (int) config('proxy.broadcast_on_demand_startup_grace_seconds', 30));
+        $inStartupGrace = $startupGraceSeconds > 0
+            && $network->broadcast_started_at
+            && $network->broadcast_started_at->gte(now()->subSeconds($startupGraceSeconds));
+
+        if ($network->isOnDemandBroadcast() && ! $inStartupGrace && ! $network->hasRecentBroadcastConnection($network->getBroadcastConnectionWindowSeconds())) {
+            $this->stop($network, keepRequested: true, preservePlaybackReference: true);
+            $result['action'] = 'stopped_waiting_for_connection';
 
             return $result;
         }
@@ -1127,6 +1257,7 @@ class NetworkBroadcastService
                 'broadcast_restart_locked' => false,
                 'broadcast_transcode_session_id' => null,
                 'broadcast_boot_recovery_until' => $gracePeriodUntil,
+                'broadcast_last_connection_at' => null,
                 // Reset sequences — stale segments were just deleted, so we start fresh
                 'broadcast_segment_sequence' => 0,
                 'broadcast_discontinuity_sequence' => 0,
@@ -1145,8 +1276,8 @@ class NetworkBroadcastService
             Log::info("BOOT RECOVERY: Recovered {$recovered} network(s) for broadcast");
             Log::info('🚀 CONTAINER BOOT RECOVERY COMPLETE: Broadcasting systems are ready');
 
-            // Direct console output to ensure it shows up in container logs (not during tests)
-            if (app()->isProduction()) {
+            // Direct console output to ensure it shows up in container logs
+            if (! app()->runningUnitTests()) {
                 echo "🚀 [BOOT RECOVERY] Container recovery complete - {$recovered} network(s) ready for broadcasting\n";
             }
         }

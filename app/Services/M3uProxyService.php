@@ -791,8 +791,7 @@ class M3uProxyService
                 ]);
 
                 $url = PlaylistUrlService::getChannelUrl($channel, $playlist);
-                $format = pathinfo($url, PATHINFO_EXTENSION);
-                $format = $format === 'm3u8' ? 'hls' : $format;
+                $format = $this->getFormatFromUrl($url);
 
                 return $this->buildProxyUrl($existingStreamId, $format, $username);
             }
@@ -915,8 +914,7 @@ class M3uProxyService
                         $activeChannelStreams = self::getActiveStreamsCountByMetadata('original_channel_id', (string) $originalChannelId);
 
                         if ($activeChannelStreams > 0) {
-                            $format = pathinfo($primaryUrl ?? '', PATHINFO_EXTENSION);
-                            $format = $format === 'm3u8' ? 'hls' : $format;
+                            $format = $this->getFormatFromUrl($primaryUrl);
 
                             return $this->buildProxyUrl($existingStreamId, $format, $username);
                         }
@@ -1115,8 +1113,7 @@ class M3uProxyService
             }
 
             // Get the format from the URL
-            $format = pathinfo($primaryUrl, PATHINFO_EXTENSION);
-            $format = $format === 'm3u8' ? 'hls' : $format;
+            $format = $this->getFormatFromUrl($primaryUrl);
 
             // Return the direct proxy URL using the stream ID
             return $this->buildProxyUrl($streamId, $format, $username);
@@ -1230,8 +1227,7 @@ class M3uProxyService
                             return $this->buildTranscodeStreamUrl($existingStreamId, $profile->format ?? 'ts', $username);
                         }
 
-                        $format = pathinfo($url, PATHINFO_EXTENSION);
-                        $format = $format === 'm3u8' ? 'hls' : $format;
+                        $format = $this->getFormatFromUrl($url);
 
                         return $this->buildProxyUrl($existingStreamId, $format, $username);
                     }
@@ -1371,8 +1367,7 @@ class M3uProxyService
             }
 
             // Get the format from the URL
-            $format = pathinfo($url, PATHINFO_EXTENSION);
-            $format = $format === 'm3u8' ? 'hls' : $format;
+            $format = $this->getFormatFromUrl($url);
 
             // Return the direct proxy URL using the stream ID
             return $this->buildProxyUrl($streamId, $format, $username);
@@ -1964,6 +1959,14 @@ class M3uProxyService
         $separator = parse_url($url, PHP_URL_QUERY) ? '&' : '?';
 
         return $url.$separator.http_build_query(['username' => $username]);
+    }
+
+    private function getFormatFromUrl(?string $url): string
+    {
+        $path = parse_url($url ?? '', PHP_URL_PATH) ?? $url ?? '';
+        $format = pathinfo($path, PATHINFO_EXTENSION);
+
+        return $format === 'm3u8' ? 'hls' : $format;
     }
 
     /**

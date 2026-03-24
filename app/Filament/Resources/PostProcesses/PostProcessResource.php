@@ -9,6 +9,7 @@ use App\Filament\Resources\PostProcesses\RelationManagers\ProcessesRelationManag
 use App\Filament\Resources\PostProcessResource\Pages;
 use App\Models\PostProcess;
 use App\Rules\CheckIfUrlOrLocalPath;
+use App\Services\DateFormatService;
 use App\Traits\HasUserFiltering;
 use Filament\Actions\ActionGroup;
 use Filament\Actions\BulkActionGroup;
@@ -98,11 +99,11 @@ class PostProcessResource extends Resource
                     ->toggleable()
                     ->sortable(),
                 TextColumn::make('created_at')
-                    ->dateTime()
+                    ->formatStateUsing(fn ($state) => app(DateFormatService::class)->format($state))
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('updated_at')
-                    ->dateTime()
+                    ->formatStateUsing(fn ($state) => app(DateFormatService::class)->format($state))
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
             ])

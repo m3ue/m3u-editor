@@ -9,6 +9,7 @@ use App\Filament\Resources\CategoryResource\Pages;
 use App\Jobs\ProcessM3uImportSeriesEpisodes;
 use App\Jobs\SyncSeriesStrmFiles;
 use App\Models\Category;
+use App\Services\DateFormatService;
 use App\Services\PlaylistService;
 use App\Traits\HasUserFiltering;
 use Filament\Actions\Action;
@@ -140,11 +141,11 @@ class CategoryResource extends Resource
                     ->toggleable()
                     ->sortable(),
                 TextColumn::make('created_at')
-                    ->dateTime()
+                    ->formatStateUsing(fn ($state) => app(DateFormatService::class)->format($state))
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('updated_at')
-                    ->dateTime()
+                    ->formatStateUsing(fn ($state) => app(DateFormatService::class)->format($state))
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
             ])

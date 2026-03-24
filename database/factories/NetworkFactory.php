@@ -32,6 +32,8 @@ class NetworkFactory extends Factory
             'loop_content' => true,
             'user_id' => User::factory(),
             'broadcast_enabled' => false,
+            'broadcast_on_demand' => false,
+            'broadcast_last_connection_at' => null,
             'output_format' => 'hls',
             'segment_duration' => 6,
             'hls_list_size' => 10,

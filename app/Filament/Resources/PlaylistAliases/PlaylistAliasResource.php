@@ -10,6 +10,7 @@ use App\Models\Playlist;
 use App\Models\PlaylistAlias;
 use App\Models\StreamProfile;
 use App\Rules\UrlIsAllowed;
+use App\Services\DateFormatService;
 use App\Services\EpgCacheService;
 use App\Services\M3uProxyService;
 use App\Traits\HasUserFiltering;
@@ -162,11 +163,11 @@ class PlaylistAliasResource extends Resource
                     })
                     ->toggleable(isToggledHiddenByDefault: true),
                 Tables\Columns\TextColumn::make('created_at')
-                    ->dateTime()
+                    ->formatStateUsing(fn ($state) => app(DateFormatService::class)->format($state))
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
                 Tables\Columns\TextColumn::make('updated_at')
-                    ->dateTime()
+                    ->formatStateUsing(fn ($state) => app(DateFormatService::class)->format($state))
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
             ])

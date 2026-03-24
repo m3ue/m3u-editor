@@ -57,7 +57,7 @@ it('auto-starts broadcast when broadcast_requested is true', function () {
     $service = Mockery::mock(NetworkBroadcastService::class, function ($mock) {
         $mock->makePartial();
         $mock->shouldAllowMockingProtectedMethods();
-        $mock->shouldReceive('start')->once()->andReturn(true);
+        $mock->shouldReceive('startRequested')->once()->andReturn(true);
         $mock->shouldReceive('isProcessRunning')->andReturn(false);
     });
 

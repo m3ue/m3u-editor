@@ -54,10 +54,11 @@ function invokeStartViaProxyAndCapturePayload(array $networkAttrs = []): array
     return $captured;
 }
 
-it('does not send output_dir in the broadcast start payload', function () {
+it('sends output_dir in the broadcast start payload', function () {
     $payload = invokeStartViaProxyAndCapturePayload();
 
-    expect($payload)->not->toHaveKey('output_dir');
+    expect($payload)->toHaveKey('output_dir')
+        ->and($payload['output_dir'])->toBe(config('proxy.broadcast_temp_dir'));
 });
 
 it('sends required broadcast fields in the payload', function () {

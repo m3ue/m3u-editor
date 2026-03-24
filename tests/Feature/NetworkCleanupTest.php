@@ -7,10 +7,13 @@ use App\Models\NetworkProgramme;
 use App\Services\NetworkBroadcastService;
 use App\Services\NetworkEpgService;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 
 use function Pest\Laravel\mock;
 
 beforeEach(function () {
+    Queue::fake();
+
     // Mock proxy HTTP calls - proxy handles HLS file management now
     Http::fake([
         '*/broadcast/*/status' => Http::response(['status' => 'stopped'], 404),
@@ -90,6 +93,7 @@ it('deleted network endpoints return 404', function () {
 
 it('stops broadcast and clears schedule when last content is removed', function () {
     $network = Network::factory()->activeBroadcast()->create();
+    $network->update(['auto_regenerate_schedule' => false]);
     $channel = Channel::factory()->create();
 
     // Add content to the network

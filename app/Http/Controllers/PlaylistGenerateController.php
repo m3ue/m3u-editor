@@ -488,7 +488,8 @@ class PlaylistGenerateController extends Controller
             foreach ($cursor as $channel) {
                 $sourceUrl = $channel->url_custom ?? $channel->url;
                 $baseUrl = ProxyFacade::getBaseUrl();
-                $extension = pathinfo($sourceUrl, PATHINFO_EXTENSION);
+                $filename = parse_url($sourceUrl, PHP_URL_PATH);
+                $extension = pathinfo($filename, PATHINFO_EXTENSION);
                 $urlPath = 'live';
                 if ($channel->is_vod) {
                     $urlPath = 'movie';
@@ -697,7 +698,7 @@ class PlaylistGenerateController extends Controller
             ]);
         }
 
-        $baseUrl = url('/');
+        $baseUrl = ProxyFacade::getBaseUrl();
 
         return response()->stream(function () use ($networks, $baseUrl, $playlist) {
             // M3U header with EPG URL

@@ -564,7 +564,7 @@ it('tick restarts broadcast after boot recovery sets broadcast_requested', funct
     $service = Mockery::mock(NetworkBroadcastService::class)->makePartial();
     $service->shouldAllowMockingProtectedMethods();
     $service->shouldReceive('isProcessRunning')->andReturn(false);
-    $service->shouldReceive('start')->once()->andReturn(true);
+    $service->shouldReceive('startRequested')->once()->andReturn(true);
 
     // Before boot recovery: tick should return idle
     $result = $service->tick($network);

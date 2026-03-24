@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Jobs\RegenerateNetworkSchedule;
 use App\Services\NetworkBroadcastService;
 use App\Services\NetworkEpgService;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -39,6 +40,27 @@ class NetworkContent extends Model
     protected static function boot(): void
     {
         parent::boot();
+
+        // When content is created, queue a debounced schedule regeneration.
+        // ShouldBeUnique on the job ensures bulk imports collapse into a single
+        // regeneration rather than firing one per inserted row.
+        static::created(function (NetworkContent $networkContent) {
+            $network = $networkContent->network;
+
+            if (! $network) {
+                return;
+            }
+
+            if (! in_array($network->schedule_type, ['sequential', 'shuffle'])) {
+                return;
+            }
+
+            if ($network->auto_regenerate_schedule === false) {
+                return;
+            }
+
+            RegenerateNetworkSchedule::dispatch($network->id)->delay(3);
+        });
 
         // When content is deleted, check if network has any remaining content
         static::deleted(function (NetworkContent $networkContent) {

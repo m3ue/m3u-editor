@@ -25,6 +25,7 @@ function scheduleBuilder(config) {
         pendingRemoveId: null,
         rowDragIndex: null,
         rowDragOverIndex: null,
+        mediaPoolCollapsed: false,
 
         // Now-playing status
         nowPlaying: null,
@@ -41,6 +42,8 @@ function scheduleBuilder(config) {
         endDate: '',
 
         init() {
+            this.mediaPoolCollapsed = window.innerWidth < 1024;
+
             const now = new Date();
             this.currentDate = this.formatDateLocal(now);
 
@@ -55,6 +58,12 @@ function scheduleBuilder(config) {
 
             setInterval(() => this.loadNowPlaying(), 60000);
 
+            window.addEventListener('resize', () => {
+                if (window.innerWidth >= 1024) {
+                    this.mediaPoolCollapsed = false;
+                }
+            });
+
             // When showAll is enabled, re-fetch server-side as search term changes.
             // (Client-side filtering handles the non-showAll case.)
             this.$watch('mediaSearch', () => {
@@ -62,6 +71,10 @@ function scheduleBuilder(config) {
                 clearTimeout(this._mediaSearchTimer);
                 this._mediaSearchTimer = setTimeout(() => this.loadMediaPool(), 300);
             });
+        },
+
+        toggleMediaPool() {
+            this.mediaPoolCollapsed = !this.mediaPoolCollapsed;
         },
 
         // ── Date Helpers ──────────────────────────────────────────────

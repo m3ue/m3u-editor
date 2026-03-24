@@ -142,7 +142,7 @@ class Channel extends Model
         )->orderBy('channel_failovers.sort');
     }
 
-    public function getFloatingPlayerAttributes(?string $username, ?string $password): array
+    public function getFloatingPlayerAttributes(?string $username = null, ?string $password = null): array
     {
         $settings = app(GeneralSettings::class);
 

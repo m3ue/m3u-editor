@@ -429,10 +429,15 @@ class EmbyJellyfinService implements MediaServer
             'api_key' => $this->apiKey,
         ];
 
-        // static=true means "send file as-is, no transcoding". Only use it when
-        // no server-side transcode options have been requested; otherwise the
-        // transcode parameters (VideoBitrate, MaxWidth, etc.) would be ignored.
-        if (empty($transcodeOptions)) {
+        // static=true means "send file as-is, no transcoding". Only disable it
+        // when real server-side transcode options are present. Internal helper
+        // flags (e.g. skip_plex_transcode/session_id) should not affect Emby/Jellyfin.
+        $effectiveTranscodeOptions = array_diff_key($transcodeOptions, [
+            'skip_plex_transcode' => true,
+            'session_id' => true,
+        ]);
+
+        if (empty($effectiveTranscodeOptions)) {
             $params['static'] = 'true';
         }
 
@@ -445,29 +450,29 @@ class EmbyJellyfinService implements MediaServer
         }
 
         // Include transcode options (VideoBitrate, AudioBitrate, MaxWidth, MaxHeight) if requested
-        if (! empty($transcodeOptions)) {
-            if (isset($transcodeOptions['video_bitrate'])) {
-                $params['VideoBitrate'] = (string) $transcodeOptions['video_bitrate'];
+        if (! empty($effectiveTranscodeOptions)) {
+            if (isset($effectiveTranscodeOptions['video_bitrate'])) {
+                $params['VideoBitrate'] = (string) $effectiveTranscodeOptions['video_bitrate'];
             }
-            if (isset($transcodeOptions['audio_bitrate'])) {
-                $params['AudioBitrate'] = (string) $transcodeOptions['audio_bitrate'];
+            if (isset($effectiveTranscodeOptions['audio_bitrate'])) {
+                $params['AudioBitrate'] = (string) $effectiveTranscodeOptions['audio_bitrate'];
             }
-            if (isset($transcodeOptions['max_width'])) {
-                $params['MaxWidth'] = (int) $transcodeOptions['max_width'];
+            if (isset($effectiveTranscodeOptions['max_width'])) {
+                $params['MaxWidth'] = (int) $effectiveTranscodeOptions['max_width'];
             }
-            if (isset($transcodeOptions['max_height'])) {
-                $params['MaxHeight'] = (int) $transcodeOptions['max_height'];
+            if (isset($effectiveTranscodeOptions['max_height'])) {
+                $params['MaxHeight'] = (int) $effectiveTranscodeOptions['max_height'];
             }
 
             // Optional codec/preset hints
-            if (! empty($transcodeOptions['video_codec'])) {
-                $params['VideoCodec'] = $transcodeOptions['video_codec'];
+            if (! empty($effectiveTranscodeOptions['video_codec'])) {
+                $params['VideoCodec'] = $effectiveTranscodeOptions['video_codec'];
             }
-            if (! empty($transcodeOptions['audio_codec'])) {
-                $params['AudioCodec'] = $transcodeOptions['audio_codec'];
+            if (! empty($effectiveTranscodeOptions['audio_codec'])) {
+                $params['AudioCodec'] = $effectiveTranscodeOptions['audio_codec'];
             }
-            if (! empty($transcodeOptions['preset'])) {
-                $params['EncoderPreset'] = $transcodeOptions['preset'];
+            if (! empty($effectiveTranscodeOptions['preset'])) {
+                $params['EncoderPreset'] = $effectiveTranscodeOptions['preset'];
             }
         }
 

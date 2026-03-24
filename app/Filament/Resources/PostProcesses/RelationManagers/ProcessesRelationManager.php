@@ -4,6 +4,7 @@ namespace App\Filament\Resources\PostProcesses\RelationManagers;
 
 use App\Models\Epg;
 use App\Models\Playlist;
+use App\Services\DateFormatService;
 use App\Tables\Columns\PivotNameColumn;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\CreateAction;
@@ -73,7 +74,7 @@ class ProcessesRelationManager extends RelationManager
                 PivotNameColumn::make('name')
                     ->label('Model'),
                 TextColumn::make('created_at')
-                    ->dateTime()
+                    ->formatStateUsing(fn ($state) => app(DateFormatService::class)->format($state))
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
             ])

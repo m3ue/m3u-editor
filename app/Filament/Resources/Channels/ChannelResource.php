@@ -16,6 +16,7 @@ use App\Models\ChannelFailover;
 use App\Models\CustomPlaylist;
 use App\Models\Group;
 use App\Models\Playlist;
+use App\Services\DateFormatService;
 use App\Services\EpgCacheService;
 use App\Services\LogoCacheService;
 use App\Services\PlaylistService;
@@ -358,11 +359,11 @@ class ChannelResource extends Resource
                 ->toggleable(isToggledHiddenByDefault: true),
 
             TextColumn::make('created_at')
-                ->dateTime()
+                ->formatStateUsing(fn ($state) => app(DateFormatService::class)->format($state))
                 ->sortable()
                 ->toggleable(isToggledHiddenByDefault: true),
             TextColumn::make('updated_at')
-                ->dateTime()
+                ->formatStateUsing(fn ($state) => app(DateFormatService::class)->format($state))
                 ->sortable()
                 ->toggleable(isToggledHiddenByDefault: true),
         ];
@@ -1058,6 +1059,7 @@ class ChannelResource extends Resource
                         TextEntry::make('url')
                             ->label('URL')->columnSpanFull(),
                         TextEntry::make('proxy_url')
+                            ->state(fn ($record) => $record?->getProxyUrl())
                             ->label('Proxy URL')->columnSpanFull(),
                         TextEntry::make('stream_id')
                             ->label('ID'),

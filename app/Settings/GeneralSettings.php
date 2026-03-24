@@ -223,6 +223,11 @@ class GeneralSettings extends Settings
     // Allowed playlist URL settings
     public ?array $allowed_urls = null;
 
+    // Display & formatting settings
+    public ?string $app_timezone = null;
+
+    public ?string $date_format = null;
+
     public static function group(): string
     {
         return 'general';

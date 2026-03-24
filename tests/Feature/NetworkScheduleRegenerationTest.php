@@ -6,13 +6,18 @@ use App\Models\NetworkContent;
 use App\Models\NetworkProgramme;
 use App\Services\NetworkScheduleService;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Queue;
+
+beforeEach(function () {
+    Queue::fake();
+});
 
 it('preserves a programme that starts exactly at regeneration boundary and avoids duplicates', function () {
     Carbon::setTestNow($now = Carbon::parse('2026-01-21 11:00:00'));
 
     $network = Network::factory()->create([
         'loop_content' => true,
-        'auto_regenerate_schedule' => true,
+        'auto_regenerate_schedule' => false,
     ]);
 
     $c1 = Channel::factory()->create();
@@ -73,7 +78,7 @@ it('handles timestamp precision with microseconds at boundary', function () {
 
     $network = Network::factory()->create([
         'loop_content' => true,
-        'auto_regenerate_schedule' => true,
+        'auto_regenerate_schedule' => false,
     ]);
 
     $c1 = Channel::factory()->create();
@@ -122,7 +127,7 @@ it('handles regeneration when boundary timestamp differs by milliseconds', funct
 
     $network = Network::factory()->create([
         'loop_content' => true,
-        'auto_regenerate_schedule' => true,
+        'auto_regenerate_schedule' => false,
     ]);
 
     $c1 = Channel::factory()->create();
@@ -178,7 +183,7 @@ it('handles database timestamp truncation correctly', function () {
 
     $network = Network::factory()->create([
         'loop_content' => true,
-        'auto_regenerate_schedule' => true,
+        'auto_regenerate_schedule' => false,
     ]);
 
     $c1 = Channel::factory()->create();
@@ -227,7 +232,7 @@ it('preserves currently airing programme when regenerating mid-broadcast', funct
 
     $network = Network::factory()->create([
         'loop_content' => true,
-        'auto_regenerate_schedule' => true,
+        'auto_regenerate_schedule' => false,
     ]);
 
     $c1 = Channel::factory()->create();
@@ -275,7 +280,7 @@ it('continues content sequence correctly after boundary programme', function () 
 
     $network = Network::factory()->create([
         'loop_content' => true,
-        'auto_regenerate_schedule' => true,
+        'auto_regenerate_schedule' => false,
     ]);
 
     $c1 = Channel::factory()->create();

@@ -2,6 +2,7 @@
 
 namespace App\Livewire;
 
+use App\Services\DateFormatService;
 use Filament\Actions\Action;
 use Filament\Actions\BulkAction;
 use Filament\Actions\BulkActionGroup;
@@ -86,7 +87,7 @@ class BackupDestinationListRecords extends Component implements HasActions, HasF
                 //     ->sortable(),
                 TextColumn::make('date')
                     ->label(__('filament-spatie-backup::backup.components.backup_destination_list.table.fields.date'))
-                    ->dateTime()
+                    ->formatStateUsing(fn ($state) => app(DateFormatService::class)->format($state))
                     ->searchable()
                     ->sortable(),
                 TextColumn::make('size')

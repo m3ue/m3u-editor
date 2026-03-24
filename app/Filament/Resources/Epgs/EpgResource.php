@@ -12,6 +12,7 @@ use App\Jobs\ProcessEpgImport;
 use App\Models\Epg;
 use App\Rules\CheckIfUrlOrLocalPath;
 use App\Rules\Cron;
+use App\Services\DateFormatService;
 use App\Services\SchedulesDirectService;
 use App\Traits\HasUserFiltering;
 use Cron\CronExpression;
@@ -25,8 +26,8 @@ use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
 use Filament\Actions\ViewAction;
 use Filament\Forms;
-use Filament\Forms\Components\DateTimePicker;
 use Filament\Forms\Components\FileUpload;
+use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
@@ -150,7 +151,7 @@ class EpgResource extends Resource
                     ->sortable(),
                 TextColumn::make('synced')
                     ->label('Last Synced')
-                    ->since()
+                    ->formatStateUsing(fn ($state) => app(DateFormatService::class)->format($state))
                     ->toggleable()
                     ->sortable(),
                 TextColumn::make('sync_interval')
@@ -158,7 +159,7 @@ class EpgResource extends Resource
                     ->toggleable()
                     ->formatStateUsing(function ($state, $record) {
                         if ($record->auto_sync && $record->sync_interval && CronExpression::isValidExpression($record->sync_interval)) {
-                            return (new CronExpression($record->sync_interval))->getNextRunDate()->format('Y-m-d H:i:s');
+                            return (new CronExpression($record->sync_interval))->getNextRunDate()->format(app(DateFormatService::class)->getFormat());
                         }
 
                         return 'N/A';
@@ -170,11 +171,11 @@ class EpgResource extends Resource
                     ->toggleable()
                     ->sortable(),
                 TextColumn::make('created_at')
-                    ->dateTime()
+                    ->formatStateUsing(fn ($state) => app(DateFormatService::class)->format($state))
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('updated_at')
-                    ->dateTime()
+                    ->formatStateUsing(fn ($state) => app(DateFormatService::class)->format($state))
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
@@ -753,17 +754,13 @@ class EpgResource extends Resource
                                 ->openUrlInNewTab(true)
                         )
                         ->helperText(fn ($get) => $get('sync_interval') && CronExpression::isValidExpression($get('sync_interval'))
-                            ? 'Next scheduled sync: '.(new CronExpression($get('sync_interval')))->getNextRunDate()->format('Y-m-d H:i:s')
+                            ? 'Next scheduled sync: '.(new CronExpression($get('sync_interval')))->getNextRunDate()->format(app(DateFormatService::class)->getFormat())
                             : 'Specify the CRON schedule for automatic sync, e.g. "0 */6 * * *".')
                         ->hidden(fn (Get $get): bool => ! $get('auto_sync')),
-                    DateTimePicker::make('synced')
+                    Placeholder::make('synced')
                         ->columnSpanFull()
-                        ->suffix(config('app.timezone'))
-                        ->native(false)
                         ->label('Last Synced')
-                        ->disabled()
-                        ->helperText('The last time the EPG was successfully synced.')
-                        ->dehydrated(false),
+                        ->content(fn ($record) => app(DateFormatService::class)->format($record?->synced)),
                 ]),
 
             Section::make('Mapping')

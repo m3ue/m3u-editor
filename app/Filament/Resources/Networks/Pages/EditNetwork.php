@@ -55,7 +55,7 @@ class EditNetwork extends EditRecord
                     // Mark as requested so worker will start it when time comes
                     $record->update(['broadcast_requested' => true]);
 
-                    $result = $service->start($record);
+                    $result = $service->startNow($record);
 
                     // Refresh to get updated error message
                     $record->refresh();

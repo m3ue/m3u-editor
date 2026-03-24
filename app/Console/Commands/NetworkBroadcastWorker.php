@@ -182,6 +182,7 @@ class NetworkBroadcastWorker extends Command
 
         $message = match ($action) {
             'started' => "Started broadcasting: {$programme}",
+            'waiting_for_connection' => 'Started (waiting for connection)',
             'stopped' => 'Stopped broadcasting',
             'stopped_no_content' => 'Stopped (no content scheduled)',
             'monitoring' => "Running ({$remaining}s remaining)",

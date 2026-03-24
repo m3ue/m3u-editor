@@ -7,6 +7,8 @@ use App\Jobs\RestartQueue;
 use App\Models\StreamFileSetting;
 use App\Models\StreamProfile;
 use App\Rules\Cron;
+use App\Rules\ValidDateFormat;
+use App\Services\DateFormatService;
 use App\Services\M3uProxyService;
 use App\Services\PlaylistService;
 use App\Settings\GeneralSettings;
@@ -122,6 +124,58 @@ class Preferences extends SettingsPage
         ];
     }
 
+    /** Preset date format strings available in the select. */
+    private const DATE_FORMAT_PRESETS = [
+        'Y-m-d H:i:s',
+        'd/m/Y H:i',
+        'D, d M Y H:i:s',
+        'M j, Y g:i A',
+        'g:i A m/d/Y',
+    ];
+
+    /**
+     * Populate virtual form fields (date_format_preset / date_format_custom)
+     * from the stored date_format setting value before the form is filled.
+     */
+    protected function mutateFormDataBeforeFill(array $data): array
+    {
+        $dateFormat = $data['date_format'] ?? null;
+
+        if ($dateFormat && ! in_array($dateFormat, self::DATE_FORMAT_PRESETS, true)) {
+            $data['date_format_preset'] = '__custom__';
+            $data['date_format_custom'] = $dateFormat;
+        } else {
+            $data['date_format_preset'] = $dateFormat ?? 'Y-m-d H:i:s';
+            $data['date_format_custom'] = null;
+        }
+
+        return $data;
+    }
+
+    /**
+     * Resolve the actual format string from the virtual fields before saving
+     * and strip transient keys that do not exist on GeneralSettings.
+     */
+    protected function mutateFormDataBeforeSave(array $data): array
+    {
+        $preset = $data['date_format_preset'] ?? 'Y-m-d H:i:s';
+
+        if ($preset === '__custom__') {
+            $data['date_format'] = ! empty($data['date_format_custom'])
+                ? $data['date_format_custom']
+                : 'Y-m-d H:i:s';
+        } else {
+            $data['date_format'] = in_array($preset, self::DATE_FORMAT_PRESETS, true)
+                ? $preset
+                : 'Y-m-d H:i:s';
+        }
+
+        // Remove transient fields that are not in GeneralSettings
+        unset($data['date_format_preset'], $data['date_format_custom']);
+
+        return $data;
+    }
+
     public function form(Schema $schema): Schema
     {
         $m3uPublicUrl = rtrim(config('proxy.m3u_proxy_public_url'), '/');
@@ -192,6 +246,78 @@ class Preferences extends SettingsPage
                                                         Width::ScreenTwoExtraLarge->value => '2XL',
                                                         Width::Full->value => 'Full',
                                                     ]),
+                                            ]),
+                                        Grid::make()
+                                            ->columnSpanFull()
+                                            ->columns(2)
+                                            ->schema([
+                                                TextInput::make('app_timezone')
+                                                    ->label('Application Timezone')
+                                                    ->placeholder('UTC')
+                                                    ->helperText('Override the application timezone. Leave empty to use the server default (UTC). Takes effect for all date/time output throughout the app.')
+                                                    ->disabled(fn () => ! empty(config('dev.timezone')))
+                                                    ->hint(fn () => ! empty(config('dev.timezone')) ? 'Already set by environment variable!' : null)
+                                                    ->dehydrated(fn () => empty(config('dev.timezone')))
+                                                    ->afterStateHydrated(function (TextInput $component, $state) {
+                                                        if (! empty(config('dev.timezone'))) {
+                                                            $component->state(config('dev.timezone'));
+                                                        }
+                                                    })
+                                                    ->hintAction(
+                                                        Action::make('view_timezones')
+                                                            ->label('Accepted Values')
+                                                            ->icon('heroicon-o-arrow-top-right-on-square')
+                                                            ->iconPosition('after')
+                                                            ->size('sm')
+                                                            ->url('https://www.php.net/manual/en/timezones.php')
+                                                            ->openUrlInNewTab(true)
+                                                    ),
+                                                Select::make('date_format_preset')
+                                                    ->label('Date Format')
+                                                    ->options([
+                                                        'Y-m-d H:i:s' => 'Default — '.date('Y-m-d H:i:s', mktime(14, 30, 0, 1, 15, 2024)),
+                                                        'd/m/Y H:i' => 'Short — '.date('d/m/Y H:i', mktime(14, 30, 0, 1, 15, 2024)),
+                                                        'D, d M Y H:i:s' => 'Long — '.date('D, d M Y H:i:s', mktime(14, 30, 0, 1, 15, 2024)),
+                                                        'M j, Y g:i A' => 'Human Readable — '.date('M j, Y g:i A', mktime(14, 30, 0, 1, 15, 2024)),
+                                                        'g:i A m/d/Y' => '12-Hour AM/PM — '.date('g:i A m/d/Y', mktime(14, 30, 0, 1, 15, 2024)),
+                                                        '__custom__' => 'Custom...',
+                                                    ])
+                                                    ->default('Y-m-d H:i:s')
+                                                    ->live()
+                                                    ->helperText('Format applied to dates throughout the application (e.g. next sync, last synced).'),
+                                            ]),
+                                        Grid::make()
+                                            ->columnSpanFull()
+                                            ->columns(2)
+                                            ->schema([
+                                                TextInput::make('date_format_custom')
+                                                    ->label('Custom Date Format String')
+                                                    ->placeholder('e.g. d/m/Y H:i:s')
+                                                    ->live(debounce: 500)
+                                                    ->rules([new ValidDateFormat])
+                                                    ->helperText(function (Get $get): string {
+                                                        $fmt = $get('date_format_custom');
+
+                                                        if (! $fmt) {
+                                                            return 'Enter a PHP date format string. See the link above for accepted characters.';
+                                                        }
+
+                                                        try {
+                                                            return 'Preview: '.date($fmt, mktime(14, 30, 0, 1, 15, 2024));
+                                                        } catch (\Throwable) {
+                                                            return 'Invalid format string.';
+                                                        }
+                                                    })
+                                                    ->hintAction(
+                                                        Action::make('view_date_formats')
+                                                            ->label('PHP Date Formats')
+                                                            ->icon('heroicon-o-arrow-top-right-on-square')
+                                                            ->iconPosition('after')
+                                                            ->size('sm')
+                                                            ->url('https://www.php.net/manual/en/datetime.format.php')
+                                                            ->openUrlInNewTab(true)
+                                                    )
+                                                    ->visible(fn (Get $get): bool => $get('date_format_preset') === '__custom__'),
                                             ]),
 
                                     ]),
@@ -953,7 +1079,7 @@ class Preferences extends SettingsPage
                                                             ->openUrlInNewTab(true)
                                                     )
                                                     ->helperText(fn ($get) => CronExpression::isValidExpression($get('auto_backup_database_schedule'))
-                                                        ? 'Next scheduled backup: '.(new CronExpression($get('auto_backup_database_schedule')))->getNextRunDate()->format('Y-m-d H:i:s')
+                                                        ? 'Next scheduled backup: '.(new CronExpression($get('auto_backup_database_schedule')))->getNextRunDate()->format(app(DateFormatService::class)->getFormat())
                                                         : 'Specify the CRON schedule for automatic backups, e.g. "0 3 * * *".'),
                                                 TextInput::make('auto_backup_database_max_backups')
                                                     ->label('Max Backups')

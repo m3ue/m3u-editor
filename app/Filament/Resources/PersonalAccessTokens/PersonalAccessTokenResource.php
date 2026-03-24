@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\PersonalAccessTokens;
 
 use App\Models\PersonalAccessToken;
+use App\Services\DateFormatService;
 use Filament\Actions;
 use Filament\Forms;
 use Filament\Resources\Resource;
@@ -94,17 +95,17 @@ class PersonalAccessTokenResource extends Resource
                     ->badge()
                     ->sortable(),
                 Tables\Columns\TextColumn::make('last_used_at')
-                    ->dateTime()
+                    ->formatStateUsing(fn ($state) => app(DateFormatService::class)->format($state))
                     ->sortable(),
                 Tables\Columns\TextColumn::make('expires_at')
                     ->date()
                     ->sortable(),
                 Tables\Columns\TextColumn::make('created_at')
-                    ->dateTime()
+                    ->formatStateUsing(fn ($state) => app(DateFormatService::class)->format($state))
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
                 Tables\Columns\TextColumn::make('updated_at')
-                    ->dateTime()
+                    ->formatStateUsing(fn ($state) => app(DateFormatService::class)->format($state))
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
             ])

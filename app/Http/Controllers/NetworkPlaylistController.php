@@ -6,6 +6,7 @@ use App\Models\MediaServerIntegration;
 use App\Models\Network;
 use App\Models\User;
 use App\Services\M3uProxyService;
+use App\Services\NetworkBroadcastService;
 use App\Services\NetworkEpgService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -68,7 +69,15 @@ class NetworkPlaylistController extends Controller
 
         // If broadcasting is enabled, redirect clients to the proxy HLS playlist
         if ($network->broadcast_enabled) {
-            return redirect()->to($proxy->getProxyBroadcastHlsUrl($network));
+            if ($network->enabled && $network->broadcast_requested && $network->broadcast_on_demand && ! $network->isBroadcasting()) {
+                $broadcastService = app(NetworkBroadcastService::class);
+                $broadcastService->markConnectionSeen($network);
+                $broadcastService->startNow($network);
+            }
+
+            // Route through Laravel HLS endpoints so segment requests can update
+            // on-demand connection heartbeat and stop idling correctly.
+            return redirect()->route('network.hls.playlist', ['network' => $network->uuid]);
         }
 
         $baseUrl = url('/');

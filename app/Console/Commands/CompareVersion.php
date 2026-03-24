@@ -42,7 +42,7 @@ class CompareVersion extends Command
         }
 
         // Also refresh and store recent releases to a flat file for the widget/page
-        $releases = VersionServiceProvider::fetchReleases(50, refresh: true);
+        $releases = VersionServiceProvider::fetchReleases(perBranchLimit: 15, refresh: true);
         $count = is_array($releases) ? count($releases) : 0;
         $this->info("Fetched $count releases and saved to storage (for dashboard widget).");
 

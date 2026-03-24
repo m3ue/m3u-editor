@@ -25,7 +25,7 @@
                                             gapSeconds: {{ $gapSeconds }},
                                         })" x-cloak class="schedule-builder">
             {{-- Header bar: Day nav + Now playing + Actions --}}
-            <div class="flex flex-wrap items-center gap-3 mb-4">
+            <div class="mb-4 space-y-3 lg:flex lg:flex-wrap lg:items-center lg:gap-3 lg:space-y-0">
                 {{-- Day Navigation --}}
                 <div
                     class="flex items-center gap-1.5 bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-1.5">
@@ -51,7 +51,7 @@
                 </div>
 
                 {{-- Now-Playing pill --}}
-                <div class="flex items-center gap-1.5 ml-auto text-xs rounded-full px-3 py-1.5 font-medium" :class="{
+                <div class="flex w-full items-center gap-1.5 text-xs rounded-full px-3 py-1.5 font-medium lg:ml-auto lg:w-auto" :class="{
                                                      'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300': nowPlaying?.status === 'playing',
                                                      'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300': nowPlaying?.status === 'gap',
                                                      'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300': nowPlaying?.status === 'empty',
@@ -85,7 +85,7 @@
                 </div>
 
                 {{-- Actions --}}
-                <div class="flex items-center gap-1.5">
+                <div class="flex flex-wrap items-center gap-1.5 lg:flex-nowrap">
                     <button @click="openCopyModal()"
                         class="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition">
                         <x-heroicon-o-document-duplicate class="w-3.5 h-3.5" />
@@ -118,9 +118,9 @@
             </div>
 
             {{-- Main Layout: Programme List + Sticky Media Pool --}}
-            <div class="flex gap-5 items-start">
+            <div class="flex flex-col gap-5 items-stretch lg:flex-row lg:items-start">
                 {{-- Programme List --}}
-                <div class="flex-1 min-w-0" @dragover="handleListDragOver($event)" @drop="handleListDrop($event)">
+                <div class="order-2 flex-1 min-w-0 lg:order-1" @dragover="handleListDragOver($event)" @drop="handleListDrop($event)">
                     {{-- Empty state --}}
                     <template x-if="!loading && programmes.length === 0">
                         <div
@@ -245,7 +245,7 @@
                                                                 <x-heroicon-s-map-pin class="w-4 h-4" />
                                                             </button>
                                                             <button @click.stop="unpinTime(prog.id)"
-                                                                class="p-1 rounded-md text-gray-300 dark:text-gray-600 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition opacity-0 group-hover/card:opacity-100"
+                                                                class="p-1 rounded-md text-gray-300 dark:text-gray-600 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition opacity-100 sm:opacity-0 sm:group-hover/card:opacity-100"
                                                                 title="Remove pin">
                                                                 <x-heroicon-o-x-circle class="w-3.5 h-3.5" />
                                                             </button>
@@ -253,7 +253,7 @@
                                                     </template>
                                                     <template x-if="!prog.is_pinned">
                                                         <button @click.stop="startEditPin(prog)"
-                                                            class="p-1 rounded-md text-gray-300 dark:text-gray-600 hover:text-amber-500 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/30 transition opacity-0 group-hover/card:opacity-100"
+                                                            class="p-1 rounded-md text-gray-300 dark:text-gray-600 hover:text-amber-500 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/30 transition opacity-100 sm:opacity-0 sm:group-hover/card:opacity-100"
                                                             title="Pin to specific time">
                                                             <x-heroicon-o-map-pin class="w-4 h-4" />
                                                         </button>
@@ -264,7 +264,7 @@
 
                                         {{-- Actions --}}
                                         <div
-                                            class="flex items-center px-2 shrink-0 opacity-0 group-hover/card:opacity-100 transition-opacity">
+                                            class="flex items-center px-2 shrink-0 opacity-100 sm:opacity-0 sm:group-hover/card:opacity-100 transition-opacity">
                                             <button @click.stop="confirmRemoveProgramme(prog.id)"
                                                 class="p-1.5 rounded-md text-gray-400 dark:text-gray-500 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition"
                                                 title="Remove programme">
@@ -280,13 +280,22 @@
 
                 {{-- Media Pool — sticky sidebar --}}
                 <div
-                    class="w-72 shrink-0 sticky top-4 max-h-[calc(100vh-6rem)] flex flex-col bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
+                    class="order-1 w-full shrink-0 lg:order-2 lg:w-72 lg:sticky lg:top-4 max-h-[60vh] lg:max-h-[calc(100vh-6rem)] flex flex-col bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
                     {{-- Pool Header --}}
                     <div class="p-3 border-b border-gray-200 dark:border-gray-700 space-y-2">
                         <div class="flex items-center justify-between">
                             <h3 class="text-sm font-semibold text-gray-900 dark:text-white">Media Pool</h3>
-                            <span class="text-[10px] text-gray-400 dark:text-gray-500"
-                                x-text="filteredMediaPool.length + ' items'"></span>
+                            <div class="flex items-center gap-2">
+                                <span class="text-[10px] text-gray-400 dark:text-gray-500"
+                                    x-text="filteredMediaPool.length + ' items'"></span>
+                                <button type="button" @click="toggleMediaPool()"
+                                    class="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700 lg:hidden"
+                                    :aria-expanded="(!mediaPoolCollapsed).toString()" aria-controls="media-pool-body"
+                                    title="Toggle media pool">
+                                    <x-heroicon-s-chevron-down class="h-4 w-4 transition-transform"
+                                        x-bind:class="mediaPoolCollapsed ? '' : 'rotate-180'" />
+                                </button>
+                            </div>
                         </div>
 
                         <input type="text" x-model.debounce.300ms="mediaSearch" placeholder="Search..."
@@ -300,7 +309,8 @@
                     </div>
 
                     {{-- Pool Items --}}
-                    <div class="flex-1 overflow-y-auto p-2 space-y-1"
+                    <div id="media-pool-body" x-show="!mediaPoolCollapsed || window.innerWidth >= 1024" x-collapse
+                        class="flex-1 overflow-y-auto p-2 space-y-1"
                         @scroll.passive="if ($el.scrollTop + $el.clientHeight >= $el.scrollHeight - 150) { loadMoreMedia() }">
                         <template x-if="loadingPool">
                             <div class="flex items-center justify-center py-8">
@@ -338,7 +348,7 @@
                                     </div>
                                 </div>
                                 <button @click.stop="appendToEnd(item)"
-                                    class="shrink-0 p-1.5 rounded-lg text-gray-300 dark:text-gray-600 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/30 opacity-0 group-hover/item:opacity-100 transition-all"
+                                    class="shrink-0 p-1.5 rounded-lg text-gray-300 dark:text-gray-600 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/30 opacity-100 sm:opacity-0 sm:group-hover/item:opacity-100 transition-all"
                                     title="Append to end of schedule">
                                     <x-heroicon-o-plus-circle class="w-4 h-4" />
                                 </button>
