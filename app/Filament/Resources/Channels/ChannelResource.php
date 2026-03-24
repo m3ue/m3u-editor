@@ -987,6 +987,35 @@ class ChannelResource extends Resource
                     ->modalIcon('heroicon-o-arrows-pointing-in')
                     ->modalDescription('Don\'t allow merging for selected channels when running "Merge Same ID" jobs.')
                     ->modalSubmitActionLabel('Disable now'),
+                BulkAction::make('set-timeshift')
+                    ->label('Set Timeshift')
+                    ->schema([
+                        TextInput::make('shift')
+                            ->label('Timeshift value')
+                            ->helperText('Set the timeshift (in hours) for the selected channels. Use 0 to disable catch-up.')
+                            ->type('number')
+                            ->rules(['integer', 'min:0'])
+                            ->default(0)
+                            ->required(),
+                    ])
+                    ->action(function (Collection $records, array $data): void {
+                        $value = (int) $data['shift'];
+                        foreach ($records->chunk(100) as $chunk) {
+                            Channel::whereIn('id', $chunk->pluck('id'))->update(['shift' => $value]);
+                        }
+                    })->after(function (array $data) {
+                        Notification::make()
+                            ->success()
+                            ->title('Timeshift updated')
+                            ->body("Timeshift set to {$data['shift']} for the selected channels.")
+                            ->send();
+                    })
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-clock')
+                    ->modalIcon('heroicon-o-clock')
+                    ->modalDescription('Set the timeshift value for the selected channels. Use 0 to disable catch-up.')
+                    ->modalSubmitActionLabel('Set timeshift'),
                 BulkAction::make('enable')
                     ->label('Enable selected')
                     ->action(function (Collection $records): void {

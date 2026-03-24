@@ -218,14 +218,16 @@ class PlaylistGenerateController extends Controller
 
                     // Output the channel
                     $extInf = '#EXTINF:-1';
-                    if ($channel->catchup) {
-                        $extInf .= " catchup=\"$channel->catchup\"";
-                    }
-                    if ($channel->catchup_source) {
-                        $extInf .= " catchup-source=\"$channel->catchup_source\"";
-                    }
-                    if ($timeshift) {
-                        $extInf .= " timeshift=\"$timeshift\"";
+                    if (! $playlist->disable_catchup) {
+                        if ($channel->catchup) {
+                            $extInf .= " catchup=\"$channel->catchup\"";
+                        }
+                        if ($channel->catchup_source) {
+                            $extInf .= " catchup-source=\"$channel->catchup_source\"";
+                        }
+                        if ($timeshift) {
+                            $extInf .= " timeshift=\"$timeshift\"";
+                        }
                     }
                     if ($stationId) {
                         $extInf .= " tvc-guide-stationid=\"$stationId\"";
