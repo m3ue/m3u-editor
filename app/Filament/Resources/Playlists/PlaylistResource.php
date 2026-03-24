@@ -2311,16 +2311,18 @@ class PlaylistResource extends Resource
                             Select::make('target')
                                 ->label('Target')
                                 ->options([
-                                    'channels' => 'Channels (Live & VOD)',
+                                    'channels' => 'Live Channels',
+                                    'vod_channels' => 'VOD Channels',
+                                    'groups' => 'Live Groups',
+                                    'vod_groups' => 'VOD Groups',
                                     'series' => 'Series',
-                                    'groups' => 'Groups (Live & VOD)',
-                                    'categories' => 'Categories (Series)',
+                                    'categories' => 'Series Categories',
                                 ])
                                 ->default('channels')
                                 ->required()
                                 ->live()
                                 ->afterStateUpdated(fn (Set $set, ?string $state) => $set('column', match ($state) {
-                                    'groups', 'categories', 'series' => 'name',
+                                    'groups', 'vod_groups', 'categories', 'series' => 'name',
                                     default => 'title',
                                 }))
                                 ->columnSpan(2),
@@ -2332,21 +2334,25 @@ class PlaylistResource extends Resource
                                         'genre' => 'Genre',
                                         'plot' => 'Plot',
                                     ],
-                                    'groups' => [
+                                    'groups', 'vod_groups' => [
                                         'name' => 'Group Name',
                                     ],
                                     'categories' => [
                                         'name' => 'Category Name',
                                     ],
-                                    default => [
+                                    'vod_channels' => [
                                         'title' => 'Channel Title',
                                         'name' => 'Channel Name (tvg-name)',
                                         'info->description' => 'Description (metadata)',
                                         'info->genre' => 'Genre (metadata)',
                                     ],
+                                    default => [
+                                        'title' => 'Channel Title',
+                                        'name' => 'Channel Name (tvg-name)',
+                                    ],
                                 })
                                 ->default(fn (Get $get): string => match ($get('target')) {
-                                    'groups', 'categories', 'series' => 'name',
+                                    'groups', 'vod_groups', 'categories', 'series' => 'name',
                                     default => 'title',
                                 })
                                 ->required()

@@ -39,9 +39,11 @@ class RunPlaylistFindReplaceRules implements ShouldQueue
         }
 
         $start = now();
-        $channelRulesRun = 0;
+        $liveChannelRulesRun = 0;
+        $vodChannelRulesRun = 0;
         $seriesRulesRun = 0;
-        $groupRulesRun = 0;
+        $liveGroupRulesRun = 0;
+        $vodGroupRulesRun = 0;
         $categoryRulesRun = 0;
 
         foreach ($rules as $rule) {
@@ -61,8 +63,22 @@ class RunPlaylistFindReplaceRules implements ShouldQueue
                     all_playlists: false,
                     playlist_id: $this->playlist->id,
                     silent: true,
+                    is_vod: false,
                 ))->handle();
-                $channelRulesRun++;
+                $liveChannelRulesRun++;
+            } elseif ($target === 'vod_channels') {
+                (new ChannelFindAndReplace(
+                    user_id: $this->playlist->user_id,
+                    use_regex: $rule['use_regex'] ?? true,
+                    column: $rule['column'] ?? 'title',
+                    find_replace: $rule['find_replace'] ?? '',
+                    replace_with: $rule['replace_with'] ?? '',
+                    all_playlists: false,
+                    playlist_id: $this->playlist->id,
+                    silent: true,
+                    is_vod: true,
+                ))->handle();
+                $vodChannelRulesRun++;
             } elseif ($target === 'series') {
                 (new SeriesFindAndReplace(
                     user_id: $this->playlist->user_id,
@@ -83,8 +99,20 @@ class RunPlaylistFindReplaceRules implements ShouldQueue
                     replace_with: $rule['replace_with'] ?? '',
                     playlist_id: $this->playlist->id,
                     silent: true,
+                    group_type: 'live',
                 ))->handle();
-                $groupRulesRun++;
+                $liveGroupRulesRun++;
+            } elseif ($target === 'vod_groups') {
+                (new GroupFindAndReplace(
+                    user_id: $this->playlist->user_id,
+                    use_regex: $rule['use_regex'] ?? true,
+                    find_replace: $rule['find_replace'] ?? '',
+                    replace_with: $rule['replace_with'] ?? '',
+                    playlist_id: $this->playlist->id,
+                    silent: true,
+                    group_type: 'vod',
+                ))->handle();
+                $vodGroupRulesRun++;
             } elseif ($target === 'categories') {
                 (new CategoryFindAndReplace(
                     user_id: $this->playlist->user_id,
@@ -102,14 +130,20 @@ class RunPlaylistFindReplaceRules implements ShouldQueue
         $user = User::find($this->playlist->user_id);
 
         $parts = [];
-        if ($channelRulesRun > 0) {
-            $parts[] = "{$channelRulesRun} channel ".($channelRulesRun === 1 ? 'rule' : 'rules');
+        if ($liveChannelRulesRun > 0) {
+            $parts[] = "{$liveChannelRulesRun} live channel ".($liveChannelRulesRun === 1 ? 'rule' : 'rules');
+        }
+        if ($vodChannelRulesRun > 0) {
+            $parts[] = "{$vodChannelRulesRun} VOD channel ".($vodChannelRulesRun === 1 ? 'rule' : 'rules');
         }
         if ($seriesRulesRun > 0) {
             $parts[] = "{$seriesRulesRun} series ".($seriesRulesRun === 1 ? 'rule' : 'rules');
         }
-        if ($groupRulesRun > 0) {
-            $parts[] = "{$groupRulesRun} group ".($groupRulesRun === 1 ? 'rule' : 'rules');
+        if ($liveGroupRulesRun > 0) {
+            $parts[] = "{$liveGroupRulesRun} live group ".($liveGroupRulesRun === 1 ? 'rule' : 'rules');
+        }
+        if ($vodGroupRulesRun > 0) {
+            $parts[] = "{$vodGroupRulesRun} VOD group ".($vodGroupRulesRun === 1 ? 'rule' : 'rules');
         }
         if ($categoryRulesRun > 0) {
             $parts[] = "{$categoryRulesRun} category ".($categoryRulesRun === 1 ? 'rule' : 'rules');

@@ -27,6 +27,7 @@ class ChannelFindAndReplace implements ShouldQueue
         public ?bool $all_playlists = false,
         public ?int $playlist_id = null,
         public bool $silent = false,
+        public ?bool $is_vod = null,
     ) {
         //
     }
@@ -65,6 +66,7 @@ class ChannelFindAndReplace implements ShouldQueue
             Channel::query()
                 ->where('user_id', $this->user_id)
                 ->when(! $this->all_playlists && $this->playlist_id, fn ($query) => $query->where('playlist_id', $this->playlist_id))
+                ->when($this->is_vod !== null, fn ($query) => $query->where('is_vod', $this->is_vod))
                 ->chunkById(1000, function ($channels) use ($customColumn, &$updated) {
                     $updated += $this->processChannelChunk($channels, $customColumn);
                 });
