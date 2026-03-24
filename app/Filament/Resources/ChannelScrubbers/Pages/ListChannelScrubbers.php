@@ -10,6 +10,8 @@ class ListChannelScrubbers extends ListRecords
 {
     protected static string $resource = ChannelScrubberResource::class;
 
+    protected ?string $subheading = 'Scrubber tasks run after Playlist sync to check for dead URLs and automatically disable failing channels based on the configuration.';
+
     protected function getHeaderActions(): array
     {
         return [

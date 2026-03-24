@@ -3,8 +3,6 @@
 namespace App\Filament\Resources\ChannelScrubbers;
 
 use App\Enums\Status;
-use App\Filament\Resources\ChannelScrubbers\Pages\CreateChannelScrubber;
-use App\Filament\Resources\ChannelScrubbers\Pages\EditChannelScrubber;
 use App\Filament\Resources\ChannelScrubbers\Pages\ListChannelScrubbers;
 use App\Filament\Resources\ChannelScrubbers\Pages\ViewChannelScrubber;
 use App\Filament\Resources\ChannelScrubbers\RelationManagers\ScrubberLogsRelationManager;
@@ -44,6 +42,8 @@ class ChannelScrubberResource extends Resource
     protected static ?string $label = 'Channel Scrubber';
 
     protected static ?string $pluralLabel = 'Channel Scrubbers';
+
+    protected static ?string $recordTitleAttribute = 'name';
 
     protected static string|\UnitEnum|null $navigationGroup = 'Playlist';
 
@@ -95,6 +95,7 @@ class ChannelScrubberResource extends Resource
                 TextColumn::make('dead_count')
                     ->label('Dead Links')
                     ->tooltip('Number of channels with dead links found in the last run.')
+                    ->badge()
                     ->color(fn ($state) => $state > 0 ? 'danger' : 'success')
                     ->toggleable()
                     ->sortable(),
@@ -130,8 +131,9 @@ class ChannelScrubberResource extends Resource
                     ->hiddenLabel(),
                 ViewAction::make()
                     ->button()
-                    ->hiddenLabel()
-                    ->tooltip('View logs'),
+                    ->tooltip('View scrubber logs')
+                    ->icon('heroicon-s-document-text')
+                    ->hiddenLabel(),
                 Action::make('run')
                     ->label('Run Now')
                     ->icon('heroicon-s-play-circle')
@@ -230,9 +232,7 @@ class ChannelScrubberResource extends Resource
     {
         return [
             'index' => ListChannelScrubbers::route('/'),
-            'create' => CreateChannelScrubber::route('/create'),
             'view' => ViewChannelScrubber::route('/{record}'),
-            'edit' => EditChannelScrubber::route('/{record}/edit'),
         ];
     }
 
