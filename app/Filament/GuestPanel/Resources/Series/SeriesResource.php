@@ -8,6 +8,7 @@ use App\Filament\GuestPanel\Pages\Concerns\HasPlaylist;
 use App\Models\CustomPlaylist;
 use App\Models\Playlist;
 use App\Models\Series;
+use App\Services\DateFormatService;
 use Filament\Actions;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
@@ -148,11 +149,11 @@ class SeriesResource extends Resource
                     ->icon('heroicon-m-star')
                     ->sortable(),
                 Tables\Columns\TextColumn::make('created_at')
-                    ->dateTime()
+                    ->formatStateUsing(fn ($state) => app(DateFormatService::class)->format($state))
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
                 Tables\Columns\TextColumn::make('updated_at')
-                    ->dateTime()
+                    ->formatStateUsing(fn ($state) => app(DateFormatService::class)->format($state))
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
             ])

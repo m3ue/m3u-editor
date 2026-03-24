@@ -5,6 +5,7 @@ namespace App\Filament\Resources\PlaylistAuths\RelationManagers;
 use App\Models\CustomPlaylist;
 use App\Models\MergedPlaylist;
 use App\Models\Playlist;
+use App\Services\DateFormatService;
 use App\Tables\Columns\PivotNameColumn;
 use App\Tables\Columns\PlaylistUrlColumn;
 use Filament\Actions\BulkActionGroup;
@@ -85,7 +86,7 @@ class PlaylistsRelationManager extends RelationManager
                     ->label('Playlist URL')
                     ->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('created_at')
-                    ->dateTime()
+                    ->formatStateUsing(fn ($state) => app(DateFormatService::class)->format($state))
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
             ])

@@ -75,7 +75,7 @@ class Episode extends Model
         return $this->morphMany(StrmFileMapping::class, 'syncable');
     }
 
-    public function getFloatingPlayerAttributes(?string $username, ?string $password): array
+    public function getFloatingPlayerAttributes(?string $username = null, ?string $password = null): array
     {
         $settings = app(GeneralSettings::class);
 

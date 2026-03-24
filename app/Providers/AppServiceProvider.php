@@ -28,6 +28,7 @@ use App\Models\PlaylistViewer;
 use App\Models\StreamFileSetting;
 use App\Models\StreamProfile;
 use App\Models\User;
+use App\Services\DateFormatService;
 use App\Services\EpgCacheService;
 use App\Services\GitInfoService;
 use App\Services\NetworkBroadcastService;
@@ -137,6 +138,9 @@ class AppServiceProvider extends ServiceProvider
 
         // Setup the services
         $this->setupServices();
+
+        // Apply user-defined timezone (when TZ env var is not set)
+        $this->applyTimezoneFromSettings();
 
         // Livewire components
         $this->registerLivewireComponents();
@@ -785,10 +789,46 @@ class AppServiceProvider extends ServiceProvider
     }
 
     /**
+     * Apply the user-defined application timezone from settings when the
+     * TZ environment variable is not explicitly set.
+     *
+     * When TZ is defined in the environment it always takes priority (matching
+     * standard Laravel / PHP behaviour). Otherwise, the value stored in
+     * GeneralSettings::app_timezone is applied so that all PHP date/Carbon
+     * calls use the correct timezone throughout the application.
+     */
+    private function applyTimezoneFromSettings(): void
+    {
+        // TZ environment variable always takes priority
+        $envTimezone = config('dev.timezone');
+        if (! empty($envTimezone)) {
+            config(['app.timezone' => $envTimezone]);
+            date_default_timezone_set($envTimezone);
+
+            return;
+        }
+
+        try {
+            $settings = app(GeneralSettings::class);
+            $timezone = $settings->app_timezone;
+
+            if (! empty($timezone) && in_array($timezone, \DateTimeZone::listIdentifiers(), true)) {
+                config(['app.timezone' => $timezone]);
+                date_default_timezone_set($timezone);
+            }
+        } catch (Throwable) {
+            // Settings may not be available during fresh installs / migrations
+        }
+    }
+
+    /**
      * Setup the services.
      */
     public function setupServices(): void
     {
+        // Register the date format service
+        $this->app->singleton(DateFormatService::class);
+
         // Register the proxy service
         $this->app->singleton('proxy', function () {
             return new ProxyService;

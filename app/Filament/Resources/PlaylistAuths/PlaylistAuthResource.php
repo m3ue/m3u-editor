@@ -10,6 +10,7 @@ use App\Models\MergedPlaylist;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
 use App\Models\PlaylistAuth;
+use App\Services\DateFormatService;
 use App\Traits\HasUserFiltering;
 use Filament\Actions\ActionGroup;
 use Filament\Actions\BulkActionGroup;
@@ -85,11 +86,11 @@ class PlaylistAuthResource extends Resource
                     ->tooltip('Toggle auth status')
                     ->sortable(),
                 TextColumn::make('created_at')
-                    ->dateTime()
+                    ->formatStateUsing(fn ($state) => app(DateFormatService::class)->format($state))
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('updated_at')
-                    ->dateTime()
+                    ->formatStateUsing(fn ($state) => app(DateFormatService::class)->format($state))
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
             ])

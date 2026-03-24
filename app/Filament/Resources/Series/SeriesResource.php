@@ -19,6 +19,7 @@ use App\Models\Category;
 use App\Models\Playlist;
 use App\Models\Series;
 use App\Rules\CheckIfUrlOrLocalPath;
+use App\Services\DateFormatService;
 use App\Services\LogoCacheService;
 use App\Services\PlaylistService;
 use App\Services\TmdbService;
@@ -212,11 +213,11 @@ class SeriesResource extends Resource
                 ->sortable()
                 ->hidden(fn () => ! $showPlaylist),
             TextColumn::make('created_at')
-                ->dateTime()
+                ->formatStateUsing(fn ($state) => app(DateFormatService::class)->format($state))
                 ->sortable()
                 ->toggleable(isToggledHiddenByDefault: true),
             TextColumn::make('updated_at')
-                ->dateTime()
+                ->formatStateUsing(fn ($state) => app(DateFormatService::class)->format($state))
                 ->sortable()
                 ->toggleable(isToggledHiddenByDefault: true),
         ];

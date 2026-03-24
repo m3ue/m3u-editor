@@ -14,6 +14,7 @@ use App\Forms\Components\XtreamApiInfo;
 use App\Models\MergedPlaylist;
 use App\Models\PlaylistAuth;
 use App\Models\StreamProfile;
+use App\Services\DateFormatService;
 use App\Services\EpgCacheService;
 use App\Traits\HasUserFiltering;
 use Filament\Actions\Action;
@@ -117,11 +118,11 @@ class MergedPlaylistResource extends Resource
                     ->hidden(fn () => ! auth()->user()->canUseProxy())
                     ->sortable(),
                 TextColumn::make('created_at')
-                    ->dateTime()
+                    ->formatStateUsing(fn ($state) => app(DateFormatService::class)->format($state))
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('updated_at')
-                    ->dateTime()
+                    ->formatStateUsing(fn ($state) => app(DateFormatService::class)->format($state))
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
             ])

@@ -6,6 +6,7 @@ use App\Filament\Resources\Assets\Pages\ListAssets;
 use App\Models\Asset;
 use App\Models\User;
 use App\Services\AssetInventoryService;
+use App\Services\DateFormatService;
 use Filament\Actions;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
@@ -81,7 +82,7 @@ class AssetResource extends Resource
                     ->formatStateUsing(fn (?int $state): string => $state ? number_format($state / 1024, 2).' KB' : '—'),
                 TextColumn::make('last_modified_at')
                     ->label('Modified')
-                    ->dateTime()
+                    ->formatStateUsing(fn ($state) => app(DateFormatService::class)->format($state))
                     ->sortable(),
             ])
             ->filters([

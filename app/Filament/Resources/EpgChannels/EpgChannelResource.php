@@ -8,6 +8,7 @@ use App\Filament\Resources\EpgChannels\Pages\ListEpgChannels;
 use App\Jobs\EpgChannelFindAndReplace;
 use App\Jobs\EpgChannelFindAndReplaceReset;
 use App\Models\EpgChannel;
+use App\Services\DateFormatService;
 use App\Traits\HasUserFiltering;
 use Filament\Actions\BulkAction;
 use Filament\Actions\BulkActionGroup;
@@ -116,11 +117,11 @@ class EpgChannelResource extends Resource
                     ->toggleable()
                     ->sortable(),
                 TextColumn::make('created_at')
-                    ->dateTime()
+                    ->formatStateUsing(fn ($state) => app(DateFormatService::class)->format($state))
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('updated_at')
-                    ->dateTime()
+                    ->formatStateUsing(fn ($state) => app(DateFormatService::class)->format($state))
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
             ])

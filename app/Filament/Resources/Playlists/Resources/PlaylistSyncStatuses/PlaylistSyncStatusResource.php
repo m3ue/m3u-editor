@@ -4,6 +4,7 @@ namespace App\Filament\Resources\Playlists\Resources\PlaylistSyncStatuses;
 
 use App\Filament\Resources\Playlists\PlaylistResource;
 use App\Models\PlaylistSyncStatus;
+use App\Services\DateFormatService;
 use Filament\Actions;
 use Filament\Infolists;
 use Filament\Resources\ParentResourceRegistration;
@@ -56,7 +57,7 @@ class PlaylistSyncStatusResource extends Resource
                             ->helperText('Total time to sync playlist (in seconds)'),
                         Infolists\Components\TextEntry::make('created_at')
                             ->label('Synced at')
-                            ->dateTime(),
+                            ->formatStateUsing(fn ($state) => app(DateFormatService::class)->format($state)),
                         Infolists\Components\TextEntry::make('sync_stats.status')
                             ->label('Status')
                             ->default('success')
@@ -84,7 +85,7 @@ class PlaylistSyncStatusResource extends Resource
             ->columns([
                 TextColumn::make('created_at')
                     ->label('Synced')
-                    ->dateTime()
+                    ->formatStateUsing(fn ($state) => app(DateFormatService::class)->format($state))
                     ->sortable()
                     ->toggleable(),
                 TextColumn::make('name')

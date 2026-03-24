@@ -3,14 +3,14 @@
 namespace App\Filament\GuestPanel\Resources\Vods\Pages;
 
 use App\Filament\GuestPanel\Pages\Concerns\HasPlaylist;
-use App\Filament\GuestPanel\Resources\Vods\VODResource;
+use App\Filament\GuestPanel\Resources\Vods\VodResource;
 use Filament\Resources\Pages\ListRecords;
 
 class ListVod extends ListRecords
 {
     use HasPlaylist;
 
-    protected static string $resource = VODResource::class;
+    protected static string $resource = VodResource::class;
 
     protected static ?string $title = '';
 

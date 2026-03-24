@@ -5,6 +5,12 @@ return [
      * M3U Proxy Service Configuration
      */
 
+    // Post Processing
+    // Allow webhook post-processing to target private/reserved IP addresses.
+    // Disabled by default (SSRF protection). Enable for self-hosted setups where
+    // local services (e.g., Jellyfin, Emby) are addressed by a private IP.
+    'allow_private_webhook_urls' => env('ALLOW_PRIVATE_WEBHOOK_URLS', false),
+
     // If M3U_PROXY_ENABLED=false/null, uses external proxy service
     // If M3U_PROXY_ENABLED=true, uses embedded proxy via nginx reverse proxy
     'embedded_proxy_enabled' => env('M3U_PROXY_ENABLED', true), // true = embedded service, false/null = external service

@@ -110,7 +110,7 @@ class EpgViewer extends Component implements HasActions, HasForms
                     // Add URL for Playlist channels
                     if ($this->type !== 'Epg') {
                         $playlist = $updated->playlist;
-                        $proxyEnabled = $playlist->enable_proxy;
+                        $proxyEnabled = $playlist?->enable_proxy ?? false;
                         $url = $updated->url_custom ?? $updated->url;
 
                         // Get the URL based on proxy settings

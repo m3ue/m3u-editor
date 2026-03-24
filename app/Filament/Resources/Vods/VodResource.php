@@ -20,6 +20,7 @@ use App\Models\CustomPlaylist;
 use App\Models\Group;
 use App\Models\Playlist;
 use App\Rules\CheckIfUrlOrLocalPath;
+use App\Services\DateFormatService;
 use App\Services\LogoCacheService;
 use App\Services\PlaylistService;
 use App\Services\TmdbService;
@@ -391,11 +392,11 @@ class VodResource extends Resource
                 ->toggleable(isToggledHiddenByDefault: true),
 
             TextColumn::make('created_at')
-                ->dateTime()
+                ->formatStateUsing(fn ($state) => app(DateFormatService::class)->format($state))
                 ->sortable()
                 ->toggleable(isToggledHiddenByDefault: true),
             TextColumn::make('updated_at')
-                ->dateTime()
+                ->formatStateUsing(fn ($state) => app(DateFormatService::class)->format($state))
                 ->sortable()
                 ->toggleable(isToggledHiddenByDefault: true),
         ];
