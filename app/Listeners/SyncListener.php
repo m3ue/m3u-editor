@@ -7,6 +7,7 @@ use App\Events\SyncCompleted;
 use App\Jobs\GenerateEpgCache;
 use App\Jobs\MergeChannels;
 use App\Jobs\RunPlaylistFindReplaceRules;
+use App\Jobs\RunPlaylistSortAlpha;
 use App\Jobs\RunPostProcess;
 use App\Models\Epg;
 use App\Models\Playlist;
@@ -32,6 +33,11 @@ class SyncListener
             // Handle saved find & replace rules
             if ($playlist->status === Status::Completed && collect($playlist->find_replace_rules ?? [])->contains(fn ($r) => $r['enabled'] ?? false)) {
                 dispatch(new RunPlaylistFindReplaceRules($playlist));
+            }
+
+            // Handle sort alpha rules
+            if ($playlist->status === Status::Completed && collect($playlist->sort_alpha_config ?? [])->contains(fn ($r) => $r['enabled'] ?? false)) {
+                dispatch(new RunPlaylistSortAlpha($playlist));
             }
 
             // Handle post-processes

@@ -2379,6 +2379,89 @@ class PlaylistResource extends Resource
                             : null
                         ),
                 ]),
+            Section::make('Sort Alpha Configs')
+                ->description('Define sort configurations that automatically run after each playlist sync. Configurations execute in order.')
+                ->columnSpanFull()
+                ->collapsible()
+                ->collapsed($creating)
+                ->schema([
+                    Repeater::make('sort_alpha_config')
+                        ->label('')
+                        ->schema([
+                            Toggle::make('enabled')
+                                ->label('Enabled')
+                                ->default(true)
+                                ->inline(false)
+                                ->columnSpan(1),
+                            Select::make('target')
+                                ->label('Target')
+                                ->options([
+                                    'live_groups' => 'Live Groups',
+                                    'vod_groups' => 'VOD Groups',
+                                ])
+                                ->live()
+                                ->default('live_groups')
+                                ->required()
+                                ->afterStateUpdated(fn (Set $set) => $set('group', ['all']))
+                                ->columnSpan(1),
+                            Select::make('group')
+                                ->label('Groups')
+                                ->options(fn (Get $get, ?Playlist $record): array => [
+                                    'all' => 'All groups',
+                                    ...($record
+                                        ? SourceGroup::where('playlist_id', $record->id)
+                                            ->where('type', match ($get('target')) {
+                                                'vod_groups' => 'vod',
+                                                default => 'live',
+                                            })
+                                            ->orderBy('name')
+                                            ->pluck('name', 'name')
+                                            ->toArray()
+                                        : []),
+                                ])
+                                ->default(['all'])
+                                ->multiple()
+                                ->searchable()
+                                ->columnSpan(3),
+                            Select::make('column')
+                                ->label('Sort By')
+                                ->options([
+                                    'title' => 'Title (or override if set)',
+                                    'name' => 'Name (or override if set)',
+                                    'stream_id' => 'ID (or override if set)',
+                                    'channel' => 'Channel No.',
+                                ])
+                                ->default('title')
+                                ->required()
+                                ->columnSpan(2),
+                            Select::make('sort')
+                                ->label('Sort Order')
+                                ->options([
+                                    'ASC' => 'A to Z or 0 to 9',
+                                    'DESC' => 'Z to A or 9 to 0',
+                                ])
+                                ->default('ASC')
+                                ->required()
+                                ->columnSpan(2),
+                        ])
+                        ->columns(9)
+                        ->reorderable()
+                        ->reorderableWithButtons()
+                        ->collapsible()
+                        ->defaultItems(0)
+                        ->addActionLabel('Add sort config')
+                        ->itemLabel(function (array $state): ?string {
+                            if (empty($state['target'])) {
+                                return null;
+                            }
+                            $targetLabel = $state['target'] === 'vod_groups' ? 'VOD Groups' : 'Live Groups';
+                            $groups = (array) ($state['group'] ?? ['all']);
+                            $groupLabel = \in_array('all', $groups) ? 'All' : implode(', ', $groups);
+                            $disabled = ($state['enabled'] ?? true) ? '' : ' (disabled)';
+
+                            return "{$targetLabel} — {$groupLabel}{$disabled}";
+                        }),
+                ]),
         ];
 
         $outputFields = [
