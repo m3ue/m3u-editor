@@ -235,6 +235,10 @@ class PlaylistGenerateController extends Controller
                     if ($epgShift) {
                         $extInf .= " tvg-shift=\"$epgShift\"";
                     }
+                    $tmdbId = $channel->tmdb_id ?: ($channel->info['tmdb_id'] ?? $channel->movie_data['tmdb_id'] ?? null);
+                    if ($tmdbId) {
+                        $extInf .= " tmdb-id=\"{$tmdbId}\"";
+                    }
                     $extInf .= " tvg-chno=\"$channelNo\" tvg-id=\"$tvgId\" tvg-name=\"$name\" tvg-logo=\"$icon\" group-title=\"$group\"";
                     echo "$extInf,".$title."\n";
                     if ($channel->extvlcopt) {
@@ -314,6 +318,10 @@ class PlaylistGenerateController extends Controller
                             }
 
                             $extInf = "#EXTINF:$runtime";
+                            $episodeTmdbId = $episode->tmdb_id ?: ($episode->info['tmdb_id'] ?? null);
+                            if ($episodeTmdbId) {
+                                $extInf .= " tmdb-id=\"{$episodeTmdbId}\"";
+                            }
                             $extInf .= " tvg-chno=\"$channelNo\" tvg-id=\"$tvgId\" tvg-name=\"$name\" tvg-logo=\"$icon\" group-title=\"$group\"";
                             echo "$extInf,".$title."\n";
                             echo $url."\n";
