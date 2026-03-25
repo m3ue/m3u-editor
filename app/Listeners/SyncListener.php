@@ -12,8 +12,7 @@ use App\Jobs\RunPlaylistSortAlpha;
 use App\Jobs\RunPostProcess;
 use App\Models\Epg;
 use App\Models\Playlist;
-use Filament\Notifications\Notification;
-use Throwable;
+use Illuminate\Support\Facades\Bus;
 
 class SyncListener
 {
@@ -26,50 +25,21 @@ class SyncListener
             $playlist = $event->model;
             $lastSync = $playlist->syncStatuses()->first();
 
-            // Handle auto-merge channels if enabled
-            if ($playlist->auto_merge_channels_enabled && $playlist->status === Status::Completed) {
-                $this->handleAutoMergeChannels($playlist);
-            }
-
-            // Handle saved find & replace rules
-            if ($playlist->status === Status::Completed && collect($playlist->find_replace_rules ?? [])->contains(fn ($r) => $r['enabled'] ?? false)) {
-                dispatch(new RunPlaylistFindReplaceRules($playlist));
-            }
-
-            // Handle sort alpha rules
-            if ($playlist->status === Status::Completed && collect($playlist->sort_alpha_config ?? [])->contains(fn ($r) => $r['enabled'] ?? false)) {
-                dispatch(new RunPlaylistSortAlpha($playlist));
-            }
-
-            // Handle post-processes
-            $playlist->postProcesses()->where([
-                ['event', 'synced'],
-                ['enabled', true],
-            ])->get()->each(function ($postProcess) use ($playlist, $lastSync) {
-                dispatch(new RunPostProcess(
-                    $postProcess,
-                    $playlist,
-                    $lastSync
-                ));
-            });
-
-            // Dispatch recurring channel scrubbers after playlist sync
+            // Only run the following on completed syncs
             if ($playlist->status === Status::Completed) {
-                $playlist->channelScrubbers()->where('recurring', true)->get()->each(function ($scrubber) {
-                    dispatch(new ProcessChannelScrubber($scrubber->id));
-                });
+                // Handle saved find & replace rules and sort alpha if enabled
+                $this->dispatchNameProcessingPipeline($playlist);
+
+                // Handle channel merge & scrubbers if enabled
+                $this->dispatchChannelScanJobs($playlist);
             }
+
+            // Handle Playlist post-processes
+            $this->dispatchPostProcessJobs($event->model, $lastSync);
         }
         if ($event->model instanceof Epg) {
-            $event->model->postProcesses()->where([
-                ['event', 'synced'],
-                ['enabled', true],
-            ])->get()->each(function ($postProcess) use ($event) {
-                dispatch(new RunPostProcess(
-                    $postProcess,
-                    $event->model
-                ));
-            });
+            // Handle EPG post-processes
+            $this->dispatchPostProcessJobs($event->model);
 
             // Generate EPG cache if sync was successful
             if ($event->model->status === Status::Completed) {
@@ -79,68 +49,119 @@ class SyncListener
     }
 
     /**
+     * Group 1: Find & Replace → Sort Alpha.
+     *
+     * Sort alpha depends on channel names, which Find & Replace may change,
+     * so these must run in sequence when both are enabled.
+     */
+    private function dispatchNameProcessingPipeline(Playlist $playlist): void
+    {
+        $hasFindReplace = collect($playlist->find_replace_rules ?? [])
+            ->contains(fn ($r) => $r['enabled'] ?? false);
+        $hasSortAlpha = collect($playlist->sort_alpha_config ?? [])
+            ->contains(fn ($r) => $r['enabled'] ?? false);
+
+        if ($hasFindReplace && $hasSortAlpha) {
+            Bus::chain([
+                new RunPlaylistFindReplaceRules($playlist),
+                new RunPlaylistSortAlpha($playlist),
+            ])->dispatch();
+        } elseif ($hasFindReplace) {
+            dispatch(new RunPlaylistFindReplaceRules($playlist));
+        } elseif ($hasSortAlpha) {
+            dispatch(new RunPlaylistSortAlpha($playlist));
+        }
+    }
+
+    /**
+     * Group 2. Merge Channels → Channel Scrubber.
+     *
+     * Merge uses `stream_id` and doesn't rely on name/titles, so can be run in parallel with name processing jobs.
+     * However, channel scrubber jobs should be dispatched after the merge channels job completes,
+     * to ensure they run against the updated channel list and avoid potential conflicts with the merge process.
+     */
+    private function dispatchChannelScanJobs(Playlist $playlist): void
+    {
+        $mergeJob = ($playlist->auto_merge_channels_enabled ?? false)
+            ? $this->getMergeJob($playlist)
+            : null;
+
+        $scrubberJobs = $playlist->channelScrubbers()
+            ->where('recurring', true)->get()
+            ->map(fn ($scrubber) => new ProcessChannelScrubber($scrubber->id))
+            ->toArray();
+
+        if ($mergeJob) {
+            Bus::chain([$mergeJob, ...$scrubberJobs])->dispatch();
+        } elseif (! empty($scrubberJobs)) {
+            Bus::chain($scrubberJobs)->dispatch();
+        }
+    }
+
+    /**
+     * Dispatch post-processes for a model after sync.
+     */
+    private function dispatchPostProcessJobs(Playlist|Epg $model, $lastSync = null): void
+    {
+        $model->postProcesses()->where([
+            ['event', 'synced'],
+            ['enabled', true],
+        ])->get()->each(function ($postProcess) use ($model, $lastSync) {
+            dispatch(new RunPostProcess(
+                $postProcess,
+                $model,
+                $lastSync
+            ));
+        });
+    }
+
+    /**
      * Handle auto-merge channels after playlist sync.
      */
-    private function handleAutoMergeChannels(Playlist $playlist): void
+    private function getMergeJob(Playlist $playlist): ?MergeChannels
     {
-        try {
-            // Get auto-merge configuration
-            $config = $playlist->auto_merge_config ?? [];
-            $useResolution = $config['check_resolution'] ?? false;
-            $forceCompleteRemerge = $config['force_complete_remerge'] ?? false;
-            $preferCatchupAsPrimary = $config['prefer_catchup_as_primary'] ?? false;
-            $newChannelsOnly = $config['new_channels_only'] ?? true; // Default to true for new channels only
-            $preferredPlaylistId = $config['preferred_playlist_id'] ?? null;
-            $failoverPlaylists = $config['failover_playlists'] ?? [];
-            $deactivateFailover = $playlist->auto_merge_deactivate_failover;
+        // Get auto-merge configuration
+        $config = $playlist->auto_merge_config ?? [];
+        $useResolution = $config['check_resolution'] ?? false;
+        $forceCompleteRemerge = $config['force_complete_remerge'] ?? false;
+        $preferCatchupAsPrimary = $config['prefer_catchup_as_primary'] ?? false;
+        $newChannelsOnly = $config['new_channels_only'] ?? true; // Default to true for new channels only
+        $preferredPlaylistId = $config['preferred_playlist_id'] ?? null;
+        $failoverPlaylists = $config['failover_playlists'] ?? [];
+        $deactivateFailover = (bool) ($playlist->auto_merge_deactivate_failover ?? false);
 
-            // Build the playlists collection for merging
-            // Start with the current playlist
-            $playlists = collect([['playlist_failover_id' => $playlist->id]]);
+        // Build the playlists collection for merging
+        // Start with the current playlist
+        $playlists = collect([['playlist_failover_id' => $playlist->id]]);
 
-            // Add any additional failover playlists from config
-            if (! empty($failoverPlaylists)) {
-                foreach ($failoverPlaylists as $failover) {
-                    $failoverId = is_array($failover) ? ($failover['playlist_failover_id'] ?? null) : $failover;
-                    if ($failoverId && $failoverId != $playlist->id) {
-                        $playlists->push(['playlist_failover_id' => $failoverId]);
-                    }
+        // Add any additional failover playlists from config
+        if (! empty($failoverPlaylists)) {
+            foreach ($failoverPlaylists as $failover) {
+                $failoverId = is_array($failover) ? ($failover['playlist_failover_id'] ?? null) : $failover;
+                if ($failoverId && $failoverId != $playlist->id) {
+                    $playlists->push(['playlist_failover_id' => $failoverId]);
                 }
             }
-
-            // Determine the preferred playlist ID (use configured one or fallback to current playlist)
-            $effectivePlaylistId = $preferredPlaylistId ? (int) $preferredPlaylistId : $playlist->id;
-
-            // Build weighted config if any weighted priority options are set
-            $weightedConfig = $this->buildWeightedConfig($config);
-
-            // Dispatch the merge job
-            dispatch(new MergeChannels(
-                user: $playlist->user,
-                playlists: $playlists,
-                playlistId: $effectivePlaylistId,
-                checkResolution: $useResolution,
-                deactivateFailoverChannels: $deactivateFailover,
-                forceCompleteRemerge: $forceCompleteRemerge,
-                preferCatchupAsPrimary: $preferCatchupAsPrimary,
-                weightedConfig: $weightedConfig,
-                newChannelsOnly: $newChannelsOnly,
-            ));
-        } catch (Throwable $e) {
-            // Log error and send notification
-            logger()->error('Auto-merge failed for playlist: '.$playlist->name, [
-                'playlist_id' => $playlist->id,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-            ]);
-
-            Notification::make()
-                ->title('Auto-merge failed')
-                ->body("Failed to auto-merge channels for playlist \"{$playlist->name}\": {$e->getMessage()}")
-                ->danger()
-                ->broadcast($playlist->user)
-                ->sendToDatabase($playlist->user);
         }
+
+        // Determine the preferred playlist ID (use configured one or fallback to current playlist)
+        $effectivePlaylistId = $preferredPlaylistId ? (int) $preferredPlaylistId : $playlist->id;
+
+        // Build weighted config if any weighted priority options are set
+        $weightedConfig = $this->buildWeightedConfig($config);
+
+        // Dispatch the merge job
+        return new MergeChannels(
+            user: $playlist->user,
+            playlists: $playlists,
+            playlistId: $effectivePlaylistId,
+            checkResolution: $useResolution,
+            deactivateFailoverChannels: $deactivateFailover,
+            forceCompleteRemerge: $forceCompleteRemerge,
+            preferCatchupAsPrimary: $preferCatchupAsPrimary,
+            weightedConfig: $weightedConfig,
+            newChannelsOnly: $newChannelsOnly,
+        );
     }
 
     /**
