@@ -118,6 +118,11 @@ class AppServiceProvider extends ServiceProvider
             $this->configureDynamicHttpsDetection();
         }
 
+        // Sync the public disk URL with the resolved base URL so that
+        // Storage::disk('public')->url() includes the correct scheme,
+        // host, and port — regardless of what APP_URL is set to.
+        config(['filesystems.disks.public.url' => url('/storage')]);
+
         // Setup the middleware
         $this->setupMiddleware();
 
