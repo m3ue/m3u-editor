@@ -25,6 +25,8 @@ class PersonalAccessTokenResource extends Resource
 
     protected static ?string $recordTitleAttribute = 'name';
 
+    protected static ?int $navigationSort = 1;
+
     /**
      * Check if the user can access this page.
      * Only users with the "tools" permission can access this page.
@@ -43,11 +45,6 @@ class PersonalAccessTokenResource extends Resource
     {
         return parent::getGlobalSearchEloquentQuery()
             ->where('tokenable_id', auth()->id());
-    }
-
-    public static function getNavigationSort(): ?int
-    {
-        return 0;
     }
 
     public static function form(Schema $schema): Schema

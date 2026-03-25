@@ -48,6 +48,8 @@ class PostProcessResource extends Resource
 
     protected static string|\UnitEnum|null $navigationGroup = 'Tools';
 
+    protected static ?int $navigationSort = 4;
+
     /**
      * Check if the user can access this page.
      * Only users with the "tools" permission can access this page.
@@ -60,11 +62,6 @@ class PostProcessResource extends Resource
     public static function getGloballySearchableAttributes(): array
     {
         return ['name'];
-    }
-
-    public static function getNavigationSort(): ?int
-    {
-        return 4;
     }
 
     public static function form(Schema $schema): Schema

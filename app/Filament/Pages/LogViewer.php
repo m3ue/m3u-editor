@@ -16,7 +16,7 @@ class LogViewer extends Page
 
     protected static string|\UnitEnum|null $navigationGroup = 'Tools';
 
-    protected static ?int $navigationSort = 6;
+    protected static ?int $navigationSort = 5;
 
     protected static string|\BackedEnum|null $navigationIcon = null;
 
