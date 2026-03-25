@@ -184,6 +184,7 @@ class PluginManager
         ]);
 
         $stagingRoot = $this->reviewStagingRoot($review);
+        $this->resetReviewStagingRoot($stagingRoot);
         $workingPath = $stagingRoot.DIRECTORY_SEPARATOR.'source';
 
         File::ensureDirectoryExists($workingPath);
@@ -218,7 +219,7 @@ class PluginManager
 
         $stagingRoot = $this->reviewStagingRoot($review);
         try {
-            File::ensureDirectoryExists($stagingRoot);
+            $this->resetReviewStagingRoot($stagingRoot);
 
             $stagedArchivePath = $stagingRoot.DIRECTORY_SEPARATOR.basename($archivePath);
             File::copy($archivePath, $stagedArchivePath);
@@ -240,13 +241,7 @@ class PluginManager
                 archiveFilename: basename($archivePath),
             );
         } catch (Throwable $exception) {
-            if (is_dir($stagingRoot)) {
-                $this->deleteDirectoryOrFail($stagingRoot, "plugin review staging directory [{$stagingRoot}]");
-            }
-
-            if ($review->exists) {
-                $review->delete();
-            }
+            $this->cleanupFailedReviewStage($review, $stagingRoot);
 
             throw $exception;
         }
@@ -305,7 +300,7 @@ class PluginManager
             ]);
 
             $stagingRoot = $this->reviewStagingRoot($review);
-            File::ensureDirectoryExists($stagingRoot);
+            $this->resetReviewStagingRoot($stagingRoot);
 
             $stagedArchivePath = $stagingRoot.DIRECTORY_SEPARATOR.$archiveFilename;
             if (! File::move($absoluteUploadedPath, $stagedArchivePath)) {
@@ -332,17 +327,15 @@ class PluginManager
                 archiveFilename: $archiveFilename,
             );
         } catch (Throwable $exception) {
-            if (is_dir($stagingRoot)) {
-                $this->deleteDirectoryOrFail($stagingRoot, "plugin review staging directory [{$stagingRoot}]");
-            }
-
-            if (is_file($absoluteUploadedPath)) {
-                $this->deleteFileOrFail($absoluteUploadedPath, "uploaded plugin archive [{$archiveFilename}]");
-            }
-
-            if ($review?->exists) {
-                $review->delete();
-            }
+            $this->cleanupFailedReviewStage(
+                $review,
+                $stagingRoot,
+                cleanup: function () use ($absoluteUploadedPath, $archiveFilename): void {
+                    if (is_file($absoluteUploadedPath)) {
+                        $this->deleteFileOrFail($absoluteUploadedPath, "uploaded plugin archive [{$archiveFilename}]");
+                    }
+                },
+            );
 
             throw $exception;
         }
@@ -368,7 +361,7 @@ class PluginManager
 
         $stagingRoot = $this->reviewStagingRoot($review);
         try {
-            File::ensureDirectoryExists($stagingRoot);
+            $this->resetReviewStagingRoot($stagingRoot);
 
             $stagedArchivePath = $stagingRoot.DIRECTORY_SEPARATOR.$metadata['asset_name'];
             $this->downloadGithubReleaseArchive($releaseUrl, $stagedArchivePath);
@@ -397,11 +390,7 @@ class PluginManager
                 archiveFilename: $metadata['asset_name'],
             );
         } catch (Throwable $exception) {
-            if (is_dir($stagingRoot)) {
-                File::deleteDirectory($stagingRoot);
-            }
-
-            $review->delete();
+            $this->cleanupFailedReviewStage($review, $stagingRoot);
 
             throw $exception;
         }
@@ -1449,6 +1438,37 @@ class PluginManager
     {
         if (is_dir($path) && ! File::deleteDirectory($path)) {
             throw new RuntimeException("Unable to delete {$displayPath}.");
+        }
+    }
+
+    private function resetReviewStagingRoot(string $stagingRoot): void
+    {
+        if (is_dir($stagingRoot)) {
+            $this->deleteDirectoryOrFail($stagingRoot, "plugin review staging directory [{$stagingRoot}]");
+        }
+
+        File::ensureDirectoryExists($stagingRoot);
+    }
+
+    private function cleanupFailedReviewStage(
+        PluginInstallReview $review,
+        ?string $stagingRoot = null,
+        ?callable $cleanup = null,
+    ): void {
+        if ($review->exists) {
+            $review->delete();
+        }
+
+        try {
+            if ($cleanup !== null) {
+                $cleanup();
+            }
+
+            if ($stagingRoot && is_dir($stagingRoot)) {
+                $this->deleteDirectoryOrFail($stagingRoot, "plugin review staging directory [{$stagingRoot}]");
+            }
+        } catch (Throwable $cleanupException) {
+            report($cleanupException);
         }
     }
 
