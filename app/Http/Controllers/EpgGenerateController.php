@@ -125,7 +125,7 @@ class EpgGenerateController extends Controller
                     $tvgId = $channel->id;
                     break;
                 case PlaylistChannelId::Number:
-                    $tvgId = $channelNumber;
+                    $tvgId = $channelNo;
                     break;
                 case PlaylistChannelId::Name:
                     $tvgId = $channel->name_custom ?? $channel->name;

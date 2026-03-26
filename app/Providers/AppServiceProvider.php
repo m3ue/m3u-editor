@@ -147,6 +147,14 @@ class AppServiceProvider extends ServiceProvider
 
         // Livewire components
         $this->registerLivewireComponents();
+
+        // Override the public storage URL at runtime so it always reflects the
+        // actual request scheme/host, even when the config is cached via
+        // `php artisan optimize`. This fixes 404s when the app is accessed via a
+        // TLD/reverse proxy that differs from APP_URL.
+        if (! app()->runningInConsole()) {
+            config(['filesystems.disks.public.url' => url('/storage')]);
+        }
     }
 
     /**

@@ -152,7 +152,7 @@ class PlaylistGenerateController extends Controller
                             $tvgId = $channel->id;
                             break;
                         case PlaylistChannelId::Number:
-                            $tvgId = $channelNumber;
+                            $tvgId = $channelNo;
                             break;
                         case PlaylistChannelId::Name:
                             $tvgId = $channel->name_custom ?? $channel->name;
@@ -304,7 +304,7 @@ class PlaylistGenerateController extends Controller
                                     $tvgId = $episode->id;
                                     break;
                                 case PlaylistChannelId::Number:
-                                    $tvgId = $channelNumber;
+                                    $tvgId = $channelNo;
                                     break;
                                 case PlaylistChannelId::Name:
                                     $tvgId = $name;
@@ -520,7 +520,7 @@ class PlaylistGenerateController extends Controller
                         $tvgId = $channel->id;
                         break;
                     case PlaylistChannelId::Number:
-                        $tvgId = $channelNumber;
+                        $tvgId = $channelNo;
                         break;
                     case PlaylistChannelId::Name:
                         $tvgId = $channel->name_custom ?? $channel->name;

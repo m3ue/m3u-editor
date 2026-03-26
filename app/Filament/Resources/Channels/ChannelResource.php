@@ -53,7 +53,6 @@ use Filament\Tables\Columns\TextInputColumn;
 use Filament\Tables\Columns\ToggleColumn;
 use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Filters\Filter;
-use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
@@ -372,24 +371,6 @@ class ChannelResource extends Resource
     public static function getTableFilters($showPlaylist = true): array
     {
         return [
-            SelectFilter::make('playlist')
-                ->relationship('playlist', 'name')
-                ->hidden(fn () => ! $showPlaylist)
-                ->multiple()
-                ->preload()
-                ->searchable(),
-            Filter::make('enabled')
-                ->label('Channel is enabled')
-                ->toggle()
-                ->query(function ($query) {
-                    return $query->where('enabled', true);
-                }),
-            Filter::make('disabled')
-                ->label('Channel is disabled')
-                ->toggle()
-                ->query(function ($query) {
-                    return $query->where('enabled', false);
-                }),
             Filter::make('mapped')
                 ->label('EPG is mapped')
                 ->toggle()

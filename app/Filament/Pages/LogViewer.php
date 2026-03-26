@@ -66,7 +66,7 @@ class LogViewer extends Page
         }
 
         $files = collect(File::allFiles($dir))
-            ->filter(fn ($f) => str_ends_with($f->getFilename(), '.log'))
+            ->filter(fn ($f) => str_starts_with($f->getFilename(), 'laravel-') && str_ends_with($f->getFilename(), '.log'))
             ->sortByDesc(fn ($f) => $f->getMTime())
             ->mapWithKeys(fn ($f) => [
                 $f->getFilename() => $f->getRealPath(),

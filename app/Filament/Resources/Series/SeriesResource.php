@@ -60,7 +60,6 @@ use Filament\Tables\Columns\TextInputColumn;
 use Filament\Tables\Columns\ToggleColumn;
 use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Filters\Filter;
-use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
@@ -226,18 +225,6 @@ class SeriesResource extends Resource
     public static function getTableFilters($showPlaylist = true): array
     {
         return [
-            SelectFilter::make('playlist')
-                ->relationship('playlist', 'name')
-                ->multiple()
-                ->preload()
-                ->searchable()
-                ->hidden(fn () => ! $showPlaylist),
-            Filter::make('enabled')
-                ->label('Series is enabled')
-                ->toggle()
-                ->query(function ($query) {
-                    return $query->where('enabled', true);
-                }),
             Filter::make('has_metadata')
                 ->label('Has TMDB/TVDB/IMDB ID')
                 ->toggle()
