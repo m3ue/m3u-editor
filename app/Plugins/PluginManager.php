@@ -603,7 +603,7 @@ class PluginManager
         );
 
         $plugin->update([
-            'settings' => $this->resolvedSettings($plugin) + $settings,
+            'settings' => $settings + $this->resolvedSettings($plugin),
         ]);
 
         return $plugin->fresh();
