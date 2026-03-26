@@ -1,0 +1,82 @@
+{
+  "id": "tv-logos",
+  "name": "TV Logos",
+  "version": "1.0.0",
+  "api_version": "1.0.0",
+  "description": "Automatically enriches channel logos from the open-source tv-logo/tv-logos repository via the jsDelivr CDN.",
+  "entrypoint": "Plugin.php",
+  "class": "AppLocalPlugins\\TvLogos\\Plugin",
+  "capabilities": [
+    "channel_processor"
+  ],
+  "hooks": [
+    "playlist.synced"
+  ],
+  "permissions": [
+    "db_read",
+    "db_write",
+    "network_egress",
+    "filesystem_read",
+    "filesystem_write",
+    "hook_subscriptions",
+    "queue_jobs"
+  ],
+  "schema": {
+    "tables": []
+  },
+  "data_ownership": {
+    "tables": [],
+    "directories": [
+      "plugin-data/tv-logos",
+      "plugin-reports/tv-logos"
+    ],
+    "files": [],
+    "default_cleanup_policy": "purge"
+  },
+  "settings": [
+    {
+      "id": "country_code",
+      "label": "Country Code (e.g. us, gb, de, fr)",
+      "type": "text",
+      "default": "us"
+    },
+    {
+      "id": "overwrite_existing",
+      "label": "Overwrite channels that already have a custom logo",
+      "type": "boolean",
+      "default": false
+    },
+    {
+      "id": "skip_vod",
+      "label": "Skip VOD channels",
+      "type": "boolean",
+      "default": true
+    },
+    {
+      "id": "cache_ttl_days",
+      "label": "Match cache TTL in days (0 = never expire)",
+      "type": "number",
+      "default": 7
+    }
+  ],
+  "actions": [
+    {
+      "id": "health_check",
+      "label": "Health Check",
+      "dry_run": true,
+      "fields": []
+    },
+    {
+      "id": "enrich_logos",
+      "label": "Enrich Logos",
+      "dry_run": false,
+      "fields": [
+        {
+          "id": "playlist_id",
+          "label": "Playlist ID",
+          "type": "number"
+        }
+      ]
+    }
+  ]
+}

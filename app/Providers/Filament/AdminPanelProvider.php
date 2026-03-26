@@ -107,7 +107,7 @@ class AdminPanelProvider extends PanelProvider
                     ->icon('heroicon-m-calendar-days'),
                 NavigationGroup::make('Proxy')
                     ->icon('heroicon-m-arrows-right-left'),
-                NavigationGroup::make('Extensions')
+                NavigationGroup::make('Plugins')
                     ->icon('heroicon-m-puzzle-piece'),
                 NavigationGroup::make('Tools')
                     ->collapsed()

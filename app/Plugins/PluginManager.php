@@ -3,9 +3,9 @@
 namespace App\Plugins;
 
 use App\Jobs\ExecutePluginInvocation;
-use App\Models\ExtensionPlugin;
-use App\Models\ExtensionPluginRun;
+use App\Models\Plugin;
 use App\Models\PluginInstallReview;
+use App\Models\PluginRun;
 use App\Models\User;
 use App\Plugins\Contracts\HookablePluginInterface;
 use App\Plugins\Contracts\LifecyclePluginInterface;
@@ -50,8 +50,8 @@ class PluginManager
             $manifest = $result->manifest;
             $pluginId = $result->pluginId ?? basename($pluginPath);
 
-            $record = ExtensionPlugin::query()->where('plugin_id', $pluginId)->first()
-                ?? new ExtensionPlugin(['plugin_id' => $pluginId]);
+            $record = Plugin::query()->where('plugin_id', $pluginId)->first()
+                ?? new Plugin(['plugin_id' => $pluginId]);
             $securityState = $this->determineSecurityState($record, $result, file_exists($pluginPath));
             $attributes = [
                 'name' => $manifest?->name ?? Arr::get($result->manifestData, 'name', $pluginId),
@@ -84,7 +84,7 @@ class PluginManager
                 'last_validated_at' => now(),
             ];
 
-            $record = ExtensionPlugin::query()->updateOrCreate(
+            $record = Plugin::query()->updateOrCreate(
                 ['plugin_id' => $pluginId],
                 $attributes,
             );
@@ -94,7 +94,7 @@ class PluginManager
         }
 
         if ($seenPaths !== []) {
-            $missingPlugins = ExtensionPlugin::query()
+            $missingPlugins = Plugin::query()
                 ->whereNotIn('path', $seenPaths)
                 ->get();
 
@@ -113,7 +113,7 @@ class PluginManager
         return $discovered;
     }
 
-    public function validate(ExtensionPlugin $plugin): ExtensionPlugin
+    public function validate(Plugin $plugin): Plugin
     {
         $result = $this->validator->validatePath((string) $plugin->path);
         $securityState = $this->determineSecurityState($plugin, $result, file_exists((string) $plugin->path));
@@ -149,9 +149,9 @@ class PluginManager
         return $plugin->fresh();
     }
 
-    public function findPluginById(string $pluginId): ?ExtensionPlugin
+    public function findPluginById(string $pluginId): ?Plugin
     {
-        return ExtensionPlugin::query()
+        return Plugin::query()
             ->where('plugin_id', $pluginId)
             ->first();
     }
@@ -582,7 +582,7 @@ class PluginManager
         ]);
     }
 
-    public function resolvedSettings(ExtensionPlugin $plugin): array
+    public function resolvedSettings(Plugin $plugin): array
     {
         return $this->schemaMapper->defaultsForFields(
             $plugin->settings_schema ?? [],
@@ -590,7 +590,7 @@ class PluginManager
         );
     }
 
-    public function updateSettings(ExtensionPlugin $plugin, array $settings): ExtensionPlugin
+    public function updateSettings(Plugin $plugin, array $settings): Plugin
     {
         Validator::make(
             ['settings' => $settings],
@@ -610,11 +610,11 @@ class PluginManager
     }
 
     public function executeAction(
-        ExtensionPlugin $plugin,
+        Plugin $plugin,
         string $action,
         array $payload = [],
         array $options = [],
-    ): ExtensionPluginRun {
+    ): PluginRun {
         $this->recoverStaleRuns();
         $actingUser = isset($options['user_id']) ? User::find($options['user_id']) : null;
 
@@ -655,11 +655,11 @@ class PluginManager
     }
 
     public function executeHook(
-        ExtensionPlugin $plugin,
+        Plugin $plugin,
         string $hook,
         array $payload = [],
         array $options = [],
-    ): ExtensionPluginRun {
+    ): PluginRun {
         $this->recoverStaleRuns();
 
         $run = $this->prepareRun($plugin, [
@@ -695,7 +695,7 @@ class PluginManager
         }
     }
 
-    public function scheduledInvocations(ExtensionPlugin $plugin, CarbonInterface $now): array
+    public function scheduledInvocations(Plugin $plugin, CarbonInterface $now): array
     {
         $instance = $this->instantiate($plugin);
         if (! $instance instanceof ScheduledPluginInterface) {
@@ -707,7 +707,7 @@ class PluginManager
 
     public function enabledPluginsForHook(string $hook)
     {
-        return ExtensionPlugin::query()
+        return Plugin::query()
             ->where('enabled', true)
             ->where('available', true)
             ->where('installation_status', 'installed')
@@ -715,11 +715,11 @@ class PluginManager
             ->where('trust_state', 'trusted')
             ->where('integrity_status', 'verified')
             ->get()
-            ->filter(fn (ExtensionPlugin $plugin) => in_array($hook, $plugin->hooks ?? [], true))
+            ->filter(fn (Plugin $plugin) => in_array($hook, $plugin->hooks ?? [], true))
             ->values();
     }
 
-    public function instantiate(ExtensionPlugin $plugin): PluginInterface
+    public function instantiate(Plugin $plugin): PluginInterface
     {
         $plugin = $this->validate($plugin);
         $this->assertPluginLoadable($plugin, requireEnabled: false);
@@ -738,7 +738,7 @@ class PluginManager
         return $instance;
     }
 
-    public function trust(ExtensionPlugin $plugin, ?int $userId = null, ?string $reason = null): ExtensionPlugin
+    public function trust(Plugin $plugin, ?int $userId = null, ?string $reason = null): Plugin
     {
         $plugin = $this->validate($plugin);
         $this->assertPluginLoadable($plugin, requireEnabled: false);
@@ -780,7 +780,7 @@ class PluginManager
         return $plugin->fresh();
     }
 
-    public function block(ExtensionPlugin $plugin, ?string $reason = null, ?int $userId = null): ExtensionPlugin
+    public function block(Plugin $plugin, ?string $reason = null, ?int $userId = null): Plugin
     {
         $plugin->update([
             'enabled' => false,
@@ -793,12 +793,12 @@ class PluginManager
         return $plugin->fresh();
     }
 
-    public function verifyIntegrity(ExtensionPlugin $plugin): ExtensionPlugin
+    public function verifyIntegrity(Plugin $plugin): Plugin
     {
         return $this->validate($plugin);
     }
 
-    public function uninstall(ExtensionPlugin $plugin, string $cleanupMode = 'preserve', ?int $userId = null): ExtensionPlugin
+    public function uninstall(Plugin $plugin, string $cleanupMode = 'preserve', ?int $userId = null): Plugin
     {
         if (! in_array($cleanupMode, config('plugins.cleanup_modes', []), true)) {
             throw new RuntimeException("Unsupported cleanup mode [{$cleanupMode}]");
@@ -834,7 +834,7 @@ class PluginManager
         return $plugin->fresh();
     }
 
-    public function forgetRegistryRecord(ExtensionPlugin $plugin): void
+    public function forgetRegistryRecord(Plugin $plugin): void
     {
         if ($plugin->hasActiveRuns()) {
             throw new RuntimeException('Cannot forget a plugin registry record while it still has active runs.');
@@ -843,7 +843,7 @@ class PluginManager
         $plugin->delete();
     }
 
-    public function reinstall(ExtensionPlugin $plugin): ExtensionPlugin
+    public function reinstall(Plugin $plugin): Plugin
     {
         $plugin->update([
             'installation_status' => 'installed',
@@ -859,7 +859,7 @@ class PluginManager
         return $plugin->fresh();
     }
 
-    public function requestCancellation(ExtensionPluginRun $run, ?int $userId = null): ExtensionPluginRun
+    public function requestCancellation(PluginRun $run, ?int $userId = null): PluginRun
     {
         if ($run->status !== 'running') {
             return $run->fresh();
@@ -883,7 +883,7 @@ class PluginManager
         return $run->fresh();
     }
 
-    public function resumeRun(ExtensionPluginRun $run, ?int $userId = null): ExtensionPluginRun
+    public function resumeRun(PluginRun $run, ?int $userId = null): PluginRun
     {
         $plugin = $run->plugin()->firstOrFail();
 
@@ -910,7 +910,7 @@ class PluginManager
 
     public function recoverStaleRuns(int $minutes = 15): int
     {
-        $staleRuns = ExtensionPluginRun::query()
+        $staleRuns = PluginRun::query()
             ->where('status', 'running')
             ->where(function ($query) use ($minutes) {
                 $query
@@ -961,7 +961,10 @@ class PluginManager
     private function pluginPaths(): array
     {
         $paths = [];
-        $directories = config('plugins.directories', []);
+        $directories = array_merge(
+            config('plugins.bundled_directories', []),
+            config('plugins.directories', []),
+        );
 
         if (config('plugins.install_mode') === 'dev') {
             $directories = array_merge($directories, config('plugins.dev_directories', []));
@@ -986,7 +989,7 @@ class PluginManager
     {
         $issues = [];
         $pluginPaths = collect($this->pluginPaths());
-        $registryPlugins = ExtensionPlugin::query()->get();
+        $registryPlugins = Plugin::query()->get();
 
         foreach ($registryPlugins as $plugin) {
             if ($plugin->enabled && ! $plugin->isInstalled()) {
@@ -1100,7 +1103,7 @@ class PluginManager
         }
 
         foreach ($pluginPaths as $pluginPath) {
-            if (! $registryPlugins->contains(fn (ExtensionPlugin $plugin) => $plugin->path === $pluginPath)) {
+            if (! $registryPlugins->contains(fn (Plugin $plugin) => $plugin->path === $pluginPath)) {
                 $issues[] = [
                     'plugin_id' => basename($pluginPath),
                     'level' => 'info',
@@ -1113,7 +1116,7 @@ class PluginManager
         return $issues;
     }
 
-    private function ownershipForPlugin(ExtensionPlugin $plugin): array
+    private function ownershipForPlugin(Plugin $plugin): array
     {
         try {
             if ($plugin->path && file_exists((string) $plugin->path.DIRECTORY_SEPARATOR.'plugin.json')) {
@@ -1133,7 +1136,7 @@ class PluginManager
         ];
     }
 
-    private function runPluginUninstallHook(ExtensionPlugin $plugin, string $cleanupMode, array $ownership, ?int $userId): void
+    private function runPluginUninstallHook(Plugin $plugin, string $cleanupMode, array $ownership, ?int $userId): void
     {
         if (! $plugin->path || ! file_exists(rtrim((string) $plugin->path, DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR.(string) $plugin->entrypoint)) {
             return;
@@ -1173,7 +1176,7 @@ class PluginManager
         }
     }
 
-    private function prepareRun(ExtensionPlugin $plugin, array $attributes, array $options = []): ExtensionPluginRun
+    private function prepareRun(Plugin $plugin, array $attributes, array $options = []): PluginRun
     {
         $existingRunId = $options['existing_run_id'] ?? null;
 
@@ -1181,7 +1184,7 @@ class PluginManager
             return $this->startRun($plugin, $attributes);
         }
 
-        $run = ExtensionPluginRun::query()
+        $run = PluginRun::query()
             ->where('extension_plugin_id', $plugin->id)
             ->findOrFail($existingRunId);
 
@@ -1215,7 +1218,7 @@ class PluginManager
         return $run->fresh();
     }
 
-    private function startRun(ExtensionPlugin $plugin, array $attributes): ExtensionPluginRun
+    private function startRun(Plugin $plugin, array $attributes): PluginRun
     {
         return $plugin->runs()->create([
             ...$attributes,
@@ -1227,7 +1230,7 @@ class PluginManager
         ]);
     }
 
-    private function finishRun(ExtensionPluginRun $run, PluginActionResult $result): ExtensionPluginRun
+    private function finishRun(PluginRun $run, PluginActionResult $result): PluginRun
     {
         $run->logs()->create([
             'level' => $result->success ? 'info' : 'error',
@@ -1254,7 +1257,7 @@ class PluginManager
         return $run->fresh();
     }
 
-    private function failRun(ExtensionPluginRun $run, string $message): ExtensionPluginRun
+    private function failRun(PluginRun $run, string $message): PluginRun
     {
         $run->logs()->create([
             'level' => 'error',
@@ -1279,7 +1282,7 @@ class PluginManager
         return $run->fresh();
     }
 
-    private function approvedReviewForPlugin(ExtensionPlugin $plugin): ?PluginInstallReview
+    private function approvedReviewForPlugin(Plugin $plugin): ?PluginInstallReview
     {
         return PluginInstallReview::query()
             ->where('plugin_id', $plugin->plugin_id)
@@ -1292,8 +1295,12 @@ class PluginManager
             });
     }
 
-    private function trustWithoutReviewAllowed(ExtensionPlugin $plugin): bool
+    private function trustWithoutReviewAllowed(Plugin $plugin): bool
     {
+        if ($plugin->source_type === 'bundled') {
+            return true;
+        }
+
         return config('plugins.install_mode') === 'dev'
             && $plugin->source_type === 'local_dev';
     }
@@ -1795,11 +1802,15 @@ class PluginManager
         return $manifestFiles->first()->getPath();
     }
 
-    private function determineSourceType(string $pluginPath, ExtensionPlugin $existing): string
+    private function determineSourceType(string $pluginPath, Plugin $existing): string
     {
         if (in_array($existing->source_type, config('plugins.source_types', []), true)
             && in_array($existing->source_type, ['staged_archive', 'github_release', 'uploaded_archive'], true)) {
             return $existing->source_type;
+        }
+
+        if ($this->isPathWithinConfiguredDirectories($pluginPath, config('plugins.bundled_directories', []))) {
+            return 'bundled';
         }
 
         if ($this->isPathWithinConfiguredDirectories($pluginPath, config('plugins.dev_directories', []))) {
@@ -1809,7 +1820,7 @@ class PluginManager
         return 'local_directory';
     }
 
-    private function determineSecurityState(ExtensionPlugin $existing, PluginValidationResult $result, bool $available): array
+    private function determineSecurityState(Plugin $existing, PluginValidationResult $result, bool $available): array
     {
         $currentHashes = $this->normalizeHashSnapshot($result->hashes);
         $trustedHashes = $this->normalizeHashSnapshot($existing->trusted_hashes ?? []);
@@ -1885,7 +1896,7 @@ class PluginManager
         ]);
     }
 
-    private function currentHashSnapshot(ExtensionPlugin $plugin): array
+    private function currentHashSnapshot(Plugin $plugin): array
     {
         return $this->normalizeHashSnapshot([
             'manifest_hash' => $plugin->manifest_hash,
@@ -1894,7 +1905,7 @@ class PluginManager
         ]);
     }
 
-    private function assertPluginLoadable(ExtensionPlugin $plugin, bool $requireEnabled): void
+    private function assertPluginLoadable(Plugin $plugin, bool $requireEnabled): void
     {
         if (! $plugin->isInstalled()) {
             throw new RuntimeException("Plugin [{$plugin->plugin_id}] has been uninstalled and must be reinstalled before it can run.");
@@ -1913,7 +1924,7 @@ class PluginManager
         }
     }
 
-    private function assertPluginRunnable(ExtensionPlugin $plugin): void
+    private function assertPluginRunnable(Plugin $plugin): void
     {
         if (! $plugin->enabled) {
             throw new RuntimeException("Plugin [{$plugin->plugin_id}] is disabled.");

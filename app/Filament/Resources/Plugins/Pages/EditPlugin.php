@@ -1,10 +1,10 @@
 <?php
 
-namespace App\Filament\Resources\ExtensionPlugins\Pages;
+namespace App\Filament\Resources\Plugins\Pages;
 
-use App\Filament\Resources\ExtensionPlugins\ExtensionPluginResource;
+use App\Filament\Resources\Plugins\PluginResource;
 use App\Jobs\ExecutePluginInvocation;
-use App\Models\ExtensionPlugin;
+use App\Models\Plugin;
 use App\Plugins\PluginManager;
 use App\Plugins\PluginSchemaMapper;
 use Filament\Actions\Action;
@@ -15,9 +15,9 @@ use Filament\Notifications\Notification;
 use Filament\Resources\Pages\EditRecord;
 use Illuminate\Database\Eloquent\Model;
 
-class EditExtensionPlugin extends EditRecord
+class EditPlugin extends EditRecord
 {
-    protected static string $resource = ExtensionPluginResource::class;
+    protected static string $resource = PluginResource::class;
 
     public function mount(int|string $record): void
     {
@@ -35,7 +35,7 @@ class EditExtensionPlugin extends EditRecord
     {
         abort_unless(auth()->user()?->canManagePlugins(), 403);
 
-        /** @var ExtensionPlugin $record */
+        /** @var Plugin $record */
         app(PluginManager::class)->updateSettings($record, $data['settings'] ?? []);
 
         return $record->fresh();
@@ -111,7 +111,7 @@ class EditExtensionPlugin extends EditRecord
                 }),
 
             // Plugin-defined actions
-            ...$pluginActions,
+            ActionGroup::make([...$pluginActions])->label('Actions')->icon('heroicon-o-rocket-launch')->button(),
 
             // Security & trust group
             ActionGroup::make([
@@ -287,7 +287,7 @@ class EditExtensionPlugin extends EditRecord
                     ->visible(fn () => $canManagePlugins)
                     ->disabled(fn () => $this->record->hasActiveRuns())
                     ->modalDescription('This deletes the registry row, saved plugin settings, and recorded run history. It does not uninstall the local plugin files and does not clean plugin-owned data. Discovery will register the plugin again if its folder still exists.')
-                    ->successRedirectUrl(ExtensionPluginResource::getUrl()),
+                    ->successRedirectUrl(PluginResource::getUrl()),
             ])->label('Manage')->icon('heroicon-o-cog-6-tooth')->button(),
         ];
     }

@@ -2,14 +2,14 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\ExtensionPlugin;
-use App\Models\ExtensionPluginRun;
+use App\Models\Plugin;
+use App\Models\PluginRun;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 
 class PluginRunReportController extends Controller
 {
-    public function __invoke(Request $request, ExtensionPlugin $plugin, ExtensionPluginRun $run)
+    public function __invoke(Request $request, Plugin $plugin, PluginRun $run)
     {
         abort_unless($request->user()?->canUseTools(), 403);
         abort_unless($run->extension_plugin_id === $plugin->id, 404);

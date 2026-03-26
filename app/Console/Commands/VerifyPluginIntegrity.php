@@ -2,7 +2,7 @@
 
 namespace App\Console\Commands;
 
-use App\Models\ExtensionPlugin;
+use App\Models\Plugin;
 use App\Plugins\PluginManager;
 use Illuminate\Console\Command;
 
@@ -17,7 +17,7 @@ class VerifyPluginIntegrity extends Command
         $pluginId = $this->argument('pluginId');
         $pluginManager->discover();
 
-        $plugins = ExtensionPlugin::query()
+        $plugins = Plugin::query()
             ->when($pluginId, fn ($query) => $query->where('plugin_id', $pluginId))
             ->get();
 

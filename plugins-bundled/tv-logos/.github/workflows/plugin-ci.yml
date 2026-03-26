@@ -1,0 +1,36 @@
+name: Plugin CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  validate-and-package:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+
+      - name: Validate plugin files
+        run: php scripts/validate-plugin.php
+
+      - name: Package plugin artifact
+        run: bash scripts/package-plugin.sh
+
+      - name: Show release checksum
+        run: cat dist/tv-logos.zip.sha256
+
+      - name: Upload packaged plugin
+        uses: actions/upload-artifact@v4
+        with:
+          name: tv-logos-artifact
+          path: |
+            dist/tv-logos.zip
+            dist/tv-logos.zip.sha256

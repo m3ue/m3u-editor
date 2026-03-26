@@ -2,7 +2,7 @@
 
 namespace App\Plugins;
 
-use App\Models\ExtensionPlugin;
+use App\Models\Plugin;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
@@ -17,7 +17,7 @@ use InvalidArgumentException;
 
 class PluginSchemaMapper
 {
-    public function settingsComponents(?ExtensionPlugin $plugin): array
+    public function settingsComponents(?Plugin $plugin): array
     {
         if (! $plugin) {
             return [];
@@ -26,14 +26,14 @@ class PluginSchemaMapper
         return $this->componentsForFields($plugin->settings_schema ?? [], 'settings.');
     }
 
-    public function actionComponents(ExtensionPlugin $plugin, string $actionId): array
+    public function actionComponents(Plugin $plugin, string $actionId): array
     {
         $action = $plugin->getActionDefinition($actionId);
 
         return $this->componentsForFields($action['fields'] ?? [], '', $plugin->settings ?? []);
     }
 
-    public function settingsRules(?ExtensionPlugin $plugin): array
+    public function settingsRules(?Plugin $plugin): array
     {
         if (! $plugin) {
             return [];
@@ -42,7 +42,7 @@ class PluginSchemaMapper
         return $this->rulesForFields($plugin->settings_schema ?? [], 'settings.');
     }
 
-    public function actionRules(ExtensionPlugin $plugin, string $actionId): array
+    public function actionRules(Plugin $plugin, string $actionId): array
     {
         $action = $plugin->getActionDefinition($actionId);
 

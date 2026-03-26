@@ -1,10 +1,10 @@
 <?php
 
-use App\Filament\Resources\ExtensionPlugins\Pages\ViewPluginRun;
+use App\Filament\Resources\Plugins\Pages\ViewPluginRun;
 use App\Jobs\ExecutePluginInvocation;
-use App\Models\ExtensionPlugin;
-use App\Models\ExtensionPluginRun;
+use App\Models\Plugin;
 use App\Models\PluginInstallReview;
+use App\Models\PluginRun;
 use App\Models\User;
 use App\Plugins\PluginManager;
 use App\Plugins\PluginValidator;
@@ -200,7 +200,7 @@ function cleanupReviewFixturePlugin(string $pluginId): void
     }
 
     PluginInstallReview::query()->where('plugin_id', $pluginId)->delete();
-    ExtensionPlugin::query()->where('plugin_id', $pluginId)->delete();
+    Plugin::query()->where('plugin_id', $pluginId)->delete();
 
     foreach (config('plugins.directories', [base_path('plugins')]) as $directory) {
         File::deleteDirectory(rtrim((string) $directory, DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR.$pluginId);
@@ -714,7 +714,7 @@ it('supports plugin lifecycle and trust commands for a fixture plugin', function
         ])->assertSuccessful()
             ->expectsOutputToContain('registry record deleted');
 
-        expect(ExtensionPlugin::query()->where('plugin_id', $pluginId)->exists())->toBeFalse();
+        expect(Plugin::query()->where('plugin_id', $pluginId)->exists())->toBeFalse();
     } finally {
         cleanupReviewFixturePlugin($pluginId);
     }
@@ -827,7 +827,7 @@ it('loads a plugin run detail page inside the plugin resource', function () {
 
         $this->actingAs($user);
 
-        $run = ExtensionPluginRun::query()->create([
+        $run = PluginRun::query()->create([
             'extension_plugin_id' => $plugin->id,
             'user_id' => $user->id,
             'status' => 'running',
@@ -869,7 +869,7 @@ it('marks stale runs, supports cancellation requests, and queues resume for stal
             'permissions' => ['use_tools'],
         ]);
 
-        $staleRun = ExtensionPluginRun::query()->create([
+        $staleRun = PluginRun::query()->create([
             'extension_plugin_id' => $plugin->id,
             'user_id' => $user->id,
             'status' => 'running',
@@ -897,7 +897,7 @@ it('marks stale runs, supports cancellation requests, and queues resume for stal
         expect($staleRun->stale_at)->not->toBeNull();
         expect(data_get($staleRun->result, 'status'))->toBe('stale');
 
-        $runningRun = ExtensionPluginRun::query()->create([
+        $runningRun = PluginRun::query()->create([
             'extension_plugin_id' => $plugin->id,
             'user_id' => $user->id,
             'status' => 'running',

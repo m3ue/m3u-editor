@@ -1,11 +1,11 @@
 <?php
 
-use App\Filament\Pages\ExtensionsDashboard;
-use App\Filament\Resources\ExtensionPlugins\ExtensionPluginResource;
-use App\Filament\Resources\ExtensionPlugins\Pages\ListExtensionPlugins;
+use App\Filament\Pages\PluginsDashboard;
 use App\Filament\Resources\PluginInstallReviews\Pages\ListPluginInstallReviews;
 use App\Filament\Resources\PluginInstallReviews\PluginInstallReviewResource;
-use App\Models\ExtensionPlugin;
+use App\Filament\Resources\Plugins\Pages\ListPlugins;
+use App\Filament\Resources\Plugins\PluginResource;
+use App\Models\Plugin;
 use App\Models\PluginInstallReview;
 use App\Models\User;
 use Illuminate\Support\Facades\File;
@@ -25,10 +25,10 @@ it('honors testing cache and session overrides', function () {
 /**
  * Create an admin user for plugin dashboard and install management tests.
  */
-function adminUserForExtensionsTests(): User
+function adminUserForPluginsTests(): User
 {
     $user = User::factory()->create([
-        'email' => 'extensions-admin-'.Str::lower(Str::random(8)).'@example.com',
+        'email' => 'plugins-admin-'.Str::lower(Str::random(8)).'@example.com',
     ]);
 
     config()->set('dev.admin_emails', [$user->email]);
@@ -37,15 +37,15 @@ function adminUserForExtensionsTests(): User
 }
 
 /**
- * Seed a minimal extension plugin row for dashboard rendering tests.
+ * Seed a minimal plugin row for dashboard rendering tests.
  *
  * @param  array<string, mixed>  $overrides
  */
-function createExtensionForDashboardTests(string $name, array $overrides = []): ExtensionPlugin
+function createPluginForDashboardTests(string $name, array $overrides = []): Plugin
 {
     $pluginId = Str::slug($name).'-'.Str::lower(Str::random(4));
 
-    return ExtensionPlugin::query()->create(array_merge([
+    return Plugin::query()->create(array_merge([
         'plugin_id' => $pluginId,
         'name' => $name,
         'version' => '1.0.0',
@@ -99,9 +99,9 @@ function createPluginInstallForDashboardTests(string $pluginId, int $userId, arr
 /**
  * Create a zip archive fixture that is structurally valid but lacks plugin.json.
  */
-function createMissingManifestArchiveForExtensionsTests(): string
+function createMissingManifestArchiveForPluginsTests(): string
 {
-    $directory = storage_path('app/testing-plugin-archives/extensions-dashboard');
+    $directory = storage_path('app/testing-plugin-archives/plugins-dashboard');
     $archivePath = $directory.'/missing-manifest-'.Str::lower(Str::random(6)).'.zip';
 
     File::ensureDirectoryExists($directory);
@@ -119,58 +119,58 @@ function createMissingManifestArchiveForExtensionsTests(): string
     return $archivePath;
 }
 
-it('renders the extensions dashboard with health cards, quick actions, and install queue data', function () {
-    $admin = adminUserForExtensionsTests();
+it('renders the plugins dashboard with health cards, quick actions, and install queue data', function () {
+    $admin = adminUserForPluginsTests();
     $this->actingAs($admin);
 
-    createExtensionForDashboardTests('Trusted Extension', [
+    createPluginForDashboardTests('Trusted Plugin', [
         'trust_state' => 'trusted',
         'integrity_status' => 'verified',
     ]);
 
-    createExtensionForDashboardTests('Pending Review Extension', [
+    createPluginForDashboardTests('Pending Review Plugin', [
         'trust_state' => 'pending_review',
         'integrity_status' => 'changed',
     ]);
 
     createPluginInstallForDashboardTests('Queued Upload Install', $admin->id);
 
-    Livewire::test(ExtensionsDashboard::class)
+    Livewire::test(PluginsDashboard::class)
         ->assertOk()
-        ->assertSee('Installed Extensions')
-        ->assertSee('Trusted Extensions')
+        ->assertSee('Installed Plugins')
+        ->assertSee('Trusted Plugins')
         ->assertSee('Pending Plugin Installs')
-        ->assertSee('Extensions Needing Attention')
+        ->assertSee('Plugins Needing Attention')
         ->assertSee('Upload Plugin Archive')
-        ->assertSee('Trusted Extension')
-        ->assertSee('Pending Review Extension')
+        ->assertSee('Trusted Plugin')
+        ->assertSee('Pending Review Plugin')
         ->assertSee('Queued Upload Install');
 });
 
-it('renames the plugin navigation surfaces to extensions and plugin installs', function () {
-    $extensionDefaults = (new ReflectionClass(ExtensionPluginResource::class))->getDefaultProperties();
+it('renames the plugin navigation surfaces to plugins and plugin installs', function () {
+    $pluginDefaults = (new ReflectionClass(PluginResource::class))->getDefaultProperties();
     $installDefaults = (new ReflectionClass(PluginInstallReviewResource::class))->getDefaultProperties();
 
-    expect(ExtensionPluginResource::getNavigationLabel())->toBe('Extensions');
-    expect(PluginInstallReviewResource::getNavigationLabel())->toBe('Plugin Installs');
-    expect($extensionDefaults['navigationGroup'])->toBe('Extensions');
-    expect($installDefaults['navigationGroup'])->toBe('Extensions');
+    expect(PluginResource::getNavigationLabel())->toBe('Plugins');
+    expect(PluginInstallReviewResource::getNavigationLabel())->toBe('Installs');
+    expect($pluginDefaults['navigationGroup'])->toBe('Plugins');
+    expect($installDefaults['navigationGroup'])->toBe('Plugins');
 });
 
-it('shows the plugin installs action from the extensions list page', function () {
-    $admin = adminUserForExtensionsTests();
+it('shows the plugin installs action from the plugins list page', function () {
+    $admin = adminUserForPluginsTests();
     $this->actingAs($admin);
 
-    Livewire::test(ListExtensionPlugins::class)
+    Livewire::test(ListPlugins::class)
         ->assertOk()
-        ->assertSee('Plugin Installs')
+        ->assertSee('Installs')
         ->assertSee('Discover Plugins');
 });
 
 it('converts staging exceptions into user-facing notifications on the install list page', function () {
-    $admin = adminUserForExtensionsTests();
+    $admin = adminUserForPluginsTests();
     $this->actingAs($admin);
-    $archivePath = createMissingManifestArchiveForExtensionsTests();
+    $archivePath = createMissingManifestArchiveForPluginsTests();
 
     try {
         $beforeCount = PluginInstallReview::query()->count();

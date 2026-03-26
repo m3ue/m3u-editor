@@ -1,6 +1,6 @@
 <?php
 
-use App\Models\ExtensionPlugin;
+use App\Models\Plugin;
 use App\Models\PluginInstallReview;
 use App\Plugins\PluginManager;
 use Illuminate\Support\Facades\File;
@@ -30,7 +30,7 @@ function cleanupGeneratedPlugin(string $pluginId): void
         $pluginManager->forgetRegistryRecord($plugin);
     }
 
-    ExtensionPlugin::query()->where('plugin_id', $pluginId)->delete();
+    Plugin::query()->where('plugin_id', $pluginId)->delete();
     File::deleteDirectory(generatedPluginPath($pluginId));
 }
 
@@ -263,5 +263,5 @@ it('rejects unknown capabilities before writing any files', function () {
         ->expectsOutputToContain('Unknown capability value(s)');
 
     expect(File::exists($pluginPath))->toBeFalse();
-    expect(ExtensionPlugin::query()->where('plugin_id', $pluginId)->exists())->toBeFalse();
+    expect(Plugin::query()->where('plugin_id', $pluginId)->exists())->toBeFalse();
 });

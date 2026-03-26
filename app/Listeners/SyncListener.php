@@ -42,6 +42,7 @@ class SyncListener
                     'playlist_id' => $playlist->id,
                     'user_id' => $playlist->user_id,
                 ], [
+                    'dry_run' => false,
                     'user_id' => $playlist->user_id,
                 ]);
             }

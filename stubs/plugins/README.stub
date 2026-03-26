@@ -35,7 +35,7 @@ php artisan plugins:approve-install <review-id> --trust
 
 For Docker deployments, "local" means a path the host/container can already read. It is not a browser-upload flow.
 
-For private plugins in the UI, the recommended path is `Extensions -> Plugin Installs -> Upload Plugin Archive`.
+For private plugins in the UI, the recommended path is `Extensions -> Installs -> Upload Extension Archive`.
 
 ## GitHub release installs
 

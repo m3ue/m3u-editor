@@ -1,9 +1,9 @@
 <?php
 
-namespace App\Filament\Resources\ExtensionPlugins\RelationManagers;
+namespace App\Filament\Resources\Plugins\RelationManagers;
 
-use App\Filament\Resources\ExtensionPlugins\ExtensionPluginResource;
-use App\Models\ExtensionPluginRun;
+use App\Filament\Resources\Plugins\PluginResource;
+use App\Models\PluginRun;
 use Filament\Actions\Action;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Components\Tabs\Tab;
@@ -40,7 +40,7 @@ class RunsRelationManager extends RelationManager
             ->defaultPaginationPageOption(10)
             ->poll('3s')
             ->defaultSort('created_at', 'desc')
-            ->recordUrl(fn ($record): string => ExtensionPluginResource::getUrl('run', [
+            ->recordUrl(fn ($record): string => PluginResource::getUrl('run', [
                 'record' => $this->getOwnerRecord(),
                 'run' => $record,
             ]))
@@ -51,7 +51,7 @@ class RunsRelationManager extends RelationManager
                     Stack::make([
                         TextColumn::make('run_reference')
                             ->label('Run')
-                            ->state(fn (ExtensionPluginRun $record): string => self::runLabel($record))
+                            ->state(fn (PluginRun $record): string => self::runLabel($record))
                             ->weight('medium')
                             ->wrap()
                             ->searchable(query: function (Builder $query, string $search): Builder {
@@ -70,7 +70,7 @@ class RunsRelationManager extends RelationManager
                             ->label('Queued')
                             ->since()
                             ->color('gray')
-                            ->tooltip(fn (ExtensionPluginRun $record): ?string => $record->created_at?->toDateTimeString()),
+                            ->tooltip(fn (PluginRun $record): ?string => $record->created_at?->toDateTimeString()),
                     ]),
                     Stack::make([
                         TextColumn::make('status')
@@ -90,8 +90,8 @@ class RunsRelationManager extends RelationManager
                         TextColumn::make('dry_run')
                             ->badge()
                             ->label('Mode')
-                            ->state(fn (ExtensionPluginRun $record): string => $record->dry_run ? 'Dry Run' : 'Apply')
-                            ->color(fn (ExtensionPluginRun $record): string => $record->dry_run ? 'gray' : 'primary'),
+                            ->state(fn (PluginRun $record): string => $record->dry_run ? 'Dry Run' : 'Apply')
+                            ->color(fn (PluginRun $record): string => $record->dry_run ? 'gray' : 'primary'),
                     ])->grow(false),
                 ])->from('lg'),
                 Panel::make([
@@ -99,11 +99,11 @@ class RunsRelationManager extends RelationManager
                         Stack::make([
                             TextColumn::make('scope')
                                 ->label('Target Scope')
-                                ->state(fn (ExtensionPluginRun $record): string => self::targetScope($record))
+                                ->state(fn (PluginRun $record): string => self::targetScope($record))
                                 ->wrap(),
                             TextColumn::make('timing')
                                 ->label('Timing')
-                                ->state(fn (ExtensionPluginRun $record): string => self::timingSummary($record))
+                                ->state(fn (PluginRun $record): string => self::timingSummary($record))
                                 ->wrap(),
                         ]),
                         Stack::make([
@@ -113,7 +113,7 @@ class RunsRelationManager extends RelationManager
                                 ->formatStateUsing(fn (string $state): string => Str::headline($state)),
                             TextColumn::make('metrics')
                                 ->label('Returned Metrics')
-                                ->state(fn (ExtensionPluginRun $record): ?string => self::metricsSummary($record))
+                                ->state(fn (PluginRun $record): ?string => self::metricsSummary($record))
                                 ->placeholder('No aggregate totals were returned by this run.')
                                 ->wrap(),
                         ])->grow(false),
@@ -146,7 +146,7 @@ class RunsRelationManager extends RelationManager
                 Action::make('open')
                     ->label('Open')
                     ->icon('heroicon-o-arrow-top-right-on-square')
-                    ->url(fn ($record): string => ExtensionPluginResource::getUrl('run', [
+                    ->url(fn ($record): string => PluginResource::getUrl('run', [
                         'record' => $this->getOwnerRecord(),
                         'run' => $record,
                     ])),
@@ -157,31 +157,31 @@ class RunsRelationManager extends RelationManager
     {
         $pluginId = $this->getOwnerRecord()->getKey();
 
-        $allCount = ExtensionPluginRun::query()
+        $allCount = PluginRun::query()
             ->where('extension_plugin_id', $pluginId)
             ->visibleTo(auth()->user())
             ->count();
-        $runningCount = ExtensionPluginRun::query()
+        $runningCount = PluginRun::query()
             ->where('extension_plugin_id', $pluginId)
             ->visibleTo(auth()->user())
             ->where('status', 'running')
             ->count();
-        $failedCount = ExtensionPluginRun::query()
+        $failedCount = PluginRun::query()
             ->where('extension_plugin_id', $pluginId)
             ->visibleTo(auth()->user())
             ->whereIn('status', ['failed', 'stale', 'cancelled'])
             ->count();
-        $manualCount = ExtensionPluginRun::query()
+        $manualCount = PluginRun::query()
             ->where('extension_plugin_id', $pluginId)
             ->visibleTo(auth()->user())
             ->where('trigger', 'manual')
             ->count();
-        $hookCount = ExtensionPluginRun::query()
+        $hookCount = PluginRun::query()
             ->where('extension_plugin_id', $pluginId)
             ->visibleTo(auth()->user())
             ->where('trigger', 'hook')
             ->count();
-        $scheduledCount = ExtensionPluginRun::query()
+        $scheduledCount = PluginRun::query()
             ->where('extension_plugin_id', $pluginId)
             ->visibleTo(auth()->user())
             ->where('trigger', 'schedule')
@@ -213,14 +213,14 @@ class RunsRelationManager extends RelationManager
         ];
     }
 
-    protected static function runLabel(ExtensionPluginRun $record): string
+    protected static function runLabel(PluginRun $record): string
     {
         $name = $record->action ?: $record->hook ?: 'run';
 
         return Str::headline($name).' #'.$record->getKey();
     }
 
-    protected static function targetScope(ExtensionPluginRun $record): string
+    protected static function targetScope(PluginRun $record): string
     {
         $payload = $record->payload ?? [];
         $parts = [];
@@ -244,7 +244,7 @@ class RunsRelationManager extends RelationManager
         return implode(' • ', $parts);
     }
 
-    protected static function timingSummary(ExtensionPluginRun $record): string
+    protected static function timingSummary(PluginRun $record): string
     {
         $started = $record->started_at?->toDateTimeString() ?? 'Not started yet';
         $finished = $record->finished_at?->toDateTimeString() ?? 'Still running';
@@ -252,7 +252,7 @@ class RunsRelationManager extends RelationManager
         return "Started: {$started}\nFinished: {$finished}";
     }
 
-    protected static function metricsSummary(ExtensionPluginRun $record): ?string
+    protected static function metricsSummary(PluginRun $record): ?string
     {
         $totals = collect(data_get($record->result, 'data.totals', []))
             ->filter(fn ($value) => is_scalar($value))

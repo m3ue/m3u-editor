@@ -2,15 +2,15 @@
 
 namespace App\Plugins\Support;
 
-use App\Models\ExtensionPlugin;
-use App\Models\ExtensionPluginRun;
+use App\Models\Plugin;
+use App\Models\PluginRun;
 use App\Models\User;
 
 class PluginExecutionContext
 {
     public function __construct(
-        public readonly ExtensionPlugin $plugin,
-        public readonly ExtensionPluginRun $run,
+        public readonly Plugin $plugin,
+        public readonly PluginRun $run,
         public readonly string $trigger,
         public readonly bool $dryRun,
         public readonly ?string $hook,

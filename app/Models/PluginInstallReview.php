@@ -69,7 +69,7 @@ class PluginInstallReview extends Model
 
     public function plugin(): BelongsTo
     {
-        return $this->belongsTo(ExtensionPlugin::class, 'extension_plugin_id');
+        return $this->belongsTo(Plugin::class, 'extension_plugin_id');
     }
 
     public function createdBy(): BelongsTo

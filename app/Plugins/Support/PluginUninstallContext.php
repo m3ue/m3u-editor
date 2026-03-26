@@ -2,13 +2,13 @@
 
 namespace App\Plugins\Support;
 
-use App\Models\ExtensionPlugin;
+use App\Models\Plugin;
 use App\Models\User;
 
 class PluginUninstallContext
 {
     public function __construct(
-        public readonly ExtensionPlugin $plugin,
+        public readonly Plugin $plugin,
         public readonly string $cleanupMode,
         public readonly array $dataOwnership,
         public readonly ?User $user = null,

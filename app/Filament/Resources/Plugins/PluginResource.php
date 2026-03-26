@@ -1,16 +1,16 @@
 <?php
 
-namespace App\Filament\Resources\ExtensionPlugins;
+namespace App\Filament\Resources\Plugins;
 
-use App\Filament\Resources\ExtensionPlugins\Pages\EditExtensionPlugin;
-use App\Filament\Resources\ExtensionPlugins\Pages\ListExtensionPlugins;
-use App\Filament\Resources\ExtensionPlugins\Pages\ViewPluginRun;
-use App\Filament\Resources\ExtensionPlugins\RelationManagers\LogsRelationManager;
-use App\Filament\Resources\ExtensionPlugins\RelationManagers\RunsRelationManager;
+use App\Filament\Resources\Plugins\Pages\EditPlugin;
+use App\Filament\Resources\Plugins\Pages\ListPlugins;
+use App\Filament\Resources\Plugins\Pages\ViewPluginRun;
+use App\Filament\Resources\Plugins\RelationManagers\LogsRelationManager;
+use App\Filament\Resources\Plugins\RelationManagers\RunsRelationManager;
 use App\Models\Epg;
-use App\Models\ExtensionPlugin;
-use App\Models\ExtensionPluginRun;
 use App\Models\Playlist;
+use App\Models\Plugin;
+use App\Models\PluginRun;
 use App\Plugins\PluginSchemaMapper;
 use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Textarea;
@@ -27,17 +27,17 @@ use Filament\Tables\Table;
 use Illuminate\Support\HtmlString;
 use Illuminate\Support\Str;
 
-class ExtensionPluginResource extends Resource
+class PluginResource extends Resource
 {
-    protected static ?string $model = ExtensionPlugin::class;
+    protected static ?string $model = Plugin::class;
 
     protected static ?string $recordTitleAttribute = 'name';
 
-    protected static ?string $label = 'Extension';
+    protected static ?string $label = 'Plugin';
 
-    protected static ?string $pluralLabel = 'Extensions';
+    protected static ?string $pluralLabel = 'Plugins';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'Extensions';
+    protected static string|\UnitEnum|null $navigationGroup = 'Plugins';
 
     public static function canAccess(): bool
     {
@@ -46,7 +46,7 @@ class ExtensionPluginResource extends Resource
 
     public static function getNavigationLabel(): string
     {
-        return 'Extensions';
+        return 'Plugins';
     }
 
     public static function getNavigationSort(): ?int
@@ -70,7 +70,7 @@ class ExtensionPluginResource extends Resource
                                 ->schema([
                                     Placeholder::make('hero_panel')
                                         ->hiddenLabel()
-                                        ->content(fn (?ExtensionPlugin $record): HtmlString => new HtmlString(self::heroPanel($record))),
+                                        ->content(fn (?Plugin $record): HtmlString => new HtmlString(self::heroPanel($record))),
                                 ]),
                             Section::make('Operational Snapshot')
                                 ->compact()
@@ -78,13 +78,13 @@ class ExtensionPluginResource extends Resource
                                 ->schema([
                                     Placeholder::make('run_posture')
                                         ->hiddenLabel()
-                                        ->content(fn (?ExtensionPlugin $record): HtmlString => new HtmlString(self::runPostureCard($record))),
+                                        ->content(fn (?Plugin $record): HtmlString => new HtmlString(self::runPostureCard($record))),
                                     Placeholder::make('automation_snapshot')
                                         ->hiddenLabel()
-                                        ->content(fn (?ExtensionPlugin $record): HtmlString => new HtmlString(self::automationCard($record))),
+                                        ->content(fn (?Plugin $record): HtmlString => new HtmlString(self::automationCard($record))),
                                     Placeholder::make('next_step_snapshot')
                                         ->hiddenLabel()
-                                        ->content(fn (?ExtensionPlugin $record): HtmlString => new HtmlString(self::nextStepCard($record))),
+                                        ->content(fn (?Plugin $record): HtmlString => new HtmlString(self::nextStepCard($record))),
                                 ]),
                             Section::make('Capability Map')
                                 ->compact()
@@ -93,7 +93,7 @@ class ExtensionPluginResource extends Resource
                                         ->schema([
                                             Placeholder::make('capabilities_display')
                                                 ->hiddenLabel()
-                                                ->content(fn (?ExtensionPlugin $record): HtmlString => new HtmlString(self::infoCard(
+                                                ->content(fn (?Plugin $record): HtmlString => new HtmlString(self::infoCard(
                                                     'Capabilities',
                                                     'What this plugin can participate in inside the platform.',
                                                     self::pillList(
@@ -105,7 +105,7 @@ class ExtensionPluginResource extends Resource
                                                 ))),
                                             Placeholder::make('actions_display')
                                                 ->hiddenLabel()
-                                                ->content(fn (?ExtensionPlugin $record): HtmlString => new HtmlString(self::infoCard(
+                                                ->content(fn (?Plugin $record): HtmlString => new HtmlString(self::infoCard(
                                                     'Operator Actions',
                                                     'Manual actions available from the page header.',
                                                     self::operatorActions($record),
@@ -115,7 +115,7 @@ class ExtensionPluginResource extends Resource
                                         ->schema([
                                             Placeholder::make('hooks_display')
                                                 ->hiddenLabel()
-                                                ->content(fn (?ExtensionPlugin $record): HtmlString => new HtmlString(self::infoCard(
+                                                ->content(fn (?Plugin $record): HtmlString => new HtmlString(self::infoCard(
                                                     'Hook Subscriptions',
                                                     'Background entry points the framework can trigger automatically.',
                                                     self::pillList(
@@ -125,7 +125,7 @@ class ExtensionPluginResource extends Resource
                                                 ))),
                                             Placeholder::make('plugin_identity')
                                                 ->hiddenLabel()
-                                                ->content(fn (?ExtensionPlugin $record): HtmlString => new HtmlString(self::infoCard(
+                                                ->content(fn (?Plugin $record): HtmlString => new HtmlString(self::infoCard(
                                                     'Plugin Contract',
                                                     'Version, implementation source, and what operators should expect.',
                                                     self::pluginIdentity($record),
@@ -156,7 +156,7 @@ class ExtensionPluginResource extends Resource
                                         ->disabled()
                                         ->rows(6)
                                         ->dehydrated(false)
-                                        ->formatStateUsing(fn (?ExtensionPlugin $record) => json_encode($record?->validation_errors ?? [], JSON_PRETTY_PRINT)),
+                                        ->formatStateUsing(fn (?Plugin $record) => json_encode($record?->validation_errors ?? [], JSON_PRETTY_PRINT)),
                                 ]),
                         ]),
                     Tab::make('Settings')
@@ -165,8 +165,8 @@ class ExtensionPluginResource extends Resource
                         ->schema([
                             Section::make('Settings')
                                 ->description('These settings are used by hook-triggered runs, scheduled runs, and as defaults for manual actions.')
-                                ->visible(fn (?ExtensionPlugin $record) => filled($record?->settings_schema))
-                                ->schema(fn (?ExtensionPlugin $record) => app(PluginSchemaMapper::class)->settingsComponents($record)),
+                                ->visible(fn (?Plugin $record) => filled($record?->settings_schema))
+                                ->schema(fn (?Plugin $record) => app(PluginSchemaMapper::class)->settingsComponents($record)),
                         ]),
                 ]),
         ]);
@@ -237,13 +237,13 @@ class ExtensionPluginResource extends Resource
     public static function getPages(): array
     {
         return [
-            'index' => ListExtensionPlugins::route('/'),
-            'edit' => EditExtensionPlugin::route('/{record}/edit'),
+            'index' => ListPlugins::route('/'),
+            'edit' => EditPlugin::route('/{record}/edit'),
             'run' => ViewPluginRun::route('/{record}/runs/{run}'),
         ];
     }
 
-    protected static function pluginStatusSnapshot(?ExtensionPlugin $record): string
+    protected static function pluginStatusSnapshot(?Plugin $record): string
     {
         $enabled = $record?->enabled
             ? '<span class="text-success-600 dark:text-success-400 font-medium">Enabled</span>'
@@ -264,7 +264,7 @@ class ExtensionPluginResource extends Resource
         ]);
     }
 
-    protected static function heroPanel(?ExtensionPlugin $record): string
+    protected static function heroPanel(?Plugin $record): string
     {
         if (! $record) {
             return self::mutedMessage('No plugin record loaded.');
@@ -318,7 +318,7 @@ class ExtensionPluginResource extends Resource
         ';
     }
 
-    protected static function latestRunSnapshot(?ExtensionPlugin $record): string
+    protected static function latestRunSnapshot(?Plugin $record): string
     {
         $latestRun = self::latestRun($record);
 
@@ -335,7 +335,7 @@ class ExtensionPluginResource extends Resource
         ]);
     }
 
-    protected static function runPostureCard(?ExtensionPlugin $record): string
+    protected static function runPostureCard(?Plugin $record): string
     {
         $latestRun = self::focusRun($record);
 
@@ -377,7 +377,7 @@ class ExtensionPluginResource extends Resource
         return self::infoCard('Current Run', 'The latest execution and its immediate outcome.', $body);
     }
 
-    protected static function automationCard(?ExtensionPlugin $record): string
+    protected static function automationCard(?Plugin $record): string
     {
         if (! $record) {
             return self::infoCard('Automation', 'Defaults and schedules used by the plugin.', self::mutedMessage('No plugin record loaded.'));
@@ -405,7 +405,7 @@ class ExtensionPluginResource extends Resource
         return self::infoCard('Automation', 'Defaults, schedules, and automatic entry points.', $body);
     }
 
-    protected static function nextStepCard(?ExtensionPlugin $record): string
+    protected static function nextStepCard(?Plugin $record): string
     {
         if (! $record) {
             return self::infoCard('Recommended Next Step', 'What the operator should do next.', self::mutedMessage('No plugin record loaded.'));
@@ -448,7 +448,7 @@ class ExtensionPluginResource extends Resource
         return self::infoCard('Recommended Next Step', 'A simple operator recommendation based on the current state.', $body);
     }
 
-    protected static function pluginIdentity(?ExtensionPlugin $record): string
+    protected static function pluginIdentity(?Plugin $record): string
     {
         if (! $record) {
             return self::mutedMessage('No plugin record loaded.');
@@ -464,7 +464,7 @@ class ExtensionPluginResource extends Resource
         ]);
     }
 
-    protected static function operatorActions(?ExtensionPlugin $record): string
+    protected static function operatorActions(?Plugin $record): string
     {
         $actions = collect($record?->actions ?? [])
             ->map(function (array $action): string {
@@ -544,7 +544,7 @@ class ExtensionPluginResource extends Resource
         ';
     }
 
-    protected static function statusBadge(ExtensionPlugin $record): string
+    protected static function statusBadge(Plugin $record): string
     {
         if (! $record->isInstalled()) {
             return '<span class="inline-flex items-center rounded-full border border-gray-200 bg-white/90 px-3 py-1.5 text-xs font-semibold text-gray-600 dark:border-gray-800 dark:bg-gray-900/80 dark:text-gray-300">Uninstalled</span>';
@@ -573,7 +573,7 @@ class ExtensionPluginResource extends Resource
         return '<span class="inline-flex items-center rounded-full border border-success-200 bg-success-50 px-3 py-1.5 text-xs font-semibold text-success-700 dark:border-success-800 dark:bg-success-950/40 dark:text-success-300">Enabled and ready</span>';
     }
 
-    protected static function runStatusBadge(ExtensionPluginRun $run): string
+    protected static function runStatusBadge(PluginRun $run): string
     {
         return match ($run->status) {
             'completed' => '<span class="inline-flex items-center rounded-full border border-success-200 bg-success-50 px-3 py-1.5 text-xs font-semibold text-success-700 dark:border-success-800 dark:bg-success-950/40 dark:text-success-300">Last run completed</span>',
@@ -595,12 +595,12 @@ class ExtensionPluginResource extends Resource
         return '<div class="text-sm text-gray-500 dark:text-gray-400">'.e($message).'</div>';
     }
 
-    protected static function latestRun(?ExtensionPlugin $record): ?ExtensionPluginRun
+    protected static function latestRun(?Plugin $record): ?PluginRun
     {
         return $record?->runs()->first();
     }
 
-    protected static function focusRun(?ExtensionPlugin $record): ?ExtensionPluginRun
+    protected static function focusRun(?Plugin $record): ?PluginRun
     {
         if (! $record) {
             return null;
@@ -612,7 +612,7 @@ class ExtensionPluginResource extends Resource
             ->first();
     }
 
-    protected static function targetSummary(ExtensionPlugin $record): string
+    protected static function targetSummary(Plugin $record): string
     {
         return self::playlistLabel($record->getSetting('default_playlist_id')).' · '.self::epgLabel($record->getSetting('default_epg_id'));
     }
@@ -639,7 +639,7 @@ class ExtensionPluginResource extends Resource
         return $epg ? $epg->name.' (#'.$epg->id.')' : 'EPG #'.$epgId;
     }
 
-    protected static function ownershipSummary(ExtensionPlugin $record): string
+    protected static function ownershipSummary(Plugin $record): string
     {
         $ownership = $record->data_ownership ?? [];
         $parts = [];

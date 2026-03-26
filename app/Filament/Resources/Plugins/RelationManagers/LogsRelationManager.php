@@ -1,9 +1,9 @@
 <?php
 
-namespace App\Filament\Resources\ExtensionPlugins\RelationManagers;
+namespace App\Filament\Resources\Plugins\RelationManagers;
 
-use App\Filament\Resources\ExtensionPlugins\ExtensionPluginResource;
-use App\Models\ExtensionPluginRunLog;
+use App\Filament\Resources\Plugins\PluginResource;
+use App\Models\PluginRunLog;
 use Filament\Actions\Action;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Components\Tabs\Tab;
@@ -53,7 +53,7 @@ class LogsRelationManager extends RelationManager
                             ->label('Seen')
                             ->since()
                             ->color('gray')
-                            ->tooltip(fn (ExtensionPluginRunLog $record): ?string => $record->created_at?->toDateTimeString()),
+                            ->tooltip(fn (PluginRunLog $record): ?string => $record->created_at?->toDateTimeString()),
                     ]),
                     Stack::make([
                         TextColumn::make('level')
@@ -67,8 +67,8 @@ class LogsRelationManager extends RelationManager
                         TextColumn::make('run_reference')
                             ->label('Run')
                             ->badge()
-                            ->state(fn (ExtensionPluginRunLog $record): string => self::runLabel($record))
-                            ->color(fn (ExtensionPluginRunLog $record): string => match ($record->run?->status) {
+                            ->state(fn (PluginRunLog $record): string => self::runLabel($record))
+                            ->color(fn (PluginRunLog $record): string => match ($record->run?->status) {
                                 'completed' => 'success',
                                 'failed' => 'danger',
                                 'running' => 'warning',
@@ -76,8 +76,8 @@ class LogsRelationManager extends RelationManager
                                 'cancelled' => 'gray',
                                 default => 'gray',
                             })
-                            ->url(fn (ExtensionPluginRunLog $record): ?string => $record->run
-                                ? ExtensionPluginResource::getUrl('run', [
+                            ->url(fn (PluginRunLog $record): ?string => $record->run
+                                ? PluginResource::getUrl('run', [
                                     'record' => $this->getOwnerRecord(),
                                     'run' => $record->run,
                                 ])
@@ -88,12 +88,12 @@ class LogsRelationManager extends RelationManager
                     Stack::make([
                         TextColumn::make('context_summary')
                             ->label('Structured Context')
-                            ->state(fn (ExtensionPluginRunLog $record): ?string => self::contextSummary($record->context ?? []))
+                            ->state(fn (PluginRunLog $record): ?string => self::contextSummary($record->context ?? []))
                             ->placeholder('No structured context was attached to this activity line.')
                             ->wrap(),
                         TextColumn::make('run_summary')
                             ->label('Run Summary')
-                            ->state(fn (ExtensionPluginRunLog $record): ?string => $record->run?->summary)
+                            ->state(fn (PluginRunLog $record): ?string => $record->run?->summary)
                             ->placeholder('This run has not written a summary yet.')
                             ->wrap(),
                     ]),
@@ -127,8 +127,8 @@ class LogsRelationManager extends RelationManager
                 Action::make('open')
                     ->label('Open run')
                     ->icon('heroicon-o-arrow-top-right-on-square')
-                    ->url(fn (ExtensionPluginRunLog $record): ?string => $record->run
-                        ? ExtensionPluginResource::getUrl('run', [
+                    ->url(fn (PluginRunLog $record): ?string => $record->run
+                        ? PluginResource::getUrl('run', [
                             'record' => $this->getOwnerRecord(),
                             'run' => $record->run,
                         ])
@@ -141,17 +141,17 @@ class LogsRelationManager extends RelationManager
     {
         $pluginId = $this->getOwnerRecord()->getKey();
 
-        $allCount = ExtensionPluginRunLog::query()
+        $allCount = PluginRunLog::query()
             ->whereHas('run', fn (Builder $query) => $query->where('extension_plugin_id', $pluginId)->visibleTo(auth()->user()))
             ->count();
-        $runningCount = ExtensionPluginRunLog::query()
+        $runningCount = PluginRunLog::query()
             ->whereHas('run', fn (Builder $query) => $query->where('extension_plugin_id', $pluginId)->visibleTo(auth()->user())->where('status', 'running'))
             ->count();
-        $warningCount = ExtensionPluginRunLog::query()
+        $warningCount = PluginRunLog::query()
             ->whereHas('run', fn (Builder $query) => $query->where('extension_plugin_id', $pluginId)->visibleTo(auth()->user()))
             ->where('level', 'warning')
             ->count();
-        $errorCount = ExtensionPluginRunLog::query()
+        $errorCount = PluginRunLog::query()
             ->whereHas('run', fn (Builder $query) => $query->where('extension_plugin_id', $pluginId)->visibleTo(auth()->user()))
             ->where('level', 'error')
             ->count();
@@ -174,7 +174,7 @@ class LogsRelationManager extends RelationManager
         ];
     }
 
-    protected static function runLabel(ExtensionPluginRunLog $record): string
+    protected static function runLabel(PluginRunLog $record): string
     {
         $name = $record->run?->action ?: $record->run?->hook ?: 'run';
 

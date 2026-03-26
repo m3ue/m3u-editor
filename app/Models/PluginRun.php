@@ -8,9 +8,11 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-class ExtensionPluginRun extends Model
+class PluginRun extends Model
 {
     use HasFactory;
+
+    protected $table = 'extension_plugin_runs';
 
     protected $fillable = [
         'extension_plugin_id',
@@ -53,7 +55,7 @@ class ExtensionPluginRun extends Model
 
     public function plugin(): BelongsTo
     {
-        return $this->belongsTo(ExtensionPlugin::class, 'extension_plugin_id');
+        return $this->belongsTo(Plugin::class, 'extension_plugin_id');
     }
 
     public function user(): BelongsTo
@@ -63,7 +65,7 @@ class ExtensionPluginRun extends Model
 
     public function logs(): HasMany
     {
-        return $this->hasMany(ExtensionPluginRunLog::class)->latest();
+        return $this->hasMany(PluginRunLog::class, 'extension_plugin_run_id')->latest();
     }
 
     public function isStale(int $minutes = 15): bool

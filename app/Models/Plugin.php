@@ -7,9 +7,11 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 
-class ExtensionPlugin extends Model
+class Plugin extends Model
 {
     use HasFactory;
+
+    protected $table = 'extension_plugins';
 
     protected $fillable = [
         'plugin_id',
@@ -75,19 +77,19 @@ class ExtensionPlugin extends Model
 
     public function runs(): HasMany
     {
-        return $this->hasMany(ExtensionPluginRun::class)->latest();
+        return $this->hasMany(PluginRun::class, 'extension_plugin_id')->latest();
     }
 
     public function installReviews(): HasMany
     {
-        return $this->hasMany(PluginInstallReview::class)->latest();
+        return $this->hasMany(PluginInstallReview::class, 'extension_plugin_id')->latest();
     }
 
     public function logs(): HasManyThrough
     {
         return $this->hasManyThrough(
-            ExtensionPluginRunLog::class,
-            ExtensionPluginRun::class,
+            PluginRunLog::class,
+            PluginRun::class,
             'extension_plugin_id',
             'extension_plugin_run_id',
             'id',

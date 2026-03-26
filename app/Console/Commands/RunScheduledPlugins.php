@@ -3,7 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Jobs\ExecutePluginInvocation;
-use App\Models\ExtensionPlugin;
+use App\Models\Plugin;
 use App\Plugins\PluginManager;
 use Illuminate\Console\Command;
 
@@ -18,7 +18,7 @@ class RunScheduledPlugins extends Command
         $queued = 0;
         $now = now();
 
-        $plugins = ExtensionPlugin::query()
+        $plugins = Plugin::query()
             ->where('enabled', true)
             ->where('available', true)
             ->where('validation_status', 'valid')

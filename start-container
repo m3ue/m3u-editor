@@ -337,6 +337,8 @@ playlist_dir="${config_dir}/playlist"
 playlist_epg_dir="${config_dir}/playlist-epg-files"
 backup_dir="${config_dir}/m3u-editor-backups"
 log_dir="${config_dir}/logs"
+user_plugins_dir="${config_dir}/plugins"
+plugin_data_dir="${config_dir}/plugin-data"
 queue_log_file="${log_dir}/queue.log"
 websockets_log_file="${log_dir}/websocket.log"
 laravel_log_file="${log_dir}/laravel.log"
@@ -375,6 +377,8 @@ fi
 [ ! -d "${playlist_epg_dir}" ] && mkdir -p "${playlist_epg_dir}"
 [ ! -d "${backup_dir}" ] && mkdir -p "${backup_dir}"
 [ ! -d "${log_dir}" ] && mkdir -p "${log_dir}"
+[ ! -d "${user_plugins_dir}" ] && mkdir -p "${user_plugins_dir}"
+[ ! -d "${plugin_data_dir}" ] && mkdir -p "${plugin_data_dir}"
 
 # Create environment file if missing
 if [ ! -f "${env_file}" ]; then
@@ -520,6 +524,11 @@ ln -sf "${log_dir}" storage/
 [ ! -d "storage/app/private/playlist" ] && ln -sf "${playlist_dir}" storage/app/private/playlist
 [ ! -d "storage/app/private/playlist-epg-files" ] && ln -sf "${playlist_epg_dir}" storage/app/private/playlist-epg-files
 [ ! -d "storage/app/private/m3u-editor-backups" ] && ln -sf "${backup_dir}" storage/app/private/m3u-editor-backups
+
+# Link user-installed plugins and plugin runtime data (persisted across container rebuilds)
+# Note: bundled (first-party) plugins live in plugins-bundled/ inside the image and are NOT symlinked.
+[ ! -d "plugins" ] && ln -sf "${user_plugins_dir}" plugins
+[ ! -d "storage/app/private/plugin-data" ] && ln -sf "${plugin_data_dir}" storage/app/private/plugin-data
 
 # Link Laravel storage
 if [ ! -d "public/storage" ]; then
@@ -716,6 +725,10 @@ echo "💾 Running migrations..."
 php artisan migrate --force
 # Jobs database uses a separate SQLite file for queue job tracking (see config/database.php)
 php artisan migrate --database=jobs --force
+
+# Auto-trust bundled (first-party) plugins shipped in the image
+echo "🔌 Syncing bundled plugins..."
+php artisan plugins:sync-bundled
 
 # Register webhook for real-time cache invalidation
 # This works for both embedded and external m3u-proxy modes

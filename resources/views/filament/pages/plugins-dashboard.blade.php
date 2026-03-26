@@ -5,11 +5,11 @@
                 <x-filament::card class="p-4">
                     <div class="flex items-start gap-4">
                         <div class="rounded-lg p-3
-                            @if ($card['color'] === 'green') bg-green-100 dark:bg-green-900
-                            @elseif ($card['color'] === 'amber') bg-amber-100 dark:bg-amber-900
-                            @elseif ($card['color'] === 'red') bg-red-100 dark:bg-red-900
-                            @else bg-blue-100 dark:bg-blue-900
-                            @endif">
+                                    @if ($card['color'] === 'green') bg-green-100 dark:bg-green-900
+                                    @elseif ($card['color'] === 'amber') bg-amber-100 dark:bg-amber-900
+                                    @elseif ($card['color'] === 'red') bg-red-100 dark:bg-red-900
+                                    @else bg-blue-100 dark:bg-blue-900
+                                    @endif">
                             <x-dynamic-component :component="$card['icon']" class="h-6 w-6 text-gray-900 dark:text-white" />
                         </div>
                         <div class="min-w-0 flex items-center gap-1">
@@ -26,7 +26,7 @@
             <x-filament::card class="p-6">
                 <div class="flex items-start justify-between gap-4">
                     <div>
-                        <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Extensions Needing Attention
+                        <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Plugins Needing Attention
                         </h2>
                         <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
                             These extensions need review because of trust, integrity, validation, availability, or
@@ -71,7 +71,7 @@
                                     </div>
 
                                     <x-filament::button tag="a"
-                                        href="{{ \App\Filament\Resources\ExtensionPlugins\ExtensionPluginResource::getUrl('edit', ['record' => $plugin]) }}"
+                                        href="{{ \App\Filament\Resources\Plugins\PluginResource::getUrl('edit', ['record' => $plugin]) }}"
                                         color="gray" size="sm">
                                         Open
                                     </x-filament::button>
@@ -89,7 +89,7 @@
                     <div>
                         <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Recent Plugin Installs</h2>
                         <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                            The latest staged, approved, rejected, or installed plugin review records.
+                            The latest staged, approved, rejected, or installed extension review records.
                         </p>
                     </div>
                     <x-filament::button tag="a" href="{{ $pluginInstallsUrl }}" color="gray" size="sm"

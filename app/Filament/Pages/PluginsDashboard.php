@@ -3,9 +3,9 @@
 namespace App\Filament\Pages;
 
 use App\Filament\Actions\PluginInstallActions;
-use App\Filament\Resources\ExtensionPlugins\ExtensionPluginResource;
 use App\Filament\Resources\PluginInstallReviews\PluginInstallReviewResource;
-use App\Models\ExtensionPlugin;
+use App\Filament\Resources\Plugins\PluginResource;
+use App\Models\Plugin;
 use App\Models\PluginInstallReview;
 use App\Plugins\PluginManager;
 use Filament\Actions\Action;
@@ -13,22 +13,22 @@ use Filament\Pages\Page;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 
-class ExtensionsDashboard extends Page
+class PluginsDashboard extends Page
 {
     protected static ?string $navigationLabel = 'Overview';
 
-    protected static ?string $title = 'Extensions';
+    protected static ?string $title = 'Plugins';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'Extensions';
+    protected static string|\UnitEnum|null $navigationGroup = 'Plugins';
 
     protected static ?int $navigationSort = 1;
 
     protected static string|\BackedEnum|null $navigationIcon = null;
 
-    protected string $view = 'filament.pages.extensions-dashboard';
+    protected string $view = 'filament.pages.plugins-dashboard';
 
     /**
-     * Keep dashboard access aligned with the installed extensions resource.
+     * Keep dashboard access aligned with the installed plugins resource.
      */
     public static function canAccess(): bool
     {
@@ -48,7 +48,7 @@ class ExtensionsDashboard extends Page
      */
     public function getSubheading(): ?string
     {
-        return 'Manage installed extensions, plugin installs, and trust posture from one place.';
+        return 'Manage installed plugins, plugin installs, and trust posture from one place.';
     }
 
     /**
@@ -78,7 +78,7 @@ class ExtensionsDashboard extends Page
             'attentionPlugins' => $this->attentionPlugins(),
             'recentInstallReviews' => $this->canManagePlugins() ? $this->recentInstallReviews() : collect(),
             'canManagePlugins' => $this->canManagePlugins(),
-            'extensionsUrl' => ExtensionPluginResource::getUrl(),
+            'extensionsUrl' => PluginResource::getUrl(),
             'pluginInstallsUrl' => $this->canManagePlugins() ? PluginInstallReviewResource::getUrl() : null,
         ];
     }
@@ -92,24 +92,24 @@ class ExtensionsDashboard extends Page
     {
         return [
             [
-                'label' => 'Installed Extensions',
-                'value' => ExtensionPlugin::query()
+                'label' => 'Installed Plugins',
+                'value' => Plugin::query()
                     ->where('installation_status', 'installed')
                     ->count(),
-                'description' => 'Extensions that are currently installed and available to operate.',
+                'description' => 'Plugins that are currently installed and available to operate.',
                 'icon' => 'heroicon-s-puzzle-piece',
                 'color' => 'blue',
             ],
             [
-                'label' => 'Trusted Extensions',
-                'value' => ExtensionPlugin::query()
+                'label' => 'Trusted Plugins',
+                'value' => Plugin::query()
                     ->where('installation_status', 'installed')
                     ->where('available', true)
                     ->where('validation_status', 'valid')
                     ->where('trust_state', 'trusted')
                     ->where('integrity_status', 'verified')
                     ->count(),
-                'description' => 'Installed extensions that are valid, trusted, and integrity-verified.',
+                'description' => 'Installed plugins that are valid, trusted, and integrity-verified.',
                 'icon' => 'heroicon-s-shield-check',
                 'color' => 'green',
             ],
@@ -123,9 +123,9 @@ class ExtensionsDashboard extends Page
                 'color' => 'amber',
             ],
             [
-                'label' => 'Extensions Needing Attention',
+                'label' => 'Plugins Needing Attention',
                 'value' => $this->attentionPluginQuery()->count(),
-                'description' => 'Extensions blocked by trust, integrity, validation, or install state.',
+                'description' => 'Plugins blocked by trust, integrity, validation, or install state.',
                 'icon' => 'heroicon-s-exclamation-triangle',
                 'color' => 'red',
             ],
@@ -133,9 +133,9 @@ class ExtensionsDashboard extends Page
     }
 
     /**
-     * Return the extensions that need operator attention first.
+     * Return the plugins that need operator attention first.
      *
-     * @return Collection<int, ExtensionPlugin>
+     * @return Collection<int, Plugin>
      */
     private function attentionPlugins(): Collection
     {
@@ -174,7 +174,7 @@ class ExtensionsDashboard extends Page
      */
     private function attentionPluginQuery(): Builder
     {
-        return ExtensionPlugin::query()
+        return Plugin::query()
             ->where(function (Builder $query): void {
                 $query
                     ->where('trust_state', 'pending_review')
@@ -210,7 +210,7 @@ class ExtensionsDashboard extends Page
     /**
      * Provide a stable badge color for plugin trust posture in the view.
      */
-    public function pluginHealthColor(ExtensionPlugin $plugin): string
+    public function pluginHealthColor(Plugin $plugin): string
     {
         if ($plugin->trust_state === 'blocked' || $plugin->integrity_status === 'changed' || $plugin->validation_status !== 'valid') {
             return 'danger';
@@ -226,7 +226,7 @@ class ExtensionsDashboard extends Page
     /**
      * Summarize the primary posture operators should care about first.
      */
-    public function pluginHealthLabel(ExtensionPlugin $plugin): string
+    public function pluginHealthLabel(Plugin $plugin): string
     {
         if ($plugin->trust_state === 'blocked') {
             return 'Blocked';

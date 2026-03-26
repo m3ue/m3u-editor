@@ -1,15 +1,15 @@
 <?php
 
-namespace App\Filament\Resources\ExtensionPlugins\Pages;
+namespace App\Filament\Resources\Plugins\Pages;
 
 use App\Filament\Actions\PluginInstallActions;
-use App\Filament\Resources\ExtensionPlugins\ExtensionPluginResource;
+use App\Filament\Resources\Plugins\PluginResource;
 use App\Plugins\PluginManager;
 use Filament\Resources\Pages\ListRecords;
 
-class ListExtensionPlugins extends ListRecords
+class ListPlugins extends ListRecords
 {
-    protected static string $resource = ExtensionPluginResource::class;
+    protected static string $resource = PluginResource::class;
 
     public function mount(): void
     {

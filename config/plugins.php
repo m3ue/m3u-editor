@@ -14,6 +14,10 @@ return [
         base_path('plugins'),
     ],
 
+    'bundled_directories' => [
+        base_path('plugins-bundled'),
+    ],
+
     'dev_directories' => array_values(array_filter(array_map(
         'trim',
         explode(',', (string) env('PLUGIN_DEV_DIRECTORIES', ''))
@@ -42,6 +46,7 @@ return [
     ],
 
     'source_types' => [
+        'bundled',
         'local_directory',
         'staged_archive',
         'github_release',

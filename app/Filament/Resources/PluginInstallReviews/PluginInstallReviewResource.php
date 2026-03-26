@@ -22,7 +22,7 @@ class PluginInstallReviewResource extends Resource
 
     protected static ?string $pluralLabel = 'Plugin Installs';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'Extensions';
+    protected static string|\UnitEnum|null $navigationGroup = 'Plugins';
 
     public static function canAccess(): bool
     {
@@ -31,7 +31,7 @@ class PluginInstallReviewResource extends Resource
 
     public static function getNavigationLabel(): string
     {
-        return 'Plugin Installs';
+        return 'Installs';
     }
 
     public static function getNavigationSort(): ?int

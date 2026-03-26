@@ -1,10 +1,10 @@
 <?php
 
-namespace App\Filament\Resources\ExtensionPlugins\Pages;
+namespace App\Filament\Resources\Plugins\Pages;
 
-use App\Filament\Resources\ExtensionPlugins\ExtensionPluginResource;
-use App\Models\ExtensionPlugin;
-use App\Models\ExtensionPluginRun;
+use App\Filament\Resources\Plugins\PluginResource;
+use App\Models\Plugin;
+use App\Models\PluginRun;
 use App\Plugins\PluginManager;
 use Filament\Actions\Action;
 use Filament\Notifications\Notification;
@@ -19,11 +19,11 @@ class ViewPluginRun extends Page
 {
     use InteractsWithRecord;
 
-    protected static string $resource = ExtensionPluginResource::class;
+    protected static string $resource = PluginResource::class;
 
     protected string $view = 'filament.resources.extension-plugins.pages.view-plugin-run';
 
-    public ExtensionPluginRun $runRecord;
+    public PluginRun $runRecord;
 
     public Collection $logs;
 
@@ -35,14 +35,14 @@ class ViewPluginRun extends Page
 
         static::authorizeResourceAccess();
 
-        /** @var ExtensionPlugin $plugin */
+        /** @var Plugin $plugin */
         $plugin = $this->getRecord();
         $runRecord = $plugin->runs()
             ->with(['plugin', 'user'])
             ->find($run);
 
         if (! $runRecord) {
-            throw (new ModelNotFoundException)->setModel(ExtensionPluginRun::class, [$run]);
+            throw (new ModelNotFoundException)->setModel(PluginRun::class, [$run]);
         }
 
         abort_unless($runRecord->canBeViewedBy(auth()->user()), 403);
@@ -105,7 +105,7 @@ class ViewPluginRun extends Page
                 ->label('Back to Plugin')
                 ->icon('heroicon-o-arrow-left')
                 ->color('gray')
-                ->url(fn (): string => ExtensionPluginResource::getUrl('edit', [
+                ->url(fn (): string => PluginResource::getUrl('edit', [
                     'record' => $this->getRecord(),
                 ])),
         ];
