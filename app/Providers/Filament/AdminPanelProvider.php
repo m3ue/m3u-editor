@@ -108,8 +108,7 @@ class AdminPanelProvider extends PanelProvider
                 NavigationGroup::make('Proxy')
                     ->icon('heroicon-m-arrows-right-left'),
                 NavigationGroup::make('Tools')
-                    ->collapsed()
-                    ->icon('heroicon-m-wrench-screwdriver'),
+                    ->collapsed(),
             ])
             ->navigationItems([
                 NavigationItem::make('API Docs')

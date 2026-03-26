@@ -16,7 +16,7 @@ use ShuvroRoy\FilamentSpatieLaravelBackup\Pages\Backups as BaseBackups;
 
 class Backups extends BaseBackups
 {
-    protected static string|\BackedEnum|null $navigationIcon = '';
+    protected static string|\BackedEnum|null $navigationIcon = null;
 
     protected static ?string $navigationLabel = 'Backup & Restore';
 
