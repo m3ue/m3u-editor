@@ -28,7 +28,7 @@ class AssetResource extends Resource
 
     protected static ?string $navigationLabel = 'Assets';
 
-    protected static ?int $navigationSort = 5;
+    protected static ?int $navigationSort = 2;
 
     public static function canAccess(): bool
     {

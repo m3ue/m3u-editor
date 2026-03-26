@@ -9,6 +9,7 @@ use App\Filament\Resources\MergedEpgs\Pages\ListMergedEpgs;
 use App\Jobs\ProcessEpgImport;
 use App\Models\Epg;
 use App\Rules\Cron;
+use App\Tables\Columns\ProgressColumn;
 use App\Traits\HasUserFiltering;
 use Cron\CronExpression;
 use Filament\Actions\Action;
@@ -36,7 +37,6 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Auth;
-use RyanChandler\FilamentProgressColumn\ProgressColumn;
 
 class MergedEpgResource extends Resource
 {

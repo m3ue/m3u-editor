@@ -17,7 +17,7 @@ class ReleaseLogs extends Page
 
     protected static string|\UnitEnum|null $navigationGroup = 'Tools';
 
-    protected static ?int $navigationSort = 3;
+    protected static ?int $navigationSort = 6;
 
     public static function canAccess(): bool
     {

@@ -4,6 +4,7 @@ namespace App\Filament\Resources\PlaylistViewers\RelationManagers;
 
 use App\Models\ViewerWatchProgress;
 use App\Services\LogoService;
+use App\Tables\Columns\ProgressColumn;
 use Filament\Actions\Action;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
@@ -18,7 +19,6 @@ use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
-use RyanChandler\FilamentProgressColumn\ProgressColumn;
 
 class WatchProgressRelationManager extends RelationManager
 {

@@ -9,6 +9,7 @@ use App\Jobs\MapPlaylistChannelsToEpg;
 use App\Models\Epg;
 use App\Models\EpgMap;
 use App\Models\Playlist;
+use App\Tables\Columns\ProgressColumn;
 use App\Traits\HasUserFiltering;
 use Filament\Actions\Action;
 use Filament\Actions\BulkAction;
@@ -32,7 +33,6 @@ use Filament\Tables\Columns\ToggleColumn;
 use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Table;
 use Illuminate\Support\Facades\Auth;
-use RyanChandler\FilamentProgressColumn\ProgressColumn;
 
 class EpgMapResource extends Resource
 {

@@ -14,6 +14,7 @@ use App\Rules\CheckIfUrlOrLocalPath;
 use App\Rules\Cron;
 use App\Services\DateFormatService;
 use App\Services\SchedulesDirectService;
+use App\Tables\Columns\ProgressColumn;
 use App\Traits\HasUserFiltering;
 use Cron\CronExpression;
 use Exception;
@@ -46,7 +47,6 @@ use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
-use RyanChandler\FilamentProgressColumn\ProgressColumn;
 
 class EpgResource extends Resource
 {
