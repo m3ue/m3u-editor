@@ -25,7 +25,10 @@ use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Pages\SettingsPage;
+use Filament\Schemas\Components\Component;
+use Filament\Schemas\Components\EmbeddedSchema;
 use Filament\Schemas\Components\Fieldset;
+use Filament\Schemas\Components\Form;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Group;
 use Filament\Schemas\Components\Section;
@@ -60,6 +63,23 @@ class Preferences extends SettingsPage
     public static function canAccess(): bool
     {
         return auth()->check() && auth()->user()->isAdmin();
+    }
+
+    /**
+     * Disable native browser validation on the settings form.
+     * Collapsed/hidden sections with numeric inputs trigger
+     * "An invalid form control is not focusable" in browsers
+     * because the fields are invisible but still validated.
+     * Livewire handles validation server-side anyway.
+     */
+    public function getFormContentComponent(): Component
+    {
+        return Form::make([EmbeddedSchema::make('form')])
+            ->id('form')
+            ->extraAttributes(['novalidate' => true])
+            ->footer([
+                $this->getFormActionsContentComponent(),
+            ]);
     }
 
     protected function getActions(): array
@@ -853,7 +873,7 @@ class Preferences extends SettingsPage
                                         TextInput::make('provider_request_delay_ms')
                                             ->label('Request delay (milliseconds)')
                                             ->integer()
-                                            ->required()
+                                            ->required(fn ($get) => (bool) $get('enable_provider_request_delay'))
                                             ->hintIcon(
                                                 'heroicon-m-question-mark-circle',
                                                 tooltip: 'Recommended: 500-2000ms. Higher values reduce load on provider but increase sync time.'
@@ -868,7 +888,7 @@ class Preferences extends SettingsPage
                                         TextInput::make('provider_max_concurrent_requests')
                                             ->label('Max concurrent requests')
                                             ->integer()
-                                            ->required()
+                                            ->required(fn ($get) => (bool) $get('enable_provider_request_delay'))
                                             ->hintIcon(
                                                 'heroicon-m-question-mark-circle',
                                                 tooltip: 'Lower values (1-2) are safer but slower. Set to 1 to process requests sequentially.'
