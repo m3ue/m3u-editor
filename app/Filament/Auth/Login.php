@@ -13,13 +13,17 @@ use Illuminate\Validation\ValidationException;
 
 class Login extends \Filament\Auth\Pages\Login
 {
+    public bool $localBypass = false;
+
     public function mount(): void
     {
+        $this->localBypass = request()->has('local');
+
         // Auto-redirect to OIDC provider if configured
         if (
             config('services.oidc.enabled')
             && config('services.oidc.auto_redirect')
-            && ! request()->has('local')
+            && ! $this->localBypass
             && ! session()->has('oidc_error')
         ) {
             $this->redirect(route('auth.oidc.redirect'));
@@ -31,12 +35,21 @@ class Login extends \Filament\Auth\Pages\Login
     }
 
     /**
+     * Whether the login form should be hidden in favour of the SSO button.
+     */
+    private function shouldHideLoginForm(): bool
+    {
+        return config('services.oidc.enabled')
+            && config('services.oidc.hide_login_form')
+            && ! $this->localBypass;
+    }
+
+    /**
      * Get the form fields for the component.
      */
     public function form(Schema $schema): Schema
     {
-        // Hide the login form entirely when OIDC is the sole auth method
-        if (config('services.oidc.enabled') && config('services.oidc.hide_login_form')) {
+        if ($this->shouldHideLoginForm()) {
             return $schema
                 ->components([])
                 ->statePath('data');
@@ -57,7 +70,7 @@ class Login extends \Filament\Auth\Pages\Login
      */
     protected function getFormActions(): array
     {
-        if (config('services.oidc.enabled') && config('services.oidc.hide_login_form')) {
+        if ($this->shouldHideLoginForm()) {
             return [];
         }
 
@@ -66,7 +79,7 @@ class Login extends \Filament\Auth\Pages\Login
 
     public function getFormContentComponent(): Component
     {
-        if (config('services.oidc.enabled') && config('services.oidc.hide_login_form')) {
+        if ($this->shouldHideLoginForm()) {
             return Group::make([])
                 ->visible(false);
         }

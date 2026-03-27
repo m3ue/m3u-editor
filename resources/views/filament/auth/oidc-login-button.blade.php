@@ -1,5 +1,9 @@
-<div @class(['mt-4' => !config('services.oidc.hide_login_form')])>
-    @unless(config('services.oidc.hide_login_form'))
+@php
+    $hideForm = config('services.oidc.hide_login_form') && ! request()->has('local');
+@endphp
+
+<div @class(['mt-4' => ! $hideForm])>
+    @unless($hideForm)
         <div class="relative flex items-center justify-center">
             <div class="absolute inset-0 flex items-center">
                 <div class="w-full border-t border-gray-300 dark:border-gray-600"></div>
