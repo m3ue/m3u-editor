@@ -72,6 +72,9 @@ COPY vite.config.js postcss.config.js ./
 COPY resources/ ./resources/
 COPY public/ ./public/
 
+# Copy app/ so Tailwind v4 can scan @source '../../app/Filament' for used classes
+COPY app/ ./app/
+
 # Copy vendor built by composer stage for Vite to resolve vendor CSS
 COPY --from=composer_builder /app/vendor ./vendor
 
