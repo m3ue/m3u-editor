@@ -30,7 +30,7 @@ database/*.sqlite*
 
 # Testing
 tests/
-stubs/
+stubs/blueprint/
 .phpunit*
 phpunit.xml
 Pest.php

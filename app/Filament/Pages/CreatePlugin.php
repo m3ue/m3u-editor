@@ -151,16 +151,16 @@ class CreatePlugin extends Page
                         ]),
                 ])
                     ->columnSpanFull()
-                    ->submitAction(new HtmlString(<<<'HTML'
+                    ->submitAction(new HtmlString('
                         <div class="flex gap-3">
-                            <x-filament::button wire:click="installToPlugins" color="primary" icon="heroicon-o-folder-plus">
+                            <button type="button" wire:click="installToPlugins" class="fi-btn fi-btn-size-md fi-color-custom fi-color-primary fi-btn-color-primary relative inline-grid grid-flow-col items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold outline-none transition duration-75 fi-ac-action fi-ac-btn-action shadow-sm bg-custom-600 text-white hover:bg-custom-500 dark:bg-custom-500 dark:hover:bg-custom-400" style="--c-400:var(--primary-400);--c-500:var(--primary-500);--c-600:var(--primary-600);">
                                 Install to plugins/
-                            </x-filament::button>
-                            <x-filament::button wire:click="downloadZip" color="gray" icon="heroicon-o-arrow-down-tray">
+                            </button>
+                            <button type="button" wire:click="downloadZip" class="fi-btn fi-btn-size-md fi-color-custom fi-color-gray fi-btn-color-gray relative inline-grid grid-flow-col items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold outline-none transition duration-75 fi-ac-action fi-ac-btn-action shadow-sm bg-white text-gray-950 hover:bg-gray-50 dark:bg-white/5 dark:text-white dark:hover:bg-white/10 ring-1 ring-gray-950/10 dark:ring-white/20">
                                 Download as ZIP
-                            </x-filament::button>
+                            </button>
                         </div>
-                    HTML)),
+                    ')),
             ])
             ->statePath('data');
     }
