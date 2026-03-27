@@ -3,6 +3,7 @@
 use App\Filament\Pages\PluginsDashboard;
 use App\Filament\Resources\PluginInstallReviews\Pages\ListPluginInstallReviews;
 use App\Filament\Resources\PluginInstallReviews\PluginInstallReviewResource;
+use App\Filament\Resources\Plugins\Pages\EditPlugin;
 use App\Filament\Resources\Plugins\Pages\ListPlugins;
 use App\Filament\Resources\Plugins\PluginResource;
 use App\Models\Plugin;
@@ -185,4 +186,79 @@ it('converts staging exceptions into user-facing notifications on the install li
     } finally {
         File::delete($archivePath);
     }
+});
+
+it('confirms plugin management is admin-only', function () {
+    $admin = adminUserForPluginsTests();
+    $nonAdmin = User::factory()->create([
+        'email' => 'non-admin-'.Str::lower(Str::random(8)).'@example.com',
+        'permissions' => ['use_tools'],
+    ]);
+
+    expect($admin->canManagePlugins())->toBeTrue();
+    expect($nonAdmin->canManagePlugins())->toBeFalse();
+});
+
+it('blocks non-admin users from accessing the plugin install reviews resource', function () {
+    $nonAdmin = User::factory()->create([
+        'email' => 'non-admin-'.Str::lower(Str::random(8)).'@example.com',
+        'permissions' => ['use_tools'],
+    ]);
+
+    $this->actingAs($nonAdmin);
+
+    expect(PluginInstallReviewResource::canAccess())->toBeFalse();
+});
+
+it('allows admin users to access the plugin install reviews resource', function () {
+    $admin = adminUserForPluginsTests();
+
+    $this->actingAs($admin);
+
+    expect(PluginInstallReviewResource::canAccess())->toBeTrue();
+});
+
+it('allows tool users to access the plugins resource but not install reviews', function () {
+    $nonAdmin = User::factory()->create([
+        'email' => 'tool-user-'.Str::lower(Str::random(8)).'@example.com',
+        'permissions' => ['use_tools'],
+    ]);
+
+    $this->actingAs($nonAdmin);
+
+    expect(PluginResource::canAccess())->toBeTrue();
+    expect(PluginInstallReviewResource::canAccess())->toBeFalse();
+});
+
+it('blocks non-admin users from reaching the install reviews list page', function () {
+    $nonAdmin = User::factory()->create([
+        'email' => 'non-admin-list-'.Str::lower(Str::random(8)).'@example.com',
+        'permissions' => ['use_tools'],
+    ]);
+
+    $this->actingAs($nonAdmin);
+
+    Livewire::test(ListPluginInstallReviews::class)
+        ->assertForbidden();
+});
+
+it('blocks non-admin users from editing plugin settings via the edit page save', function () {
+    $admin = adminUserForPluginsTests();
+    $nonAdmin = User::factory()->create([
+        'email' => 'non-admin-edit-'.Str::lower(Str::random(8)).'@example.com',
+        'permissions' => ['use_tools'],
+    ]);
+
+    $plugin = createPluginForDashboardTests('Settings Guard Plugin');
+
+    // Admin can load the edit page without error
+    $this->actingAs($admin);
+    Livewire::test(EditPlugin::class, ['record' => $plugin->getKey()])
+        ->assertOk();
+
+    // Non-admin gets 403 when trying to save settings
+    $this->actingAs($nonAdmin);
+    Livewire::test(EditPlugin::class, ['record' => $plugin->getKey()])
+        ->call('save')
+        ->assertForbidden();
 });

@@ -932,3 +932,31 @@ it('marks stale runs, supports cancellation requests, and queues resume for stal
         cleanupReviewFixturePlugin($pluginId);
     }
 });
+
+it('rejects zip archive entries that contain symlinks', function () {
+    $pluginId = 'zip-symlink-'.Str::lower(Str::random(6));
+    $archivePath = storage_path('app/testing-plugin-archives/'.$pluginId.'-symlink.zip');
+
+    File::delete($archivePath);
+    File::ensureDirectoryExists(dirname($archivePath));
+
+    $zip = new ZipArchive;
+    if ($zip->open($archivePath, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
+        throw new RuntimeException("Unable to create test archive [{$archivePath}].");
+    }
+
+    $zip->addFromString('plugin.json', json_encode(['id' => $pluginId]));
+    $zip->addFromString('Plugin.php', '<?php // fixture');
+    $zip->addFromString('link.php', '/etc/passwd');
+    // Mark link.php as a Unix symlink (file type 0xA000)
+    $symlinkIndex = $zip->locateName('link.php');
+    $zip->setExternalAttributesIndex($symlinkIndex, ZipArchive::OPSYS_UNIX, 0xA000 << 16);
+    $zip->close();
+
+    try {
+        expect(fn () => app(PluginManager::class)->stageArchiveReview($archivePath))
+            ->toThrow(RuntimeException::class, 'symlink entry');
+    } finally {
+        File::delete($archivePath);
+    }
+});
