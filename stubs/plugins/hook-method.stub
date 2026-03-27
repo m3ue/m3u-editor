@@ -1,0 +1,9 @@
+
+
+    public function runHook(string $hook, array $payload, PluginExecutionContext $context): PluginActionResult
+    {
+        return PluginActionResult::success("Hook [{$hook}] received.", [
+            'hook' => $hook,
+            'payload' => $payload,
+        ]);
+    }

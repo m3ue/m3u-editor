@@ -1,0 +1,10 @@
+
+
+    public function uninstall(PluginUninstallContext $context): void
+    {
+        if (! $context->shouldPurge()) {
+            return;
+        }
+
+        // Add non-declarative purge cleanup here if the plugin ever needs it.
+    }

@@ -1,0 +1,27 @@
+
+
+    public function scheduledActions(CarbonInterface $now, array $settings): array
+    {
+        if (! ($settings['schedule_enabled'] ?? false)) {
+            return [];
+        }
+
+        $cron = (string) ($settings['schedule_cron'] ?? '');
+        if ($cron === '' || ! CronExpression::isValidExpression($cron)) {
+            return [];
+        }
+
+        $expression = new CronExpression($cron);
+        if (! $expression->isDue($now)) {
+            return [];
+        }
+
+        return [[
+            'type' => 'action',
+            'name' => 'health_check',
+            'payload' => [
+                'source' => 'schedule',
+            ],
+            'dry_run' => true,
+        ]];
+    }

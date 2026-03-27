@@ -60,3 +60,5 @@ docker-compose.local.yml
 fast-build.sh
 .opencode/
 .tmp/
+# Local plugins are generated artifacts, not source code
+/plugins/

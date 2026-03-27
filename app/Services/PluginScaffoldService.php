@@ -26,7 +26,7 @@ class PluginScaffoldService
      * @param  string  $cleanupMode  Default cleanup mode (preserve|purge)
      * @param  bool  $lifecycle  Include lifecycle uninstall hook stub
      * @param  bool  $bare  Only generate plugin.json and Plugin.php
-     * @return array<string, string>  Relative path => file content
+     * @return array<string, string> Relative path => file content
      *
      * @throws InvalidArgumentException On unknown capabilities, hooks, or cleanup mode
      */
@@ -459,65 +459,16 @@ class PluginScaffoldService
 
     private function hookMethodStub(): string
     {
-        return <<<'PHP'
-
-
-    public function runHook(string $hook, array $payload, PluginExecutionContext $context): PluginActionResult
-    {
-        return PluginActionResult::success("Hook [{$hook}] received.", [
-            'hook' => $hook,
-            'payload' => $payload,
-        ]);
-    }
-PHP;
+        return File::get(base_path('stubs/plugins/hook-method.stub'));
     }
 
     private function scheduledMethodStub(): string
     {
-        return <<<'PHP'
-
-
-    public function scheduledActions(CarbonInterface $now, array $settings): array
-    {
-        if (! ($settings['schedule_enabled'] ?? false)) {
-            return [];
-        }
-
-        $cron = (string) ($settings['schedule_cron'] ?? '');
-        if ($cron === '' || ! CronExpression::isValidExpression($cron)) {
-            return [];
-        }
-
-        $expression = new CronExpression($cron);
-        if (! $expression->isDue($now)) {
-            return [];
-        }
-
-        return [[
-            'type' => 'action',
-            'name' => 'health_check',
-            'payload' => [
-                'source' => 'schedule',
-            ],
-            'dry_run' => true,
-        ]];
-    }
-PHP;
+        return File::get(base_path('stubs/plugins/scheduled-method.stub'));
     }
 
     private function uninstallMethodStub(): string
     {
-        return <<<'PHP'
-
-
-    public function uninstall(PluginUninstallContext $context): void
-    {
-        if (! $context->shouldPurge()) {
-            return;
-        }
-
-        // Add non-declarative purge cleanup here if the plugin ever needs it.
-    }
-PHP;
+        return File::get(base_path('stubs/plugins/uninstall-method.stub'));
     }
 }
