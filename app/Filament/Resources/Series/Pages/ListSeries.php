@@ -15,6 +15,7 @@ use App\Models\Playlist;
 use App\Models\Series;
 use App\Services\TmdbService;
 use App\Settings\GeneralSettings;
+use App\Traits\RenderlessColumnUpdates;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Forms\Components\Select;
@@ -36,6 +37,8 @@ use Livewire\Attributes\Url;
 
 class ListSeries extends ListRecords
 {
+    use RenderlessColumnUpdates;
+
     protected static string $resource = SeriesResource::class;
 
     protected ?string $subheading = 'Only enabled series will be automatically updated on Playlist sync, this includes fetching episodes and metadata. You can also manually sync series to update episodes and metadata.';

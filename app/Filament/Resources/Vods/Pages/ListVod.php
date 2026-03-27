@@ -18,6 +18,7 @@ use App\Models\Series;
 use App\Services\PlaylistService;
 use App\Services\TmdbService;
 use App\Settings\GeneralSettings;
+use App\Traits\RenderlessColumnUpdates;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Actions\CreateAction;
@@ -43,6 +44,8 @@ use Livewire\Attributes\Url;
 
 class ListVod extends ListRecords
 {
+    use RenderlessColumnUpdates;
+
     protected static string $resource = VodResource::class;
 
     protected ?string $subheading = 'NOTE: VOD output order is based on: 1 Sort order, 2 Channel no. and 3 Title - in that order. You can edit your Playlist output to auto sort as well, which will define the sort order based on the playlist order.';

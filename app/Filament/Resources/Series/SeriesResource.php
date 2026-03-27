@@ -105,7 +105,9 @@ class SeriesResource extends Resource
                 return $action->button()->label('Filters');
             })
             ->modifyQueryUsing(function (Builder $query) {
-                $query->with(['playlist']);
+                $query->with([
+                    'playlist' => fn ($q) => $q->select('id', 'name', 'auto_sort'),
+                ]);
             })
             ->paginated([10, 25, 50, 100])
             ->defaultPaginationPageOption(25)
@@ -142,7 +144,6 @@ class SeriesResource extends Resource
                 ->toggleable(),
             ToggleColumn::make('enabled')
                 ->toggleable()
-                ->tooltip('Toggle series status')
                 ->sortable(),
             IconColumn::make('has_metadata')
                 ->label('TMDB/TVDB')

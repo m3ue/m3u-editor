@@ -136,7 +136,10 @@ class ChannelResource extends Resource
                 return $action->button()->label('Filters');
             })
             ->modifyQueryUsing(function (Builder $query) {
-                $query->with(['epgChannel', 'playlist', 'customPlaylist'])
+                $query->with([
+                    'epgChannel' => fn ($q) => $q->select('id', 'name', 'icon', 'icon_custom'),
+                    'playlist' => fn ($q) => $q->select('id', 'name', 'auto_sort'),
+                ])
                     ->withCount(['failovers'])
                     ->where('is_vod', false);
             })
@@ -192,12 +195,10 @@ class ChannelResource extends Resource
                 ->toggleable(),
             ToggleColumn::make('enabled')
                 ->toggleable()
-                ->tooltip('Toggle channel status')
                 ->sortable(),
             ToggleColumn::make('can_merge')
                 ->label('Merge Enabled')
                 ->toggleable()
-                ->tooltip('Toggle channel merge status during "Merge Same ID" jobs')
                 ->sortable(),
             TextColumn::make('failovers_count')
                 ->label('Failovers')
@@ -208,7 +209,6 @@ class ChannelResource extends Resource
             TextInputColumn::make('stream_id_custom')
                 ->label('ID')
                 ->rules(['min:0', 'max:255'])
-                ->tooltip(fn ($record) => $record->stream_id)
                 ->placeholder(fn ($record) => $record->stream_id)
                 ->searchable()
                 ->sortable(query: function (Builder $query, string $direction): Builder {
@@ -220,7 +220,6 @@ class ChannelResource extends Resource
             TextInputColumn::make('title_custom')
                 ->label('Title')
                 ->rules(['min:0', 'max:255'])
-                ->tooltip(fn ($record) => $record->title)
                 ->placeholder(fn ($record) => $record->title)
                 ->searchable()
                 ->sortable(query: function (Builder $query, string $direction): Builder {
@@ -232,7 +231,6 @@ class ChannelResource extends Resource
             TextInputColumn::make('name_custom')
                 ->label('Name')
                 ->rules(['min:0', 'max:255'])
-                ->tooltip(fn ($record) => $record->name)
                 ->placeholder(fn ($record) => $record->name)
                 ->searchable(query: function (Builder $query, string $search): Builder {
                     return $query->orWhereRaw('LOWER(channels.name_custom) LIKE ?', ['%'.strtolower($search).'%']);
@@ -247,14 +245,12 @@ class ChannelResource extends Resource
                 ->rules(['numeric', 'min:0'])
                 ->type('number')
                 ->placeholder('Channel No.')
-                ->tooltip('Channel number')
                 ->toggleable()
                 ->sortable(),
             TextInputColumn::make('url_custom')
                 ->label('URL')
                 ->rules(['url'])
                 ->type('url')
-                ->tooltip('Channel url')
                 ->placeholder(fn ($record) => $record->url)
                 ->searchable()
                 ->toggleable(),
@@ -263,7 +259,6 @@ class ChannelResource extends Resource
                 ->rules(['numeric', 'min:0'])
                 ->type('number')
                 ->placeholder('Time Shift')
-                ->tooltip('Time Shift')
                 ->toggleable()
                 ->sortable(),
             TextColumn::make('group')
@@ -304,7 +299,6 @@ class ChannelResource extends Resource
                 ->label('EPG Shift')
                 ->rules(['numeric'])
                 ->placeholder('EPG Shift')
-                ->tooltip('EPG Shift')
                 ->toggleable()
                 ->sortable(),
             SelectColumn::make('logo_type')
@@ -314,7 +308,6 @@ class ChannelResource extends Resource
                     'epg' => 'EPG',
                 ])
                 ->sortable()
-                ->tooltip('Preferred icon source')
                 ->toggleable(),
             TextColumn::make('lang')
                 ->searchable()
