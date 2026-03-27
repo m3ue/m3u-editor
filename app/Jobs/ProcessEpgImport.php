@@ -17,6 +17,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\LazyCollection;
 use Illuminate\Support\Str;
@@ -81,6 +82,11 @@ class ProcessEpgImport implements ShouldQueue
         if (! $this->force) {
             // Don't update if currently processing
             if ($this->epg->processing) {
+                Log::info('ProcessEpgImport: EPG is currently processing, skipping refresh', [
+                    'epg_id' => $this->epg->id,
+                    'name' => $this->epg->name,
+                ]);
+
                 return;
             }
 

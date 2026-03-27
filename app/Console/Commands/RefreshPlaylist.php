@@ -47,6 +47,7 @@ class RefreshPlaylist extends Command
                 ->each(function (Playlist $playlist) {
                     $playlist->update([
                         'status' => Status::Pending,
+                        'synced' => null,
                         'processing' => [
                             ...$playlist->processing ?? [],
                             'live_processing' => false,
@@ -75,13 +76,14 @@ class RefreshPlaylist extends Command
             $playlists->get()->each(function (Playlist $playlist) use (&$count) {
                 $cronExpression = new CronExpression($playlist->sync_interval);
 
-                // Check if sync is due (with a 1-minute buffer)
-                $lastRun = $playlist->synced ?? now()->subYears(1);
+                // Check if sync is due based on last synced time and cron expression
+                $force = $playlist->status === Status::Failed; // Force refresh if currently in failed state
+                $lastRun = $force ? now()->subYears(1) : ($playlist->synced ?? now()->subYears(1));
                 $nextDue = $cronExpression->getNextRunDate($lastRun->toDateTimeImmutable());
 
                 if (now() >= $nextDue) {
                     $count++;
-                    dispatch(new ProcessM3uImport($playlist));
+                    dispatch(new ProcessM3uImport($playlist, $force));
                 }
             });
             $this->info('Dispatched '.$count.' playlists for refresh');
