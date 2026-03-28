@@ -151,7 +151,7 @@ class CreatePlugin extends Page
                     ->columnSpanFull()
                     ->submitAction(new HtmlString(Blade::render(<<<'BLADE'
                         <div class="flex gap-3">
-                            <x-filament::button wire:click="downloadZip" color="gray" icon="heroicon-o-arrow-down-tray">
+                            <x-filament::button wire:click="downloadZip" color="primary" icon="heroicon-o-arrow-down-tray">
                                 Download as ZIP
                             </x-filament::button>
                         </div>
