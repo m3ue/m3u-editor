@@ -46,6 +46,7 @@ use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
 use Filament\Support\Enums\Width;
+use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\ImageColumn;
 use Filament\Tables\Columns\SelectColumn;
 use Filament\Tables\Columns\TextColumn;
@@ -196,6 +197,30 @@ class ChannelResource extends Resource
             ToggleColumn::make('enabled')
                 ->toggleable()
                 ->sortable(),
+            IconColumn::make('enable_proxy')
+                ->label('Proxy')
+                ->getStateUsing(fn ($record) => $record->enable_proxy ?? 'inherit')
+                ->icon(fn ($state) => match ($state) {
+                    true => 'heroicon-s-shield-check',
+                    false => 'heroicon-s-shield-exclamation',
+                    'inherit' => 'heroicon-s-shield-check',
+                    default => 'heroicon-s-shield-check',
+                })
+                ->tooltip(fn ($state) => match ($state) {
+                    true => 'Always proxied',
+                    false => 'Never proxied',
+                    'inherit' => 'Inherits from playlist',
+                    default => 'Inherits from playlist',
+                })
+                ->color(fn ($state) => match ($state) {
+                    true => 'success',
+                    false => 'danger',
+                    'inherit' => 'gray',
+                    default => 'gray',
+                })
+                ->toggleable()
+                ->sortable()
+                ->hidden(fn () => ! auth()->user()->canUseProxy()),
             ToggleColumn::make('can_merge')
                 ->label('Merge Enabled')
                 ->toggleable()
@@ -478,6 +503,42 @@ class ChannelResource extends Resource
                     ->modalIcon('heroicon-o-arrows-right-left')
                     ->modalDescription('Move the selected channel(s) to the chosen group.')
                     ->modalSubmitActionLabel('Move now'),
+                BulkAction::make('set_proxy_override')
+                    ->label('Set proxy override')
+                    ->schema([
+                        Select::make('enable_proxy')
+                            ->label('Proxy Override')
+                            ->options([
+                                'inherit' => 'Inherit from playlist',
+                                'always' => 'Always proxy',
+                                'never' => 'Never proxy',
+                            ])
+                            ->default('inherit')
+                            ->required(),
+                    ])
+                    ->action(function (Collection $records, array $data): void {
+                        $value = match ($data['enable_proxy']) {
+                            'always' => true,
+                            'never' => false,
+                            default => null,
+                        };
+
+                        Channel::whereIn('id', $records->pluck('id')->toArray())
+                            ->update(['enable_proxy' => $value]);
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title('Proxy override updated')
+                            ->body('The proxy override has been updated for the selected channels.')
+                            ->send();
+                    })
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-signal')
+                    ->modalIcon('heroicon-o-signal')
+                    ->modalDescription('Set the proxy override for the selected channel(s).')
+                    ->modalSubmitActionLabel('Update now')
+                    ->hidden(fn () => ! auth()->user()->canUseProxy()),
                 BulkAction::make('preferred_logo')
                     ->label('Update preferred icon')
                     ->schema([
@@ -1096,6 +1157,36 @@ class ChannelResource extends Resource
             Toggle::make('epg_map_enabled')
                 ->default(true)
                 ->helperText('Allow mapping EPG to this channel when running EPG mapping jobs.'),
+            Select::make('enable_proxy_override')
+                ->label('Proxy Override')
+                ->options([
+                    'inherit' => 'Inherit from playlist',
+                    'always' => 'Always proxy',
+                    'never' => 'Never proxy',
+                ])
+                ->default('inherit')
+                ->afterStateHydrated(function ($component, $state, $record): void {
+                    $component->state(match ($record?->enable_proxy) {
+                        true => 'always',
+                        false => 'never',
+                        default => 'inherit',
+                    });
+                })
+                ->afterStateUpdated(function (Set $set, $state): void {
+                    $set('enable_proxy', match ($state) {
+                        'always' => true,
+                        'never' => false,
+                        default => null,
+                    });
+                })
+                ->dehydrated(false)
+                ->helperText('Override the playlist-level proxy setting for this channel. Inherit uses the playlist default.')
+                ->hidden(fn () => ! auth()->user()->canUseProxy()),
+            Hidden::make('enable_proxy')
+                ->afterStateHydrated(function ($component, $state, $record): void {
+                    $component->state($record?->enable_proxy);
+                })
+                ->dehydrated(true),
             Fieldset::make('Playlist Type (choose one)')
                 ->schema([
                     Toggle::make('is_custom')

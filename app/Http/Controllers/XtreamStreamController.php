@@ -218,9 +218,7 @@ class XtreamStreamController extends Controller
         }
 
         if ($channel instanceof Channel) {
-            if ($playlist->enable_proxy || $request->input('proxy') === 'true') {
-                // Timeshift handled in proxy controller (if needed)
-                // Add username to request for proxy traceability
+            if ($channel->shouldProxy($playlist) || $request->input('proxy') === 'true') {
                 $request->merge(['username' => $username]);
 
                 return app()->call('App\\Http\\Controllers\\Api\\M3uProxyApiController@channel', [
@@ -263,7 +261,7 @@ class XtreamStreamController extends Controller
         $format = $format ?? 'ts'; // Default to 'ts' if no format provided
         [$playlist, $channel] = $this->findAuthenticatedPlaylistAndStreamModel($username, $password, $streamId, 'vod');
         if ($channel instanceof Channel) {
-            if ($playlist->enable_proxy || $request->input('proxy') === 'true') {
+            if ($channel->shouldProxy($playlist) || $request->input('proxy') === 'true') {
                 // Add username to request for proxy traceability
                 $request->merge(['username' => $username]);
 
@@ -360,7 +358,7 @@ class XtreamStreamController extends Controller
             'username' => $username,
         ]);
 
-        if ($playlist->enable_proxy) {
+        if ($channel->shouldProxy($playlist)) {
             return app()->call('App\\Http\\Controllers\\Api\\M3uProxyApiController@channel', [
                 'id' => $streamId,
                 'uuid' => $playlist->uuid,
