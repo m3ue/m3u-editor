@@ -26,7 +26,6 @@ use App\Models\Epg;
 use App\Models\Playlist;
 use App\Models\User;
 use Illuminate\Support\Facades\Bus;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Notification;
 
 beforeEach(function () {

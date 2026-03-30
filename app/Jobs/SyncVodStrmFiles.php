@@ -23,6 +23,11 @@ class SyncVodStrmFiles implements ShouldQueue
     use Queueable;
 
     /**
+     * Do not retry on failure (e.g. upstream server unreachable).
+     */
+    public int $tries = 1;
+
+    /**
      * Track sync locations that were processed for deferred cleanup
      */
     protected array $processedSyncLocations = [];
