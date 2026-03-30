@@ -78,7 +78,7 @@
             'content_type' => 'vod',
             'playlist_id' => $record->playlist_id,
             'title' => $title,
-            'url' => $record->getProxyUrl(username: $username, password: $password), // pass guest auth (if set)
+            'url' => $record->getProxyUrl(username: $username, password: $password, internal: true),
             'format' => $record->container_extension ?? 'ts',
             'type' => 'channel',
             'username' => $username,
