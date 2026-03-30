@@ -43,8 +43,7 @@ it('grants release logs access with permission', function () {
 });
 
 it('grants all permissions to admin users', function () {
-    $adminEmail = config('dev.admin_emails')[0];
-    $admin = User::factory()->make(['email' => $adminEmail]);
+    $admin = User::factory()->make(['is_admin' => true]);
 
     expect($admin->canUseScrubber())->toBeTrue()
         ->and($admin->canViewReleaseLogs())->toBeTrue();

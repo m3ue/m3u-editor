@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\AssetPreviewController;
+use App\Http\Controllers\Auth\OidcController;
 use App\Http\Controllers\ChannelController;
 use App\Http\Controllers\EpgController;
 use App\Http\Controllers\EpgFileController;
@@ -26,6 +27,10 @@ use App\Http\Controllers\XtreamApiController;
 use App\Http\Controllers\XtreamStreamController;
 use App\Services\ExternalIpService;
 use Illuminate\Support\Facades\Route;
+
+// OIDC SSO authentication
+Route::get('/auth/oidc/redirect', [OidcController::class, 'redirect'])->name('auth.oidc.redirect');
+Route::get('/auth/oidc/callback', [OidcController::class, 'callback'])->name('auth.oidc.callback');
 
 // In-app watch progress tracking (admin panel + guest panel)
 Route::get('/api/watch-progress', [WatchProgressController::class, 'fetch'])->name('watch-progress.fetch');

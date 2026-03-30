@@ -39,7 +39,7 @@ class UserResource extends Resource
     public static function getEloquentQuery(): Builder
     {
         $query = parent::getEloquentQuery()
-            ->where('email', '!=', config('dev.admin_emails')[0] ?? ''); // Hide primary admin user
+            ->where('is_admin', false); // Hide admin users from the list
 
         return $query;
     }

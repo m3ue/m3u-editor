@@ -118,14 +118,14 @@ class AdminPanelProvider extends PanelProvider
                     ->group('Tools')
                     ->sort(sort: 9)
                     ->icon(null)
-                    ->visible(fn (): bool => in_array(auth()->user()->email, config('dev.admin_emails'), true)),
+                    ->visible(fn (): bool => auth()->user()->isAdmin()),
                 NavigationItem::make('Queue Manager')
                     ->label('Queue Manager ↗')
                     ->url('/horizon', shouldOpenInNewTab: true)
                     ->group('Tools')
                     ->sort(10)
                     ->icon(null)
-                    ->visible(fn (): bool => in_array(auth()->user()->email, config('dev.admin_emails'), true)),
+                    ->visible(fn (): bool => auth()->user()->isAdmin()),
             ])
             ->breadcrumbs($settings['show_breadcrumbs'])
             ->widgets([
@@ -142,7 +142,7 @@ class AdminPanelProvider extends PanelProvider
             ])
             ->plugins([
                 FilamentSpatieLaravelBackupPlugin::make()
-                    ->authorize(fn (): bool => in_array(auth()->user()->email, config('dev.admin_emails'), true))
+                    ->authorize(fn (): bool => auth()->user()->isAdmin())
                     ->usingPage(Backups::class),
             ])
             ->maxContentWidth($settings['content_width'])
@@ -187,6 +187,14 @@ class AdminPanelProvider extends PanelProvider
             FilamentView::registerRenderHook(
                 PanelsRenderHook::GLOBAL_SEARCH_BEFORE, // Place it before the global search
                 fn (): string => view('components.external-ip-display')->render()
+            );
+        }
+
+        // Register OIDC SSO button on the login page
+        if (config('services.oidc.enabled')) {
+            FilamentView::registerRenderHook(
+                PanelsRenderHook::AUTH_LOGIN_FORM_AFTER,
+                fn (): string => view('filament.auth.oidc-login-button')->render(),
             );
         }
 

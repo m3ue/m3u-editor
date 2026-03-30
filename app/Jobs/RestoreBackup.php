@@ -54,7 +54,7 @@ class RestoreBackup implements ShouldQueue
             sleep(3);
 
             // Notify the admin that the backup was restored
-            $user = User::whereIn('email', config('dev.admin_emails'))->first();
+            $user = User::where('is_admin', true)->first();
             if ($user) {
                 $message = "Backup restored successfully - restored: \"$this->backupPath\"";
                 Notification::make()
@@ -73,7 +73,7 @@ class RestoreBackup implements ShouldQueue
             logger()->error('Failed to restore backup', ['error' => $e->getMessage()]);
 
             // Notify the admin that the backup was restored
-            $user = User::whereIn('email', config('dev.admin_emails'))->first();
+            $user = User::where('is_admin', true)->first();
             if ($user) {
                 $message = "Backup restore (\"$this->backupPath\") failed: {$e->getMessage()}";
                 Notification::make()

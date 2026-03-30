@@ -23,7 +23,7 @@ class LogViewer extends Page
     public static function canAccess(): bool
     {
         return auth()->check()
-            && in_array(auth()->user()->email, config('dev.admin_emails'), true);
+            && auth()->user()->isAdmin();
     }
 
     public function getView(): string

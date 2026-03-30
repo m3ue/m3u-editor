@@ -35,4 +35,17 @@ return [
         ],
     ],
 
+    'oidc' => [
+        'enabled' => env('OIDC_ENABLED', false),
+        'client_id' => env('OIDC_CLIENT_ID'),
+        'client_secret' => env('OIDC_CLIENT_SECRET'),
+        'base_url' => env('OIDC_ISSUER_URL'),
+        'redirect' => '/auth/oidc/callback',
+        'scopes' => implode(' ', array_filter(array_map('trim', explode(',', env('OIDC_SCOPES', 'openid,profile,email'))))),
+        'auto_redirect' => env('OIDC_AUTO_REDIRECT', false),
+        'auto_create_users' => env('OIDC_AUTO_CREATE_USERS', true),
+        'button_label' => env('OIDC_BUTTON_LABEL', 'Login with SSO'),
+        'hide_login_form' => env('OIDC_HIDE_LOGIN_FORM', false),
+    ],
+
 ];

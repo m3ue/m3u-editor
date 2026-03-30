@@ -29,6 +29,7 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
         'remember_token',
         'app_authentication_secret',
         'app_authentication_recovery_codes',
+        'oidc_id',
     ];
 
     /**
@@ -46,6 +47,7 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
             'app_authentication_recovery_codes' => 'encrypted:array',
             'permissions' => 'array',
             'must_change_password' => 'boolean',
+            'is_admin' => 'boolean',
         ];
     }
 
@@ -179,12 +181,20 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
     }
 
     /**
+     * Check if the user was created via OIDC authentication.
+     */
+    public function isOidcUser(): bool
+    {
+        return $this->oidc_id !== null;
+    }
+
+    /**
      * Check if user is an admin.
      * Admin users have full access to all resources in the system.
      */
     public function isAdmin(): bool
     {
-        return in_array($this->email, config('dev.admin_emails', []));
+        return (bool) $this->is_admin;
     }
 
     /**

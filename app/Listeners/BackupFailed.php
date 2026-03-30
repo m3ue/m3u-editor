@@ -14,7 +14,7 @@ class BackupFailed implements ShouldQueue
      */
     public function handle(BackupHasFailed $event): void
     {
-        $user = User::whereIn('email', config('dev.admin_emails'))->first();
+        $user = User::where('is_admin', true)->first();
         if ($user) {
             $exception = $event->exception;
             $message = "Backup failed, error: \"{$exception->getMessage()}\"";

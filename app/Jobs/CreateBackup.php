@@ -41,7 +41,7 @@ class CreateBackup implements ShouldQueue
             ]);
 
             // Notify the admin that the backup was restored
-            $user = User::whereIn('email', config('dev.admin_emails'))->first();
+            $user = User::where('is_admin', true)->first();
             if ($user) {
                 $message = 'Backup created successfully';
                 Notification::make()
@@ -60,7 +60,7 @@ class CreateBackup implements ShouldQueue
             logger()->error('Failed to create backup', ['error' => $e->getMessage()]);
 
             // Notify the admin that the backup was restored
-            $user = User::whereIn('email', config('dev.admin_emails'))->first();
+            $user = User::where('is_admin', true)->first();
             if ($user) {
                 $message = "Backup create failed: {$e->getMessage()}";
                 Notification::make()
