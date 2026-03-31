@@ -12,6 +12,17 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Config;
 
+function createTestStreamProfile(User $user, string $format): StreamProfile
+{
+    return StreamProfile::query()->create([
+        'user_id' => $user->id,
+        'name' => 'Test '.$format.' profile',
+        'description' => 'Test stream profile',
+        'args' => '{}',
+        'format' => $format,
+    ]);
+}
+
 uses(RefreshDatabase::class);
 
 beforeEach(function () {
@@ -37,10 +48,7 @@ it('uses a signed in-app player route for floating live channel playback', funct
 });
 
 it('uses live in-app transcoding format only for floating live channel playback', function () {
-    $profile = StreamProfile::factory()->for($this->user)->create([
-        'format' => 'm3u8',
-        'args' => '{}',
-    ]);
+    $profile = createTestStreamProfile($this->user, 'm3u8');
 
     $settings = new GeneralSettings;
     $settings->default_stream_profile_id = $profile->id;
@@ -75,10 +83,7 @@ it('uses a signed in-app player route for floating vod playback', function () {
 });
 
 it('uses vod in-app transcoding format only for floating vod playback', function () {
-    $profile = StreamProfile::factory()->for($this->user)->create([
-        'format' => 'm3u8',
-        'args' => '{}',
-    ]);
+    $profile = createTestStreamProfile($this->user, 'm3u8');
 
     $settings = new GeneralSettings;
     $settings->default_stream_profile_id = null;
@@ -120,10 +125,7 @@ it('uses a signed in-app player route for floating episode playback', function (
 });
 
 it('uses vod in-app transcoding format only for floating episode playback', function () {
-    $profile = StreamProfile::factory()->for($this->user)->create([
-        'format' => 'm3u8',
-        'args' => '{}',
-    ]);
+    $profile = createTestStreamProfile($this->user, 'm3u8');
 
     $settings = new GeneralSettings;
     $settings->default_stream_profile_id = null;
