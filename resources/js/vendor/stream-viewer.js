@@ -234,24 +234,20 @@ function streamPlayer() {
             // Set stream format
             this.streamMetadata.format = 'HLS';
 
+            const contentType = video.dataset.contentType || '';
+            const isLiveStream = contentType === 'live';
+
             if (typeof Hls !== 'undefined' && Hls.isSupported()) {
                 console.log('Creating HLS player with configuration...');
-                this.hls = new Hls({
+
+                const hlsConfig = {
                     enableWorker: true,
-                    lowLatencyMode: true,
-                    backBufferLength: 90,
-                    maxBufferLength: 30,
-                    maxMaxBufferLength: 600,
+                    backBufferLength: isLiveStream ? 90 : 30,
+                    maxBufferLength: isLiveStream ? 30 : 60,
+                    maxMaxBufferLength: isLiveStream ? 600 : 120,
                     maxBufferSize: 60 * 1000 * 1000,
                     maxBufferHole: 0.5,
-                    // Live stream settings - critical for continuous playback
-                    liveSyncDurationCount: 3,       // Sync to 3 segments behind live edge
-                    liveMaxLatencyDurationCount: 6, // Max latency before seeking forward
-                    liveDurationInfinity: true,     // Treat stream as infinite (no duration limit)
-                    liveBackBufferLength: 60,       // Keep 60s of back buffer for seeking
-                    // Add debug logging
                     debug: false,
-                    // Add retry and timeout configurations
                     manifestLoadingTimeOut: 10000,
                     manifestLoadingMaxRetry: 3,
                     manifestLoadingRetryDelay: 1000,
@@ -261,17 +257,38 @@ function streamPlayer() {
                     fragLoadingTimeOut: 20000,
                     fragLoadingMaxRetry: 6,
                     fragLoadingRetryDelay: 1000,
-                    // Add CORS configuration
                     xhrSetup: function(xhr, url) {
                         console.log('HLS XHR setup for:', url);
-                        // Add any necessary headers here
                         xhr.withCredentials = false;
                     }
-                });
+                };
+
+                if (isLiveStream) {
+                    Object.assign(hlsConfig, {
+                        lowLatencyMode: true,
+                        liveSyncDurationCount: 3,
+                        liveMaxLatencyDurationCount: 6,
+                        liveDurationInfinity: true,
+                        liveBackBufferLength: 60,
+                    });
+                } else {
+                    Object.assign(hlsConfig, {
+                        lowLatencyMode: false,
+                        liveDurationInfinity: false,
+                        startPosition: -1,
+                    });
+                }
+
+                this.hls = new Hls(hlsConfig);
                 
                 // Load source and attach media
                 this.hls.loadSource(url);
                 this.hls.attachMedia(video);
+
+                this.hls.on(Hls.Events.MEDIA_ATTACHED, () => {
+                    console.log('HLS media attached successfully');
+                    this.updateStatus(playerId, 'Buffering...');
+                });
                 
                 this.hls.on(Hls.Events.MANIFEST_PARSED, () => {
                     console.log('HLS manifest parsed successfully');
@@ -300,6 +317,10 @@ function streamPlayer() {
                     this.hideLoading(playerId);
                     this.updateStatus(playerId, 'Connected');
                     this.updateStreamDetails(playerId);
+
+                    video.play().catch((error) => {
+                        console.warn('HLS autoplay was prevented:', error);
+                    });
                 });
 
                 // Also set up native events for Safari HLS
