@@ -145,13 +145,10 @@ it('renders the plugins dashboard with health cards, quick actions, and install 
 });
 
 it('renames the plugin navigation surfaces to plugins and plugin installs', function () {
-    $pluginDefaults = (new ReflectionClass(PluginResource::class))->getDefaultProperties();
-    $installDefaults = (new ReflectionClass(PluginInstallReviewResource::class))->getDefaultProperties();
-
     expect(PluginResource::getNavigationLabel())->toBe('Plugins');
     expect(PluginInstallReviewResource::getNavigationLabel())->toBe('Installs');
-    expect($pluginDefaults['navigationGroup'])->toBe('Plugins');
-    expect($installDefaults['navigationGroup'])->toBe('Plugins');
+    expect(PluginResource::getNavigationGroup())->toBe('Plugins');
+    expect(PluginInstallReviewResource::getNavigationGroup())->toBe('Plugins');
 });
 
 it('shows the plugin installs action from the plugins list page', function () {

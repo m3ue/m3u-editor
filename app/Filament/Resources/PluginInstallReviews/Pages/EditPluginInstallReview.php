@@ -30,7 +30,7 @@ class EditPluginInstallReview extends EditRecord
         return [
             ActionGroup::make([
                 Action::make('scan')
-                    ->label('Run ClamAV Scan')
+                    ->label(__('Run ClamAV Scan'))
                     ->icon('heroicon-o-shield-check')
                     ->hidden(fn () => PluginInstallReviewResource::useFakeScanner())
                     ->action(function () use ($record): void {
@@ -38,7 +38,7 @@ class EditPluginInstallReview extends EditRecord
                             $review = app(PluginManager::class)->scanInstallReview($record);
 
                             Notification::make()
-                                ->title('Scan completed')
+                                ->title(__('Scan completed'))
                                 ->body($review->scan_summary ?: "Scan status: {$review->scan_status}")
                                 ->color($review->scan_status === 'clean' ? 'success' : 'warning')
                                 ->send();
@@ -52,14 +52,14 @@ class EditPluginInstallReview extends EditRecord
                         } catch (Throwable $exception) {
                             Notification::make()
                                 ->danger()
-                                ->title('Scan failed')
+                                ->title(__('Scan failed'))
                                 ->body($exception->getMessage())
                                 ->persistent()
                                 ->send();
                         }
                     }),
                 Action::make('approve')
-                    ->label('Install')
+                    ->label(__('Install'))
                     ->icon('heroicon-o-check-circle')
                     ->color('success')
                     ->requiresConfirmation()
@@ -69,22 +69,22 @@ class EditPluginInstallReview extends EditRecord
 
                             Notification::make()
                                 ->success()
-                                ->title('Plugin installed')
-                                ->body("Plugin install #{$review->id} installed [{$review->plugin_id}].")
+                                ->title(__('Plugin installed'))
+                                ->body(__("Plugin install #:id installed [:plugin_id].", ['id' => $review->id, 'plugin_id' => $review->plugin_id]))
                                 ->send();
 
                             $this->refreshFormData(['status', 'installed_path', 'installed_at']);
                         } catch (Throwable $exception) {
                             Notification::make()
                                 ->danger()
-                                ->title('Plugin install failed')
+                                ->title(__('Plugin install failed'))
                                 ->body($exception->getMessage())
                                 ->persistent()
                                 ->send();
                         }
                     }),
                 Action::make('install_and_trust')
-                    ->label('Install And Trust')
+                    ->label(__('Install And Trust'))
                     ->icon('heroicon-o-shield-check')
                     ->color('success')
                     ->requiresConfirmation()
@@ -94,22 +94,22 @@ class EditPluginInstallReview extends EditRecord
 
                             Notification::make()
                                 ->success()
-                                ->title('Plugin installed and trusted')
-                                ->body("Plugin install #{$review->id} installed and trusted [{$review->plugin_id}].")
+                                ->title(__('Plugin installed and trusted'))
+                                ->body(__("Plugin install #:id installed and trusted [:plugin_id].", ['id' => $review->id, 'plugin_id' => $review->plugin_id]))
                                 ->send();
 
                             $this->refreshFormData(['status', 'installed_path', 'installed_at']);
                         } catch (Throwable $exception) {
                             Notification::make()
                                 ->danger()
-                                ->title('Plugin install failed')
+                                ->title(__('Plugin install failed'))
                                 ->body($exception->getMessage())
                                 ->persistent()
                                 ->send();
                         }
                     }),
                 Action::make('reject')
-                    ->label('Reject Install')
+                    ->label(__('Reject Install'))
                     ->icon('heroicon-o-no-symbol')
                     ->color('danger')
                     ->requiresConfirmation()
@@ -119,22 +119,22 @@ class EditPluginInstallReview extends EditRecord
 
                             Notification::make()
                                 ->success()
-                                ->title('Plugin install rejected')
-                                ->body("Plugin install #{$review->id} was rejected.")
+                                ->title(__('Plugin install rejected'))
+                                ->body(__("Plugin install #:id was rejected.", ['id' => $review->id]))
                                 ->send();
 
                             $this->refreshFormData(['status', 'review_notes']);
                         } catch (Throwable $exception) {
                             Notification::make()
                                 ->danger()
-                                ->title('Reject install failed')
+                                ->title(__('Reject install failed'))
                                 ->body($exception->getMessage())
                                 ->persistent()
                                 ->send();
                         }
                     }),
                 Action::make('discard')
-                    ->label('Discard Review')
+                    ->label(__('Discard Review'))
                     ->icon('heroicon-o-trash')
                     ->color('danger')
                     ->hidden(fn () => $record->status === 'installed')
@@ -145,23 +145,23 @@ class EditPluginInstallReview extends EditRecord
 
                             Notification::make()
                                 ->success()
-                                ->title('Plugin install discarded')
+                                ->title(__('Plugin install discarded'))
                                 ->send();
 
                             $this->redirect(PluginInstallReviewResource::getUrl());
                         } catch (Throwable $exception) {
                             Notification::make()
                                 ->danger()
-                                ->title('Discard review failed')
+                                ->title(__('Discard review failed'))
                                 ->body($exception->getMessage())
                                 ->persistent()
                                 ->send();
                         }
                     }),
-            ])->label('Actions')->button(),
+            ])->label(__('Actions'))->button(),
             DeleteAction::make()
-                ->label('Delete Record')
-                ->modalDescription('Permanently removes this install log entry. The plugin itself (if installed) is not affected.')
+                ->label(__('Delete Record'))
+                ->modalDescription(__('Permanently removes this install log entry. The plugin itself (if installed) is not affected.'))
                 ->successRedirectUrl(PluginInstallReviewResource::getUrl()),
         ];
     }

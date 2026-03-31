@@ -35,10 +35,10 @@ class RunsRelationManager extends RelationManager
     public function table(Table $table): Table
     {
         return $table
-            ->heading('Run History')
-            ->description('Manual actions, hook-triggered automation, and scheduled jobs. Open a run to inspect payload, metrics, and live activity.')
+            ->heading(__('Run History'))
+            ->description(__('Manual actions, hook-triggered automation, and scheduled jobs. Open a run to inspect payload, metrics, and live activity.'))
             ->modifyQueryUsing(fn (Builder $query) => $query->visibleTo(auth()->user()))
-            ->filtersTriggerAction(fn ($action) => $action->button()->label('Refine runs'))
+            ->filtersTriggerAction(fn ($action) => $action->button()->label(__('Refine runs')))
             ->paginated([10, 25, 50])
             ->defaultPaginationPageOption(10)
             ->poll('3s')
@@ -47,13 +47,13 @@ class RunsRelationManager extends RelationManager
                 'record' => $this->getOwnerRecord(),
                 'run' => $record,
             ]))
-            ->emptyStateHeading('No run history yet')
-            ->emptyStateDescription('Queue a plugin action from the page header to create the first run.')
+            ->emptyStateHeading(__('No run history yet'))
+            ->emptyStateDescription(__('Queue a plugin action from the page header to create the first run.'))
             ->columns([
                 Split::make([
                     Stack::make([
                         TextColumn::make('run_reference')
-                            ->label('Run')
+                            ->label(__('Run'))
                             ->state(fn (PluginRun $record): string => self::runLabel($record))
                             ->weight('medium')
                             ->wrap()
@@ -66,11 +66,11 @@ class RunsRelationManager extends RelationManager
                                 });
                             }),
                         TextColumn::make('summary')
-                            ->label('Summary')
-                            ->placeholder('This run has not written a summary yet.')
+                            ->label(__('Summary'))
+                            ->placeholder(__('This run has not written a summary yet.'))
                             ->wrap(),
                         TextColumn::make('created_at')
-                            ->label('Queued')
+                            ->label(__('Queued'))
                             ->since()
                             ->color('gray')
                             ->tooltip(fn (PluginRun $record): ?string => $record->created_at ? app(DateFormatService::class)->format($record->created_at) : null),
@@ -92,7 +92,7 @@ class RunsRelationManager extends RelationManager
                             ->formatStateUsing(fn (string $state): string => Str::headline($state)),
                         TextColumn::make('dry_run')
                             ->badge()
-                            ->label('Mode')
+                            ->label(__('Mode'))
                             ->state(fn (PluginRun $record): string => $record->dry_run ? 'Dry Run' : 'Apply')
                             ->color(fn (PluginRun $record): string => $record->dry_run ? 'gray' : 'primary'),
                     ])->grow(false),
@@ -101,23 +101,23 @@ class RunsRelationManager extends RelationManager
                     Split::make([
                         Stack::make([
                             TextColumn::make('scope')
-                                ->label('Target Scope')
+                                ->label(__('Target Scope'))
                                 ->state(fn (PluginRun $record): string => self::targetScope($record))
                                 ->wrap(),
                             TextColumn::make('timing')
-                                ->label('Timing')
+                                ->label(__('Timing'))
                                 ->state(fn (PluginRun $record): string => self::timingSummary($record))
                                 ->wrap(),
                         ]),
                         Stack::make([
                             TextColumn::make('invocation_type')
-                                ->label('Invocation')
+                                ->label(__('Invocation'))
                                 ->badge()
                                 ->formatStateUsing(fn (string $state): string => Str::headline($state)),
                             TextColumn::make('metrics')
-                                ->label('Returned Metrics')
+                                ->label(__('Returned Metrics'))
                                 ->state(fn (PluginRun $record): ?string => self::metricsSummary($record))
-                                ->placeholder('No aggregate totals were returned by this run.')
+                                ->placeholder(__('No aggregate totals were returned by this run.'))
                                 ->wrap(),
                         ])->grow(false),
                     ])->from('md'),
@@ -139,7 +139,7 @@ class RunsRelationManager extends RelationManager
                         'schedule' => 'Schedule',
                     ]),
                 SelectFilter::make('invocation_type')
-                    ->label('Invocation')
+                    ->label(__('Invocation'))
                     ->options([
                         'action' => 'Action',
                         'hook' => 'Hook',
@@ -147,13 +147,13 @@ class RunsRelationManager extends RelationManager
             ])
             ->headerActions([
                 Action::make('clearHistory')
-                    ->label('Clear History')
+                    ->label(__('Clear History'))
                     ->icon('heroicon-o-trash')
                     ->color('danger')
                     ->requiresConfirmation()
-                    ->modalHeading('Clear run history')
-                    ->modalDescription('This permanently deletes all completed, failed, cancelled, and stale runs for this plugin. Any currently running jobs are not affected.')
-                    ->modalSubmitActionLabel('Clear history')
+                    ->modalHeading(__('Clear run history'))
+                    ->modalDescription(__('This permanently deletes all completed, failed, cancelled, and stale runs for this plugin. Any currently running jobs are not affected.'))
+                    ->modalSubmitActionLabel(__('Clear history'))
                     ->action(function (): void {
                         $plugin = $this->getOwnerRecord();
                         PluginRun::query()
@@ -164,14 +164,14 @@ class RunsRelationManager extends RelationManager
             ])
             ->recordActions([
                 Action::make('delete')
-                    ->label('Delete')
+                    ->label(__('Delete'))
                     ->icon('heroicon-o-trash')
                     ->color('danger')
                     ->requiresConfirmation()
                     ->disabled(fn (PluginRun $record): bool => $record->status === 'running')
                     ->action(fn (PluginRun $record) => $record->delete()),
                 Action::make('open')
-                    ->label('Open run')
+                    ->label(__('Open run'))
                     ->icon('heroicon-o-arrow-top-right-on-square')
                     ->url(fn ($record): string => PluginResource::getUrl('run', [
                         'record' => $this->getOwnerRecord(),
@@ -180,7 +180,7 @@ class RunsRelationManager extends RelationManager
             ])
             ->bulkActions([
                 BulkAction::make('delete')
-                    ->label('Delete selected')
+                    ->label(__('Delete selected'))
                     ->icon('heroicon-o-trash')
                     ->color('danger')
                     ->requiresConfirmation()
@@ -224,25 +224,25 @@ class RunsRelationManager extends RelationManager
             ->count();
 
         return [
-            'all' => Tab::make('All Runs')
+            'all' => Tab::make(__('All Runs'))
                 ->badge($allCount),
-            'running' => Tab::make('Running')
+            'running' => Tab::make(__('Running'))
                 ->badge($runningCount)
                 ->badgeColor('warning')
                 ->modifyQueryUsing(fn (Builder $query) => $query->where('status', 'running')),
-            'failed' => Tab::make('Failed')
+            'failed' => Tab::make(__('Failed'))
                 ->badge($failedCount)
                 ->badgeColor('danger')
                 ->modifyQueryUsing(fn (Builder $query) => $query->where('status', 'failed')),
-            'manual' => Tab::make('Manual')
+            'manual' => Tab::make(__('Manual'))
                 ->badge($manualCount)
                 ->badgeColor('primary')
                 ->modifyQueryUsing(fn (Builder $query) => $query->where('trigger', 'manual')),
-            'hooks' => Tab::make('Hooks')
+            'hooks' => Tab::make(__('Hooks'))
                 ->badge($hookCount)
                 ->badgeColor('info')
                 ->modifyQueryUsing(fn (Builder $query) => $query->where('trigger', 'hook')),
-            'scheduled' => Tab::make('Scheduled')
+            'scheduled' => Tab::make(__('Scheduled'))
                 ->badge($scheduledCount)
                 ->badgeColor('gray')
                 ->modifyQueryUsing(fn (Builder $query) => $query->where('trigger', 'schedule')),

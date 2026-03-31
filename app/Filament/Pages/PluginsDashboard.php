@@ -16,11 +16,22 @@ use Illuminate\Support\Collection;
 
 class PluginsDashboard extends Page
 {
-    protected static ?string $navigationLabel = 'Overview';
-
-    protected static ?string $title = 'Plugins';
-
     protected static string|\UnitEnum|null $navigationGroup = 'Plugins';
+
+    public static function getNavigationLabel(): string
+    {
+        return __('Overview');
+    }
+
+    public function getTitle(): string
+    {
+        return __('Plugins');
+    }
+
+    public static function getNavigationGroup(): ?string
+    {
+        return __('Plugins');
+    }
 
     protected static ?int $navigationSort = 1;
 
@@ -49,7 +60,7 @@ class PluginsDashboard extends Page
      */
     public function getSubheading(): ?string
     {
-        return 'Manage installed plugins, review new installs, and check security status from one place.';
+        return __('Manage installed plugins, review new installs, and check security status from one place.');
     }
 
     /**
@@ -94,16 +105,16 @@ class PluginsDashboard extends Page
     {
         return [
             [
-                'label' => 'Installed Plugins',
+                'label' => __('Installed Plugins'),
                 'value' => Plugin::query()
                     ->where('installation_status', 'installed')
                     ->count(),
-                'description' => 'Plugins that are currently installed and available to operate.',
+                'description' => __('Plugins that are currently installed and available to operate.'),
                 'icon' => 'heroicon-s-puzzle-piece',
                 'color' => 'blue',
             ],
             [
-                'label' => 'Trusted Plugins',
+                'label' => __('Trusted Plugins'),
                 'value' => Plugin::query()
                     ->where('installation_status', 'installed')
                     ->where('available', true)
@@ -111,23 +122,23 @@ class PluginsDashboard extends Page
                     ->where('trust_state', 'trusted')
                     ->where('integrity_status', 'verified')
                     ->count(),
-                'description' => 'Installed plugins that passed validation, are trusted, and haven\'t been modified.',
+                'description' => __('Installed plugins that passed validation, are trusted, and haven\'t been modified.'),
                 'icon' => 'heroicon-s-shield-check',
                 'color' => 'green',
             ],
             [
-                'label' => 'Pending Plugin Installs',
+                'label' => __('Pending Plugin Installs'),
                 'value' => PluginInstallReview::query()
                     ->whereIn('status', ['staged', 'scanned', 'review_ready'])
                     ->count(),
-                'description' => 'Uploads waiting for security scan or admin approval.',
+                'description' => __('Uploads waiting for security scan or admin approval.'),
                 'icon' => 'heroicon-s-arrow-down-tray',
                 'color' => 'amber',
             ],
             [
-                'label' => 'Plugins Needing Attention',
+                'label' => __('Plugins Needing Attention'),
                 'value' => $this->attentionPluginQuery()->count(),
-                'description' => 'Plugins that are blocked, modified, invalid, or not fully installed.',
+                'description' => __('Plugins that are blocked, modified, invalid, or not fully installed.'),
                 'icon' => 'heroicon-s-exclamation-triangle',
                 'color' => 'red',
             ],
@@ -245,29 +256,29 @@ class PluginsDashboard extends Page
     public function pluginHealthLabel(Plugin $plugin): string
     {
         if ($plugin->trust_state === 'blocked') {
-            return 'Blocked';
+            return __('Blocked');
         }
 
         if ($plugin->integrity_status === 'changed') {
-            return 'Files Changed';
+            return __('Files Changed');
         }
 
         if ($plugin->validation_status !== 'valid') {
-            return 'Validation Failed';
+            return __('Validation Failed');
         }
 
         if ($plugin->trust_state === 'pending_review') {
-            return 'Pending Review';
+            return __('Pending Review');
         }
 
         if ($plugin->installation_status !== 'installed') {
-            return 'Uninstalled';
+            return __('Uninstalled');
         }
 
         if (! $plugin->available) {
-            return 'Missing Files';
+            return __('Missing Files');
         }
 
-        return 'Healthy';
+        return __('Healthy');
     }
 }

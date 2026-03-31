@@ -32,26 +32,26 @@ class LogsRelationManager extends RelationManager
     public function table(Table $table): Table
     {
         return $table
-            ->heading('Live Activity Feed')
-            ->description('Streaming notes from running and recent jobs. Open any run to inspect the payload, result snapshot, and full trail.')
+            ->heading(__('Live Activity Feed'))
+            ->description(__('Streaming notes from running and recent jobs. Open any run to inspect the payload, result snapshot, and full trail.'))
             ->modifyQueryUsing(fn (Builder $query) => $query->whereHas('run', fn (Builder $runQuery) => $runQuery->visibleTo(auth()->user())))
-            ->filtersTriggerAction(fn ($action) => $action->button()->label('Refine feed'))
+            ->filtersTriggerAction(fn ($action) => $action->button()->label(__('Refine feed')))
             ->paginated([10, 25, 50])
             ->defaultPaginationPageOption(10)
             ->poll('2s')
             ->defaultSort('created_at', 'desc')
-            ->emptyStateHeading('No live activity yet')
-            ->emptyStateDescription('Run a plugin action to see step-by-step activity appear here.')
+            ->emptyStateHeading(__('No live activity yet'))
+            ->emptyStateDescription(__('Run a plugin action to see step-by-step activity appear here.'))
             ->columns([
                 Split::make([
                     Stack::make([
                         TextColumn::make('message')
-                            ->label('Activity')
+                            ->label(__('Activity'))
                             ->weight('medium')
                             ->wrap()
                             ->searchable(),
                         TextColumn::make('created_at')
-                            ->label('Seen')
+                            ->label(__('Seen'))
                             ->since()
                             ->color('gray')
                             ->tooltip(fn (PluginRunLog $record): ?string => $record->created_at ? app(DateFormatService::class)->format($record->created_at) : null),
@@ -66,7 +66,7 @@ class LogsRelationManager extends RelationManager
                                 default => 'info',
                             }),
                         TextColumn::make('run_reference')
-                            ->label('Run')
+                            ->label(__('Run'))
                             ->badge()
                             ->state(fn (PluginRunLog $record): string => self::runLabel($record))
                             ->color(fn (PluginRunLog $record): string => match ($record->run?->status) {
@@ -88,14 +88,14 @@ class LogsRelationManager extends RelationManager
                 Panel::make([
                     Stack::make([
                         TextColumn::make('context_summary')
-                            ->label('Structured Context')
+                            ->label(__('Structured Context'))
                             ->state(fn (PluginRunLog $record): ?string => self::contextSummary($record->context ?? []))
-                            ->placeholder('No structured context was attached to this activity line.')
+                            ->placeholder(__('No structured context was attached to this activity line.'))
                             ->wrap(),
                         TextColumn::make('run_summary')
-                            ->label('Run Summary')
+                            ->label(__('Run Summary'))
                             ->state(fn (PluginRunLog $record): ?string => $record->run?->summary)
-                            ->placeholder('This run has not written a summary yet.')
+                            ->placeholder(__('This run has not written a summary yet.'))
                             ->wrap(),
                     ]),
                 ])->collapsible()->collapsed(),
@@ -108,7 +108,7 @@ class LogsRelationManager extends RelationManager
                         'error' => 'Error',
                     ]),
                 SelectFilter::make('run_status')
-                    ->label('Run status')
+                    ->label(__('Run status'))
                     ->options([
                         'running' => 'Running',
                         'completed' => 'Completed',
@@ -126,7 +126,7 @@ class LogsRelationManager extends RelationManager
             ])
             ->recordActions([
                 Action::make('open')
-                    ->label('Open run')
+                    ->label(__('Open run'))
                     ->icon('heroicon-o-arrow-top-right-on-square')
                     ->url(fn (PluginRunLog $record): ?string => $record->run
                         ? PluginResource::getUrl('run', [
@@ -158,17 +158,17 @@ class LogsRelationManager extends RelationManager
             ->count();
 
         return [
-            'all' => Tab::make('All Activity')
+            'all' => Tab::make(__('All Activity'))
                 ->badge($allCount),
-            'running' => Tab::make('Running')
+            'running' => Tab::make(__('Running'))
                 ->badge($runningCount)
                 ->badgeColor('warning')
                 ->modifyQueryUsing(fn (Builder $query) => $query->whereHas('run', fn (Builder $runQuery) => $runQuery->where('status', 'running'))),
-            'warnings' => Tab::make('Warnings')
+            'warnings' => Tab::make(__('Warnings'))
                 ->badge($warningCount)
                 ->badgeColor('warning')
                 ->modifyQueryUsing(fn (Builder $query) => $query->where('level', 'warning')),
-            'errors' => Tab::make('Errors')
+            'errors' => Tab::make(__('Errors'))
                 ->badge($errorCount)
                 ->badgeColor('danger')
                 ->modifyQueryUsing(fn (Builder $query) => $query->where('level', 'error')),

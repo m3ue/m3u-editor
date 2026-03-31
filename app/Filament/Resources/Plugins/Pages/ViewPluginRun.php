@@ -62,7 +62,7 @@ class ViewPluginRun extends Page
     {
         return [
             Action::make('download_report')
-                ->label('Download Report')
+                ->label(__('Download Report'))
                 ->icon('heroicon-o-arrow-down-tray')
                 ->color('gray')
                 ->visible(fn (): bool => filled($this->reportPath()) && Storage::disk('local')->exists($this->reportPath()))
@@ -71,7 +71,7 @@ class ViewPluginRun extends Page
                     'run' => $this->runRecord,
                 ])),
             Action::make('stop_run')
-                ->label('Stop Run')
+                ->label(__('Stop Run'))
                 ->icon('heroicon-o-stop-circle')
                 ->color('warning')
                 ->visible(fn (): bool => $this->runRecord->status === 'running')
@@ -82,12 +82,12 @@ class ViewPluginRun extends Page
 
                     Notification::make()
                         ->success()
-                        ->title('Cancellation requested')
-                        ->body('The worker will stop the run at the next safe checkpoint.')
+                        ->title(__('Cancellation requested'))
+                        ->body(__('The worker will stop the run at the next safe checkpoint.'))
                         ->send();
                 }),
             Action::make('resume_run')
-                ->label('Resume Run')
+                ->label(__('Resume Run'))
                 ->icon('heroicon-o-arrow-path')
                 ->color('primary')
                 ->visible(fn (): bool => in_array($this->runRecord->status, ['cancelled', 'stale', 'failed'], true))
@@ -97,12 +97,12 @@ class ViewPluginRun extends Page
 
                     Notification::make()
                         ->success()
-                        ->title('Run resumed')
-                        ->body('The run was queued again and will continue from the last saved checkpoint when possible.')
+                        ->title(__('Run resumed'))
+                        ->body(__('The run was queued again and will continue from the last saved checkpoint when possible.'))
                         ->send();
                 }),
             Action::make('back_to_plugin')
-                ->label('Back to Plugin')
+                ->label(__('Back to Plugin'))
                 ->icon('heroicon-o-arrow-left')
                 ->color('gray')
                 ->url(fn (): string => PluginResource::getUrl('edit', [

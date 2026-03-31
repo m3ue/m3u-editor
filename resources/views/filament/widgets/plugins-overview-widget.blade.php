@@ -5,7 +5,7 @@
             <div class="flex items-center justify-between">
                 <h2 class="flex items-center gap-2 text-base font-semibold leading-6 text-gray-950 dark:text-white">
                     <x-filament::icon icon="heroicon-o-puzzle-piece" class="h-5 w-5 text-gray-400 dark:text-gray-500" />
-                    Plugins
+                    {{ __('Plugins') }}
                 </h2>
 
                 <x-filament::button
@@ -14,17 +14,17 @@
                     href="{{ route('filament.admin.pages.plugins-dashboard') }}"
                     icon="heroicon-m-arrow-top-right-on-square"
                 >
-                    Manage
+                    {{ __('Manage') }}
                 </x-filament::button>
             </div>
 
             {{-- Stats --}}
             <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
                 @foreach ([
-                    ['label' => 'Installed', 'value' => $installed, 'warn' => false],
-                    ['label' => 'Enabled',   'value' => $enabled,   'warn' => false],
-                    ['label' => 'Trusted',   'value' => $trusted,   'warn' => false],
-                    ['label' => 'Pending Trust', 'value' => $pending, 'warn' => $pending > 0],
+                    ['label' => __('Installed'), 'value' => $installed, 'warn' => false],
+                    ['label' => __('Enabled'), 'value' => $enabled, 'warn' => false],
+                    ['label' => __('Trusted'), 'value' => $trusted, 'warn' => false],
+                    ['label' => __('Pending Trust'), 'value' => $pending, 'warn' => $pending > 0],
                 ] as $stat)
                     <div class="rounded-xl bg-gray-50 px-4 py-3 text-center ring-1 ring-gray-950/5 dark:bg-white/5 dark:ring-white/10">
                         <p class="text-2xl font-bold tabular-nums {{ $stat['warn'] ? 'text-warning-600 dark:text-warning-400' : 'text-gray-950 dark:text-white' }}">
@@ -39,7 +39,7 @@
             @if ($recentRuns->isNotEmpty())
                 <div>
                     <p class="mb-2 text-xs font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">
-                        Recent Runs
+                        {{ __('Recent Runs') }}
                     </p>
 
                     <div class="divide-y divide-gray-100 dark:divide-white/5">
@@ -76,7 +76,7 @@
 
                                     @if ($runUrl)
                                         <x-filament::button tag="a" href="{{ $runUrl }}" color="gray" size="xs">
-                                            View
+                                            {{ __('View') }}
                                         </x-filament::button>
                                     @endif
                                 </div>
@@ -85,7 +85,7 @@
                     </div>
                 </div>
             @else
-                <p class="text-sm text-gray-400 dark:text-gray-500">No plugin runs recorded yet.</p>
+                <p class="text-sm text-gray-400 dark:text-gray-500">{{ __('No plugin runs recorded yet.') }}</p>
             @endif
         </div>
     </x-filament::section>

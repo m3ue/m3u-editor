@@ -40,11 +40,20 @@ class PluginResource extends Resource
 
     protected static ?string $recordTitleAttribute = 'name';
 
-    protected static ?string $label = 'Plugin';
+    public static function getModelLabel(): string
+    {
+        return __('Plugin');
+    }
 
-    protected static ?string $pluralLabel = 'Plugins';
+    public static function getPluralModelLabel(): string
+    {
+        return __('Plugins');
+    }
 
-    protected static string|\UnitEnum|null $navigationGroup = 'Plugins';
+    public static function getNavigationGroup(): ?string
+    {
+        return __('Plugins');
+    }
 
     public static function canAccess(): bool
     {
@@ -53,7 +62,7 @@ class PluginResource extends Resource
 
     public static function getNavigationLabel(): string
     {
-        return 'Plugins';
+        return __('Plugins');
     }
 
     public static function getNavigationSort(): ?int
@@ -69,17 +78,17 @@ class PluginResource extends Resource
                 ->contained(false)
                 ->columnSpanFull()
                 ->tabs([
-                    Tab::make('Overview')
+                    Tab::make(__('Overview'))
                         ->icon('heroicon-m-puzzle-piece')
                         ->schema([
-                            Section::make('Overview')
+                            Section::make(__('Overview'))
                                 ->compact()
                                 ->schema([
                                     Placeholder::make('hero_panel')
                                         ->hiddenLabel()
                                         ->content(fn (?Plugin $record): HtmlString => new HtmlString(self::heroPanel($record))),
                                 ]),
-                            Section::make('Current Status')
+                            Section::make(__('Current Status'))
                                 ->compact()
                                 ->icon('heroicon-m-bolt')
                                 ->collapsed()
@@ -95,7 +104,7 @@ class PluginResource extends Resource
                                         ->hiddenLabel()
                                         ->content(fn (?Plugin $record): HtmlString => new HtmlString(self::nextStepCard($record))),
                                 ]),
-                            Section::make('Capability Map')
+                            Section::make(__('Capability Map'))
                                 ->compact()
                                 ->icon('heroicon-m-chart-bar')
                                 ->collapsed()
@@ -104,21 +113,17 @@ class PluginResource extends Resource
                                         ->schema([
                                             Placeholder::make('capabilities_display')
                                                 ->hiddenLabel()
-                                                ->content(fn (?Plugin $record): HtmlString => new HtmlString(self::infoCard(
-                                                    'Capabilities',
-                                                    'What this plugin can participate in inside the platform.',
+                                                ->content(fn (?Plugin $record): HtmlString => new HtmlString(self::infoCard(__('Capabilities'), __('What this plugin can participate in inside the platform.'),
                                                     self::pillList(
                                                         collect($record?->capabilities ?? [])
-                                                            ->map(fn (string $capability) => str($capability)->replace('_', ' ')->headline())
+                                                            ->map(fn (string $capability) => str($capability)->replace('_', __(' '))->headline())
                                                             ->all(),
                                                         'This plugin has not declared any capabilities yet.',
                                                     ),
                                                 ))),
                                             Placeholder::make('actions_display')
                                                 ->hiddenLabel()
-                                                ->content(fn (?Plugin $record): HtmlString => new HtmlString(self::infoCard(
-                                                    'Available Actions',
-                                                    'Manual actions available from the page header.',
+                                                ->content(fn (?Plugin $record): HtmlString => new HtmlString(self::infoCard(__('Available Actions'), __('Manual actions available from the page header.'),
                                                     self::availableActions($record),
                                                 ))),
                                         ]),
@@ -126,9 +131,7 @@ class PluginResource extends Resource
                                         ->schema([
                                             Placeholder::make('hooks_display')
                                                 ->hiddenLabel()
-                                                ->content(fn (?Plugin $record): HtmlString => new HtmlString(self::infoCard(
-                                                    'Event Triggers',
-                                                    'Events that automatically run this plugin in the background.',
+                                                ->content(fn (?Plugin $record): HtmlString => new HtmlString(self::infoCard(__('Event Triggers'), __('Events that automatically run this plugin in the background.'),
                                                     self::pillList(
                                                         collect($record?->hooks ?? [])->all(),
                                                         'This plugin only runs when you trigger one of its header actions.',
@@ -136,14 +139,12 @@ class PluginResource extends Resource
                                                 ))),
                                             Placeholder::make('plugin_identity')
                                                 ->hiddenLabel()
-                                                ->content(fn (?Plugin $record): HtmlString => new HtmlString(self::infoCard(
-                                                    'Plugin Info',
-                                                    'Version, source, and type of this plugin.',
+                                                ->content(fn (?Plugin $record): HtmlString => new HtmlString(self::infoCard(__('Plugin Info'), __('Version, source, and type of this plugin.'),
                                                     self::pluginIdentity($record),
                                                 ))),
                                         ]),
                                 ]),
-                            Section::make('Technical Details')
+                            Section::make(__('Technical Details'))
                                 ->compact()
                                 ->icon('heroicon-m-magnifying-glass')
                                 ->collapsible()
@@ -163,19 +164,19 @@ class PluginResource extends Resource
                                                 ->columnSpanFull(),
                                         ]),
                                     Textarea::make('validation_errors_json')
-                                        ->label('Validation Errors')
+                                        ->label(__('Validation Errors'))
                                         ->disabled()
                                         ->rows(6)
                                         ->dehydrated(false)
                                         ->formatStateUsing(fn (?Plugin $record) => json_encode($record?->validation_errors ?? [], JSON_PRETTY_PRINT)),
                                 ]),
                         ]),
-                    Tab::make('Settings')
+                    Tab::make(__('Settings'))
                         ->icon('heroicon-m-cog-6-tooth')
                         ->visible(fn (): bool => auth()->user()?->canManagePlugins() ?? false)
                         ->schema([
-                            Section::make('Settings')
-                                ->description('These settings are used by hook-triggered runs, scheduled runs, and as defaults for manual actions.')
+                            Section::make(__('Settings'))
+                                ->description(__('These settings are used by hook-triggered runs, scheduled runs, and as defaults for manual actions.'))
                                 ->visible(fn (?Plugin $record) => filled($record?->settings_schema))
                                 ->schema(fn (?Plugin $record) => app(PluginSchemaMapper::class)->settingsComponents($record)),
                         ]),
@@ -189,7 +190,7 @@ class PluginResource extends Resource
             ->defaultSort('name')
             ->columns([
                 TextColumn::make('plugin_id')
-                    ->label('ID')
+                    ->label(__('ID'))
                     ->searchable()
                     ->sortable(),
                 TextColumn::make('name')
@@ -261,18 +262,18 @@ class PluginResource extends Resource
                     ->size('sm')
                     ->hiddenLabel()
                     ->tooltip(fn (Plugin $record) => $record->isBundled() ? 'Cannot delete bundled plugin' : 'Delete this plugin')
-                    ->label('Delete')
+                    ->label(__('Delete'))
                     ->color('danger')
                     ->icon('heroicon-o-trash')
                     ->visible(fn (Plugin $record) => auth()->user()?->canManagePlugins() ?? false)
                     ->disabled(fn (Plugin $record) => $record->hasActiveRuns() || $record->isBundled())
                     ->requiresConfirmation()
                     ->modalHeading(fn (Plugin $record) => "Delete {$record->name}?")
-                    ->modalDescription('Permanently removes the plugin files from the server and deletes its registry record, settings, and run history. This cannot be undone.')
-                    ->modalSubmitActionLabel('Delete permanently')
+                    ->modalDescription(__('Permanently removes the plugin files from the server and deletes its registry record, settings, and run history. This cannot be undone.'))
+                    ->modalSubmitActionLabel(__('Delete permanently'))
                     ->schema([
                         Select::make('cleanup_mode')
-                            ->label('What to do with plugin data')
+                            ->label(__('What to do with plugin data'))
                             ->options([
                                 'preserve' => 'Keep database tables and files created by the plugin',
                                 'purge' => 'Delete database tables and files created by the plugin',
@@ -284,8 +285,8 @@ class PluginResource extends Resource
                         if ($record->isBundled()) {
                             Notification::make()
                                 ->danger()
-                                ->title('Delete blocked')
-                                ->body('Bundled plugins cannot be deleted.')
+                                ->title(__('Delete blocked'))
+                                ->body(__('Bundled plugins cannot be deleted.'))
                                 ->send();
 
                             return;
@@ -299,13 +300,13 @@ class PluginResource extends Resource
 
                             Notification::make()
                                 ->success()
-                                ->title('Plugin deleted')
-                                ->body('The plugin files have been removed from disk and its registry record has been deleted.')
+                                ->title(__('Plugin deleted'))
+                                ->body(__('The plugin files have been removed from disk and its registry record has been deleted.'))
                                 ->send();
                         } catch (\RuntimeException $exception) {
                             Notification::make()
                                 ->danger()
-                                ->title('Delete blocked')
+                                ->title(__('Delete blocked'))
                                 ->body($exception->getMessage())
                                 ->send();
                         }
@@ -354,13 +355,13 @@ class PluginResource extends Resource
     protected static function heroPanel(?Plugin $record): string
     {
         if (! $record) {
-            return self::mutedMessage('No plugin record loaded.');
+            return self::mutedMessage(__('No plugin record loaded.'));
         }
 
         $focusRun = self::focusRun($record);
         $statusBadge = self::statusBadge($record);
-        $runBadge = $focusRun ? self::runStatusBadge($focusRun) : self::mutedBadge('No runs yet');
-        $summary = $focusRun?->summary ?: 'Use the header actions to run this plugin once, then track the job from Live Activity and Run History.';
+        $runBadge = $focusRun ? self::runStatusBadge($focusRun) : self::mutedBadge(__('No runs yet'));
+        $summary = $focusRun?->summary ?: __('Use the header actions to run this plugin once, then track the job from Live Activity and Run History.');
         $runLink = $focusRun
             ? '<a href="'.e(self::getUrl('run', ['record' => $record, 'run' => $focusRun])).'" class="inline-flex items-center rounded-full border border-primary-200 bg-white/90 px-3 py-1.5 text-xs font-semibold text-primary-700 shadow-sm hover:bg-primary-50 dark:border-primary-800 dark:bg-gray-900/80 dark:text-primary-300 dark:hover:bg-primary-950/60">Inspect this run</a>'
             : null;
@@ -377,23 +378,23 @@ class PluginResource extends Resource
                         <div class="space-y-2">
                             <div class="text-[11px] font-semibold uppercase tracking-[0.22em] text-primary-600 dark:text-primary-300">Plugin control center</div>
                             <div class="text-2xl font-semibold tracking-tight text-gray-950 dark:text-white">'.e($record->name).'</div>
-                            <div class="max-w-3xl text-sm leading-6 text-gray-600 dark:text-gray-300">'.e($record->description ?: 'No description provided.').'</div>
+                            <div class="max-w-3xl text-sm leading-6 text-gray-600 dark:text-gray-300">'.e($record->description ?: __('No description provided.')).'</div>
                         </div>
                         <div class="grid gap-3 sm:grid-cols-3">
-                            '.self::statPill('Implementation', e($record->class_name ? class_basename($record->class_name) : 'Unknown class'), 'The plugin class discovered from the manifest.').'
-                            '.self::statPill('Availability', $record->available ? 'Available on disk' : 'Missing from disk', 'Whether the plugin files are currently present.').'
-                            '.self::statPill('Trust posture', e(Str::headline($record->trust_state ?? 'pending_review')).' · '.e(Str::headline($record->integrity_status ?? 'unknown')), 'Execution requires both admin trust and verified file integrity.').'
-                            '.self::statPill('Defaults', e(self::targetSummary($record)), 'Saved targets used for manual defaults and automation.').'
+                            '.self::statPill(__('Implementation'), e($record->class_name ? class_basename($record->class_name) : 'Unknown class'), __('The plugin class discovered from the manifest.')).'
+                            '.self::statPill(__('Availability'), $record->available ? 'Available on disk' : 'Missing from disk', __('Whether the plugin files are currently present.')).'
+                            '.self::statPill(__('Trust posture'), e(Str::headline($record->trust_state ?? 'pending_review')).' · '.e(Str::headline($record->integrity_status ?? 'unknown')), __('Execution requires both admin trust and verified file integrity.')).'
+                            '.self::statPill(__('Defaults'), e(self::targetSummary($record)), __('Saved targets used for manual defaults and automation.')).'
                         </div>
                     </div>
                     <div class="rounded-[1.5rem] border border-white/60 bg-white/80 p-5 shadow-sm backdrop-blur dark:border-gray-800 dark:bg-gray-900/85">
                         <div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">Trust & Security</div>
                         <div class="mt-3 text-sm leading-6 text-gray-700 dark:text-gray-200">'.e($summary).'</div>
                         <div class="mt-5 space-y-3">
-                            '.self::stackedStat('Last validation', app(DateFormatService::class)->format($record->last_validated_at, 'Not validated yet')).'
-                            '.self::stackedStat('Focus run', app(DateFormatService::class)->format($focusRun?->created_at, 'No runs queued yet')).'
-                            '.self::stackedStat('Source', e(Str::headline($record->source_type ?? 'local'))).'
-                            '.self::stackedStat('Trusted by', e(app(DateFormatService::class)->format($record->trusted_at, 'Awaiting admin review'))).'
+                            '.self::stackedStat(__('Last validation'), app(DateFormatService::class)->format($record->last_validated_at, 'Not validated yet')).'
+                            '.self::stackedStat(__('Focus run'), app(DateFormatService::class)->format($focusRun?->created_at, 'No runs queued yet')).'
+                            '.self::stackedStat(__('Source'), e(Str::headline($record->source_type ?? 'local'))).'
+                            '.self::stackedStat(__('Trusted by'), e(app(DateFormatService::class)->format($record->trusted_at, 'Awaiting admin review'))).'
                         </div>
                         <div class="mt-5 flex flex-wrap gap-2">
                             '.$runLink.'
@@ -409,7 +410,7 @@ class PluginResource extends Resource
         $latestRun = self::latestRun($record);
 
         if (! $latestRun) {
-            return self::mutedMessage('No plugin runs recorded yet. Use the header actions to run the plugin once.');
+            return self::mutedMessage(__('No plugin runs recorded yet. Use the header actions to run the plugin once.'));
         }
 
         return self::stackedLines([
@@ -426,10 +427,8 @@ class PluginResource extends Resource
         $latestRun = self::focusRun($record);
 
         if (! $latestRun) {
-            return self::infoCard(
-                'Current Run',
-                'The most recent plugin job and where to inspect it.',
-                self::mutedMessage('No runs recorded yet. Trigger a scan or apply action from the header to create the first job.'),
+            return self::infoCard(__('Current Run'), __('The most recent plugin job and where to inspect it.'),
+                self::mutedMessage(__('No runs recorded yet. Trigger a scan or apply action from the header to create the first job.')),
             );
         }
 
@@ -443,15 +442,15 @@ class PluginResource extends Resource
             <div class="space-y-4">
                 <div class="flex flex-wrap items-center gap-2">
                     '.self::runStatusBadge($latestRun).'
-                    '.($latestRun->dry_run ? self::mutedBadge('Dry run') : '').'
+                    '.($latestRun->dry_run ? self::mutedBadge(__('Dry run')) : '').'
                 </div>
                 <div class="space-y-1">
                     <div class="text-sm font-semibold text-gray-950 dark:text-white">'.e(Str::headline($latestRun->action ?: $latestRun->hook ?: 'Run')).'</div>
-                    <div class="text-sm text-gray-600 dark:text-gray-300">'.e($latestRun->summary ?: 'No summary has been written yet.').'</div>
+                    <div class="text-sm text-gray-600 dark:text-gray-300">'.e($latestRun->summary ?: __('No summary has been written yet.')).'</div>
                 </div>
                 <div class="grid gap-3 sm:grid-cols-2">
-                    '.self::stackedStat('Queued', app(DateFormatService::class)->format($latestRun->created_at, 'Unknown time')).'
-                    '.self::stackedStat('Invocation', e(Str::headline($latestRun->invocation_type))).'
+                    '.self::stackedStat(__('Queued'), app(DateFormatService::class)->format($latestRun->created_at, 'Unknown time')).'
+                    '.self::stackedStat(__('Invocation'), e(Str::headline($latestRun->invocation_type))).'
                 </div>
                 '.($totals !== '' ? '<div class="grid gap-2 sm:grid-cols-2">'.$totals.'</div>' : '').'
                 <div>
@@ -460,91 +459,91 @@ class PluginResource extends Resource
             </div>
         ';
 
-        return self::infoCard('Current Run', 'The latest execution and its immediate outcome.', $body);
+        return self::infoCard(__('Current Run'), __('The latest execution and its immediate outcome.'), $body);
     }
 
     protected static function automationCard(?Plugin $record): string
     {
         if (! $record) {
-            return self::infoCard('Automation', 'Defaults and schedules used by the plugin.', self::mutedMessage('No plugin record loaded.'));
+            return self::infoCard(__('Automation'), __('Defaults and schedules used by the plugin.'), self::mutedMessage(__('No plugin record loaded.')));
         }
 
-        $autoScan = $record?->getSetting('auto_scan_on_epg_ready') ? 'Auto scan on EPG cache: enabled' : 'Auto scan on EPG cache: disabled';
+        $autoScan = $record?->getSetting('auto_scan_on_epg_ready') ? __('Auto scan on EPG cache: enabled') : __('Auto scan on EPG cache: disabled');
         $scheduled = $record?->getSetting('schedule_enabled')
             ? 'Scheduled scans: '.(string) $record->getSetting('schedule_cron', 'enabled')
-            : 'Scheduled scans: disabled';
+            : __('Scheduled scans: disabled');
 
         $body = '
             <div class="space-y-4">
                 <div class="grid gap-3 sm:grid-cols-2">
-                    '.self::stackedStat('Auto trigger', e($autoScan)).'
-                    '.self::stackedStat('Schedule', e($scheduled)).'
+                    '.self::stackedStat(__('Auto trigger'), e($autoScan)).'
+                    '.self::stackedStat(__('Schedule'), e($scheduled)).'
                 </div>
                 <div class="grid gap-3 sm:grid-cols-2">
-                    '.self::stackedStat('Default playlist', e(self::playlistLabel($record->getSetting('default_playlist_id')))).'
-                    '.self::stackedStat('Default EPG', e(self::epgLabel($record->getSetting('default_epg_id')))).'
+                    '.self::stackedStat(__('Default playlist'), e(self::playlistLabel($record->getSetting('default_playlist_id')))).'
+                    '.self::stackedStat(__('Default EPG'), e(self::epgLabel($record->getSetting('default_epg_id')))).'
                 </div>
                 <div class="text-xs leading-5 text-gray-500 dark:text-gray-400">These values prefill manual actions and are reused when hooks or schedules queue work automatically.</div>
             </div>
         ';
 
-        return self::infoCard('Automation', 'Defaults, schedules, and automatic entry points.', $body);
+        return self::infoCard(__('Automation'), __('Defaults, schedules, and automatic entry points.'), $body);
     }
 
     protected static function nextStepCard(?Plugin $record): string
     {
         if (! $record) {
-            return self::infoCard('Recommended Next Step', 'What to do next.', self::mutedMessage('No plugin record loaded.'));
+            return self::infoCard(__('Recommended Next Step'), __('What to do next.'), self::mutedMessage(__('No plugin record loaded.')));
         }
 
         $latestRun = self::latestRun($record);
 
         if ($record->validation_status !== 'valid') {
-            $message = 'Validate the plugin before you enable it or queue any work. The system should treat this plugin as untrusted until the contract checks pass.';
+            $message = __('Validate the plugin before you enable it or queue any work. The system should treat this plugin as untrusted until the contract checks pass.');
         } elseif (! $record->isTrusted()) {
-            $message = 'An administrator still needs to trust this plugin. Review the declared permissions, owned schema, and file integrity before enabling it.';
+            $message = __('An administrator still needs to trust this plugin. Review the declared permissions, owned schema, and file integrity before enabling it.');
         } elseif (! $record->hasVerifiedIntegrity()) {
-            $message = 'Integrity is no longer verified. Re-run integrity verification and trust review before allowing this plugin to execute again.';
+            $message = __('Integrity is no longer verified. Re-run integrity verification and trust review before allowing this plugin to execute again.');
         } elseif (! $record->enabled) {
-            $message = 'The plugin is valid but disabled. Enable it first, then run a dry scan so you can inspect the output before applying repairs.';
+            $message = __('The plugin is valid but disabled. Enable it first, then run a dry scan so you can inspect the output before applying repairs.');
         } elseif (! $latestRun) {
-            $message = 'Queue a scan from the header to generate the first run. That will populate Live Activity, Run History, and the run detail screen.';
+            $message = __('Queue a scan from the header to generate the first run. That will populate Live Activity, Run History, and the run detail screen.');
         } elseif ($latestRun->status === 'running') {
-            $message = 'Open the current run and watch the activity stream. If the run stalls, inspect the payload to confirm the target playlist and EPG pair.';
+            $message = __('Open the current run and watch the activity stream. If the run stalls, inspect the payload to confirm the target playlist and EPG pair.');
         } elseif ($latestRun->status === 'failed') {
-            $message = 'Review the failed run, check the activity stream for the error context, and correct the target playlist, EPG, or thresholds before trying again.';
+            $message = __('Review the failed run, check the activity stream for the error context, and correct the target playlist, EPG, or thresholds before trying again.');
         } else {
-            $message = 'Use the last completed run as your baseline. If the candidate count looks right, queue an apply run or tighten the thresholds from the Settings tab.';
+            $message = __('Use the last completed run as your baseline. If the candidate count looks right, queue an apply run or tighten the thresholds from the Settings tab.');
         }
 
         $body = '
             <div class="space-y-4">
                 <div class="rounded-2xl border border-primary-200 bg-primary-50/70 px-4 py-4 text-sm leading-6 text-primary-900 dark:border-primary-800 dark:bg-primary-950/30 dark:text-primary-100">'.e($message).'</div>
                 <div class="grid gap-3 sm:grid-cols-2">
-                    '.self::stackedStat('Validation', e(Str::headline($record->validation_status ?? 'pending'))).'
-                    '.self::stackedStat('Trust', e(Str::headline($record->trust_state ?? 'pending_review'))).'
-                    '.self::stackedStat('Enabled', $record->enabled ? 'Yes' : 'No').'
-                    '.self::stackedStat('Integrity', e(Str::headline($record->integrity_status ?? 'unknown'))).'
-                    '.self::stackedStat('Lifecycle', e(Str::headline($record->installation_status ?? 'installed'))).'
-                    '.self::stackedStat('Cleanup default', e(Str::headline($record->defaultCleanupMode()))).'
+                    '.self::stackedStat(__('Validation'), e(Str::headline($record->validation_status ?? 'pending'))).'
+                    '.self::stackedStat(__('Trust'), e(Str::headline($record->trust_state ?? 'pending_review'))).'
+                    '.self::stackedStat(__('Enabled'), $record->enabled ? __('Yes') : __('No')).'
+                    '.self::stackedStat(__('Integrity'), e(Str::headline($record->integrity_status ?? 'unknown'))).'
+                    '.self::stackedStat(__('Lifecycle'), e(Str::headline($record->installation_status ?? 'installed'))).'
+                    '.self::stackedStat(__('Cleanup default'), e(Str::headline($record->defaultCleanupMode()))).'
                 </div>
             </div>
         ';
 
-        return self::infoCard('Recommended Next Step', 'A recommendation based on the current plugin state.', $body);
+        return self::infoCard(__('Recommended Next Step'), __('A recommendation based on the current plugin state.'), $body);
     }
 
     protected static function pluginIdentity(?Plugin $record): string
     {
         if (! $record) {
-            return self::mutedMessage('No plugin record loaded.');
+            return self::mutedMessage(__('No plugin record loaded.'));
         }
 
         return self::stackedLines([
             '<div class="text-base font-semibold text-gray-950 dark:text-white">'.e($record->name).'</div>',
-            '<div class="text-sm text-gray-600 dark:text-gray-300">Version '.e($record->version).' · '.e($record->description ?: 'No description provided.').'</div>',
+            '<div class="text-sm text-gray-600 dark:text-gray-300">Version '.e($record->version).' · '.e($record->description ?: __('No description provided.')).'</div>',
             '<div class="text-xs text-gray-500 dark:text-gray-400">Class: '.e($record->class_name ?: 'Unknown').'</div>',
-            '<div class="text-xs text-gray-500 dark:text-gray-400">Permissions: '.e(collect($record->permissions ?? [])->map(fn (string $permission) => Str::headline($permission))->implode(', ') ?: 'None declared').'</div>',
+            '<div class="text-xs text-gray-500 dark:text-gray-400">Permissions: '.e(collect($record->permissions ?? [])->map(fn (string $permission) => Str::headline($permission))->implode(', ') ?: __('None declared')).'</div>',
             '<div class="text-xs text-gray-500 dark:text-gray-400">Lifecycle: disable pauses execution, uninstall changes lifecycle state, forget registry only removes the row.</div>',
             '<div class="text-xs text-gray-500 dark:text-gray-400">Declared ownership: '.e(self::ownershipSummary($record)).'</div>',
         ]);
@@ -569,7 +568,7 @@ class PluginResource extends Resource
             ->implode('');
 
         if ($actions === '') {
-            return self::mutedMessage('No actions were declared for this plugin.');
+            return self::mutedMessage(__('No actions were declared for this plugin.'));
         }
 
         return '<div class="grid gap-2">'.$actions.'</div>';

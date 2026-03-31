@@ -21,11 +21,20 @@ class PluginInstallReviewResource extends Resource
 {
     protected static ?string $model = PluginInstallReview::class;
 
-    protected static ?string $label = 'Plugin Install';
+    public static function getModelLabel(): string
+    {
+        return __('Plugin Install');
+    }
 
-    protected static ?string $pluralLabel = 'Plugin Installs';
+    public static function getPluralModelLabel(): string
+    {
+        return __('Plugin Installs');
+    }
 
-    protected static string|\UnitEnum|null $navigationGroup = 'Plugins';
+    public static function getNavigationGroup(): ?string
+    {
+        return __('Plugins');
+    }
 
     public static function canAccess(): bool
     {
@@ -39,7 +48,7 @@ class PluginInstallReviewResource extends Resource
 
     public static function getNavigationLabel(): string
     {
-        return 'Installs';
+        return __('Installs');
     }
 
     public static function getNavigationSort(): ?int
@@ -50,7 +59,7 @@ class PluginInstallReviewResource extends Resource
     public static function form(Schema $schema): Schema
     {
         return $schema->components([
-            Section::make('Review Summary')
+            Section::make(__('Review Summary'))
                 ->columns(2)
                 ->schema([
                     TextInput::make('plugin_id')->disabled(),
@@ -67,7 +76,7 @@ class PluginInstallReviewResource extends Resource
                     TextInput::make('source_path')->disabled()->columnSpanFull(),
                     TextInput::make('extracted_path')->disabled()->columnSpanFull(),
                 ]),
-            Section::make('Requested Access')
+            Section::make(__('Requested Access'))
                 ->columns(2)
                 ->schema([
                     Placeholder::make('permissions_preview')
@@ -77,7 +86,7 @@ class PluginInstallReviewResource extends Resource
                         ->hiddenLabel()
                         ->content(fn (?PluginInstallReview $record) => collect($record?->capabilities ?? [])->implode(', ') ?: 'No capabilities declared.'),
                     Placeholder::make('high_risk_permissions')
-                        ->label('High-Risk Permissions')
+                        ->label(__('High-Risk Permissions'))
                         ->content(function (?PluginInstallReview $record): string {
                             $highRisk = collect($record?->permissions ?? [])
                                 ->intersect(['network_egress', 'filesystem_write', 'schema_manage'])
@@ -89,13 +98,13 @@ class PluginInstallReviewResource extends Resource
                         })
                         ->columnSpanFull(),
                     Textarea::make('schema_json')
-                        ->label('Schema')
+                        ->label(__('Schema'))
                         ->disabled()
                         ->rows(10)
                         ->dehydrated(false)
                         ->formatStateUsing(fn (?PluginInstallReview $record) => json_encode($record?->schema_definition ?? [], JSON_PRETTY_PRINT)),
                     Textarea::make('ownership_json')
-                        ->label('Data Ownership')
+                        ->label(__('Data Ownership'))
                         ->disabled()
                         ->rows(10)
                         ->dehydrated(false)
@@ -105,26 +114,26 @@ class PluginInstallReviewResource extends Resource
                 ->columns(2)
                 ->schema([
                     Textarea::make('validation_errors_json')
-                        ->label('Validation Errors')
+                        ->label(__('Validation Errors'))
                         ->disabled()
                         ->rows(10)
                         ->dehydrated(false)
                         ->formatStateUsing(fn (?PluginInstallReview $record) => json_encode($record?->validation_errors ?? [], JSON_PRETTY_PRINT)),
                     Textarea::make('scan_details_json')
-                        ->label('Scan Details')
+                        ->label(__('Scan Details'))
                         ->disabled()
                         ->rows(10)
                         ->dehydrated(false)
                         ->hidden(fn () => static::useFakeScanner())
                         ->formatStateUsing(fn (?PluginInstallReview $record) => json_encode($record?->scan_details ?? [], JSON_PRETTY_PRINT)),
                     Textarea::make('source_metadata_json')
-                        ->label('Source Metadata')
+                        ->label(__('Source Metadata'))
                         ->disabled()
                         ->rows(10)
                         ->dehydrated(false)
                         ->formatStateUsing(fn (?PluginInstallReview $record) => json_encode($record?->source_metadata ?? [], JSON_PRETTY_PRINT)),
                 ]),
-            Section::make('Review Notes')
+            Section::make(__('Review Notes'))
                 ->schema([
                     Textarea::make('review_notes')
                         ->disabled()
@@ -156,7 +165,7 @@ class PluginInstallReviewResource extends Resource
             ->toolbarActions([
                 DeleteBulkAction::make()
                     ->visible(fn () => auth()->user()->canManagePlugins())
-                    ->modalDescription('Removes the selected reviews from the system. This does not affect the installed plugins or their files on disk.'),
+                    ->modalDescription(__('Removes the selected reviews from the system. This does not affect the installed plugins or their files on disk.')),
             ]);
     }
 

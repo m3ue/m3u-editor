@@ -21,11 +21,22 @@ use InvalidArgumentException;
 
 class CreatePlugin extends Page
 {
-    protected static ?string $navigationLabel = 'Create Plugin';
-
-    protected static ?string $title = 'Create Plugin';
-
     protected static string|\UnitEnum|null $navigationGroup = 'Plugins';
+
+    public static function getNavigationLabel(): string
+    {
+        return __('Create Plugin');
+    }
+
+    public function getTitle(): string
+    {
+        return __('Create Plugin');
+    }
+
+    public static function getNavigationGroup(): ?string
+    {
+        return __('Plugins');
+    }
 
     protected static ?int $navigationSort = 4;
 
@@ -43,7 +54,7 @@ class CreatePlugin extends Page
 
     public function getSubheading(): ?string
     {
-        return 'Generate a new plugin scaffold with all the files you need to get started.';
+        return __('Generate a new plugin scaffold with all the files you need to get started.');
     }
 
     public function mount(): void

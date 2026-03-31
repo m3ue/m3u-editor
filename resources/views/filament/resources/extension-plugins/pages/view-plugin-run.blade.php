@@ -34,7 +34,7 @@
                         @if($run->dry_run)
                             <span
                                 class="inline-flex items-center rounded-full bg-primary-50 px-3 py-1 text-sm font-medium text-primary-700 ring-1 ring-inset ring-primary-200 dark:bg-primary-950/40 dark:text-primary-300 dark:ring-primary-800">
-                                Dry run
+                                {{ __('Dry run') }}
                             </span>
                         @endif
                         <span
@@ -46,12 +46,12 @@
                     <div>
                         <p
                             class="text-sm font-medium uppercase tracking-[0.24em] text-primary-600 dark:text-primary-300">
-                            Plugin run detail</p>
+                            {{ __('Plugin run detail') }}</p>
                         <h2 class="mt-2 text-2xl font-semibold tracking-tight text-gray-950 dark:text-white">
-                            {{ $run->plugin?->name ?? 'Unknown plugin' }}
+                            {{ $run->plugin?->name ?? __('Unknown plugin') }}
                         </h2>
                         <p class="mt-2 max-w-2xl text-sm leading-6 text-gray-600 dark:text-gray-300">
-                            {{ $run->summary ?: 'This run has no summary yet. Use the payload, result, and log stream below to inspect what happened.' }}
+                            {{ $run->summary ?: __('This run has no summary yet. Use the payload, result, and log stream below to inspect what happened.') }}
                         </p>
                     </div>
 
@@ -60,9 +60,9 @@
                             class="rounded-2xl border border-gray-200 bg-white/80 p-4 backdrop-blur dark:border-gray-800 dark:bg-gray-900/80">
                             <div
                                 class="text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">
-                                Invocation</div>
+                                {{ __('Invocation') }}</div>
                             <div class="mt-2 text-sm font-medium text-gray-950 dark:text-white">
-                                {{ $run->action ? \Illuminate\Support\Str::headline($run->action) : ($run->hook ? \Illuminate\Support\Str::headline($run->hook) : 'Plugin run') }}
+                                {{ $run->action ? \Illuminate\Support\Str::headline($run->action) : ($run->hook ? \Illuminate\Support\Str::headline($run->hook) : __('Plugin run')) }}
                             </div>
                             <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">
                                 {{ \Illuminate\Support\Str::headline($run->invocation_type) }}
@@ -72,24 +72,23 @@
                             class="rounded-2xl border border-gray-200 bg-white/80 p-4 backdrop-blur dark:border-gray-800 dark:bg-gray-900/80">
                             <div
                                 class="text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">
-                                Current signal</div>
+                                {{ __('Current signal') }}</div>
                             <div class="mt-2 text-sm font-medium text-gray-950 dark:text-white">
-                                {{ $run->progress_message ?: ($latestMessage ?: 'No log messages yet') }}
+                                {{ $run->progress_message ?: ($latestMessage ?: __('No log messages yet')) }}
                             </div>
                             <div class="mt-3 h-2 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800">
                                 <div class="h-full rounded-full bg-primary-500 transition-all"
                                     style="width: {{ max(2, $progress) }}%"></div>
                             </div>
-                            <div class="mt-2 text-xs text-gray-500 dark:text-gray-400">{{ $progress }}% recorded
-                                progress.</div>
+                            <div class="mt-2 text-xs text-gray-500 dark:text-gray-400">{{ $progress }}% {{ __('recorded progress.') }}</div>
                         </div>
                         <div
                             class="rounded-2xl border border-gray-200 bg-white/80 p-4 backdrop-blur dark:border-gray-800 dark:bg-gray-900/80">
                             <div
                                 class="text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">
-                                Queued by</div>
+                                {{ __('Queued by') }}</div>
                             <div class="mt-2 text-sm font-medium text-gray-950 dark:text-white">
-                                {{ $run->user?->name ?? 'System' }}
+                                {{ $run->user?->name ?? __('System') }}
                             </div>
                             <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">
                                 {{ $fmt->format($run->created_at, 'Unknown time') }}
@@ -103,33 +102,30 @@
                         class="rounded-2xl border border-gray-200 bg-white/90 p-5 shadow-xs dark:border-gray-800 dark:bg-gray-900/90">
                         <div
                             class="text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">
-                            Lifecycle</div>
+                            {{ __('Lifecycle') }}</div>
                         <dl class="mt-4 space-y-3 text-sm text-gray-600 dark:text-gray-300">
                             <div>
-                                <dt class="text-xs uppercase tracking-wide text-gray-400 dark:text-gray-500">Queued</dt>
+                                <dt class="text-xs uppercase tracking-wide text-gray-400 dark:text-gray-500">{{ __('Queued') }}</dt>
                                 <dd class="mt-1 font-medium text-gray-950 dark:text-white">
                                     {{ $fmt->format($run->created_at) }}
                                 </dd>
                             </div>
                             <div>
-                                <dt class="text-xs uppercase tracking-wide text-gray-400 dark:text-gray-500">Started
-                                </dt>
+                                <dt class="text-xs uppercase tracking-wide text-gray-400 dark:text-gray-500">{{ __('Started') }}</dt>
                                 <dd class="mt-1 font-medium text-gray-950 dark:text-white">
-                                    {{ $run->started_at ? $fmt->format($run->started_at) : 'Not started' }}
+                                    {{ $run->started_at ? $fmt->format($run->started_at) : __('Not started') }}
                                 </dd>
                             </div>
                             <div>
-                                <dt class="text-xs uppercase tracking-wide text-gray-400 dark:text-gray-500">Finished
-                                </dt>
+                                <dt class="text-xs uppercase tracking-wide text-gray-400 dark:text-gray-500">{{ __('Finished') }}</dt>
                                 <dd class="mt-1 font-medium text-gray-950 dark:text-white">
-                                    {{ $run->finished_at ? $fmt->format($run->finished_at) : 'Still running' }}
+                                    {{ $run->finished_at ? $fmt->format($run->finished_at) : __('Still running') }}
                                 </dd>
                             </div>
                             <div>
-                                <dt class="text-xs uppercase tracking-wide text-gray-400 dark:text-gray-500">Last
-                                    heartbeat</dt>
+                                <dt class="text-xs uppercase tracking-wide text-gray-400 dark:text-gray-500">{{ __('Last heartbeat') }}</dt>
                                 <dd class="mt-1 font-medium text-gray-950 dark:text-white">
-                                    {{ $run->last_heartbeat_at ? $fmt->format($run->last_heartbeat_at) : 'No heartbeat yet' }}
+                                    {{ $run->last_heartbeat_at ? $fmt->format($run->last_heartbeat_at) : __('No heartbeat yet') }}
                                 </dd>
                             </div>
                         </dl>
@@ -139,7 +135,7 @@
                         class="rounded-2xl border border-gray-200 bg-white/90 p-5 shadow-xs dark:border-gray-800 dark:bg-gray-900/90">
                         <div
                             class="text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">
-                            Returned totals</div>
+                            {{ __('Returned totals') }}</div>
                         <div class="mt-4 flex flex-wrap gap-2 text-sm text-gray-600 dark:text-gray-300">
                             @forelse($totals as $key => $value)
                                 <span
@@ -147,15 +143,14 @@
                                     {{ \Illuminate\Support\Str::headline((string) $key) }} · {{ $value }}
                                 </span>
                             @empty
-                                <span class="text-sm text-gray-500 dark:text-gray-400">This run did not publish aggregate
-                                    totals.</span>
+                                <span class="text-sm text-gray-500 dark:text-gray-400">{{ __('This run did not publish aggregate totals.') }}</span>
                             @endforelse
                         </div>
 
                         @if($reportPath)
                             <div
                                 class="mt-4 rounded-2xl bg-gray-50 p-4 text-xs text-gray-500 dark:bg-gray-950/60 dark:text-gray-300">
-                                <div class="font-semibold text-gray-700 dark:text-gray-100">Artifact</div>
+                                <div class="font-semibold text-gray-700 dark:text-gray-100">{{ __('Artifact') }}</div>
                                 <div class="mt-1">{{ $this->reportFilename() }}</div>
                                 <div class="mt-1">{{ $reportPath }}</div>
                             </div>
@@ -170,9 +165,8 @@
                 class="rounded-3xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900">
                 <div class="flex items-center justify-between gap-3">
                     <div>
-                        <h2 class="text-sm font-semibold text-gray-950 dark:text-white">Activity stream</h2>
-                        <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Latest persisted log messages for this
-                            run.</p>
+                        <h2 class="text-sm font-semibold text-gray-950 dark:text-white">{{ __('Activity stream') }}</h2>
+                        <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ __('Latest persisted log messages for this run.') }}</p>
                     </div>
                 </div>
 

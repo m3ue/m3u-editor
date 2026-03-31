@@ -26,22 +26,21 @@
             <x-filament::card class="p-6">
                 <div class="flex items-start justify-between gap-4">
                     <div>
-                        <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Plugins Needing Attention
+                        <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ __('Plugins Needing Attention') }}
                         </h2>
                         <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                            These plugins have issues that need your attention — they may be blocked, modified, invalid, or
-                            incomplete.
+                            {{ __('These plugins have issues that need your attention — they may be blocked, modified, invalid, or incomplete.') }}
                         </p>
                     </div>
                     <x-filament::badge color="warning" size="sm">
-                        {{ $attentionPlugins->count() }} shown
+                        {{ $attentionPlugins->count() }} {{ __('shown') }}
                     </x-filament::badge>
                 </div>
 
                 @if ($attentionPlugins->isEmpty())
                     <div
                         class="mt-4 rounded-xl border border-dashed border-green-300 bg-green-50 p-4 text-sm text-green-700 dark:border-green-900 dark:bg-green-950/40 dark:text-green-300">
-                        No plugins currently need attention.
+                        {{ __('No plugins currently need attention.') }}
                     </div>
                 @else
                     <div class="mt-4 space-y-3">
@@ -58,14 +57,14 @@
                                             </x-filament::badge>
                                         </div>
                                         <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                                            {{ $plugin->plugin_id }} · {{ $plugin->source_type ?: 'unknown source' }}
+                                            {{ $plugin->plugin_id }} · {{ $plugin->source_type ?: __('unknown source') }}
                                         </p>
                                         <p class="mt-2 text-sm text-gray-600 dark:text-gray-300">
-                                            Trust:
+                                            {{ __('Trust') }}:
                                             {{ str($plugin->trust_state ?: 'pending_review')->replace('_', ' ')->headline() }}
-                                            · Files:
+                                            · {{ __('Files') }}:
                                             {{ str($plugin->integrity_status ?: 'unknown')->replace('_', ' ')->headline() }}
-                                            · Status:
+                                            · {{ __('Status') }}:
                                             {{ str($plugin->installation_status ?: 'installed')->replace('_', ' ')->headline() }}
                                         </p>
                                     </div>
@@ -73,7 +72,7 @@
                                     <x-filament::button tag="a"
                                         href="{{ \App\Filament\Resources\Plugins\PluginResource::getUrl('edit', ['record' => $plugin]) }}"
                                         color="gray" size="sm">
-                                        Open
+                                        {{ __('Open') }}
                                     </x-filament::button>
                                 </div>
                             </div>
@@ -84,14 +83,14 @@
         </div>
 
         <x-filament::card class="p-6">
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Recent Runs</h2>
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ __('Recent Runs') }}</h2>
             <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                The latest plugin executions across all installed plugins.
+                {{ __('The latest plugin executions across all installed plugins.') }}
             </p>
 
             @if ($recentRuns->isEmpty())
                 <div class="mt-4 rounded-xl border border-dashed border-gray-300 p-4 text-sm text-gray-600 dark:border-gray-700 dark:text-gray-300">
-                    No plugin runs recorded yet.
+                    {{ __('No plugin runs recorded yet.') }}
                 </div>
             @else
                 <div class="mt-4 divide-y divide-gray-100 dark:divide-white/5">
@@ -132,7 +131,7 @@
 
                                 @if ($runUrl)
                                     <x-filament::button tag="a" href="{{ $runUrl }}" color="gray" size="sm">
-                                        View
+                                        {{ __('View') }}
                                     </x-filament::button>
                                 @endif
                             </div>
@@ -146,21 +145,21 @@
             <x-filament::card class="p-6">
                 <div class="flex items-start justify-between gap-4">
                     <div>
-                        <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Recent Plugin Installs</h2>
+                        <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ __('Recent Plugin Installs') }}</h2>
                         <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                            Recent plugin uploads — pending approval, approved, or rejected.
+                            {{ __('Recent plugin uploads — pending approval, approved, or rejected.') }}
                         </p>
                     </div>
                     <x-filament::button tag="a" href="{{ $pluginInstallsUrl }}" color="gray" size="sm"
                         icon="heroicon-o-arrow-right">
-                        View Queue
+                        {{ __('View Queue') }}
                     </x-filament::button>
                 </div>
 
                 @if ($recentInstallReviews->isEmpty())
                     <div
                         class="mt-4 rounded-xl border border-dashed border-gray-300 p-4 text-sm text-gray-600 dark:border-gray-700 dark:text-gray-300">
-                        No plugin installs yet.
+                        {{ __('No plugin installs yet.') }}
                     </div>
                 @else
                     <div class="mt-4 space-y-3">
@@ -170,7 +169,7 @@
                                     <div class="min-w-0">
                                         <div class="flex flex-wrap items-center gap-2">
                                             <p class="font-medium text-gray-900 dark:text-white">
-                                                {{ $review->plugin_name ?: $review->plugin_id ?: 'Unknown Plugin' }}
+                                                {{ $review->plugin_name ?: $review->plugin_id ?: __('Unknown Plugin') }}
                                             </p>
                                             <x-filament::badge :color="$this->installStatusColor($review->status)" size="sm">
                                                 {{ str($review->status)->replace('_', ' ')->headline() }}
@@ -180,7 +179,7 @@
                                             </x-filament::badge>
                                         </div>
                                         <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                                            Scan: {{ str($review->scan_status ?: 'pending')->replace('_', ' ')->headline() }}
+                                            {{ __('Scan') }}: {{ str($review->scan_status ?: 'pending')->replace('_', ' ')->headline() }}
                                             · {{ optional($review->created_at)->diffForHumans() }}
                                         </p>
                                     </div>
@@ -188,7 +187,7 @@
                                     <x-filament::button tag="a"
                                         href="{{ \App\Filament\Resources\PluginInstallReviews\PluginInstallReviewResource::getUrl('edit', ['record' => $review]) }}"
                                         color="gray" size="sm">
-                                        Open
+                                        {{ __('Open') }}
                                     </x-filament::button>
                                 </div>
                             </div>
