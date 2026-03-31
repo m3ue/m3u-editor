@@ -187,7 +187,10 @@ function streamPlayer() {
                 console.error('Video element not found:', playerId);
                 return;
             }
-                        
+
+            // Clean up any existing players before binding the new video element
+            this.cleanup();
+
             // Store reference to video element for cleanup
             this.player = video;
 
@@ -196,9 +199,6 @@ function streamPlayer() {
 
             // Reset error counters
             this.fragmentErrorCount = 0;
-
-            // Clean up any existing players
-            this.cleanup();
 
             // Initialise progress tracking from data attributes
             this._initProgress();
@@ -228,37 +228,36 @@ function streamPlayer() {
             // Set stream format
             this.streamMetadata.format = 'HLS';
 
+            const contentType = video.dataset.contentType || '';
+            const isLive = contentType === 'live';
+
             if (typeof Hls !== 'undefined' && Hls.isSupported()) {
-                console.log('Creating HLS player with configuration...');
+                console.log('Creating HLS player with configuration...', { contentType, isLive });
                 this.hls = new Hls({
                     enableWorker: true,
-                    lowLatencyMode: true,
-                    backBufferLength: 90,
-                    maxBufferLength: 30,
-                    maxMaxBufferLength: 600,
+                    lowLatencyMode: isLive,
+                    backBufferLength: isLive ? 90 : 30,
+                    maxBufferLength: isLive ? 30 : 60,
+                    maxMaxBufferLength: isLive ? 600 : 120,
                     maxBufferSize: 60 * 1000 * 1000,
                     maxBufferHole: 0.5,
-                    // Live stream settings - critical for continuous playback
-                    liveSyncDurationCount: 3,       // Sync to 3 segments behind live edge
-                    liveMaxLatencyDurationCount: 6, // Max latency before seeking forward
-                    liveDurationInfinity: true,     // Treat stream as infinite (no duration limit)
-                    liveBackBufferLength: 60,       // Keep 60s of back buffer for seeking
-                    // Add debug logging
+                    startPosition: -1,
+                    liveSyncDurationCount: isLive ? 3 : undefined,
+                    liveMaxLatencyDurationCount: isLive ? 6 : undefined,
+                    liveDurationInfinity: isLive,
+                    liveBackBufferLength: isLive ? 60 : undefined,
                     debug: false,
-                    // Add retry and timeout configurations
-                    manifestLoadingTimeOut: 10000,
-                    manifestLoadingMaxRetry: 3,
-                    manifestLoadingRetryDelay: 1000,
-                    levelLoadingTimeOut: 10000,
-                    levelLoadingMaxRetry: 4,
-                    levelLoadingRetryDelay: 1000,
-                    fragLoadingTimeOut: 20000,
-                    fragLoadingMaxRetry: 6,
-                    fragLoadingRetryDelay: 1000,
-                    // Add CORS configuration
+                    manifestLoadingTimeOut: isLive ? 10000 : 15000,
+                    manifestLoadingMaxRetry: isLive ? 3 : 4,
+                    manifestLoadingRetryDelay: isLive ? 1000 : 1500,
+                    levelLoadingTimeOut: isLive ? 10000 : 15000,
+                    levelLoadingMaxRetry: isLive ? 4 : 4,
+                    levelLoadingRetryDelay: isLive ? 1000 : 1500,
+                    fragLoadingTimeOut: isLive ? 20000 : 30000,
+                    fragLoadingMaxRetry: isLive ? 6 : 6,
+                    fragLoadingRetryDelay: isLive ? 1000 : 1500,
                     xhrSetup: function(xhr, url) {
                         console.log('HLS XHR setup for:', url);
-                        // Add any necessary headers here
                         xhr.withCredentials = false;
                     }
                 });
@@ -394,6 +393,9 @@ function streamPlayer() {
         initMpegTsPlayer(video, url, playerId) {
             console.log('MPEG-TS libraries available:', typeof mpegts !== 'undefined', mpegts?.getFeatureList().mseLivePlayback);
 
+            const contentType = video.dataset.contentType || '';
+            const isLive = contentType === 'live';
+
             // Set stream format
             this.streamMetadata.format = 'MPEG-TS';
 
@@ -404,19 +406,19 @@ function streamPlayer() {
             this.updateStreamDetails(playerId);
             
             if (typeof mpegts !== 'undefined' && mpegts.getFeatureList().mseLivePlayback) {
-                console.log('Creating MPEG-TS player...');
+                console.log('Creating MPEG-TS player...', { contentType, isLive });
                 this.mpegts = mpegts.createPlayer({
                     type: 'mpegts',
                     url: url,
-                    isLive: true,
+                    isLive,
                     enableWorker: true,
-                    enableStashBuffer: false,
-                    liveBufferLatencyChasing: true,
-                    liveSync: true,
+                    enableStashBuffer: isLive,
+                    liveBufferLatencyChasing: isLive,
+                    liveSync: isLive,
                     cors: true,
                     autoCleanupSourceBuffer: true,
-                    autoCleanupMaxBackwardDuration: 10,
-                    autoCleanupMinBackwardDuration: 5,
+                    autoCleanupMaxBackwardDuration: isLive ? 10 : 30,
+                    autoCleanupMinBackwardDuration: isLive ? 5 : 15,
                     reuseRedirectedURL: true,
                 });
                 
@@ -855,12 +857,15 @@ function streamPlayer() {
                 console.log('Stopping video playback');
                 try {
                     this.player.pause();
-                    this.player.src = '';
+                    this.player.removeAttribute('src');
                     this.player.load(); // This will stop any ongoing loading/streaming
+                    this.player._streamPlayer = null;
                 } catch (error) {
                     console.warn('Error cleaning up video element:', error);
                 }
             }
+
+            this.player = null;
         }
     };
 }
