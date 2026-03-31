@@ -664,7 +664,7 @@ class XtreamApiController extends Controller
                     // Use stream_icon as thumbnail (or a dedicated thumbnail if available)
                     $thumbnail = $streamIcon;
 
-                    $liveStreams[] = [
+                    $liveStream = [
                         'num' => $channelNo,
                         'name' => $channel->title_custom ?? $channel->title,
                         'stream_type' => 'live',
@@ -680,6 +680,14 @@ class XtreamApiController extends Controller
                         'thumbnail' => $thumbnail,
                         'direct_source' => '',
                     ];
+
+                    // Include emby-compatible stream_stats if probed data exists
+                    $embyStats = $channel->getEmbyStreamStats();
+                    if (! empty($embyStats)) {
+                        $liveStream['stream_stats'] = $embyStats;
+                    }
+
+                    $liveStreams[] = $liveStream;
                 }
             }
 

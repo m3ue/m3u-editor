@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\DispatcharrController;
 use App\Http\Controllers\AssetPreviewController;
 use App\Http\Controllers\Auth\OidcController;
 use App\Http\Controllers\ChannelController;
@@ -288,6 +289,10 @@ Route::get('/xmltv.php', [XtreamApiController::class, 'epg'])->name('xtream.api.
 // Stream endpoints
 Route::get('/live/{username}/{password}/{streamId}.{format?}', [XtreamStreamController::class, 'handleLive'])
     ->name('xtream.stream.live.root');
+
+// Dispatcharr-compatible proxy stream endpoint (used by emby-xtream plugin)
+Route::get('/proxy/ts/stream/{token}', [DispatcharrController::class, 'proxyStream'])
+    ->name('dispatcharr.proxy.stream');
 Route::get('/movie/{username}/{password}/{streamId}.{format?}', [XtreamStreamController::class, 'handleVod'])
     ->name('xtream.stream.vod.root');
 Route::get('/series/{username}/{password}/{streamId}.{format?}', [XtreamStreamController::class, 'handleSeries'])

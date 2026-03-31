@@ -1702,6 +1702,12 @@ class PlaylistResource extends Resource
                 ->columnSpanFull()
                 ->columns(columns: 2)
                 ->schema([
+                    Toggle::make('auto_probe_streams')
+                        ->label('Probe Streams After Sync')
+                        ->helperText('When enabled, channels will be probed with ffprobe after sync to collect stream metadata (codec, resolution, bitrate) for fast channel switching.')
+                        ->inline(true)
+                        ->default(false),
+
                     Toggle::make('import_prefs.preprocess')
                         ->label('Preprocess playlist')
                         ->live()
@@ -2028,6 +2034,11 @@ class PlaylistResource extends Resource
                                 ->inline(true)
                                 ->default(true)
                                 ->helperText('When enabled, newly added channels will have merging enabled by default on sync.'),
+                            Toggle::make('import_prefs.channel_default_probe_enabled')
+                                ->label('Enable stream probing by default')
+                                ->inline(true)
+                                ->default(true)
+                                ->helperText('When enabled, newly added channels will be included in automatic stream probing after sync.'),
                         ])
                         ->hidden(fn (Get $get): bool => ! $get('enable_channels')),
 

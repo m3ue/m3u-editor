@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\DispatcharrController;
 use App\Http\Controllers\Api\EpgApiController;
 use App\Http\Controllers\Api\M3uProxyApiController;
 use Illuminate\Support\Facades\Route;
@@ -37,4 +38,21 @@ Route::middleware(['proxy.throttle'])->prefix('m3u-proxy')->group(function () {
     Route::post('broadcast/callback', [M3uProxyApiController::class, 'handleBroadcastCallback'])
         ->name('m3u-proxy.broadcast.callback')
         ->withoutMiddleware('proxy.throttle');
+});
+
+/*
+ * Dispatcharr-compatible API routes (used by emby-xtream plugin)
+ */
+Route::prefix('accounts')->group(function () {
+    Route::post('token', [DispatcharrController::class, 'login'])
+        ->name('dispatcharr.token');
+    Route::post('token/refresh', [DispatcharrController::class, 'refresh'])
+        ->name('dispatcharr.token.refresh');
+});
+
+Route::prefix('channels')->middleware('dispatcharr.auth')->group(function () {
+    Route::get('profiles', [DispatcharrController::class, 'profiles'])
+        ->name('dispatcharr.profiles');
+    Route::get('channels', [DispatcharrController::class, 'channels'])
+        ->name('dispatcharr.channels');
 });

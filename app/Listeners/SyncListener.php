@@ -6,6 +6,7 @@ use App\Enums\Status;
 use App\Events\SyncCompleted;
 use App\Jobs\GenerateEpgCache;
 use App\Jobs\MergeChannels;
+use App\Jobs\ProbeChannelStreams;
 use App\Jobs\ProcessChannelScrubber;
 use App\Jobs\RunPlaylistFindReplaceRules;
 use App\Jobs\RunPlaylistSortAlpha;
@@ -49,6 +50,11 @@ class SyncListener
                     'dry_run' => false,
                     'user_id' => $playlist->user_id,
                 ]);
+
+                // Dispatch stream probing job if enabled for this playlist
+                if ($playlist->auto_probe_streams ?? false) {
+                    dispatch(new ProbeChannelStreams(playlistId: $playlist->id));
+                }
             }
         }
         if ($event->model instanceof Epg) {

@@ -96,6 +96,8 @@ class ProcessM3uImport implements ShouldQueue
     // Merging enabled by default
     public bool $canMergeEnabled = true;
 
+    public bool $probeEnabled = true;
+
     // VOD merging enabled by default
     public bool $canMergeVodEnabled = true;
 
@@ -140,6 +142,9 @@ class ProcessM3uImport implements ShouldQueue
             $canMergeEnabled = $playlist->import_prefs['channel_default_merge_enabled'] ?? null;
             $this->epgMapEnabled = $epgMapEnabled !== null ? $epgMapEnabled : true;
             $this->canMergeEnabled = $canMergeEnabled !== null ? $canMergeEnabled : true;
+
+            $probeEnabled = $playlist->import_prefs['channel_default_probe_enabled'] ?? null;
+            $this->probeEnabled = $probeEnabled !== null ? $probeEnabled : true;
         }
 
         // See if VOD channel options set
@@ -578,6 +583,7 @@ class ProcessM3uImport implements ShouldQueue
                 'source_id' => null, // source ID for the channel
                 'can_merge' => $this->canMergeEnabled,
                 'epg_map_enabled' => $this->epgMapEnabled,
+                'probe_enabled' => $this->probeEnabled,
             ];
 
             // Keep track of channel number
@@ -851,6 +857,7 @@ class ProcessM3uImport implements ShouldQueue
                     'source_id' => null, // source ID for the channel
                     'can_merge' => $this->canMergeEnabled,
                     'epg_map_enabled' => $this->epgMapEnabled,
+                    'probe_enabled' => $this->probeEnabled,
                 ];
                 if ($autoSort) {
                     $channelFields['sort'] = 0;

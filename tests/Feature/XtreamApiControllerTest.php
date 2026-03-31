@@ -249,6 +249,67 @@ class XtreamApiControllerTest extends TestCase
         $this->assertIsString($channel1Data['direct_source']);
     }
 
+    public function test_get_live_streams_includes_stream_stats_when_probed()
+    {
+        $group = Group::factory()->for($this->user)->create();
+        $channel = Channel::factory()->for($this->playlist)->for($group)->create([
+            'enabled' => true,
+            'stream_stats' => [
+                ['stream' => [
+                    'codec_type' => 'video',
+                    'codec_name' => 'h264',
+                    'profile' => 'High',
+                    'level' => 41,
+                    'width' => 1920,
+                    'height' => 1080,
+                    'bit_rate' => '5000000',
+                    'avg_frame_rate' => '25/1',
+                    'bits_per_raw_sample' => '8',
+                ]],
+                ['stream' => [
+                    'codec_type' => 'audio',
+                    'codec_name' => 'aac',
+                    'channels' => 2,
+                    'sample_rate' => '48000',
+                    'bit_rate' => '128000',
+                ]],
+            ],
+            'stream_stats_probed_at' => now(),
+        ]);
+
+        $response = $this->getJson($this->getXtreamApiUrl('get_live_streams'));
+
+        $response->assertStatus(200)->assertJsonCount(1);
+
+        $jsonResponse = $response->json();
+        $channelData = collect($jsonResponse)->firstWhere('stream_id', $channel->id);
+
+        $this->assertNotNull($channelData);
+        $this->assertArrayHasKey('stream_stats', $channelData);
+        $this->assertEquals('1920x1080', $channelData['stream_stats']['resolution']);
+        $this->assertEquals('h264', $channelData['stream_stats']['video_codec']);
+        $this->assertEquals('High', $channelData['stream_stats']['video_profile']);
+        $this->assertEquals(41, $channelData['stream_stats']['video_level']);
+        $this->assertEquals('aac', $channelData['stream_stats']['audio_codec']);
+        $this->assertEquals('stereo', $channelData['stream_stats']['audio_channels']);
+    }
+
+    public function test_get_live_streams_omits_stream_stats_when_not_probed()
+    {
+        $group = Group::factory()->for($this->user)->create();
+        Channel::factory()->for($this->playlist)->for($group)->create([
+            'enabled' => true,
+            'stream_stats' => null,
+        ]);
+
+        $response = $this->getJson($this->getXtreamApiUrl('get_live_streams'));
+
+        $response->assertStatus(200)->assertJsonCount(1);
+
+        $jsonResponse = $response->json();
+        $this->assertArrayNotHasKey('stream_stats', $jsonResponse[0]);
+    }
+
     public function test_get_live_streams_no_channels()
     {
         $response = $this->getJson($this->getXtreamApiUrl('get_live_streams'));

@@ -17,6 +17,7 @@ use App\Enums\Status;
 use App\Events\SyncCompleted;
 use App\Jobs\GenerateEpgCache;
 use App\Jobs\MergeChannels;
+use App\Jobs\ProbeChannelStreams;
 use App\Jobs\ProcessChannelScrubber;
 use App\Jobs\RunPlaylistFindReplaceRules;
 use App\Jobs\RunPlaylistSortAlpha;
@@ -378,4 +379,33 @@ it('does not dispatch SyncPlexDvrJob when EPG sync failed', function () {
     event(new SyncCompleted($epg));
 
     Bus::assertNotDispatched(SyncPlexDvrJob::class);
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Stream probing: auto_probe_streams dispatch
+// ──────────────────────────────────────────────────────────────────────────────
+
+it('dispatches ProbeChannelStreams when auto_probe_streams is enabled', function () {
+    $this->playlist->update(['auto_probe_streams' => true]);
+
+    event(new SyncCompleted($this->playlist));
+
+    Bus::assertDispatched(ProbeChannelStreams::class, function ($job) {
+        return $job->playlistId === $this->playlist->id;
+    });
+});
+
+it('does not dispatch ProbeChannelStreams when auto_probe_streams is disabled', function () {
+    $this->playlist->update(['auto_probe_streams' => false]);
+
+    event(new SyncCompleted($this->playlist));
+
+    Bus::assertNotDispatched(ProbeChannelStreams::class);
+});
+
+it('does not dispatch ProbeChannelStreams when auto_probe_streams is null', function () {
+    // auto_probe_streams defaults to false/null
+    event(new SyncCompleted($this->playlist));
+
+    Bus::assertNotDispatched(ProbeChannelStreams::class);
 });

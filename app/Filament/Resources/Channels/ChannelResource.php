@@ -12,6 +12,7 @@ use App\Filament\Resources\EpgMaps\EpgMapResource;
 use App\Jobs\ChannelFindAndReplace;
 use App\Jobs\ChannelFindAndReplaceReset;
 use App\Jobs\MapPlaylistChannelsToEpg;
+use App\Jobs\ProbeChannelStreams;
 use App\Jobs\SyncPlexDvrJob;
 use App\Models\Channel;
 use App\Models\ChannelFailover;
@@ -47,6 +48,7 @@ use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
 use Filament\Support\Enums\Width;
+use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\ImageColumn;
 use Filament\Tables\Columns\SelectColumn;
 use Filament\Tables\Columns\TextColumn;
@@ -286,6 +288,17 @@ class ChannelResource extends Resource
                     }
                 })
                 ->sortable(),
+            ToggleColumn::make('probe_enabled')
+                ->label('Probe Enabled')
+                ->toggleable()
+                ->sortable(),
+            IconColumn::make('stream_stats_probed_at')
+                ->label('Probed')
+                ->icon(fn ($state): string => $state ? 'heroicon-o-check-circle' : 'heroicon-o-x-circle')
+                ->color(fn ($state): string => $state ? 'success' : 'gray')
+                ->tooltip(fn ($record): ?string => $record->stream_stats_probed_at?->diffForHumans())
+                ->toggleable()
+                ->sortable(),
             ToggleColumn::make('epg_map_enabled')
                 ->label('Mapping Enabled')
                 ->sortable(),
@@ -379,6 +392,18 @@ class ChannelResource extends Resource
                 ->toggle()
                 ->query(function ($query) {
                     return $query->where('epg_channel_id', '=', null);
+                }),
+            Filter::make('probed')
+                ->label('Stream probed')
+                ->toggle()
+                ->query(function ($query) {
+                    return $query->whereNotNull('stream_stats_probed_at');
+                }),
+            Filter::make('not_probed')
+                ->label('Stream not probed')
+                ->toggle()
+                ->query(function ($query) {
+                    return $query->whereNull('stream_stats_probed_at');
                 }),
         ];
     }
@@ -997,6 +1022,25 @@ class ChannelResource extends Resource
                         ->modalIcon('heroicon-o-clock')
                         ->modalDescription('Set the timeshift value for the selected channels. Use 0 to disable catch-up.')
                         ->modalSubmitActionLabel('Set timeshift'),
+                    BulkAction::make('probe-streams')
+                        ->label('Probe Streams')
+                        ->action(function (Collection $records): void {
+                            dispatch(new ProbeChannelStreams(
+                                channelIds: $records->pluck('id')->all(),
+                            ));
+                        })->after(function () {
+                            Notification::make()
+                                ->success()
+                                ->title('Stream probing started')
+                                ->body('Stream probing is running in the background. You will be notified once the process is complete.')
+                                ->send();
+                        })
+                        ->deselectRecordsAfterCompletion()
+                        ->requiresConfirmation()
+                        ->icon('heroicon-o-signal')
+                        ->modalIcon('heroicon-o-signal')
+                        ->modalDescription('Probe the selected channels with ffprobe to collect stream metadata (codec, resolution, bitrate). This data enables fast channel switching in Emby.')
+                        ->modalSubmitActionLabel('Start probing'),
                     BulkAction::make('enable')
                         ->label('Enable selected')
                         ->action(function (Collection $records): void {

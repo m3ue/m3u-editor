@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Middleware\AutoLoginMiddleware;
+use App\Http\Middleware\DispatcharrAuthMiddleware;
 use App\Http\Middleware\ProxyRateLimitMiddleware;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -20,6 +21,7 @@ return Application::configure(basePath: dirname(__DIR__))
                 AutoLoginMiddleware::class,
             ])
             ->alias([
+                'dispatcharr.auth' => DispatcharrAuthMiddleware::class,
                 'proxy.throttle' => ProxyRateLimitMiddleware::class,
             ])
             ->redirectGuestsTo('login')

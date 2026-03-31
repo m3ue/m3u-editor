@@ -58,6 +58,9 @@ class Channel extends Model
         'epg_map_enabled' => 'boolean',
         'logo_type' => ChannelLogoType::class,
         'sort' => 'decimal:4',
+        'stream_stats' => 'array',
+        'stream_stats_probed_at' => 'datetime',
+        'probe_enabled' => 'boolean',
     ];
 
     public function user(): BelongsTo
@@ -260,14 +263,39 @@ class Channel extends Model
      */
     public function getStreamStatsAttribute(): array
     {
+        // Prefer persisted stream_stats from database
+        $persisted = $this->attributes['stream_stats'] ?? null;
+        if ($persisted) {
+            $decoded = is_string($persisted) ? json_decode($persisted, true) : $persisted;
+            if (! empty($decoded)) {
+                return $decoded;
+            }
+        }
+
+        // Fall back to cache
         $stats = Cache::get("channel_stream_stats_{$this->id}");
         if ($stats !== null) {
             return $stats;
         }
+
+        return [];
+    }
+
+    /**
+     * Run ffprobe against this channel's stream URL and return parsed stats.
+     *
+     * @return array{streams: array<int, array{codec_type: string, codec_name: string, codec_long_name: ?string, profile: ?string, width: ?int, height: ?int, bit_rate: ?string, avg_frame_rate: ?string, display_aspect_ratio: ?string, sample_rate: ?string, channels: ?int, channel_layout: ?string, level: ?int, bits_per_raw_sample: ?string}>}
+     */
+    public function probeStreamStats(): array
+    {
         try {
             $url = $this->url_custom ?? $this->url;
+            if (empty($url)) {
+                return [];
+            }
+
             $process = new SymfonyProcess(['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_streams', $url]);
-            $process->setTimeout(10);
+            $process->setTimeout(15);
             $output = '';
             $errors = '';
             $hasErrors = false;
@@ -297,6 +325,7 @@ class Channel extends Model
                             'codec_name' => $stream['codec_name'],
                             'codec_long_name' => $stream['codec_long_name'] ?? null,
                             'profile' => $stream['profile'] ?? null,
+                            'level' => $stream['level'] ?? null,
                             'width' => $stream['width'] ?? null,
                             'height' => $stream['height'] ?? null,
                             'bit_rate' => $stream['bit_rate'] ?? null,
@@ -305,12 +334,10 @@ class Channel extends Model
                             'sample_rate' => $stream['sample_rate'] ?? null,
                             'channels' => $stream['channels'] ?? null,
                             'channel_layout' => $stream['channel_layout'] ?? null,
+                            'bits_per_raw_sample' => $stream['bits_per_raw_sample'] ?? null,
                         ];
                     }
                 }
-
-                // Cache the result for 5 minutes
-                Cache::put("channel_stream_stats_{$this->id}", $streamStats, now()->addMinutes(5));
 
                 return $streamStats;
             }
@@ -319,6 +346,87 @@ class Channel extends Model
         }
 
         return [];
+    }
+
+    /**
+     * Build stream_stats in the format expected by emby-xtream (Dispatcharr-compatible).
+     *
+     * @return array{resolution: ?string, video_codec: ?string, video_profile: ?string, video_level: ?int, video_bit_depth: ?int, source_fps: ?float, ffmpeg_output_bitrate: ?float, audio_codec: ?string, audio_channels: ?string, sample_rate: ?int, audio_bitrate: ?float, audio_language: ?string}
+     */
+    public function getEmbyStreamStats(): array
+    {
+        $stats = $this->stream_stats;
+        if (empty($stats)) {
+            return [];
+        }
+
+        $video = null;
+        $audio = null;
+        foreach ($stats as $entry) {
+            $stream = $entry['stream'] ?? $entry;
+            if (($stream['codec_type'] ?? '') === 'video' && ! $video) {
+                $video = $stream;
+            }
+            if (($stream['codec_type'] ?? '') === 'audio' && ! $audio) {
+                $audio = $stream;
+            }
+        }
+
+        if (! $video && ! $audio) {
+            return [];
+        }
+
+        $result = [];
+
+        if ($video) {
+            $width = $video['width'] ?? null;
+            $height = $video['height'] ?? null;
+            $result['resolution'] = ($width && $height) ? "{$width}x{$height}" : null;
+            $result['video_codec'] = $video['codec_name'] ?? null;
+            $result['video_profile'] = $video['profile'] ?? null;
+            $result['video_level'] = isset($video['level']) ? (int) $video['level'] : null;
+            $result['video_bit_depth'] = isset($video['bits_per_raw_sample']) ? (int) $video['bits_per_raw_sample'] : 8;
+
+            // Parse frame rate from "25/1" or "30000/1001" format
+            $fps = $video['avg_frame_rate'] ?? null;
+            if ($fps && str_contains($fps, '/')) {
+                [$num, $den] = explode('/', $fps);
+                $result['source_fps'] = $den > 0 ? round((float) $num / (float) $den, 2) : null;
+            } else {
+                $result['source_fps'] = $fps ? (float) $fps : null;
+            }
+
+            // Convert bps to kbps
+            $bitRate = $video['bit_rate'] ?? null;
+            $result['ffmpeg_output_bitrate'] = $bitRate ? round((float) $bitRate / 1000, 1) : null;
+        }
+
+        if ($audio) {
+            $result['audio_codec'] = $audio['codec_name'] ?? null;
+
+            // Map channel count to layout string
+            $channels = $audio['channels'] ?? null;
+            if ($channels) {
+                $result['audio_channels'] = match ((int) $channels) {
+                    1 => 'mono',
+                    2 => 'stereo',
+                    6 => '5.1',
+                    8 => '7.1',
+                    default => (string) $channels,
+                };
+            } else {
+                $result['audio_channels'] = $audio['channel_layout'] ?? null;
+            }
+
+            $result['sample_rate'] = isset($audio['sample_rate']) ? (int) $audio['sample_rate'] : null;
+
+            // Convert bps to kbps
+            $audioBitRate = $audio['bit_rate'] ?? null;
+            $result['audio_bitrate'] = $audioBitRate ? round((float) $audioBitRate / 1000, 1) : null;
+            $result['audio_language'] = null;
+        }
+
+        return $result;
     }
 
     public function fetchMetadata($xtream = null, $refresh = false, bool $skipTmdb = false)
