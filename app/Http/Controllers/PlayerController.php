@@ -24,8 +24,8 @@ class PlayerController extends Controller
             abort(404);
         }
 
-        $streamFormat = (string) $request->query('format', 'ts');
-        if (! in_array($streamFormat, ['ts', 'mpegts', 'hls', 'm3u8'], true)) {
+        $streamFormat = strtolower((string) $request->query('format', 'ts'));
+        if (! preg_match('/^[a-z0-9]+$/', $streamFormat)) {
             $streamFormat = 'ts';
         }
 

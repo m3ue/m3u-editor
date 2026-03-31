@@ -202,16 +202,22 @@ function streamPlayer() {
 
             // Initialise progress tracking from data attributes
             this._initProgress();
+
+            const normalizedFormat = String(format || '').toLowerCase();
+            const contentType = video.dataset.contentType || '';
+            const isLiveStream = contentType === 'live';
+            const isHlsFormat = normalizedFormat === 'hls' || normalizedFormat === 'm3u8' || url.includes('.m3u8');
+            const isMpegTsFormat = normalizedFormat === 'ts' || normalizedFormat === 'mpegts';
             
             // Update status
             !!statusEl && (statusEl.textContent = 'Connecting...');
             !!loadingEl && (loadingEl.style.display = 'flex');
             !!errorEl && (errorEl.style.display = 'none');
             try {
-                if (format === 'hls' || format === 'm3u8' || url.includes('.m3u8')) {
+                if (isHlsFormat) {
                     console.log('Initializing HLS player');
                     this.initHlsPlayer(video, url, playerId);
-                } else if (format === 'ts' || format === 'mpegts') {
+                } else if (isMpegTsFormat && isLiveStream) {
                     console.log('Initializing MPEG-TS player');
                     this.initMpegTsPlayer(video, url, playerId);
                 } else {
