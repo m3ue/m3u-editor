@@ -3,8 +3,8 @@
 return [
     'author' => 'Shaun Parkison',
     'version' => '0.10.23',
-    'dev_version' => '0.10.29-dev',
-    'experimental_version' => '0.10.29-exp',
+    'dev_version' => '0.10.30-dev',
+    'experimental_version' => '0.10.30-exp',
     'repo' => 'm3ue/m3u-editor',
     'docs_url' => 'https://m3ue.sparkison.dev',
     'donate' => 'https://buymeacoffee.com/shparkison',
