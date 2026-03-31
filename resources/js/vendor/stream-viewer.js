@@ -188,6 +188,9 @@ function streamPlayer() {
                 return;
             }
                         
+            // Clean up any existing players before binding to the new element
+            this.cleanup();
+
             // Store reference to video element for cleanup
             this.player = video;
 
@@ -196,9 +199,6 @@ function streamPlayer() {
 
             // Reset error counters
             this.fragmentErrorCount = 0;
-
-            // Clean up any existing players
-            this.cleanup();
 
             // Initialise progress tracking from data attributes
             this._initProgress();
@@ -882,12 +882,15 @@ function streamPlayer() {
                 console.log('Stopping video playback');
                 try {
                     this.player.pause();
-                    this.player.src = '';
+                    this.player.removeAttribute('src');
                     this.player.load(); // This will stop any ongoing loading/streaming
+                    this.player._streamPlayer = null;
                 } catch (error) {
                     console.warn('Error cleaning up video element:', error);
                 }
             }
+
+            this.player = null;
         }
     };
 }
