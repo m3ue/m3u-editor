@@ -89,7 +89,7 @@ class XtreamStreamController extends Controller
                                 }
                             }
                         } catch (ModelNotFoundException $e) {
-                            return [null, null];
+                            return [null, null, null];
                         }
                     }
                 }
