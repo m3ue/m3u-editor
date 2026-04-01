@@ -188,26 +188,13 @@ class PlaylistAuthResource extends Resource
             Select::make('enable_proxy')
                 ->label('Proxy Override')
                 ->options([
-                    '1' => 'Force Proxy On',
-                    '0' => 'Force Proxy Off',
+                    1 => 'Force Proxy On',
+                    0 => 'Force Proxy Off',
                 ])
                 ->placeholder('Inherit from Playlist')
                 ->default(null)
                 ->nullable()
-                ->afterStateHydrated(function ($component, $state) {
-                    if ($state === null) {
-                        $component->state(null);
-                    } else {
-                        $component->state($state ? '1' : '0');
-                    }
-                })
-                ->dehydrateStateUsing(function ($state) {
-                    if ($state === null || $state === '') {
-                        return null;
-                    }
-
-                    return $state === '1';
-                })
+                ->dehydrateStateUsing(fn ($state) => $state === null || $state === '' ? null : (bool) $state)
                 ->helperText('Override the assigned playlist\'s proxy setting for this auth.')
                 ->columnSpan(1),
             Placeholder::make('proxy_notice')

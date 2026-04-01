@@ -25,6 +25,7 @@ class PlaylistAuth extends Model
         'enabled' => 'boolean',
         'user_id' => 'integer',
         'max_connections' => 'integer',
+        'enable_proxy' => 'integer',
         'expires_at' => 'datetime',
     ];
 
