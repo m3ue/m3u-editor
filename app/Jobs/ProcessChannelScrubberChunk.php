@@ -11,7 +11,6 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
-use Symfony\Component\Process\Process as SymfonyProcess;
 use Throwable;
 
 class ProcessChannelScrubberChunk implements ShouldQueue
@@ -59,8 +58,8 @@ class ProcessChannelScrubberChunk implements ShouldQueue
                     ChannelScrubberLogChannel::create([
                         'channel_scrubber_log_id' => $this->logId,
                         'channel_id' => $channel->id,
-                        'title' => $channel->title,
-                        'url' => $channel->url_custom ?? $channel->url,
+                        'title' => $channel->title ?? $channel->name_custom ?? $channel->name ?? '',
+                        'url' => ($channel->url_custom ?? $channel->url) ?? '',
                     ]);
 
                     $channel->update(['enabled' => false]);
@@ -107,28 +106,12 @@ class ProcessChannelScrubberChunk implements ShouldQueue
     }
 
     /**
-     * Check a channel URL via ffprobe.
+     * Check a channel URL via ffprobe, using ensureStreamStats() so results are persisted.
      */
     private function checkViaFfprobe(Channel $channel): bool
     {
-        $url = $channel->url_custom ?? $channel->url;
-        if (empty($url)) {
-            return true;
-        }
-
         try {
-            $process = new SymfonyProcess(['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_streams', $url]);
-            $process->setTimeout(30);
-            $output = '';
-            $process->run(function ($type, $buffer) use (&$output) {
-                if ($type === SymfonyProcess::OUT) {
-                    $output .= $buffer;
-                }
-            });
-
-            $json = json_decode($output, true);
-
-            return empty($json['streams']);
+            return empty($channel->ensureStreamStats());
         } catch (Throwable) {
             return true;
         }
