@@ -216,6 +216,13 @@ class MediaServerIntegrationResource extends Resource
                                 ->required()
                                 ->default('emby')
                                 ->live()
+                                ->afterStateUpdated(function (Set $set, ?string $state): void {
+                                    $set('port', match ($state) {
+                                        'plex' => 32400,
+                                        'webdav' => 5005,
+                                        default => 8096,
+                                    });
+                                })
                                 ->disabledOn('edit')
                                 ->native(false),
                         ]),
@@ -234,7 +241,11 @@ class MediaServerIntegrationResource extends Resource
                             TextInput::make('port')
                                 ->label('Port')
                                 ->numeric()
-                                ->default(fn (callable $get) => $get('type') === 'webdav' ? 5005 : 8096)
+                                ->default(fn (callable $get) => match ($get('type')) {
+                                    'plex' => 32400,
+                                    'webdav' => 5005,
+                                    default => 8096,
+                                })
                                 ->helperText(fn (callable $get) => match ($get('type')) {
                                     'webdav' => 'e.g., 5005 for Synology, 80/443 for standard WebDAV',
                                     default => 'e.g., 8096 for Emby/Jellyfin, 32400 for Plex',
@@ -613,28 +624,53 @@ class MediaServerIntegrationResource extends Resource
                                     }
                                 }),
 
-                            Placeholder::make('plex_active_sessions')
-                                ->label('Active Sessions')
+                            Placeholder::make('plex_dvr_sync_status')
+                                ->label('DVR Sync Status')
                                 ->content(function ($record) {
                                     if (! $record || ! $record->isPlex()) {
                                         return '—';
                                     }
                                     try {
                                         $service = PlexManagementService::make($record);
-                                        $result = $service->getActiveSessions();
-                                        if ($result['success']) {
-                                            $count = $result['data']->count();
-                                            if ($count === 0) {
-                                                return 'No active sessions';
-                                            }
-                                            $lines = $result['data']->map(fn ($s) => '<li>'.$s['user'].' — '.$s['title'].' ('.$s['state'].')</li>')->implode('');
-
-                                            return new HtmlString('<ul class="text-sm list-disc list-inside">'.$lines.'</ul>');
+                                        $result = $service->verifyDvrSync();
+                                        if (! $result['success']) {
+                                            return new HtmlString('<span class="text-danger-500">'.e($result['message'] ?? 'Verification failed').'</span>');
                                         }
 
-                                        return '—';
+                                        $data = $result['data'];
+                                        $status = $data['status'];
+
+                                        if ($status === 'not_configured') {
+                                            return new HtmlString('<span class="text-gray-400">'.e($data['summary']).'</span>');
+                                        }
+
+                                        if ($status === 'error') {
+                                            return new HtmlString('<span class="text-danger-500">'.e($data['summary']).'</span>');
+                                        }
+
+                                        $icon = $status === 'ok'
+                                            ? '<svg xmlns="http://www.w3.org/2000/svg" class="inline-block h-5 w-5 text-success-500" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" /></svg>'
+                                            : '<svg xmlns="http://www.w3.org/2000/svg" class="inline-block h-5 w-5 text-warning-500" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" /></svg>';
+
+                                        $colorClass = $status === 'ok' ? 'text-success-500' : 'text-warning-500';
+                                        $html = '<div class="text-sm space-y-1">';
+                                        $html .= '<p class="'.$colorClass.' font-medium">'.$icon.' '.e($data['summary']).'</p>';
+
+                                        if (! empty($data['tuners'])) {
+                                            $totalChannels = $data['total_channels'] ?? 0;
+                                            $totalPlex = $data['total_in_plex'] ?? 0;
+                                            $totalEpg = $data['total_epg_mapped'] ?? 0;
+                                            $html .= '<div class="mt-2 text-xs text-gray-500 dark:text-gray-400">';
+                                            $html .= '<p>Channels: '.$totalPlex.'/'.$totalChannels.' in Plex</p>';
+                                            $html .= '<p>EPG: '.$totalEpg.'/'.$totalChannels.' mapped</p>';
+                                            $html .= '</div>';
+                                        }
+
+                                        $html .= '</div>';
+
+                                        return new HtmlString($html);
                                     } catch (\Exception $e) {
-                                        return '—';
+                                        return new HtmlString('<span class="text-danger-500">Error: '.e($e->getMessage()).'</span>');
                                     }
                                 }),
                         ])->visible(fn (callable $get) => $get('plex_management_enabled')),
@@ -739,7 +775,7 @@ class MediaServerIntegrationResource extends Resource
                                                 })
                                                 ->required(),
                                             Placeholder::make('tvg_id_warning')
-                                                ->content(new HtmlString('<p style="color: #f59e0b; font-weight: 600;">⚠ This playlist\'s TVG ID output is not set to "Channel ID". For HDHR/Plex DVR to match EPG correctly, set the playlist\'s "Preferred TVG ID output" to "Channel ID (recommended for HDHR)".</p>'))
+                                                ->content(new HtmlString('<p style="color: #f59e0b; font-weight: 600;">⚠ This playlist\'s TVG ID output is not set to "Channel Number". For HDHR/Plex DVR to match EPG correctly, set the playlist\'s "Preferred TVG ID output" to "Channel Number".</p>'))
                                                 ->visible(function (Get $get): bool {
                                                     $uuid = $get('playlist_uuid');
                                                     if (! $uuid) {
@@ -749,7 +785,9 @@ class MediaServerIntegrationResource extends Resource
                                                         ?? CustomPlaylist::where('uuid', $uuid)->first()
                                                         ?? MergedPlaylist::where('uuid', $uuid)->first();
 
-                                                    return $playlist && ($playlist->id_channel_by?->value ?? $playlist->id_channel_by ?? 'stream_id') !== 'channel_id';
+                                                    $value = $playlist->id_channel_by?->value ?? $playlist->id_channel_by ?? 'stream_id';
+
+                                                    return $playlist && $value !== 'number';
                                                 }),
                                             TextInput::make('hdhr_base_url')
                                                 ->label('HDHR Base URL')
@@ -878,28 +916,6 @@ class MediaServerIntegrationResource extends Resource
                                         })
                                         ->visible(fn ($record) => $record && $record->isPlex() && ! empty($record->plex_dvr_tuners)),
                                 ])->fullWidth(),
-
-                                Placeholder::make('plex_dvr_channels')
-                                    ->label('DVR Channels')
-                                    ->content(function ($record) {
-                                        if (! $record || ! $record->plex_dvr_id) {
-                                            return 'Register a DVR tuner first';
-                                        }
-                                        try {
-                                            $service = PlexManagementService::make($record);
-                                            $result = $service->getDvrChannels($record->plex_dvr_id);
-                                            if ($result['success']) {
-                                                $count = $result['data']->count();
-
-                                                return "{$count} channels available in Plex DVR";
-                                            }
-
-                                            return 'Could not fetch channels';
-                                        } catch (\Exception $e) {
-                                            return 'Error: '.$e->getMessage();
-                                        }
-                                    })
-                                    ->visible(fn ($record) => $record && $record->plex_dvr_id),
                             ])
                             ->visible(fn (callable $get) => $get('plex_management_enabled')),
 

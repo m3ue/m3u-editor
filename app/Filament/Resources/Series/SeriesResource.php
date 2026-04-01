@@ -111,6 +111,7 @@ class SeriesResource extends Resource
             })
             ->paginated([10, 25, 50, 100])
             ->defaultPaginationPageOption(25)
+            ->defaultSort('sort')
             ->columns(self::getTableColumns(showCategory: ! $relationId, showPlaylist: ! $relationId))
             ->filters(self::getTableFilters(showPlaylist: ! $relationId))
             ->recordActions(self::getTableActions(), position: RecordActionsPosition::BeforeCells)
