@@ -25,6 +25,7 @@
         "laravel/sanctum": "^4.0",
         "laravel/socialite": "^5.26",
         "laravel/tinker": "^3.0",
+        "lcobucci/jwt": "^5.6",
         "predis/predis": "^2.3",
         "shuvroroy/filament-spatie-laravel-backup": "dev-main",
         "sparkison/m3u-parser": "dev-master",
