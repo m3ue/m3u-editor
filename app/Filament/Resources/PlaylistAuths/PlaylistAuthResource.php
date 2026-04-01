@@ -194,6 +194,20 @@ class PlaylistAuthResource extends Resource
                 ->placeholder('Inherit from Playlist')
                 ->default(null)
                 ->nullable()
+                ->afterStateHydrated(function ($component, $state) {
+                    if ($state === null) {
+                        $component->state(null);
+                    } else {
+                        $component->state($state ? '1' : '0');
+                    }
+                })
+                ->dehydrateStateUsing(function ($state) {
+                    if ($state === null || $state === '') {
+                        return null;
+                    }
+
+                    return $state === '1';
+                })
                 ->helperText('Override the assigned playlist\'s proxy setting for this auth.')
                 ->columnSpan(1),
             Placeholder::make('proxy_notice')
