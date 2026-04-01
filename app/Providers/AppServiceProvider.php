@@ -822,8 +822,7 @@ class AppServiceProvider extends ServiceProvider
         // TZ environment variable always takes priority
         $envTimezone = config('dev.timezone');
         if (! empty($envTimezone)) {
-            config(['app.timezone' => $envTimezone]);
-            date_default_timezone_set($envTimezone);
+            $this->setApplicationTimezone($envTimezone);
 
             return;
         }
@@ -833,11 +832,26 @@ class AppServiceProvider extends ServiceProvider
             $timezone = $settings->app_timezone;
 
             if (! empty($timezone) && in_array($timezone, \DateTimeZone::listIdentifiers(), true)) {
-                config(['app.timezone' => $timezone]);
-                date_default_timezone_set($timezone);
+                $this->setApplicationTimezone($timezone);
             }
         } catch (Throwable) {
             // Settings may not be available during fresh installs / migrations
+        }
+    }
+
+    /**
+     * Apply a timezone consistently across the application and database.
+     */
+    private function setApplicationTimezone(string $timezone): void
+    {
+        config(['app.timezone' => $timezone]);
+        date_default_timezone_set($timezone);
+
+        // Sync the database session timezone so that timestamps stored via
+        // PostgreSQL's timestamptz columns use the correct offset.
+        $connection = config('database.default');
+        if (config("database.connections.{$connection}.driver") === 'pgsql') {
+            config(["database.connections.{$connection}.timezone" => $timezone]);
         }
     }
 
