@@ -18,7 +18,6 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
@@ -263,19 +262,12 @@ class Channel extends Model
      */
     public function getStreamStatsAttribute(): array
     {
-        // Prefer persisted stream_stats from database
-        $persisted = $this->attributes['stream_stats'] ?? null;
-        if ($persisted) {
-            $decoded = is_string($persisted) ? json_decode($persisted, true) : $persisted;
+        $raw = $this->attributes['stream_stats'] ?? null;
+        if ($raw) {
+            $decoded = is_string($raw) ? json_decode($raw, true) : $raw;
             if (! empty($decoded)) {
                 return $decoded;
             }
-        }
-
-        // Fall back to cache
-        $stats = Cache::get("channel_stream_stats_{$this->id}");
-        if ($stats !== null) {
-            return $stats;
         }
 
         return [];

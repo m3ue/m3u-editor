@@ -87,7 +87,7 @@ class DispatcharrController extends Controller
             return response()->json(['detail' => 'Token is invalid or expired'], 401);
         }
 
-        unset($payload['type'], $payload['exp']);
+        unset($payload['type'], $payload['exp'], $payload['iat']);
 
         return response()->json([
             'access' => DispatcharrAuthMiddleware::createToken($payload, self::ACCESS_TTL),
@@ -149,7 +149,6 @@ class DispatcharrController extends Controller
         $channelsQuery = $playlist->channels()
             ->where('channels.enabled', true)
             ->where('channels.is_vod', false)
-            ->with(['group'])
             ->orderBy('channels.channel')
             ->limit(min($limit, 10000));
 

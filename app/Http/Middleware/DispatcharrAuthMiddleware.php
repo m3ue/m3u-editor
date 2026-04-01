@@ -23,6 +23,11 @@ class DispatcharrAuthMiddleware
      */
     private const REGISTERED_CLAIMS = ['iss', 'sub', 'aud', 'exp', 'nbf', 'iat', 'jti'];
 
+    /**
+     * Cached JWT configuration instance.
+     */
+    private static ?Configuration $jwtConfigInstance = null;
+
     public function handle(Request $request, Closure $next): Response
     {
         $bearer = $request->bearerToken();
@@ -153,11 +158,15 @@ class DispatcharrAuthMiddleware
      */
     private static function jwtConfig(): Configuration
     {
+        if (static::$jwtConfigInstance !== null) {
+            return static::$jwtConfigInstance;
+        }
+
         $key = config('app.key');
         $signingKey = str_starts_with($key, 'base64:')
             ? InMemory::base64Encoded(substr($key, 7))
             : InMemory::plainText($key);
 
-        return Configuration::forSymmetricSigner(new Sha256, $signingKey);
+        return static::$jwtConfigInstance = Configuration::forSymmetricSigner(new Sha256, $signingKey);
     }
 }
