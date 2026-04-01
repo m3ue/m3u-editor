@@ -76,16 +76,7 @@ class ViewVod extends ViewRecord
                 ->label('Play')
                 ->icon('heroicon-s-play')
                 ->color('primary')
-                ->dispatch('openFloatingStream', [[
-                    'id' => $this->record->id,
-                    'stream_id' => $this->record->id,
-                    'content_type' => 'vod',
-                    'playlist_id' => $this->record->playlist_id,
-                    'title' => $this->record->title_custom ?? $this->record->title ?? $this->record->name,
-                    'url' => $this->record->getProxyUrl(internal: true),
-                    'format' => $this->record->container_extension ?? 'ts',
-                    'type' => 'channel',
-                ]]),
+                ->dispatch('openFloatingStream', fn () => [$this->record->getFloatingPlayerAttributes()]),
         ];
     }
 }

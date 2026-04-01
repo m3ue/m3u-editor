@@ -25,7 +25,7 @@ class PlayerController extends Controller
         }
 
         $streamFormat = (string) $request->query('format', 'ts');
-        if (! in_array($streamFormat, ['ts', 'mpegts', 'hls', 'm3u8'], true)) {
+        if (! in_array($streamFormat, ['ts', 'mpegts', 'hls', 'm3u8', 'mp4', 'm4v', 'mkv', 'webm', 'mov'], true)) {
             $streamFormat = 'ts';
         }
 

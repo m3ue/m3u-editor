@@ -72,18 +72,10 @@
             $tmdbId = $imdbId = $youtubeTrailer = null;
         }
 
-        $playerArgs = json_encode([
-            'id' => $record->id,
-            'stream_id' => $record->id,
-            'content_type' => 'vod',
-            'playlist_id' => $record->playlist_id,
-            'title' => $title,
-            'url' => $record->getProxyUrl(username: $username, password: $password, internal: true),
-            'format' => $record->container_extension ?? 'ts',
-            'type' => 'channel',
-            'username' => $username,
-            'password' => $password,
-        ]);
+        $playerArgs = json_encode($record->getFloatingPlayerAttributes(
+            username: $username,
+            password: $password,
+        ));
     @endphp
 
     @if($hasError ?? false)
