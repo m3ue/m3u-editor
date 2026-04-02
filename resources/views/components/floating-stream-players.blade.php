@@ -15,9 +15,6 @@
                 }
             }
             
-            // Reset global state
-            window._floatingStreamListenerAdded = false;
-            
             // Create new instance with unique ID
             const manager = multiStreamManager();
             manager._instanceId = instanceId;
@@ -56,11 +53,11 @@
                     <img 
                         x-show="player.logo"
                         :src="player.logo" 
-                        :alt="player.title"
+                        :alt="player.display_title || player.title"
                         class="w-5 h-5 rounded object-cover flex-shrink-0"
                         onerror="this.style.display='none'"
                     >
-                    <span class="text-sm font-medium text-gray-900 dark:text-gray-100 truncate" x-text="player.title"></span>
+                    <span class="text-sm font-medium text-gray-900 dark:text-gray-100 truncate" x-text="player.display_title || player.title"></span>
                 </div>
                 
                 <div class="flex items-center space-x-1 flex-shrink-0">
@@ -75,7 +72,7 @@
 
                             if (!castUrl) {
                                 console.warn('[CastManager] No cast-safe URL available for player', {
-                                    title: player.title,
+                                    title: player.display_title || player.title,
                                     playerId: player.id,
                                     streamId: player.stream_id,
                                 });
@@ -87,7 +84,7 @@
                             } else {
                                 const videoEl = document.getElementById(player.id + '-video');
                                 $store.cast.startCast(
-                                    castUrl, castFormat, player.title, player.logo,
+                                    castUrl, castFormat, player.display_title || player.title, player.logo,
                                     () => {
                                         // Stop local playback to free the proxy connection
                                         if (videoEl) {
@@ -95,6 +92,10 @@
                                         }
                                         if (videoEl && videoEl._streamPlayer) {
                                             videoEl._streamPlayer.cleanup();
+                                        }
+                                        // Show the casting overlay
+                                        if (window.streamPlayer) {
+                                            window.streamPlayer().showError(player.id + '-video', 'Casting');
                                         }
                                     },
                                     () => {
