@@ -685,13 +685,26 @@ class ChannelResource extends Resource
                                 $start = (int) $data['start'];
                                 SortFacade::bulkRecountChannels($records, $start);
 
-                                // Clear EPG cache for all affected playlists so EPG channel IDs are regenerated
-                                $records->pluck('playlist_id')->unique()->each(function ($playlistId) {
-                                    $playlist = Playlist::find($playlistId);
-                                    if ($playlist) {
-                                        EpgCacheService::clearPlaylistEpgCacheFile($playlist);
-                                    }
-                                });
+                                // Clear EPG cache for all playlist types that contain these channels
+                                $channelIds = $records->pluck('id');
+                                $playlistIds = $records->pluck('playlist_id')->unique();
+
+                                // Source playlists
+                                Playlist::whereIn('id', $playlistIds)
+                                    ->each(fn (Playlist $p) => EpgCacheService::clearPlaylistEpgCacheFile($p));
+
+                                // Custom playlists
+                                CustomPlaylist::whereHas('channels', fn ($q) => $q->whereIn('channels.id', $channelIds))
+                                    ->each(fn (CustomPlaylist $cp) => EpgCacheService::clearPlaylistEpgCacheFile($cp));
+
+                                // Merged playlists (contain source playlists)
+                                MergedPlaylist::whereHas('playlists', fn ($q) => $q->whereIn('playlists.id', $playlistIds))
+                                    ->each(fn (MergedPlaylist $mp) => EpgCacheService::clearPlaylistEpgCacheFile($mp));
+
+                                // Playlist aliases (point to source or custom playlists)
+                                PlaylistAlias::where(fn ($q) => $q->whereIn('playlist_id', $playlistIds)
+                                    ->orWhereIn('custom_playlist_id', CustomPlaylist::whereHas('channels', fn ($q2) => $q2->whereIn('channels.id', $channelIds))->pluck('id')))
+                                    ->each(fn (PlaylistAlias $pa) => EpgCacheService::clearPlaylistEpgCacheFile($pa));
 
                                 dispatch(new SyncPlexDvrJob(trigger: 'channel_recount'));
                             })
