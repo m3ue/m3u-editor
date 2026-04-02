@@ -208,10 +208,16 @@ function streamPlayer() {
             !!loadingEl && (loadingEl.style.display = 'flex');
             !!errorEl && (errorEl.style.display = 'none');
             try {
-                if (format === 'hls' || format === 'm3u8' || url.includes('.m3u8')) {
+                // Use the explicit format parameter as authoritative. Only fall back to
+                // URL sniffing when no format is provided — the URL extension is an
+                // Xtream routing concern and may not reflect the actual output format
+                // (e.g. direct-proxied episodes use .m3u8 in the path but deliver raw video).
+                const effectiveFormat = format || (url.includes('.m3u8') ? 'm3u8' : '');
+
+                if (effectiveFormat === 'hls' || effectiveFormat === 'm3u8') {
                     console.log('Initializing HLS player');
                     this.initHlsPlayer(video, url, playerId);
-                } else if (format === 'ts' || format === 'mpegts') {
+                } else if (effectiveFormat === 'ts' || effectiveFormat === 'mpegts') {
                     console.log('Initializing MPEG-TS player');
                     this.initMpegTsPlayer(video, url, playerId);
                 } else {
