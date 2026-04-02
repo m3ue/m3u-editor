@@ -46,6 +46,11 @@ class GeneralSettings extends Settings
 
     public ?int $default_vod_stream_profile_id = null;
 
+    // Cast transcoding profile IDs (Chromecast)
+    public ?int $default_cast_stream_profile_id = null;
+
+    public ?int $default_cast_vod_stream_profile_id = null;
+
     // Default stream file setting profile IDs
     public ?int $default_series_stream_file_setting_id = null;
 

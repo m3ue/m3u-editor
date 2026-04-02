@@ -156,9 +156,16 @@ class CastStreamController extends Controller
 
     protected function castQueryOverrides(string $type): array
     {
+        $settings = app(GeneralSettings::class);
+
+        // Use cast-specific profile, falling back to in-app player profile
         $profileId = match ($type) {
-            'movie', 'series' => app(GeneralSettings::class)->default_vod_stream_profile_id ?? null,
-            default => app(GeneralSettings::class)->default_stream_profile_id ?? null,
+            'movie', 'series' => $settings->default_cast_vod_stream_profile_id
+                ?? $settings->default_vod_stream_profile_id
+                ?? null,
+            default => $settings->default_cast_stream_profile_id
+                ?? $settings->default_stream_profile_id
+                ?? null,
         };
 
         $profile = $profileId ? StreamProfile::find($profileId) : null;
