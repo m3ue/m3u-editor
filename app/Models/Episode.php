@@ -95,6 +95,15 @@ class Episode extends Model
             internal: true
         );
 
+        // When no transcoding profile is set, the proxy delivers raw bytes (direct proxy),
+        // not an HLS manifest. If the URL-derived format is m3u8/ts but we have no profile,
+        // use the actual container extension so the player picks the correct playback engine
+        // (native for mkv/mp4/etc. instead of HLS.js which would fail on raw video data).
+        $playerFormat = $episodeFormat;
+        if (! $profile && in_array($episodeFormat, ['m3u8', 'ts'], true)) {
+            $playerFormat = $this->container_extension ?? 'mkv';
+        }
+
         return [
             'id' => 'episode-'.$this->id,
             'stream_id' => $this->id,
@@ -104,7 +113,7 @@ class Episode extends Model
             'season_number' => $this->season,
             'title' => $this->title,
             'url' => $url,
-            'format' => $episodeFormat,
+            'format' => $profile->format ?? $playerFormat,
             'type' => 'episode',
         ];
     }

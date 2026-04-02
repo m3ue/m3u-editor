@@ -168,6 +168,16 @@ class Channel extends Model
             internal: true
         );
 
+        // When no transcoding profile is set, the proxy delivers raw bytes (direct proxy),
+        // not an HLS manifest. If the URL-derived format is m3u8 but we have no profile
+        // and this is a VOD channel, use the actual container extension so the player picks
+        // the correct playback engine (native for mkv/mp4/etc.).
+        // For live channels, m3u8/ts are valid direct-proxy formats.
+        $playerFormat = $format;
+        if (! $profile && $this->is_vod && in_array($format, ['m3u8', 'ts'], true)) {
+            $playerFormat = $this->container_extension ?? 'mkv';
+        }
+
         return [
             'id' => $this->id,
             'stream_id' => $this->id,
@@ -175,7 +185,7 @@ class Channel extends Model
             'playlist_id' => $this->playlist_id,
             'title' => $this->name_custom ?? $this->name,
             'url' => $url,
-            'format' => $profile->format ?? $format,
+            'format' => $profile->format ?? $playerFormat,
             'type' => 'channel',
         ];
     }
