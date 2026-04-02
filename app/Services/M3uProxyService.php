@@ -805,6 +805,11 @@ class M3uProxyService
                 $url = PlaylistUrlService::getChannelUrl($channel, $playlist);
                 $format = $this->getFormatFromUrl($url);
 
+                // VOD channels: force /stream/ endpoint (see comment in direct stream creation path)
+                if (($channel->is_vod ?? false) && ($format === 'hls' || $format === 'm3u8')) {
+                    $format = 'raw';
+                }
+
                 return $this->buildProxyUrl($existingStreamId, $format, $username);
             } elseif ($existingStreamId && $isTimeshiftRequest) {
                 Log::debug('Skipping pool reuse for timeshift request (requires different upstream URL)', [
@@ -1133,6 +1138,13 @@ class M3uProxyService
             // Get the format from the URL
             $format = $this->getFormatFromUrl($primaryUrl);
 
+            // For VOD channels, direct (non-transcoded) streams should always use the /stream/
+            // endpoint. Xtream VOD source URLs may end in .m3u8 but createStream() proxies raw
+            // bytes, not an HLS manifest. Live channels genuinely use HLS so their format is kept.
+            if (($actualChannel->is_vod ?? false) && ($format === 'hls' || $format === 'm3u8')) {
+                $format = 'raw';
+            }
+
             // Return the direct proxy URL using the stream ID
             return $this->buildProxyUrl($streamId, $format, $username);
         }
@@ -1246,6 +1258,9 @@ class M3uProxyService
                         }
 
                         $format = $this->getFormatFromUrl($url);
+                        if ($format === 'hls' || $format === 'm3u8') {
+                            $format = 'raw';
+                        }
 
                         return $this->buildProxyUrl($existingStreamId, $format, $username);
                     }
@@ -1384,8 +1399,14 @@ class M3uProxyService
                 ProfileService::finalizeReservation($selectedProfile, $reservationId, $streamId);
             }
 
-            // Get the format from the URL
+            // For direct (non-transcoded) streams, always use the /stream/ endpoint.
+            // The source URL may have an .m3u8 extension (common for Xtream episode URLs),
+            // but createStream() proxies raw bytes — not an HLS manifest — so we must
+            // avoid buildProxyUrl routing to the /hls/ endpoint.
             $format = $this->getFormatFromUrl($url);
+            if ($format === 'hls' || $format === 'm3u8') {
+                $format = 'raw';
+            }
 
             // Return the direct proxy URL using the stream ID
             return $this->buildProxyUrl($streamId, $format, $username);
