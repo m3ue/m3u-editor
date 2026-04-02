@@ -106,7 +106,7 @@ class SeriesResource extends Resource
             })
             ->modifyQueryUsing(function (Builder $query) {
                 $query->with([
-                    'playlist' => fn ($q) => $q->select('id', 'name', 'auto_sort'),
+                    'playlist' => fn ($q) => $q->select('id', 'name', 'uuid', 'auto_sort'),
                 ]);
             })
             ->paginated([10, 25, 50, 100])

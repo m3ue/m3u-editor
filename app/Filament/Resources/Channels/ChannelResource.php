@@ -139,7 +139,7 @@ class ChannelResource extends Resource
             ->modifyQueryUsing(function (Builder $query) {
                 $query->with([
                     'epgChannel' => fn ($q) => $q->select('id', 'name', 'icon', 'icon_custom'),
-                    'playlist' => fn ($q) => $q->select('id', 'name', 'auto_sort'),
+                    'playlist' => fn ($q) => $q->select('id', 'name', 'uuid', 'auto_sort'),
                 ])
                     ->withCount(['failovers'])
                     ->where('is_vod', false);
