@@ -469,7 +469,7 @@ class PlaylistAliasResource extends Resource
                                 ->searchable()
                                 ->preload()
                                 ->nullable()
-                                ->helperText('Select a transcoding profile to apply to Live streams from this playlist. Leave empty for direct stream proxying.')
+                                ->helperText('Select a transcoding profile to apply to Live streams for external clients (VLC, Kodi, etc.). Does not affect the in-app player. Leave empty for direct stream proxying.')
                                 ->placeholder('Leave empty for direct stream proxying'),
                             Forms\Components\Select::make('vod_stream_profile_id')
                                 ->label('VOD and Series Streaming Profile')
@@ -484,7 +484,7 @@ class PlaylistAliasResource extends Resource
                                     'heroicon-m-question-mark-circle',
                                     tooltip: 'Time seeking is not supported when transcoding VOD or Series streams. This is a limitation of live-transcoding. Leave empty to allow time seeking.'
                                 )
-                                ->helperText('Select a transcoding profile to apply to VOD and Series streams from this playlist. Leave empty for direct stream proxying.')
+                                ->helperText('Select a transcoding profile to apply to VOD and Series streams for external clients (VLC, Kodi, etc.). Does not affect the in-app player. Leave empty for direct stream proxying.')
                                 ->placeholder('Leave empty for direct stream proxying'),
                         ])->hidden(fn (Get $get): bool => ! $get('enable_proxy')),
                     Schemas\Components\Fieldset::make('HTTP Headers (optional)')
