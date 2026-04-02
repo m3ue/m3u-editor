@@ -114,6 +114,7 @@ class Episode extends Model
             'series_id' => $this->series_id,
             'season_number' => $this->season,
             'title' => $this->title,
+            'display_title' => $this->title,
             'url' => $url,
             'format' => $episodeFormat,
             'cast_url' => $castUrl,

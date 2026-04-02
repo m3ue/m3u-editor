@@ -185,6 +185,7 @@ class Channel extends Model
             'content_type' => $this->is_vod ? 'vod' : 'live',
             'playlist_id' => $this->playlist_id,
             'title' => $this->name_custom ?? $this->name,
+            'display_title' => $this->title_custom ?? $this->title ?? $this->name_custom ?? $this->name,
             'url' => $url,
             'format' => $format,
             'cast_url' => $castUrl,

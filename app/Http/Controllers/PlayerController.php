@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Playlist;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
 
@@ -47,7 +48,7 @@ class PlayerController extends Controller
 
             if ($streamId > 0 && $playlistId > 0) {
                 $username = auth()->user()?->name ?? null;
-                $playlistUuid = \App\Models\Playlist::query()->whereKey($playlistId)->value('uuid');
+                $playlistUuid = Playlist::query()->whereKey($playlistId)->value('uuid');
 
                 if ($username && $playlistUuid) {
                     $castRoute = match ($contentType) {

@@ -134,6 +134,8 @@ class EpgViewer extends Component implements HasActions, HasForms
                         $channelData['format'] = $channelFormat;
                         $channelData['cast_url'] = $playerAttributes['cast_url'] ?? null;
                         $channelData['cast_format'] = $playerAttributes['cast_format'] ?? null;
+                        $channelData['title'] = $playerAttributes['title'] ?? ($updated->name_custom ?? $updated->name);
+                        $channelData['display_title'] = $playerAttributes['display_title'] ?? ($updated->title_custom ?? $updated->title ?? $updated->name_custom ?? $updated->name);
                         $channelData['icon'] = $icon;
 
                         // Fetch programme data for Playlist channels if they have an EPG channel
