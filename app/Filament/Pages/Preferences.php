@@ -1429,6 +1429,7 @@ class Preferences extends SettingsPage
                                     ->schema([
                                         CheckboxList::make('copilot_global_tools')
                                             ->label(__('Enabled Tools'))
+                                            ->bulkToggleable()
                                             ->options([
                                                 GetToolsTool::class => __('Get Available Tools'),
                                                 RunToolTool::class => __('Run Tool'),
