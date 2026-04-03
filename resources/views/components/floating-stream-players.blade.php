@@ -1,39 +1,7 @@
 <!-- Floating Stream Players Container -->
 <div 
-    x-data="(() => {
-        // Create a unique instance ID to avoid conflicts
-        const instanceId = 'floating-streams-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
-        
-        // Only create a new global manager if none exists, or if it's from a different instance
-        if (!window._globalMultiStreamManager || window._globalMultiStreamManager._instanceId !== instanceId) {
-            // Clean up any existing instance
-            if (window._globalMultiStreamManager && typeof window._globalMultiStreamManager.cleanupAllStreams === 'function') {
-                try {
-                    window._globalMultiStreamManager.cleanupAllStreams();
-                } catch (e) {
-                    console.warn('Error during cleanup:', e);
-                }
-            }
-            
-            // Create new instance with unique ID
-            const manager = multiStreamManager();
-            manager._instanceId = instanceId;
-            window._globalMultiStreamManager = manager;
-        }
-        
-        return window._globalMultiStreamManager;
-    })()"
+    x-data="multiStreamManager()"
     x-init="init()"
-    x-on:alpine:destroyed="
-        if (typeof cleanupAllStreams === 'function') {
-            cleanupAllStreams();
-        }
-    "
-    x-on:livewire:navigating.window="
-        if (typeof cleanupAllStreams === 'function') {
-            cleanupAllStreams();
-        }
-    "
     class="fixed inset-0 pointer-events-none z-[9999]"
 >
     <!-- Multiple Floating Players -->

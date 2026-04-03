@@ -27,50 +27,59 @@ function multiStreamManager() {
                 return;
             }
 
-            // Check if we already have a listener
-            if (window._floatingStreamListenerAdded) {
-                return;
+            // Store this instance as the current active manager so global
+            // listeners (attached once) always delegate to the latest instance
+            window._globalMultiStreamManager = this;
+
+            // Attach global listeners exactly once (they survive Livewire SPA
+            // navigation and always delegate to window._globalMultiStreamManager)
+            if (!window._floatingStreamListenersAttached) {
+                window._floatingStreamListenersAttached = true;
+
+                // Listen for new stream requests
+                window.addEventListener('openFloatingStream', (event) => {
+                    const mgr = window._globalMultiStreamManager;
+                    if (!mgr) return;
+                    let detail = event.detail;
+                    if (Array.isArray(detail)) {
+                        detail = detail[0];
+                    }
+                    console.log('Received openFloatingStream event:', detail);
+                    event.stopPropagation();
+                    mgr.openStream(detail);
+                });
+
+                // Cleanup on page unload (beforeunload + pagehide for mobile Safari)
+                window.addEventListener('beforeunload', () => {
+                    const mgr = window._globalMultiStreamManager;
+                    if (mgr) mgr.cleanupAllStreams();
+                });
+                window.addEventListener('pagehide', () => {
+                    const mgr = window._globalMultiStreamManager;
+                    if (mgr) mgr.cleanupAllStreams();
+                });
+
+                // Pause/resume streams on tab visibility change (saves bandwidth on mobile)
+                document.addEventListener('visibilitychange', () => {
+                    const mgr = window._globalMultiStreamManager;
+                    if (!mgr) return;
+                    if (document.visibilityState === 'hidden') {
+                        mgr.pauseAllStreams();
+                    } else if (document.visibilityState === 'visible') {
+                        mgr.resumeAllStreams();
+                    }
+                });
+
+                // Global mouse events for drag and resize
+                document.addEventListener('mousemove', (e) => {
+                    const mgr = window._globalMultiStreamManager;
+                    if (mgr) mgr.handleMouseMove(e);
+                });
+                document.addEventListener('mouseup', () => {
+                    const mgr = window._globalMultiStreamManager;
+                    if (mgr) mgr.handleMouseUp();
+                });
             }
-
-            // Listen for new stream requests
-            window.addEventListener('openFloatingStream', (event) => {
-                let detail = event.detail;
-                if (Array.isArray(detail)) {
-                    detail = detail[0];
-                }
-                console.log('Received openFloatingStream event:', detail);
-                event.stopPropagation(); // Prevent event bubbling
-                this.openStream(detail);
-            });
-
-            // Mark that we've added the listener
-            window._floatingStreamListenerAdded = true;
-
-            // Cleanup on page unload (beforeunload + pagehide for mobile Safari)
-            window.addEventListener('beforeunload', () => {
-                this.cleanupAllStreams();
-            });
-            window.addEventListener('pagehide', () => {
-                this.cleanupAllStreams();
-            });
-
-            // Cleanup on Livewire SPA navigation
-            window.addEventListener('livewire:navigating', () => {
-                this.cleanupAllStreams();
-            });
-
-            // Pause/resume streams on tab visibility change (saves bandwidth on mobile)
-            document.addEventListener('visibilitychange', () => {
-                if (document.visibilityState === 'hidden') {
-                    this.pauseAllStreams();
-                } else if (document.visibilityState === 'visible') {
-                    this.resumeAllStreams();
-                }
-            });
-
-            // Global mouse events for drag and resize
-            document.addEventListener('mousemove', (e) => this.handleMouseMove(e));
-            document.addEventListener('mouseup', () => this.handleMouseUp());
 
             // Mark as initialized
             this._initialized = true;
@@ -186,7 +195,8 @@ function multiStreamManager() {
             });
             this.players = [];
 
-            // Reset initialization flag
+            // Reset instance initialization flag (NOT the global listeners flag —
+            // those persist and delegate to the current manager via window._globalMultiStreamManager)
             this._initialized = false;
         },
 
