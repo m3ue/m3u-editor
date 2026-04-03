@@ -146,13 +146,9 @@ class M3uProxyApiController extends Controller
             $playlist = $channel->getEffectivePlaylist();
         }
 
-        // Load the stream profile relationships (needed for playlist profile fallback)
-        if ($playlist) {
-            $playlist->load('streamProfile', 'vodStreamProfile');
-        }
-
-        // Prioritize in-app player transcoding profiles (from Preferences → In-App Player Transcoding)
-        // over playlist-level stream profiles for the floating player
+        // Use in-app player transcoding profiles (from Preferences > In-App Player Transcoding).
+        // Playlist-level stream profiles are for external clients only — they should not
+        // apply to the in-app floating/popout player.
         $settings = app(GeneralSettings::class);
         if ($channel->is_vod) {
             $profileId = $settings->default_vod_stream_profile_id ?? null;
@@ -160,11 +156,6 @@ class M3uProxyApiController extends Controller
             $profileId = $settings->default_stream_profile_id ?? null;
         }
         $profile = $profileId ? StreamProfile::find($profileId) : null;
-
-        // Fall back to playlist profile if no in-app player profile is configured
-        if (! $profile) {
-            $profile = $channel->is_vod ? $playlist->vodStreamProfile : $playlist->streamProfile;
-        }
 
         $url = app(M3uProxyService::class)
             ->getChannelUrl(
@@ -196,20 +187,12 @@ class M3uProxyApiController extends Controller
             $playlist = $episode->playlist;
         }
 
-        // Load the stream profile relationships (needed for playlist profile fallback)
-        if ($playlist) {
-            $playlist->load('streamProfile', 'vodStreamProfile');
-        }
-
-        // Prioritize in-app player VOD transcoding profile (from Preferences → In-App Player Transcoding)
+        // Use in-app player VOD transcoding profile (from Preferences > In-App Player Transcoding).
+        // Playlist-level stream profiles are for external clients only — they should not
+        // apply to the in-app floating/popout player.
         $settings = app(GeneralSettings::class);
         $profileId = $settings->default_vod_stream_profile_id ?? null;
         $profile = $profileId ? StreamProfile::find($profileId) : null;
-
-        // Fall back to playlist VOD profile if no in-app player profile is configured
-        if (! $profile) {
-            $profile = $playlist->vodStreamProfile;
-        }
 
         $url = app(M3uProxyService::class)
             ->getEpisodeUrl(
