@@ -1,7 +1,7 @@
 <?php
 
 return [
-    'failed' => 'Diese Anmeldeinformationen stimmen nicht mit unseren Unterlagen überein.',
+    'failed' => 'Die Anmeldeinformationen sind nicht korrekt.',
     'password' => 'Das angegebene Passwort ist falsch.',
-    'throttle' => 'Zu viele Anmeldeversuche. Bitte versuchen Sie es in :Sekunden Sekunden erneut.',
+    'throttle' => 'Zu viele fehlgeschlagene Anmeldeversuche. Bitte versuchen Sie es in :Sekunden Sekunden erneut.',
 ];
