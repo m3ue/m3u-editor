@@ -307,6 +307,12 @@ class Channel extends Model
         // Load the effective playlist to determine proxy settings and get UUID for authentication
         $playlist = $this->playlist ?? $this->customPlaylist;
         $user = $this->user;
+
+        // Without a playlist (and no explicit credentials), there's no auth context for a proxy URL
+        if (! $playlist && ! ($username && $password)) {
+            return $withFormat ? [null, null] : null;
+        }
+
         $originalUrl = $this->url_custom ?? $this->url;
 
         // Extract the filename from the URL to determine the format (extension)
