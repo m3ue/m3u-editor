@@ -30,6 +30,7 @@ class EpgApiControllerTest extends TestCase
             'dummy_epg_length' => 120,
             'dummy_epg_category' => true,
         ]);
+        $this->actingAs($this->user);
     }
 
     public function test_can_get_epg_data_for_playlist_without_epg_mapping()
