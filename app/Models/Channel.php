@@ -39,6 +39,7 @@ class Channel extends Model
     protected $casts = [
         'id' => 'integer',
         'enabled' => 'boolean',
+        'enable_proxy' => 'boolean',
         'channel' => 'integer',
         'shift' => 'integer',
         'user_id' => 'integer',
@@ -84,6 +85,21 @@ class Channel extends Model
     public function isNetworkChannel(): bool
     {
         return $this->network_id !== null;
+    }
+
+    /**
+     * Determine whether this channel should be proxied, considering the per-channel
+     * override and falling back to the playlist-level setting.
+     *
+     * @param  Playlist|CustomPlaylist|MergedPlaylist|PlaylistAlias  $playlist
+     */
+    public function shouldProxy($playlist): bool
+    {
+        if ($this->enable_proxy !== null) {
+            return (bool) $this->enable_proxy;
+        }
+
+        return (bool) $playlist->enable_proxy;
     }
 
     /**
