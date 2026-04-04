@@ -13,11 +13,40 @@ class MediaServerIntegration extends Model
     use HasFactory;
 
     /**
-     * The attributes that aren't mass assignable.
+     * The attributes that are mass assignable.
      *
-     * @var array
+     * @var array<string>
      */
-    protected $guarded = [];
+    protected $fillable = [
+        'user_id',
+        'playlist_id',
+        'name',
+        'type',
+        'host',
+        'port',
+        'api_key',
+        'enabled',
+        'ssl',
+        'genre_handling',
+        'import_movies',
+        'import_series',
+        'auto_sync',
+        'sync_interval',
+        'available_libraries',
+        'selected_library_ids',
+        'local_media_paths',
+        'metadata_source',
+        'scan_recursive',
+        'video_extensions',
+        'auto_fetch_metadata',
+        'webdav_username',
+        'webdav_password',
+        'plex_management_enabled',
+        'plex_dvr_id',
+        'plex_machine_id',
+        'plex_dvr_device_key',
+        'plex_dvr_playlist_uuid',
+    ];
 
     /**
      * The attributes that should have default values.
