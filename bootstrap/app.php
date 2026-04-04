@@ -25,11 +25,9 @@ return Application::configure(basePath: dirname(__DIR__))
             ->redirectGuestsTo('login')
             ->trustProxies(at: ['*'])
             ->validateCsrfTokens(except: [
+                // Webhook test endpoint - receives external POST requests without CSRF token
                 'webhook/test',
-                'channel',
-                'channel/*',
-                'group',
-                'group/*',
+                // Xtream API endpoints - receive requests from media players (no browser CSRF token)
                 'player_api.php',
                 'get.php',
             ])
