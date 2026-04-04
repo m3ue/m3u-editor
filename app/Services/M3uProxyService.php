@@ -38,7 +38,7 @@ class M3uProxyService
 
     public function __construct()
     {
-        $this->apiBaseUrl = rtrim(config('proxy.m3u_proxy_host'), '/');
+        $this->apiBaseUrl = rtrim(config('proxy.m3u_proxy_host', ''), '/');
         if ($port = config('proxy.m3u_proxy_port')) {
             $this->apiBaseUrl .= ':'.$port;
         }
