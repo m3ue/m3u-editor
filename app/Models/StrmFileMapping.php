@@ -853,8 +853,8 @@ class StrmFileMapping extends Model
             return preg_replace('/\.strm$/i', self::NFO_EXTENSION, $path);
         }
 
-        // Fallback: append .nfo
-        return $path.self::NFO_EXTENSION;
+        // Non-STRM paths are returned unchanged
+        return $path;
     }
 
     /**
