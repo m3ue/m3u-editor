@@ -17,6 +17,7 @@ use App\Traits\ProviderRequestDelay;
 use Carbon\Carbon;
 use Exception;
 use Filament\Notifications\Notification;
+use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Http\Client\RequestException;
@@ -35,13 +36,16 @@ use M3uParser\Tag\ExtVlcOpt;
 use M3uParser\Tag\KodiDrop;
 use Throwable;
 
-class ProcessM3uImport implements ShouldQueue
+class ProcessM3uImport implements ShouldBeUnique, ShouldQueue
 {
     use ProviderRequestDelay;
     use Queueable;
 
     // Don't retry the job on failure
     public $tries = 1;
+
+    // Prevent duplicate imports for the same playlist (matches job timeout)
+    public int $uniqueFor = 3600;
 
     // To prevent errors when processing large files, limit imported channels to 50,000
     // NOTE: this only applies to M3U+ files
@@ -151,6 +155,14 @@ class ProcessM3uImport implements ShouldQueue
         // Get the enabled groups and categories for this playlist
         $this->enabledGroups = $playlist->groups()->where('enabled', true)->get('name')->pluck('name');
         $this->enabledCategories = $playlist->categories()->where('enabled', true)->get('name')->pluck('name');
+    }
+
+    /**
+     * Get the unique ID for the job (prevents duplicate imports for the same playlist).
+     */
+    public function uniqueId(): string
+    {
+        return 'process-m3u-import-'.$this->playlist->id;
     }
 
     /**
