@@ -752,14 +752,13 @@ class ChannelController extends Controller
 
         $validated = $request->validate([
             'ids' => 'required|array|min:1',
-            'ids.*' => 'integer|exists:channels,id',
+            'ids.*' => ['integer', Rule::exists('channels', 'id')->where('user_id', $user->id)],
             'enabled' => 'required|boolean',
         ]);
 
         $ids = $validated['ids'];
         $enabled = $validated['enabled'];
 
-        // Update only channels that belong to the user
         $updatedCount = Channel::where('user_id', $user->id)
             ->whereIn('id', $ids)
             ->update(['enabled' => $enabled]);
@@ -814,7 +813,7 @@ class ChannelController extends Controller
 
         $validated = $request->validate([
             'ids' => 'sometimes|array|min:1',
-            'ids.*' => 'integer|exists:channels,id',
+            'ids.*' => ['integer', Rule::exists('channels', 'id')->where('user_id', $user->id)],
             'filter' => 'sometimes|array',
             'filter.playlist_uuid' => 'sometimes|string',
             'filter.group_id' => 'sometimes|integer',
@@ -1053,7 +1052,7 @@ class ChannelController extends Controller
 
         $validated = $request->validate([
             'channel_ids' => 'required|array|min:1|max:50',
-            'channel_ids.*' => 'integer|exists:channels,id',
+            'channel_ids.*' => ['integer', Rule::exists('channels', 'id')->where('user_id', $user->id)],
         ]);
 
         $channelIds = $validated['channel_ids'];
