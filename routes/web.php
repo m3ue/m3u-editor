@@ -280,21 +280,23 @@ Route::match(['get', 'post'], '/player_api.php', [XtreamApiController::class, 'h
 Route::match(['get', 'post'], '/get.php', [XtreamApiController::class, 'handle'])->name('xtream.api.get');
 Route::get('/xmltv.php', [XtreamApiController::class, 'epg'])->name('xtream.api.epg');
 
-// Stream endpoints
-Route::get('/live/{username}/{password}/{streamId}.{format?}', [XtreamStreamController::class, 'handleLive'])
-    ->name('xtream.stream.live.root');
-Route::get('/movie/{username}/{password}/{streamId}.{format?}', [XtreamStreamController::class, 'handleVod'])
-    ->name('xtream.stream.vod.root');
-Route::get('/series/{username}/{password}/{streamId}.{format?}', [XtreamStreamController::class, 'handleSeries'])
-    ->name('xtream.stream.series.root');
+// Stream endpoints (throttled per IP to prevent credential brute force)
+Route::middleware(['throttle:60,1'])->group(function () {
+    Route::get('/live/{username}/{password}/{streamId}.{format?}', [XtreamStreamController::class, 'handleLive'])
+        ->name('xtream.stream.live.root');
+    Route::get('/movie/{username}/{password}/{streamId}.{format?}', [XtreamStreamController::class, 'handleVod'])
+        ->name('xtream.stream.vod.root');
+    Route::get('/series/{username}/{password}/{streamId}.{format?}', [XtreamStreamController::class, 'handleSeries'])
+        ->name('xtream.stream.series.root');
 
-// Timeshift endpoints
-Route::get('/timeshift/{username}/{password}/{duration}/{date}/{streamId}.{format?}', [XtreamStreamController::class, 'handleTimeshift'])
-    ->name('xtream.stream.timeshift.root');
+    // Timeshift endpoints
+    Route::get('/timeshift/{username}/{password}/{duration}/{date}/{streamId}.{format?}', [XtreamStreamController::class, 'handleTimeshift'])
+        ->name('xtream.stream.timeshift.root');
 
-// (Fallback) direct stream access (without /live/ or /movie/ prefix)
-Route::get('/{username}/{password}/{streamId}.{format?}', [XtreamStreamController::class, 'handleDirect'])
-    ->name('xtream.stream.direct');
+    // (Fallback) direct stream access (without /live/ or /movie/ prefix)
+    Route::get('/{username}/{password}/{streamId}.{format?}', [XtreamStreamController::class, 'handleDirect'])
+        ->name('xtream.stream.direct');
+});
 
 // Add this route for the image proxy
 Route::get('/schedules-direct/{epg}/image/{imageHash}', [

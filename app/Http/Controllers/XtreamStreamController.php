@@ -15,6 +15,7 @@ use App\Services\PlaylistUrlService;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Redirect;
 
 class XtreamStreamController extends Controller
@@ -27,6 +28,12 @@ class XtreamStreamController extends Controller
     {
         $streamModel = null;
         $playlist = null;
+
+        // Block IPs that have exceeded the failed-auth threshold (10 failures in 5 min)
+        $failKey = 'xtream-auth-fail:'.sha1($username.request()->ip());
+        if (RateLimiter::tooManyAttempts($failKey, 10)) {
+            return [null, null];
+        }
 
         // Method 1: Try to authenticate using PlaylistAuth credentials
         $playlistAuth = PlaylistAuth::where('username', $username)
@@ -98,6 +105,10 @@ class XtreamStreamController extends Controller
 
         // If no authentication method worked, return null
         if (! $playlist) {
+            // Track failed auth attempts per username+IP to limit brute force
+            $failKey = 'xtream-auth-fail:'.sha1($username.request()->ip());
+            RateLimiter::hit($failKey, 300); // 5-minute decay window
+
             return [null, null];
         }
 
