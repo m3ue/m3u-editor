@@ -89,7 +89,7 @@ class XtreamStreamController extends Controller
                                 }
                             }
                         } catch (ModelNotFoundException $e) {
-                            return [null, null];
+                            return [null, null, null];
                         }
                     }
                 }
@@ -98,13 +98,28 @@ class XtreamStreamController extends Controller
 
         // If no authentication method worked, return null
         if (! $playlist) {
-            return [null, null];
+            return [null, null, null];
         }
 
         // Get the stream model
         $streamModel = $this->getValidatedStreamFromPlaylist($playlist, $streamId, $streamType);
 
-        return [$playlist, $streamModel];
+        return [$playlist, $streamModel, $playlistAuth];
+    }
+
+    /**
+     * Resolve the effective proxy setting, allowing PlaylistAuth to override the playlist.
+     */
+    private function resolveEnableProxy($playlist, ?PlaylistAuth $playlistAuth): bool
+    {
+        if ($playlistAuth !== null) {
+            $override = $playlistAuth->resolveEnableProxy();
+            if ($override !== null) {
+                return $override;
+            }
+        }
+
+        return (bool) $playlist->enable_proxy;
     }
 
     /**
@@ -210,7 +225,7 @@ class XtreamStreamController extends Controller
         }
 
         $format = $format ?? 'ts'; // Default to 'ts' if no format provided
-        [$playlist, $channel] = $this->findAuthenticatedPlaylistAndStreamModel($username, $password, $streamId, 'live');
+        [$playlist, $channel, $playlistAuth] = $this->findAuthenticatedPlaylistAndStreamModel($username, $password, $streamId, 'live');
 
         // Handle network playlists - stream_id is actually a network ID
         if ($playlist instanceof Playlist && $playlist->is_network_playlist) {
@@ -218,7 +233,7 @@ class XtreamStreamController extends Controller
         }
 
         if ($channel instanceof Channel) {
-            if ($playlist->enable_proxy || $request->input('proxy') === 'true') {
+            if ($this->resolveEnableProxy($playlist, $playlistAuth) || $request->input('proxy') === 'true') {
                 // Timeshift handled in proxy controller (if needed)
                 // Add username to request for proxy traceability
                 $request->merge(['username' => $username]);
@@ -265,9 +280,9 @@ class XtreamStreamController extends Controller
         }
 
         $format = $format ?? 'ts'; // Default to 'ts' if no format provided
-        [$playlist, $channel] = $this->findAuthenticatedPlaylistAndStreamModel($username, $password, $streamId, 'vod');
+        [$playlist, $channel, $playlistAuth] = $this->findAuthenticatedPlaylistAndStreamModel($username, $password, $streamId, 'vod');
         if ($channel instanceof Channel) {
-            if ($playlist->enable_proxy || $request->input('proxy') === 'true') {
+            if ($this->resolveEnableProxy($playlist, $playlistAuth) || $request->input('proxy') === 'true') {
                 // Add username to request for proxy traceability
                 $request->merge(['username' => $username]);
 
@@ -297,9 +312,9 @@ class XtreamStreamController extends Controller
         }
 
         $format = $format ?? 'mp4'; // Default to 'mp4' if no format provided
-        [$playlist, $episode] = $this->findAuthenticatedPlaylistAndStreamModel($username, $password, $streamId, 'episode');
+        [$playlist, $episode, $playlistAuth] = $this->findAuthenticatedPlaylistAndStreamModel($username, $password, $streamId, 'episode');
         if ($episode instanceof Episode) {
-            if ($playlist->enable_proxy || $request->input('proxy') === 'true') {
+            if ($this->resolveEnableProxy($playlist, $playlistAuth) || $request->input('proxy') === 'true') {
                 // Add username to request for proxy traceability
                 $request->merge(['username' => $username]);
 
@@ -355,7 +370,7 @@ class XtreamStreamController extends Controller
         $format = $format ?? 'ts'; // Default to 'ts' if no format provided
 
         // Timeshift is only available for live channels
-        [$playlist, $channel] = $this->findAuthenticatedPlaylistAndStreamModel($username, $password, $streamId, 'timeshift');
+        [$playlist, $channel, $playlistAuth] = $this->findAuthenticatedPlaylistAndStreamModel($username, $password, $streamId, 'timeshift');
 
         if (! ($channel instanceof Channel)) {
             return response()->json(['error' => 'Unauthorized or stream not found'], 403);
@@ -370,7 +385,7 @@ class XtreamStreamController extends Controller
             'username' => $username,
         ]);
 
-        if ($playlist->enable_proxy) {
+        if ($this->resolveEnableProxy($playlist, $playlistAuth)) {
             return app()->call('App\\Http\\Controllers\\Api\\M3uProxyApiController@channel', [
                 'id' => $streamId,
                 'uuid' => $playlist->uuid,

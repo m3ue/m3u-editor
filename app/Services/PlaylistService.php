@@ -453,6 +453,7 @@ class PlaylistService
                         'alias_auth',
                         $username,
                         $password,
+                        null,
                     ];
                 }
             }
@@ -528,6 +529,7 @@ class PlaylistService
             $authMethod,
             $username,
             $password,
+            $playlistAuth,
         ];
     }
 

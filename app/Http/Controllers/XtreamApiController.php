@@ -381,11 +381,17 @@ class XtreamApiController extends Controller
             'username' => 'required|string',
             'password' => 'required|string',
         ]);
-        [$playlist, $authMethod, $username, $password] = $this->authenticate($request);
+        [$playlist, $authMethod, $username, $password, $playlistAuth] = $this->authenticate($request);
 
         // If no authentication method worked, return error
         if (! $playlist || $authMethod === 'none') {
             return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        // Resolve effective proxy setting (PlaylistAuth can override playlist)
+        $proxyEnabled = (bool) $playlist->enable_proxy;
+        if ($playlistAuth && ($override = $playlistAuth->resolveEnableProxy()) !== null) {
+            $proxyEnabled = $override;
         }
 
         $urlSafePass = urlencode($password);
@@ -433,7 +439,7 @@ class XtreamApiController extends Controller
                 $activeConnections = 0;
             }
             $outputFormats = ['m3u8', 'ts'];
-            if ($playlist->enable_proxy) {
+            if ($proxyEnabled) {
                 // For PlaylistAlias, xtream_config is a list of configs — use effective playlist's config for output format
                 $xtreamConfig = $playlist instanceof PlaylistAlias
                     ? ($playlist->getEffectivePlaylist()?->xtream_config ?? null)
@@ -443,6 +449,14 @@ class XtreamApiController extends Controller
                     $outputFormats = $proxyOutput === 'hls' ? ['m3u8'] : [$proxyOutput];
                 }
                 $activeConnections = M3uProxyService::getPlaylistActiveStreamsCount($playlist);
+            }
+
+            // Override with per-auth connection limits if set
+            if ($playlistAuth && $playlistAuth->max_connections > 0) {
+                $streams = $playlistAuth->max_connections;
+                $activeConnections = $proxyEnabled
+                    ? M3uProxyService::getActiveStreamsCountByMetadata('username', $username)
+                    : 0;
             }
 
             $expDate = PlaylistFacade::resolveXtreamExpDate(
@@ -540,8 +554,6 @@ class XtreamApiController extends Controller
                     $channelsQuery->where('group_id', $categoryId);
                 }
             }
-
-            $proxyEnabled = $playlist->enable_proxy;
 
             $enabledChannels = $channelsQuery
                 ->orderBy('groups.sort_order')
@@ -1494,7 +1506,6 @@ class XtreamApiController extends Controller
             $streamId = $request->input('stream_id');
             $limit = $request->input('limit');
             $limit = (int) ($limit ?? 4);
-            $proxyEnabled = $playlist->enable_proxy;
 
             if (! $streamId) {
                 return response()->json(['error' => 'stream_id parameter is required for get_short_epg action'], 400);
@@ -1584,7 +1595,6 @@ class XtreamApiController extends Controller
             }
 
             $streamId = $request->input('stream_id');
-            $proxyEnabled = $playlist->enable_proxy;
 
             if (! $streamId) {
                 return response()->json(['error' => 'stream_id parameter is required for get_simple_data_table action'], 400);
@@ -1671,7 +1681,6 @@ class XtreamApiController extends Controller
             $streamIds = array_slice($streamIds, 0, 100);
 
             $date = $request->input('date', Carbon::now()->format('Y-m-d'));
-            $proxyEnabled = $playlist->enable_proxy;
 
             // Load all requested channels in one query
             $channels = $playlist->channels()
@@ -1893,7 +1902,7 @@ class XtreamApiController extends Controller
             'username' => 'required|string',
             'password' => 'required|string',
         ]);
-        [$playlist, $authMethod, $username, $password] = $this->authenticate($request);
+        [$playlist, $authMethod, $username, $password, $playlistAuth] = $this->authenticate($request);
 
         // If no authentication method worked, return error
         if (! $playlist || $authMethod === 'none') {

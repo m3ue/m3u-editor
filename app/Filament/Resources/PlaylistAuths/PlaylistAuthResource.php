@@ -19,6 +19,7 @@ use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
 use Filament\Forms;
 use Filament\Forms\Components\DateTimePicker;
+use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
@@ -84,6 +85,21 @@ class PlaylistAuthResource extends Resource
                 ToggleColumn::make('enabled')
                     ->toggleable()
                     ->tooltip('Toggle auth status')
+                    ->sortable(),
+                TextColumn::make('max_connections')
+                    ->label('Max Conns')
+                    ->formatStateUsing(fn ($state) => $state === 0 ? "\u{221E}" : $state)
+                    ->toggleable(isToggledHiddenByDefault: true)
+                    ->sortable(),
+                TextColumn::make('enable_proxy')
+                    ->label('Proxy')
+                    ->formatStateUsing(fn ($state) => match ($state) {
+                        null => 'Inherit',
+                        true, 1 => 'On',
+                        false, 0 => 'Off',
+                        default => 'Inherit',
+                    })
+                    ->toggleable(isToggledHiddenByDefault: true)
                     ->sortable(),
                 TextColumn::make('created_at')
                     ->formatStateUsing(fn ($state) => app(DateFormatService::class)->format($state))
@@ -161,6 +177,45 @@ class PlaylistAuthResource extends Resource
                 ->native(false)
                 ->helperText('If set, this account will stop working at that exact time.')
                 ->nullable()
+                ->columnSpan(2),
+            TextInput::make('max_connections')
+                ->label('Max Concurrent Connections')
+                ->numeric()
+                ->default(0)
+                ->minValue(0)
+                ->helperText('Maximum concurrent proxy streams for this auth. Set to 0 for unlimited.')
+                ->columnSpan(1),
+            Select::make('enable_proxy')
+                ->label('Proxy Override')
+                ->options([
+                    'on' => 'Force Proxy On',
+                    'off' => 'Force Proxy Off',
+                ])
+                ->placeholder('Inherit from Playlist')
+                ->default(null)
+                ->nullable()
+                ->afterStateHydrated(function ($component, $record) {
+                    if (! $record) {
+                        return;
+                    }
+                    $value = $record->getRawOriginal('enable_proxy');
+                    if (is_null($value)) {
+                        $component->state(null);
+                    } else {
+                        $component->state($value ? 'on' : 'off');
+                    }
+                })
+                ->dehydrateStateUsing(function ($state) {
+                    if ($state === null || $state === '') {
+                        return null;
+                    }
+
+                    return $state === 'on';
+                })
+                ->helperText('Override the assigned playlist\'s proxy setting for this auth.')
+                ->columnSpan(1),
+            Placeholder::make('proxy_notice')
+                ->content('Connection limits only apply when proxy is active. Non-proxied streams are direct redirects and cannot be tracked or limited.')
                 ->columnSpan(2),
         ];
 

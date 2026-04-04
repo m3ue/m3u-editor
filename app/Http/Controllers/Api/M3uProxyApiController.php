@@ -8,6 +8,7 @@ use App\Models\Channel;
 use App\Models\Episode;
 use App\Models\Network;
 use App\Models\Playlist;
+use App\Models\PlaylistAuth;
 use App\Models\PlaylistProfile;
 use App\Models\StreamProfile;
 use App\Services\M3uProxyService;
@@ -67,13 +68,19 @@ class M3uProxyApiController extends Controller
             $profile = $playlist->streamProfile;
         }
 
+        // Look up PlaylistAuth for per-auth connection limits
+        $playlistAuth = $username
+            ? PlaylistAuth::where('username', $username)->where('enabled', true)->first()
+            : null;
+
         $url = app(M3uProxyService::class)
             ->getChannelUrl(
                 $playlist,
                 $channel,
                 $request,
                 $profile,
-                $username
+                $username,
+                $playlistAuth
             );
 
         return redirect($url);
@@ -114,13 +121,19 @@ class M3uProxyApiController extends Controller
         // For Series, use the VOD stream profile if set
         $profile = $playlist->vodStreamProfile;
 
+        // Look up PlaylistAuth for per-auth connection limits
+        $playlistAuth = $username
+            ? PlaylistAuth::where('username', $username)->where('enabled', true)->first()
+            : null;
+
         $url = app(M3uProxyService::class)
             ->getEpisodeUrl(
                 $playlist,
                 $episode,
                 $profile,
                 $username,
-                $request
+                $request,
+                $playlistAuth
             );
 
         return redirect($url);

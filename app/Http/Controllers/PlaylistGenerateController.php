@@ -11,6 +11,7 @@ use App\Models\CustomPlaylist;
 use App\Models\Network;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
+use App\Models\PlaylistAuth;
 use App\Services\PlaylistUrlService;
 use Illuminate\Http\Request;
 
@@ -83,6 +84,11 @@ class PlaylistGenerateController extends Controller
             $proxyEnabled = $request->input('proxy') === 'true';
         } else {
             $proxyEnabled = $playlist->enable_proxy;
+        }
+
+        // Apply PlaylistAuth proxy override if set
+        if ($usedAuth instanceof PlaylistAuth && ($override = $usedAuth->resolveEnableProxy()) !== null) {
+            $proxyEnabled = $override;
         }
 
         // Check if user has permission to use proxy

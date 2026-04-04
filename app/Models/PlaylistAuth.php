@@ -24,6 +24,7 @@ class PlaylistAuth extends Model
         'id' => 'integer',
         'enabled' => 'boolean',
         'user_id' => 'integer',
+        'max_connections' => 'integer',
         'expires_at' => 'datetime',
     ];
 
@@ -35,6 +36,35 @@ class PlaylistAuth extends Model
     public function viewer(): HasOne
     {
         return $this->hasOne(PlaylistViewer::class);
+    }
+
+    /**
+     * Resolve the effective proxy override for this auth.
+     *
+     * Returns null if inheriting from playlist, true/false if overriding.
+     * When forcing proxy on, checks that the user has proxy permission.
+     */
+    public function resolveEnableProxy(): ?bool
+    {
+        $value = $this->getRawOriginal('enable_proxy');
+
+        if (is_null($value)) {
+            return null;
+        }
+
+        if ($value && ! $this->user?->canUseProxy()) {
+            return false;
+        }
+
+        return (bool) $value;
+    }
+
+    /**
+     * Check if this auth has reached its concurrent connection limit.
+     */
+    public function isAtConnectionLimit(int $activeCount): bool
+    {
+        return $this->max_connections > 0 && $activeCount >= $this->max_connections;
     }
 
     /**
