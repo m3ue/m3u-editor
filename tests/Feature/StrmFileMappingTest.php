@@ -2,14 +2,16 @@
 
 use App\Models\Channel;
 use App\Models\StrmFileMapping;
+use App\Models\User;
 
-// Note: These tests are skipped in CI because they require specific database
-// setup and the StrmFileMapping::findOrphanedMappings() method uses chunkById
-// which requires the primary key column in the query result.
-// TODO: Fix the StrmFileMapping model or tests to work in CI environment.
+// Note: The chunkById ambiguous column issue (with joins) in findOrphanedMappings() has been
+// fixed in the model by passing explicit column/alias params to chunkById().
 
 beforeEach(function () {
-    $this->markTestSkipped('StrmFileMapping tests require additional database setup not available in CI');
+    $this->user = User::factory()->create();
+    $this->actingAs($this->user);
+    $this->testDir = sys_get_temp_dir().'/strm_test_'.uniqid();
+    mkdir($this->testDir, 0755, true);
 });
 
 afterEach(function () {
