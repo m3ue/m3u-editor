@@ -110,18 +110,37 @@ class PlaylistController extends Controller
             ], 404);
         }
 
-        // Get channel counts
-        $totalChannels = $playlist->channels()->count();
-        $enabledChannels = $playlist->channels()->where('enabled', true)->count();
-        $liveChannels = $playlist->channels()->where('is_vod', false)->count();
-        $liveEnabledChannels = $playlist->channels()->where('is_vod', false)->where('enabled', true)->count();
-        $vodChannels = $playlist->channels()->where('is_vod', true)->count();
-        $vodEnabledChannels = $playlist->channels()->where('is_vod', true)->where('enabled', true)->count();
+        // Get channel counts using a single aggregated query
+        $channelCounts = $playlist->channels()
+            ->selectRaw('
+                COUNT(*) as total,
+                SUM(CASE WHEN enabled = 1 THEN 1 ELSE 0 END) as enabled,
+                SUM(CASE WHEN is_vod = 0 THEN 1 ELSE 0 END) as live,
+                SUM(CASE WHEN is_vod = 0 AND enabled = 1 THEN 1 ELSE 0 END) as live_enabled,
+                SUM(CASE WHEN is_vod = 1 THEN 1 ELSE 0 END) as vod,
+                SUM(CASE WHEN is_vod = 1 AND enabled = 1 THEN 1 ELSE 0 END) as vod_enabled
+            ')
+            ->first();
 
-        // Get group counts
-        $totalGroups = $playlist->groups()->count();
-        $liveGroups = $playlist->groups()->where('type', 'live')->count();
-        $vodGroups = $playlist->groups()->where('type', 'vod')->count();
+        $totalChannels = (int) ($channelCounts->total ?? 0);
+        $enabledChannels = (int) ($channelCounts->enabled ?? 0);
+        $liveChannels = (int) ($channelCounts->live ?? 0);
+        $liveEnabledChannels = (int) ($channelCounts->live_enabled ?? 0);
+        $vodChannels = (int) ($channelCounts->vod ?? 0);
+        $vodEnabledChannels = (int) ($channelCounts->vod_enabled ?? 0);
+
+        // Get group counts using a single aggregated query
+        $groupCounts = $playlist->groups()
+            ->selectRaw("
+                COUNT(*) as total,
+                SUM(CASE WHEN type = 'live' THEN 1 ELSE 0 END) as live,
+                SUM(CASE WHEN type = 'vod' THEN 1 ELSE 0 END) as vod
+            ")
+            ->first();
+
+        $totalGroups = (int) ($groupCounts->total ?? 0);
+        $liveGroups = (int) ($groupCounts->live ?? 0);
+        $vodGroups = (int) ($groupCounts->vod ?? 0);
 
         // Get series counts if available
         $totalSeries = 0;
