@@ -472,6 +472,8 @@ class VodResource extends Resource
 
     public static function getTableActions(): array
     {
+        $hlsProfileAvailable = Channel::hasHlsProfileForCasting('vod');
+
         return [
             ActionGroup::make([
                 Action::make('fetch_tmdb_ids')
@@ -647,6 +649,42 @@ class VodResource extends Resource
                 ->button()->hiddenLabel()->size('sm')
                     // Refresh table after edit to remove records that no longer match active filters
                 ->after(fn ($livewire) => $livewire->dispatch('$refresh')),
+            Action::make('cast')
+                ->tooltip(function ($record) use ($hlsProfileAvailable) {
+                    if ($hlsProfileAvailable) {
+                        return 'Cast to Chromecast';
+                    }
+                    $sourceUrl = $record->url_custom ?: ($record->url ?? '');
+                    if (preg_match('/\.m3u8($|\?)/i', $sourceUrl)) {
+                        return 'Cast to Chromecast';
+                    }
+
+                    return 'No HLS transcoding profile configured';
+                })
+                ->disabled(function ($record) use ($hlsProfileAvailable) {
+                    if ($hlsProfileAvailable) {
+                        return false;
+                    }
+                    $sourceUrl = $record->url_custom ?: ($record->url ?? '');
+
+                    return ! preg_match('/\.m3u8($|\?)/i', $sourceUrl);
+                })
+                ->action(function ($record, $livewire) {
+                    $attrs = $record->getFloatingPlayerAttributes();
+                    if (! ($attrs['cast_url'] ?? null)) {
+                        return;
+                    }
+                    $livewire->dispatch('startDirectCast', [
+                        'cast_url' => $attrs['cast_url'],
+                        'cast_format' => $attrs['cast_format'],
+                        'title' => $attrs['display_title'] ?? $attrs['title'] ?? $record->name,
+                        'content_type' => $attrs['content_type'] ?? 'vod',
+                    ]);
+                })
+                ->icon('svg-chromecast')
+                ->button()
+                ->hiddenLabel()
+                ->size('sm'),
             Action::make('play')
                 ->tooltip('Play Video')
                 ->action(function ($record, $livewire) {

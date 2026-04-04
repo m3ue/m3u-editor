@@ -14,12 +14,15 @@ class PlayerPopoutRouteTest extends TestCase
 
     public function test_renders_player_popout_with_provided_stream_data(): void
     {
-        $this->get('/player/popout?url=http://example.test/stream.ts&format=ts&title=Test+Channel')
+        $this->get('/player/popout?url=http://example.test/stream.ts&format=ts&cast_url=http://example.test/stream.m3u8&cast_format=m3u8&title=Test+Channel')
             ->assertOk()
             ->assertSee('Test Channel - Player', false)
             ->assertSee('id="popout-player"', false)
+            ->assertSee('const videoElement = document.getElementById(\'popout-player\');', false)
             ->assertSee('data-url="http://example.test/stream.ts"', false)
-            ->assertSee('data-format="ts"', false);
+            ->assertSee('data-format="ts"', false)
+            ->assertSee('data-cast-url="http://example.test/stream.m3u8"', false)
+            ->assertSee('data-cast-format="m3u8"', false);
     }
 
     public function test_rejects_unsupported_stream_url_schemes(): void
@@ -41,5 +44,12 @@ class PlayerPopoutRouteTest extends TestCase
         $this->get('/player/popout?url=http://example.test/stream.ts&format=avi')
             ->assertOk()
             ->assertSee('data-format="ts"', false);
+    }
+
+    public function test_infers_m3u8_cast_format_from_cast_url_when_missing(): void
+    {
+        $this->get('/player/popout?url=http://example.test/stream.ts&format=ts&cast_url=http://example.test/stream.m3u8')
+            ->assertOk()
+            ->assertSee('data-cast-format="m3u8"', false);
     }
 }

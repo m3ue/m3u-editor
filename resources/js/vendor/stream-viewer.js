@@ -172,6 +172,11 @@ function streamPlayer() {
         },
         // ─────────────────────────────────────────────────────────────────
 
+        _isLocalPlaybackSuspendedForCast(playerId = null) {
+            const player = playerId ? document.getElementById(playerId) : this.player;
+            return player?.dataset?.localPlaybackSuspendedForCast === 'true';
+        },
+
         initPlayer(url, format, playerId) {
             if (!url) {
                 return
@@ -597,10 +602,43 @@ function streamPlayer() {
             const loadingEl = document.getElementById(playerId + '-loading');
             const errorEl = document.getElementById(playerId + '-error');
             const errorMessageEl = document.getElementById(playerId + '-error-message');
+            const errorTitleEl = document.getElementById(playerId + '-error-title');
+            const retryButtonEl = document.getElementById(playerId + '-error-retry');
+            const errorIconEl = document.getElementById(playerId + '-error-icon');
+            const isCastingLocallySuspended = this._isLocalPlaybackSuspendedForCast(playerId);
 
             if (loadingEl) loadingEl.style.display = 'none';
             if (errorEl) errorEl.style.display = 'flex';
-            if (errorMessageEl) errorMessageEl.textContent = message;
+
+            if (isCastingLocallySuspended) {
+                if (errorTitleEl) {
+                    errorTitleEl.textContent = 'Casting to your device';
+                }
+                if (errorMessageEl) {
+                    errorMessageEl.textContent = 'Playback has moved to Chromecast. Stop casting to resume playback here.';
+                }
+                if (retryButtonEl) {
+                    retryButtonEl.classList.add('hidden');
+                }
+                if (errorIconEl) {
+                    errorIconEl.innerHTML = '<svg class="h-8 w-8 text-blue-400" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M1 18v3h3c0-1.66-1.34-3-3-3zm0-4v2c2.76 0 5 2.24 5 5h2c0-3.87-3.13-7-7-7zm0-4v2c4.97 0 9 4.03 9 9h2c0-6.08-4.93-11-11-11zm20-7H3c-1.1 0-2 .9-2 2v3h2V5h18v14h-7v2h7c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/></svg>';
+                }
+                this.updateStatus(playerId, 'Casting');
+                return;
+            }
+
+            if (errorTitleEl) {
+                errorTitleEl.textContent = 'Playback Error';
+            }
+            if (errorMessageEl) {
+                errorMessageEl.textContent = message;
+            }
+            if (retryButtonEl) {
+                retryButtonEl.classList.remove('hidden');
+            }
+            if (errorIconEl) {
+                errorIconEl.innerHTML = '<svg class="h-8 w-8 text-red-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v3.75m9.303 3.376c.866 1.5-.217 3.374-1.949 3.374H4.646c-1.732 0-2.815-1.874-1.949-3.374L10.051 3.374c.866-1.5 3.032-1.5 3.898 0l7.354 12.752ZM12 16.5h.008v.008H12V16.5Z" /></svg>';
+            }
 
             this.updateStatus(playerId, 'Error');
         },

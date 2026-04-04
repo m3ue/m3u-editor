@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\AssetPreviewController;
 use App\Http\Controllers\Auth\OidcController;
+use App\Http\Controllers\CastStreamController;
 use App\Http\Controllers\ChannelController;
 use App\Http\Controllers\EpgController;
 use App\Http\Controllers\EpgFileController;
@@ -279,6 +280,16 @@ Route::group(['prefix' => 'epg'], function () {
 Route::match(['get', 'post'], '/player_api.php', [XtreamApiController::class, 'handle'])->name('xtream.api.player');
 Route::match(['get', 'post'], '/get.php', [XtreamApiController::class, 'handle'])->name('xtream.api.get');
 Route::get('/xmltv.php', [XtreamApiController::class, 'epg'])->name('xtream.api.epg');
+
+// Cast-safe HLS endpoints
+Route::get('/cast/live/{username}/{password}/{streamId}.{format?}', [CastStreamController::class, 'live'])
+    ->name('cast.stream.live');
+Route::get('/cast/movie/{username}/{password}/{streamId}.{format?}', [CastStreamController::class, 'movie'])
+    ->name('cast.stream.movie');
+Route::get('/cast/series/{username}/{password}/{streamId}.{format?}', [CastStreamController::class, 'series'])
+    ->name('cast.stream.series');
+Route::get('/cast/segment', [CastStreamController::class, 'segment'])
+    ->name('cast.stream.segment');
 
 // Stream endpoints
 Route::get('/live/{username}/{password}/{streamId}.{format?}', [XtreamStreamController::class, 'handleLive'])

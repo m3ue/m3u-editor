@@ -207,6 +207,12 @@ class AdminPanelProvider extends PanelProvider
         // Register our custom app js
         FilamentView::registerRenderHook('panels::body.end', fn () => Blade::render("@vite('resources/js/app.js')"));
 
+        // Load Google Cast SDK for Chromecast support
+        FilamentView::registerRenderHook(
+            PanelsRenderHook::HEAD_END,
+            fn (): string => '<script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>'
+        );
+
         // Return the configured panel
         return $adminPanel;
     }

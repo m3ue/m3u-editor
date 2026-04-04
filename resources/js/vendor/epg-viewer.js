@@ -617,6 +617,17 @@ function epgViewer(config) {
                         this.epgData.channels[foundChannelId].url = updatedChannel.url;
                     }
 
+                    // Preserve cast-safe playback metadata during channel refreshes
+                    if (Object.prototype.hasOwnProperty.call(updatedChannel, 'cast_url')) {
+                        this.epgData.channels[foundChannelId].cast_url = updatedChannel.cast_url;
+                    }
+                    if (Object.prototype.hasOwnProperty.call(updatedChannel, 'cast_format')) {
+                        this.epgData.channels[foundChannelId].cast_format = updatedChannel.cast_format;
+                    }
+                    if (Object.prototype.hasOwnProperty.call(updatedChannel, 'cast_unavailable_reason')) {
+                        this.epgData.channels[foundChannelId].cast_unavailable_reason = updatedChannel.cast_unavailable_reason;
+                    }
+
                     // Update programmes if provided
                     if (updatedChannel.programmes) {
                         this.epgData.channels[foundChannelId].programmes = updatedChannel.programmes;

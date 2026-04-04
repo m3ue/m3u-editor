@@ -27,50 +27,59 @@ function multiStreamManager() {
                 return;
             }
 
-            // Check if we already have a listener
-            if (window._floatingStreamListenerAdded) {
-                return;
+            // Store this instance as the current active manager so global
+            // listeners (attached once) always delegate to the latest instance
+            window._globalMultiStreamManager = this;
+
+            // Attach global listeners exactly once (they survive Livewire SPA
+            // navigation and always delegate to window._globalMultiStreamManager)
+            if (!window._floatingStreamListenersAttached) {
+                window._floatingStreamListenersAttached = true;
+
+                // Listen for new stream requests
+                window.addEventListener('openFloatingStream', (event) => {
+                    const mgr = window._globalMultiStreamManager;
+                    if (!mgr) return;
+                    let detail = event.detail;
+                    if (Array.isArray(detail)) {
+                        detail = detail[0];
+                    }
+                    console.log('Received openFloatingStream event:', detail);
+                    event.stopPropagation();
+                    mgr.openStream(detail);
+                });
+
+                // Cleanup on page unload (beforeunload + pagehide for mobile Safari)
+                window.addEventListener('beforeunload', () => {
+                    const mgr = window._globalMultiStreamManager;
+                    if (mgr) mgr.cleanupAllStreams();
+                });
+                window.addEventListener('pagehide', () => {
+                    const mgr = window._globalMultiStreamManager;
+                    if (mgr) mgr.cleanupAllStreams();
+                });
+
+                // Pause/resume streams on tab visibility change (saves bandwidth on mobile)
+                document.addEventListener('visibilitychange', () => {
+                    const mgr = window._globalMultiStreamManager;
+                    if (!mgr) return;
+                    if (document.visibilityState === 'hidden') {
+                        mgr.pauseAllStreams();
+                    } else if (document.visibilityState === 'visible') {
+                        mgr.resumeAllStreams();
+                    }
+                });
+
+                // Global mouse events for drag and resize
+                document.addEventListener('mousemove', (e) => {
+                    const mgr = window._globalMultiStreamManager;
+                    if (mgr) mgr.handleMouseMove(e);
+                });
+                document.addEventListener('mouseup', () => {
+                    const mgr = window._globalMultiStreamManager;
+                    if (mgr) mgr.handleMouseUp();
+                });
             }
-
-            // Listen for new stream requests
-            window.addEventListener('openFloatingStream', (event) => {
-                let detail = event.detail;
-                if (Array.isArray(detail)) {
-                    detail = detail[0];
-                }
-                console.log('Received openFloatingStream event:', detail);
-                event.stopPropagation(); // Prevent event bubbling
-                this.openStream(detail);
-            });
-
-            // Mark that we've added the listener
-            window._floatingStreamListenerAdded = true;
-
-            // Cleanup on page unload (beforeunload + pagehide for mobile Safari)
-            window.addEventListener('beforeunload', () => {
-                this.cleanupAllStreams();
-            });
-            window.addEventListener('pagehide', () => {
-                this.cleanupAllStreams();
-            });
-
-            // Cleanup on Livewire SPA navigation
-            window.addEventListener('livewire:navigating', () => {
-                this.cleanupAllStreams();
-            });
-
-            // Pause/resume streams on tab visibility change (saves bandwidth on mobile)
-            document.addEventListener('visibilitychange', () => {
-                if (document.visibilityState === 'hidden') {
-                    this.pauseAllStreams();
-                } else if (document.visibilityState === 'visible') {
-                    this.resumeAllStreams();
-                }
-            });
-
-            // Global mouse events for drag and resize
-            document.addEventListener('mousemove', (e) => this.handleMouseMove(e));
-            document.addEventListener('mouseup', () => this.handleMouseUp());
 
             // Mark as initialized
             this._initialized = true;
@@ -86,14 +95,23 @@ function multiStreamManager() {
 
             const playerId = 'floating-player-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
 
+            const castUrl = channelData.cast_url || '';
+            const inferredCastFormat = castUrl
+                ? (castUrl.includes('.m3u8') ? 'm3u8' : (channelData.cast_format || channelData.format || 'ts'))
+                : null;
+
             const player = {
                 id: playerId,
                 channelId: channelData.id || null,
                 channelType: channelData.type || null,
                 title: channelData.title || channelData.name || 'Unknown Channel',
+                display_title: channelData.display_title || channelData.title || channelData.name || 'Unknown Channel',
                 logo: channelData.logo || channelData.icon || '',
                 url: channelData.url || '',
                 format: channelData.format || 'ts',
+                cast_url: castUrl,
+                cast_format: inferredCastFormat,
+                cast_unavailable_reason: channelData.cast_unavailable_reason || null,
                 content_type: channelData.content_type || '',
                 stream_id: channelData.stream_id || null,
                 playlist_id: channelData.playlist_id || null,
@@ -177,7 +195,8 @@ function multiStreamManager() {
             });
             this.players = [];
 
-            // Reset initialization flag
+            // Reset instance initialization flag (NOT the global listeners flag —
+            // those persist and delegate to the current manager via window._globalMultiStreamManager)
             this._initialized = false;
         },
 
@@ -250,9 +269,13 @@ function multiStreamManager() {
 
             const params = new URLSearchParams({
                 title: player.title ?? '',
+                display_title: player.display_title ?? player.title ?? '',
                 logo: player.logo ?? '',
                 url: player.url ?? '',
                 format: player.format ?? 'ts',
+                cast_url: player.cast_url ?? '',
+                cast_format: player.cast_format ?? '',
+                cast_unavailable_reason: player.cast_unavailable_reason ?? '',
                 content_type: player.content_type ?? '',
                 stream_id: player.stream_id ?? '',
                 playlist_id: player.playlist_id ?? '',

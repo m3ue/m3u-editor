@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Series\RelationManagers;
 
+use App\Models\Channel;
 use Filament\Actions;
 use Filament\Actions\Action;
 use Filament\Actions\ViewAction;
@@ -139,6 +140,41 @@ class EpisodesRelationManager extends RelationManager
                 //
             ])
             ->recordActions([
+                Action::make('cast')
+                    ->tooltip(function ($record) {
+                        if (Channel::hasHlsProfileForCasting('vod')) {
+                            return 'Cast to Chromecast';
+                        }
+                        $sourceUrl = $record->url ?? '';
+                        if (preg_match('/\.m3u8($|\?)/i', $sourceUrl)) {
+                            return 'Cast to Chromecast';
+                        }
+
+                        return 'No HLS transcoding profile configured';
+                    })
+                    ->disabled(function ($record) {
+                        if (Channel::hasHlsProfileForCasting('vod')) {
+                            return false;
+                        }
+                        $sourceUrl = $record->url ?? '';
+
+                        return ! preg_match('/\.m3u8($|\?)/i', $sourceUrl);
+                    })
+                    ->action(function ($record, $livewire) {
+                        $attrs = $record->getFloatingPlayerAttributes();
+                        if (! ($attrs['cast_url'] ?? null)) {
+                            return;
+                        }
+                        $livewire->dispatch('startDirectCast', [
+                            'cast_url' => $attrs['cast_url'],
+                            'cast_format' => $attrs['cast_format'],
+                            'title' => $attrs['display_title'] ?? $attrs['title'] ?? $record->title,
+                            'content_type' => $attrs['content_type'] ?? 'episode',
+                        ]);
+                    })
+                    ->icon('svg-chromecast')
+                    ->button()
+                    ->hiddenLabel(),
                 Action::make('play')
                     ->tooltip('Play Episode')
                     ->action(function ($record, $livewire) {

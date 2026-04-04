@@ -295,6 +295,7 @@ class EpgApiController extends Controller
                     $dummyEpgChannels[] = [
                         'playlist_channel_id' => $channelKey,
                         'display_name' => $channel->title_custom ?? $channel->title,
+                        'display_title' => $channel->title_custom ?? $channel->title ?? $channel->name_custom ?? $channel->name,
                         'title' => $channel->name_custom ?? $channel->name,
                         'icon' => $icon,
                         'channel_number' => $channelNo,
@@ -328,6 +329,8 @@ class EpgApiController extends Controller
                 $channelResults = $channel->getFloatingPlayerAttributes(username: $username, password: $password);
                 $url = $channelResults['url'] ?? '';
                 $channelFormat = $channelResults['format'] ?? '';
+                $castUrl = $channelResults['cast_url'] ?? null;
+                $castFormat = $channelResults['cast_format'] ?? null;
 
                 // Get the icon
                 $icon = '';
@@ -354,9 +357,13 @@ class EpgApiController extends Controller
                     'playlist_id' => $playlist->id,
                     'url' => $url,
                     'format' => $channelFormat,
+                    'cast_url' => $castUrl,
+                    'cast_format' => $castFormat,
+                    'cast_unavailable_reason' => $channelResults['cast_unavailable_reason'] ?? null,
                     'tvg_id' => $tvgId,
                     'display_name' => $channel->title_custom ?? $channel->title,
-                    'title' => $channel->name_custom ?? $channel->name,
+                    'display_title' => $channelResults['display_title'] ?? $channel->title_custom ?? $channel->title ?? $channel->name_custom ?? $channel->name,
+                    'title' => $channelResults['title'] ?? $channel->name_custom ?? $channel->name,
                     'channel_number' => $channelNo,
                     'group' => $channel->group ?? $channel->group_internal,
                     'icon' => $icon,

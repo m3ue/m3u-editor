@@ -104,6 +104,8 @@ class Episode extends Model
             internal: true
         );
 
+        [$castUrl, $castFormat, $castUnavailableReason] = $this->getCastPlaybackAttributes($username, $password);
+
         return [
             'id' => 'episode-'.$this->id,
             'stream_id' => $this->id,
@@ -112,10 +114,60 @@ class Episode extends Model
             'series_id' => $this->series_id,
             'season_number' => $this->season,
             'title' => $this->title,
+            'display_title' => $this->title,
             'url' => $url,
             'format' => $episodeFormat,
+            'cast_url' => $castUrl,
+            'cast_format' => $castFormat,
+            'cast_unavailable_reason' => $castUnavailableReason,
             'type' => 'episode',
         ];
+    }
+
+    protected function getCastPlaybackAttributes(?string $username = null, ?string $password = null): array
+    {
+        $playlist = $this->playlist ?? Playlist::find($this->playlist_id);
+
+        // Chromecast requires HLS.  Casting is available when either:
+        //  1. A global cast/player HLS transcoding profile is configured, OR
+        //  2. The provider already serves HLS (episode URL ends in .m3u8)
+        // Note: playlist-level output transcoding settings (vod_stream_profile_id)
+        // are for external clients only and are not considered here.
+        if (! Channel::hasHlsProfileForCasting('vod')) {
+            $sourceIsHls = (bool) preg_match('/\.m3u8($|\?)/i', $this->url ?? '');
+
+            if (! $sourceIsHls) {
+                return [null, null, 'No HLS transcoding profile configured'];
+            }
+        }
+
+        if ($username && $password) {
+            return [
+                route('cast.stream.series', [
+                    'username' => $username,
+                    'password' => $password,
+                    'streamId' => $this->id,
+                    'format' => 'm3u8',
+                ]),
+                'm3u8',
+                null,
+            ];
+        }
+
+        if ($playlist?->uuid) {
+            return [
+                route('cast.stream.series', [
+                    'username' => $this->user->name ?? 'admin',
+                    'password' => $playlist->uuid,
+                    'streamId' => $this->id,
+                    'format' => 'm3u8',
+                ]),
+                'm3u8',
+                null,
+            ];
+        }
+
+        return [null, null, null];
     }
 
     /**

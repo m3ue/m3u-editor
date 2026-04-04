@@ -251,6 +251,26 @@
                                                     <x-heroicon-s-pencil class="w-4 h-4" />
                                                 </button>
                                         @endif
+                                            <!-- Cast Button -->
+                                            <button x-show="item.channel.url" @click.stop="
+                                                    if (!item.channel.cast_url) return;
+                                                    window.dispatchEvent(new CustomEvent('startDirectCast', { detail: {
+                                                        cast_url: item.channel.cast_url,
+                                                        cast_format: item.channel.cast_format || 'm3u8',
+                                                        title: item.channel.display_title || item.channel.title || item.channel.display_name,
+                                                        content_type: item.channel.content_type || 'live'
+                                                    }}))
+                                                "
+                                                :disabled="!item.channel.cast_url"
+                                                :title="item.channel.cast_url ? 'Cast to Chromecast' : (item.channel.cast_unavailable_reason || 'Cast unavailable')"
+                                                class="p-2 rounded-full transition-colors"
+                                                :class="item.channel.cast_url
+                                                    ? 'text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-900/20'
+                                                    : 'opacity-40 cursor-not-allowed text-gray-400 dark:text-gray-500'">
+                                                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+                                                    <path d="M1 18v3h3c0-1.66-1.34-3-3-3zm0-4v2c2.76 0 5 2.24 5 5h2c0-3.87-3.13-7-7-7zm0-4v2c4.97 0 9 4.03 9 9h2c0-6.08-4.93-11-11-11zm20-7H3c-1.1 0-2 .9-2 2v3h2V5h18v14h-7v2h7c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/>
+                                                </svg>
+                                            </button>
                                             <!-- Play Button -->
                                             <button x-show="item.channel.url" @click.stop="
                                                     window.dispatchEvent(new CustomEvent('openFloatingStream', { detail: item.channel }))

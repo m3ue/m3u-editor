@@ -386,6 +386,9 @@ class ChannelResource extends Resource
 
     public static function getTableActions(): array
     {
+        $hlsLiveAvailable = Channel::hasHlsProfileForCasting('live');
+        $hlsVodAvailable = Channel::hasHlsProfileForCasting('vod');
+
         return [
             ActionGroup::make([
                 EditAction::make('edit_custom')
@@ -412,6 +415,42 @@ class ChannelResource extends Resource
                 ->hiddenLabel()
                 ->disabled(fn (Model $record) => $record->is_custom)
                 ->hidden(fn (Model $record) => $record->is_custom),
+            Action::make('cast')
+                ->tooltip(function (Model $record) use ($hlsLiveAvailable, $hlsVodAvailable) {
+                    if ($record->is_vod ? $hlsVodAvailable : $hlsLiveAvailable) {
+                        return 'Cast to Chromecast';
+                    }
+                    $sourceUrl = $record->url_custom ?: ($record->url ?? '');
+                    if (preg_match('/\.m3u8($|\?)/i', $sourceUrl)) {
+                        return 'Cast to Chromecast';
+                    }
+
+                    return 'No HLS transcoding profile configured';
+                })
+                ->disabled(function (Model $record) use ($hlsLiveAvailable, $hlsVodAvailable) {
+                    if ($record->is_vod ? $hlsVodAvailable : $hlsLiveAvailable) {
+                        return false;
+                    }
+                    $sourceUrl = $record->url_custom ?: ($record->url ?? '');
+
+                    return ! preg_match('/\.m3u8($|\?)/i', $sourceUrl);
+                })
+                ->action(function (Model $record, $livewire) {
+                    $attrs = $record->getFloatingPlayerAttributes();
+                    if (! ($attrs['cast_url'] ?? null)) {
+                        return;
+                    }
+                    $livewire->dispatch('startDirectCast', [
+                        'cast_url' => $attrs['cast_url'],
+                        'cast_format' => $attrs['cast_format'],
+                        'title' => $attrs['display_title'] ?? $attrs['title'] ?? $record->name,
+                        'content_type' => $attrs['content_type'] ?? 'live',
+                    ]);
+                })
+                ->icon('svg-chromecast')
+                ->button()
+                ->hiddenLabel()
+                ->size('sm'),
             Action::make('play')
                 ->tooltip('Play Channel')
                 ->action(function ($record, $livewire) {

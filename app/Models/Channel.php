@@ -177,16 +177,121 @@ class Channel extends Model
             internal: true
         );
 
+        [$castUrl, $castFormat, $castUnavailableReason] = $this->getCastPlaybackAttributes($username, $password);
+
         return [
             'id' => $this->id,
             'stream_id' => $this->id,
             'content_type' => $this->is_vod ? 'vod' : 'live',
             'playlist_id' => $this->playlist_id,
             'title' => $this->name_custom ?? $this->name,
+            'display_title' => $this->title_custom ?? $this->title ?? $this->name_custom ?? $this->name,
             'url' => $url,
             'format' => $format,
+            'cast_url' => $castUrl,
+            'cast_format' => $castFormat,
+            'cast_unavailable_reason' => $castUnavailableReason,
             'type' => 'channel',
         ];
+    }
+
+    protected function getCastPlaybackAttributes(?string $username = null, ?string $password = null): array
+    {
+        $castRoute = $this->is_vod ? 'cast.stream.movie' : 'cast.stream.live';
+
+        $playlist = $this->playlist;
+
+        if (! $playlist?->uuid) {
+            $playlist = $this->customPlaylist;
+        }
+
+        if (! $playlist?->uuid) {
+            $playlist = Playlist::find($this->playlist_id ?: $this->custom_playlist_id);
+        }
+
+        // Chromecast requires HLS.  Casting is available when either:
+        //  1. A global cast/player HLS transcoding profile is configured, OR
+        //  2. The provider already serves HLS (channel URL ends in .m3u8)
+        // Note: playlist-level output transcoding settings (stream_profile_id /
+        // vod_stream_profile_id) are for external clients only and are not
+        // considered here.
+        if (! self::hasHlsProfileForCasting($this->is_vod ? 'vod' : 'live')) {
+            $sourceUrl = $this->url_custom ?: ($this->url ?? '');
+            $sourceIsHls = (bool) preg_match('/\.m3u8($|\?)/i', $sourceUrl);
+
+            if (! $sourceIsHls) {
+                return [null, null, 'No HLS transcoding profile configured'];
+            }
+        }
+
+        if ($username && $password) {
+            return [
+                route($castRoute, [
+                    'username' => $username,
+                    'password' => $password,
+                    'streamId' => $this->id,
+                    'format' => 'm3u8',
+                ]),
+                'm3u8',
+                null,
+            ];
+        }
+
+        if ($playlist?->uuid) {
+            return [
+                route($castRoute, [
+                    'username' => $this->user->name ?? 'admin',
+                    'password' => $playlist->uuid,
+                    'streamId' => $this->id,
+                    'format' => 'm3u8',
+                ]),
+                'm3u8',
+                null,
+            ];
+        }
+
+        return [null, null, null];
+    }
+
+    /**
+     * Check if an explicitly configured HLS profile is available for casting.
+     * Only considers profiles assigned in cast or in-app player settings.
+     *
+     * @param  string|null  $contentType  'live', 'vod', or null (check both)
+     */
+    public static function hasHlsProfileForCasting(?string $contentType = null): bool
+    {
+        $settings = app(GeneralSettings::class);
+
+        // Check cast-specific VOD profile, falling back to in-app VOD profile
+        if ($contentType !== 'live') {
+            $profileId = $settings->default_cast_vod_stream_profile_id
+                ?? $settings->default_vod_stream_profile_id
+                ?? null;
+
+            if ($profileId) {
+                $profile = StreamProfile::find($profileId);
+                if ($profile && in_array(strtolower((string) $profile->format), ['hls', 'm3u8'], true)) {
+                    return true;
+                }
+            }
+        }
+
+        // Check cast-specific live profile, falling back to in-app live profile
+        if ($contentType !== 'vod') {
+            $liveProfileId = $settings->default_cast_stream_profile_id
+                ?? $settings->default_stream_profile_id
+                ?? null;
+
+            if ($liveProfileId) {
+                $profile = StreamProfile::find($liveProfileId);
+                if ($profile && in_array(strtolower((string) $profile->format), ['hls', 'm3u8'], true)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -208,6 +313,12 @@ class Channel extends Model
         // Load the effective playlist to determine proxy settings and get UUID for authentication
         $playlist = $this->playlist ?? $this->customPlaylist;
         $user = $this->user;
+
+        // Without a playlist (and no explicit credentials), there's no auth context for a proxy URL
+        if (! $playlist && ! ($username && $password)) {
+            return $withFormat ? [null, null] : null;
+        }
+
         $originalUrl = $this->url_custom ?? $this->url;
 
         // Extract the filename from the URL to determine the format (extension)
