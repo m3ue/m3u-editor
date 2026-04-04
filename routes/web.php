@@ -260,13 +260,13 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
 });
 
 // Playlist API routes (public with UUID auth - rate limited to prevent DoS/queue flooding)
-Route::middleware(['throttle:5,1'])->group(['prefix' => 'playlist'], function () {
+Route::middleware(['throttle:5,1'])->prefix('playlist')->group(function () {
     Route::get('{uuid}/sync', [PlaylistController::class, 'refreshPlaylist'])
         ->name('api.playlist.sync');
 });
 
 // EPG API routes (rate limited to prevent DoS/queue flooding)
-Route::middleware(['throttle:5,1'])->group(['prefix' => 'epg'], function () {
+Route::middleware(['throttle:5,1'])->prefix('epg')->group(function () {
     Route::get('{uuid}/sync', [EpgController::class, 'refreshEpg'])
         ->name('api.epg.sync');
 });
