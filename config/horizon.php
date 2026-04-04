@@ -191,7 +191,7 @@ return [
             'maxJobs' => 0,
             'memory' => 512, // MB
             'tries' => 3, // Number of times to attempt a job before marking it as failed
-            'timeout' => 60 * 30, // 30 minutes
+            'timeout' => 60 * 125, // 125 minutes — must exceed the longest job timeout (MapPlaylistChannelsToEpg/ProcessChannelScrubber: 120 min)
             'nice' => 0,
         ],
     ],
