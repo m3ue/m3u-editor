@@ -1062,6 +1062,45 @@ class ChannelResource extends Resource implements CopilotResource
                         ->modalIcon('heroicon-o-signal')
                         ->modalDescription(__('Probe the selected channels with ffprobe to collect stream metadata (codec, resolution, bitrate). This data enables fast channel switching in Emby.'))
                         ->modalSubmitActionLabel(__('Start probing')),
+                    BulkAction::make('enable-probing')
+                        ->label(__('Enable Probing'))
+                        ->action(function (Collection $records): void {
+                            foreach ($records->chunk(100) as $chunk) {
+                                Channel::whereIn('id', $chunk->pluck('id'))->update(['probe_enabled' => true]);
+                            }
+                        })->after(function () {
+                            Notification::make()
+                                ->success()
+                                ->title(__('Stream probing enabled'))
+                                ->body(__('Stream probing has been enabled for the selected channels.'))
+                                ->send();
+                        })
+                        ->deselectRecordsAfterCompletion()
+                        ->requiresConfirmation()
+                        ->icon('heroicon-o-signal')
+                        ->modalIcon('heroicon-o-signal')
+                        ->modalDescription(__('Enable stream probing for the selected channels. They will be included in stream probing jobs.'))
+                        ->modalSubmitActionLabel(__('Enable now')),
+                    BulkAction::make('disable-probing')
+                        ->label(__('Disable Probing'))
+                        ->color('warning')
+                        ->action(function (Collection $records): void {
+                            foreach ($records->chunk(100) as $chunk) {
+                                Channel::whereIn('id', $chunk->pluck('id'))->update(['probe_enabled' => false]);
+                            }
+                        })->after(function () {
+                            Notification::make()
+                                ->success()
+                                ->title(__('Stream probing disabled'))
+                                ->body(__('Stream probing has been disabled for the selected channels.'))
+                                ->send();
+                        })
+                        ->deselectRecordsAfterCompletion()
+                        ->requiresConfirmation()
+                        ->icon('heroicon-o-signal-slash')
+                        ->modalIcon('heroicon-o-signal-slash')
+                        ->modalDescription(__('Disable stream probing for the selected channels. They will be excluded from stream probing jobs.'))
+                        ->modalSubmitActionLabel(__('Disable now')),
                     BulkAction::make('enable')
                         ->label(__('Enable selected'))
                         ->action(function (Collection $records): void {
