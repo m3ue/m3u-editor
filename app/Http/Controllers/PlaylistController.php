@@ -114,11 +114,11 @@ class PlaylistController extends Controller
         $channelCounts = $playlist->channels()
             ->selectRaw('
                 COUNT(*) as total,
-                SUM(CASE WHEN enabled = 1 THEN 1 ELSE 0 END) as enabled,
-                SUM(CASE WHEN is_vod = 0 THEN 1 ELSE 0 END) as live,
-                SUM(CASE WHEN is_vod = 0 AND enabled = 1 THEN 1 ELSE 0 END) as live_enabled,
-                SUM(CASE WHEN is_vod = 1 THEN 1 ELSE 0 END) as vod,
-                SUM(CASE WHEN is_vod = 1 AND enabled = 1 THEN 1 ELSE 0 END) as vod_enabled
+                SUM(CASE WHEN enabled = TRUE THEN 1 ELSE 0 END) as enabled,
+                SUM(CASE WHEN is_vod = FALSE THEN 1 ELSE 0 END) as live,
+                SUM(CASE WHEN is_vod = FALSE AND enabled = TRUE THEN 1 ELSE 0 END) as live_enabled,
+                SUM(CASE WHEN is_vod = TRUE THEN 1 ELSE 0 END) as vod,
+                SUM(CASE WHEN is_vod = TRUE AND enabled = TRUE THEN 1 ELSE 0 END) as vod_enabled
             ')
             ->first();
 
