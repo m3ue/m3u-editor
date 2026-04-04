@@ -529,19 +529,7 @@ class FetchTmdbIds implements ShouldQueue
                         : (is_array($details['genres']) ? $details['genres'][0] : null);
 
                     if ($primaryGenre) {
-                        // Build TMDB genre list to detect library folder names.
-                        // A group is treated as a library folder name (and eligible for replacement)
-                        // if it does not appear in the TMDB genre list — e.g. "Movies", "TV Shows".
-                        // A group that already matches a TMDB genre (e.g. "Action") is preserved.
-                        $tmdbGenreList = is_string($details['genres'])
-                            ? array_map('trim', explode(',', $details['genres']))
-                            : (array) $details['genres'];
-
-                        $groupIsLibraryName = ! empty($channel->group)
-                            && ! str_contains($channel->group, ',')
-                            && ! in_array(trim($channel->group), $tmdbGenreList);
-
-                        if (empty($channel->group) || $channel->group === 'Uncategorized' || $channel->group_internal === 'Uncategorized' || $groupIsLibraryName) {
+                        if (empty($channel->group) || $channel->group === 'Uncategorized' || $channel->group_internal === 'Uncategorized') {
                             $group = Group::firstOrCreate(
                                 [
                                     'playlist_id' => $channel->playlist_id,
@@ -864,25 +852,14 @@ class FetchTmdbIds implements ShouldQueue
                     $updateData['plot'] = $details['overview'];
                 }
 
-                // Populate genre if not already set, or if the current value looks like a
-                // library folder name (not found in the TMDB genre list).
+                // Populate genre if not already set (treat 'Uncategorized' as empty)
                 if (! empty($details['genres'])) {
-                    $tmdbGenreListForGenre = is_string($details['genres'])
-                        ? array_map('trim', explode(',', $details['genres']))
-                        : (array) $details['genres'];
-
-                    $genreIsLibraryName = ! empty($series->genre)
-                        && ($series->genre ?? '') !== 'Uncategorized'
-                        && ! str_contains($series->genre, ',')
-                        && ! in_array(trim($series->genre), $tmdbGenreListForGenre);
-
-                    if (empty($series->genre) || ($series->genre ?? '') === 'Uncategorized' || $genreIsLibraryName) {
+                    if (empty($series->genre) || ($series->genre ?? '') === 'Uncategorized') {
                         $updateData['genre'] = $details['genres'];
                     }
                 }
 
-                // Update the series' category when it is missing, Uncategorized, or looks like
-                // a library folder name (not found in the TMDB genre list for this title).
+                // Update the series' category when it is missing or Uncategorized.
                 if (! empty($details['genres'])) {
                     $primaryGenre = is_string($details['genres'])
                         ? explode(', ', $details['genres'])[0]
@@ -891,15 +868,7 @@ class FetchTmdbIds implements ShouldQueue
                     if ($primaryGenre) {
                         $currentCategory = $series->category_id ? Category::find($series->category_id) : null;
 
-                        $tmdbGenreList = is_string($details['genres'])
-                            ? array_map('trim', explode(',', $details['genres']))
-                            : (array) $details['genres'];
-
-                        $categoryIsLibraryName = $currentCategory
-                            && ! str_contains($currentCategory->name, ',')
-                            && ! in_array(trim($currentCategory->name), $tmdbGenreList);
-
-                        if (! $currentCategory || $currentCategory->name === 'Uncategorized' || $categoryIsLibraryName) {
+                        if (! $currentCategory || $currentCategory->name === 'Uncategorized') {
                             $category = Category::firstOrCreate(
                                 [
                                     'playlist_id' => $series->playlist_id,
