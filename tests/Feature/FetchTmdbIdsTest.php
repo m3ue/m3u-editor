@@ -348,7 +348,7 @@ it('splits large lookups into batched chunk jobs', function () {
     });
 });
 
-it('updates VOD group from library name to TMDB genre on first fetch', function () {
+it('does not overwrite VOD group when already set, but populates genre on first fetch', function () {
     Http::fake([
         'https://api.themoviedb.org/3/movie/603/external_ids*' => Http::response([
             'imdb_id' => 'tt0133093',
@@ -397,13 +397,13 @@ it('updates VOD group from library name to TMDB genre on first fetch', function 
 
     $channel->refresh();
 
-    // Group should be updated to TMDB primary genre, not remain as library name
-    expect($channel->group)->toBe('Action')
-        ->and($channel->group_internal)->toBe('Action')
+    // Group should remain unchanged (already a non-Uncategorized value)
+    expect($channel->group)->toBe('Movies')
+        ->and($channel->group_internal)->toBe('Movies')
         ->and($channel->info['genre'])->toContain('Action');
 });
 
-it('updates series category from library name to TMDB genre on first fetch', function () {
+it('does not overwrite series category when already set, but populates genre on first fetch', function () {
     Http::fake([
         'https://api.themoviedb.org/3/search/tv*' => Http::response([
             'results' => [
@@ -446,6 +446,7 @@ it('updates series category from library name to TMDB genre on first fetch', fun
         'category_id' => $libraryCategory->id,
         'source_category_id' => $libraryCategory->id,
         'metadata' => [],
+        'genre' => null, // No genre yet, should be populated from TMDB
         'last_metadata_fetch' => null, // Never enriched by TMDB
     ]);
 
@@ -460,10 +461,10 @@ it('updates series category from library name to TMDB genre on first fetch', fun
 
     $series->refresh();
 
-    // Category should be updated to TMDB primary genre, not remain as library name
+    // Category should remain unchanged (already a non-Uncategorized value)
     $updatedCategory = Category::find($series->category_id);
     expect($updatedCategory)->not->toBeNull()
-        ->and($updatedCategory->name)->toBe('Drama')
+        ->and($updatedCategory->name)->toBe('TV Shows')
         ->and($series->genre)->toContain('Drama');
 });
 
