@@ -262,6 +262,38 @@ it('can get DVR configurations', function () {
     expect($result['data']->first()['device_count'])->toBe(1);
 });
 
+it('prefers the provided hdhr url when fetching discover json', function () {
+    $requestedUrls = [];
+
+    Http::fake(function ($request) use (&$requestedUrls) {
+        $requestedUrls[] = $request->url();
+
+        return match ($request->url()) {
+            'https://iptv.chorkley.uk/test-playlist-uuid/hdhr/discover.json' => Http::response([
+                'DeviceID' => 'hdhr-device-123',
+                'DeviceAuth' => 'auth-abc',
+            ]),
+            default => Http::response(null, 500),
+        };
+    });
+
+    $service = new class($this->integration) extends PlexManagementService
+    {
+        public function fetchDiscoverPayloadForTest(string $hdhrBaseUrl): array
+        {
+            return $this->fetchDiscoverPayload($hdhrBaseUrl);
+        }
+    };
+
+    $result = $service->fetchDiscoverPayloadForTest('https://iptv.chorkley.uk/test-playlist-uuid/hdhr');
+
+    expect($result['success'])->toBeTrue();
+    expect($result['data']['DeviceID'])->toBe('hdhr-device-123');
+    expect($requestedUrls)->toContain('https://iptv.chorkley.uk/test-playlist-uuid/hdhr/discover.json');
+    expect($requestedUrls)->not->toContain('http://localhost:443/test-playlist-uuid/hdhr/discover.json');
+    expect($requestedUrls)->not->toContain('http://127.0.0.1:443/test-playlist-uuid/hdhr/discover.json');
+});
+
 it('can register a DVR device', function () {
     $devicesCallCount = 0;
     $dvrsCallCount = 0;
@@ -269,7 +301,7 @@ it('can register a DVR device', function () {
     Http::fake(function ($request) use (&$devicesCallCount, &$dvrsCallCount) {
         $url = $request->url();
 
-        // Step 1: discover.json fetched via local app URL
+        // Step 1: discover.json fetched via the configured HDHR URL
         if (str_contains($url, '/hdhr/discover.json')) {
             return Http::response([
                 'DeviceID' => 'hdhr-device-123',
