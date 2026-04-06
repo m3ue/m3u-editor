@@ -412,11 +412,14 @@ class PlexManagementService
     {
         $playlist = PlaylistFacade::resolvePlaylistByUuid($playlistUuid);
 
-        if (! $playlist) {
-            return null;
+        if ($playlist) {
+            return PlaylistFacade::getUrls($playlist);
         }
 
-        return PlaylistFacade::getUrls($playlist);
+        return [
+            'hdhr' => route('playlist.hdhr.overview', ['uuid' => $playlistUuid]),
+            'epg' => route('epg.generate', ['uuid' => $playlistUuid]),
+        ];
     }
 
     /**
