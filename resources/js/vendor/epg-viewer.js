@@ -607,6 +607,14 @@ function epgViewer(config) {
                     this.epgData.channels[foundChannelId].display_name = updatedChannel.display_name;
                     this.epgData.channels[foundChannelId].icon = updatedChannel.icon;
 
+                    // Update title and display_title if provided
+                    if (updatedChannel.title) {
+                        this.epgData.channels[foundChannelId].title = updatedChannel.title;
+                    }
+                    if (updatedChannel.display_title) {
+                        this.epgData.channels[foundChannelId].display_title = updatedChannel.display_title;
+                    }
+
                     // Update format if provided
                     if (updatedChannel.format) {
                         this.epgData.channels[foundChannelId].format = updatedChannel.format;

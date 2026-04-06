@@ -127,10 +127,12 @@ class EpgViewer extends Component implements HasActions, HasForms
                             $icon = url('/placeholder.png');
                         }
 
-                        // Add URL, format, and icon to channel data
+                        // Add URL, format, icon, and display title to channel data
                         $channelData['url'] = $url;
                         $channelData['format'] = $channelFormat;
                         $channelData['icon'] = $icon;
+                        $channelData['title'] = $channelResults['title'] ?? $updated->name_custom ?? $updated->name;
+                        $channelData['display_title'] = $channelResults['display_title'] ?? $updated->title_custom ?? $updated->title ?? $updated->name_custom ?? $updated->name;
 
                         // Fetch programme data for Playlist channels if they have an EPG channel
                         if ($updated->epgChannel) {
