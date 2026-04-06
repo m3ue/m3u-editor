@@ -129,13 +129,35 @@
             const player = window.streamPlayer();
             player.initPlayer(streamUrl, streamFormat, 'popout-player');
 
+            // Notify the proxy server to stop the stream (best-effort via sendBeacon)
+            function notifyStreamStop() {
+                const contentType = videoElement.dataset.contentType || '';
+                const streamId = videoElement.dataset.streamId || '';
+                if (!contentType || !streamId) return;
+
+                const type = contentType === 'episode' ? 'episode' : 'channel';
+                const id = contentType === 'episode' ? 'episode-' + streamId : streamId;
+
+                try {
+                    const data = new Blob(
+                        [JSON.stringify({ id, type })],
+                        { type: 'application/json' }
+                    );
+                    navigator.sendBeacon('/api/m3u-proxy/player-stream/stop', data);
+                } catch (e) {
+                    // Best-effort: proxy will detect TCP drop as fallback
+                }
+            }
+
             window.addEventListener('beforeunload', () => {
+                notifyStreamStop();
                 if (typeof player.cleanup === 'function') {
                     player.cleanup();
                 }
             });
 
             window.addEventListener('pagehide', () => {
+                notifyStreamStop();
                 if (typeof player.cleanup === 'function') {
                     player.cleanup();
                 }
