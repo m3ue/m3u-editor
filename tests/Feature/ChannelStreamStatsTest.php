@@ -26,6 +26,7 @@ it('transforms video and audio stats into emby-xtream format', function () {
                 'bit_rate' => '5000000',
                 'avg_frame_rate' => '25/1',
                 'bits_per_raw_sample' => '8',
+                'refs' => 4,
             ]],
             ['stream' => [
                 'codec_type' => 'audio',
@@ -33,6 +34,7 @@ it('transforms video and audio stats into emby-xtream format', function () {
                 'channels' => 2,
                 'sample_rate' => '48000',
                 'bit_rate' => '128000',
+                'tags' => ['language' => 'eng'],
             ]],
         ],
     ]);
@@ -45,13 +47,14 @@ it('transforms video and audio stats into emby-xtream format', function () {
         ->video_profile->toBe('High')
         ->video_level->toBe(41)
         ->video_bit_depth->toBe(8)
+        ->video_ref_frames->toBe(4)
         ->source_fps->toBe(25.0)
         ->ffmpeg_output_bitrate->toBe(5000.0)
         ->audio_codec->toBe('aac')
         ->audio_channels->toBe('stereo')
         ->sample_rate->toBe(48000)
         ->audio_bitrate->toBe(128.0)
-        ->audio_language->toBeNull();
+        ->audio_language->toBe('eng');
 });
 
 it('returns empty array when stream_stats is empty', function () {

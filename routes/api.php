@@ -56,3 +56,12 @@ Route::prefix('channels')->middleware('dispatcharr.auth')->group(function () {
     Route::get('channels', [DispatcharrController::class, 'channels'])
         ->name('dispatcharr.channels');
 });
+
+Route::prefix('vod')->middleware('dispatcharr.auth')->group(function () {
+    Route::get('movies/{streamId}', [DispatcharrController::class, 'vodMovieDetail'])
+        ->name('dispatcharr.vod.movie.detail')
+        ->whereNumber('streamId');
+    Route::get('movies/{streamId}/providers', [DispatcharrController::class, 'vodMovieProviders'])
+        ->name('dispatcharr.vod.movie.providers')
+        ->whereNumber('streamId');
+});

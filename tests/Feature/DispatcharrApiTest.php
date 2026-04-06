@@ -170,7 +170,7 @@ it('rejects unauthenticated profile requests', function () {
 // GET /api/channels/channels/ — Channels
 // ──────────────────────────────────────────────────────────────────────────────
 
-it('returns channels in dispatcharr format', function () {
+it('returns channels in dispatcharr format with stable uuid', function () {
     $group = Group::factory()->for($this->playlist)->for($this->user)->create();
 
     $channel = Channel::factory()->for($this->playlist)->for($this->user)->create([
@@ -192,12 +192,36 @@ it('returns channels in dispatcharr format', function () {
 
     $data = $response->json(0);
     expect($data['id'])->toBe($channel->id)
-        ->and($data['uuid'])->toBeString()
+        ->and($data['uuid'])->toBe($channel->dispatcharr_uuid)
+        ->and($data['uuid'])->toMatch('/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/')
         ->and($data['name'])->toBe('Test Channel')
         ->and($data['channel_number'])->toBe(42)
+        ->and($data['tvc_guide_stationid'])->toBe('')
         ->and($data['streams'])->toBeArray()->toHaveCount(1)
         ->and($data['streams'][0]['id'])->toBe($channel->id)
         ->and($data['streams'][0]['stream_id'])->toBe(393573);
+});
+
+it('returns stable uuid that persists across requests', function () {
+    $group = Group::factory()->for($this->playlist)->for($this->user)->create();
+
+    $channel = Channel::factory()->for($this->playlist)->for($this->user)->create([
+        'group_id' => $group->id,
+        'enabled' => true,
+        'is_vod' => false,
+    ]);
+
+    $accessToken = getAccessToken();
+
+    $response1 = $this->getJson('/api/channels/channels/', [
+        'Authorization' => "Bearer {$accessToken}",
+    ]);
+    $response2 = $this->getJson('/api/channels/channels/', [
+        'Authorization' => "Bearer {$accessToken}",
+    ]);
+
+    expect($response1->json('0.uuid'))->toBe($response2->json('0.uuid'))
+        ->and($response1->json('0.uuid'))->toBe($channel->dispatcharr_uuid);
 });
 
 it('includes stream_stats when probed', function () {
@@ -218,6 +242,7 @@ it('includes stream_stats when probed', function () {
                 'profile' => 'High',
                 'level' => 41,
                 'bits_per_raw_sample' => '8',
+                'refs' => 4,
             ]],
             ['stream' => [
                 'codec_type' => 'audio',
@@ -225,6 +250,7 @@ it('includes stream_stats when probed', function () {
                 'channels' => 2,
                 'sample_rate' => '48000',
                 'bit_rate' => '128000',
+                'tags' => ['language' => 'eng'],
             ]],
         ],
     ]);
@@ -239,7 +265,9 @@ it('includes stream_stats when probed', function () {
     expect($stats)->not->toBeNull()
         ->and($stats['resolution'])->toBe('1920x1080')
         ->and($stats['video_codec'])->toBe('h264')
-        ->and($stats['audio_codec'])->toBe('aac');
+        ->and($stats['video_ref_frames'])->toBe(4)
+        ->and($stats['audio_codec'])->toBe('aac')
+        ->and($stats['audio_language'])->toBe('eng');
 });
 
 it('excludes streams when include_streams is false', function () {
@@ -291,11 +319,59 @@ it('excludes disabled and VOD channels', function () {
     expect($response->json('0.name'))->toBe('Live Channel');
 });
 
+it('returns X-Total-Count header for pagination', function () {
+    $group = Group::factory()->for($this->playlist)->for($this->user)->create();
+
+    Channel::factory()->count(5)->for($this->playlist)->for($this->user)->create([
+        'group_id' => $group->id,
+        'enabled' => true,
+        'is_vod' => false,
+    ]);
+
+    $accessToken = getAccessToken();
+
+    $response = $this->getJson('/api/channels/channels/?limit=2', [
+        'Authorization' => "Bearer {$accessToken}",
+    ]);
+
+    $response->assertOk()
+        ->assertJsonCount(2)
+        ->assertHeader('X-Total-Count', '5');
+});
+
+it('paginates with offset parameter', function () {
+    $group = Group::factory()->for($this->playlist)->for($this->user)->create();
+
+    Channel::factory()->count(5)->for($this->playlist)->for($this->user)->create([
+        'group_id' => $group->id,
+        'enabled' => true,
+        'is_vod' => false,
+        'channel' => 1,
+    ]);
+
+    $accessToken = getAccessToken();
+
+    $page1 = $this->getJson('/api/channels/channels/?limit=2&offset=0', [
+        'Authorization' => "Bearer {$accessToken}",
+    ]);
+    $page2 = $this->getJson('/api/channels/channels/?limit=2&offset=2', [
+        'Authorization' => "Bearer {$accessToken}",
+    ]);
+
+    $page1->assertJsonCount(2);
+    $page2->assertJsonCount(2);
+
+    // IDs should not overlap between pages
+    $ids1 = collect($page1->json())->pluck('id');
+    $ids2 = collect($page2->json())->pluck('id');
+    expect($ids1->intersect($ids2))->toBeEmpty();
+});
+
 // ──────────────────────────────────────────────────────────────────────────────
-// GET /proxy/ts/stream/{token} — Proxy Stream
+// GET /proxy/ts/stream/{uuid} — Proxy Stream
 // ──────────────────────────────────────────────────────────────────────────────
 
-it('redirects to stream URL with a valid stream token', function () {
+it('redirects to stream URL with a valid dispatcharr uuid', function () {
     $group = Group::factory()->for($this->playlist)->for($this->user)->create();
 
     $channel = Channel::factory()->for($this->playlist)->for($this->user)->create([
@@ -305,47 +381,17 @@ it('redirects to stream URL with a valid stream token', function () {
         'url' => 'http://provider.example.com/live/stream/123.ts',
     ]);
 
-    $token = DispatcharrAuthMiddleware::createStreamToken(
-        $channel->id,
-        $this->playlist->id,
-        Playlist::class
-    );
-
-    $response = $this->get("/proxy/ts/stream/{$token}");
+    $response = $this->get("/proxy/ts/stream/{$channel->dispatcharr_uuid}");
 
     $response->assertRedirect('http://provider.example.com/live/stream/123.ts');
 });
 
-it('returns uuid as signed stream token in channels response', function () {
-    $group = Group::factory()->for($this->playlist)->for($this->user)->create();
-
-    Channel::factory()->for($this->playlist)->for($this->user)->create([
-        'group_id' => $group->id,
-        'enabled' => true,
-        'is_vod' => false,
-    ]);
-
-    $accessToken = getAccessToken();
-
-    $response = $this->getJson('/api/channels/channels/?include_streams=true', [
-        'Authorization' => "Bearer {$accessToken}",
-    ]);
-
-    $uuid = $response->json('0.uuid');
-    $streamPayload = DispatcharrAuthMiddleware::verifyStreamToken($uuid);
-
-    expect($streamPayload)->not->toBeNull()
-        ->and($streamPayload['c'])->toBeInt()
-        ->and($streamPayload['p'])->toBe($this->playlist->id)
-        ->and($streamPayload['t'])->toBe(Playlist::class);
+it('returns 404 for non-existent dispatcharr uuid', function () {
+    $this->getJson('/proxy/ts/stream/00000000-0000-0000-0000-000000000000')
+        ->assertStatus(404);
 });
 
-it('rejects tampered stream tokens', function () {
-    $this->get('/proxy/ts/stream/tampered.abcdef1234567890')
-        ->assertStatus(403);
-});
-
-it('rejects stream token for disabled channel', function () {
+it('returns 404 for disabled channel uuid', function () {
     $group = Group::factory()->for($this->playlist)->for($this->user)->create();
 
     $channel = Channel::factory()->for($this->playlist)->for($this->user)->create([
@@ -354,45 +400,107 @@ it('rejects stream token for disabled channel', function () {
         'is_vod' => false,
     ]);
 
-    $token = DispatcharrAuthMiddleware::createStreamToken(
-        $channel->id,
-        $this->playlist->id,
-        Playlist::class
-    );
-
-    $this->get("/proxy/ts/stream/{$token}")
-        ->assertStatus(404);
-});
-
-it('rejects stream token with non-existent channel', function () {
-    $token = DispatcharrAuthMiddleware::createStreamToken(
-        999999,
-        $this->playlist->id,
-        Playlist::class
-    );
-
-    $this->get("/proxy/ts/stream/{$token}")
+    $this->getJson("/proxy/ts/stream/{$channel->dispatcharr_uuid}")
         ->assertStatus(404);
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Stream Token Unit Tests
+// GET /api/vod/movies/{streamId}/ — VOD Movie Detail
 // ──────────────────────────────────────────────────────────────────────────────
 
-it('creates and verifies stream tokens roundtrip', function () {
-    $token = DispatcharrAuthMiddleware::createStreamToken(93, 1, Playlist::class);
+it('returns VOD movie detail with uuid', function () {
+    $group = Group::factory()->for($this->playlist)->for($this->user)->create();
 
-    expect($token)->toBeString()
-        ->and($token)->not->toContain('+')
-        ->and($token)->not->toContain('/')
-        ->and($token)->not->toContain('=');
+    $channel = Channel::factory()->for($this->playlist)->for($this->user)->create([
+        'group_id' => $group->id,
+        'enabled' => true,
+        'is_vod' => true,
+        'source_id' => '12345',
+    ]);
 
-    $payload = DispatcharrAuthMiddleware::verifyStreamToken($token);
+    $accessToken = getAccessToken();
 
-    expect($payload)->not->toBeNull()
-        ->and($payload['c'])->toBe(93)
-        ->and($payload['p'])->toBe(1)
-        ->and($payload['t'])->toBe(Playlist::class);
+    $response = $this->getJson('/api/vod/movies/12345/', [
+        'Authorization' => "Bearer {$accessToken}",
+    ]);
+
+    $response->assertOk()
+        ->assertJsonPath('id', $channel->id)
+        ->assertJsonPath('uuid', $channel->dispatcharr_uuid);
+});
+
+it('returns 404 for non-existent VOD movie', function () {
+    $accessToken = getAccessToken();
+
+    $this->getJson('/api/vod/movies/99999/', [
+        'Authorization' => "Bearer {$accessToken}",
+    ])->assertStatus(404);
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// GET /api/vod/movies/{streamId}/providers/ — VOD Movie Providers
+// ──────────────────────────────────────────────────────────────────────────────
+
+it('returns VOD movie providers', function () {
+    $group = Group::factory()->for($this->playlist)->for($this->user)->create();
+
+    $channel = Channel::factory()->for($this->playlist)->for($this->user)->create([
+        'group_id' => $group->id,
+        'enabled' => true,
+        'is_vod' => true,
+        'source_id' => '12345',
+        'name' => 'Test Movie',
+    ]);
+
+    $accessToken = getAccessToken();
+
+    $response = $this->getJson('/api/vod/movies/12345/providers/', [
+        'Authorization' => "Bearer {$accessToken}",
+    ]);
+
+    $response->assertOk()
+        ->assertJsonCount(1);
+
+    $provider = $response->json(0);
+    expect($provider['id'])->toBe($channel->id)
+        ->and($provider['stream_id'])->toBe(12345)
+        ->and($provider['name'])->toBe('Test Movie');
+});
+
+it('returns empty array for non-existent VOD providers', function () {
+    $accessToken = getAccessToken();
+
+    $this->getJson('/api/vod/movies/99999/providers/', [
+        'Authorization' => "Bearer {$accessToken}",
+    ])->assertOk()->assertJsonCount(0);
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Auto-generation of dispatcharr_uuid
+// ──────────────────────────────────────────────────────────────────────────────
+
+it('auto-generates dispatcharr_uuid on channel creation', function () {
+    $group = Group::factory()->for($this->playlist)->for($this->user)->create();
+
+    $channel = Channel::factory()->for($this->playlist)->for($this->user)->create([
+        'group_id' => $group->id,
+        'dispatcharr_uuid' => null,
+    ]);
+
+    expect($channel->dispatcharr_uuid)->not->toBeNull()
+        ->and($channel->dispatcharr_uuid)->toMatch('/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/');
+});
+
+it('preserves explicitly set dispatcharr_uuid', function () {
+    $group = Group::factory()->for($this->playlist)->for($this->user)->create();
+    $customUuid = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+
+    $channel = Channel::factory()->for($this->playlist)->for($this->user)->create([
+        'group_id' => $group->id,
+        'dispatcharr_uuid' => $customUuid,
+    ]);
+
+    expect($channel->dispatcharr_uuid)->toBe($customUuid);
 });
 
 // ──────────────────────────────────────────────────────────────────────────────

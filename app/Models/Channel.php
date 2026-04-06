@@ -30,6 +30,15 @@ class Channel extends Model
     use HasFactory;
     use HasTags;
 
+    protected static function booted(): void
+    {
+        static::creating(function (Channel $channel) {
+            if (empty($channel->dispatcharr_uuid)) {
+                $channel->dispatcharr_uuid = Str::uuid()->toString();
+            }
+        });
+    }
+
     /**
      * The attributes that should be cast to native types.
      *
@@ -354,6 +363,8 @@ class Channel extends Model
                             'channels' => $stream['channels'] ?? null,
                             'channel_layout' => $stream['channel_layout'] ?? null,
                             'bits_per_raw_sample' => $stream['bits_per_raw_sample'] ?? null,
+                            'refs' => $stream['refs'] ?? null,
+                            'tags' => $stream['tags'] ?? [],
                         ];
                     }
                 }
@@ -405,6 +416,7 @@ class Channel extends Model
             $result['video_profile'] = $video['profile'] ?? null;
             $result['video_level'] = isset($video['level']) ? (int) $video['level'] : null;
             $result['video_bit_depth'] = isset($video['bits_per_raw_sample']) ? (int) $video['bits_per_raw_sample'] : 8;
+            $result['video_ref_frames'] = isset($video['refs']) ? (int) $video['refs'] : null;
 
             // Parse frame rate from "25/1" or "30000/1001" format
             $fps = $video['avg_frame_rate'] ?? null;
@@ -442,7 +454,9 @@ class Channel extends Model
             // Convert bps to kbps
             $audioBitRate = $audio['bit_rate'] ?? null;
             $result['audio_bitrate'] = $audioBitRate ? round((float) $audioBitRate / 1000, 1) : null;
-            $result['audio_language'] = null;
+
+            $tags = $audio['tags'] ?? [];
+            $result['audio_language'] = $tags['language'] ?? null;
         }
 
         return $result;

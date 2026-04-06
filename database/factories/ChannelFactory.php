@@ -7,6 +7,7 @@ use App\Models\Group;
 use App\Models\Playlist;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\Factory;
+use Illuminate\Support\Str;
 
 class ChannelFactory extends Factory
 {
@@ -33,6 +34,7 @@ class ChannelFactory extends Factory
             'stream_id' => $this->faker->word(),
             'lang' => $this->faker->word(),
             'country' => $this->faker->country(),
+            'dispatcharr_uuid' => Str::uuid()->toString(),
             'user_id' => User::factory(),
             'playlist_id' => Playlist::factory(),
             'group_id' => Group::factory(),
