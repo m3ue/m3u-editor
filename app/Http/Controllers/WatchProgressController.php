@@ -22,7 +22,7 @@ class WatchProgressController extends Controller
     {
         $viewer = $this->resolveViewer($request);
         if (! $viewer) {
-            return response()->json(null);
+            return response()->json(null, 401);
         }
 
         $contentType = $request->input('content_type');

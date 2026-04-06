@@ -128,7 +128,7 @@ class ReleaseLogs extends Page
 
     public function formatMarkdown(string $text): string
     {
-        return Str::markdown($text);
+        return Str::markdown($text, ['html_input' => 'escape']);
     }
 
     public function getCounts(): array
