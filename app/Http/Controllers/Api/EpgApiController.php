@@ -179,6 +179,7 @@ class EpgApiController extends Controller
         $perPage = (int) $request->get('per_page', 50);
         $skip = max(0, ($page - 1) * $perPage);
         $search = $request->get('search', null);
+        $group = $request->get('group', null) ?: null;
         $vod = (bool) $request->get('vod', false);
         $username = $request->get('username', null);
         $password = $request->get('password', null);
@@ -202,6 +203,7 @@ class EpgApiController extends Controller
             'per_page' => $perPage,
             'start_date' => $startDate,
             'end_date' => $endDate,
+            'group' => $group,
         ]);
         try {
             // Get enabled channels from the playlist
@@ -215,6 +217,9 @@ class EpgApiController extends Controller
                             ->orWhereRaw('LOWER(channels.title) LIKE ?', ['%'.$search.'%'])
                             ->orWhereRaw('LOWER(channels.title_custom) LIKE ?', ['%'.$search.'%']);
                     });
+                })
+                ->when($group, function ($queryBuilder) use ($group) {
+                    return $queryBuilder->whereRaw('LOWER(COALESCE(channels.group, channels.group_internal)) = ?', [Str::lower($group)]);
                 })
                 ->limit($perPage)
                 ->offset($skip)
@@ -377,6 +382,8 @@ class EpgApiController extends Controller
                         ->orWhereRaw('LOWER(channels.title) LIKE ?', ['%'.$search.'%'])
                         ->orWhereRaw('LOWER(channels.title_custom) LIKE ?', ['%'.$search.'%']);
                 });
+            })->when($group, function ($queryBuilder) use ($group) {
+                return $queryBuilder->whereRaw('LOWER(COALESCE(channels.group, channels.group_internal)) = ?', [Str::lower($group)]);
             })->when(! $vod, function ($query) {
                 return $query->where('channels.is_vod', false);
             })->where('enabled', true)->count();
@@ -740,6 +747,36 @@ class EpgApiController extends Controller
                 'error' => 'Failed to retrieve EPG data: '.$e->getMessage(),
             ], 500);
         }
+    }
+
+    /**
+     * Get distinct group names for a playlist's enabled channels.
+     * Used to populate the category tabs on the EPG guide page.
+     */
+    public function getGroupsForPlaylist(string $uuid, Request $request): JsonResponse
+    {
+        $playlist = PlaylistFacade::resolvePlaylistByUuid($uuid);
+        if (! $playlist) {
+            return response()->json(['error' => 'Playlist Not Found'], 404);
+        }
+
+        $vod = (bool) $request->get('vod', false);
+
+        $groups = $playlist->channels()
+            ->selectRaw('COALESCE(channels.group, channels.group_internal) as effective_group')
+            ->when(! $vod, function ($q) {
+                $q->where('channels.is_vod', false);
+            })
+            ->where('channels.enabled', true)
+            ->whereRaw('COALESCE(channels.group, channels.group_internal) IS NOT NULL')
+            ->whereRaw("COALESCE(channels.group, channels.group_internal) != ''")
+            ->groupByRaw('COALESCE(channels.group, channels.group_internal)')
+            ->orderByRaw('LOWER(COALESCE(channels.group, channels.group_internal))')
+            ->pluck('effective_group')
+            ->values()
+            ->toArray();
+
+        return response()->json(['groups' => $groups]);
     }
 
     /**

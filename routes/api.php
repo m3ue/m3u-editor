@@ -14,6 +14,8 @@ Route::group(['prefix' => 'epg'], function () {
         ->name('api.epg.data');
     Route::get('playlist/{uuid}/data', [EpgApiController::class, 'getDataForPlaylist'])
         ->name('api.epg.playlist.data');
+    Route::get('playlist/{uuid}/groups', [EpgApiController::class, 'getGroupsForPlaylist'])
+        ->name('api.epg.playlist.groups');
 });
 
 /*

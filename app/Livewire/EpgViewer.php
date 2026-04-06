@@ -235,8 +235,13 @@ class EpgViewer extends Component implements HasActions, HasForms
             ? route('api.epg.data', ['uuid' => $this->record?->uuid])
             : route('api.epg.playlist.data', ['uuid' => $this->record?->uuid]);
 
+        $groupsApiUrl = $this->type !== 'Epg'
+            ? route('api.epg.playlist.groups', ['uuid' => $this->record?->uuid])
+            : null;
+
         return view('livewire.epg-viewer', [
             'route' => $route,
+            'groupsApiUrl' => $groupsApiUrl,
             'vod' => $this->vod,
             'username' => $this->username,
             'password' => $this->password,

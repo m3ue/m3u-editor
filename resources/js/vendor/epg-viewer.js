@@ -2,6 +2,7 @@
 function epgViewer(config) {
     return {
         apiUrl: config.apiUrl,
+        groupsApiUrl: config.groupsApiUrl || null,
         vod: config.vod || false,
         username: config.username || null,
         password: config.password || null,
@@ -37,6 +38,10 @@ function epgViewer(config) {
         // Search functionality
         searchTerm: '',
         isSearchActive: false,
+
+        // Group / category tabs
+        selectedGroup: '',
+        availableGroups: [],
 
         // Modal loading state to prevent rapid clicking
         modalLoading: false,
@@ -165,6 +170,11 @@ function epgViewer(config) {
                     url += `&search=${encodeURIComponent(this.searchTerm.trim())}`;
                 }
 
+                // Add group filter if a category tab is selected
+                if (this.selectedGroup) {
+                    url += `&group=${encodeURIComponent(this.selectedGroup)}`;
+                }
+
                 console.log('Request URL:', url);
 
                 const response = await fetch(url);
@@ -248,7 +258,7 @@ function epgViewer(config) {
             const newDay = String(date.getDate()).padStart(2, '0');
             this.currentDate = `${newYear}-${newMonth}-${newDay}`;
 
-            // Clear search when navigating dates
+            // Clear search when navigating dates (keep selected group tab)
             this.searchTerm = '';
             this.isSearchActive = false;
 
@@ -265,7 +275,7 @@ function epgViewer(config) {
             const newDay = String(date.getDate()).padStart(2, '0');
             this.currentDate = `${newYear}-${newMonth}-${newDay}`;
 
-            // Clear search when navigating dates
+            // Clear search when navigating dates (keep selected group tab)
             this.searchTerm = '';
             this.isSearchActive = false;
 
@@ -279,7 +289,7 @@ function epgViewer(config) {
             const day = String(now.getDate()).padStart(2, '0');
             this.currentDate = `${year}-${month}-${day}`;
 
-            // Clear search when navigating dates
+            // Clear search when navigating dates (keep selected group tab)
             this.searchTerm = '';
             this.isSearchActive = false;
 
@@ -404,6 +414,44 @@ function epgViewer(config) {
 
                 return String(idA).localeCompare(String(idB));
             });
+        },
+
+        // Fetch distinct group names from the server for the category tabs.
+        // Runs once on init; no-ops silently for EPG-only viewers (groupsApiUrl is null).
+        async loadGroups() {
+            if (!this.groupsApiUrl) {
+                return;
+            }
+
+            try {
+                let url = this.groupsApiUrl;
+                if (this.vod) {
+                    url += '?vod=1';
+                }
+                const response = await fetch(url);
+                if (!response.ok) {
+                    return;
+                }
+                const data = await response.json();
+                this.availableGroups = data.groups || [];
+            } catch (e) {
+                console.error('Error loading EPG groups:', e);
+            }
+        },
+
+        // Select a category tab. Clears any active search (same behaviour as Emby),
+        // then reloads channels server-side filtered to the chosen group.
+        selectGroup(group) {
+            this.selectedGroup = group;
+            // Clear search — selecting a category tab resets the search
+            this.searchTerm = '';
+            this.isSearchActive = false;
+            this.loadEpgData();
+        },
+
+        // Returns channelOrder as-is; server-side filtering handles the group restriction.
+        get filteredChannelOrder() {
+            return this.channelOrder;
         },
 
         getTooltipContent(programme) {

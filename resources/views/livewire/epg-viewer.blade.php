@@ -1,9 +1,10 @@
 <div x-data="epgViewer({ 
         apiUrl: '{{ $route }}',
+        groupsApiUrl: {{ $groupsApiUrl ? "'" . $groupsApiUrl . "'" : 'null' }},
         vod: {{ $vod ? 'true' : 'false' }},
         username: '{{ $username }}',
         password: '{{ $password }}'
-    })" x-init="init(); loadEpgData()" x-on:beforeunload.window="destroy()" x-on:livewire:navigating.window="destroy()"
+    })" x-init="init(); loadEpgData(); loadGroups()" x-on:beforeunload.window="destroy()" x-on:livewire:navigating.window="destroy()"
     x-on:refresh-epg-data.window="(e) => refreshEpgData(e.detail)" wire:ignore.self>
     <div>
         <!-- Loading State -->
@@ -80,7 +81,7 @@
                     </div>
 
                     <!-- Search Bar -->
-                    <div class="flex items-center space-x-2">
+                    <div class="flex items-center gap-2">
                         <div class="relative flex-1">
                             <x-filament::input.wrapper>
                                 <x-filament::input type="text" x-model="searchTerm"
@@ -100,6 +101,34 @@
                                     </button>
                                 </x-slot>
                             </x-filament::input.wrapper>
+                        </div>
+                    </div>
+
+                    <!-- Group / Category Tabs -->
+                    <div x-show="availableGroups.length > 0" class="relative" wire:ignore>
+                        <div class="overflow-x-auto scrollbar-hide" style="scroll-behavior: smooth;">
+                            <div class="flex items-center gap-1.5 pb-0.5">
+                                <!-- All tab -->
+                                <button
+                                    @click="selectGroup('')"
+                                    :class="selectedGroup === ''
+                                        ? 'bg-primary-600 text-white shadow-sm'
+                                        : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'"
+                                    class="flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors whitespace-nowrap">
+                                    All
+                                </button>
+                                <!-- Group tabs -->
+                                <template x-for="group in availableGroups" :key="group">
+                                    <button
+                                        @click="selectGroup(group)"
+                                        :class="selectedGroup === group
+                                            ? 'bg-primary-600 text-white shadow-sm'
+                                            : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'"
+                                        class="flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors whitespace-nowrap"
+                                        x-text="group">
+                                    </button>
+                                </template>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -141,7 +170,7 @@
                                         <span x-show="isMobile">Ch.</span>
                                     </span>
                                     <span class="text-xs text-gray-500 dark:text-gray-400 ml-1"
-                                        x-text="`(${channelOrder.length})`"></span>
+                                        x-text="`(${filteredChannelOrder.length})`"></span>
                                 </div>
                                 <!-- Search Status Indicator -->
                                 <div x-show="isSearchActive && !isMobile" class="flex items-center space-x-1">
@@ -187,12 +216,12 @@
                     virtualScrollTop: 0,
                     get itemHeight() { return isMobile ? 48 : 60; },
                     get containerHeight() { return isMobile ? 452 : 552; },
-                    get totalChannels() { return channelOrder.length; },
+                    get totalChannels() { return filteredChannelOrder.length; },
                     get startIndex() { return Math.max(0, Math.floor(this.virtualScrollTop / this.itemHeight) - 5); },
                     get endIndex() { return Math.min(this.totalChannels, this.startIndex + Math.ceil(this.containerHeight / this.itemHeight) + 15); },
                     get visibleChannels() {
                         if (!epgData?.channels) return [];
-                        const orderedIds = channelOrder.slice(this.startIndex, this.endIndex);
+                        const orderedIds = filteredChannelOrder.slice(this.startIndex, this.endIndex);
                         return orderedIds.map((id, index) => ({
                             id,
                             channel: epgData.channels[id],
