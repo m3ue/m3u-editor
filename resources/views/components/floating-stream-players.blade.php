@@ -15,9 +15,6 @@
                 }
             }
             
-            // Reset global state
-            window._floatingStreamListenerAdded = false;
-            
             // Create new instance with unique ID
             const manager = multiStreamManager();
             manager._instanceId = instanceId;

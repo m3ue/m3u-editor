@@ -4,6 +4,7 @@ function multiStreamManager() {
         players: [],
         zIndexCounter: 1000,
         _initialized: false,
+        _abortController: null,
         dragState: {
             isDragging: false,
             playerId: null,
@@ -27,10 +28,10 @@ function multiStreamManager() {
                 return;
             }
 
-            // Check if we already have a listener
-            if (window._floatingStreamListenerAdded) {
-                return;
-            }
+            // Abort any previous listeners (safety net in case cleanup wasn't called)
+            this._abortController?.abort();
+            this._abortController = new AbortController();
+            const { signal } = this._abortController;
 
             // Listen for new stream requests
             window.addEventListener('openFloatingStream', (event) => {
@@ -41,23 +42,20 @@ function multiStreamManager() {
                 console.log('Received openFloatingStream event:', detail);
                 event.stopPropagation(); // Prevent event bubbling
                 this.openStream(detail);
-            });
-
-            // Mark that we've added the listener
-            window._floatingStreamListenerAdded = true;
+            }, { signal });
 
             // Cleanup on page unload (beforeunload + pagehide for mobile Safari)
             window.addEventListener('beforeunload', () => {
                 this.cleanupAllStreams();
-            });
+            }, { signal });
             window.addEventListener('pagehide', () => {
                 this.cleanupAllStreams();
-            });
+            }, { signal });
 
             // Cleanup on Livewire SPA navigation
             window.addEventListener('livewire:navigating', () => {
                 this.cleanupAllStreams();
-            });
+            }, { signal });
 
             // Pause/resume streams on tab visibility change (saves bandwidth on mobile)
             document.addEventListener('visibilitychange', () => {
@@ -66,11 +64,11 @@ function multiStreamManager() {
                 } else if (document.visibilityState === 'visible') {
                     this.resumeAllStreams();
                 }
-            });
+            }, { signal });
 
             // Global mouse events for drag and resize
-            document.addEventListener('mousemove', (e) => this.handleMouseMove(e));
-            document.addEventListener('mouseup', () => this.handleMouseUp());
+            document.addEventListener('mousemove', (e) => this.handleMouseMove(e), { signal });
+            document.addEventListener('mouseup', () => this.handleMouseUp(), { signal });
 
             // Mark as initialized
             this._initialized = true;
@@ -176,6 +174,10 @@ function multiStreamManager() {
                 }
             });
             this.players = [];
+
+            // Remove all event listeners registered by this instance
+            this._abortController?.abort();
+            this._abortController = null;
 
             // Reset initialization flag
             this._initialized = false;
