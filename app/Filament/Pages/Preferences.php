@@ -1392,6 +1392,10 @@ class Preferences extends SettingsPage
                                                         'anthropic' => 'Anthropic',
                                                         'gemini' => 'Google Gemini',
                                                         'mistral' => 'Mistral',
+                                                        'groq' => 'Groq',
+                                                        'deepseek' => 'DeepSeek',
+                                                        'xai' => 'xAI (Grok)',
+                                                        'openrouter' => 'OpenRouter',
                                                         'ollama' => 'Ollama (Local)',
                                                     ])
                                                     ->live()
@@ -1403,6 +1407,10 @@ class Preferences extends SettingsPage
                                                         'anthropic' => 'claude-sonnet-4',
                                                         'gemini' => 'gemini-2.0-flash',
                                                         'mistral' => 'mistral-large-latest',
+                                                        'groq' => 'llama-3.3-70b-versatile',
+                                                        'deepseek' => 'deepseek-chat',
+                                                        'xai' => 'grok-3',
+                                                        'openrouter' => 'openai/gpt-4o',
                                                         'ollama' => 'llama3',
                                                         default => 'gpt-4o',
                                                     })
@@ -1417,6 +1425,15 @@ class Preferences extends SettingsPage
                                             ->visible(fn (Get $get): bool => $get('copilot_provider') !== 'ollama')
                                             ->required(fn (Get $get): bool => (bool) $get('copilot_enabled') && $get('copilot_provider') !== 'ollama')
                                             ->helperText(__('Your API key for the selected provider. Stored in the database.')),
+                                        TextInput::make('copilot_url')
+                                            ->label(__('Base URL'))
+                                            ->url()
+                                            ->placeholder(fn (Get $get): string => match ($get('copilot_provider')) {
+                                                'ollama' => 'http://localhost:11434',
+                                                default => 'https://api.openai.com/v1',
+                                            })
+                                            ->visible(fn (Get $get): bool => in_array($get('copilot_provider'), ['openai', 'ollama']))
+                                            ->helperText(__('Override the default API base URL. Leave blank to use the provider default. Useful for self-hosted models or proxy endpoints.')),
                                     ]),
                                 Section::make(__('System Prompt'))
                                     ->description(__('The system prompt sent to the AI on every conversation to configure its behaviour.'))

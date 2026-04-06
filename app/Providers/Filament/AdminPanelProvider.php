@@ -63,6 +63,7 @@ class AdminPanelProvider extends PanelProvider
             'copilot_system_prompt' => '',
             'copilot_global_tools' => [],
             'copilot_quick_actions' => [],
+            'copilot_url' => null,
         ];
         try {
             $envShowWan = config('dev.show_wan_details', false);
@@ -81,6 +82,7 @@ class AdminPanelProvider extends PanelProvider
                 'copilot_system_prompt' => $userPreferences->copilot_system_prompt ?? $settings['copilot_system_prompt'],
                 'copilot_global_tools' => $userPreferences->copilot_global_tools ?? $settings['copilot_global_tools'],
                 'copilot_quick_actions' => $userPreferences->copilot_quick_actions ?? $settings['copilot_quick_actions'],
+                'copilot_url' => $userPreferences->copilot_url ?? $settings['copilot_url'],
             ];
         } catch (Exception $e) {
             // Ignore
@@ -186,6 +188,7 @@ class AdminPanelProvider extends PanelProvider
                     'copilot_system_prompt' => $settings['copilot_system_prompt'],
                     'copilot_global_tools' => $settings['copilot_global_tools'],
                     'copilot_quick_actions' => $settings['copilot_quick_actions'],
+                    'copilot_url' => $settings['copilot_url'],
                 ]),
             ]))
             ->maxContentWidth($settings['content_width'])
@@ -266,6 +269,10 @@ class AdminPanelProvider extends PanelProvider
         'gemini' => 'gemini-2.0-flash',
         'mistral' => 'mistral-large-latest',
         'ollama' => 'llama3',
+        'groq' => 'llama-3.3-70b-versatile',
+        'deepseek' => 'deepseek-chat',
+        'xai' => 'grok-3',
+        'openrouter' => 'openai/gpt-4o',
     ];
 
     /**
@@ -291,6 +298,10 @@ class AdminPanelProvider extends PanelProvider
 
             $model = $s['copilot_model']
                 ?: (self::COPILOT_DEFAULT_MODELS[$s['copilot_provider']] ?? 'gpt-4o');
+
+            if (! empty($s['copilot_url']) && in_array($s['copilot_provider'], ['openai', 'ollama'], true)) {
+                config(["ai.providers.{$s['copilot_provider']}.url" => $s['copilot_url']]);
+            }
 
             return FilamentCopilotPlugin::make()
                 ->provider($s['copilot_provider'])

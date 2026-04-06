@@ -239,6 +239,8 @@ class GeneralSettings extends Settings
 
     public ?string $copilot_api_key = null;
 
+    public ?string $copilot_url = null;
+
     public ?string $copilot_system_prompt = null;
 
     public ?array $copilot_global_tools = null;

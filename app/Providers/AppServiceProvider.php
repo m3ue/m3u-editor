@@ -844,6 +844,10 @@ class AppServiceProvider extends ServiceProvider
             if (! empty($settings->copilot_api_key) && ! empty($settings->copilot_provider)) {
                 config(["ai.providers.{$settings->copilot_provider}.key" => $settings->copilot_api_key]);
             }
+
+            if (! empty($settings->copilot_url) && in_array($settings->copilot_provider, ['openai', 'ollama'], true)) {
+                config(["ai.providers.{$settings->copilot_provider}.url" => $settings->copilot_url]);
+            }
         } catch (Throwable) {
             // Settings may not be available during fresh installs / migrations
         }
