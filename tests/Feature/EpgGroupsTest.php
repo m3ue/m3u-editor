@@ -13,6 +13,7 @@ beforeEach(function () {
     $this->playlist = Playlist::factory()->for($this->user)->create([
         'dummy_epg' => false,
     ]);
+    $this->actingAs($this->user);
 });
 
 it('returns distinct sorted groups for a playlist', function () {
