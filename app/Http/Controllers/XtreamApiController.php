@@ -922,11 +922,21 @@ class XtreamApiController extends Controller
                     $tmdb = $seriesItem->metadata['tmdb'] ?? '';
                     $lastModified = $seriesItem->metadata['last_modified'] ?? null;
 
+                    $cover = $seriesItem->cover ? (filter_var($seriesItem->cover, FILTER_VALIDATE_URL) ? $seriesItem->cover : $baseUrl."/$seriesItem->cover") : LogoCacheService::getPlaceholderUrl('poster');
+                    $backdropPaths = $seriesItem->backdrop_path ?? [];
+                    if (is_string($backdropPaths)) {
+                        $backdropPaths = json_decode($backdropPaths, true) ?? [];
+                    }
+                    if ($playlist->enable_logo_proxy) {
+                        $cover = LogoProxyController::generateProxyUrl($cover);
+                        $backdropPaths = array_map(fn ($path) => LogoProxyController::generateProxyUrl($path), $backdropPaths);
+                    }
+
                     $seriesList[] = [
                         'num' => $index + 1,
                         'name' => $seriesItem->name,
                         'series_id' => (int) $seriesItem->id,
-                        'cover' => $seriesItem->cover ? (filter_var($seriesItem->cover, FILTER_VALIDATE_URL) ? $seriesItem->cover : $baseUrl."/$seriesItem->cover") : LogoCacheService::getPlaceholderUrl('poster'),
+                        'cover' => $cover,
                         'plot' => $seriesItem->plot ?? '',
                         'cast' => $seriesItem->cast ?? '',
                         'director' => $seriesItem->director ?? '',
@@ -935,7 +945,7 @@ class XtreamApiController extends Controller
                         'last_modified' => (string) ($lastModified),
                         'rating' => (string) ($seriesItem->rating ?? 0),
                         'rating_5based' => round((floatval($seriesItem->rating ?? 0)) / 2, 1),
-                        'backdrop_path' => $seriesItem->backdrop_path ?? [],
+                        'backdrop_path' => $backdropPaths,
                         'tmdb' => (string) $tmdb,
                         'tmdb_id' => (int) ($tmdb ?: 0),
                         'youtube_trailer' => $seriesItem->youtube_trailer ?? '',
