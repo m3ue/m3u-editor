@@ -60,6 +60,7 @@ class WatchProgressRelationManager extends RelationManager
     {
         return $table
             ->persistSortInSession()
+            ->reorderableColumns()
             ->filtersTriggerAction(fn ($action) => $action->button()->label(__('Filters')))
             ->deferLoading()
             ->modifyQueryUsing(fn ($query) => match ($this->activeTab ?? 'live') {

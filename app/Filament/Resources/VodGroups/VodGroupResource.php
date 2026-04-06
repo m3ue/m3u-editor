@@ -91,6 +91,7 @@ class VodGroupResource extends Resource implements CopilotResource
     {
         return $table->persistFiltersInSession()
             ->persistSortInSession()
+            ->reorderableColumns()
             ->modifyQueryUsing(function (Builder $query) {
                 $query->withCount('vod_channels')
                     ->withCount('enabled_vod_channels')

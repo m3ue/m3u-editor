@@ -152,6 +152,7 @@ class PlaylistResource extends Resource implements CopilotResource
     {
         return $table->persistFiltersInSession()
             ->persistSortInSession()
+            ->reorderableColumns()
             ->modifyQueryUsing(function (Builder $query) {
                 $query->withCount([
                     'enabled_live_channels',

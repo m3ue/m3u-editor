@@ -150,6 +150,7 @@ class ChannelResource extends Resource implements CopilotResource
         // $livewire = $table->getLivewire();
         return $table->persistFiltersInSession()
             ->persistSortInSession()
+            ->reorderableColumns()
             ->filtersTriggerAction(function ($action) {
                 return $action->button()->label(__('Filters'));
             })

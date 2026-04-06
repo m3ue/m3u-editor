@@ -90,6 +90,7 @@ class GroupResource extends Resource implements CopilotResource
     {
         return $table->persistFiltersInSession()
             ->persistSortInSession()
+            ->reorderableColumns()
             ->modifyQueryUsing(function (Builder $query) {
                 $query->withCount('live_channels')
                     ->withCount('enabled_live_channels')

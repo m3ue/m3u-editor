@@ -109,6 +109,7 @@ class EpgResource extends Resource implements CopilotResource
     public static function table(Table $table): Table
     {
         return $table->persistSortInSession()
+            ->reorderableColumns()
             ->modifyQueryUsing(function (Builder $query) {
                 $query->withCount([
                     'channels',

@@ -480,6 +480,7 @@ class StreamFileSettingResource extends Resource implements CopilotResource
     {
         return $table
             ->persistSortInSession()
+            ->reorderableColumns()
             ->filtersTriggerAction(function ($action) {
                 return $action->button()->label(__('Filters'));
             })

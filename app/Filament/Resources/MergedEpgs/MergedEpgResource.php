@@ -102,6 +102,7 @@ class MergedEpgResource extends Resource implements CopilotResource
     {
         return $table->persistFiltersInSession()
             ->persistSortInSession()
+            ->reorderableColumns()
             ->deferLoading()
             ->columns([
                 TextColumn::make('id')
