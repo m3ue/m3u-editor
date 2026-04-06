@@ -17,13 +17,19 @@ return new class extends Migration
             $table->string('uuid', 36)->nullable()->unique()->after('id');
         });
 
-        // Populate existing channels with UUIDs
-        $channels = DB::table('channels')->whereNull('uuid')->pluck('id');
-        foreach ($channels as $id) {
-            DB::table('channels')
-                ->where('id', $id)
-                ->update(['uuid' => Str::orderedUuid()->toString()]);
-        }
+        // Populate existing channels with UUIDs in chunks to avoid N+1 updates
+        DB::table('channels')->whereNull('uuid')->orderBy('id')->chunkById(500, function ($channels) {
+            $cases = '';
+            $ids = [];
+            foreach ($channels as $channel) {
+                $uuid = Str::orderedUuid()->toString();
+                $cases .= "WHEN {$channel->id} THEN '{$uuid}' ";
+                $ids[] = $channel->id;
+            }
+
+            $idList = implode(',', $ids);
+            DB::statement("UPDATE channels SET uuid = CASE id {$cases}END WHERE id IN ({$idList})");
+        });
     }
 
     /**

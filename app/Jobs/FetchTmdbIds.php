@@ -529,7 +529,9 @@ class FetchTmdbIds implements ShouldQueue
                         : (is_array($details['genres']) ? $details['genres'][0] : null);
 
                     if ($primaryGenre) {
-                        if (empty($channel->group) || $channel->group === 'Uncategorized' || $channel->group_internal === 'Uncategorized') {
+                        $tmdbGenreNames = is_array($details['genres']) ? $details['genres'] : array_map('trim', explode(',', (string) $details['genres']));
+                        if (empty($channel->group) || $channel->group === 'Uncategorized' || $channel->group_internal === 'Uncategorized'
+                            || ! in_array(trim($channel->group ?? ''), $tmdbGenreNames)) {
                             $group = Group::firstOrCreate(
                                 [
                                     'playlist_id' => $channel->playlist_id,
@@ -852,9 +854,11 @@ class FetchTmdbIds implements ShouldQueue
                     $updateData['plot'] = $details['overview'];
                 }
 
-                // Populate genre if not already set (treat 'Uncategorized' as empty)
+                // Populate genre if not already set or if the current value is not a TMDB genre
                 if (! empty($details['genres'])) {
-                    if (empty($series->genre) || ($series->genre ?? '') === 'Uncategorized') {
+                    $tmdbGenreNames = is_array($details['genres']) ? $details['genres'] : array_map('trim', explode(',', (string) $details['genres']));
+                    if (empty($series->genre) || ($series->genre ?? '') === 'Uncategorized'
+                        || ! in_array(trim($series->genre ?? ''), $tmdbGenreNames)) {
                         $updateData['genre'] = $details['genres'];
                     }
                 }
@@ -866,9 +870,11 @@ class FetchTmdbIds implements ShouldQueue
                         : (is_array($details['genres']) ? $details['genres'][0] : null);
 
                     if ($primaryGenre) {
+                        $tmdbGenreNames = is_array($details['genres']) ? $details['genres'] : array_map('trim', explode(',', (string) $details['genres']));
                         $currentCategory = $series->category_id ? Category::find($series->category_id) : null;
 
-                        if (! $currentCategory || $currentCategory->name === 'Uncategorized') {
+                        if (! $currentCategory || $currentCategory->name === 'Uncategorized'
+                            || ! in_array(trim($currentCategory->name), $tmdbGenreNames)) {
                             $category = Category::firstOrCreate(
                                 [
                                     'playlist_id' => $series->playlist_id,

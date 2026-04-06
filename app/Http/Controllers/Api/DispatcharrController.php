@@ -164,7 +164,7 @@ class DispatcharrController extends Controller
         foreach ($channels as $channel) {
             $entry = [
                 'id' => $channel->id,
-                'uuid' => $channel->dispatcharr_uuid,
+                'uuid' => $channel->uuid,
                 'name' => $channel->name_custom ?? $channel->name,
                 'channel_number' => $channel->channel ?: null,
                 'tvg_id' => $channel->source_id ?? $channel->stream_id ?? (string) $channel->id,
@@ -197,13 +197,13 @@ class DispatcharrController extends Controller
     /**
      * GET /proxy/ts/stream/{uuid}
      *
-     * Stream proxy endpoint. Looks up the channel by its stable dispatcharr_uuid,
+     * Stream proxy endpoint. Looks up the channel by its stable uuid,
      * resolves the playlist from the authenticated bearer token, then redirects
      * to the actual stream URL or proxies through m3u-proxy.
      */
     public function proxyStream(Request $request, string $uuid): RedirectResponse|JsonResponse
     {
-        $channel = Channel::where('dispatcharr_uuid', $uuid)->first();
+        $channel = Channel::where('uuid', $uuid)->first();
         if (! $channel || ! $channel->enabled) {
             return response()->json(['error' => 'Channel not found'], 404);
         }
@@ -267,7 +267,7 @@ class DispatcharrController extends Controller
 
         return response()->json([
             'id' => $channel->id,
-            'uuid' => $channel->dispatcharr_uuid,
+            'uuid' => $channel->uuid,
         ]);
     }
 
