@@ -484,7 +484,8 @@ class M3uProxyService
                 ->withHeaders($service->apiToken ? [
                     'X-API-Token' => $service->apiToken,
                 ] : [])
-                ->delete($endpoint, $params);
+                ->withQueryParameters($params)
+                ->delete($endpoint);
 
             if ($response->successful()) {
                 $data = $response->json();
