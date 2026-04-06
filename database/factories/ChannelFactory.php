@@ -34,7 +34,7 @@ class ChannelFactory extends Factory
             'stream_id' => $this->faker->word(),
             'lang' => $this->faker->word(),
             'country' => $this->faker->country(),
-            'dispatcharr_uuid' => Str::uuid()->toString(),
+            'uuid' => Str::uuid()->toString(),
             'user_id' => User::factory(),
             'playlist_id' => Playlist::factory(),
             'group_id' => Group::factory(),

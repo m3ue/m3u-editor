@@ -14,15 +14,15 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('channels', function (Blueprint $table) {
-            $table->string('dispatcharr_uuid', 36)->nullable()->unique()->after('source_id');
+            $table->string('uuid', 36)->nullable()->unique()->after('id');
         });
 
         // Populate existing channels with UUIDs
-        $channels = DB::table('channels')->whereNull('dispatcharr_uuid')->pluck('id');
+        $channels = DB::table('channels')->whereNull('uuid')->pluck('id');
         foreach ($channels as $id) {
             DB::table('channels')
                 ->where('id', $id)
-                ->update(['dispatcharr_uuid' => Str::uuid()->toString()]);
+                ->update(['uuid' => Str::orderedUuid()->toString()]);
         }
     }
 
@@ -32,7 +32,7 @@ return new class extends Migration
     public function down(): void
     {
         Schema::table('channels', function (Blueprint $table) {
-            $table->dropColumn('dispatcharr_uuid');
+            $table->dropColumn('uuid');
         });
     }
 };

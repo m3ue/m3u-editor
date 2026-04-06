@@ -192,7 +192,7 @@ it('returns channels in dispatcharr format with stable uuid', function () {
 
     $data = $response->json(0);
     expect($data['id'])->toBe($channel->id)
-        ->and($data['uuid'])->toBe($channel->dispatcharr_uuid)
+        ->and($data['uuid'])->toBe($channel->uuid)
         ->and($data['uuid'])->toMatch('/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/')
         ->and($data['name'])->toBe('Test Channel')
         ->and($data['channel_number'])->toBe(42)
@@ -221,7 +221,7 @@ it('returns stable uuid that persists across requests', function () {
     ]);
 
     expect($response1->json('0.uuid'))->toBe($response2->json('0.uuid'))
-        ->and($response1->json('0.uuid'))->toBe($channel->dispatcharr_uuid);
+        ->and($response1->json('0.uuid'))->toBe($channel->uuid);
 });
 
 it('includes stream_stats when probed', function () {
@@ -381,7 +381,7 @@ it('redirects to stream URL with a valid dispatcharr uuid', function () {
         'url' => 'http://provider.example.com/live/stream/123.ts',
     ]);
 
-    $response = $this->get("/proxy/ts/stream/{$channel->dispatcharr_uuid}");
+    $response = $this->get("/proxy/ts/stream/{$channel->uuid}");
 
     $response->assertRedirect('http://provider.example.com/live/stream/123.ts');
 });
@@ -400,7 +400,7 @@ it('returns 404 for disabled channel uuid', function () {
         'is_vod' => false,
     ]);
 
-    $this->getJson("/proxy/ts/stream/{$channel->dispatcharr_uuid}")
+    $this->getJson("/proxy/ts/stream/{$channel->uuid}")
         ->assertStatus(404);
 });
 
@@ -426,7 +426,7 @@ it('returns VOD movie detail with uuid', function () {
 
     $response->assertOk()
         ->assertJsonPath('id', $channel->id)
-        ->assertJsonPath('uuid', $channel->dispatcharr_uuid);
+        ->assertJsonPath('uuid', $channel->uuid);
 });
 
 it('returns 404 for non-existent VOD movie', function () {
@@ -476,31 +476,31 @@ it('returns empty array for non-existent VOD providers', function () {
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Auto-generation of dispatcharr_uuid
+// Auto-generation of uuid
 // ──────────────────────────────────────────────────────────────────────────────
 
-it('auto-generates dispatcharr_uuid on channel creation', function () {
+it('auto-generates uuid on channel creation', function () {
     $group = Group::factory()->for($this->playlist)->for($this->user)->create();
 
     $channel = Channel::factory()->for($this->playlist)->for($this->user)->create([
         'group_id' => $group->id,
-        'dispatcharr_uuid' => null,
+        'uuid' => null,
     ]);
 
-    expect($channel->dispatcharr_uuid)->not->toBeNull()
-        ->and($channel->dispatcharr_uuid)->toMatch('/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/');
+    expect($channel->uuid)->not->toBeNull()
+        ->and($channel->uuid)->toMatch('/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/');
 });
 
-it('preserves explicitly set dispatcharr_uuid', function () {
+it('preserves explicitly set uuid', function () {
     $group = Group::factory()->for($this->playlist)->for($this->user)->create();
     $customUuid = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
 
     $channel = Channel::factory()->for($this->playlist)->for($this->user)->create([
         'group_id' => $group->id,
-        'dispatcharr_uuid' => $customUuid,
+        'uuid' => $customUuid,
     ]);
 
-    expect($channel->dispatcharr_uuid)->toBe($customUuid);
+    expect($channel->uuid)->toBe($customUuid);
 });
 
 // ──────────────────────────────────────────────────────────────────────────────

@@ -618,6 +618,13 @@ class AppServiceProvider extends ServiceProvider
                 }
             });
 
+            // Auto-generate UUID for channels
+            Channel::creating(function (Channel $channel) {
+                if (empty($channel->uuid)) {
+                    $channel->uuid = Str::orderedUuid()->toString();
+                }
+            });
+
             // Failover channels
             ChannelFailover::creating(function (ChannelFailover $channelFailover) {
                 if (! $channelFailover->user_id) {

@@ -30,15 +30,6 @@ class Channel extends Model
     use HasFactory;
     use HasTags;
 
-    protected static function booted(): void
-    {
-        static::creating(function (Channel $channel) {
-            if (empty($channel->dispatcharr_uuid)) {
-                $channel->dispatcharr_uuid = Str::uuid()->toString();
-            }
-        });
-    }
-
     /**
      * The attributes that should be cast to native types.
      *
