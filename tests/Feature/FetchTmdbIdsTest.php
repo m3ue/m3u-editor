@@ -348,7 +348,7 @@ it('splits large lookups into batched chunk jobs', function () {
     });
 });
 
-it('updates VOD group from library name to TMDB genre on first fetch', function () {
+it('updates VOD group from Uncategorized to TMDB genre on first fetch', function () {
     Http::fake([
         'https://api.themoviedb.org/3/movie/603/external_ids*' => Http::response([
             'imdb_id' => 'tt0133093',
@@ -368,8 +368,8 @@ it('updates VOD group from library name to TMDB genre on first fetch', function 
     $libraryGroup = Group::factory()->create([
         'playlist_id' => $this->playlist->id,
         'user_id' => $this->user->id,
-        'name' => 'Movies',
-        'name_internal' => 'Movies',
+        'name' => 'Uncategorized',
+        'name_internal' => 'Uncategorized',
         'type' => 'vod',
     ]);
 
@@ -379,8 +379,8 @@ it('updates VOD group from library name to TMDB genre on first fetch', function 
         'is_vod' => true,
         'title' => 'The Matrix',
         'tmdb_id' => 603,
-        'group' => 'Movies',
-        'group_internal' => 'Movies',
+        'group' => 'Uncategorized',
+        'group_internal' => 'Uncategorized',
         'group_id' => $libraryGroup->id,
         'last_metadata_fetch' => null, // Never enriched by TMDB
         'info' => ['tmdb_id' => 603],
@@ -403,7 +403,7 @@ it('updates VOD group from library name to TMDB genre on first fetch', function 
         ->and($channel->info['genre'])->toContain('Action');
 });
 
-it('updates series category from library name to TMDB genre on first fetch', function () {
+it('updates series category from Uncategorized to TMDB genre on first fetch', function () {
     Http::fake([
         'https://api.themoviedb.org/3/search/tv*' => Http::response([
             'results' => [
@@ -435,8 +435,8 @@ it('updates series category from library name to TMDB genre on first fetch', fun
     $libraryCategory = Category::factory()->create([
         'playlist_id' => $this->playlist->id,
         'user_id' => $this->user->id,
-        'name' => 'TV Shows',
-        'name_internal' => 'TV Shows',
+        'name' => 'Uncategorized',
+        'name_internal' => 'Uncategorized',
     ]);
 
     $series = Series::factory()->create([
@@ -445,6 +445,7 @@ it('updates series category from library name to TMDB genre on first fetch', fun
         'name' => 'Breaking Bad',
         'category_id' => $libraryCategory->id,
         'source_category_id' => $libraryCategory->id,
+        'genre' => null,
         'metadata' => [],
         'last_metadata_fetch' => null, // Never enriched by TMDB
     ]);
