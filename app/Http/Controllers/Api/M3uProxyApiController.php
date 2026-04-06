@@ -710,8 +710,15 @@ class M3uProxyApiController extends Controller
             return response()->noContent(422);
         }
 
+        // For episodes, the browser sends 'episode-123' but the proxy stores
+        // the raw numeric ID, so strip the prefix.
+        $value = (string) $id;
+        if ($type === 'episode' && str_starts_with($value, 'episode-')) {
+            $value = substr($value, 8);
+        }
+
         try {
-            M3uProxyService::stopStreamsByMetadata($field, (string) $id);
+            M3uProxyService::stopStreamsByMetadata($field, $value);
         } catch (Exception $e) {
             Log::warning("Failed to stop player stream ({$type}:{$id}): ".$e->getMessage());
         }

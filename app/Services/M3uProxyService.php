@@ -1038,6 +1038,7 @@ class M3uProxyService
 
             $metadata = [
                 'id' => $actualChannel->id,  // Actual channel being streamed
+                'channel_id' => (string) $actualChannel->id,  // Searchable by stopPlayerStream
                 'type' => 'channel',
                 'playlist_uuid' => $playlist->uuid,  // Actual playlist being used
                 'profile_id' => $profile->id,
@@ -1101,6 +1102,7 @@ class M3uProxyService
 
             $metadata = [
                 'id' => $actualChannel->id,  // Actual channel being streamed
+                'channel_id' => (string) $actualChannel->id,  // Searchable by stopPlayerStream
                 'type' => 'channel',
                 'playlist_uuid' => $playlist->uuid,  // Actual playlist being used
                 'strict_live_ts' => $playlist->strict_live_ts ?? false,
@@ -1329,6 +1331,7 @@ class M3uProxyService
             // No existing pooled stream found, create a new transcoded stream
             $metadata = [
                 'id' => $id,
+                'episode_id' => (string) $id,  // Searchable by stopPlayerStream
                 'type' => 'episode',
                 'playlist_uuid' => $playlist->uuid,
                 'profile_id' => $profile->id,
@@ -1368,6 +1371,7 @@ class M3uProxyService
             // Use direct streaming endpoint
             $metadata = [
                 'id' => $id,
+                'episode_id' => (string) $id,  // Searchable by stopPlayerStream
                 'type' => 'episode',
                 'playlist_uuid' => $playlist->uuid,
                 'strict_live_ts' => $playlist->strict_live_ts ?? false,
