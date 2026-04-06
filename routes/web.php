@@ -286,11 +286,6 @@ Route::match(['get', 'post'], '/player_api.php', [XtreamApiController::class, 'h
 Route::match(['get', 'post'], '/get.php', [XtreamApiController::class, 'handle'])->name('xtream.api.get');
 Route::get('/xmltv.php', [XtreamApiController::class, 'epg'])->name('xtream.api.epg');
 
-// Dispatcharr-compatible proxy stream endpoint (used by emby-xtream plugin)
-Route::get('/proxy/ts/stream/{uuid}', [DispatcharrController::class, 'proxyStream'])
-    ->name('dispatcharr.proxy.stream')
-    ->where('uuid', '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}');
-
 // Xtream API stream endpoints
 Route::get('/live/{username}/{password}/{streamId}.{format?}', [XtreamStreamController::class, 'handleLive'])
     ->name('xtream.stream.live.root');
@@ -302,6 +297,11 @@ Route::get('/series/{username}/{password}/{streamId}.{format?}', [XtreamStreamCo
 // Timeshift endpoints
 Route::get('/timeshift/{username}/{password}/{duration}/{date}/{streamId}.{format?}', [XtreamStreamController::class, 'handleTimeshift'])
     ->name('xtream.stream.timeshift.root');
+
+// Dispatcharr-compatible proxy stream endpoint (used by emby-xtream plugin)
+Route::get('/proxy/ts/stream/{uuid}', [DispatcharrController::class, 'proxyStream'])
+    ->name('dispatcharr.proxy.stream')
+    ->where('uuid', '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}');
 
 // (Fallback) direct stream access (without /live/ or /movie/ prefix)
 Route::get('/{username}/{password}/{streamId}.{format?}', [XtreamStreamController::class, 'handleDirect'])
