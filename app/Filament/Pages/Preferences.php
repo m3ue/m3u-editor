@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Filament\CopilotTools\SearchDocsTool;
 use App\Filament\Resources\Assets\AssetResource;
 use App\Jobs\RestartQueue;
 use App\Models\StreamFileSetting;
@@ -1442,6 +1443,7 @@ class Preferences extends SettingsPage
                                                 ListWidgetsTool::class => __('List Widgets'),
                                                 RememberTool::class => __('Remember'),
                                                 RecallTool::class => __('Recall Memories'),
+                                                SearchDocsTool::class => __('Search Documentation'),
                                             ])
                                             ->columns(2)
                                             ->default([
@@ -1452,6 +1454,7 @@ class Preferences extends SettingsPage
                                                 ListWidgetsTool::class,
                                                 RememberTool::class,
                                                 RecallTool::class,
+                                                SearchDocsTool::class,
                                             ])
                                             ->helperText(__('Select which tools the AI assistant can use.')),
                                     ]),
