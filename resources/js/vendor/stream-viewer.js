@@ -876,17 +876,27 @@ function streamPlayer() {
     };
 }
 
-// Global retry function
+// Global retry function — works across floating, pop-out, and modal players
 function retryStream(playerId) {
-    const component = document.querySelector(`#${playerId}`).closest('[wire\\:id]');
-    if (component) {
-        // Re-trigger the player initialization
-        const alpineData = Alpine.$data(document.getElementById(playerId));
-        if (alpineData && typeof alpineData.initPlayer === 'function') {
-            const url = document.getElementById(playerId).getAttribute('data-url');
-            const format = document.getElementById(playerId).getAttribute('data-format');
-            alpineData.initPlayer(url, format, playerId);
-        }
+    const video = document.getElementById(playerId);
+    if (!video) return;
+
+    // data-url (pop-out / modal) or data-stream-url (floating player)
+    const url = video.dataset.url || video.dataset.streamUrl || '';
+    const format = video.dataset.format || video.dataset.streamFormat || '';
+
+    if (!url) return;
+
+    // Prefer the _streamPlayer reference that initPlayer() attaches to every video element
+    if (video._streamPlayer && typeof video._streamPlayer.initPlayer === 'function') {
+        video._streamPlayer.initPlayer(url, format, playerId);
+        return;
+    }
+
+    // Fallback: create a fresh streamPlayer instance
+    if (window.streamPlayer) {
+        const player = window.streamPlayer();
+        player.initPlayer(url, format, playerId);
     }
 }
 
