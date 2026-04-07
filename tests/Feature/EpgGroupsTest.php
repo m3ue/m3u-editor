@@ -125,8 +125,8 @@ it('filters channels by group when group param is provided', function () {
     $data = $response->json();
     $channels = $data['channels'];
 
-    expect($channels)->toHaveKey((string) $sportsChannel->channel)
-        ->and($channels)->not->toHaveKey((string) $newsChannel->channel);
+    expect($channels)->toHaveKey((string) $sportsChannel->id)
+        ->and($channels)->not->toHaveKey((string) $newsChannel->id);
 });
 
 it('returns all channels when no group param is provided', function () {
@@ -179,5 +179,5 @@ it('group filter is case-insensitive', function () {
     $response->assertOk();
     $data = $response->json();
 
-    expect($data['channels'])->toHaveKey((string) $channel->channel);
+    expect($data['channels'])->toHaveKey((string) $channel->id);
 });
