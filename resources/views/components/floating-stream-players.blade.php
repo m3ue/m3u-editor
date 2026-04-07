@@ -48,6 +48,7 @@
             <div 
                 class="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-600 cursor-move select-none hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors"
                 @mousedown="startDrag(player.id, $event)"
+                @touchstart="startDragTouch(player.id, $event)"
             >
                 <div class="flex items-center space-x-2 flex-1 min-w-0">
                     <img 
@@ -256,6 +257,7 @@
                 <div 
                     class="absolute bottom-0 right-0 w-4 h-4 cursor-se-resize opacity-50 hover:opacity-100 transition-opacity group"
                     @mousedown.stop="startResize(player.id, $event)"
+                    @touchstart.stop="startResizeTouch(player.id, $event)"
                     title="Resize"
                 >
                     <!-- Visual resize indicator with lines -->

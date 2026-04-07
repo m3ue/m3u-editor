@@ -72,6 +72,10 @@ function multiStreamManager() {
             document.addEventListener('mousemove', (e) => this.handleMouseMove(e), { signal });
             document.addEventListener('mouseup', () => this.handleMouseUp(), { signal });
 
+            // Global touch events for drag and resize (mobile/tablet support)
+            document.addEventListener('touchmove', (e) => this.handleTouchMove(e), { signal, passive: false });
+            document.addEventListener('touchend', () => this.handleMouseUp(), { signal });
+
             // Mark as initialized
             this._initialized = true;
         },
@@ -337,6 +341,50 @@ function multiStreamManager() {
                 player.position.x = Math.max(0, Math.min(vw - player.size.width, player.position.x));
                 player.position.y = Math.max(0, Math.min(vh - 50, player.position.y));
             });
+        },
+
+        startDragTouch(playerId, event) {
+            event.preventDefault();
+            this.bringToFront(playerId);
+
+            const player = this.players.find(p => p.id === playerId);
+            if (!player) return;
+
+            const touch = event.touches[0];
+            this.dragState = {
+                isDragging: true,
+                playerId: playerId,
+                startX: touch.clientX,
+                startY: touch.clientY,
+                startLeft: player.position.x,
+                startTop: player.position.y
+            };
+        },
+
+        startResizeTouch(playerId, event) {
+            event.preventDefault();
+            event.stopPropagation();
+            this.bringToFront(playerId);
+
+            const player = this.players.find(p => p.id === playerId);
+            if (!player) return;
+
+            const touch = event.touches[0];
+            this.resizeState = {
+                isResizing: true,
+                playerId: playerId,
+                startX: touch.clientX,
+                startY: touch.clientY,
+                startWidth: player.size.width,
+                startHeight: player.size.height
+            };
+        },
+
+        handleTouchMove(event) {
+            if (!this.dragState.isDragging && !this.resizeState.isResizing) return;
+            event.preventDefault();
+            const touch = event.touches[0];
+            this.handleMouseMove(touch);
         },
 
         handleMouseMove(event) {
