@@ -93,6 +93,7 @@ function multiStreamManager() {
 
             // Enforce max concurrent player limit (0 = unlimited)
             if (this.maxPlayers > 0 && this.players.length >= this.maxPlayers) {
+                this.showLimitMessage();
                 return;
             }
 
@@ -235,6 +236,32 @@ function multiStreamManager() {
             if (window.notifyProxyStreamStop) {
                 window.notifyProxyStreamStop(player.channelId, player.channelType);
             }
+        },
+
+        showLimitMessage() {
+            const existing = document.getElementById('floating-player-limit-msg');
+            if (existing) existing.remove();
+
+            const msg = document.createElement('div');
+            msg.id = 'floating-player-limit-msg';
+            msg.textContent = `Player limit reached (${this.maxPlayers}). Close one to open another.`;
+            Object.assign(msg.style, {
+                position: 'fixed',
+                bottom: '20px',
+                left: '50%',
+                transform: 'translateX(-50%)',
+                background: 'rgba(0, 0, 0, 0.85)',
+                color: '#fff',
+                padding: '8px 16px',
+                borderRadius: '8px',
+                fontSize: '13px',
+                zIndex: '99999',
+                pointerEvents: 'none',
+                transition: 'opacity 0.3s',
+            });
+            document.body.appendChild(msg);
+            setTimeout(() => { msg.style.opacity = '0'; }, 2000);
+            setTimeout(() => { msg.remove(); }, 2300);
         },
 
         bringToFront(playerId) {
