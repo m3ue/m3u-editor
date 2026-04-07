@@ -16,7 +16,6 @@ use App\Jobs\ProcessChannelScrubber;
 use App\Jobs\SyncMediaServer;
 use App\Listeners\PersistUserLocale;
 use App\Livewire\BackupDestinationListRecords;
-use App\Livewire\StreamPlayer;
 use App\Livewire\TmdbSearch;
 use App\Models\Channel;
 use App\Models\ChannelFailover;
@@ -937,9 +936,6 @@ class AppServiceProvider extends ServiceProvider
     {
         // Register the backup destination list records component
         Livewire::component('backup-destination-list-records', BackupDestinationListRecords::class);
-
-        // Register the stream player component
-        Livewire::component('stream-player', StreamPlayer::class);
 
         // Register the TMDB search component
         Livewire::component('tmdb-search', TmdbSearch::class);
