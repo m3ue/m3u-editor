@@ -180,7 +180,6 @@ class EpgApiController extends Controller
         $skip = max(0, ($page - 1) * $perPage);
         $search = $request->get('search', null);
         $group = $request->get('group', null) ?: null;
-        $vod = (bool) $request->get('vod', false);
         $username = $request->get('username', null);
         $password = $request->get('password', null);
 
@@ -250,9 +249,9 @@ class EpgApiController extends Controller
                     $channelNo = ++$channelNumber;
                 }
 
-                // Ensure we always have a unique identifier for the channel
-                // Use database ID as fallback if channel number is not set
-                $channelKey = $channelNo ?: $channel->id;
+                // Always use the database primary key as the array key to guarantee uniqueness.
+                // Duplicate channel numbers would otherwise overwrite earlier entries.
+                $channelKey = $channel->id;
                 if ($epgId) {
                     $epgIds[] = $epgId;
                     if (! isset($epgChannelMap[$epgId])) {
@@ -377,24 +376,27 @@ class EpgApiController extends Controller
                 ];
             }
 
-            // Apply pagination to playlist channels
-            $totalChannels = $playlist->channels()->when($search, function ($queryBuilder) use ($search) {
-                $search = Str::lower($search);
+            // Apply pagination to playlist channels — use the same base query as the data
+            // fetch so the count reflects identical filters (VOD setting, enabled, custom
+            // tag deduplication) and stays consistent with the paginated results.
+            $totalChannels = PlaylistGenerateController::getChannelQuery($playlist)
+                ->when($search, function ($queryBuilder) use ($search) {
+                    $search = Str::lower($search);
 
-                return $queryBuilder->where(function ($query) use ($search) {
-                    $query->whereRaw('LOWER(channels.name) LIKE ?', ['%'.$search.'%'])
-                        ->orWhereRaw('LOWER(channels.name_custom) LIKE ?', ['%'.$search.'%'])
-                        ->orWhereRaw('LOWER(channels.title) LIKE ?', ['%'.$search.'%'])
-                        ->orWhereRaw('LOWER(channels.title_custom) LIKE ?', ['%'.$search.'%']);
-                });
-            })->when($group, function ($queryBuilder) use ($group) {
-                $g = $queryBuilder->getQuery()->getGrammar();
-                $coalesce = 'COALESCE('.$g->wrap('channels.group').', '.$g->wrap('channels.group_internal').')';
+                    return $queryBuilder->where(function ($query) use ($search) {
+                        $query->whereRaw('LOWER(channels.name) LIKE ?', ['%'.$search.'%'])
+                            ->orWhereRaw('LOWER(channels.name_custom) LIKE ?', ['%'.$search.'%'])
+                            ->orWhereRaw('LOWER(channels.title) LIKE ?', ['%'.$search.'%'])
+                            ->orWhereRaw('LOWER(channels.title_custom) LIKE ?', ['%'.$search.'%']);
+                    });
+                })
+                ->when($group, function ($queryBuilder) use ($group) {
+                    $g = $queryBuilder->getQuery()->getGrammar();
+                    $coalesce = 'COALESCE('.$g->wrap('channels.group').', '.$g->wrap('channels.group_internal').')';
 
-                return $queryBuilder->whereRaw("LOWER({$coalesce}) = ?", [Str::lower($group)]);
-            })->when(! $vod, function ($query) {
-                return $query->where('channels.is_vod', false);
-            })->where('enabled', true)->count();
+                    return $queryBuilder->whereRaw("LOWER({$coalesce}) = ?", [Str::lower($group)]);
+                })
+                ->count();
 
             $channels = $playlistChannelData;
 

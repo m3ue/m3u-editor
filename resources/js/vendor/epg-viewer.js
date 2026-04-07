@@ -25,9 +25,12 @@ function epgViewer(config) {
         isMobile: window.innerWidth < 768,
 
         // Pagination
+        paginationMode: localStorage.getItem('epg_pagination_mode') || 'scroll',
         currentPage: 1,
-        perPage: 50,
+        perPage: parseInt(localStorage.getItem('epg_per_page') || '50', 10),
         hasMore: true,
+        totalChannelCount: 0,
+        pageInput: '',
         allChannels: {},
         allProgrammes: {},
         channelOrder: [],
@@ -56,51 +59,28 @@ function epgViewer(config) {
         init() {
             this.generateTimeSlots();
             this.updateCurrentTime();
-            // Update current time every minute
             this.timeUpdateInterval = setInterval(() => this.updateCurrentTime(), 60000);
 
-            // Setup mobile detection with resize listener
             const updateMobile = () => { this.isMobile = window.innerWidth < 768; };
             window.addEventListener('resize', updateMobile);
             this.resizeListener = updateMobile;
 
-            // Setup scroll listener for pagination
-            this.$nextTick(() => {
-                // The main scrollable container is the timeline-scroll element
-                const timelineContainer = document.querySelector('.timeline-scroll');
-                if (timelineContainer) {
-                    this.scrollEventListener = this.handleScroll.bind(this);
-                    timelineContainer.addEventListener('scroll', this.scrollEventListener);
-                }
-            });
-
-            // Scroll to current time on load
+            this.setupScrollListener();
             this.scrollToCurrentTime();
         },
 
         destroy() {
-            // Clear the time update interval
             if (this.timeUpdateInterval) {
                 clearInterval(this.timeUpdateInterval);
                 this.timeUpdateInterval = null;
             }
 
-            // Remove resize listener
             if (this.resizeListener) {
                 window.removeEventListener('resize', this.resizeListener);
                 this.resizeListener = null;
             }
 
-            // Remove scroll event listener
-            if (this.scrollEventListener) {
-                const timelineContainer = document.querySelector('.timeline-scroll');
-                if (timelineContainer) {
-                    timelineContainer.removeEventListener('scroll', this.scrollEventListener);
-                }
-                this.scrollEventListener = null;
-            }
-
-            console.log('EPG Viewer component destroyed and cleaned up');
+            this.removeScrollListener();
         },
 
         generateTimeSlots() {
@@ -130,17 +110,71 @@ function epgViewer(config) {
             return this.currentDate === today;
         },
 
+        get totalPages() {
+            return Math.max(1, Math.ceil(this.totalChannelCount / this.perPage));
+        },
+
+        get isScrollMode() {
+            return this.paginationMode === 'scroll';
+        },
+
+        setupScrollListener() {
+            this.$nextTick(() => {
+                if (this.paginationMode !== 'scroll') return;
+                const timelineContainer = document.querySelector('.timeline-scroll');
+                if (timelineContainer && !this.scrollEventListener) {
+                    this.scrollEventListener = this.handleScroll.bind(this);
+                    timelineContainer.addEventListener('scroll', this.scrollEventListener);
+                }
+            });
+        },
+
+        removeScrollListener() {
+            if (this.scrollEventListener) {
+                const timelineContainer = document.querySelector('.timeline-scroll');
+                if (timelineContainer) {
+                    timelineContainer.removeEventListener('scroll', this.scrollEventListener);
+                }
+                this.scrollEventListener = null;
+            }
+        },
+
+        handleScroll(event) {
+            if (this.paginationMode !== 'scroll') return;
+            const container = event.target;
+            const nearBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - 200;
+
+            if (nearBottom && this.hasMore && !this.loadingMore) {
+                this.loadMoreData();
+            }
+        },
+
+        async loadMoreData() {
+            if (!this.hasMore || this.loadingMore) return;
+            await this.loadPage(this.currentPage + 1);
+        },
+
+        togglePaginationMode() {
+            this.paginationMode = this.isScrollMode ? 'pages' : 'scroll';
+            localStorage.setItem('epg_pagination_mode', this.paginationMode);
+
+            this.currentPage = 1;
+
+            if (this.isScrollMode) {
+                this.setupScrollListener();
+            } else {
+                this.removeScrollListener();
+            }
+
+            this.loadEpgData();
+        },
+
         async loadEpgData() {
             this.loading = true;
             this.error = null;
-            this.currentPage = 1;
-            this.allChannels = {};
-            this.allProgrammes = {};
-            this.processedChannels = {};
-            this.channelOrder = [];
 
             try {
-                await this.loadPage(1);
+                await this.loadPage(this.currentPage);
                 this.loading = false;
             } catch (error) {
                 console.error('Error loading EPG data:', error);
@@ -150,22 +184,19 @@ function epgViewer(config) {
         },
 
         async loadPage(page = 1) {
-            const isInitialLoad = page === 1;
+            const isAppending = this.isScrollMode && page > 1;
 
-            if (!isInitialLoad) {
+            if (isAppending) {
                 this.loadingMore = true;
             }
 
             try {
-                console.log(`Loading page ${page} of EPG data...`);
                 let url = `${this.apiUrl}?start_date=${this.currentDate}&end_date=${this.getEndDate()}&page=${page}&per_page=${this.perPage}&vod=${this.vod ? '1' : '0'}`;
 
-                // Append authentication parameters if available
                 if (this.username && this.password) {
                     url += `&username=${encodeURIComponent(this.username)}&password=${encodeURIComponent(this.password)}`;
                 }
 
-                // Add search parameter if active
                 if (this.isSearchActive && this.searchTerm.trim()) {
                     url += `&search=${encodeURIComponent(this.searchTerm.trim())}`;
                 }
@@ -185,16 +216,24 @@ function epgViewer(config) {
                 }
 
                 const data = await response.json();
-                console.log('EPG data loaded successfully:', data);
 
-                // Process only new channels incrementally
+                if (!isAppending) {
+                    // Pages mode or first load in scroll mode: replace data
+                    this.allChannels = {};
+                    this.allProgrammes = {};
+                    this.processedChannels = {};
+                    this.channelOrder = [];
+                }
+
+                // Merge/set channel data
                 this.processNewChannels(data.channels || {}, data.programmes || {});
 
                 // Update pagination state
                 this.currentPage = data.pagination.current_page;
                 this.hasMore = data.pagination.has_more;
+                this.totalChannelCount = data.pagination.total_channels || 0;
+                this.pageInput = '';
 
-                // Set epgData for template compatibility
                 this.epgData = {
                     epg: data.epg || null,
                     playlist: data.playlist || null,
@@ -204,44 +243,49 @@ function epgViewer(config) {
                     pagination: data.pagination
                 };
 
-                console.log('Loaded channels:', Object.keys(this.allChannels).length);
-                console.log('Has more pages:', this.hasMore);
-
+                // In pages mode, scroll back to top on page change
+                if (!this.isScrollMode && !isAppending) {
+                    this.$nextTick(() => {
+                        const channelScroll = this.$refs?.channelScroll || document.querySelector('[x-ref="channelScroll"]');
+                        const timelineScroll = this.$refs?.timelineScroll || document.querySelector('[x-ref="timelineScroll"]');
+                        if (channelScroll) channelScroll.scrollTop = 0;
+                        if (timelineScroll) timelineScroll.scrollTop = 0;
+                    });
+                }
             } catch (error) {
                 console.error('Error loading page:', error);
-                if (isInitialLoad) {
-                    throw error;
-                }
+                if (!isAppending) throw error;
             } finally {
-                if (!isInitialLoad) {
+                if (isAppending) {
                     this.loadingMore = false;
                 }
             }
         },
 
-        async loadMoreData() {
-            if (!this.hasMore || this.loadingMore) {
-                return;
-            }
-
-            const nextPage = this.currentPage + 1;
-            await this.loadPage(nextPage);
+        goToPage(page) {
+            page = parseInt(page, 10);
+            if (isNaN(page) || page < 1) page = 1;
+            if (page > this.totalPages) page = this.totalPages;
+            this.currentPage = page;
+            this.loadEpgData();
         },
 
-        handleScroll(event) {
-            const container = event.target;
-            const scrollTop = container.scrollTop;
-            const scrollHeight = container.scrollHeight;
-            const clientHeight = container.clientHeight;
-
-            // For pagination, we only care about vertical scrolling
-            // Check if we're near the bottom (within 200px)
-            const nearBottom = scrollTop + clientHeight >= scrollHeight - 200;
-
-            if (nearBottom && this.hasMore && !this.loadingMore) {
-                console.log('Near bottom, loading more data...');
-                this.loadMoreData();
+        nextPage() {
+            if (this.currentPage < this.totalPages) {
+                this.goToPage(this.currentPage + 1);
             }
+        },
+
+        previousPage() {
+            if (this.currentPage > 1) {
+                this.goToPage(this.currentPage - 1);
+            }
+        },
+
+        changePerPage() {
+            localStorage.setItem('epg_per_page', String(this.perPage));
+            this.currentPage = 1;
+            this.loadEpgData();
         },
 
         getEndDate() {
@@ -261,6 +305,7 @@ function epgViewer(config) {
             // Clear search when navigating dates (keep selected group tab)
             this.searchTerm = '';
             this.isSearchActive = false;
+            this.currentPage = 1;
 
             this.loadEpgData();
         },
@@ -278,6 +323,7 @@ function epgViewer(config) {
             // Clear search when navigating dates (keep selected group tab)
             this.searchTerm = '';
             this.isSearchActive = false;
+            this.currentPage = 1;
 
             this.loadEpgData();
         },
@@ -292,6 +338,7 @@ function epgViewer(config) {
             // Clear search when navigating dates (keep selected group tab)
             this.searchTerm = '';
             this.isSearchActive = false;
+            this.currentPage = 1;
 
             this.loadEpgData();
         },
@@ -446,6 +493,7 @@ function epgViewer(config) {
             // Clear search — selecting a category tab resets the search
             this.searchTerm = '';
             this.isSearchActive = false;
+            this.currentPage = 1;
             this.loadEpgData();
         },
 
@@ -579,16 +627,16 @@ function epgViewer(config) {
                 return;
             }
 
-            console.log('Performing search for:', this.searchTerm);
             this.isSearchActive = true;
-            this.loadEpgData(); // Reload data with search
+            this.currentPage = 1;
+            this.loadEpgData();
         },
 
         clearSearch() {
-            console.log('Clearing search');
             this.searchTerm = '';
             this.isSearchActive = false;
-            this.loadEpgData(); // Reload data without search
+            this.currentPage = 1;
+            this.loadEpgData();
         },
 
         // Handle Enter key in search input

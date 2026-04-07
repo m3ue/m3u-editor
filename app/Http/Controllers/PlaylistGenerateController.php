@@ -669,31 +669,23 @@ class PlaylistGenerateController extends Controller
             // Alias the external EPG channel identifier to avoid clobbering the FK attribute
             ->selectRaw('epg_channels.channel_id as epg_channel_key');
 
-        // If custom playlist (or alias of one), left join tags through the taggables polymorphic table
+        // If custom playlist (or alias of one), use correlated subqueries to retrieve the
+        // custom tag order/name without JOINing taggables, which would produce duplicate
+        // rows for channels that belong to more than one tag in this playlist.
         $isCustomContext = $playlist instanceof CustomPlaylist
             || ($playlist instanceof PlaylistAlias && ! empty($playlist->custom_playlist_id));
         if ($isCustomContext) {
-            $query->leftJoin('taggables', function ($join) {
-                $join->on('channels.id', '=', 'taggables.taggable_id')
-                    ->where('taggables.taggable_type', '=', Channel::class);
-            });
+            $orderSubquery = '(SELECT MIN(t.order_column) FROM taggables tb INNER JOIN tags t ON t.id = tb.tag_id WHERE tb.taggable_id = channels.id AND tb.taggable_type = ? AND t.type = ?)';
 
-            $query->leftJoin('tags as custom_tags', function ($join) use ($playlistUuid) {
-                $join->on('taggables.tag_id', '=', 'custom_tags.id')
-                    ->where('custom_tags.type', '=', $playlistUuid);
-            });
-
-            // Order by custom tag order when present, otherwise fall back to group sort_order
-            $query->orderByRaw('COALESCE(custom_tags.order_column, groups.sort_order)')
+            $query->selectRaw("{$orderSubquery} as custom_order", [Channel::class, $playlistUuid])
+                ->selectRaw(
+                    '(SELECT t.name FROM taggables tb INNER JOIN tags t ON t.id = tb.tag_id WHERE tb.taggable_id = channels.id AND tb.taggable_type = ? AND t.type = ? ORDER BY t.order_column ASC LIMIT 1) as custom_group_name',
+                    [Channel::class, $playlistUuid]
+                )
+                ->orderByRaw("COALESCE({$orderSubquery}, groups.sort_order)", [Channel::class, $playlistUuid])
                 ->orderBy('channels.sort')
                 ->orderBy('channels.channel')
                 ->orderBy('channels.title');
-
-            // Include the custom tag name/order in the selected columns
-            // Note: custom_tags.name is a JSON field with translations like {"en":"Name"}
-            // We'll decode it in PHP to extract the locale-specific value
-            $query->selectRaw('custom_tags.name as custom_group_name')
-                ->selectRaw('custom_tags.order_column as custom_order');
         } else {
             // Standard ordering for non-custom playlists
             $query->orderBy('groups.sort_order')
