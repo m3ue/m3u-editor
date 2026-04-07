@@ -138,6 +138,10 @@
             });
 
             document.addEventListener('visibilitychange', () => {
+                const isLive = videoElement.dataset.contentType === 'live';
+                if (isLive) {
+                    return;
+                }
                 if (document.visibilityState === 'hidden') {
                     videoElement.pause();
                 } else if (document.visibilityState === 'visible') {
