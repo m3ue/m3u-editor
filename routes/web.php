@@ -35,8 +35,10 @@ Route::get('/auth/oidc/redirect', [OidcController::class, 'redirect'])->name('au
 Route::get('/auth/oidc/callback', [OidcController::class, 'callback'])->name('auth.oidc.callback');
 
 // In-app watch progress tracking (admin panel + guest panel)
-Route::get('/api/watch-progress', [WatchProgressController::class, 'fetch'])->name('watch-progress.fetch');
-Route::post('/api/watch-progress', [WatchProgressController::class, 'update'])->name('watch-progress.update');
+Route::middleware(['throttle:60,1'])->group(function () {
+    Route::get('/api/watch-progress', [WatchProgressController::class, 'fetch'])->name('watch-progress.fetch');
+    Route::post('/api/watch-progress', [WatchProgressController::class, 'update'])->name('watch-progress.update');
+});
 
 // External IP refresh route for admin panel
 Route::post('/admin/refresh-external-ip', function (ExternalIpService $ipService) {
