@@ -4,8 +4,9 @@
         vod: {{ $vod ? 'true' : 'false' }},
         username: '{{ $username }}',
         password: '{{ $password }}'
-    })" x-init="init(); loadEpgData(); loadGroups()" x-on:beforeunload.window="destroy()" x-on:livewire:navigating.window="destroy()"
-    x-on:refresh-epg-data.window="(e) => refreshEpgData(e.detail)" wire:ignore.self>
+    })" x-init="init(); loadEpgData(); loadGroups()" x-on:beforeunload.window="destroy()"
+    x-on:livewire:navigating.window="destroy()" x-on:refresh-epg-data.window="(e) => refreshEpgData(e.detail)"
+    wire:ignore.self>
     <div>
         <!-- Loading State -->
         <div x-show="loading" class="flex items-center justify-center p-8">
@@ -109,8 +110,7 @@
                         <div class="overflow-x-auto scrollbar-hide" style="scroll-behavior: smooth;">
                             <div class="flex items-center gap-1.5 pb-0.5">
                                 <!-- All tab -->
-                                <button
-                                    @click="selectGroup('')"
+                                <button @click="selectGroup('')"
                                     :class="selectedGroup === ''
                                         ? 'bg-primary-600 text-white shadow-sm'
                                         : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'"
@@ -119,8 +119,7 @@
                                 </button>
                                 <!-- Group tabs -->
                                 <template x-for="group in availableGroups" :key="group">
-                                    <button
-                                        @click="selectGroup(group)"
+                                    <button @click="selectGroup(group)"
                                         :class="selectedGroup === group
                                             ? 'bg-primary-600 text-white shadow-sm'
                                             : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'"
@@ -268,12 +267,12 @@
                                                 class="absolute p-2 rounded-xl bg-white/90 shadow-sm dark:bg-gray-800/90 right-1 top-1/2 -translate-y-1/2 flex space-x-1 transform translate-x-8 opacity-0 group-hover:translate-x-0 group-hover:opacity-100 group-focus-within:translate-x-0 group-focus-within:opacity-100 transition-all duration-200 ease-in-out">
                                                 <!-- Edit Button -->
                                                 <button x-show="item.channel.database_id" @click.stop="
-                                                            if (!modalLoading) {
-                                                                modalLoading = true;
-                                                                $wire.openChannelEdit(item.channel.database_id);
-                                                                setTimeout(() => { modalLoading = false; }, 1000);
-                                                            }
-                                                        " :disabled="modalLoading"
+                                                                    if (!modalLoading) {
+                                                                        modalLoading = true;
+                                                                        $wire.openChannelEdit(item.channel.database_id);
+                                                                        setTimeout(() => { modalLoading = false; }, 1000);
+                                                                    }
+                                                                " :disabled="modalLoading"
                                                     class="p-2 text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-900/20 rounded-full transition-colors disabled:opacity-50"
                                                     title="Edit Channel">
                                                     <x-heroicon-s-pencil class="w-4 h-4" />
@@ -298,9 +297,10 @@
                             </div>
 
                             <!-- Scroll mode: more channels indicator -->
-                            <div x-show="isScrollMode && hasMore && !loadingMore" :class="isMobile ? 'px-2 py-2' : 'px-4 py-3'"
-                                class="text-center">
-                                <div class="text-xs text-gray-500 dark:text-gray-400">Scroll down for more channels...</div>
+                            <div x-show="isScrollMode && hasMore && !loadingMore"
+                                :class="isMobile ? 'px-2 py-2' : 'px-4 py-3'" class="text-center">
+                                <div class="text-xs text-gray-500 dark:text-gray-400">Scroll down for more channels...
+                                </div>
                             </div>
 
                             <!-- No Results Message -->
@@ -441,12 +441,13 @@
 
                 <!-- Footer Bar -->
                 <div x-show="totalChannelCount > 0"
-                    class="absolute bottom-0 left-0 right-0 h-12 bg-gray-50 dark:bg-gray-800 border-t border-gray-200 dark:border-gray-600 px-3 flex items-center justify-between z-20">
+                    class="absolute bottom-0 left-0 right-0 h-12 bg-gray-50 dark:bg-gray-800 border-t border-gray-200 dark:border-gray-600 px-3 flex items-center justify-between z-30">
                     <!-- Left: Mode toggle + per-page (pages mode only) -->
                     <div class="flex items-center gap-2">
                         <button @click="togglePaginationMode()"
                             class="p-1 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
-                            :title="isScrollMode ? 'Switch to pages' : 'Switch to scroll'">
+                            x-tooltip="isScrollMode ? 'Switch to pages' : 'Switch to infinite scroll'"
+                            :title="isScrollMode ? 'Switch to pages' : 'Switch to infinite scroll'">
                             <template x-if="isScrollMode">
                                 <x-heroicon-m-numbered-list class="w-4 h-4" />
                             </template>
@@ -456,10 +457,9 @@
                         </button>
                         <template x-if="!isScrollMode">
                             <div class="flex items-center gap-2">
-                                <label class="text-xs text-gray-500 dark:text-gray-400 hidden sm:inline">Per page</label>
-                                <select
-                                    @change="changePerPage($event.target.value)"
-                                    :value="perPage"
+                                <label class="text-xs text-gray-500 dark:text-gray-400 hidden sm:inline">Per
+                                    page</label>
+                                <select @change="changePerPage($event.target.value)" :value="perPage"
                                     class="text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 py-1 px-2 focus:outline-none focus:ring-1 focus:ring-indigo-500">
                                     <option value="25">25</option>
                                     <option value="50">50</option>
@@ -480,13 +480,12 @@
 
                             <div class="flex items-center gap-1">
                                 <span class="text-xs text-gray-500 dark:text-gray-400 hidden sm:inline">Page</span>
-                                <input type="text"
-                                    x-model="pageInput"
-                                    :placeholder="currentPage"
-                                    @keydown.enter="goToPage(pageInput || currentPage)"
+                                <input type="text" x-model="pageInput" :placeholder="currentPage"
+                                    @blur="goToPage(pageInput || currentPage)"
                                     class="w-10 text-center text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 py-1 px-1 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
                                 <span class="text-xs text-gray-500 dark:text-gray-400">of</span>
-                                <span class="text-xs font-medium text-gray-700 dark:text-gray-300" x-text="totalPages"></span>
+                                <span class="text-xs font-medium text-gray-700 dark:text-gray-300"
+                                    x-text="totalPages"></span>
                             </div>
 
                             <button @click="nextPage()" :disabled="currentPage >= totalPages"
@@ -498,13 +497,15 @@
                     </template>
                     <template x-if="isScrollMode">
                         <div class="text-xs text-gray-500 dark:text-gray-400">
-                            <span x-text="channelOrder.length"></span> of <span x-text="totalChannelCount"></span> <span class="hidden sm:inline">channels loaded</span><span class="sm:hidden">loaded</span>
+                            <span x-text="channelOrder.length"></span> of <span x-text="totalChannelCount"></span> <span
+                                class="hidden sm:inline">channels loaded</span><span class="sm:hidden">loaded</span>
                         </div>
                     </template>
 
                     <!-- Right: Total count -->
                     <div class="text-xs text-gray-500 dark:text-gray-400">
-                        <span x-text="totalChannelCount"></span> <span class="hidden sm:inline">channels</span><span class="sm:hidden">ch.</span>
+                        <span x-text="totalChannelCount"></span> <span class="hidden sm:inline">channels</span><span
+                            class="sm:hidden">ch.</span>
                     </div>
                 </div>
             </div>

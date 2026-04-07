@@ -158,12 +158,7 @@ function epgViewer(config) {
             this.paginationMode = this.isScrollMode ? 'pages' : 'scroll';
             localStorage.setItem('epg_pagination_mode', this.paginationMode);
 
-            // Reset and reload
             this.currentPage = 1;
-            this.allChannels = {};
-            this.allProgrammes = {};
-            this.processedChannels = {};
-            this.channelOrder = [];
 
             if (this.isScrollMode) {
                 this.setupScrollListener();
@@ -287,8 +282,7 @@ function epgViewer(config) {
             }
         },
 
-        changePerPage(newPerPage) {
-            this.perPage = parseInt(newPerPage, 10);
+        changePerPage() {
             localStorage.setItem('epg_per_page', String(this.perPage));
             this.currentPage = 1;
             this.loadEpgData();
@@ -499,6 +493,7 @@ function epgViewer(config) {
             // Clear search — selecting a category tab resets the search
             this.searchTerm = '';
             this.isSearchActive = false;
+            this.currentPage = 1;
             this.loadEpgData();
         },
 

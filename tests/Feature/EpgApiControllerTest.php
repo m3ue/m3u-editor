@@ -75,7 +75,7 @@ class EpgApiControllerTest extends TestCase
         // Check that programmes were generated for each channel
         foreach ($channels as $channel) {
             $channel->refresh(); // Refresh to get latest data
-            $channelId = $channel->channel ?: $channel->id;
+            $channelId = $channel->id;
             $this->assertArrayHasKey($channelId, $data['programmes'], "Channel {$channelId} should have programmes");
 
             $programmes = $data['programmes'][$channelId];
@@ -120,7 +120,7 @@ class EpgApiControllerTest extends TestCase
 
         $data = $response->json();
         $channel->refresh(); // Refresh to get latest data
-        $channelId = $channel->channel ?: $channel->id;
+        $channelId = $channel->id;
         $programmes = $data['programmes'][$channelId] ?? [];
 
         $this->assertNotEmpty($programmes);
@@ -156,7 +156,7 @@ class EpgApiControllerTest extends TestCase
 
         $data = $response->json();
         $channel->refresh(); // Refresh to get latest data
-        $channelId = $channel->channel ?: $channel->id;
+        $channelId = $channel->id;
 
         // Programmes should be empty or not include the channel without EPG
         $this->assertEmpty($data['programmes'][$channelId] ?? []);
@@ -188,7 +188,7 @@ class EpgApiControllerTest extends TestCase
 
         $data = $response->json();
         $channel->refresh(); // Refresh to get latest data
-        $channelId = $channel->channel ?: $channel->id;
+        $channelId = $channel->id;
         $programmes = $data['programmes'][$channelId] ?? [];
 
         $this->assertNotEmpty($programmes);
@@ -256,7 +256,7 @@ class EpgApiControllerTest extends TestCase
 
         // Channel without EPG should have dummy programmes
         $channelWithoutEpg->refresh(); // Refresh to get latest data
-        $channelId = $channelWithoutEpg->channel ?? $channelWithoutEpg->id;
+        $channelId = $channelWithoutEpg->id;
         $this->assertArrayHasKey($channelId, $data['programmes']);
         $this->assertNotEmpty($data['programmes'][$channelId]);
     }
@@ -310,8 +310,8 @@ class EpgApiControllerTest extends TestCase
 
         $data = $response->json();
         $channel->refresh(); // Refresh to get latest data
-        // Use same logic as controller: falsy check with ?: not null-coalescing ??
-        $channelId = $channel->channel ?: $channel->id;
+        // Always use database ID as channel key (controller guarantees uniqueness)
+        $channelId = $channel->id;
         $programmes = $data['programmes'][$channelId] ?? [];
 
         $this->assertNotEmpty($programmes);
