@@ -181,7 +181,9 @@ class GeneralSettings extends Settings
     // VOD NFO file generation
     public ?bool $vod_stream_file_sync_generate_nfo = false;
 
-    // Video player proxy options
+    // Video player options
+    public ?int $max_concurrent_floating_players = 4;
+
     public ?bool $force_video_player_proxy = false;
 
     // Resolve m3u-proxy public URL at request time when not explicitly configured

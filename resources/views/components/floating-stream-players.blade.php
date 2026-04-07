@@ -1,5 +1,9 @@
 <!-- Floating Stream Players Container -->
-<div 
+@php
+    $maxPlayers = app(\App\Settings\GeneralSettings::class)->max_concurrent_floating_players ?? 4;
+@endphp
+<div
+    data-max-players="{{ $maxPlayers }}"
     x-data="(() => {
         // Create a unique instance ID to avoid conflicts
         const instanceId = 'floating-streams-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);

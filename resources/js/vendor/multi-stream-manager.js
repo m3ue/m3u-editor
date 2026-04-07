@@ -2,6 +2,7 @@
 function multiStreamManager() {
     return {
         players: [],
+        maxPlayers: 4,
         zIndexCounter: 1000,
         _initialized: false,
         _abortController: null,
@@ -26,6 +27,12 @@ function multiStreamManager() {
             // Only initialize if not already done for this instance
             if (this._initialized) {
                 return;
+            }
+
+            // Read max players from container data attribute
+            const container = document.querySelector('[data-max-players]');
+            if (container) {
+                this.maxPlayers = parseInt(container.dataset.maxPlayers, 10) || 0;
             }
 
             // Abort any previous listeners (safety net in case cleanup wasn't called)
@@ -81,6 +88,11 @@ function multiStreamManager() {
             const existingPlayer = this.players.find(p => p.url === channelData.url);
             if (existingPlayer) {
                 this.bringToFront(existingPlayer.id);
+                return;
+            }
+
+            // Enforce max concurrent player limit (0 = unlimited)
+            if (this.maxPlayers > 0 && this.players.length >= this.maxPlayers) {
                 return;
             }
 

@@ -814,6 +814,14 @@ class Preferences extends SettingsPage
                                                     ->openUrlInNewTab(false)
                                             )
                                             ->helperText(__('The default transcoding profile used for the in-app player for VOD/Series content. Leave empty to disable transcoding (some streams may not be playable in the player).')),
+                                        TextInput::make('max_concurrent_floating_players')
+                                            ->label(__('Max Concurrent Floating Players'))
+                                            ->numeric()
+                                            ->default(4)
+                                            ->minValue(0)
+                                            ->maxValue(20)
+                                            ->step(1)
+                                            ->helperText(__('Maximum number of floating players that can be open at once. Set to 0 for unlimited.')),
                                     ]),
                                 Section::make(__('MediaFlow Proxy'))
                                     ->description(__('If you have MediaFlow Proxy installed, you can use it to proxy your m3u editor playlist streams. When enabled, the app will auto-generate URLs for you to use via MediaFlow Proxy.'))
