@@ -6,6 +6,7 @@ function multiStreamManager() {
         zIndexCounter: 1000,
         _initialized: false,
         _abortController: null,
+        _lastClickPos: { x: 0, y: 0 },
         dragState: {
             isDragging: false,
             playerId: null,
@@ -74,6 +75,9 @@ function multiStreamManager() {
 
             // Reposition players when viewport shrinks
             window.addEventListener('resize', () => this.constrainAllToViewport(), { signal });
+
+            // Track last click position for tooltip positioning
+            document.addEventListener('click', (e) => { this._lastClickPos = { x: e.clientX, y: e.clientY }; }, { signal, capture: true });
 
             // Global mouse events for drag and resize
             document.addEventListener('mousemove', (e) => this.handleMouseMove(e), { signal });
@@ -242,9 +246,6 @@ function multiStreamManager() {
             const existing = document.getElementById('floating-player-limit-msg');
             if (existing) existing.remove();
 
-            const anchor = document.activeElement;
-            const rect = anchor?.getBoundingClientRect();
-
             const msg = document.createElement('div');
             msg.id = 'floating-player-limit-msg';
             msg.textContent = `Player limit reached (${this.maxPlayers}). Close one to open another.`;
@@ -262,16 +263,12 @@ function multiStreamManager() {
             });
             document.body.appendChild(msg);
 
-            // Position above the clicked button, or center screen as fallback
-            if (rect && rect.top > 0) {
-                const msgRect = msg.getBoundingClientRect();
-                msg.style.left = Math.max(8, Math.min(rect.left + rect.width / 2 - msgRect.width / 2, document.documentElement.clientWidth - msgRect.width - 8)) + 'px';
-                msg.style.top = (rect.top - msgRect.height - 8) + 'px';
-            } else {
-                msg.style.left = '50%';
-                msg.style.top = '20px';
-                msg.style.transform = 'translateX(-50%)';
-            }
+            // Position above the last click location
+            const pos = this._lastClickPos;
+            const msgRect = msg.getBoundingClientRect();
+            const vw = document.documentElement.clientWidth;
+            msg.style.left = Math.max(8, Math.min(pos.x - msgRect.width / 2, vw - msgRect.width - 8)) + 'px';
+            msg.style.top = Math.max(8, pos.y - msgRect.height - 12) + 'px';
 
             setTimeout(() => { msg.style.opacity = '0'; }, 2000);
             setTimeout(() => { msg.remove(); }, 2300);
