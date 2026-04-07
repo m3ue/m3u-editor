@@ -70,8 +70,21 @@
                         <x-heroicon-o-arrow-top-right-on-square class="w-3 h-3" />
                     </button>
 
+                    <!-- Picture-in-Picture Button -->
+                    <button
+                        x-show="document.pictureInPictureEnabled"
+                        @click.stop="togglePiP(player.id)"
+                        class="p-1 text-gray-400 hover:text-purple-600 dark:hover:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/20 rounded transition-colors focus:outline-none"
+                        title="Picture-in-Picture"
+                    >
+                        <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="2" y="3" width="20" height="14" rx="2" />
+                            <rect x="12" y="9" width="8" height="6" rx="1" fill="currentColor" />
+                        </svg>
+                    </button>
+
                     <!-- Minimize Button -->
-                    <button 
+                    <button
                         @click.stop="toggleMinimize(player.id)"
                         class="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors focus:outline-none"
                         title="Minimize"
@@ -90,9 +103,21 @@
                 </div>
             </div>
 
+            <!-- PiP Indicator (shown when video is in Picture-in-Picture) -->
+            <div
+                x-show="player.isPiP && !player.isMinimized"
+                class="flex items-center justify-center gap-2 bg-gray-900 px-4 py-3 text-xs text-gray-400"
+            >
+                <svg class="w-4 h-4 text-purple-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="2" y="3" width="20" height="14" rx="2" />
+                    <rect x="12" y="9" width="8" height="6" rx="1" fill="currentColor" />
+                </svg>
+                <span>Playing in Picture-in-Picture</span>
+            </div>
+
             <!-- Video Player Area -->
-            <div 
-                x-show="!player.isMinimized"
+            <div
+                x-show="!player.isMinimized && !player.isPiP"
                 class="relative bg-black group"
                 :style="getVideoStyle(player)"
             >

@@ -102,6 +102,7 @@ function multiStreamManager() {
                 position: this.getRandomPosition(),
                 size: { width: 480, height: 270 }, // 16:9 aspect ratio
                 isMinimized: false,
+                isPiP: false,
                 streamPlayer: null
             };
 
@@ -132,11 +133,14 @@ function multiStreamManager() {
             if (playerIndex !== -1) {
                 const player = this.players[playerIndex];
 
+                // Exit PiP if this player is in PiP mode
+                const videoElement = document.getElementById(player.id + '-video');
+                if (document.pictureInPictureElement === videoElement) {
+                    document.exitPictureInPicture().catch(() => {});
+                }
+
                 // Notify server to stop the proxy stream (best-effort via sendBeacon)
                 this.notifyServerStreamStop(player);
-
-                // Cleanup stream player via video element
-                const videoElement = document.getElementById(player.id + '-video');
                 if (videoElement && videoElement._streamPlayer) {
                     videoElement._streamPlayer.cleanup();
                 }
@@ -229,6 +233,26 @@ function multiStreamManager() {
             const player = this.players.find(p => p.id === playerId);
             if (player) {
                 player.isMinimized = !player.isMinimized;
+            }
+        },
+
+        togglePiP(playerId) {
+            const videoElement = document.getElementById(playerId + '-video');
+            if (!videoElement) return;
+
+            const player = this.players.find(p => p.id === playerId);
+
+            if (document.pictureInPictureElement === videoElement) {
+                document.exitPictureInPicture().catch(() => {});
+            } else if (document.pictureInPictureEnabled) {
+                videoElement.requestPictureInPicture().then(() => {
+                    if (player) player.isPiP = true;
+                }).catch(() => {});
+
+                // Listen for PiP exit (user closes PiP window or we call exitPiP)
+                videoElement.addEventListener('leavepictureinpicture', () => {
+                    if (player) player.isPiP = false;
+                }, { once: true });
             }
         },
 
@@ -343,8 +367,8 @@ function multiStreamManager() {
                 position: 'fixed',
                 left: player.position.x + 'px',
                 top: player.position.y + 'px',
-                width: player.size.width + 'px',
-                height: (player.size.height + 40) + 'px', // Add height for title bar
+                width: player.isPiP ? '280px' : player.size.width + 'px',
+                height: player.isPiP ? 'auto' : (player.size.height + 40) + 'px', // Add height for title bar
                 zIndex: player.zIndex
             };
         },
