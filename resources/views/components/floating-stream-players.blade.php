@@ -117,16 +117,6 @@
                             playerInstance.initPlayer($el.dataset.streamUrl, $el.dataset.streamFormat, $el.id);
                         }
                     "
-                    x-on:beforeunload.window="
-                        if (playerInstance && typeof playerInstance.cleanup === 'function') {
-                            playerInstance.cleanup();
-                        }
-                    "
-                    x-on:pagehide.window="
-                        if (playerInstance && typeof playerInstance.cleanup === 'function') {
-                            playerInstance.cleanup();
-                        }
-                    "
                 >
                     <p class="text-white p-4">Your browser does not support video playback.</p>
                 </video>
