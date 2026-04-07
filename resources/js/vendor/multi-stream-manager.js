@@ -242,24 +242,37 @@ function multiStreamManager() {
             const existing = document.getElementById('floating-player-limit-msg');
             if (existing) existing.remove();
 
+            const anchor = document.activeElement;
+            const rect = anchor?.getBoundingClientRect();
+
             const msg = document.createElement('div');
             msg.id = 'floating-player-limit-msg';
             msg.textContent = `Player limit reached (${this.maxPlayers}). Close one to open another.`;
             Object.assign(msg.style, {
                 position: 'fixed',
-                bottom: '20px',
-                left: '50%',
-                transform: 'translateX(-50%)',
-                background: 'rgba(0, 0, 0, 0.85)',
+                background: 'rgba(0, 0, 0, 0.9)',
                 color: '#fff',
-                padding: '8px 16px',
-                borderRadius: '8px',
-                fontSize: '13px',
+                padding: '6px 12px',
+                borderRadius: '6px',
+                fontSize: '12px',
                 zIndex: '99999',
                 pointerEvents: 'none',
+                whiteSpace: 'nowrap',
                 transition: 'opacity 0.3s',
             });
             document.body.appendChild(msg);
+
+            // Position above the clicked button, or center screen as fallback
+            if (rect && rect.top > 0) {
+                const msgRect = msg.getBoundingClientRect();
+                msg.style.left = Math.max(8, Math.min(rect.left + rect.width / 2 - msgRect.width / 2, document.documentElement.clientWidth - msgRect.width - 8)) + 'px';
+                msg.style.top = (rect.top - msgRect.height - 8) + 'px';
+            } else {
+                msg.style.left = '50%';
+                msg.style.top = '20px';
+                msg.style.transform = 'translateX(-50%)';
+            }
+
             setTimeout(() => { msg.style.opacity = '0'; }, 2000);
             setTimeout(() => { msg.remove(); }, 2300);
         },
