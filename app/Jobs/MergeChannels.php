@@ -174,7 +174,99 @@ class MergeChannels implements ShouldQueue
             }
         }
 
+        // Process regex-based merge matching (second pass)
+        $regexResults = $this->processRegexMerges($playlistIds, $playlistPriority);
+        $processed += $regexResults['processed'];
+        $deactivatedCount += $regexResults['deactivated'];
+
         $this->sendCompletionNotification($processed, $deactivatedCount);
+    }
+
+    /**
+     * Process regex-based merge matching after standard stream ID merging.
+     * Channels with a merge_regex pattern will match against all mergeable channels.
+     *
+     * @return array{processed: int, deactivated: int}
+     */
+    protected function processRegexMerges(array $playlistIds, array $playlistPriority): array
+    {
+        $processed = 0;
+        $deactivatedCount = 0;
+
+        // Find all channels with merge_regex set
+        $regexChannels = Channel::where([
+            ['user_id', $this->user->id],
+            ['can_merge', true],
+        ])->whereIn('playlist_id', $playlistIds)
+            ->whereNotNull('merge_regex')
+            ->where('merge_regex', '!=', '')
+            ->when($this->groupId, fn ($query) => $query->where('group_id', $this->groupId))
+            ->get();
+
+        if ($regexChannels->isEmpty()) {
+            return ['processed' => 0, 'deactivated' => 0];
+        }
+
+        // Get all candidate channels for matching
+        $candidates = Channel::where([
+            ['user_id', $this->user->id],
+            ['can_merge', true],
+        ])->whereIn('playlist_id', $playlistIds)
+            ->get();
+
+        foreach ($regexChannels as $master) {
+            $pattern = $master->merge_regex;
+
+            // Validate the regex pattern
+            if (@preg_match($pattern, '') === false) {
+                continue; // Skip invalid patterns
+            }
+
+            // Find matching channels
+            $matches = $candidates->filter(function ($candidate) use ($master, $pattern) {
+                if ($candidate->id === $master->id) {
+                    return false;
+                }
+
+                $title = $candidate->title_custom ?: $candidate->title;
+                $name = $candidate->name_custom ?: $candidate->name;
+
+                return preg_match($pattern, $title) === 1 || preg_match($pattern, $name) === 1;
+            });
+
+            if ($matches->isEmpty()) {
+                continue;
+            }
+
+            // Sort matches using the same scoring system
+            $matches = $this->sortChannelsByScore($matches, $playlistPriority);
+
+            // Get existing max sort order for this master's failovers
+            $maxSort = ChannelFailover::where('channel_id', $master->id)->max('sort') ?? 0;
+            $sortOrder = $maxSort + 1;
+
+            foreach ($matches as $failover) {
+                ChannelFailover::updateOrCreate(
+                    [
+                        'channel_id' => $master->id,
+                        'channel_failover_id' => $failover->id,
+                    ],
+                    [
+                        'user_id' => $this->user->id,
+                        'sort' => $sortOrder++,
+                    ]
+                );
+
+                if ($this->deactivateFailoverChannels && $failover->enabled) {
+                    $failover->update(['enabled' => false]);
+                    $deactivatedCount++;
+                }
+
+                $processed++;
+            }
+        }
+
+        return ['processed' => $processed, 'deactivated' => $deactivatedCount];
     }
 
     /**

@@ -1771,6 +1771,18 @@ class PlaylistResource extends Resource implements CopilotResource
                         ->helperText(__('When enabled, groups will be included based on regex pattern match instead of prefix.'))
                         ->hidden(fn (Get $get): bool => ! $get('import_prefs.preprocess') || ! $get('status')),
 
+                    Toggle::make('import_prefs.use_positional_index')
+                        ->label(__('Use positional index for channel identity'))
+                        ->columnSpan(2)
+                        ->inline(true)
+                        ->default(false)
+                        ->hintIcon(
+                            'heroicon-m-question-mark-circle',
+                            tooltip: 'Enable this when your M3U playlist contains multiple entries with the same channel name, group, and tvg-id but different stream URLs (e.g. failover/backup streams). Without this, only one entry per unique name/group combination is imported.'
+                        )
+                        ->helperText(__('When enabled, each line in the M3U file is treated as a unique channel, allowing duplicate entries with different URLs to be imported separately for failover merging.'))
+                        ->hidden(fn (Get $get): bool => $get('xtream')),
+
                     Fieldset::make(__('Live channel processing'))
                         ->schema([
                             ModalTableSelect::make('import_prefs.selected_groups')

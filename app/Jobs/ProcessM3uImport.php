@@ -98,6 +98,9 @@ class ProcessM3uImport implements ShouldQueue
 
     public bool $probeEnabled = true;
 
+    // Use positional index for source_id (allows duplicate entries with same metadata)
+    public bool $usePositionalIndex = false;
+
     // VOD merging enabled by default
     public bool $canMergeVodEnabled = true;
 
@@ -152,6 +155,9 @@ class ProcessM3uImport implements ShouldQueue
             $vodCanMergeEnabled = $playlist->import_prefs['vod_channel_default_merge_enabled'] ?? null;
             $this->canMergeVodEnabled = $vodCanMergeEnabled !== null ? $vodCanMergeEnabled : true;
         }
+
+        // Use positional index for source_id (allows duplicate entries with same metadata)
+        $this->usePositionalIndex = $playlist->import_prefs['use_positional_index'] ?? false;
 
         // Get the enabled groups and categories for this playlist
         $this->enabledGroups = $playlist->groups()->where('enabled', true)->get('name')->pluck('name');
@@ -865,11 +871,13 @@ class ProcessM3uImport implements ShouldQueue
 
                 // Extract the channels and groups from the m3u
                 $excludeFileTypes = $playlist->import_prefs['ignored_file_types'] ?? [];
+                $usePositionalIndex = $this->usePositionalIndex;
                 $collection = LazyCollection::make(function () use (
                     $filePath,
                     $channelFields,
                     $excludeFileTypes,
                     $autoSort,
+                    $usePositionalIndex,
                 ) {
                     // Keep track of channel number
                     $channelNo = 0;
@@ -990,7 +998,11 @@ class ProcessM3uImport implements ShouldQueue
                                 }
 
                                 // Set the source ID based on our composite index
-                                $channel['source_id'] = md5($channel['title'].$channel['name'].$chGroup);
+                                $sourceKey = $channel['title'].$channel['name'].$chGroup;
+                                if ($usePositionalIndex) {
+                                    $sourceKey .= ':'.$channelNo;
+                                }
+                                $channel['source_id'] = md5($sourceKey);
 
                                 // Update group name to the singular name and return the channel
                                 $channel['group'] = $chGroup;
@@ -1029,7 +1041,11 @@ class ProcessM3uImport implements ShouldQueue
                             }
 
                             // Set the source ID based on our composite index
-                            $channel['source_id'] = md5($channel['title'].$channel['name'].$channel['group']);
+                            $sourceKey = $channel['title'].$channel['name'].$channel['group'];
+                            if ($usePositionalIndex) {
+                                $sourceKey .= ':'.$channelNo;
+                            }
+                            $channel['source_id'] = md5($sourceKey);
 
                             // Set channel number, if auto sort is enabled
                             if ($autoSort) {

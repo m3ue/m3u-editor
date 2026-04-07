@@ -1290,6 +1290,16 @@ class ChannelResource extends Resource implements CopilotResource
                         ->placeholder(fn (Get $get) => $get('stream_id'))
                         ->helperText(fn (Get $get) => $get('is_custom') ? '' : 'Leave empty to use default value.')
                         ->rules(['min:1', 'max:255']),
+                    TextInput::make('merge_regex')
+                        ->label(__('Merge Regex'))
+                        ->hintIcon(
+                            'heroicon-m-question-mark-circle',
+                            tooltip: 'A regex pattern to match streams from other playlists for failover merging. Matched against the channel title and name. Example: /^CCTV[-]?1$/i'
+                        )
+                        ->columnSpan(1)
+                        ->placeholder('/^CCTV[-]?1$/i')
+                        ->helperText(__('Regex pattern for cross-playlist failover matching.'))
+                        ->rules(['max:500']),
                     TextInput::make('station_id')
                         ->label(__('Station ID'))
                         ->hint(__('tvc-guide-stationid'))
