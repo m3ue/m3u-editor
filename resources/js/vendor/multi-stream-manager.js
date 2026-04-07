@@ -86,7 +86,7 @@ function multiStreamManager() {
 
             const player = {
                 id: playerId,
-                channelId: channelData.id || null,
+                channelId: channelData.id ?? null,
                 channelType: channelData.type || 'channel', // default to 'channel' if type not provided
                 title: channelData.title || channelData.name || 'Unknown Channel',
                 display_title: channelData.display_title || channelData.title || channelData.name || 'Unknown Channel',
@@ -94,10 +94,10 @@ function multiStreamManager() {
                 url: channelData.url || '',
                 format: channelData.format || 'ts',
                 content_type: channelData.content_type || '',
-                stream_id: channelData.stream_id || null,
-                playlist_id: channelData.playlist_id || null,
-                series_id: channelData.series_id || null,
-                season_number: channelData.season_number || null,
+                stream_id: channelData.stream_id ?? null,
+                playlist_id: channelData.playlist_id ?? null,
+                series_id: channelData.series_id ?? null,
+                season_number: channelData.season_number ?? null,
                 zIndex: ++this.zIndexCounter,
                 position: this.getRandomPosition(),
                 size: { width: 480, height: 270 }, // 16:9 aspect ratio
