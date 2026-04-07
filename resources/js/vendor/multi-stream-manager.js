@@ -186,6 +186,7 @@ function multiStreamManager() {
 
         pauseAllStreams() {
             this.players.forEach(player => {
+                if (player.content_type === 'live') return;
                 const videoElement = document.getElementById(player.id + '-video');
                 if (videoElement && !videoElement.paused) {
                     videoElement.pause();
