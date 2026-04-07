@@ -112,8 +112,8 @@ function multiStreamManager() {
         },
 
         getRandomPosition() {
-            const maxX = window.innerWidth - 500; // Account for player width
-            const maxY = window.innerHeight - 300; // Account for player height
+            const maxX = document.documentElement.clientWidth - 500; // Account for player width
+            const maxY = document.documentElement.clientHeight - 300; // Account for player height
             const padding = 50;
 
             return {
@@ -298,8 +298,8 @@ function multiStreamManager() {
         },
 
         constrainAllToViewport() {
-            const vw = window.innerWidth;
-            const vh = window.innerHeight;
+            const vw = document.documentElement.clientWidth;
+            const vh = document.documentElement.clientHeight;
 
             this.players.forEach(player => {
                 // Shrink player if it's wider/taller than viewport
@@ -324,11 +324,11 @@ function multiStreamManager() {
                     const deltaY = event.clientY - this.dragState.startY;
 
                     player.position.x = Math.max(0, Math.min(
-                        window.innerWidth - player.size.width,
+                        document.documentElement.clientWidth - player.size.width,
                         this.dragState.startLeft + deltaX
                     ));
                     player.position.y = Math.max(0, Math.min(
-                        window.innerHeight - 50, // Keep title bar visible
+                        document.documentElement.clientHeight - 50, // Keep title bar visible
                         this.dragState.startTop + deltaY
                     ));
                 }
@@ -340,8 +340,8 @@ function multiStreamManager() {
                     const deltaX = event.clientX - this.resizeState.startX;
                     const deltaY = event.clientY - this.resizeState.startY;
 
-                    const maxWidth = window.innerWidth - player.position.x;
-                    const maxHeight = window.innerHeight - player.position.y - 40; // 40 for title bar
+                    const maxWidth = document.documentElement.clientWidth - player.position.x;
+                    const maxHeight = document.documentElement.clientHeight - player.position.y - 40; // 40 for title bar
 
                     const newWidth = Math.min(Math.max(320, this.resizeState.startWidth + deltaX), maxWidth);
                     const newHeight = Math.min(Math.max(180, this.resizeState.startHeight + deltaY), maxHeight);
