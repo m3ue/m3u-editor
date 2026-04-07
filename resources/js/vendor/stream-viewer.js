@@ -17,6 +17,7 @@ function streamPlayer() {
         },
         availableAudioTracks: [],
         selectedAudioTrack: null,
+        fragmentErrorCount: 0,
 
         // ── Watch Progress ────────────────────────────────────────────────
         progressConfig: null,   // { contentType, streamId, playlistId, seriesId, seasonNumber }
@@ -347,7 +348,6 @@ function streamPlayer() {
                         // For segment loading errors, let's show the specific error
                         if (data.details && data.details.includes('FRAG_LOAD_ERROR')) {
                             // If we've had multiple fragment errors, fall back
-                            if (!this.fragmentErrorCount) this.fragmentErrorCount = 0;
                             this.fragmentErrorCount++;
 
                             if (this.fragmentErrorCount >= 3) {
