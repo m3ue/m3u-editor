@@ -61,7 +61,7 @@
                     <span class="text-sm font-medium text-gray-900 dark:text-gray-100 truncate" x-text="player.display_title || player.title"></span>
                 </div>
                 
-                <div class="flex items-center space-x-1 flex-shrink-0">
+                <div class="flex items-center space-x-1 flex-shrink-0" @mousedown.stop @touchstart.stop>
                     <!-- Open in New Tab Button -->
                     <button
                         @click.stop="openInNewTab(player, '{{ route('player.popout') }}')"
