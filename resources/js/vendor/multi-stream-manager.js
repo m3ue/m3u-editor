@@ -39,7 +39,6 @@ function multiStreamManager() {
                 if (Array.isArray(detail)) {
                     detail = detail[0];
                 }
-                console.log('Received openFloatingStream event:', detail);
                 event.stopPropagation(); // Prevent event bubbling
                 this.openStream(detail);
             }, { signal });

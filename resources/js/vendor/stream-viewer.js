@@ -177,7 +177,6 @@ function streamPlayer() {
                 return
             }
 
-            console.log('initPlayer called with:', { url, format, playerId });
             const video = document.getElementById(playerId);
             const loadingEl = document.getElementById(playerId + '-loading');
             const errorEl = document.getElementById(playerId + '-error');
@@ -215,13 +214,10 @@ function streamPlayer() {
                 const effectiveFormat = format || (url.includes('.m3u8') ? 'm3u8' : '');
 
                 if (effectiveFormat === 'hls' || effectiveFormat === 'm3u8') {
-                    console.log('Initializing HLS player');
                     this.initHlsPlayer(video, url, playerId);
                 } else if (effectiveFormat === 'ts' || effectiveFormat === 'mpegts') {
-                    console.log('Initializing MPEG-TS player');
                     this.initMpegTsPlayer(video, url, playerId);
                 } else {
-                    console.log('Initializing native player');
                     this.initNativePlayer(video, url, playerId);
                 }
             } catch (error) {
@@ -238,7 +234,6 @@ function streamPlayer() {
             const isLive = contentType === 'live';
 
             if (typeof Hls !== 'undefined' && Hls.isSupported()) {
-                console.log('Creating HLS player with configuration...', { contentType, isLive });
                 this.hls = new Hls({
                     enableWorker: true,
                     lowLatencyMode: isLive,
@@ -263,7 +258,6 @@ function streamPlayer() {
                     fragLoadingMaxRetry: 6,
                     fragLoadingRetryDelay: isLive ? 1000 : 1500,
                     xhrSetup: function (xhr, url) {
-                        console.log('HLS XHR setup for:', url);
                         xhr.withCredentials = false;
                     }
                 });
@@ -273,8 +267,6 @@ function streamPlayer() {
                 this.hls.attachMedia(video);
 
                 this.hls.on(Hls.Events.MANIFEST_PARSED, () => {
-                    console.log('HLS manifest parsed successfully');
-
                     // Collect HLS metadata
                     if (this.hls.levels && this.hls.levels.length > 0) {
                         const level = this.hls.levels[this.hls.currentLevel] || this.hls.levels[0];
@@ -310,15 +302,12 @@ function streamPlayer() {
                 });
 
                 this.hls.on(Hls.Events.ERROR, (event, data) => {
-                    console.error('HLS Error:', data);
-
                     // Check for authentication/authorization errors (403, 401)
                     const isAuthError = data.response && (data.response.code === 403 || data.response.code === 401);
                     const isFragLoadError = data.details && data.details.includes('FRAG_LOAD_ERROR');
 
                     // If we get auth errors on fragment loading, immediately fall back to native
                     if (isAuthError && isFragLoadError) {
-                        console.log('HLS Authentication error on fragments, falling back to native player immediately');
                         this.cleanup();
                         this.initNativePlayer(video, url, playerId);
                         return;
@@ -326,24 +315,19 @@ function streamPlayer() {
 
                     // Handle different types of errors
                     if (data.fatal) {
-                        console.log('Fatal HLS error, attempting recovery or fallback');
                         switch (data.type) {
                             case Hls.ErrorTypes.NETWORK_ERROR:
-                                console.log('HLS Network error, trying to recover...');
                                 this.hls.startLoad();
                                 break;
                             case Hls.ErrorTypes.MEDIA_ERROR:
-                                console.log('HLS Media error, trying to recover...');
                                 this.hls.recoverMediaError();
                                 break;
                             default:
-                                console.log('HLS Unrecoverable error, falling back to native player');
                                 this.cleanup();
                                 this.initNativePlayer(video, url, playerId);
                                 break;
                         }
                     } else {
-                        console.warn('Non-fatal HLS error:', data.details);
                         // For segment loading errors, let's show the specific error
                         if (data.details && data.details.includes('FRAG_LOAD_ERROR')) {
                             // If we've had multiple fragment errors, fall back
@@ -351,7 +335,6 @@ function streamPlayer() {
                             this.fragmentErrorCount++;
 
                             if (this.fragmentErrorCount >= 3) {
-                                console.log('Multiple fragment errors, falling back to native player');
                                 this.cleanup();
                                 this.initNativePlayer(video, url, playerId);
                                 return;
@@ -362,20 +345,7 @@ function streamPlayer() {
                     }
                 });
 
-                // Add more event listeners for debugging
-                this.hls.on(Hls.Events.FRAG_LOAD_ERROR, (event, data) => {
-                    console.error('HLS Fragment load error:', data);
-                    console.error('Failed URL:', data.frag?.url);
-                    console.error('Response:', data.response);
-                });
-
-                this.hls.on(Hls.Events.LEVEL_LOADED, (event, data) => {
-                    console.log('HLS Level loaded:', data.level, 'URL:', data.details?.url);
-                });
-
                 this.hls.on(Hls.Events.LEVEL_SWITCHED, (event, data) => {
-                    console.log('HLS Level switched to:', data.level);
-
                     // Update metadata when level changes
                     if (this.hls.levels && this.hls.levels[data.level]) {
                         const level = this.hls.levels[data.level];
@@ -387,7 +357,6 @@ function streamPlayer() {
                 });
 
             } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-                console.log('Using Safari native HLS support');
                 this.streamMetadata.format = 'HLS (Native)';
                 video.src = url;
                 this.setupNativeEvents(video, playerId);
@@ -397,7 +366,6 @@ function streamPlayer() {
         },
 
         initMpegTsPlayer(video, url, playerId) {
-            console.log('MPEG-TS libraries available:', typeof mpegts !== 'undefined', mpegts?.getFeatureList().mseLivePlayback);
 
             const contentType = video.dataset.contentType || '';
             const isLive = contentType === 'live';
@@ -412,7 +380,6 @@ function streamPlayer() {
             this.updateStreamDetails(playerId);
 
             if (typeof mpegts !== 'undefined' && mpegts.getFeatureList().mseLivePlayback) {
-                console.log('Creating MPEG-TS player...', { contentType, isLive });
                 this.mpegts = mpegts.createPlayer({
                     type: 'mpegts',
                     url: url,
@@ -480,7 +447,6 @@ function streamPlayer() {
                 });
 
                 this.mpegts.on(mpegts.Events.ERROR, (type, details, info) => {
-                    console.error('MPEGTS Error:', type, details, info);
                     this.showError(playerId, `MPEGTS Error: ${details || 'Unknown error'}`);
                 });
 
@@ -488,15 +454,12 @@ function streamPlayer() {
                 this.setupNativeEvents(video, playerId);
 
             } else {
-                console.log('MPEG-TS not supported, falling back to native');
                 // Fallback to native
                 this.initNativePlayer(video, url, playerId);
             }
         },
 
         initNativePlayer(video, url, playerId) {
-            console.log('Initializing native player for:', playerId);
-
             // Set stream format
             this.streamMetadata.format = 'Native';
 
@@ -672,8 +635,6 @@ function streamPlayer() {
         },
 
         collectVideoMetadata(video, playerId) {
-            console.log('Collecting video metadata for:', playerId);
-
             // Get basic video properties
             if (video.videoWidth && video.videoHeight) {
                 this.streamMetadata.resolution = `${video.videoWidth}x${video.videoHeight}`;
@@ -727,25 +688,14 @@ function streamPlayer() {
         },
 
         detectAudioTracks(video, playerId) {
-            console.log('Detecting audio tracks for:', playerId);
-
             // Reset audio tracks
             this.availableAudioTracks = [];
             this.selectedAudioTrack = null;
 
             // Try to get real audio tracks first
             if (video.audioTracks && video.audioTracks.length > 0) {
-                console.log('Found real audio tracks:', video.audioTracks.length);
-
                 for (let i = 0; i < video.audioTracks.length; i++) {
                     const track = video.audioTracks[i];
-                    console.log(`Audio track ${i}:`, {
-                        id: track.id,
-                        kind: track.kind,
-                        label: track.label,
-                        language: track.language,
-                        enabled: track.enabled
-                    });
 
                     this.availableAudioTracks.push({
                         index: i,
@@ -768,8 +718,6 @@ function streamPlayer() {
                         }
                     }
                 }
-            } else {
-                console.log('No real audio tracks found');
             }
 
             // Default audio channels if we have tracks but no channels
@@ -783,7 +731,6 @@ function streamPlayer() {
             if (!videoSrc) return;
 
             const extension = videoSrc.split('.').pop().toLowerCase().split('?')[0];
-            console.log('Detecting codec from container extension:', extension);
 
             switch (extension) {
                 case 'mkv':
@@ -826,8 +773,6 @@ function streamPlayer() {
         },
 
         cleanup() {
-            console.log('Cleaning up stream player...');
-
             // Save final progress and stop timer
             this._saveProgress(true);
             this._stopProgressTimer();
@@ -857,7 +802,6 @@ function streamPlayer() {
             this.baseUrl = null;
 
             if (this.hls) {
-                console.log('Destroying HLS player');
                 try {
                     this.hls.destroy();
                 } catch (error) {
@@ -867,7 +811,6 @@ function streamPlayer() {
             }
 
             if (this.mpegts) {
-                console.log('Destroying MPEG-TS player');
                 try {
                     this.mpegts.destroy();
                 } catch (error) {
@@ -878,7 +821,6 @@ function streamPlayer() {
 
             // Also pause and clear any video element that might be playing
             if (this.player && this.player.tagName === 'VIDEO') {
-                console.log('Stopping video playback');
                 try {
                     this.player.pause();
                     this.player.removeAttribute('src');
