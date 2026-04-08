@@ -130,7 +130,7 @@ function multiStreamManager() {
             }
         },
 
-        closeStream(playerId) {
+        closeStream(playerId, { notifyServer = true } = {}) {
             const playerIndex = this.players.findIndex(p => p.id === playerId);
             if (playerIndex !== -1) {
                 const player = this.players[playerIndex];
@@ -141,8 +141,10 @@ function multiStreamManager() {
                     document.exitPictureInPicture().catch(() => {});
                 }
 
-                // Notify server to stop the proxy stream (best-effort via sendBeacon)
-                this.notifyServerStreamStop(player);
+                // Notify server to stop the proxy stream (skip for transfers to pop-out)
+                if (notifyServer) {
+                    this.notifyServerStreamStop(player);
+                }
                 if (videoElement && videoElement._streamPlayer) {
                     videoElement._streamPlayer.cleanup();
                 }
@@ -264,8 +266,9 @@ function multiStreamManager() {
                 return;
             }
 
-            // Close the current floating player
-            this.closeStream(player.id);
+            // Close the floating player locally without telling the proxy to stop —
+            // the pop-out window will pick up the same stream.
+            this.closeStream(player.id, { notifyServer: false });
 
             const params = new URLSearchParams({
                 title: player.title ?? '',
