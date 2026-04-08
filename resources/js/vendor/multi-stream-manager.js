@@ -68,14 +68,27 @@ function multiStreamManager() {
             // Reposition players when viewport shrinks
             window.addEventListener('resize', () => this.constrainAllToViewport(), { signal });
 
-            // Listen for pop-in requests from pop-out windows
+            // Listen for pop-in requests from pop-out windows (two-phase handshake)
             this._popinChannel = new BroadcastChannel('m3u-editor-popin');
+            this._popinTabId = Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+            this._popinPending = null;
             this._popinChannel.onmessage = (event) => {
                 if (event.data?.type === 'popin-ping') {
                     this._popinChannel.postMessage({ type: 'popin-pong' });
                 } else if (event.data?.type === 'popin-request') {
-                    this.openStream(event.data.channel);
-                    this._popinChannel.postMessage({ type: 'popin-ack' });
+                    // Phase 1: store data and offer to handle it
+                    this._popinPending = event.data.channel;
+                    this._popinChannel.postMessage({ type: 'popin-offer', tabId: this._popinTabId });
+                } else if (event.data?.type === 'popin-accept' && event.data.tabId === this._popinTabId) {
+                    // Phase 2: we were chosen — open the stream
+                    if (this._popinPending) {
+                        this.openStream(this._popinPending);
+                        this._popinPending = null;
+                        this._popinChannel.postMessage({ type: 'popin-ack' });
+                    }
+                } else if (event.data?.type === 'popin-accept' && event.data.tabId !== this._popinTabId) {
+                    // A different tab was chosen — discard
+                    this._popinPending = null;
                 }
             };
 

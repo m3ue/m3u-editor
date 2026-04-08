@@ -223,25 +223,30 @@
 
                 popinChannel.postMessage({ type: 'popin-request', channel: data });
 
-                // Wait for acknowledgement then close
+                // Two-phase: wait for an offer, accept the first, then wait for ack
                 popinBtn.disabled = true;
                 popinBtn.textContent = 'Connecting...';
-                let acked = false;
+                let accepted = false;
+                let done = false;
 
-                const ackHandler = (event) => {
-                    if (event.data?.type === 'popin-ack') {
-                        acked = true;
-                        popinChannel.removeEventListener('message', ackHandler);
+                const handler = (event) => {
+                    if (event.data?.type === 'popin-offer' && !accepted) {
+                        // Accept the first tab that offers
+                        accepted = true;
+                        popinChannel.postMessage({ type: 'popin-accept', tabId: event.data.tabId });
+                    } else if (event.data?.type === 'popin-ack') {
+                        done = true;
+                        popinChannel.removeEventListener('message', handler);
                         popinChannel.close();
                         window.close();
                     }
                 };
-                popinChannel.addEventListener('message', ackHandler);
+                popinChannel.addEventListener('message', handler);
 
-                // Timeout fallback — shouldn't happen since heartbeat confirmed tab is alive
+                // Timeout fallback
                 setTimeout(() => {
-                    if (!acked) {
-                        popinChannel.removeEventListener('message', ackHandler);
+                    if (!done) {
+                        popinChannel.removeEventListener('message', handler);
                         setPopinAvailable(false);
                     }
                 }, 1500);
