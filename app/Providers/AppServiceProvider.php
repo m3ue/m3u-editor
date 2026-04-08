@@ -94,6 +94,16 @@ class AppServiceProvider extends ServiceProvider
 
         $this->app->singleton(GitInfoService::class);
 
+        // Detect HTTPS before any provider boot() runs, so package providers
+        // calling asset() during their boot() (e.g. filament-copilot) get the
+        // correct scheme. We can't rely on TrustProxies middleware here — it
+        // runs after all providers have booted.
+        $this->app->booting(function () {
+            if (! $this->app->runningInConsole()) {
+                $this->configureDynamicHttpsDetection();
+            }
+        });
+
         // Register Artisan commands for HLS maintenance
         if ($this->app->runningInConsole()) {
             // Ensure command class file is loaded in environments without composer dump-autoload
@@ -123,12 +133,9 @@ class AppServiceProvider extends ServiceProvider
             // no HTTP request context for URL generation. Force the root URL,
             // including the configured port, so route()/url() use the correct base.
             $this->configureConsoleBaseUrl();
-        } elseif (request()->hasHeader('X-Forwarded-Proto')) {
-            // Detect actual protocol from request headers
-            // This allows the app to work correctly with both HTTP and HTTPS access
-            // when behind a reverse proxy with SSL termination
-            $this->configureDynamicHttpsDetection();
         }
+        // Note: HTTP scheme detection is handled via booting() callback in register()
+        // so that package providers calling asset() during boot() get the correct scheme.
 
         // Setup the middleware
         $this->setupMiddleware();
