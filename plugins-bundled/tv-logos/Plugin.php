@@ -296,47 +296,68 @@ class Plugin implements ChannelProcessorPluginInterface, HookablePluginInterface
      * API), resolution is a pure O(1) array lookup — no HTTP requests per channel.
      * Falls back to sequential CDN HEAD checks only when the index is unavailable.
      *
-     * Tries three slug variants in order:
-     *   1. {slug}-{cc}.png            — e.g. bbc-one-gb.png
-     *   2. {slug}.png                 — e.g. bbc-one.png
-     *   3. {shortened-slug}-{cc}.png  — e.g. bbc-gb.png (last word stripped)
+     * Tries candidate slugs with and without quality tokens (when present), then
+     * probes country root and subfolders (for example `hd/`) in a quality-aware
+     * order so channels like "Das Erste HD" can resolve to HD-specific assets.
      *
      * @param  array<string, true>  $index  Filename → true map; empty array triggers HEAD fallback.
      */
     private function resolveLogoUrl(string $channelName, string $countryCode, string $countryFolder, array $index): ?string
     {
-        $slug = $this->slugify($channelName);
+        $slugs = array_values(array_unique(array_filter([
+            $this->slugify($channelName, false),
+            $this->slugify($channelName, true),
+        ])));
 
-        if ($slug === '') {
+        if ($slugs === []) {
             return null;
         }
 
-        $candidates = [
-            "{$slug}-{$countryCode}.png",
-            "{$slug}.png",
-        ];
+        $qualityFolders = $this->preferredQualityFolders($channelName);
 
-        $parts = explode('-', $slug);
-        if (count($parts) > 1) {
-            $shortened = implode('-', array_slice($parts, 0, -1));
-            if ($shortened !== '') {
-                $candidates[] = "{$shortened}-{$countryCode}.png";
+        $filenames = [];
+
+        foreach ($slugs as $slug) {
+            $filenames[] = "{$slug}-{$countryCode}.png";
+            $filenames[] = "{$slug}.png";
+
+            $parts = explode('-', $slug);
+            if (count($parts) > 1) {
+                $shortened = implode('-', array_slice($parts, 0, -1));
+                if ($shortened !== '') {
+                    $filenames[] = "{$shortened}-{$countryCode}.png";
+                }
             }
         }
 
-        foreach ($candidates as $filename) {
-            $url = self::CDN_BASE."/{$countryFolder}/{$filename}";
+        $filenames = array_values(array_unique($filenames));
 
-            $exists = $index !== []
-                ? isset($index[$filename])
-                : $this->urlExists($url);
+        foreach ($qualityFolders as $folder) {
+            foreach ($filenames as $filename) {
+                $relativePath = $folder === '' ? $filename : "{$folder}/{$filename}";
+                $url = self::CDN_BASE."/{$countryFolder}/{$relativePath}";
 
-            if ($exists) {
-                return $url;
+                $exists = $index !== []
+                    ? isset($index[strtolower($relativePath)])
+                    : $this->urlExists($url);
+
+                if ($exists) {
+                    return $url;
+                }
             }
         }
 
         return null;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function preferredQualityFolders(string $channelName): array
+    {
+        $hasHdHint = (bool) preg_match('/\b(hd|fhd|uhd|4k|8k|1080[pi]|720p)\b/iu', $channelName);
+
+        return $hasHdHint ? ['hd', ''] : ['', 'hd'];
     }
 
     /**
@@ -366,10 +387,7 @@ class Plugin implements ChannelProcessorPluginInterface, HookablePluginInterface
                 ->get(self::INDEX_API_BASE.'/'.$countryFolder);
 
             if ($response->successful()) {
-                $index = collect($response->json() ?? [])
-                    ->filter(fn ($f) => is_array($f) && ($f['type'] ?? '') === 'file' && str_ends_with($f['name'] ?? '', '.png'))
-                    ->mapWithKeys(fn ($f) => [strtolower((string) $f['name']) => true])
-                    ->all();
+                $index = $this->collectPngIndexEntries($countryFolder);
 
                 $cache[$cacheKey] = $index;
                 $cacheChanged = true;
@@ -381,6 +399,54 @@ class Plugin implements ChannelProcessorPluginInterface, HookablePluginInterface
         }
 
         return [];
+    }
+
+    /**
+     * Recursively collect PNG logo files from a country folder and its subfolders.
+     *
+     * @return array<string, true>
+     */
+    private function collectPngIndexEntries(string $path, string $prefix = ''): array
+    {
+        try {
+            $response = Http::timeout(15)
+                ->withHeaders([
+                    'Accept' => 'application/vnd.github.v3+json',
+                    'User-Agent' => 'tv-logos-plugin/1.0',
+                ])
+                ->get(self::INDEX_API_BASE.'/'.$path);
+
+            if (! $response->successful()) {
+                return [];
+            }
+
+            $entries = [];
+
+            foreach ((array) ($response->json() ?? []) as $item) {
+                if (! is_array($item)) {
+                    continue;
+                }
+
+                $type = (string) ($item['type'] ?? '');
+                $name = (string) ($item['name'] ?? '');
+
+                if ($type === 'file' && str_ends_with($name, '.png')) {
+                    $entries[strtolower($prefix.$name)] = true;
+
+                    continue;
+                }
+
+                if ($type === 'dir' && $name !== '') {
+                    $childPath = trim($path.'/'.$name, '/');
+                    $childPrefix = $prefix.$name.'/';
+                    $entries = [...$entries, ...$this->collectPngIndexEntries($childPath, $childPrefix)];
+                }
+            }
+
+            return $entries;
+        } catch (Throwable) {
+            return [];
+        }
     }
 
     private function urlExists(string $url): bool
@@ -398,12 +464,18 @@ class Plugin implements ChannelProcessorPluginInterface, HookablePluginInterface
      * Steps: lowercase → strip quality tags and bracket content → normalise & → strip
      * non-alphanumeric → collapse whitespace → hyphenate.
      */
-    private function slugify(string $name): string
+    private function slugify(string $name, bool $stripQualityTags = true): string
     {
+        // Split camelCase / PascalCase boundaries BEFORE lowercasing
+        // e.g. "ProSieben" → "Pro Sieben", "SportDeutschland" → "Sport Deutschland"
+        $name = preg_replace('/(?<=[a-z])(?=[A-Z])/', ' ', $name) ?? $name;
+
         $name = mb_strtolower($name, 'UTF-8');
 
-        // Strip quality suffixes (hd, fhd, 4k, etc.)
-        $name = preg_replace('/\b(hd|fhd|uhd|4k|8k|sd|1080[pi]|720p|hevc|h\.?264|h\.?265)\b/iu', '', $name) ?? $name;
+        if ($stripQualityTags) {
+            // Strip quality suffixes (hd, fhd, 4k, etc.)
+            $name = preg_replace('/\b(hd|fhd|uhd|4k|8k|sd|1080[pi]|720p|hevc|h\.?264|h\.?265)\b/iu', '', $name) ?? $name;
+        }
 
         // Remove content inside any bracket type
         $name = preg_replace('/[\(\[\{][^\)\]\}]*[\)\]\}]/', '', $name) ?? $name;
@@ -433,7 +505,7 @@ class Plugin implements ChannelProcessorPluginInterface, HookablePluginInterface
      */
     private function loadCache(int $cacheTtlDays): array
     {
-        $empty = ['version' => 2, 'cached_at' => now()->toIso8601String(), 'matches' => []];
+        $empty = ['version' => 3, 'cached_at' => now()->toIso8601String(), 'matches' => []];
 
         try {
             if (! Storage::disk('local')->exists(self::CACHE_FILE)) {
@@ -442,7 +514,7 @@ class Plugin implements ChannelProcessorPluginInterface, HookablePluginInterface
 
             $data = json_decode((string) Storage::disk('local')->get(self::CACHE_FILE), true);
 
-            if (! is_array($data) || ! isset($data['matches']) || ($data['version'] ?? 1) < 2) {
+            if (! is_array($data) || ! isset($data['matches']) || ($data['version'] ?? 1) < 3) {
                 return $empty;
             }
 
