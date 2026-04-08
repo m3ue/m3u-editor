@@ -1733,8 +1733,7 @@ class PlaylistResource extends Resource implements CopilotResource
                         ->hidden(fn (Get $get): bool => ! $get('xtream'))
                         ->inline(true)
                         ->default(false)
-                        ->helperText('When enabled, the playlist will fetch items by category.')
-                        ->columnSpanFull(),
+                        ->helperText('When enabled, the playlist will fetch items by category.'),
 
                     Toggle::make('auto_probe_streams')
                         ->label('Probe streams after sync')
@@ -1744,7 +1743,6 @@ class PlaylistResource extends Resource implements CopilotResource
                         )
                         ->helperText('When enabled, channels will be probed with ffprobe after sync to collect stream metadata (codec, resolution, bitrate) and store it to the database for fast retrieval.')
                         ->inline(true)
-                        ->columnSpanFull()
                         ->default(false),
 
                     Toggle::make('import_prefs.preprocess')
@@ -1754,17 +1752,8 @@ class PlaylistResource extends Resource implements CopilotResource
                         ->default(false)
                         ->helperText(__('When enabled, the playlist will be preprocessed before importing. You can then select which groups you would like to import.')),
 
-                    Toggle::make('import_prefs.import_via_category')
-                        ->label(__('Fetch by category'))
-                        ->live()
-                        ->hidden(fn (Get $get): bool => ! $get('xtream'))
-                        ->inline(true)
-                        ->default(false)
-                        ->helperText(__('When enabled, the playlist will fetch items by category. This may slow down the import process but can help with larger playlists that time out when fetching all items at once.')),
-
                     Toggle::make('import_prefs.use_regex')
                         ->label(__('Use regex for filtering'))
-                        ->columnSpan(2)
                         ->inline(true)
                         ->live()
                         ->default(false)
