@@ -37,9 +37,20 @@ test('it keeps root priority for non-hd channel names', function () {
     $plugin = new Plugin;
 
     $url = resolveLogoUrlForTest($plugin, 'ProSieben', [
-        'prosieben-de.png' => true,
-        'hd/prosieben-de.png' => true,
+        'pro-sieben-de.png' => true,
+        'hd/pro-sieben-de.png' => true,
     ]);
 
-    expect($url)->toBe('https://cdn.jsdelivr.net/gh/tv-logo/tv-logos@main/countries/germany/prosieben-de.png');
+    expect($url)->toBe('https://cdn.jsdelivr.net/gh/tv-logo/tv-logos@main/countries/germany/pro-sieben-de.png');
+});
+
+test('it splits camelCase names and matches hd subfolder for HD channels', function () {
+    $plugin = new Plugin;
+
+    $url = resolveLogoUrlForTest($plugin, 'ProSieben FUN HD', [
+        'hd/pro-sieben-fun-hd-de.png' => true,
+        'pro-sieben-fun-de.png' => true,
+    ]);
+
+    expect($url)->toBe('https://cdn.jsdelivr.net/gh/tv-logo/tv-logos@main/countries/germany/hd/pro-sieben-fun-hd-de.png');
 });

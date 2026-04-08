@@ -466,6 +466,10 @@ class Plugin implements ChannelProcessorPluginInterface, HookablePluginInterface
      */
     private function slugify(string $name, bool $stripQualityTags = true): string
     {
+        // Split camelCase / PascalCase boundaries BEFORE lowercasing
+        // e.g. "ProSieben" → "Pro Sieben", "SportDeutschland" → "Sport Deutschland"
+        $name = preg_replace('/(?<=[a-z])(?=[A-Z])/', ' ', $name) ?? $name;
+
         $name = mb_strtolower($name, 'UTF-8');
 
         if ($stripQualityTags) {
