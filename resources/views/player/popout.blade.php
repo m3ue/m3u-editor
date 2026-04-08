@@ -147,8 +147,10 @@
             };
 
             // Heartbeat: detect whether a main app tab is open
+            // Read the source tab ID from the URL (set by openInNewTab)
             const popinBtn = document.getElementById('popin-btn');
             const popinChannel = new BroadcastChannel('m3u-editor-popin');
+            const sourceTabId = new URLSearchParams(window.location.search).get('source_tab') || '';
             let mainTabAlive = false;
 
             function setPopinAvailable(available) {
@@ -166,8 +168,7 @@
             }
 
             function pingMainTab() {
-                popinChannel.postMessage({ type: 'popin-ping' });
-                // If no pong within 500ms, mark unavailable
+                popinChannel.postMessage({ type: 'popin-ping', targetTab: sourceTabId });
                 let gotPong = false;
                 const handler = (event) => {
                     if (event.data?.type === 'popin-pong') {
@@ -183,21 +184,25 @@
             }
 
             // Initial ping and periodic re-check
-            setPopinAvailable(false);
-            pingMainTab();
-            const heartbeatInterval = setInterval(pingMainTab, 3000);
+            if (sourceTabId) {
+                setPopinAvailable(false);
+                pingMainTab();
+            } else {
+                // No source tab (opened directly, not from a floating player) — hide button
+                popinBtn.style.display = 'none';
+            }
+            const heartbeatInterval = sourceTabId ? setInterval(pingMainTab, 3000) : null;
 
             // Clean up on page unload
             window.addEventListener('pagehide', () => {
-                clearInterval(heartbeatInterval);
+                if (heartbeatInterval) clearInterval(heartbeatInterval);
                 popinChannel.close();
             }, { once: true });
 
-            // Pop-in: send stream back to main window's floating player
+            // Pop-in: send stream back to the source tab's floating player
             window.popInToMainWindow = function() {
                 if (!mainTabAlive) return;
 
-                // Build channel data matching the openStream() shape
                 const data = {
                     id: videoElement.dataset.streamId || null,
                     type: (videoElement.dataset.contentType === 'episode') ? 'episode' : 'channel',
@@ -213,39 +218,29 @@
                     season_number: videoElement.dataset.seasonNumber || null,
                 };
 
-                // Include current playback position for VOD/episodes
                 if (videoElement.currentTime > 0 && isFinite(videoElement.duration)) {
                     data.resume_time = videoElement.currentTime;
                 }
 
-                // Stop heartbeat — we're about to close
                 clearInterval(heartbeatInterval);
 
-                popinChannel.postMessage({ type: 'popin-request', channel: data });
+                popinChannel.postMessage({ type: 'popin-request', targetTab: sourceTabId, channel: data });
 
-                // Two-phase: wait for an offer, accept the first, then wait for ack
                 popinBtn.disabled = true;
                 popinBtn.textContent = 'Connecting...';
-                let accepted = false;
                 let done = false;
 
                 const handler = (event) => {
-                    if (event.data?.type === 'popin-offer' && !accepted) {
-                        // Accept the first tab that offers
-                        accepted = true;
-                        popinChannel.postMessage({ type: 'popin-accept', tabId: event.data.tabId });
-                    } else if (event.data?.type === 'popin-ack') {
+                    if (event.data?.type === 'popin-ack') {
                         done = true;
                         popinChannel.removeEventListener('message', handler);
                         popinChannel.close();
-                        // Skip proxy stop — the floating player is picking up the stream
                         window._isPopinTransfer = true;
                         window.close();
                     }
                 };
                 popinChannel.addEventListener('message', handler);
 
-                // Timeout fallback
                 setTimeout(() => {
                     if (!done) {
                         popinChannel.removeEventListener('message', handler);

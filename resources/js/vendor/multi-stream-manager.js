@@ -73,22 +73,14 @@ function multiStreamManager() {
             this._popinTabId = Date.now() + '-' + Math.random().toString(36).substr(2, 9);
             this._popinPending = null;
             this._popinChannel.onmessage = (event) => {
-                if (event.data?.type === 'popin-ping') {
+                const targetTab = event.data?.targetTab;
+                const isForMe = !targetTab || targetTab === this._popinTabId;
+
+                if (event.data?.type === 'popin-ping' && isForMe) {
                     this._popinChannel.postMessage({ type: 'popin-pong' });
-                } else if (event.data?.type === 'popin-request') {
-                    // Phase 1: store data and offer to handle it
-                    this._popinPending = event.data.channel;
-                    this._popinChannel.postMessage({ type: 'popin-offer', tabId: this._popinTabId });
-                } else if (event.data?.type === 'popin-accept' && event.data.tabId === this._popinTabId) {
-                    // Phase 2: we were chosen — open the stream
-                    if (this._popinPending) {
-                        this.openStream(this._popinPending);
-                        this._popinPending = null;
-                        this._popinChannel.postMessage({ type: 'popin-ack' });
-                    }
-                } else if (event.data?.type === 'popin-accept' && event.data.tabId !== this._popinTabId) {
-                    // A different tab was chosen — discard
-                    this._popinPending = null;
+                } else if (event.data?.type === 'popin-request' && isForMe) {
+                    this.openStream(event.data.channel);
+                    this._popinChannel.postMessage({ type: 'popin-ack' });
                 }
             };
 
@@ -310,6 +302,7 @@ function multiStreamManager() {
                 playlist_id: player.playlist_id ?? '',
                 series_id: player.series_id ?? '',
                 season_number: player.season_number ?? '',
+                source_tab: this._popinTabId ?? '',
             });
 
             window.open(popoutRoute + '?' + params.toString(), '_blank', 'noopener');
