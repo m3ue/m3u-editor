@@ -22,6 +22,15 @@
                     <p class="text-xs text-white/70">{{ strtoupper($streamFormat) }} Stream</p>
                 </div>
             </div>
+            <button type="button" id="popin-btn" onclick="popInToMainWindow()"
+                class="flex items-center gap-1.5 rounded bg-white/10 px-3 py-1.5 text-xs font-medium text-white/80 transition-colors hover:bg-white/20 hover:text-white"
+                title="Send back to floating player in main window">
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="2" y="3" width="20" height="14" rx="2" />
+                    <path d="M12 10l-4 4m0 0h3m-3 0v-3" />
+                </svg>
+                Pop In
+            </button>
         </header>
 
         <section class="relative flex-1 overflow-hidden group">
@@ -138,6 +147,83 @@
                 } else if (document.pictureInPictureEnabled) {
                     videoElement.requestPictureInPicture().catch(() => {});
                 }
+            };
+
+            // Pop-in: send stream back to main window's floating player
+            window.popInToMainWindow = function() {
+                const btn = document.getElementById('popin-btn');
+                const channel = new BroadcastChannel('m3u-editor-popin');
+
+                // Build channel data matching the openStream() shape
+                const data = {
+                    id: videoElement.dataset.streamId || null,
+                    type: (videoElement.dataset.contentType === 'episode') ? 'episode' : 'channel',
+                    title: @json($channelTitle),
+                    display_title: @json($channelTitle),
+                    logo: @json($channelLogo ?? ''),
+                    url: videoElement.dataset.url || '',
+                    format: videoElement.dataset.format || 'ts',
+                    content_type: videoElement.dataset.contentType || '',
+                    stream_id: videoElement.dataset.streamId || null,
+                    playlist_id: videoElement.dataset.playlistId || null,
+                    series_id: videoElement.dataset.seriesId || null,
+                    season_number: videoElement.dataset.seasonNumber || null,
+                };
+
+                // Include current playback position for VOD/episodes
+                if (videoElement.currentTime > 0 && isFinite(videoElement.duration)) {
+                    data.resume_time = videoElement.currentTime;
+                }
+
+                channel.postMessage({ type: 'popin-request', channel: data });
+
+                // Wait for acknowledgement from main tab
+                btn.disabled = true;
+                btn.textContent = 'Connecting...';
+                let acked = false;
+
+                channel.onmessage = (event) => {
+                    if (event.data?.type === 'popin-ack') {
+                        acked = true;
+                        channel.close();
+                        window.close();
+                    }
+                };
+
+                // Timeout: no main tab listening
+                setTimeout(() => {
+                    if (!acked) {
+                        channel.close();
+                        btn.disabled = false;
+                        btn.innerHTML = `
+                            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <rect x="2" y="3" width="20" height="14" rx="2" />
+                                <path d="M12 10l-4 4m0 0h3m-3 0v-3" />
+                            </svg>
+                            Pop In
+                        `;
+
+                        // Show a brief error tooltip
+                        const tip = document.createElement('div');
+                        tip.textContent = 'No open app tab found';
+                        Object.assign(tip.style, {
+                            position: 'fixed',
+                            top: (btn.getBoundingClientRect().bottom + 6) + 'px',
+                            right: '12px',
+                            background: 'rgba(220, 38, 38, 0.9)',
+                            color: '#fff',
+                            padding: '4px 10px',
+                            borderRadius: '4px',
+                            fontSize: '12px',
+                            zIndex: '99999',
+                            pointerEvents: 'none',
+                            transition: 'opacity 0.3s',
+                        });
+                        document.body.appendChild(tip);
+                        setTimeout(() => { tip.style.opacity = '0'; }, 2000);
+                        setTimeout(() => { tip.remove(); }, 2300);
+                    }
+                }, 1500);
             };
 
             window.addEventListener('beforeunload', () => {

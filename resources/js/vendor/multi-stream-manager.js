@@ -68,6 +68,15 @@ function multiStreamManager() {
             // Reposition players when viewport shrinks
             window.addEventListener('resize', () => this.constrainAllToViewport(), { signal });
 
+            // Listen for pop-in requests from pop-out windows
+            this._popinChannel = new BroadcastChannel('m3u-editor-popin');
+            this._popinChannel.onmessage = (event) => {
+                if (event.data?.type === 'popin-request') {
+                    this.openStream(event.data.channel);
+                    this._popinChannel.postMessage({ type: 'popin-ack' });
+                }
+            };
+
             // Global mouse events for drag and resize
             document.addEventListener('mousemove', (e) => this.handleMouseMove(e), { signal });
             document.addEventListener('mouseup', () => this.handleMouseUp(), { signal });
@@ -100,6 +109,7 @@ function multiStreamManager() {
                 playlist_id: channelData.playlist_id ?? null,
                 series_id: channelData.series_id ?? null,
                 season_number: channelData.season_number ?? null,
+                resume_time: channelData.resume_time ?? null,
                 zIndex: ++this.zIndexCounter,
                 position: this.getRandomPosition(),
                 size: { width: 480, height: 270 }, // 16:9 aspect ratio
@@ -183,6 +193,10 @@ function multiStreamManager() {
                 }
             });
             this.players = [];
+
+            // Close the pop-in broadcast channel
+            this._popinChannel?.close();
+            this._popinChannel = null;
 
             // Remove all event listeners registered by this instance
             this._abortController?.abort();

@@ -140,6 +140,9 @@
                         if (window.streamPlayer && $el.dataset.streamUrl && $el.dataset.streamUrl !== '') {
                             playerInstance = window.streamPlayer();
                             playerInstance.initPlayer($el.dataset.streamUrl, $el.dataset.streamFormat, $el.id);
+                            if (player.resume_time > 0) {
+                                $el.addEventListener('loadedmetadata', () => { $el.currentTime = player.resume_time; }, { once: true });
+                            }
                         }
                     "
                 >
