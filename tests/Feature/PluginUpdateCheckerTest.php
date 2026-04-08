@@ -55,13 +55,13 @@ function createPluginForUpdateTests(string $name, array $overrides = []): Plugin
  * @param  array<int, array<string, mixed>>  $assets
  * @return array<string, mixed>
  */
-function fakeGitHubRelease(string $tagName = 'v2.0.0', array $assets = [], string $body = ''): array
+function fakeGitHubRelease(string $tagName = 'v2.0.0', array $assets = [], string $body = '', ?string $htmlUrl = null): array
 {
     return [
         'tag_name' => $tagName,
         'name' => "Release {$tagName}",
         'published_at' => '2026-04-01T12:00:00Z',
-        'html_url' => "https://github.com/test-owner/test-plugin/releases/tag/{$tagName}",
+        'html_url' => $htmlUrl ?? "https://github.com/test-owner/test-plugin/releases/tag/{$tagName}",
         'body' => $body,
         'assets' => $assets,
     ];
@@ -270,7 +270,7 @@ it('stores release metadata', function () {
         'api.github.com/repos/test-owner/metadata-test/releases/latest' => Http::response(
             fakeGitHubRelease('v2.0.0', [
                 ['name' => 'plugin.zip', 'browser_download_url' => 'https://example.com/plugin.zip'],
-            ]),
+            ], htmlUrl: 'https://github.com/test-owner/metadata-test/releases/tag/v2.0.0'),
             200,
         ),
     ]);
@@ -281,7 +281,7 @@ it('stores release metadata', function () {
     $plugin->refresh();
     expect($plugin->latest_release_metadata)->toBeArray();
     expect($plugin->latest_release_metadata['tag'])->toBe('v2.0.0');
-    expect($plugin->latest_release_metadata['html_url'])->toContain('test-owner/test-plugin');
+    expect($plugin->latest_release_metadata['html_url'])->toContain('test-owner/metadata-test');
 });
 
 it('checkAll skips plugins without repository or with update checks disabled', function () {

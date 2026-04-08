@@ -9,8 +9,7 @@ use Illuminate\Console\Command;
 class CheckPluginUpdates extends Command
 {
     protected $signature = 'plugins:check-updates
-        {--plugin= : Check a specific plugin ID only}
-        {--force : Ignore the update check cooldown}';
+        {--plugin= : Check a specific plugin ID only}';
 
     protected $description = 'Check GitHub repositories for new plugin releases.';
 

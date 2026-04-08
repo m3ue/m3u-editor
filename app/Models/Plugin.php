@@ -124,9 +124,4 @@ class Plugin extends Model
             '<',
         );
     }
-
-    public function isFromGithub(): bool
-    {
-        return $this->source_type === 'github_release' || filled($this->repository);
-    }
 }

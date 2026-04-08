@@ -95,7 +95,7 @@ return [
 
     'update_check' => [
         'enabled' => (bool) env('PLUGIN_UPDATE_CHECK_ENABLED', true),
-        'frequency_minutes' => (int) env('PLUGIN_UPDATE_CHECK_FREQUENCY', 240),
+        'frequency_hours' => (int) env('PLUGIN_UPDATE_CHECK_FREQUENCY', 4),
         'github_token' => env('PLUGIN_GITHUB_TOKEN'),
     ],
 

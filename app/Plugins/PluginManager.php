@@ -613,27 +613,6 @@ class PluginManager
     }
 
     /**
-     * Stage a plugin update from its stored latest release metadata.
-     */
-    public function stageUpdateFromLatestRelease(Plugin $plugin, ?int $userId = null): PluginInstallReview
-    {
-        if (! $plugin->hasUpdateAvailable()) {
-            throw new RuntimeException("Plugin [{$plugin->plugin_id}] does not have an update available.");
-        }
-
-        if (! $plugin->latest_release_url) {
-            throw new RuntimeException("Plugin [{$plugin->plugin_id}] has no release download URL stored.");
-        }
-
-        $sha256 = $plugin->latest_release_sha256;
-        if (! $sha256) {
-            throw new RuntimeException("Plugin [{$plugin->plugin_id}] has no verified SHA-256 checksum for the latest release. Stage the update manually and provide the checksum.");
-        }
-
-        return $this->stageGithubReleaseReview($plugin->latest_release_url, $sha256, $userId);
-    }
-
-    /**
      * Derive a repository shorthand from a GitHub release install review.
      */
     private function repositoryFromReview(PluginInstallReview $review): ?string

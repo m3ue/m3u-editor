@@ -84,7 +84,7 @@ Schedule::command('plugins:recover-stale-runs --minutes=15')
 
 // Check for plugin updates from GitHub repositories
 if (config('plugins.update_check.enabled', true)) {
-    $updateFrequencyHours = max(1, intdiv((int) config('plugins.update_check.frequency_minutes', 240), 60));
+    $updateFrequencyHours = max(1, (int) config('plugins.update_check.frequency_hours', 4));
     Schedule::command('plugins:check-updates')
         ->cron("0 */{$updateFrequencyHours} * * *")
         ->withoutOverlapping();

@@ -83,23 +83,24 @@ class PluginsDashboard extends Page
                 ->requiresConfirmation()
                 ->modalHeading(__('Check Plugin Updates'))
                 ->modalDescription(__('This will query GitHub for the latest release of every plugin that has a repository configured. Continue?'))
-                ->action(function (): void {
-                    $checker = app(PluginUpdateChecker::class);
+                ->action(function (PluginUpdateChecker $checker): void {
                     $results = $checker->checkAll();
 
                     $updatesFound = collect($results)->filter(fn (array $r): bool => $r['update_available'] ?? false)->count();
-                    $errors = collect($results)->filter(fn (array $r): bool => isset($r['error']))->count();
+                    $errors = collect($results)->filter(fn (array $r): bool => filled($r['error'] ?? null))->count();
 
                     $message = trans_choice(':count update available.|:count updates available.', $updatesFound, ['count' => $updatesFound]);
                     if ($errors > 0) {
-                        $message .= ' '.trans_choice(':count plugin had errors.', $errors, ['count' => $errors]);
+                        $message .= ' '.trans_choice(':count plugin had an error.|:count plugins had errors.', $errors, ['count' => $errors]);
                     }
 
-                    Notification::make()
+                    $notification = Notification::make()
                         ->title(__('Plugin Update Check Complete'))
-                        ->body($message)
-                        ->success()
-                        ->send();
+                        ->body($message);
+
+                    $errors > 0 ? $notification->warning() : $notification->success();
+
+                    $notification->send();
                 }),
             ...PluginInstallActions::staging(),
         ];
@@ -118,12 +119,7 @@ class PluginsDashboard extends Page
             'canManagePlugins' => $this->canManagePlugins(),
             'extensionsUrl' => PluginResource::getUrl(),
             'pluginInstallsUrl' => $this->canManagePlugins() ? PluginInstallReviewResource::getUrl() : null,
-            'updatesAvailableCount' => Plugin::query()
-                ->where('installation_status', 'installed')
-                ->whereNotNull('latest_version')
-                ->get()
-                ->filter(fn (Plugin $p): bool => $p->hasUpdateAvailable())
-                ->count(),
+            'updatesAvailableCount' => $this->updatesAvailableCount(),
         ];
     }
 
@@ -175,12 +171,7 @@ class PluginsDashboard extends Page
             ],
             [
                 'label' => __('Updates Available'),
-                'value' => Plugin::query()
-                    ->where('installation_status', 'installed')
-                    ->whereNotNull('latest_version')
-                    ->get()
-                    ->filter(fn (Plugin $p): bool => $p->hasUpdateAvailable())
-                    ->count(),
+                'value' => $this->updatesAvailableCount(),
                 'description' => __('Installed plugins with a newer version available on GitHub.'),
                 'icon' => 'heroicon-s-arrow-up-circle',
                 'color' => 'info',
@@ -237,6 +228,19 @@ class PluginsDashboard extends Page
             ->latest()
             ->limit(10)
             ->get(['id', 'extension_plugin_id', 'trigger', 'action', 'hook', 'status', 'created_at', 'finished_at']);
+    }
+
+    /**
+     * Count installed plugins that have a newer version available on GitHub.
+     */
+    private function updatesAvailableCount(): int
+    {
+        return Plugin::query()
+            ->where('installation_status', 'installed')
+            ->whereNotNull('latest_version')
+            ->get()
+            ->filter(fn (Plugin $p): bool => $p->hasUpdateAvailable())
+            ->count();
     }
 
     /**
