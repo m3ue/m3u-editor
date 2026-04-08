@@ -205,9 +205,9 @@ function streamPlayer() {
             this._initProgress();
 
             // Update status
-            !!statusEl && (statusEl.textContent = 'Connecting...');
-            !!loadingEl && (loadingEl.style.display = 'flex');
-            !!errorEl && (errorEl.style.display = 'none');
+            if (statusEl) statusEl.textContent = 'Connecting...';
+            if (loadingEl) loadingEl.style.display = 'flex';
+            if (errorEl) errorEl.style.display = 'none';
             try {
                 // Use the explicit format parameter as authoritative. Only fall back to
                 // URL sniffing when no format is provided — the URL extension is an
@@ -520,20 +520,12 @@ function streamPlayer() {
                     if (!video.error || video.error.code === video.error.MEDIA_ERR_ABORTED) {
                         return;
                     }
-                    let errorMessage = 'Playback failed';
-                    if (video.error) {
-                        switch (video.error.code) {
-                            case video.error.MEDIA_ERR_NETWORK:
-                                errorMessage = 'Network error';
-                                break;
-                            case video.error.MEDIA_ERR_DECODE:
-                                errorMessage = 'Decode error';
-                                break;
-                            case video.error.MEDIA_ERR_SRC_NOT_SUPPORTED:
-                                errorMessage = 'Format not supported';
-                                break;
-                        }
-                    }
+                    const errorMessages = {
+                        [video.error.MEDIA_ERR_NETWORK]: 'Network error',
+                        [video.error.MEDIA_ERR_DECODE]: 'Decode error',
+                        [video.error.MEDIA_ERR_SRC_NOT_SUPPORTED]: 'Format not supported',
+                    };
+                    const errorMessage = errorMessages[video.error.code] ?? 'Playback failed';
                     this.showError(playerId, errorMessage);
                 },
             };
@@ -544,7 +536,7 @@ function streamPlayer() {
         },
 
         _removeVideoHandlers(video) {
-            if (!video || !this._videoHandlers) return;
+            if (!video) return;
             for (const [event, handler] of Object.entries(this._videoHandlers)) {
                 video.removeEventListener(event, handler);
             }
