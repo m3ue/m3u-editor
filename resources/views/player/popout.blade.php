@@ -149,10 +149,56 @@
                 }
             };
 
+            // Heartbeat: detect whether a main app tab is open
+            const popinBtn = document.getElementById('popin-btn');
+            const popinChannel = new BroadcastChannel('m3u-editor-popin');
+            let mainTabAlive = false;
+
+            function setPopinAvailable(available) {
+                mainTabAlive = available;
+                popinBtn.disabled = !available;
+                if (available) {
+                    popinBtn.classList.remove('opacity-40', 'cursor-not-allowed');
+                    popinBtn.classList.add('hover:bg-white/20', 'hover:text-white');
+                    popinBtn.title = 'Send back to floating player in main window';
+                } else {
+                    popinBtn.classList.add('opacity-40', 'cursor-not-allowed');
+                    popinBtn.classList.remove('hover:bg-white/20', 'hover:text-white');
+                    popinBtn.title = 'No open app tab found';
+                }
+            }
+
+            function pingMainTab() {
+                popinChannel.postMessage({ type: 'popin-ping' });
+                // If no pong within 500ms, mark unavailable
+                let gotPong = false;
+                const handler = (event) => {
+                    if (event.data?.type === 'popin-pong') {
+                        gotPong = true;
+                        setPopinAvailable(true);
+                    }
+                };
+                popinChannel.addEventListener('message', handler);
+                setTimeout(() => {
+                    popinChannel.removeEventListener('message', handler);
+                    if (!gotPong) setPopinAvailable(false);
+                }, 500);
+            }
+
+            // Initial ping and periodic re-check
+            setPopinAvailable(false);
+            pingMainTab();
+            const heartbeatInterval = setInterval(pingMainTab, 3000);
+
+            // Clean up on page unload
+            window.addEventListener('pagehide', () => {
+                clearInterval(heartbeatInterval);
+                popinChannel.close();
+            }, { once: true });
+
             // Pop-in: send stream back to main window's floating player
             window.popInToMainWindow = function() {
-                const btn = document.getElementById('popin-btn');
-                const channel = new BroadcastChannel('m3u-editor-popin');
+                if (!mainTabAlive) return;
 
                 // Build channel data matching the openStream() shape
                 const data = {
@@ -175,53 +221,31 @@
                     data.resume_time = videoElement.currentTime;
                 }
 
-                channel.postMessage({ type: 'popin-request', channel: data });
+                // Stop heartbeat — we're about to close
+                clearInterval(heartbeatInterval);
 
-                // Wait for acknowledgement from main tab
-                btn.disabled = true;
-                btn.textContent = 'Connecting...';
+                popinChannel.postMessage({ type: 'popin-request', channel: data });
+
+                // Wait for acknowledgement then close
+                popinBtn.disabled = true;
+                popinBtn.textContent = 'Connecting...';
                 let acked = false;
 
-                channel.onmessage = (event) => {
+                const ackHandler = (event) => {
                     if (event.data?.type === 'popin-ack') {
                         acked = true;
-                        channel.close();
+                        popinChannel.removeEventListener('message', ackHandler);
+                        popinChannel.close();
                         window.close();
                     }
                 };
+                popinChannel.addEventListener('message', ackHandler);
 
-                // Timeout: no main tab listening
+                // Timeout fallback — shouldn't happen since heartbeat confirmed tab is alive
                 setTimeout(() => {
                     if (!acked) {
-                        channel.close();
-                        btn.disabled = false;
-                        btn.innerHTML = `
-                            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <rect x="2" y="3" width="20" height="14" rx="2" />
-                                <path d="M12 10l-4 4m0 0h3m-3 0v-3" />
-                            </svg>
-                            Pop In
-                        `;
-
-                        // Show a brief error tooltip
-                        const tip = document.createElement('div');
-                        tip.textContent = 'No open app tab found';
-                        Object.assign(tip.style, {
-                            position: 'fixed',
-                            top: (btn.getBoundingClientRect().bottom + 6) + 'px',
-                            right: '12px',
-                            background: 'rgba(220, 38, 38, 0.9)',
-                            color: '#fff',
-                            padding: '4px 10px',
-                            borderRadius: '4px',
-                            fontSize: '12px',
-                            zIndex: '99999',
-                            pointerEvents: 'none',
-                            transition: 'opacity 0.3s',
-                        });
-                        document.body.appendChild(tip);
-                        setTimeout(() => { tip.style.opacity = '0'; }, 2000);
-                        setTimeout(() => { tip.remove(); }, 2300);
+                        popinChannel.removeEventListener('message', ackHandler);
+                        setPopinAvailable(false);
                     }
                 }, 1500);
             };

@@ -71,7 +71,9 @@ function multiStreamManager() {
             // Listen for pop-in requests from pop-out windows
             this._popinChannel = new BroadcastChannel('m3u-editor-popin');
             this._popinChannel.onmessage = (event) => {
-                if (event.data?.type === 'popin-request') {
+                if (event.data?.type === 'popin-ping') {
+                    this._popinChannel.postMessage({ type: 'popin-pong' });
+                } else if (event.data?.type === 'popin-request') {
                     this.openStream(event.data.channel);
                     this._popinChannel.postMessage({ type: 'popin-ack' });
                 }
