@@ -123,8 +123,8 @@ class AppServiceProvider extends ServiceProvider
             // no HTTP request context for URL generation. Force the root URL,
             // including the configured port, so route()/url() use the correct base.
             $this->configureConsoleBaseUrl();
-        } elseif (request()->hasHeader('X-Forwarded-Proto')) {
-            // Detect actual protocol from request headers
+        } else {
+            // Detect actual protocol from reverse proxy headers or APP_URL config
             // This allows the app to work correctly with both HTTP and HTTPS access
             // when behind a reverse proxy with SSL termination
             $this->configureDynamicHttpsDetection();
