@@ -68,10 +68,9 @@ function multiStreamManager() {
             // Reposition players when viewport shrinks
             window.addEventListener('resize', () => this.constrainAllToViewport(), { signal });
 
-            // Listen for pop-in requests from pop-out windows (two-phase handshake)
+            // Listen for pop-in requests from pop-out windows
             this._popinChannel = new BroadcastChannel('m3u-editor-popin');
             this._popinTabId = Date.now() + '-' + Math.random().toString(36).substr(2, 9);
-            this._popinPending = null;
             this._popinChannel.onmessage = (event) => {
                 const targetTab = event.data?.targetTab;
                 const isForMe = !targetTab || targetTab === this._popinTabId;

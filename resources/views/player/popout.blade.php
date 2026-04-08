@@ -146,8 +146,7 @@
                 }
             };
 
-            // Heartbeat: detect whether a main app tab is open
-            // Read the source tab ID from the URL (set by openInNewTab)
+            // Heartbeat: detect whether the source app tab is still open
             const popinBtn = document.getElementById('popin-btn');
             const popinChannel = new BroadcastChannel('m3u-editor-popin');
             const sourceTabId = new URLSearchParams(window.location.search).get('source_tab') || '';
