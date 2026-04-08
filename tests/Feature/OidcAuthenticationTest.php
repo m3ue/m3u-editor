@@ -130,15 +130,15 @@ it('denies login when no match and auto-create is disabled', function () {
 
 // --- Profile sync ---
 
-it('syncs profile data from IdP on login', function () {
+it('syncs email and avatar from IdP but preserves name', function () {
     $user = User::factory()->create([
         'oidc_id' => 'oidc-123',
-        'name' => 'Old Name',
+        'name' => 'admin',
         'email' => 'old@example.com',
     ]);
 
     Socialite::shouldReceive('driver->user')->andReturn(mockOidcUser([
-        'name' => 'New Name',
+        'name' => 'New Name From IdP',
         'email' => 'new@example.com',
         'avatar' => 'https://example.com/new-avatar.jpg',
     ]));
@@ -146,7 +146,7 @@ it('syncs profile data from IdP on login', function () {
     $this->get('/auth/oidc/callback');
 
     $user->refresh();
-    expect($user->name)->toBe('New Name')
+    expect($user->name)->toBe('admin')
         ->and($user->email)->toBe('new@example.com')
         ->and($user->avatar_url)->toBe('https://example.com/new-avatar.jpg');
 });

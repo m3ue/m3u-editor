@@ -60,12 +60,14 @@ class OidcController
                 $user->update(['oidc_id' => $oidcUser->getId()]);
             }
 
-            // Sync profile from IdP
-            $user->update([
-                'name' => $oidcUser->getName() ?: $user->name,
+            // Sync profile from IdP — only sync email and avatar.
+            // Name is NOT synced because it is used as the Xtream API
+            // username; overwriting it would break streaming clients
+            // (e.g. Tivimate) that authenticate with the original name.
+            $user->update(array_filter([
                 'email' => $oidcUser->getEmail() ?: $user->email,
                 'avatar_url' => $oidcUser->getAvatar() ?: $user->avatar_url,
-            ]);
+            ]));
         } elseif (config('services.oidc.auto_create_users')) {
             $user = User::create([
                 'name' => $oidcUser->getName() ?: Str::before($email, '@'),
