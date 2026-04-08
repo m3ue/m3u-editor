@@ -25,11 +25,11 @@
             <button type="button" id="popin-btn" onclick="popInToMainWindow()"
                 class="flex items-center gap-1.5 rounded bg-white/10 px-3 py-1.5 text-xs font-medium text-white/80 transition-colors hover:bg-white/20 hover:text-white"
                 title="Send back to floating player in main window">
-                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <rect x="2" y="3" width="20" height="14" rx="2" />
                     <path d="M12 10l-4 4m0 0h3m-3 0v-3" />
                 </svg>
-                Pop In
+                <span>Pop In</span>
             </button>
         </header>
 
