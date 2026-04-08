@@ -166,7 +166,7 @@ function multiStreamManager() {
                     document.exitPictureInPicture().catch(() => {});
                 }
 
-                // Notify server to stop the proxy stream (skip for transfers to pop-out)
+                // Notify server to stop the proxy stream (skip for transfers to pop-out/pop-in)
                 if (notifyServer) {
                     this.notifyServerStreamStop(player);
                 }

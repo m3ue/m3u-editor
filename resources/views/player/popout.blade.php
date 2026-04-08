@@ -238,6 +238,8 @@
                         done = true;
                         popinChannel.removeEventListener('message', handler);
                         popinChannel.close();
+                        // Skip proxy stop — the floating player is picking up the stream
+                        window._isPopinTransfer = true;
                         window.close();
                     }
                 };
@@ -259,12 +261,14 @@
             });
 
             window.addEventListener('pagehide', () => {
-                // Notify proxy to stop the stream before the page unloads
-                const contentType = videoElement.dataset.contentType || '';
-                const streamId = videoElement.dataset.streamId || '';
-                const type = contentType === 'episode' ? 'episode' : 'channel';
-                if (window.notifyProxyStreamStop) {
-                    window.notifyProxyStreamStop(streamId, type);
+                // Skip proxy stop if this is a pop-in transfer (floating player takes over)
+                if (!window._isPopinTransfer) {
+                    const contentType = videoElement.dataset.contentType || '';
+                    const streamId = videoElement.dataset.streamId || '';
+                    const type = contentType === 'episode' ? 'episode' : 'channel';
+                    if (window.notifyProxyStreamStop) {
+                        window.notifyProxyStreamStop(streamId, type);
+                    }
                 }
                 if (typeof player.cleanup === 'function') {
                     player.cleanup();
