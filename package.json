@@ -25,5 +25,8 @@
         "hls.js": "^1.6.7",
         "mpegts.js": "^1.8.0",
         "video.js": "^8.23.3"
+    },
+    "overrides": {
+        "picomatch": ">=2.3.2"
     }
 }
