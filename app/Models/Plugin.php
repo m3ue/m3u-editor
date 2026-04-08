@@ -24,8 +24,11 @@ class Plugin extends Model
         'data_ownership' => 'array',
         'trusted_hashes' => 'array',
         'validation_errors' => 'array',
+        'latest_release_metadata' => 'array',
+        'update_check_enabled' => 'boolean',
         'available' => 'boolean',
         'enabled' => 'boolean',
+        'last_update_check_at' => 'datetime',
         'trusted_at' => 'datetime',
         'blocked_at' => 'datetime',
         'integrity_verified_at' => 'datetime',
@@ -107,5 +110,23 @@ class Plugin extends Model
         return $this->runs()
             ->where('status', 'running')
             ->exists();
+    }
+
+    public function hasUpdateAvailable(): bool
+    {
+        if (! $this->version || ! $this->latest_version) {
+            return false;
+        }
+
+        return version_compare(
+            ltrim($this->version, 'v'),
+            ltrim($this->latest_version, 'v'),
+            '<',
+        );
+    }
+
+    public function isFromGithub(): bool
+    {
+        return $this->source_type === 'github_release' || filled($this->repository);
     }
 }

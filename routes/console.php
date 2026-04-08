@@ -82,4 +82,12 @@ Schedule::command('plugins:recover-stale-runs --minutes=15')
     ->everyMinute()
     ->withoutOverlapping();
 
+// Check for plugin updates from GitHub repositories
+if (config('plugins.update_check.enabled', true)) {
+    $updateFrequencyHours = max(1, intdiv((int) config('plugins.update_check.frequency_minutes', 240), 60));
+    Schedule::command('plugins:check-updates')
+        ->cron("0 */{$updateFrequencyHours} * * *")
+        ->withoutOverlapping();
+}
+
 // Note: HLS broadcast files are managed by m3u-proxy service

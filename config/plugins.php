@@ -93,6 +93,12 @@ return [
         'allowed_hosts' => ['github.com'],
     ],
 
+    'update_check' => [
+        'enabled' => (bool) env('PLUGIN_UPDATE_CHECK_ENABLED', true),
+        'frequency_minutes' => (int) env('PLUGIN_UPDATE_CHECK_FREQUENCY', 240),
+        'github_token' => env('PLUGIN_GITHUB_TOKEN'),
+    ],
+
     'archive_limits' => [
         'max_archive_bytes' => (int) env('PLUGIN_MAX_ARCHIVE_BYTES', 50 * 1024 * 1024),
         'max_file_count' => (int) env('PLUGIN_MAX_ARCHIVE_FILES', 500),

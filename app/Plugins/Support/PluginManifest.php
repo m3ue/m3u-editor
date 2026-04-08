@@ -23,6 +23,7 @@ class PluginManifest
         public readonly array $settings,
         public readonly array $actions,
         public readonly array $dataOwnership,
+        public readonly ?string $repository,
         public readonly string $path,
         public readonly array $raw,
     ) {}
@@ -54,6 +55,7 @@ class PluginManifest
                 $pluginId,
                 $schema,
             ),
+            repository: self::normalizeRepository($manifest['repository'] ?? null),
             path: $path,
             raw: $manifest,
         );
@@ -144,6 +146,32 @@ class PluginManifest
         return array_values(array_unique(array_map(function (string $path): string {
             return trim(str_replace('\\', '/', $path), '/');
         }, self::normalizeStringList($value, $field))));
+    }
+
+    /**
+     * Normalize a repository value to "owner/repo" shorthand.
+     */
+    public static function normalizeRepository(mixed $repository): ?string
+    {
+        if ($repository === null || $repository === '') {
+            return null;
+        }
+
+        if (! is_string($repository)) {
+            throw new RuntimeException('Manifest field [repository] must be a string.');
+        }
+
+        $repository = trim($repository);
+
+        if (preg_match('#^https?://github\.com/([^/]+/[^/]+?)(?:\.git)?/?$#i', $repository, $matches)) {
+            return $matches[1];
+        }
+
+        if (preg_match('#^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$#', $repository)) {
+            return $repository;
+        }
+
+        throw new RuntimeException('Manifest field [repository] must be "owner/repo" or a GitHub URL (e.g. https://github.com/owner/repo).');
     }
 
     private static function defaultDataOwnership(string $pluginId, array $schema): array

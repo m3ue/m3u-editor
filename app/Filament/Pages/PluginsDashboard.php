@@ -9,7 +9,9 @@ use App\Models\Plugin;
 use App\Models\PluginInstallReview;
 use App\Models\PluginRun;
 use App\Plugins\PluginManager;
+use App\Plugins\PluginUpdateChecker;
 use Filament\Actions\Action;
+use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
@@ -74,6 +76,31 @@ class PluginsDashboard extends Page
 
         return [
             PluginInstallActions::discover(),
+            Action::make('check_all_updates')
+                ->label(__('Check for Updates'))
+                ->icon('heroicon-o-arrow-path')
+                ->color('info')
+                ->requiresConfirmation()
+                ->modalHeading(__('Check Plugin Updates'))
+                ->modalDescription(__('This will query GitHub for the latest release of every plugin that has a repository configured. Continue?'))
+                ->action(function (): void {
+                    $checker = app(PluginUpdateChecker::class);
+                    $results = $checker->checkAll();
+
+                    $updatesFound = collect($results)->filter(fn (array $r): bool => $r['update_available'] ?? false)->count();
+                    $errors = collect($results)->filter(fn (array $r): bool => isset($r['error']))->count();
+
+                    $message = trans_choice(':count update available.|:count updates available.', $updatesFound, ['count' => $updatesFound]);
+                    if ($errors > 0) {
+                        $message .= ' '.trans_choice(':count plugin had errors.', $errors, ['count' => $errors]);
+                    }
+
+                    Notification::make()
+                        ->title(__('Plugin Update Check Complete'))
+                        ->body($message)
+                        ->success()
+                        ->send();
+                }),
             ...PluginInstallActions::staging(),
         ];
     }
@@ -91,6 +118,12 @@ class PluginsDashboard extends Page
             'canManagePlugins' => $this->canManagePlugins(),
             'extensionsUrl' => PluginResource::getUrl(),
             'pluginInstallsUrl' => $this->canManagePlugins() ? PluginInstallReviewResource::getUrl() : null,
+            'updatesAvailableCount' => Plugin::query()
+                ->where('installation_status', 'installed')
+                ->whereNotNull('latest_version')
+                ->get()
+                ->filter(fn (Plugin $p): bool => $p->hasUpdateAvailable())
+                ->count(),
         ];
     }
 
@@ -139,6 +172,18 @@ class PluginsDashboard extends Page
                 'description' => __('Plugins that are blocked, modified, invalid, or not fully installed.'),
                 'icon' => 'heroicon-s-exclamation-triangle',
                 'color' => 'red',
+            ],
+            [
+                'label' => __('Updates Available'),
+                'value' => Plugin::query()
+                    ->where('installation_status', 'installed')
+                    ->whereNotNull('latest_version')
+                    ->get()
+                    ->filter(fn (Plugin $p): bool => $p->hasUpdateAvailable())
+                    ->count(),
+                'description' => __('Installed plugins with a newer version available on GitHub.'),
+                'icon' => 'heroicon-s-arrow-up-circle',
+                'color' => 'info',
             ],
         ];
     }

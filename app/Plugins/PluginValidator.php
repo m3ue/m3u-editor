@@ -44,6 +44,12 @@ class PluginValidator
             $errors[] = 'Plugin api_version does not match host plugin API version.';
         }
 
+        if (isset($manifestData['repository']) && $manifestData['repository'] !== '') {
+            if (! preg_match('#^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$#', (string) $manifest->repository)) {
+                $errors[] = 'Manifest field [repository] must be in \"owner/repo\" format (GitHub URL is normalized during parsing).';
+            }
+        }
+
         $knownCapabilities = array_keys(config('plugins.capabilities', []));
         foreach ($manifest->capabilities as $capability) {
             if (! in_array($capability, $knownCapabilities, true)) {

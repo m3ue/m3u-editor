@@ -2,14 +2,17 @@
 
 namespace App\Filament\Resources\Plugins\Pages;
 
+use App\Filament\Resources\PluginInstallReviews\PluginInstallReviewResource;
 use App\Filament\Resources\Plugins\PluginResource;
 use App\Jobs\ExecutePluginInvocation;
 use App\Models\Plugin;
 use App\Plugins\PluginManager;
 use App\Plugins\PluginSchemaMapper;
+use App\Plugins\PluginUpdateChecker;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Forms\Components\Select;
+use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\EditRecord;
 use Illuminate\Database\Eloquent\Model;
@@ -199,6 +202,96 @@ class EditPlugin extends EditRecord
 
             // Lifecycle management group
             ActionGroup::make([
+                Action::make('check_for_updates')
+                    ->label(__('Check for Updates'))
+                    ->icon('heroicon-o-arrow-path')
+                    ->color('info')
+                    ->visible(fn () => $canManagePlugins && filled($this->record->repository))
+                    ->action(function () use ($record): void {
+                        $result = app(PluginUpdateChecker::class)->check($record);
+
+                        if ($result['error']) {
+                            Notification::make()
+                                ->warning()
+                                ->title(__('Update check failed'))
+                                ->body($result['error'])
+                                ->send();
+                        } elseif ($result['update_available']) {
+                            Notification::make()
+                                ->info()
+                                ->title(__('Update available'))
+                                ->body(__('Version :version is available (current: :current).', [
+                                    'version' => $result['latest'],
+                                    'current' => $result['current'],
+                                ]))
+                                ->send();
+                        } else {
+                            Notification::make()
+                                ->success()
+                                ->title(__('Up to date'))
+                                ->body(__('This plugin is already on the latest version.'))
+                                ->send();
+                        }
+
+                        $this->refreshFormData(['latest_version', 'last_update_check_at']);
+                    }),
+                Action::make('stage_update')
+                    ->label(fn () => __('Update to :version', ['version' => $this->record->latest_version]))
+                    ->icon('heroicon-o-arrow-up-circle')
+                    ->color('success')
+                    ->visible(fn () => $canManagePlugins && $this->record->hasUpdateAvailable() && filled($this->record->latest_release_url))
+                    ->requiresConfirmation()
+                    ->modalHeading(__('Stage plugin update'))
+                    ->modalDescription(fn () => filled($this->record->latest_release_sha256)
+                        ? __('This will download the latest release and stage it for review. The checksum will be verified automatically.')
+                        : __('No checksum was found for this release. Please provide the SHA-256 hash to verify the download.'))
+                    ->schema(fn () => filled($this->record->latest_release_sha256)
+                        ? []
+                        : [
+                            TextInput::make('sha256')
+                                ->label(__('SHA-256 Checksum'))
+                                ->placeholder('e.g. a1b2c3d4...')
+                                ->required()
+                                ->length(64)
+                                ->helperText(__('Copy the file hash from the GitHub release page.')),
+                        ])
+                    ->action(function (array $data) use ($record): void {
+                        try {
+                            $sha256 = $data['sha256'] ?? $record->latest_release_sha256;
+                            if (! $sha256) {
+                                Notification::make()
+                                    ->danger()
+                                    ->title(__('Missing checksum'))
+                                    ->body(__('A SHA-256 checksum is required to stage this update.'))
+                                    ->send();
+
+                                return;
+                            }
+
+                            $review = app(PluginManager::class)->stageGithubReleaseReview(
+                                $record->latest_release_url,
+                                $sha256,
+                                auth()->id(),
+                            );
+
+                            Notification::make()
+                                ->success()
+                                ->title(__('Update staged for review'))
+                                ->body(__('Review #:id is ready - check Plugin Installs to scan and approve it.', ['id' => $review->id]))
+                                ->actions([
+                                    \Filament\Notifications\Actions\Action::make('view_review')
+                                        ->label(__('View Review'))
+                                        ->url(PluginInstallReviewResource::getUrl('edit', ['record' => $review->id])),
+                                ])
+                                ->send();
+                        } catch (\RuntimeException $exception) {
+                            Notification::make()
+                                ->danger()
+                                ->title(__('Update staging failed'))
+                                ->body($exception->getMessage())
+                                ->send();
+                        }
+                    }),
                 Action::make('stage_review')
                     ->label(__('Submit for Review'))
                     ->icon('heroicon-o-archive-box')
