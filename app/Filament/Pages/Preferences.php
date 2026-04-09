@@ -825,7 +825,6 @@ class Preferences extends SettingsPage
                                             ->numeric()
                                             ->placeholder(0)
                                             ->minValue(0)
-                                            ->maxValue(20)
                                             ->step(1)
                                             ->helperText(__('Maximum number of players that can be open at once.')),
                                     ]),
