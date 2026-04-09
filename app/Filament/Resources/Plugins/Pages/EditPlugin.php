@@ -279,7 +279,7 @@ class EditPlugin extends EditRecord
                                 ->title(__('Update staged for review'))
                                 ->body(__('Review #:id is ready - check Plugin Installs to scan and approve it.', ['id' => $review->id]))
                                 ->actions([
-                                    \Filament\Notifications\Actions\Action::make('view_review')
+                                    Action::make('view_review')
                                         ->label(__('View Review'))
                                         ->url(PluginInstallReviewResource::getUrl('edit', ['record' => $review->id])),
                                 ])
