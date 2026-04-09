@@ -2,7 +2,7 @@
 function multiStreamManager() {
     return {
         players: [],
-        maxPlayers: 4,
+        maxPlayers: 0,
         zIndexCounter: 1000,
         _initialized: false,
         _abortController: null,
@@ -33,7 +33,7 @@ function multiStreamManager() {
             // Read max players from container data attribute
             const container = document.querySelector('[data-max-players]');
             if (container) {
-                this.maxPlayers = parseInt(container.dataset.maxPlayers, 10) || 0;
+                this.maxPlayers = parseInt(container.dataset.maxPlayers, 0) || 0;
             }
 
             // Abort any previous listeners (safety net in case cleanup wasn't called)
@@ -155,7 +155,7 @@ function multiStreamManager() {
                 // Exit PiP if this player is in PiP mode
                 const videoElement = document.getElementById(player.id + '-video');
                 if (document.pictureInPictureElement === videoElement) {
-                    document.exitPictureInPicture().catch(() => {});
+                    document.exitPictureInPicture().catch(() => { });
                 }
 
                 // Notify server to stop the proxy stream (skip for transfers to pop-out)
@@ -297,11 +297,11 @@ function multiStreamManager() {
             const player = this.players.find(p => p.id === playerId);
 
             if (document.pictureInPictureElement === videoElement) {
-                document.exitPictureInPicture().catch(() => {});
+                document.exitPictureInPicture().catch(() => { });
             } else if (document.pictureInPictureEnabled) {
                 videoElement.requestPictureInPicture().then(() => {
                     if (player) player.isPiP = true;
-                }).catch(() => {});
+                }).catch(() => { });
 
                 // Listen for PiP exit (user closes PiP window or we call exitPiP)
                 videoElement.addEventListener('leavepictureinpicture', () => {
