@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Enums\ChannelLogoType;
 use App\Jobs\MergeChannels;
 use App\Jobs\UnmergeChannels;
+use App\Models\Category;
 use App\Models\Channel;
 use App\Models\Group;
 use App\Models\Playlist;
@@ -685,5 +686,27 @@ class XtreamApiControllerTest extends TestCase
 
         $response->assertStatus(403)
             ->assertJson(['error' => 'Unauthorized or stream not found']);
+    }
+
+    public function test_get_series_with_logo_proxy_handles_null_backdrop_paths(): void
+    {
+        $this->playlist->update(['enable_logo_proxy' => true]);
+
+        $category = Category::factory()->for($this->user)->create();
+
+        Series::factory()->create([
+            'user_id' => $this->user->id,
+            'playlist_id' => $this->playlist->id,
+            'category_id' => $category->id,
+            'enabled' => true,
+            'backdrop_path' => json_encode([null, 'https://example.com/img.jpg', null]),
+            'cover' => 'https://example.com/cover.jpg',
+            'metadata' => json_encode(['tmdb' => '', 'last_modified' => null]),
+        ]);
+
+        $response = $this->getJson($this->getXtreamApiUrl('get_series'));
+
+        $response->assertOk();
+        $response->assertJsonCount(1);
     }
 }

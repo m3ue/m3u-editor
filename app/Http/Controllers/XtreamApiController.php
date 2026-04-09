@@ -927,6 +927,7 @@ class XtreamApiController extends Controller
                     if (is_string($backdropPaths)) {
                         $backdropPaths = json_decode($backdropPaths, true) ?? [];
                     }
+                    $backdropPaths = array_filter($backdropPaths);
                     if ($playlist->enable_logo_proxy) {
                         $cover = LogoProxyController::generateProxyUrl($cover);
                         $backdropPaths = array_map(fn ($path) => LogoProxyController::generateProxyUrl($path), $backdropPaths);
@@ -994,6 +995,7 @@ class XtreamApiController extends Controller
             if (is_string($backdropPaths)) {
                 $backdropPaths = json_decode($backdropPaths, true) ?? [];
             }
+            $backdropPaths = array_filter($backdropPaths);
             if ($playlist->enable_logo_proxy) {
                 $cover = LogoProxyController::generateProxyUrl($cover);
                 $backdropPaths = array_map(fn ($path) => LogoProxyController::generateProxyUrl($path), $backdropPaths);
@@ -1443,6 +1445,7 @@ class XtreamApiController extends Controller
             if (is_string($backdropPaths)) {
                 $backdropPaths = json_decode($backdropPaths, true) ?? [];
             }
+            $backdropPaths = array_filter($backdropPaths);
             if ($playlist->enable_logo_proxy) {
                 $cover = LogoProxyController::generateProxyUrl($cover);
                 $movieImage = LogoProxyController::generateProxyUrl($movieImage);
