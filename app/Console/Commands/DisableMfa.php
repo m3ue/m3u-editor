@@ -27,7 +27,7 @@ class DisableMfa extends Command
      */
     public function handle()
     {
-        $users = User::get(['id', 'email']);
+        $users = User::get(['id', 'name', 'email']);
         if ($users->isEmpty()) {
             $this->info('No users found.');
 
@@ -39,7 +39,7 @@ class DisableMfa extends Command
             $user = $this->choice('Select a user to disable MFA for:', $users->pluck('email')->toArray());
             $user = $users->where('email', $user)->firstOrFail();
         }
-        $this->info("🔓 Disabling multi-factor authentication for \"$users->name\" ...");
+        $this->info("🔓 Disabling multi-factor authentication for \"$user->name\" ...");
         if ($user) {
             DB::table('breezy_sessions')->where([
                 ['authenticatable_id', $user->id],

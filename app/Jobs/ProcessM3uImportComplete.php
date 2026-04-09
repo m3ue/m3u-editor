@@ -13,7 +13,6 @@ use App\Models\User;
 use App\Services\EpgCacheService;
 use App\Settings\GeneralSettings;
 use Carbon\Carbon;
-use Exception;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -273,8 +272,10 @@ class ProcessM3uImportComplete implements ShouldQueue
                         ->broadcast($playlist->user)
                         ->sendToDatabase($playlist->user);
                 }
-            } catch (Exception $e) {
-                // Handle any exceptions that occur during EPG creation
+            } catch (\Throwable $e) {
+                // EPG creation is a best-effort post-import step: surface it
+                // to the user via the Filament notification center and let
+                // the import complete. We intentionally do not rethrow.
                 Notification::make()
                     ->danger()
                     ->title('EPG Creation Failed')

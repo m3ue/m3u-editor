@@ -35,8 +35,9 @@ class ResetPassword extends Command
         if ($users->count() === 1) {
             $user = $users->first();
         } else {
-            $user = $this->choice('Select a user to reset the password for:', $users->pluck('email', 'name')->toArray());
-            $user = $users->where('email', $user)->firstOrFail();
+            $choices = $users->mapWithKeys(fn ($u) => [$u->email => "{$u->name} ({$u->email})"])->toArray();
+            $selected = $this->choice('Select a user to reset the password for:', $choices);
+            $user = $users->where('email', $selected)->firstOrFail();
         }
 
         $password = $this->ask('🔒 Enter the new password');

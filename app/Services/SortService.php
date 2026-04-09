@@ -18,12 +18,15 @@ class SortService
         $direction = strtoupper($order) === 'DESC' ? 'DESC' : 'ASC';
         $driver = DB::getPdo()->getAttribute(\PDO::ATTR_DRIVER_NAME);
 
-        // Determine order by column, handling special cases
+        // Determine order by column, handling special cases.
+        // IMPORTANT: $column is whitelisted here because its value is interpolated
+        // directly into raw SQL below; never fall through unknown values.
         $orderByColumn = match ($column) {
-            'title' => 'COALESCE(title_custom, title)',
+            'title', null => 'COALESCE(title_custom, title)',
             'name' => 'COALESCE(name_custom, name)',
             'stream_id' => 'COALESCE(stream_id_custom, stream_id)',
-            default => $column,
+            'channel' => 'channel',
+            default => throw new \InvalidArgumentException('Invalid sort column provided.'),
         };
 
         $lowerOrderByColumn = "LOWER({$orderByColumn})";

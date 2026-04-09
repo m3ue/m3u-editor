@@ -1,4 +1,4 @@
-zz<?php
+<?php
 
 namespace App\Exceptions;
 

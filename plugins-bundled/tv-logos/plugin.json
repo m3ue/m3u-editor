@@ -1,7 +1,7 @@
 {
   "id": "tv-logos",
   "name": "TV Logos",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "api_version": "1.0.0",
   "description": "Automatically enriches channel logos from the open-source tv-logo/tv-logos repository via the jsDelivr CDN.",
   "entrypoint": "Plugin.php",
@@ -34,6 +34,13 @@
     "default_cleanup_policy": "purge"
   },
   "settings": [
+    {
+      "id": "github_repo",
+      "label": "GitHub Repository (owner/repo)",
+      "type": "text",
+      "default": "tv-logo/tv-logos",
+      "helper_text": "GitHub repository for logo files. Change to use a fork, e.g. your-username/tv-logos."
+    },
     {
       "id": "default_playlist_id",
       "label": "Default Playlist(s)",

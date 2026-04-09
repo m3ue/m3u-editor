@@ -15,11 +15,13 @@ use Throwable;
 
 class Plugin implements ChannelProcessorPluginInterface, HookablePluginInterface, PluginInterface
 {
-    private const CDN_BASE = 'https://cdn.jsdelivr.net/gh/tv-logo/tv-logos@main/countries';
-
-    private const INDEX_API_BASE = 'https://api.github.com/repos/tv-logo/tv-logos/contents/countries';
+    private const DEFAULT_GITHUB_REPO = 'tv-logo/tv-logos';
 
     private const CACHE_FILE = 'plugin-data/tv-logos/matches.json';
+
+    private string $cdnBase;
+
+    private string $indexApiBase;
 
     /**
      * Maps ISO 3166-1 alpha-2 country codes to their folder names in the tv-logo/tv-logos repo.
@@ -130,7 +132,7 @@ class Plugin implements ChannelProcessorPluginInterface, HookablePluginInterface
         $reachable = false;
 
         try {
-            $response = Http::timeout(10)->head(self::CDN_BASE.'/united-states/espn-us.png');
+            $response = Http::timeout(10)->head('https://cdn.jsdelivr.net/gh/'.self::DEFAULT_GITHUB_REPO.'@main/countries/united-states/espn-us.png');
             $reachable = $response->successful();
         } catch (Throwable) {
             // CDN unreachable
@@ -147,7 +149,7 @@ class Plugin implements ChannelProcessorPluginInterface, HookablePluginInterface
 
         return PluginActionResult::success('Health check complete.', [
             'cdn_reachable' => $reachable,
-            'cdn_base' => self::CDN_BASE,
+            'cdn_base' => 'https://cdn.jsdelivr.net/gh/'.self::DEFAULT_GITHUB_REPO.'@main/countries',
             'cached_entries' => $cacheEntries,
             'supported_countries' => array_keys(self::COUNTRY_FOLDERS),
         ]);
@@ -179,6 +181,13 @@ class Plugin implements ChannelProcessorPluginInterface, HookablePluginInterface
         $skipVod = (bool) ($settings['skip_vod'] ?? true);
         $cacheTtlDays = (int) ($settings['cache_ttl_days'] ?? 7);
         $isDryRun = $context->dryRun;
+
+        $repo = trim((string) ($settings['github_repo'] ?? self::DEFAULT_GITHUB_REPO));
+        if ($repo === '') {
+            $repo = self::DEFAULT_GITHUB_REPO;
+        }
+        $this->cdnBase = "https://cdn.jsdelivr.net/gh/{$repo}@main/countries";
+        $this->indexApiBase = "https://api.github.com/repos/{$repo}/contents/countries";
 
         $countryFolder = self::COUNTRY_FOLDERS[$countryCode] ?? null;
 
@@ -318,7 +327,7 @@ class Plugin implements ChannelProcessorPluginInterface, HookablePluginInterface
         foreach ($this->preferredQualityFolders($channelName) as $folder) {
             foreach ($filenames as $filename) {
                 $relativePath = $folder === '' ? $filename : "{$folder}/{$filename}";
-                $url = self::CDN_BASE."/{$countryFolder}/{$relativePath}";
+                $url = $this->cdnBase."/{$countryFolder}/{$relativePath}";
 
                 $exists = $index !== []
                     ? isset($index[strtolower($relativePath)])
@@ -328,6 +337,12 @@ class Plugin implements ChannelProcessorPluginInterface, HookablePluginInterface
                     return $url;
                 }
             }
+        }
+
+        // Compact matching fallback — strips all hyphens from both sides so that
+        // minor hyphenation differences (e.g. "sport1" vs "sport-1") still match.
+        if ($index !== []) {
+            return $this->compactIndexMatch($slugs, $countryCode, $countryFolder, $channelName, $index);
         }
 
         return null;
@@ -367,6 +382,58 @@ class Plugin implements ChannelProcessorPluginInterface, HookablePluginInterface
         $hasHdHint = (bool) preg_match('/\b(hd|fhd|uhd|4k|8k|1080[pi]|720p)\b/iu', $channelName);
 
         return $hasHdHint ? ['hd', ''] : ['', 'hd'];
+    }
+
+    /**
+     * Compact matching fallback — strips all hyphens from both the channel slug
+     * and index filenames so minor hyphenation differences still match
+     * (e.g. "sport1" vs "sport-1-de.png").
+     *
+     * @param  array<int, string>  $slugs
+     * @param  array<string, true>  $index
+     */
+    private function compactIndexMatch(array $slugs, string $countryCode, string $countryFolder, string $channelName, array $index): ?string
+    {
+        $suffixes = ["-{$countryCode}.png", '.png'];
+        $qualityFolders = $this->preferredQualityFolders($channelName);
+
+        $compactChannelSlugs = array_map(fn (string $s): string => str_replace('-', '', $s), $slugs);
+
+        foreach ($qualityFolders as $preferredFolder) {
+            foreach ($index as $relativePath => $_) {
+                $basename = basename($relativePath);
+                $suffixLen = 0;
+
+                foreach ($suffixes as $suffix) {
+                    if (str_ends_with($basename, $suffix)) {
+                        $suffixLen = strlen($suffix);
+
+                        break;
+                    }
+                }
+
+                if ($suffixLen === 0) {
+                    continue;
+                }
+
+                $folder = dirname($relativePath);
+                $folder = $folder === '.' ? '' : $folder;
+
+                if ($folder !== $preferredFolder) {
+                    continue;
+                }
+
+                $indexSlug = str_replace('-', '', substr($basename, 0, -$suffixLen));
+
+                foreach ($compactChannelSlugs as $compact) {
+                    if ($indexSlug === $compact) {
+                        return $this->cdnBase."/{$countryFolder}/{$relativePath}";
+                    }
+                }
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -410,7 +477,7 @@ class Plugin implements ChannelProcessorPluginInterface, HookablePluginInterface
                     'Accept' => 'application/vnd.github.v3+json',
                     'User-Agent' => 'tv-logos-plugin/1.0',
                 ])
-                ->get(self::INDEX_API_BASE.'/'.$path);
+                ->get($this->indexApiBase.'/'.$path);
 
             if (! $response->successful()) {
                 return [];
@@ -476,8 +543,14 @@ class Plugin implements ChannelProcessorPluginInterface, HookablePluginInterface
         // Remove content inside any bracket type
         $name = preg_replace('/[\(\[\{][^\)\]\}]*[\)\]\}]/', '', $name) ?? $name;
 
-        // Normalise ampersand
-        $name = str_replace('&', 'and', $name);
+        // Normalise ampersand early (before stripping non-alnum)
+        $name = str_replace('&', ' and ', $name);
+
+        // Treat dots as word separators (e.g. "SAT.1" → "SAT 1")
+        $name = str_replace('.', ' ', $name);
+
+        // Convert plus sign to word "plus" (e.g. "ANIXE+" → "ANIXE plus")
+        $name = str_replace('+', ' plus ', $name);
 
         // Keep only unicode letters, digits, and spaces
         $name = preg_replace('/[^\p{L}\p{N}\s]/u', '', $name) ?? $name;
@@ -501,7 +574,7 @@ class Plugin implements ChannelProcessorPluginInterface, HookablePluginInterface
      */
     private function loadCache(int $cacheTtlDays): array
     {
-        $empty = ['version' => 3, 'cached_at' => now()->toIso8601String(), 'matches' => []];
+        $empty = ['version' => 4, 'cached_at' => now()->toIso8601String(), 'matches' => []];
 
         try {
             if (! Storage::disk('local')->exists(self::CACHE_FILE)) {
@@ -510,7 +583,7 @@ class Plugin implements ChannelProcessorPluginInterface, HookablePluginInterface
 
             $data = json_decode((string) Storage::disk('local')->get(self::CACHE_FILE), true);
 
-            if (! is_array($data) || ! isset($data['matches']) || ($data['version'] ?? 1) < 3) {
+            if (! is_array($data) || ! isset($data['matches']) || ($data['version'] ?? 1) < 4) {
                 return $empty;
             }
 

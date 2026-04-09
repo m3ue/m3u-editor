@@ -1,0 +1,75 @@
+{
+  "version": "2.1.0",
+  "organization": "PHP Community",
+  "date": "March 2026",
+  "phpVersion": "8.0 - 8.5",
+  "rulesTotal": 51,
+  "abstract": "Comprehensive PHP 8.x best practices guide designed for AI agents and LLMs. Contains 51 rules across 7 categories (type system, modern features, PSR standards, SOLID principles, error handling, performance, security), prioritized by impact from critical to medium. Each rule includes detailed explanations, real-world examples comparing incorrect vs. correct implementations, and specific rationale to guide automated refactoring and code generation. Always detect the project's PHP version before suggesting features.",
+  "references": [
+    "https://www.php.net/manual/en/",
+    "https://www.php.net/releases/8.3/en.php",
+    "https://www.php.net/releases/8.4/en.php",
+    "https://www.php-fig.org/psr/",
+    "https://www.php-fig.org/psr/psr-4/",
+    "https://www.php-fig.org/psr/psr-12/",
+    "https://github.com/php/php-src",
+    "https://phpstan.org/",
+    "https://psalm.dev/",
+    "https://github.com/rectorphp/rector",
+    "https://cs.symfony.com/",
+    "https://phptherightway.com/"
+  ],
+  "categories": [
+    {
+      "name": "Type System",
+      "prefix": "type",
+      "impact": "CRITICAL",
+      "description": "Strict types, property types, return types, union/intersection types, never/void"
+    },
+    {
+      "name": "Modern PHP Features",
+      "prefix": "modern",
+      "impact": "CRITICAL",
+      "description": "Enums, readonly, constructor promotion, match, property hooks (8.4), pipe operator (8.5)"
+    },
+    {
+      "name": "PSR Standards",
+      "prefix": "psr",
+      "impact": "HIGH",
+      "description": "PSR-4 autoloading, PSR-12 coding style, file structure, naming conventions"
+    },
+    {
+      "name": "SOLID Principles",
+      "prefix": "solid",
+      "impact": "HIGH",
+      "description": "SRP, OCP, LSP, ISP, DIP — object-oriented design principles"
+    },
+    {
+      "name": "Error Handling",
+      "prefix": "error",
+      "impact": "HIGH",
+      "description": "Custom exceptions, exception hierarchy, specific catches, finally cleanup, no suppression"
+    },
+    {
+      "name": "Performance",
+      "prefix": "perf",
+      "impact": "MEDIUM",
+      "description": "Lazy loading, generators, native array/string functions, avoid globals"
+    },
+    {
+      "name": "Security",
+      "prefix": "sec",
+      "impact": "CRITICAL",
+      "description": "Input validation, output escaping, password hashing, prepared statements, file uploads"
+    }
+  ],
+  "keyFeatures": [
+    "Version detection: always check composer.json before suggesting features",
+    "Strict types declaration on every file",
+    "Modern PHP 8.0-8.5 syntax (enums, readonly, property hooks, pipe operator)",
+    "PSR-4 autoloading and PSR-12 coding style",
+    "SOLID principles with PHP examples",
+    "Union and intersection types for precise type safety",
+    "Per-rule PHP version annotations (8.0+, 8.1+, 8.2+, 8.3+, 8.4+, 8.5+)"
+  ]
+}
