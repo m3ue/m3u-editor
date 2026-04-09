@@ -14,10 +14,12 @@
     ],
     "sail": false,
     "skills": [
+        "ai-sdk-development",
         "laravel-best-practices",
         "configuring-horizon",
         "socialite-development",
         "pest-testing",
-        "tailwindcss-development"
+        "tailwindcss-development",
+        "php-best-practices"
     ]
 }
