@@ -1,6 +1,8 @@
-# m3u editor
 
-![logo](./public/favicon.png)
+<div style="width: 100%;text-align: center">
+  <img src="./public/favicon.png" width="96">
+  <h1>m3u editor</h1>
+</div>
 
 一个功能完整且强大的 `IPTV` 编辑器，提供与 **xteve** 或 **threadfin** 类似的能力。它还内置了完整的 `EPG` 管理、完整的 Xtream API 输出、剧集管理（支持存储与同步 `.strm` 文件）、自定义能力（可调用自定义脚本、发送 webhook 请求或发送电子邮件）以及更多丰富功能！
 
