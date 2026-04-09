@@ -182,7 +182,7 @@ class GeneralSettings extends Settings
     public ?bool $vod_stream_file_sync_generate_nfo = false;
 
     // Video player options
-    public ?int $max_concurrent_floating_players = 4;
+    public ?int $max_concurrent_floating_players = null;
 
     public ?bool $force_video_player_proxy = false;
 

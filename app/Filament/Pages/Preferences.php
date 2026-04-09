@@ -778,7 +778,7 @@ class Preferences extends SettingsPage
                                 Section::make(__('In-App Player Transcoding'))
                                     ->description(__('Select the default transcoding profiles used when playing streams in the in-app player.'))
                                     ->columnSpanFull()
-                                    ->columns(2)
+                                    ->columns(5)
                                     ->collapsible()
                                     ->collapsed()
                                     ->schema([
@@ -797,6 +797,7 @@ class Preferences extends SettingsPage
                                                     ->url('/stream-profiles')
                                                     ->openUrlInNewTab(false)
                                             )
+                                            ->columnSpan(2)
                                             ->helperText(__('The default transcoding profile used for the in-app player for Live content. Leave empty to disable transcoding (some streams may not be playable in the player).')),
                                         Select::make('default_vod_stream_profile_id')
                                             ->label(__('VOD and Series Transcoding Profile'))
@@ -813,15 +814,20 @@ class Preferences extends SettingsPage
                                                     ->url('/stream-profiles')
                                                     ->openUrlInNewTab(false)
                                             )
+                                            ->columnSpan(2)
                                             ->helperText(__('The default transcoding profile used for the in-app player for VOD/Series content. Leave empty to disable transcoding (some streams may not be playable in the player).')),
                                         TextInput::make('max_concurrent_floating_players')
-                                            ->label(__('Max Concurrent Floating Players'))
+                                            ->label(__('Max Concurrent Players'))
+                                            ->hintIcon(
+                                                'heroicon-m-question-mark-circle',
+                                                tooltip: __('Set to 0 (or clear value) for unlimited.')
+                                            )
                                             ->numeric()
-                                            ->default(4)
+                                            ->placeholder(0)
                                             ->minValue(0)
                                             ->maxValue(20)
                                             ->step(1)
-                                            ->helperText(__('Maximum number of floating players that can be open at once. Set to 0 for unlimited.')),
+                                            ->helperText(__('Maximum number of players that can be open at once.')),
                                     ]),
                                 Section::make(__('MediaFlow Proxy'))
                                     ->description(__('If you have MediaFlow Proxy installed, you can use it to proxy your m3u editor playlist streams. When enabled, the app will auto-generate URLs for you to use via MediaFlow Proxy.'))
