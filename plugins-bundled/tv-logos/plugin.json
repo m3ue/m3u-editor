@@ -35,6 +35,13 @@
   },
   "settings": [
     {
+      "id": "github_repo",
+      "label": "GitHub Repository (owner/repo)",
+      "type": "text",
+      "default": "tv-logo/tv-logos",
+      "helper_text": "GitHub repository for logo files. Change to use a fork, e.g. your-username/tv-logos."
+    },
+    {
       "id": "default_playlist_id",
       "label": "Default Playlist(s)",
       "type": "model_select",
