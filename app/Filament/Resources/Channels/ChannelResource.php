@@ -1421,6 +1421,17 @@ class ChannelResource extends Resource implements CopilotResource
                             AssetPickerAction::upload('logo'),
                             AssetPickerAction::browse('logo'),
                         ]),
+                    Toggle::make('catchup')
+                        ->label(__('Catchup'))
+                        ->inline(false)
+                        ->columnSpan(1)
+                        ->live()
+                        ->hidden(fn (Get $get) => ! $get('is_custom')),
+                    TextInput::make('catchup_source')
+                        ->label(__('Catchup Source'))
+                        ->prefixIcon('heroicon-m-globe-alt')
+                        ->url()
+                        ->hidden(fn (Get $get) => ! ($get('is_custom') && $get('catchup'))),
                     TextInput::make('proxy_url')
                         ->label(__('Proxy URL'))
                         ->columnSpan(2)
@@ -1435,7 +1446,6 @@ class ChannelResource extends Resource implements CopilotResource
                         ->dehydrated(false) // don't save the value in the database
                         ->type('url')
                         ->hiddenOn('create'),
-
                 ]),
             Fieldset::make(__('Proxy Settings'))
                 ->columns(2)

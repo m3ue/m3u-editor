@@ -116,6 +116,7 @@ class ProcessM3uImportChunk implements ShouldQueue
                 'kodidrop',
                 'catchup',
                 'catchup_source',
+                'shift',
                 // 'tvg_shift', // new field for TVG shift (don't update user overridden value)
                 'is_vod', // new field for VOD
                 'container_extension', // new field for container extension
