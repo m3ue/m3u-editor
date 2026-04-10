@@ -270,16 +270,24 @@ class PluginResource extends Resource implements CopilotResource
                     ->button()
                     ->size('sm')
                     ->hiddenLabel()
-                    ->tooltip(__('Install latest release from GitHub'))
-                    ->label(__('Install'))
-                    ->color('success')
-                    ->icon('heroicon-o-arrow-down-tray')
-                    ->visible(fn (Plugin $record) => $record->source_type === 'official' && ! $record->isInstalled())
+                    ->tooltip(fn (Plugin $record) => $record->isInstalled()
+                        ? __('Update to latest release from GitHub')
+                        : __('Install latest release from GitHub'))
+                    ->label(fn (Plugin $record) => $record->isInstalled() ? __('Update') : __('Install'))
+                    ->color(fn (Plugin $record) => $record->isInstalled() ? 'warning' : 'success')
+                    ->icon(fn (Plugin $record) => $record->isInstalled() ? 'heroicon-o-arrow-path' : 'heroicon-o-arrow-down-tray')
+                    ->visible(fn (Plugin $record) => ($record->source_type === 'official' && ! $record->isInstalled())
+                        || ($record->isInstalled() && $record->hasUpdateAvailable() && $record->isFromOfficialOrg()))
                     ->requiresConfirmation()
-                    ->modalHeading(fn (Plugin $record) => "Install {$record->name}?")
-                    ->modalDescription(fn (Plugin $record) => "This will fetch the latest release from github.com/{$record->repository} and stage it for install. Since this is an official m3ue plugin it will be auto-approved.")
-                    ->modalSubmitActionLabel(__('Fetch & Install'))
+                    ->modalHeading(fn (Plugin $record) => $record->isInstalled()
+                        ? "Update {$record->name} to {$record->latest_version}?"
+                        : "Install {$record->name}?")
+                    ->modalDescription(fn (Plugin $record) => $record->isInstalled()
+                        ? "This will fetch v{$record->latest_version} from github.com/{$record->repository} and replace the installed version. Since this is an official m3ue plugin it will be auto-approved."
+                        : "This will fetch the latest release from github.com/{$record->repository} and stage it for install. Since this is an official m3ue plugin it will be auto-approved.")
+                    ->modalSubmitActionLabel(fn (Plugin $record) => $record->isInstalled() ? __('Fetch & Update') : __('Fetch & Install'))
                     ->action(function (Plugin $record): void {
+                        $isUpdate = $record->isInstalled();
                         $pluginManager = app(PluginManager::class);
 
                         $result = app(PluginUpdateChecker::class)->check($record);
@@ -326,13 +334,17 @@ class PluginResource extends Resource implements CopilotResource
 
                             Notification::make()
                                 ->success()
-                                ->title(__(':name installed', ['name' => $record->name]))
-                                ->body(__('The plugin has been installed and trusted. Enable it to start using it.'))
+                                ->title($isUpdate
+                                    ? __(':name updated', ['name' => $record->name])
+                                    : __(':name installed', ['name' => $record->name]))
+                                ->body($isUpdate
+                                    ? __('The plugin has been updated to the latest version.')
+                                    : __('The plugin has been installed and trusted. Enable it to start using it.'))
                                 ->send();
                         } catch (\Throwable $exception) {
                             Notification::make()
                                 ->danger()
-                                ->title(__('Install failed'))
+                                ->title($isUpdate ? __('Update failed') : __('Install failed'))
                                 ->body($exception->getMessage())
                                 ->send();
                         }

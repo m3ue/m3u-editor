@@ -105,6 +105,24 @@ class Plugin extends Model
         return ($this->source_type ?? '') === 'bundled';
     }
 
+    /**
+     * Whether this plugin's repository belongs to a configured trusted org.
+     *
+     * Used for UI decisions only — trust enforcement uses the install review's
+     * source URL via PluginManager::isFromTrustedOrg().
+     */
+    public function isFromOfficialOrg(): bool
+    {
+        if (! $this->repository) {
+            return false;
+        }
+
+        $parts = explode('/', ltrim((string) $this->repository, '/'));
+
+        return count($parts) >= 2
+            && in_array($parts[0], config('plugins.trusted_orgs', []), true);
+    }
+
     public function hasActiveRuns(): bool
     {
         return $this->runs()

@@ -50,8 +50,8 @@ class PluginManager
             $manifest = $result->manifest;
             $pluginId = $result->pluginId ?? basename($pluginPath);
 
-            $record = Plugin::query()->where('plugin_id', $pluginId)->first()
-                ?? new Plugin(['plugin_id' => $pluginId]);
+            $existing = Plugin::query()->where('plugin_id', $pluginId)->first();
+            $record = $existing ?? new Plugin(['plugin_id' => $pluginId]);
             $securityState = $this->determineSecurityState($record, $result, file_exists($pluginPath));
             $attributes = [
                 'name' => $manifest?->name ?? Arr::get($result->manifestData, 'name', $pluginId),
@@ -84,6 +84,12 @@ class PluginManager
                 'last_discovered_at' => now(),
                 'last_validated_at' => now(),
             ];
+
+            // Brand-new discoveries have never been through the install flow.
+            // Default to uninstalled so they don't appear as ghost-installed plugins.
+            if (! $existing) {
+                $attributes['installation_status'] = 'uninstalled';
+            }
 
             $record = Plugin::query()->updateOrCreate(
                 ['plugin_id' => $pluginId],
@@ -1101,7 +1107,7 @@ class PluginManager
                 ];
             }
 
-            if (! $this->trustWithoutReviewAllowed($plugin) && ! $this->approvedReviewForPlugin($plugin)) {
+            if ($plugin->isInstalled() && ! $this->trustWithoutReviewAllowed($plugin) && ! $this->approvedReviewForPlugin($plugin)) {
                 $issues[] = [
                     'plugin_id' => $plugin->plugin_id,
                     'level' => $plugin->enabled ? 'error' : 'warning',
@@ -1356,15 +1362,31 @@ class PluginManager
             return true;
         }
 
-        if ($plugin->source_type === 'official' || $this->isFromTrustedOrg($plugin->repository)) {
+        // Official stubs are only seeded by SyncOfficialPlugins from server-controlled
+        // config — additionally verify the plugin_id is actually in that registry so
+        // a DB-level source_type manipulation cannot grant automatic trust.
+        if ($plugin->source_type === 'official'
+            && array_key_exists($plugin->plugin_id, config('plugins.official_plugins', []))) {
             return true;
+        }
+
+        // For GitHub release installs, anchor trust on the download URL recorded in the
+        // review's source_metadata — not on what plugin.json claims as its repository.
+        // This prevents a malicious plugin from setting "repository": "m3ue/fake" in its
+        // manifest to bypass the review requirement.
+        $review = $this->approvedReviewForPlugin($plugin);
+        if ($review && $review->source_type === 'github_release') {
+            $repoSlug = data_get($review->source_metadata ?? [], 'repository');
+            if ($this->isFromTrustedOrg($repoSlug)) {
+                return true;
+            }
         }
 
         return config('plugins.install_mode') === 'dev'
             && $plugin->source_type === 'local_dev';
     }
 
-    private function isFromTrustedOrg(?string $repository): bool
+    public function isFromTrustedOrg(?string $repository): bool
     {
         if (! $repository) {
             return false;
