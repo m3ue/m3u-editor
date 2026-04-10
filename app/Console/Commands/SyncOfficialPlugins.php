@@ -60,6 +60,7 @@ class SyncOfficialPlugins extends Command
                     'path' => null,
                     'available' => false,
                     'enabled' => false,
+                    'installation_status' => 'uninstalled',
                     'trust_state' => 'trusted',
                     'trust_reason' => "Auto-trusted: official plugin maintained by the {$org} organisation.",
                     'validation_status' => 'pending',
