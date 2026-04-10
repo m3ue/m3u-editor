@@ -1724,7 +1724,7 @@ class PlaylistResource extends Resource implements CopilotResource
                 ->columns(columns: 2)
                 ->schema([
                     Toggle::make('import_prefs.import_via_category')
-                        ->label('Fetch by category')
+                        ->label(__('Fetch by category'))
                         ->live()
                         ->hintIcon(
                             'heroicon-m-question-mark-circle',
@@ -1733,15 +1733,15 @@ class PlaylistResource extends Resource implements CopilotResource
                         ->hidden(fn (Get $get): bool => ! $get('xtream'))
                         ->inline(true)
                         ->default(false)
-                        ->helperText('When enabled, the playlist will fetch items by category.'),
+                        ->helperText(__('When enabled, the playlist will fetch items by category.')),
 
                     Toggle::make('auto_probe_streams')
-                        ->label('Probe streams after sync')
+                        ->label(__('Probe streams after sync'))
                         ->hintIcon(
                             'heroicon-m-question-mark-circle',
                             tooltip: 'Required for fast channel switching when using the emby-xtream plugin.'
                         )
-                        ->helperText('When enabled, channels will be probed with ffprobe after sync to collect stream metadata (codec, resolution, bitrate) and store it to the database for fast retrieval.')
+                        ->helperText(__('When enabled, channels will be probed with ffprobe after sync to collect stream metadata (codec, resolution, bitrate) and store it to the database for fast retrieval.'))
                         ->inline(true)
                         ->default(false),
 

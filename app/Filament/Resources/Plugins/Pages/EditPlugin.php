@@ -250,7 +250,7 @@ class EditPlugin extends EditRecord
                         : [
                             TextInput::make('sha256')
                                 ->label(__('SHA-256 Checksum'))
-                                ->placeholder('e.g. a1b2c3d4...')
+                                ->placeholder(__('e.g. a1b2c3d4...'))
                                 ->required()
                                 ->length(64)
                                 ->helperText(__('Copy the file hash from the GitHub release page.')),

@@ -46,18 +46,18 @@ class EpgChannelMatcherTool extends BaseTool
     {
         return [
             'playlist_id' => $schema->integer()
-                ->description('The playlist ID containing the channels to match.')
+                ->description(__('The playlist ID containing the channels to match.'))
                 ->required(),
             'group' => $schema->string()
-                ->description('The channel group name to process (e.g. "UNITED STATES").')
+                ->description(__('The channel group name to process (e.g. "UNITED STATES").'))
                 ->required(),
             'epg_id' => $schema->integer()
-                ->description('The EPG source ID to match against. Always ask the user which EPG source to use before calling this tool.')
+                ->description(__('The EPG source ID to match against. Always ask the user which EPG source to use before calling this tool.'))
                 ->required(),
             'limit' => $schema->integer()
-                ->description('Channels to process per call (default: 50, max: 100). Use with offset for pagination.'),
+                ->description(__('Channels to process per call (default: 50, max: 100). Use with offset for pagination.')),
             'offset' => $schema->integer()
-                ->description('Channels to skip (default: 0). Increment by limit to page through a large group.'),
+                ->description(__('Channels to skip (default: 0). Increment by limit to page through a large group.')),
         ];
     }
 

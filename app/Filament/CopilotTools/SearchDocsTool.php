@@ -72,7 +72,7 @@ class SearchDocsTool extends BaseTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'query' => $schema->string()->description('Search term or question to look up in the docs')->required(),
+            'query' => $schema->string()->description(__('Search term or question to look up in the docs'))->required(),
         ];
     }
 

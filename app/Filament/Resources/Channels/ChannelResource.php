@@ -305,11 +305,11 @@ class ChannelResource extends Resource implements CopilotResource
                 })
                 ->sortable(),
             ToggleColumn::make('probe_enabled')
-                ->label('Probe Enabled')
+                ->label(__('Probe Enabled'))
                 ->toggleable()
                 ->sortable(),
             IconColumn::make('stream_stats_probed_at')
-                ->label('Probed')
+                ->label(__('Probed'))
                 ->getStateUsing(fn ($record): bool => $record->stream_stats_probed_at !== null)
                 ->boolean()
                 ->trueIcon('heroicon-o-check-circle')
@@ -414,13 +414,13 @@ class ChannelResource extends Resource implements CopilotResource
                     return $query->where('epg_channel_id', '=', null);
                 }),
             Filter::make('probed')
-                ->label('Stream probed')
+                ->label(__('Stream probed'))
                 ->toggle()
                 ->query(function ($query) {
                     return $query->whereNotNull('stream_stats_probed_at');
                 }),
             Filter::make('not_probed')
-                ->label('Stream not probed')
+                ->label(__('Stream not probed'))
                 ->toggle()
                 ->query(function ($query) {
                     return $query->whereNull('stream_stats_probed_at');

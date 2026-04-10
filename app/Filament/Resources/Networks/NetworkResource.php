@@ -467,8 +467,8 @@ class NetworkResource extends Resource implements CopilotResource
                                 ->live(),
 
                             Toggle::make('broadcast_on_demand')
-                                ->label('Start On Viewer Connection')
-                                ->helperText('When enabled, broadcast waits for a viewer connection before starting automatically. Manual Start still forces immediate startup.')
+                                ->label(__('Start On Viewer Connection'))
+                                ->helperText(__('When enabled, broadcast waits for a viewer connection before starting automatically. Manual Start still forces immediate startup.'))
                                 ->default(false)
                                 ->visible(fn (Get $get): bool => $get('broadcast_enabled')),
 
@@ -646,8 +646,8 @@ class NetworkResource extends Resource implements CopilotResource
                                 }),
 
                             Toggle::make('broadcast_on_demand')
-                                ->label('Start On Viewer Connection')
-                                ->helperText('When enabled, worker waits for viewer activity before auto-starting. Manual Start still starts immediately.')
+                                ->label(__('Start On Viewer Connection'))
+                                ->helperText(__('When enabled, worker waits for viewer activity before auto-starting. Manual Start still starts immediately.'))
                                 ->default(false)
                                 ->columnSpan(1)
                                 ->visible(fn (Get $get): bool => $get('broadcast_enabled')),
@@ -1140,12 +1140,12 @@ class NetworkResource extends Resource implements CopilotResource
                         }),
 
                     BulkAction::make('startBroadcastSelected')
-                        ->label('Start Broadcast')
+                        ->label(__('Start Broadcast'))
                         ->icon('heroicon-s-play')
                         ->color('success')
                         ->requiresConfirmation()
-                        ->modalHeading('Start Broadcasting')
-                        ->modalDescription('Start broadcasting for the selected networks.')
+                        ->modalHeading(__('Start Broadcasting'))
+                        ->modalDescription(__('Start broadcasting for the selected networks.'))
                         ->action(function (Collection $records): void {
                             $service = app(NetworkBroadcastService::class);
 
@@ -1156,19 +1156,19 @@ class NetworkResource extends Resource implements CopilotResource
 
                             Notification::make()
                                 ->success()
-                                ->title('Broadcast Started')
+                                ->title(__('Broadcast Started'))
                                 ->body('Broadcast start requested for '.$records->count().' networks.')
                                 ->send();
                         })
                         ->deselectRecordsAfterCompletion(),
 
                     BulkAction::make('stopBroadcastSelected')
-                        ->label('Stop Broadcast')
+                        ->label(__('Stop Broadcast'))
                         ->icon('heroicon-s-stop')
                         ->color('danger')
                         ->requiresConfirmation()
-                        ->modalHeading('Stop Broadcasting')
-                        ->modalDescription('Stop broadcasting for the selected networks.')
+                        ->modalHeading(__('Stop Broadcasting'))
+                        ->modalDescription(__('Stop broadcasting for the selected networks.'))
                         ->action(function (Collection $records): void {
                             $service = app(NetworkBroadcastService::class);
 
@@ -1178,7 +1178,7 @@ class NetworkResource extends Resource implements CopilotResource
 
                             Notification::make()
                                 ->warning()
-                                ->title('Broadcast Stopped')
+                                ->title(__('Broadcast Stopped'))
                                 ->body('Broadcast stopped for '.$records->count().' networks.')
                                 ->send();
                         })

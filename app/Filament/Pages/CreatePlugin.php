@@ -71,13 +71,13 @@ class CreatePlugin extends Page
         return $schema
             ->schema([
                 Wizard::make([
-                    Step::make('Details')
+                    Step::make(__('Details'))
                         ->icon('heroicon-o-pencil')
-                        ->description('Name and describe your plugin')
+                        ->description(__('Name and describe your plugin'))
                         ->schema([
                             TextInput::make('name')
-                                ->label('Plugin Name')
-                                ->placeholder('My Awesome Plugin')
+                                ->label(__('Plugin Name'))
+                                ->placeholder(__('My Awesome Plugin'))
                                 ->required()
                                 ->maxLength(100)
                                 ->helperText(fn (?string $state): string => $state
@@ -85,20 +85,20 @@ class CreatePlugin extends Page
                                     : 'Enter a human-friendly name — the slug is generated automatically.')
                                 ->live(debounce: 500),
                             TextInput::make('description')
-                                ->label('Description')
-                                ->placeholder('What does this plugin do?')
+                                ->label(__('Description'))
+                                ->placeholder(__('What does this plugin do?'))
                                 ->maxLength(255)
-                                ->helperText('Short description for the plugin manifest. Leave blank for a default.'),
+                                ->helperText(__('Short description for the plugin manifest. Leave blank for a default.')),
 
                         ]),
 
-                    Step::make('Capabilities')
+                    Step::make(__('Capabilities'))
                         ->icon('heroicon-o-puzzle-piece')
-                        ->description('What your plugin can do')
+                        ->description(__('What your plugin can do'))
                         ->schema([
-                            Section::make('Capabilities')
+                            Section::make(__('Capabilities'))
                                 ->compact()
-                                ->description('Select what your plugin will participate in. Each capability adds a required PHP interface to your Plugin class.')
+                                ->description(__('Select what your plugin will participate in. Each capability adds a required PHP interface to your Plugin class.'))
                                 ->schema([
                                     CheckboxList::make('capabilities')
                                         ->hiddenLabel()
@@ -111,9 +111,9 @@ class CreatePlugin extends Page
                                         )
                                         ->columns(1),
                                 ]),
-                            Section::make('Event Triggers')
+                            Section::make(__('Event Triggers'))
                                 ->compact()
-                                ->description('Subscribe to host events that will automatically run your plugin in the background.')
+                                ->description(__('Subscribe to host events that will automatically run your plugin in the background.'))
                                 ->schema([
                                     CheckboxList::make('hooks')
                                         ->hiddenLabel()
@@ -128,28 +128,28 @@ class CreatePlugin extends Page
                                 ]),
                         ]),
 
-                    Step::make('Options')
+                    Step::make(__('Options'))
                         ->icon('heroicon-o-cog-6-tooth')
-                        ->description('Configure scaffold options')
+                        ->description(__('Configure scaffold options'))
                         ->schema([
                             Radio::make('cleanup_mode')
-                                ->label('Default Uninstall Behavior')
+                                ->label(__('Default Uninstall Behavior'))
                                 ->options([
                                     'preserve' => 'Preserve data — keep plugin tables and files on uninstall',
                                     'purge' => 'Purge data — delete plugin tables and files on uninstall',
                                 ])
                                 ->default('preserve'),
                             Toggle::make('lifecycle')
-                                ->label('Include lifecycle hook')
-                                ->helperText('Adds an uninstall() method for custom cleanup logic beyond what the manifest declares.'),
+                                ->label(__('Include lifecycle hook'))
+                                ->helperText(__('Adds an uninstall() method for custom cleanup logic beyond what the manifest declares.')),
                             Toggle::make('bare')
-                                ->label('Bare scaffold')
-                                ->helperText('Generate only plugin.json and Plugin.php — skip README, CI workflow, scripts, and AI guidance files.'),
+                                ->label(__('Bare scaffold'))
+                                ->helperText(__('Generate only plugin.json and Plugin.php — skip README, CI workflow, scripts, and AI guidance files.')),
                         ]),
 
-                    Step::make('Generate')
+                    Step::make(__('Generate'))
                         ->icon('heroicon-o-rocket-launch')
-                        ->description('Review and create your plugin')
+                        ->description(__('Review and create your plugin'))
                         ->schema([
                             Placeholder::make('summary')
                                 ->hiddenLabel()
@@ -203,7 +203,7 @@ class CreatePlugin extends Page
         } catch (InvalidArgumentException $e) {
             Notification::make()
                 ->danger()
-                ->title('Plugin creation failed')
+                ->title(__('Plugin creation failed'))
                 ->body($e->getMessage())
                 ->persistent()
                 ->send();

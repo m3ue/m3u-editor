@@ -32,9 +32,9 @@ class EpgMappingStateTool extends BaseTool
     {
         return [
             'playlist_id' => $schema->integer()
-                ->description('The playlist ID chosen by the user. Omit on the first call — you must list playlists first so the user can select one.'),
+                ->description(__('The playlist ID chosen by the user. Omit on the first call — you must list playlists first so the user can select one.')),
             'group' => $schema->string()
-                ->description('Filter to a specific group within the playlist. Omit to show all groups.'),
+                ->description(__('Filter to a specific group within the playlist. Omit to show all groups.')),
         ];
     }
 

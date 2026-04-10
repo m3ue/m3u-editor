@@ -19,8 +19,8 @@ class SearchRecordsTool extends AbstractResourceTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'query' => $schema->string()->description('The search term to look for')->required(),
-            'limit' => $schema->integer()->description('Maximum results to return (default: 10, max: 50)'),
+            'query' => $schema->string()->description(__('The search term to look for'))->required(),
+            'limit' => $schema->integer()->description(__('Maximum results to return (default: 10, max: 50)')),
         ];
     }
 

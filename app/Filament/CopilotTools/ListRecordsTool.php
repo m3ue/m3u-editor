@@ -19,8 +19,8 @@ class ListRecordsTool extends AbstractResourceTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'page' => $schema->integer()->description('Page number (default: 1)'),
-            'per_page' => $schema->integer()->description('Items per page (default: 15, max: 50)'),
+            'page' => $schema->integer()->description(__('Page number (default: 1)')),
+            'per_page' => $schema->integer()->description(__('Items per page (default: 15, max: 50)')),
         ];
     }
 

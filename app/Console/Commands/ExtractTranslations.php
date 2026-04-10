@@ -274,7 +274,7 @@ class ExtractTranslations extends Command
         ksort($merged);
 
         $path = lang_path('en.json');
-        file_put_contents($path, json_encode($merged, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE)."\n");
+        file_put_contents($path, json_encode($merged, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)."\n");
 
         $this->line('  <fg=green>Wrote</> lang/en.json ('.count($merged).' keys)');
     }
