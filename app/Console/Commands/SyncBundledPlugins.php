@@ -27,7 +27,7 @@ class SyncBundledPlugins extends Command
             ->filter(fn ($plugin) => in_array($plugin->source_type, ['bundled', 'official'], true));
 
         if ($plugins->isEmpty()) {
-            $this->info('No bundled plugins found.');
+            $this->info('No bundled or official plugins found.');
 
             return self::SUCCESS;
         }

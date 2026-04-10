@@ -288,7 +288,6 @@ class PluginResource extends Resource implements CopilotResource
                     ->modalSubmitActionLabel(fn (Plugin $record) => $record->isInstalled() ? __('Fetch & Update') : __('Fetch & Install'))
                     ->action(function (Plugin $record): void {
                         $isUpdate = $record->isInstalled();
-                        $pluginManager = app(PluginManager::class);
 
                         $result = app(PluginUpdateChecker::class)->check($record);
 
@@ -315,6 +314,8 @@ class PluginResource extends Resource implements CopilotResource
 
                             return;
                         }
+
+                        $pluginManager = app(PluginManager::class);
 
                         try {
                             $review = $pluginManager->stageGithubReleaseReview($url, $sha256, auth()->id());
