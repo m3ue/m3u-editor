@@ -1,0 +1,6 @@
+[submodule "plugins-bundled/tv-logos"]
+	path = plugins-bundled/tv-logos
+	url = https://github.com/Serph91P/m3u-editor-plugin-tv-logos.git
+[submodule "plugins-bundled/channels-dvr"]
+	path = plugins-bundled/channels-dvr
+	url = https://github.com/Serph91P/m3u-editor-plugin-channels-dvr.git

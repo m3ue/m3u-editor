@@ -47,6 +47,17 @@ updates:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
 
+  # Git submodules (bundled plugins)
+  - package-ecosystem: "gitsubmodule"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    labels:
+      - "dependencies"
+      - "plugins"
+    commit-message:
+      prefix: "plugins"
+
   # Docker base images
   - package-ecosystem: "docker"
     directory: "/"
