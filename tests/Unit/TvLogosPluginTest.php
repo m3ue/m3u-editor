@@ -1,6 +1,6 @@
 <?php
 
-require_once __DIR__.'/../../plugins-bundled/tv-logos/Plugin.php';
+require_once __DIR__.'/../../../m3u-plugins/tv-logos-plugin/Plugin.php';
 
 use AppLocalPlugins\TvLogos\Plugin;
 

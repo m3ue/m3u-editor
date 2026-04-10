@@ -25,6 +25,31 @@ return [
         explode(',', (string) env('PLUGIN_DEV_DIRECTORIES', ''))
     ))),
 
+    /**
+     * Trusted GitHub organisations. Plugins whose plugin.json "repository"
+     * field resolves to one of these orgs are auto-trusted without a manual
+     * install review — equivalent to bundled plugins.
+     */
+    'trusted_orgs' => ['m3ue'],
+
+    /**
+     * Official plugin stubs: known plugins maintained by a trusted org.
+     * The plugins:sync-official command seeds these as stub Plugin records
+     * so users can browse and install them from the UI.
+     */
+    'official_plugins' => [
+        'tv-logos' => [
+            'repository' => 'm3ue/tv-logos-plugin',
+            'name' => 'TV Logos',
+            'description' => 'Automatically enriches channel logos from the open-source tv-logo/tv-logos repository via the jsDelivr CDN.',
+        ],
+        'channels-dvr' => [
+            'repository' => 'm3ue/channels-dvr-plugin',
+            'name' => 'Channels DVR',
+            'description' => 'Maps Gracenote station IDs from a local Channels DVR install to your playlist channels via the DVR guide stations API.',
+        ],
+    ],
+
     'staging_directory' => storage_path('app/plugin-staging'),
 
     'upload_directory' => env('PLUGIN_UPLOAD_DIRECTORY', 'plugin-review-uploads'),
@@ -49,6 +74,7 @@ return [
 
     'source_types' => [
         'bundled',
+        'official',
         'local_directory',
         'staged_archive',
         'github_release',

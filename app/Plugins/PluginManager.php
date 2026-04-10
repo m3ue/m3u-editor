@@ -94,21 +94,24 @@ class PluginManager
             $discovered[] = $record->fresh();
         }
 
-        if ($seenPaths !== []) {
-            $missingPlugins = Plugin::query()
-                ->whereNotIn('path', $seenPaths)
-                ->get();
+        // Always sweep for stale records — plugins with a path on record that is
+        // no longer discovered. Official stubs (path = null) are intentionally
+        // pathless and are excluded from this cleanup.
+        $missingPlugins = Plugin::query()
+            ->whereNotNull('path')
+            ->when($seenPaths !== [], fn ($q) => $q->whereNotIn('path', $seenPaths))
+            ->get()
+            ->filter(fn (Plugin $p) => ! is_dir((string) $p->path));
 
-            foreach ($missingPlugins as $missingPlugin) {
-                $trustState = $missingPlugin->isBlocked() ? 'blocked' : 'pending_review';
-                $missingPlugin->update([
-                    'available' => false,
-                    'enabled' => false,
-                    'integrity_status' => 'missing',
-                    'trust_state' => $trustState,
-                    'trust_reason' => 'Plugin files are missing from disk and require operator review.',
-                ]);
-            }
+        foreach ($missingPlugins as $missingPlugin) {
+            $trustState = $missingPlugin->isBlocked() ? 'blocked' : 'pending_review';
+            $missingPlugin->update([
+                'available' => false,
+                'enabled' => false,
+                'integrity_status' => 'missing',
+                'trust_state' => $trustState,
+                'trust_reason' => 'Plugin files are missing from disk and require operator review.',
+            ]);
         }
 
         return $discovered;
@@ -1353,8 +1356,24 @@ class PluginManager
             return true;
         }
 
+        if ($plugin->source_type === 'official' || $this->isFromTrustedOrg($plugin->repository)) {
+            return true;
+        }
+
         return config('plugins.install_mode') === 'dev'
             && $plugin->source_type === 'local_dev';
+    }
+
+    private function isFromTrustedOrg(?string $repository): bool
+    {
+        if (! $repository) {
+            return false;
+        }
+
+        $parts = explode('/', ltrim($repository, '/'));
+
+        return count($parts) >= 2
+            && in_array($parts[0], config('plugins.trusted_orgs', []), true);
     }
 
     private function scanRequiredForReview(PluginInstallReview $review): bool
@@ -1861,7 +1880,7 @@ class PluginManager
     private function determineSourceType(string $pluginPath, Plugin $existing): string
     {
         if (in_array($existing->source_type, config('plugins.source_types', []), true)
-            && in_array($existing->source_type, ['staged_archive', 'github_release', 'uploaded_archive'], true)) {
+            && in_array($existing->source_type, ['staged_archive', 'github_release', 'uploaded_archive', 'official'], true)) {
             return $existing->source_type;
         }
 
