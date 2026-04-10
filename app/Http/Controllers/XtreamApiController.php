@@ -674,7 +674,7 @@ class XtreamApiController extends Controller
                         'added' => (string) $channel->created_at->timestamp,
                         'category_id' => $channelCategoryId,
                         'category_ids' => [(int) $channelCategoryId],
-                        'tv_archive' => (! $disableCatchup && $channel->catchup) ? 1 : 0,
+                        'tv_archive' => (! $disableCatchup && ($channel->catchup || $channel->shift)) ? 1 : 0,
                         'tv_archive_duration' => $disableCatchup ? 0 : ($channel->shift ?? 0),
                         'custom_sid' => $channel->stream_id_custom ?? '',
                         'thumbnail' => $thumbnail,

@@ -709,4 +709,50 @@ class XtreamApiControllerTest extends TestCase
         $response->assertOk();
         $response->assertJsonCount(1);
     }
+
+    public function test_get_live_streams_tv_archive_enabled_when_shift_set()
+    {
+        $group = Group::factory()->for($this->user)->create();
+
+        // Channel with shift > 0 but no catchup value (custom channel scenario)
+        $channelWithShift = Channel::factory()->for($this->playlist)->for($group)->create([
+            'enabled' => true,
+            'title_custom' => 'Channel With Shift',
+            'shift' => 12,
+            'catchup' => null,
+        ]);
+
+        // Channel with catchup set (provider-imported scenario)
+        $channelWithCatchup = Channel::factory()->for($this->playlist)->for($group)->create([
+            'enabled' => true,
+            'title_custom' => 'Channel With Catchup',
+            'shift' => 24,
+            'catchup' => 'default',
+        ]);
+
+        // Channel with no shift and no catchup
+        $channelWithoutArchive = Channel::factory()->for($this->playlist)->for($group)->create([
+            'enabled' => true,
+            'title_custom' => 'Channel Without Archive',
+            'shift' => 0,
+            'catchup' => null,
+        ]);
+
+        $response = $this->getJson($this->getXtreamApiUrl('get_live_streams'));
+        $response->assertStatus(200);
+
+        $jsonResponse = $response->json();
+
+        $shiftData = collect($jsonResponse)->firstWhere('stream_id', $channelWithShift->id);
+        $this->assertEquals(1, $shiftData['tv_archive'], 'tv_archive should be 1 when shift > 0');
+        $this->assertEquals(12, $shiftData['tv_archive_duration']);
+
+        $catchupData = collect($jsonResponse)->firstWhere('stream_id', $channelWithCatchup->id);
+        $this->assertEquals(1, $catchupData['tv_archive'], 'tv_archive should be 1 when catchup is set');
+        $this->assertEquals(24, $catchupData['tv_archive_duration']);
+
+        $noArchiveData = collect($jsonResponse)->firstWhere('stream_id', $channelWithoutArchive->id);
+        $this->assertEquals(0, $noArchiveData['tv_archive'], 'tv_archive should be 0 when no shift and no catchup');
+        $this->assertEquals(0, $noArchiveData['tv_archive_duration']);
+    }
 }
