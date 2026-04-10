@@ -34,7 +34,7 @@ class GenerateTranslations extends Command
     private const SLEEP_US = 200_000; // 200 ms
 
     /** Default locales to generate when --locale is omitted */
-    private const DEFAULT_LOCALES = ['de', 'fr', 'es'];
+    private const DEFAULT_LOCALES = ['de', 'fr', 'es', 'zh_CN'];
 
     /**
      * Brand names / proper nouns that must never be translated.

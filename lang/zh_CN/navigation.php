@@ -1,0 +1,37 @@
+<?php
+
+return [
+    'groups' => [
+        'epg' => 'EPG',
+        'integrations' => '集成',
+        'live_channels' => '直播频道',
+        'playlist' => '播放列表',
+        'proxy' => '代理人',
+        'series' => '系列',
+        'tools' => '工具',
+        'vod_channels' => '点播频道',
+    ],
+    'labels' => [
+        'api_docs' => 'API文档',
+        'queue_manager' => '队列管理器',
+        'api_tokens' => 'API令牌',
+        'assets' => '资产',
+        'backup_restore' => '备份与恢复',
+        'categories' => '类别',
+        'channels' => '渠道',
+        'debug_logs' => '调试日志',
+        'groups' => '团体',
+        'live_channels' => '直播频道',
+        'media_servers' => '媒体服务器',
+        'movies' => '电影',
+        'networks' => '网络',
+        'playlist_viewers' => '播放列表查看者',
+        'release_logs' => '发布日志',
+        'schedule_builder' => '时间表生成器',
+        'series' => '系列',
+        'settings' => '设置',
+        'stream_file_settings' => '流文件设置',
+        'stream_monitor' => '流监控器',
+        'vod_channels' => '点播频道',
+    ],
+];

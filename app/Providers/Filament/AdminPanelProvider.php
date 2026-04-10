@@ -184,6 +184,7 @@ class AdminPanelProvider extends PanelProvider
                         ['code' => 'fr', 'name' => 'Français', 'flag' => 'fr'],
                         ['code' => 'de', 'name' => 'Deutsch', 'flag' => 'de'],
                         ['code' => 'es', 'name' => 'Español', 'flag' => 'es'],
+                        ['code' => 'zh_CN', 'name' => '简体中文', 'flag' => 'cn'],
                     ])
                     ->showFlags(false)
                     ->rememberLocale()
