@@ -18,13 +18,6 @@ use App\Services\PlaylistService;
 use App\Settings\GeneralSettings;
 use Cron\CronExpression;
 use Dom\Text;
-use EslamRedaDiv\FilamentCopilot\Tools\GetToolsTool;
-use EslamRedaDiv\FilamentCopilot\Tools\ListPagesTool;
-use EslamRedaDiv\FilamentCopilot\Tools\ListResourcesTool;
-use EslamRedaDiv\FilamentCopilot\Tools\ListWidgetsTool;
-use EslamRedaDiv\FilamentCopilot\Tools\RecallTool;
-use EslamRedaDiv\FilamentCopilot\Tools\RememberTool;
-use EslamRedaDiv\FilamentCopilot\Tools\RunToolTool;
 use Exception;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
@@ -1421,7 +1414,7 @@ class Preferences extends SettingsPage
                                                     ->label(__('Model'))
                                                     ->placeholder(fn (Get $get): string => match ($get('copilot_provider')) {
                                                         'anthropic' => 'claude-sonnet-4',
-                                                        'gemini' => 'gemini-2.0-flash',
+                                                        'gemini' => 'gemini-2.5-flash',
                                                         'mistral' => 'mistral-large-latest',
                                                         'groq' => 'llama-3.3-70b-versatile',
                                                         'deepseek' => 'deepseek-chat',
@@ -1469,30 +1462,28 @@ class Preferences extends SettingsPage
                                             ->label(__('Enabled Tools'))
                                             ->bulkToggleable()
                                             ->options([
-                                                GetToolsTool::class => __('Get Available Tools'),
-                                                RunToolTool::class => __('Run Tool'),
-                                                ListResourcesTool::class => __('List Resources'),
-                                                ListPagesTool::class => __('List Pages'),
-                                                ListWidgetsTool::class => __('List Widgets'),
-                                                RememberTool::class => __('Remember'),
-                                                RecallTool::class => __('Recall Memories'),
                                                 SearchDocsTool::class => __('Search Documentation'),
                                                 EpgMappingStateTool::class => __('EPG Mapper: Mapping State'),
                                                 EpgChannelMatcherTool::class => __('EPG Mapper: Channel Matcher'),
                                                 EpgMappingApplyTool::class => __('EPG Mapper: Apply Mappings'),
                                             ])
+                                            ->afterStateHydrated(function ($component, $state) {
+                                                // Strip built-in tools that were saved by older versions.
+                                                // They are always registered by ToolRegistry and must not
+                                                // appear in the options list, or Filament validation fails.
+                                                $validOptions = array_keys($component->getOptions());
+                                                $component->state(
+                                                    array_values(array_filter(
+                                                        (array) $state,
+                                                        fn ($v) => \in_array($v, $validOptions, true)
+                                                    ))
+                                                );
+                                            })
                                             ->columns(2)
                                             ->default([
-                                                GetToolsTool::class,
-                                                RunToolTool::class,
-                                                ListResourcesTool::class,
-                                                ListPagesTool::class,
-                                                ListWidgetsTool::class,
-                                                RememberTool::class,
-                                                RecallTool::class,
                                                 SearchDocsTool::class,
                                             ])
-                                            ->helperText(__('Select which tools the AI assistant can use.')),
+                                            ->helperText(__('Select which additional tools the AI assistant can use. Core tools (navigation, memory) are always available.')),
                                     ]),
                                 Section::make(__('Quick Actions'))
                                     ->description(__('Pre-defined prompts displayed as buttons in the Copilot chat window.'))

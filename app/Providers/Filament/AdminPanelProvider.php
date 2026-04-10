@@ -22,6 +22,13 @@ use App\Http\Middleware\SeedLocaleFromUser;
 use App\Settings\GeneralSettings;
 use CraftForge\FilamentLanguageSwitcher\FilamentLanguageSwitcherPlugin;
 use EslamRedaDiv\FilamentCopilot\FilamentCopilotPlugin;
+use EslamRedaDiv\FilamentCopilot\Tools\GetToolsTool;
+use EslamRedaDiv\FilamentCopilot\Tools\ListPagesTool;
+use EslamRedaDiv\FilamentCopilot\Tools\ListResourcesTool;
+use EslamRedaDiv\FilamentCopilot\Tools\ListWidgetsTool;
+use EslamRedaDiv\FilamentCopilot\Tools\RecallTool;
+use EslamRedaDiv\FilamentCopilot\Tools\RememberTool;
+use EslamRedaDiv\FilamentCopilot\Tools\RunToolTool;
 use Exception;
 use Filament\Auth\MultiFactor\App\AppAuthentication;
 use Filament\Http\Middleware\Authenticate;
@@ -45,6 +52,7 @@ use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\View\Middleware\ShareErrorsFromSession;
 use ShuvroRoy\FilamentSpatieLaravelBackup\FilamentSpatieLaravelBackupPlugin;
+use Throwable;
 
 class AdminPanelProvider extends PanelProvider
 {
@@ -267,7 +275,7 @@ class AdminPanelProvider extends PanelProvider
     private const COPILOT_DEFAULT_MODELS = [
         'openai' => 'gpt-4o',
         'anthropic' => 'claude-sonnet-4',
-        'gemini' => 'gemini-2.0-flash',
+        'gemini' => 'gemini-2.5-flash',
         'mistral' => 'mistral-large-latest',
         'ollama' => 'llama3',
         'groq' => 'llama-3.3-70b-versatile',
@@ -300,15 +308,25 @@ class AdminPanelProvider extends PanelProvider
             $model = $s['copilot_model']
                 ?: (self::COPILOT_DEFAULT_MODELS[$s['copilot_provider']] ?? 'gpt-4o');
 
-            if (! empty($s['copilot_url']) && in_array($s['copilot_provider'], ['openai', 'ollama'], true)) {
-                config(["ai.providers.{$s['copilot_provider']}.url" => $s['copilot_url']]);
+            $provider = $s['copilot_provider'];
+
+            // Write the user-configured API key into the Laravel AI provider config so
+            // every gateway (Gemini, Groq, Anthropic, etc.) reads the correct key instead
+            // of falling back to the empty env var on a fresh installation.
+            if (! empty($s['copilot_api_key'])) {
+                config(["ai.providers.{$provider}.key" => $s['copilot_api_key']]);
+            }
+
+            // Custom base URL — supported for OpenAI-compatible and Ollama endpoints.
+            if (! empty($s['copilot_url']) && in_array($provider, ['openai', 'ollama'], true)) {
+                config(["ai.providers.{$provider}.url" => $s['copilot_url']]);
             }
 
             return FilamentCopilotPlugin::make()
-                ->provider($s['copilot_provider'])
+                ->provider($provider)
                 ->model($model)
                 ->systemPrompt($s['copilot_system_prompt'] ?: 'You are a helpful AI assistant integrated into m3u editor. You help users manage playlists, EPG data, streams, channels, and other media features. Be concise and accurate.')
-                ->globalTools($s['copilot_global_tools'] ?? [])
+                ->globalTools($this->filterBuiltInTools($s['copilot_global_tools'] ?? []))
                 ->quickActions($this->buildQuickActions($s))
                 ->managementEnabled($s['copilot_mgmt_enabled'] ?? false)
                 ->managementGuard('admin')
@@ -318,6 +336,35 @@ class AdminPanelProvider extends PanelProvider
 
             return null;
         }
+    }
+
+    /**
+     * Tools that ToolRegistry always registers by default — never pass these
+     * via ->globalTools() or they will be duplicated, causing Gemini 400 errors.
+     */
+    private const COPILOT_BUILTIN_TOOLS = [
+        GetToolsTool::class,
+        RunToolTool::class,
+        ListResourcesTool::class,
+        ListPagesTool::class,
+        ListWidgetsTool::class,
+        RememberTool::class,
+        RecallTool::class,
+    ];
+
+    /**
+     * Strip built-in tools from the user-configured global tools list.
+     * Built-ins are always registered by ToolRegistry and must not be duplicated.
+     *
+     * @param  list<string>  $tools
+     * @return list<string>
+     */
+    private function filterBuiltInTools(array $tools): array
+    {
+        return array_values(array_filter(
+            $tools,
+            fn (string $tool) => ! in_array($tool, self::COPILOT_BUILTIN_TOOLS, true)
+        ));
     }
 
     /**
