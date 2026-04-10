@@ -298,13 +298,7 @@ class AppServiceProvider extends ServiceProvider
             return true;
         }
 
-        // Fallback: Check if APP_URL contains https
-        // This ensures backward compatibility when no reverse proxy is used
-        if (Str::contains(config('app.url'), 'https')) {
-            return true;
-        }
-
-        // No HTTPS detected
+        // No HTTPS detected from headers
         return false;
     }
 
