@@ -14,6 +14,7 @@ use App\Models\Plugin;
 use App\Models\PluginRun;
 use App\Plugins\PluginManager;
 use App\Plugins\PluginSchemaMapper;
+use App\Plugins\PluginUpdateChecker;
 use App\Services\DateFormatService;
 use EslamRedaDiv\FilamentCopilot\Contracts\CopilotResource;
 use Filament\Actions\Action;
@@ -265,6 +266,89 @@ class PluginResource extends Resource implements CopilotResource
                     ->modalSubmitActionLabel(fn (Plugin $record) => $record->enabled ? 'Disable' : 'Enable')
                     ->modalWidth('sm')
                     ->action(fn (Plugin $record) => $record->update(['enabled' => ! $record->enabled])),
+                Action::make('install_latest_release')
+                    ->button()
+                    ->size('sm')
+                    ->hiddenLabel()
+                    ->tooltip(fn (Plugin $record) => $record->isInstalled()
+                        ? __('Update to latest release from GitHub')
+                        : __('Install latest release from GitHub'))
+                    ->label(fn (Plugin $record) => $record->isInstalled() ? __('Update') : __('Install'))
+                    ->color(fn (Plugin $record) => $record->isInstalled() ? 'warning' : 'success')
+                    ->icon(fn (Plugin $record) => $record->isInstalled() ? 'heroicon-o-arrow-path' : 'heroicon-o-arrow-down-tray')
+                    ->visible(fn (Plugin $record) => ($record->source_type === 'official' && ! $record->isInstalled())
+                        || ($record->isInstalled() && $record->hasUpdateAvailable() && $record->isFromOfficialOrg()))
+                    ->requiresConfirmation()
+                    ->modalHeading(fn (Plugin $record) => $record->isInstalled()
+                        ? "Update {$record->name} to {$record->latest_version}?"
+                        : "Install {$record->name}?")
+                    ->modalDescription(fn (Plugin $record) => $record->isInstalled()
+                        ? "This will fetch v{$record->latest_version} from github.com/{$record->repository} and replace the installed version. Since this is an official m3ue plugin it will be auto-approved."
+                        : "This will fetch the latest release from github.com/{$record->repository} and stage it for install. Since this is an official m3ue plugin it will be auto-approved.")
+                    ->modalSubmitActionLabel(fn (Plugin $record) => $record->isInstalled() ? __('Fetch & Update') : __('Fetch & Install'))
+                    ->action(function (Plugin $record): void {
+                        $isUpdate = $record->isInstalled();
+                        $pluginManager = app(PluginManager::class);
+
+                        $result = app(PluginUpdateChecker::class)->check($record);
+
+                        if (filled($result['error'] ?? null)) {
+                            Notification::make()
+                                ->danger()
+                                ->title(__('Could not fetch release'))
+                                ->body($result['error'])
+                                ->send();
+
+                            return;
+                        }
+
+                        $record->refresh();
+                        $url = $record->latest_release_url;
+                        $sha256 = $record->latest_release_sha256;
+
+                        if (! $url || ! $sha256) {
+                            Notification::make()
+                                ->danger()
+                                ->title(__('Release info missing'))
+                                ->body(__('No release URL or SHA-256 found. Ensure a release has been published with a companion .sha256 file.'))
+                                ->send();
+
+                            return;
+                        }
+
+                        try {
+                            $review = $pluginManager->stageGithubReleaseReview($url, $sha256, auth()->id());
+                            $review = $pluginManager->scanInstallReview($review);
+
+                            if ($review->scan_status === 'infected') {
+                                Notification::make()
+                                    ->danger()
+                                    ->title(__('Security scan failed'))
+                                    ->body(__('The plugin archive was flagged by the security scanner and has not been installed.'))
+                                    ->send();
+
+                                return;
+                            }
+
+                            $pluginManager->approveInstallReview($review, trust: true, userId: auth()->id(), notes: 'Auto-approved: official plugin from trusted org.');
+
+                            Notification::make()
+                                ->success()
+                                ->title($isUpdate
+                                    ? __(':name updated', ['name' => $record->name])
+                                    : __(':name installed', ['name' => $record->name]))
+                                ->body($isUpdate
+                                    ? __('The plugin has been updated to the latest version.')
+                                    : __('The plugin has been installed and trusted. Enable it to start using it.'))
+                                ->send();
+                        } catch (\Throwable $exception) {
+                            Notification::make()
+                                ->danger()
+                                ->title($isUpdate ? __('Update failed') : __('Install failed'))
+                                ->body($exception->getMessage())
+                                ->send();
+                        }
+                    }),
                 Action::make('delete')
                     ->button()
                     ->size('sm')

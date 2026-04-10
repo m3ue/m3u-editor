@@ -11,20 +11,20 @@ class SyncBundledPlugins extends Command
 {
     protected $signature = 'plugins:sync-bundled';
 
-    protected $description = 'Discover and auto-trust all plugins shipped in the bundled plugins directory.';
+    protected $description = 'Discover and auto-trust all bundled and official plugins.';
 
     public function handle(PluginManager $pluginManager): int
     {
         // Capture enabled state before discover() resets it for version-bumped plugins.
         $previouslyEnabled = Plugin::query()
-            ->where('source_type', 'bundled')
+            ->whereIn('source_type', ['bundled', 'official'])
             ->where('enabled', true)
             ->pluck('plugin_id')
             ->flip()
             ->all();
 
         $plugins = collect($pluginManager->discover())
-            ->filter(fn ($plugin) => $plugin->source_type === 'bundled');
+            ->filter(fn ($plugin) => in_array($plugin->source_type, ['bundled', 'official'], true));
 
         if ($plugins->isEmpty()) {
             $this->info('No bundled plugins found.');
