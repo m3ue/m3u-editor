@@ -151,8 +151,10 @@ class GenerateTranslations extends Command
             } elseif ($this->shouldSkipTranslation((string) $value)) {
                 $translated[$dotKey] = $value;
             } else {
+                [$protected, $map] = $this->protectPlaceholders((string) $value);
                 try {
-                    $translated[$dotKey] = $translator->translate((string) $value) ?? $value;
+                    $result = $translator->translate($protected) ?? $protected;
+                    $translated[$dotKey] = $this->restorePlaceholders($result, $map);
                 } catch (Throwable $e) {
                     $translated[$dotKey] = $value;
                     $errors++;
@@ -203,8 +205,10 @@ class GenerateTranslations extends Command
             if ($this->shouldSkipTranslation((string) $value)) {
                 $translated[$en] = $value;
             } else {
+                [$protected, $map] = $this->protectPlaceholders((string) $value);
                 try {
-                    $translated[$en] = $translator->translate((string) $value) ?? $value;
+                    $result = $translator->translate($protected) ?? $protected;
+                    $translated[$en] = $this->restorePlaceholders($result, $map);
                 } catch (Throwable $e) {
                     $translated[$en] = $value;
                     $errors++;
@@ -371,6 +375,43 @@ class GenerateTranslations extends Command
         }
 
         return false;
+    }
+
+    /**
+     * Replace Laravel :placeholder tokens with neutral markers before translation.
+     * Prevents Google Translate from mangling :name, :count, :date, etc.
+     * Returns the protected string and a map of token → original placeholder.
+     *
+     * @return array{0: string, 1: array<string, string>}
+     */
+    private function protectPlaceholders(string $value): array
+    {
+        $map = [];
+        $index = 0;
+
+        $protected = preg_replace_callback('/:[a-zA-Z_][a-zA-Z0-9_]*/', function (array $m) use (&$map, &$index) {
+            $token = "{PH{$index}}";
+            $map[$token] = $m[0];
+            $index++;
+
+            return $token;
+        }, $value);
+
+        return [$protected, $map];
+    }
+
+    /**
+     * Restore :placeholder tokens that were protected before translation.
+     *
+     * @param  array<string, string>  $map
+     */
+    private function restorePlaceholders(string $translated, array $map): string
+    {
+        if (empty($map)) {
+            return $translated;
+        }
+
+        return strtr($translated, $map);
     }
 
     /**
