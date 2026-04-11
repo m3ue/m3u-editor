@@ -73,7 +73,7 @@ class WatchProgressRelationManager extends RelationManager
 
                 // ── Shared ────────────────────────────────────────────────
                 ImageColumn::make('content_logo')
-                    ->label('')
+                    ->label(__('Logo'))
                     ->getStateUsing(function (ViewerWatchProgress $record): string {
                         if ($record->content_type === 'episode') {
                             return LogoService::getEpisodeLogoUrl($record->episode);
