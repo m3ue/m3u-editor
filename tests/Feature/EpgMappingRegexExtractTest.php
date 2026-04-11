@@ -10,21 +10,6 @@ use App\Models\Playlist;
 use App\Models\User;
 use Illuminate\Support\Facades\Event;
 
-/**
- * Helper: get the epg_channel_id from the first mapped record in job output,
- * then verify it points to the expected EpgChannel by channel_id string.
- */
-function assertMappedToEpgChannel(string $expectedChannelId): void
-{
-    $jobRecords = Job::where('batch_no', '!=', '')->get();
-    expect($jobRecords)->not->toBeEmpty();
-
-    $payload = $jobRecords->first()->payload;
-    $matched = EpgChannel::find($payload[0]['epg_channel_id']);
-    expect($matched)->not->toBeNull();
-    expect($matched->channel_id)->toBe($expectedChannelId);
-}
-
 beforeEach(function () {
     Event::fake();
     $this->user = User::factory()->create();
@@ -41,8 +26,12 @@ beforeEach(function () {
     ]);
 });
 
+afterEach(function () {
+    // Clean up Job records that may persist outside the test transaction
+    Job::query()->delete();
+});
+
 it('extracts capture group in regex extract mode and appends suffix', function () {
-    // Create an EPG channel that should match after extraction + suffix
     $epgChannel = EpgChannel::create([
         'epg_id' => $this->epg->id,
         'user_id' => $this->user->id,
@@ -51,7 +40,6 @@ it('extracts capture group in regex extract mode and appends suffix', function (
         'display_name' => 'OHIU-DT',
     ]);
 
-    // Create a channel with a complex name containing a 4-letter station ID
     $channel = Channel::factory()->create([
         'user_id' => $this->user->id,
         'playlist_id' => $this->playlist->id,
@@ -63,6 +51,8 @@ it('extracts capture group in regex extract mode and appends suffix', function (
         'epg_map_enabled' => true,
     ]);
 
+    $batchNo = fake()->uuid();
+
     $job = new MapPlaylistChannelsToEpgChunk(
         channelIds: [$channel->id],
         epgId: $this->epg->id,
@@ -73,17 +63,18 @@ it('extracts capture group in regex extract mode and appends suffix', function (
             'exclude_prefixes' => ['(?<![A-Z])([A-Z]{4})(?![A-Z])'],
             'append_suffix' => '-DT',
         ],
-        batchNo: fake()->uuid(),
+        batchNo: $batchNo,
         totalChannels: 1,
     );
 
     $job->handle();
 
-    assertMappedToEpgChannel('OHIU-DT');
+    $jobRecord = Job::where('batch_no', $batchNo)->first();
+    expect($jobRecord)->not->toBeNull();
+    expect($jobRecord->payload[0]['epg_channel_id'])->toBe($epgChannel->id);
 });
 
 it('removes matched text in default regex mode (not extract)', function () {
-    // EPG channel named just "Local" — should match after prefix removal
     $epgChannel = EpgChannel::create([
         'epg_id' => $this->epg->id,
         'user_id' => $this->user->id,
@@ -103,6 +94,8 @@ it('removes matched text in default regex mode (not extract)', function () {
         'epg_map_enabled' => true,
     ]);
 
+    $batchNo = fake()->uuid();
+
     $job = new MapPlaylistChannelsToEpgChunk(
         channelIds: [$channel->id],
         epgId: $this->epg->id,
@@ -113,13 +106,15 @@ it('removes matched text in default regex mode (not extract)', function () {
             'exclude_prefixes' => ['^US:\s*'],
             'append_suffix' => '',
         ],
-        batchNo: fake()->uuid(),
+        batchNo: $batchNo,
         totalChannels: 1,
     );
 
     $job->handle();
 
-    assertMappedToEpgChannel('local');
+    $jobRecord = Job::where('batch_no', $batchNo)->first();
+    expect($jobRecord)->not->toBeNull();
+    expect($jobRecord->payload[0]['epg_channel_id'])->toBe($epgChannel->id);
 });
 
 it('appends suffix without regex when only suffix is configured', function () {
@@ -142,6 +137,8 @@ it('appends suffix without regex when only suffix is configured', function () {
         'epg_map_enabled' => true,
     ]);
 
+    $batchNo = fake()->uuid();
+
     $job = new MapPlaylistChannelsToEpgChunk(
         channelIds: [$channel->id],
         epgId: $this->epg->id,
@@ -151,11 +148,13 @@ it('appends suffix without regex when only suffix is configured', function () {
             'exclude_prefixes' => [],
             'append_suffix' => '-HD',
         ],
-        batchNo: fake()->uuid(),
+        batchNo: $batchNo,
         totalChannels: 1,
     );
 
     $job->handle();
 
-    assertMappedToEpgChannel('espn-hd');
+    $jobRecord = Job::where('batch_no', $batchNo)->first();
+    expect($jobRecord)->not->toBeNull();
+    expect($jobRecord->payload[0]['epg_channel_id'])->toBe($epgChannel->id);
 });
