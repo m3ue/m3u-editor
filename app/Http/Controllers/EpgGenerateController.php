@@ -18,6 +18,7 @@ use DOMDocument;
 use Exception;
 use Filament\Notifications\Notification;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use XMLReader;
@@ -379,7 +380,11 @@ class EpgGenerateController extends Controller
                 }
             } catch (Exception $e) {
                 // If cache fails, fallback to original XML reading
-                $this->processEpgWithXmlReader($epg, $channels, $playlist);
+                try {
+                    $this->processEpgWithXmlReader($epg, $channels, $playlist);
+                } catch (Exception $e) {
+                    Log::warning("EPG fallback XMLReader also failed for EPG {$epg->name}: {$e->getMessage()}");
+                }
             }
         }
 
@@ -704,7 +709,7 @@ class EpgGenerateController extends Controller
             $filePath = $epg->url;
         }
 
-        if (! $filePath) {
+        if (! $filePath || ! file_exists($filePath)) {
             // Send notification
             $error = 'Invalid EPG file. Unable to read or download an associated EPG file. Please check the URL or uploaded file and try again.';
             Notification::make()
@@ -723,7 +728,11 @@ class EpgGenerateController extends Controller
 
         // Set up the reader
         $programReader = new XMLReader;
-        $programReader->open('compress.zlib://'.$filePath);
+        if (! @$programReader->open('compress.zlib://'.$filePath)) {
+            Log::warning("Failed to open EPG file for XMLReader: {$filePath}");
+
+            return;
+        }
 
         // Loop through the XML data
         while (@$programReader->read()) {
