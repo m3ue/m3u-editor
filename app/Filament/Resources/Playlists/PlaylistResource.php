@@ -2128,12 +2128,23 @@ class PlaylistResource extends Resource implements CopilotResource
                     Toggle::make('include_series_in_m3u')
                         ->label(__('Include series in M3U output'))
                         ->inline(false)
+                        ->live()
                         ->hintIcon(
                             'heroicon-m-question-mark-circle',
                             tooltip: 'Enable this to output your enabled series in the M3U file. It is recommended to enable the "Fetch metadata" option when enabled, otherwise you will need to manually fetch metadata for each series.'
                         )
                         ->default(false)
                         ->helperText(__('When enabled, series will be included in the M3U output. It is recommended to enable the "Fetch metadata" option when enabled.')),
+                    Toggle::make('include_series_metadata_in_m3u')
+                        ->label(__('Include series metadata in M3U output'))
+                        ->inline(false)
+                        ->hintIcon(
+                            'heroicon-m-question-mark-circle',
+                            tooltip: 'Adds season and episode number attributes to the M3U output for series episodes, helping external tools identify content correctly.'
+                        )
+                        ->default(false)
+                        ->visible(fn (Get $get): bool => (bool) $get('include_series_in_m3u'))
+                        ->helperText(__('When enabled, season and episode numbers will be included as attributes in the M3U output for series episodes.')),
                 ])->hidden(fn (Get $get): bool => ! $get('xtream')),
 
             Section::make(__('VOD Processing'))

@@ -49,6 +49,7 @@ class Playlist extends Model
         'backup_before_sync' => 'boolean',
         'sync_logs_enabled' => 'boolean',
         'include_series_in_m3u' => 'boolean',
+        'include_series_metadata_in_m3u' => 'boolean',
         'include_vod_in_m3u' => 'boolean',
         'auto_fetch_series_metadata' => 'boolean',
         'auto_sync_series_stream_files' => 'boolean',
