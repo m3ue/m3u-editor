@@ -219,6 +219,8 @@ class GeneralSettings extends Settings
 
     public ?int $tmdb_confidence_threshold = 80;
 
+    public ?bool $tmdb_auto_create_groups = false;
+
     // Network broadcast settings
     public ?int $broadcast_max_concurrent = 10;
 

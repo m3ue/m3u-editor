@@ -1345,6 +1345,10 @@ class Preferences extends SettingsPage
                                             ->maxValue(100)
                                             ->default(80)
                                             ->helperText(__('Minimum title similarity percentage (50-100) required to accept a match. Higher values = stricter matching.')),
+                                        Toggle::make('tmdb_auto_create_groups')
+                                            ->label(__('Auto-create groups/categories from TMDB genres'))
+                                            ->helperText(__('When enabled, TMDB metadata fetching will automatically create new groups (for VOD) and categories (for Series) based on TMDB genres. When disabled, only existing groups/categories will be used.'))
+                                            ->default(false),
                                     ]),
                             ]),
                         Tab::make(__('API'))
