@@ -81,30 +81,29 @@ class DvrVodIntegrationService
      */
     private function integrateAsMovie(DvrRecording $recording, int $playlistId, int $userId, ?array $tmdb): void
     {
-        $streamUrl = route('dvr.recording.stream', $recording->uuid);
+        $streamUrl = PlaylistService::getBaseUrl('/dvr/recordings/'.$recording->uuid.'/stream');
         $name = $tmdb['name'] ?? $recording->title;
 
-        // Check if we already integrated this recording
-        $existing = Channel::where('dvr_recording_id', $recording->id)->first();
+        // Find existing or prepare new channel
+        $channel = Channel::where('dvr_recording_id', $recording->id)->first();
+        $isNew = ! $channel;
 
-        if ($existing) {
-            Log::info("DvrVodIntegration: VOD channel already exists for recording {$recording->id} (channel {$existing->id})");
-
-            return;
+        if ($isNew) {
+            $channel = new Channel;
+            $channel->user_id = $userId;
+            $channel->playlist_id = $playlistId;
+            $channel->is_vod = true;
+            $channel->is_custom = true;
+            $channel->enabled = true;
+            $channel->container_extension = 'ts';
+            $channel->dvr_recording_id = $recording->id;
+            $channel->source_id = null;
         }
 
-        $channel = new Channel;
-        $channel->user_id = $userId;
-        $channel->playlist_id = $playlistId;
+        // Always update name, title, and URL (URL may have been created with wrong base)
         $channel->name = $name;
         $channel->title = $name;
         $channel->url = $streamUrl;
-        $channel->is_vod = true;
-        $channel->is_custom = true;
-        $channel->enabled = true;
-        $channel->container_extension = 'ts';
-        $channel->dvr_recording_id = $recording->id;
-        $channel->source_id = null;
 
         if ($tmdb) {
             $channel->logo = $tmdb['poster_url'] ?? null;
@@ -125,7 +124,7 @@ class DvrVodIntegrationService
 
         $channel->save();
 
-        Log::info("DvrVodIntegration: created VOD channel {$channel->id} for recording {$recording->id}", [
+        Log::info('DvrVodIntegration: '.($isNew ? 'created' : 'updated')." VOD channel {$channel->id} for recording {$recording->id}", [
             'title' => $name,
             'playlist_id' => $playlistId,
         ]);
@@ -139,41 +138,39 @@ class DvrVodIntegrationService
         $seriesName = $tmdb['name'] ?? $recording->title;
         $seasonNumber = $recording->season ?? 1;
         $episodeNumber = $recording->episode ?? 1;
-        $streamUrl = route('dvr.recording.stream', $recording->uuid);
-
-        // Check if we already integrated this recording
-        $existing = Episode::where('dvr_recording_id', $recording->id)->first();
-
-        if ($existing) {
-            Log::info("DvrVodIntegration: episode already exists for recording {$recording->id} (episode {$existing->id})");
-
-            return;
-        }
+        $streamUrl = PlaylistService::getBaseUrl('/dvr/recordings/'.$recording->uuid.'/stream');
 
         // Find-or-create the DVR category for this playlist
         $category = $this->findOrCreateDvrCategory($playlistId, $userId);
 
-        // Find-or-create the Series
+        // Find-or-create the Series (always update metadata if tmdb available)
         $series = $this->findOrCreateSeries($seriesName, $playlistId, $userId, $category->id, $tmdb);
 
         // Find-or-create the Season
         $season = $this->findOrCreateSeason($series, $seasonNumber, $playlistId, $userId, $category->id);
 
-        // Create the Episode
-        $episode = new Episode;
-        $episode->user_id = $userId;
-        $episode->playlist_id = $playlistId;
-        $episode->series_id = $series->id;
-        $episode->season_id = $season->id;
-        $episode->season = $seasonNumber;
-        $episode->episode_num = $episodeNumber;
+        // Find existing episode or prepare new one
+        $episode = Episode::where('dvr_recording_id', $recording->id)->first();
+        $isNew = ! $episode;
+
+        if ($isNew) {
+            $episode = new Episode;
+            $episode->user_id = $userId;
+            $episode->playlist_id = $playlistId;
+            $episode->series_id = $series->id;
+            $episode->season_id = $season->id;
+            $episode->season = $seasonNumber;
+            $episode->episode_num = $episodeNumber;
+            $episode->container_extension = 'ts';
+            $episode->enabled = true;
+            $episode->source_episode_id = null;
+            $episode->import_batch_no = 'dvr';
+            $episode->dvr_recording_id = $recording->id;
+        }
+
+        // Always update title, URL, and info (URL may have been created with wrong base)
         $episode->title = $recording->subtitle ?? $recording->title;
         $episode->url = $streamUrl;
-        $episode->container_extension = 'ts';
-        $episode->enabled = true;
-        $episode->source_episode_id = null;
-        $episode->import_batch_no = 'dvr';
-        $episode->dvr_recording_id = $recording->id;
         $episode->info = [
             'plot' => $recording->description ?? ($tmdb['overview'] ?? null),
             'release_date' => $recording->programme_start?->toDateString(),
@@ -185,7 +182,7 @@ class DvrVodIntegrationService
 
         $episode->save();
 
-        Log::info("DvrVodIntegration: created episode {$episode->id} for recording {$recording->id}", [
+        Log::info('DvrVodIntegration: '.($isNew ? 'created' : 'updated')." episode {$episode->id} for recording {$recording->id}", [
             'series' => $seriesName,
             'season' => $seasonNumber,
             'episode' => $episodeNumber,
@@ -224,6 +221,20 @@ class DvrVodIntegrationService
             ->first();
 
         if ($series) {
+            // Update metadata if we now have TMDB data and didn't before
+            if ($tmdb && empty($series->tmdb_id)) {
+                $series->cover = $tmdb['poster_url'] ?? $series->cover;
+                $series->plot = $tmdb['overview'] ?? $series->plot;
+                $series->release_date = $tmdb['first_air_date'] ?? $tmdb['release_date'] ?? $series->release_date;
+                $series->metadata = $tmdb;
+
+                if (! empty($tmdb['id'])) {
+                    $series->tmdb_id = $tmdb['id'];
+                }
+
+                $series->save();
+            }
+
             return $series;
         }
 

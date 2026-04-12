@@ -30,6 +30,7 @@ use App\Models\Series;
 use App\Models\User;
 use App\Services\DvrMetadataEnricherService;
 use App\Services\DvrVodIntegrationService;
+use App\Services\PlaylistService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Route;
@@ -101,7 +102,7 @@ it('creates a VOD channel for a recording with TMDB movie metadata', function ()
         ->and($channel->source_id)->toBeNull();
 });
 
-it('sets the VOD channel URL to the dvr.recording.stream route', function () {
+it('sets the VOD channel URL to the dvr stream path via PlaylistService', function () {
     $recording = makeCompletedRecording([
         'season' => null,
         'episode' => null,
@@ -111,8 +112,9 @@ it('sets the VOD channel URL to the dvr.recording.stream route', function () {
     $this->service->integrateRecording($recording);
 
     $channel = Channel::where('dvr_recording_id', $recording->id)->firstOrFail();
+    $expectedUrl = PlaylistService::getBaseUrl('/dvr/recordings/'.$recording->uuid.'/stream');
 
-    expect($channel->url)->toBe(route('dvr.recording.stream', $recording->uuid));
+    expect($channel->url)->toBe($expectedUrl);
 });
 
 it('does not duplicate a VOD channel when integrate is called twice', function () {
@@ -185,7 +187,7 @@ it('creates Series, Season, and Episode for a recording with TMDB tv metadata', 
         ->and($series->source_series_id)->toBeNull();
 });
 
-it('sets the episode URL to the dvr.recording.stream route', function () {
+it('sets the episode URL to the dvr stream path via PlaylistService', function () {
     $recording = makeCompletedRecording([
         'season' => 1,
         'episode' => 2,
@@ -195,8 +197,9 @@ it('sets the episode URL to the dvr.recording.stream route', function () {
     $this->service->integrateRecording($recording);
 
     $episode = Episode::where('dvr_recording_id', $recording->id)->firstOrFail();
+    $expectedUrl = PlaylistService::getBaseUrl('/dvr/recordings/'.$recording->uuid.'/stream');
 
-    expect($episode->url)->toBe(route('dvr.recording.stream', $recording->uuid));
+    expect($episode->url)->toBe($expectedUrl);
 });
 
 it('does not duplicate an episode when integrate is called twice', function () {

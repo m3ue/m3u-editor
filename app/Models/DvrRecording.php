@@ -98,6 +98,18 @@ class DvrRecording extends Model
         return $this->belongsTo(Channel::class);
     }
 
+    /** The VOD Channel created from this recording (movie integration). */
+    public function vodChannel(): HasOne
+    {
+        return $this->hasOne(Channel::class, 'dvr_recording_id');
+    }
+
+    /** The VOD Episode created from this recording (TV series integration). */
+    public function vodEpisode(): HasOne
+    {
+        return $this->hasOne(Episode::class, 'dvr_recording_id');
+    }
+
     public function scopeScheduled(Builder $query): Builder
     {
         return $query->where('status', DvrRecordingStatus::Scheduled->value);
