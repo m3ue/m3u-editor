@@ -2795,6 +2795,93 @@ class PlaylistResource extends Resource implements CopilotResource
                 ->schema($fields);
         }
 
+        // DVR tab — settings for the dvrSetting HasOne relationship.
+        // Fields are prefixed with dvr_ and hydrated/dehydrated via EditPlaylist hooks.
+        $tabs[] = Tab::make(__('DVR'))
+            ->icon('heroicon-m-video-camera')
+            ->schema([
+                Section::make(__('DVR Settings'))
+                    ->icon('heroicon-m-video-camera')
+                    ->description(__('Configure digital video recording for this playlist. Enable DVR to schedule recordings from the EPG guide.'))
+                    ->schema([
+                        Toggle::make('dvr_enabled')
+                            ->label(__('Enable DVR'))
+                            ->helperText(__('When enabled, the EPG guide will show record buttons and the scheduler will process recording rules.'))
+                            ->default(false)
+                            ->inline(false)
+                            ->live(),
+                        Grid::make()
+                            ->columns(2)
+                            ->columnSpanFull()
+                            ->hidden(fn (Get $get): bool => ! $get('dvr_enabled'))
+                            ->schema([
+                                TextInput::make('dvr_ffmpeg_path')
+                                    ->label(__('FFmpeg Path'))
+                                    ->helperText(__('Override the default FFmpeg binary path. Leave blank to use the system default.'))
+                                    ->placeholder('/usr/bin/ffmpeg')
+                                    ->maxLength(255),
+                                TextInput::make('dvr_storage_path')
+                                    ->label(__('Storage Path'))
+                                    ->helperText(__('Subdirectory within the DVR storage disk for this playlist\'s recordings.'))
+                                    ->placeholder('recordings')
+                                    ->maxLength(255),
+                                TextInput::make('dvr_max_concurrent_recordings')
+                                    ->label(__('Max Concurrent Recordings'))
+                                    ->helperText(__('Maximum number of recordings that can run simultaneously for this playlist.'))
+                                    ->numeric()
+                                    ->minValue(1)
+                                    ->maxValue(20)
+                                    ->default(2),
+                                TextInput::make('dvr_default_start_early_seconds')
+                                    ->label(__('Start Early (seconds)'))
+                                    ->helperText(__('Start recordings this many seconds before the scheduled start time.'))
+                                    ->numeric()
+                                    ->minValue(0)
+                                    ->maxValue(600)
+                                    ->default(30),
+                                TextInput::make('dvr_default_end_late_seconds')
+                                    ->label(__('End Late (seconds)'))
+                                    ->helperText(__('Continue recording this many seconds after the scheduled end time.'))
+                                    ->numeric()
+                                    ->minValue(0)
+                                    ->maxValue(600)
+                                    ->default(60),
+                                TextInput::make('dvr_retention_days')
+                                    ->label(__('Retention (days)'))
+                                    ->helperText(__('Automatically delete recordings older than this many days. Set to 0 to disable automatic deletion.'))
+                                    ->numeric()
+                                    ->minValue(0)
+                                    ->default(0),
+                                TextInput::make('dvr_global_disk_quota_gb')
+                                    ->label(__('Disk Quota (GB)'))
+                                    ->helperText(__('Maximum total disk usage for DVR recordings. Oldest recordings are deleted first when quota is exceeded. Set to 0 for no limit.'))
+                                    ->numeric()
+                                    ->minValue(0)
+                                    ->default(0),
+                            ]),
+                        Grid::make()
+                            ->columns(2)
+                            ->columnSpanFull()
+                            ->hidden(fn (Get $get): bool => ! $get('dvr_enabled'))
+                            ->schema([
+                                Toggle::make('dvr_enable_metadata_enrichment')
+                                    ->label(__('Enable Metadata Enrichment'))
+                                    ->helperText(__('Automatically fetch metadata (artwork, descriptions, episode info) from TMDB and TVMaze after recording.'))
+                                    ->default(true)
+                                    ->inline(false)
+                                    ->live(),
+                                TextInput::make('dvr_tmdb_api_key')
+                                    ->label(__('TMDB API Key'))
+                                    ->helperText(__('Your TMDB API key for metadata enrichment. Required for TMDB lookups. Leave blank to fall back to TVMaze only.'))
+                                    ->password()
+                                    ->revealable()
+                                    ->maxLength(255)
+                                    ->hidden(fn (Get $get): bool => ! $get('dvr_enable_metadata_enrichment')),
+                            ]),
+                    ]),
+            ])
+            ->hiddenOn('create');
+
         // Compose the form with tabs and sections
         return [
             Grid::make()

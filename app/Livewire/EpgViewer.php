@@ -3,17 +3,25 @@
 namespace App\Livewire;
 
 use App\Enums\ChannelLogoType;
+use App\Enums\DvrRuleType;
 use App\Filament\Resources\Channels\ChannelResource;
 use App\Filament\Resources\EpgChannels\EpgChannelResource;
 use App\Models\Channel;
+use App\Models\DvrRecordingRule;
+use App\Models\DvrSetting;
 use App\Models\Epg;
 use App\Models\EpgChannel;
+use App\Models\EpgProgramme;
+use App\Models\Playlist;
 use App\Services\EpgCacheService;
+use Carbon\Carbon;
 use Exception;
 use Filament\Actions\Action;
 use Filament\Actions\Concerns\InteractsWithActions;
 use Filament\Actions\Contracts\HasActions;
 use Filament\Actions\EditAction;
+use Filament\Forms\Components\Select;
+use Filament\Forms\Components\Toggle;
 use Filament\Forms\Concerns\InteractsWithForms;
 use Filament\Forms\Contracts\HasForms;
 use Filament\Notifications\Notification;
@@ -41,6 +49,15 @@ class EpgViewer extends Component implements HasActions, HasForms
 
     public $vod = true;
 
+    /** Whether the associated playlist has DVR enabled. */
+    public bool $dvrEnabled = false;
+
+    /** Programme data for the pending schedule action. */
+    public ?array $programmeData = null;
+
+    /** Channel database ID for the pending schedule action. */
+    public ?int $schedulingChannelId = null;
+
     // Use static cache to prevent Livewire from clearing it
     protected static $recordCache = [];
 
@@ -50,6 +67,11 @@ class EpgViewer extends Component implements HasActions, HasForms
     {
         $this->record = $record;
         $this->type = class_basename($this->record);
+
+        // Determine DVR enabled state for Playlist records
+        if ($this->type === 'Playlist') {
+            $this->dvrEnabled = (bool) $this->record->dvrSetting?->enabled;
+        }
     }
 
     /**
@@ -68,6 +90,7 @@ class EpgViewer extends Component implements HasActions, HasForms
     {
         return [
             $this->editChannelAction(),
+            $this->scheduleProgrammeAction(),
         ];
     }
 
@@ -153,6 +176,160 @@ class EpgViewer extends Component implements HasActions, HasForms
             })
             ->slideOver()
             ->modalWidth('4xl');
+    }
+
+    /**
+     * Action to schedule a one-off DVR recording for a specific programme.
+     */
+    public function scheduleProgrammeAction(): Action
+    {
+        return Action::make('scheduleProgramme')
+            ->label(__('Schedule Recording'))
+            ->icon('heroicon-o-video-camera')
+            ->color('danger')
+            ->schema([
+                Select::make('rule_type')
+                    ->label(__('Recording type'))
+                    ->options([
+                        DvrRuleType::Once->value => __('Once — record this episode only'),
+                        DvrRuleType::Series->value => __('Series — record all episodes with this title'),
+                    ])
+                    ->default(DvrRuleType::Once->value)
+                    ->required(),
+                Toggle::make('new_only')
+                    ->label(__('New episodes only'))
+                    ->helperText(__('Only record episodes marked as new. Applies to series rules only.'))
+                    ->default(false)
+                    ->inline(false),
+            ])
+            ->action(function (array $data) {
+                $this->handleScheduleProgramme($data);
+            })
+            ->slideOver(false)
+            ->modalWidth('lg');
+    }
+
+    /**
+     * Open the schedule programme modal for a specific programme.
+     *
+     * @param  array{title: string, start: string, stop: string, episode_num: ?string, category: ?string}  $programmeData
+     */
+    public function openScheduleProgramme(array $programmeData, int $channelDatabaseId): void
+    {
+        $this->programmeData = $programmeData;
+        $this->schedulingChannelId = $channelDatabaseId;
+        $this->mountAction('scheduleProgramme');
+    }
+
+    /**
+     * Create a DvrRecordingRule for the pending programme.
+     *
+     * @param  array{rule_type: string, new_only: bool}  $data
+     */
+    protected function handleScheduleProgramme(array $data): void
+    {
+        if (empty($this->programmeData) || empty($this->schedulingChannelId)) {
+            Notification::make()
+                ->danger()
+                ->title(__('Recording failed'))
+                ->body(__('Programme data is missing. Please try again.'))
+                ->send();
+
+            return;
+        }
+
+        /** @var Playlist $playlist */
+        $playlist = $this->record;
+        $dvrSetting = DvrSetting::where('playlist_id', $playlist->id)->where('enabled', true)->first();
+
+        if (! $dvrSetting) {
+            Notification::make()
+                ->danger()
+                ->title(__('DVR not enabled'))
+                ->body(__('Enable DVR for this playlist in the playlist settings before scheduling recordings.'))
+                ->send();
+
+            return;
+        }
+
+        /** @var Channel $channel */
+        $channel = Channel::find($this->schedulingChannelId);
+
+        if (! $channel) {
+            Notification::make()
+                ->danger()
+                ->title(__('Recording failed'))
+                ->body(__('Channel not found.'))
+                ->send();
+
+            return;
+        }
+
+        $ruleType = DvrRuleType::from($data['rule_type']);
+        $title = $this->programmeData['title'] ?? null;
+        $startTime = isset($this->programmeData['start']) ? Carbon::parse($this->programmeData['start']) : null;
+        $endTime = isset($this->programmeData['stop']) ? Carbon::parse($this->programmeData['stop']) : null;
+
+        // For 'once' rules, find or create the EpgProgramme record so the scheduler can match it
+        $programmeId = null;
+        if ($ruleType === DvrRuleType::Once && $startTime && $endTime && $title) {
+            $epgProgramme = EpgProgramme::firstOrCreate(
+                [
+                    'epg_channel_id' => $channel->epgChannel?->channel_id ?? '',
+                    'start_time' => $startTime,
+                ],
+                [
+                    'epg_id' => $channel->epgChannel?->epg_id ?? 0,
+                    'title' => $title,
+                    'end_time' => $endTime,
+                    'subtitle' => $this->programmeData['subtitle'] ?? null,
+                    'description' => $this->programmeData['desc'] ?? null,
+                    'category' => $this->programmeData['category'] ?? null,
+                    'episode_num' => $this->programmeData['episode_num'] ?? null,
+                    'is_new' => $this->programmeData['new'] ?? false,
+                ]
+            );
+            $programmeId = $epgProgramme->id;
+        }
+
+        try {
+            DvrRecordingRule::create([
+                'user_id' => $dvrSetting->user_id,
+                'dvr_setting_id' => $dvrSetting->id,
+                'type' => $ruleType,
+                'programme_id' => $programmeId,
+                'series_title' => $ruleType === DvrRuleType::Series ? $title : null,
+                'channel_id' => $channel->id,
+                'epg_channel_id' => $channel->epgChannel?->id,
+                'new_only' => $data['new_only'] ?? false,
+                'priority' => 0,
+                'enabled' => true,
+            ]);
+
+            $typeLabel = $ruleType === DvrRuleType::Series
+                ? __('series rule created')
+                : __('recording scheduled');
+
+            Notification::make()
+                ->success()
+                ->title(ucfirst($typeLabel))
+                ->body(__(':title has been :action.', ['title' => $title, 'action' => $typeLabel]))
+                ->send();
+        } catch (Exception $e) {
+            Log::error('Failed to create DVR recording rule', [
+                'error' => $e->getMessage(),
+                'programme' => $this->programmeData,
+            ]);
+
+            Notification::make()
+                ->danger()
+                ->title(__('Recording failed'))
+                ->body(__('An error occurred while scheduling the recording.'))
+                ->send();
+        } finally {
+            $this->programmeData = null;
+            $this->schedulingChannelId = null;
+        }
     }
 
     protected function getChannelRecord()

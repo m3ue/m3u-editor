@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\DispatcharrController;
 use App\Http\Controllers\AssetPreviewController;
 use App\Http\Controllers\Auth\OidcController;
 use App\Http\Controllers\ChannelController;
+use App\Http\Controllers\DvrStreamController;
 use App\Http\Controllers\EpgController;
 use App\Http\Controllers\EpgFileController;
 use App\Http\Controllers\EpgGenerateController;
@@ -346,3 +347,9 @@ Route::get('/webdav-media/{integration}/stream/{item}', [
     MediaServerProxyController::class,
     'streamWebDavMedia',
 ])->name('webdav-media.stream');
+
+/*
+ * DVR routes — file streaming and M3U playlist generation
+ */
+Route::get('/dvr/recordings/{uuid}/stream', [DvrStreamController::class, 'stream'])
+    ->name('dvr.recording.stream');

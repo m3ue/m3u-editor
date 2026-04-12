@@ -353,7 +353,7 @@
                                         <div class="absolute inset-0">
                                             <template x-for="(programme, programmeIndex) in item.channel.programmes"
                                                 :key="`${item.id}-${programmeIndex}-${programme.start || 'nostart'}-${programme.stop || 'nostop'}-${(programme.title || 'notitle').replace(/[^a-zA-Z0-9]/g, '')}`">
-                                                <div class="absolute rounded shadow-sm cursor-pointer group transition-all duration-200"
+                                                <div class="absolute rounded shadow-sm cursor-pointer group/prog transition-all duration-200"
                                                     :class="getProgrammeColorClass(programme)"
                                                     :style="`${getProgrammeStyle(programme)}; top: 2px; bottom: 2px;`"
                                                     x-tooltip.html="getTooltipContent(programme)">
@@ -368,6 +368,16 @@
                                                             style="font-size: 10px; line-height: 1;">
                                                             New
                                                         </div>
+                                                        @if(!$viewOnly && $dvrEnabled)
+                                                        <!-- DVR Record Button (visible on hover) -->
+                                                        <button
+                                                            x-show="item.channel.database_id"
+                                                            @click.stop="$wire.openScheduleProgramme(programme, item.channel.database_id)"
+                                                            class="absolute bottom-0.5 right-0.5 p-1 text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-200 bg-white/80 dark:bg-gray-800/80 rounded-full opacity-0 group-hover/prog:opacity-100 transition-opacity duration-150"
+                                                            title="{{ __('Schedule Recording') }}">
+                                                            <x-heroicon-s-video-camera class="w-3 h-3" />
+                                                        </button>
+                                                        @endif
                                                     </div>
                                                 </div>
                                                 {{-- <x-filament::modal width="2xl">

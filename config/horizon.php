@@ -194,6 +194,21 @@ return [
             'timeout' => 60 * 125, // Should be longer than the retry_after value set in queue.php
             'nice' => 0,
         ],
+
+        'dvr-queue' => [
+            'connection' => 'redis',
+            'queue' => ['dvr', 'dvr-post', 'dvr-meta'],
+            'balance' => 'auto',
+            'autoScalingStrategy' => 'time',
+            // Set maxProcesses to 1 if using SQLite to avoid database locks
+            'maxProcesses' => env('DB_CONNECTION', 'sqlite') === 'sqlite' ? 1 : 4,
+            'maxTime' => 0,
+            'maxJobs' => 0,
+            'memory' => 512, // MB
+            'tries' => 2, // DVR jobs get fewer retries to avoid duplicate recordings
+            'timeout' => 60 * 60, // 1 hour (long-running recordings)
+            'nice' => 5,
+        ],
     ],
 
     'environments' => [

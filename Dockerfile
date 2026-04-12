@@ -65,7 +65,10 @@ COPY package.json package-lock.json ./
 
 # Install all dependencies including dev deps (Vite is needed for build)
 # Note: NODE_ENV must NOT be set to production here, or npm ci will skip devDependencies
-RUN npm ci --silent
+# npm ci uses the lock file, which may contain only the glibc optional dep
+# (@rollup/rollup-linux-x64-gnu). Running npm rebuild afterwards forces npm to
+# resolve and install the correct musl variant for this Alpine environment.
+RUN npm ci --silent && npm rebuild
 
 # Copy only files needed for the build
 COPY vite.config.js postcss.config.js ./
