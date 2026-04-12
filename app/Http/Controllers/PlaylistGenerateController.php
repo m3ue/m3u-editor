@@ -283,6 +283,10 @@ class PlaylistGenerateController extends Controller
                         ->get();
 
                     foreach ($series as $s) {
+                        // Get season movie DB ID's as fallbacks for episode
+                        $movieDbIds = $s->getMovieDbIds() ?? [];
+                        $seriesTmdbId = $movieDbIds['tmdb'] ?? $movieDbIds['tvdb'] ?? $movieDbIds['imdb'] ?? null;
+
                         // Append the episodes
                         foreach ($s->episodes as $episode) {
                             // Set channel variables
@@ -333,6 +337,10 @@ class PlaylistGenerateController extends Controller
 
                             $extInf = "#EXTINF:$runtime";
                             $episodeTmdbId = $episode->tmdb_id ?: ($episode->info['tmdb_id'] ?? null);
+                            if (! $episodeTmdbId) {
+                                // Fallback to series TMDB ID if episode not set
+                                $episodeTmdbId = $seriesTmdbId;
+                            }
                             if ($episodeTmdbId) {
                                 $extInf .= " tmdb-id=\"{$episodeTmdbId}\"";
                             }
