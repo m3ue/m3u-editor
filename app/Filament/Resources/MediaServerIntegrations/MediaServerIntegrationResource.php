@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\MediaServerIntegrations;
 
 use App\Facades\PlaylistFacade;
+use App\Facades\ProxyFacade;
 use App\Filament\Concerns\HasCopilotSupport;
 use App\Filament\Resources\MediaServerIntegrations\Pages\CreateMediaServerIntegration;
 use App\Filament\Resources\MediaServerIntegrations\Pages\EditMediaServerIntegration;
@@ -778,9 +779,22 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                                                         return;
                                                     }
 
-                                                    $urls = PlaylistFacade::getUrls($playlist);
-                                                    $set('hdhr_base_url', $urls['hdhr'] ?? '');
-                                                    $set('epg_url', $urls['epg'] ?? '');
+                                                    // Build HDHR and EPG URLs using ProxyFacade which respects
+                                                    // the url_override setting and is request-aware via url('')
+                                                    $baseUrl = ProxyFacade::getBaseUrl();
+                                                    $uuid = $playlist->uuid;
+
+                                                    $playlistAuth = null;
+                                                    if (method_exists($playlist, 'playlistAuths')) {
+                                                        $playlistAuth = $playlist->playlistAuths()->where('enabled', true)->first();
+                                                    }
+                                                    $hdhrAuthPath = '';
+                                                    if ($playlistAuth) {
+                                                        $hdhrAuthPath = '/'.rawurlencode($playlistAuth->username).'/'.rawurlencode($playlistAuth->password);
+                                                    }
+
+                                                    $set('hdhr_base_url', $baseUrl."/{$uuid}/hdhr{$hdhrAuthPath}");
+                                                    $set('epg_url', $baseUrl."/epg/{$uuid}");
                                                 })
                                                 ->required(),
                                             Placeholder::make('tvg_id_warning')
@@ -798,11 +812,11 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                                                 }),
                                             TextInput::make('hdhr_base_url')
                                                 ->label(__('HDHR Base URL'))
-                                                ->helperText(__('This URL must be reachable from your Plex server. Use your machine\\\'s LAN IP, not localhost.'))
+                                                ->helperText(__('This URL must be reachable from your Plex server. Uses the Proxy URL Override or APP_URL. Adjust if Plex reaches m3u-editor via a different address (e.g. Docker internal IP).'))
                                                 ->required(),
                                             TextInput::make('epg_url')
                                                 ->label(__('EPG URL'))
-                                                ->helperText(__('XMLTV EPG guide URL. Must also be reachable from Plex.'))
+                                                ->helperText(__('XMLTV EPG guide URL. Must also be reachable from Plex. Adjust if needed.'))
                                                 ->required(),
                                             TextInput::make('dvr_country')
                                                 ->label(__('Country Code'))
