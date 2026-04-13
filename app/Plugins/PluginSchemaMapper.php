@@ -4,6 +4,7 @@ namespace App\Plugins;
 
 use App\Models\Plugin;
 use Filament\Forms\Components\Select;
+use Filament\Forms\Components\TagsInput;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
@@ -87,6 +88,7 @@ class PluginSchemaMapper
             'boolean' => Toggle::make($name),
             'number' => TextInput::make($name)->numeric(),
             'textarea' => Textarea::make($name)->rows(4),
+            'tags' => TagsInput::make($name)->splitKeys(['Tab', 'Return']),
             'select' => Select::make($name)->options($field['options'] ?? [])->searchable(),
             'model_select' => $this->modelSelectComponent($name, $field),
             'text' => TextInput::make($name),
@@ -157,6 +159,13 @@ class PluginSchemaMapper
                 }
                 // Per-item rule applied via wildcard.
                 $rules[$name.'.*'] = ['integer', $this->modelSelectExistsRule($field)];
+
+                continue;
+            }
+
+            if ($type === 'tags') {
+                $rules[$name] = [$required ? 'required' : 'nullable', 'array'];
+                $rules[$name.'.*'] = ['string'];
 
                 continue;
             }
