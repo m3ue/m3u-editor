@@ -1294,20 +1294,7 @@ class Preferences extends SettingsPage
                                             ->placeholder(__('Enter your TMDB API Key (v3 auth)'))
                                             ->password()
                                             ->revealable()
-                                            ->columnSpanFull()
                                             ->helperText(__('Your TMDB API key (v3 auth). You can get one for free at themoviedb.org.')),
-                                        Toggle::make('tmdb_auto_lookup_on_import')
-                                            ->label(__('Auto-lookup on metadata fetch'))
-                                            ->helperText(__('Automatically lookup TMDB IDs when fetching metadata for VOD and Series. This may slow down imports and metadata fetching for large playlists. Will only be fetched for enabled items.'))
-                                            ->default(false),
-                                        TextInput::make('tmdb_rate_limit')
-                                            ->label(__('Rate Limit (requests/second)'))
-                                            ->placeholder(__('40'))
-                                            ->numeric()
-                                            ->minValue(1)
-                                            ->maxValue(50)
-                                            ->default(40)
-                                            ->helperText(__('Maximum TMDB API requests per second. TMDB allows ~40 req/s for free accounts.')),
                                         Select::make('tmdb_language')
                                             ->label(__('Search Language'))
                                             ->searchable()
@@ -1337,6 +1324,22 @@ class Preferences extends SettingsPage
                                             ])
                                             ->default('en-US')
                                             ->helperText(__('Preferred language for TMDB searches.')),
+                                        Toggle::make('tmdb_auto_lookup_on_import')
+                                            ->label(__('Auto-lookup on metadata fetch'))
+                                            ->helperText(__('Automatically lookup TMDB IDs when fetching metadata for VOD and Series. This may slow down imports and metadata fetching for large playlists. Will only be fetched for enabled items.'))
+                                            ->default(false),
+                                        Toggle::make('tmdb_auto_create_groups')
+                                            ->label(__('Auto-create groups/categories from TMDB genres'))
+                                            ->helperText(__('When enabled, TMDB metadata fetching will automatically create new groups (for VOD) and categories (for Series) based on TMDB genres. When disabled, only existing groups/categories will be used.'))
+                                            ->default(false),
+                                        TextInput::make('tmdb_rate_limit')
+                                            ->label(__('Rate Limit (requests/second)'))
+                                            ->placeholder(__('40'))
+                                            ->numeric()
+                                            ->minValue(1)
+                                            ->maxValue(50)
+                                            ->default(40)
+                                            ->helperText(__('Maximum TMDB API requests per second. TMDB allows ~40 req/s for free accounts.')),
                                         TextInput::make('tmdb_confidence_threshold')
                                             ->label(__('Match Confidence Threshold (%)'))
                                             ->placeholder(__('80'))
@@ -1345,10 +1348,6 @@ class Preferences extends SettingsPage
                                             ->maxValue(100)
                                             ->default(80)
                                             ->helperText(__('Minimum title similarity percentage (50-100) required to accept a match. Higher values = stricter matching.')),
-                                        Toggle::make('tmdb_auto_create_groups')
-                                            ->label(__('Auto-create groups/categories from TMDB genres'))
-                                            ->helperText(__('When enabled, TMDB metadata fetching will automatically create new groups (for VOD) and categories (for Series) based on TMDB genres. When disabled, only existing groups/categories will be used.'))
-                                            ->default(false),
                                     ]),
                             ]),
                         Tab::make(__('API'))
