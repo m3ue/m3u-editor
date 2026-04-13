@@ -8,6 +8,7 @@ use App\Models\Group;
 use App\Models\Series;
 use App\Models\User;
 use App\Services\TmdbService;
+use App\Settings\GeneralSettings;
 use Filament\Notifications\Notification;
 use Illuminate\Bus\Batch;
 use Illuminate\Bus\Batchable;
@@ -27,6 +28,8 @@ class FetchTmdbIds implements ShouldQueue
     use Batchable, Queueable;
 
     public const BATCH_CHUNK_SIZE = 100;
+
+    protected bool $autoCreateGroups = false;
 
     protected const BATCH_STATS_TTL_HOURS = 6;
 
@@ -90,6 +93,8 @@ class FetchTmdbIds implements ShouldQueue
             'user_id' => $this->user?->id,
             'overwriteExisting' => $this->overwriteExisting,
         ]);
+
+        $this->autoCreateGroups = (bool) app(GeneralSettings::class)->tmdb_auto_create_groups;
 
         if (! $tmdb->isConfigured()) {
             Log::warning('FetchTmdbIds: TMDB API key not configured');
@@ -420,22 +425,24 @@ class FetchTmdbIds implements ShouldQueue
                         $info['genre'] = $details['genres'];
                         $updateData = ['info' => $info];
 
-                        $primaryGenre = $tmdbGenres[0] ?? null;
-                        if ($primaryGenre) {
-                            $group = Group::firstOrCreate(
-                                [
-                                    'playlist_id' => $channel->playlist_id,
-                                    'name' => $primaryGenre,
-                                ],
-                                [
-                                    'name_internal' => $primaryGenre,
-                                    'user_id' => $channel->user_id,
-                                    'type' => 'vod',
-                                ]
-                            );
-                            $updateData['group'] = $primaryGenre;
-                            $updateData['group_internal'] = $primaryGenre;
-                            $updateData['group_id'] = $group->id;
+                        if ($this->autoCreateGroups) {
+                            $primaryGenre = $tmdbGenres[0] ?? null;
+                            if ($primaryGenre) {
+                                $group = Group::firstOrCreate(
+                                    [
+                                        'playlist_id' => $channel->playlist_id,
+                                        'name' => $primaryGenre,
+                                    ],
+                                    [
+                                        'name_internal' => $primaryGenre,
+                                        'user_id' => $channel->user_id,
+                                        'type' => 'vod',
+                                    ]
+                                );
+                                $updateData['group'] = $primaryGenre;
+                                $updateData['group_internal'] = $primaryGenre;
+                                $updateData['group_id'] = $group->id;
+                            }
                         }
 
                         $channel->update($updateData);
@@ -524,26 +531,28 @@ class FetchTmdbIds implements ShouldQueue
                     $info['genre'] = $details['genres'];
 
                     // Update the channel's group to match the primary TMDB genre
-                    $primaryGenre = is_string($details['genres'])
-                        ? explode(', ', $details['genres'])[0]
-                        : (is_array($details['genres']) ? $details['genres'][0] : null);
+                    if ($this->autoCreateGroups) {
+                        $primaryGenre = is_string($details['genres'])
+                            ? explode(', ', $details['genres'])[0]
+                            : (is_array($details['genres']) ? $details['genres'][0] : null);
 
-                    if ($primaryGenre) {
-                        if (empty($channel->group) || $channel->group === 'Uncategorized' || $channel->group_internal === 'Uncategorized') {
-                            $group = Group::firstOrCreate(
-                                [
-                                    'playlist_id' => $channel->playlist_id,
-                                    'name' => $primaryGenre,
-                                ],
-                                [
-                                    'name_internal' => $primaryGenre,
-                                    'user_id' => $channel->user_id,
-                                    'type' => 'vod',
-                                ]
-                            );
-                            $updateData['group'] = $primaryGenre;
-                            $updateData['group_internal'] = $primaryGenre;
-                            $updateData['group_id'] = $group->id;
+                        if ($primaryGenre) {
+                            if (empty($channel->group) || $channel->group === 'Uncategorized' || $channel->group_internal === 'Uncategorized') {
+                                $group = Group::firstOrCreate(
+                                    [
+                                        'playlist_id' => $channel->playlist_id,
+                                        'name' => $primaryGenre,
+                                    ],
+                                    [
+                                        'name_internal' => $primaryGenre,
+                                        'user_id' => $channel->user_id,
+                                        'type' => 'vod',
+                                    ]
+                                );
+                                $updateData['group'] = $primaryGenre;
+                                $updateData['group_internal'] = $primaryGenre;
+                                $updateData['group_id'] = $group->id;
+                            }
                         }
                     }
                 }
@@ -714,20 +723,22 @@ class FetchTmdbIds implements ShouldQueue
                         $updateData = ['genre' => $details['genres']];
 
                         // Update category to match the primary TMDB genre
-                        $primaryGenre = $tmdbGenres[0] ?? null;
-                        if ($primaryGenre) {
-                            $category = Category::firstOrCreate(
-                                [
-                                    'playlist_id' => $series->playlist_id,
-                                    'name' => $primaryGenre,
-                                ],
-                                [
-                                    'name_internal' => $primaryGenre,
-                                    'user_id' => $series->user_id,
-                                ]
-                            );
-                            $updateData['category_id'] = $category->id;
-                            $updateData['source_category_id'] = $category->id;
+                        if ($this->autoCreateGroups) {
+                            $primaryGenre = $tmdbGenres[0] ?? null;
+                            if ($primaryGenre) {
+                                $category = Category::firstOrCreate(
+                                    [
+                                        'playlist_id' => $series->playlist_id,
+                                        'name' => $primaryGenre,
+                                    ],
+                                    [
+                                        'name_internal' => $primaryGenre,
+                                        'user_id' => $series->user_id,
+                                    ]
+                                );
+                                $updateData['category_id'] = $category->id;
+                                $updateData['source_category_id'] = $category->id;
+                            }
                         }
 
                         $series->update($updateData);
@@ -860,7 +871,7 @@ class FetchTmdbIds implements ShouldQueue
                 }
 
                 // Update the series' category when it is missing or Uncategorized.
-                if (! empty($details['genres'])) {
+                if ($this->autoCreateGroups && ! empty($details['genres'])) {
                     $primaryGenre = is_string($details['genres'])
                         ? explode(', ', $details['genres'])[0]
                         : (is_array($details['genres']) ? $details['genres'][0] : null);
