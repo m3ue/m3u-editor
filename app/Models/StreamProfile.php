@@ -42,6 +42,15 @@ class StreamProfile extends Model
     }
 
     /**
+     * Whether this profile uses a resolver backend (streamlink or yt-dlp)
+     * rather than FFmpeg for stream delivery.
+     */
+    public function isResolver(): bool
+    {
+        return ! empty($this->backend) && $this->backend !== 'ffmpeg';
+    }
+
+    /**
      * Get template variables for FFmpeg profile rendering.
      * The 'args' field can store either:
      * 1. A full FFmpeg argument template string (e.g., "-c:v libx264 -preset faster...")
@@ -61,8 +70,8 @@ class StreamProfile extends Model
     }
 
     /**
-     * Get the profile identifier for API usage.
-     * Returns either custom args template or predefined profile name.
+     * Get the profile identifier for FFmpeg API usage.
+     * Only applicable when backend is 'ffmpeg'.
      *
      * @return string Profile template or name for m3u-proxy API
      */
