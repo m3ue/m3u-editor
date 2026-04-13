@@ -1256,14 +1256,20 @@ class PlexManagementService
     public function syncDvrChannelsForTuner(string $deviceKey, string $playlistUuid): array
     {
         try {
+            // Memoize resolvePlaylistUrls so it is called at most once, whether we need it for
+            // the HDHR URL fallback, the EPG URL fallback, or both.
+            $resolvedUrls = null;
+            $resolveUrls = function () use (&$resolvedUrls, $playlistUuid): ?array {
+                return $resolvedUrls ??= $this->resolvePlaylistUrls($playlistUuid);
+            };
+
             // Prefer the stored HDHR base URL from the tuner entry (set during DVR registration)
             // so we use the same network path that was verified to work. Fall back to resolving
             // from PlaylistFacade for legacy tuners that don't have a stored URL.
             $hdhrBaseUrl = $this->getStoredHdhrBaseUrl($deviceKey, $playlistUuid);
 
             if (! $hdhrBaseUrl) {
-                $urls = $this->resolvePlaylistUrls($playlistUuid);
-                $hdhrBaseUrl = $urls['hdhr'] ?? null;
+                $hdhrBaseUrl = $resolveUrls()['hdhr'] ?? null;
             }
 
             if (! $hdhrBaseUrl) {
@@ -1288,8 +1294,7 @@ class PlexManagementService
 
             if (! $lineupId) {
                 // Fallback: rebuild from our known URL
-                $urls = $this->resolvePlaylistUrls($playlistUuid);
-                $epgUrl = $urls['epg'] ?? null;
+                $epgUrl = $resolveUrls()['epg'] ?? null;
                 if (! $epgUrl) {
                     return ['success' => false, 'message' => 'Could not resolve playlist EPG URL.'];
                 }
@@ -1786,7 +1791,9 @@ class PlexManagementService
             }
 
             // Prefer stored HDHR base URL from tuner entry, fall back to resolving from playlist
-            $hdhrBaseUrl = ! empty($tuner['hdhr_base_url']) ? $tuner['hdhr_base_url'] : null;
+            $hdhrBaseUrl = $deviceKey !== null
+                ? $this->getStoredHdhrBaseUrl($deviceKey, $playlistUuid)
+                : null;
 
             if (! $hdhrBaseUrl) {
                 $urls = $this->resolvePlaylistUrls($playlistUuid);

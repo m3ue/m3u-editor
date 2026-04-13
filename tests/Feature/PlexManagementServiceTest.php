@@ -1252,6 +1252,70 @@ it('verifies DVR sync detects stale DVR', function () {
     expect($this->integration->plex_dvr_id)->toBeNull();
 });
 
+it('verifyDvrSync uses stored hdhr_base_url from tuner entry', function () {
+    $storedUrl = 'http://172.18.0.5:36400/test-uuid/hdhr';
+
+    $this->integration->update([
+        'plex_dvr_id' => '42',
+        'plex_dvr_tuners' => [
+            [
+                'device_key' => 'device-1',
+                'playlist_uuid' => 'test-uuid',
+                'hdhr_base_url' => $storedUrl,
+            ],
+        ],
+    ]);
+
+    $lineupFetched = false;
+
+    Http::fake(function ($request) use ($storedUrl, &$lineupFetched) {
+        $url = $request->url();
+
+        // DVR detail (getDvrChannels)
+        if (preg_match('#/livetv/dvrs/42$#', parse_url($url, PHP_URL_PATH) ?? '')) {
+            return Http::response(['MediaContainer' => ['Dvr' => [
+                ['key' => '42', 'Lineup' => [
+                    ['id' => 'lineup://tv.plex.providers.epg.xmltv/test', 'title' => 'XMLTV Guide'],
+                ], 'Device' => [['key' => 'device-1', 'ChannelMapping' => [
+                    ['channelKey' => '1', 'deviceIdentifier' => '1', 'enabled' => '1', 'lineupIdentifier' => '1'],
+                ]]]],
+            ]]]);
+        }
+
+        // DVR list (verifyDvrExists + getDvrLineupId)
+        if (str_contains($url, '/livetv/dvrs') && ! str_contains($url, 'lineupchannels')) {
+            return Http::response(['MediaContainer' => ['Dvr' => [
+                ['key' => '42', 'Lineup' => [
+                    ['id' => 'lineup://tv.plex.providers.epg.xmltv/test', 'title' => 'XMLTV Guide'],
+                ], 'Device' => [['key' => 'device-1']]],
+            ]]]);
+        }
+
+        if (str_contains($url, '/livetv/epg/lineupchannels')) {
+            return Http::response(['MediaContainer' => ['Lineup' => [
+                ['Channel' => [['channelVcn' => '1', 'identifier' => 'ch-1', 'key' => '1']]],
+            ]]]);
+        }
+
+        // HDHR lineup — must be fetched from the stored Docker-internal URL, not a resolved route
+        if ($url === $storedUrl.'/lineup.json') {
+            $lineupFetched = true;
+
+            return Http::response([
+                ['GuideNumber' => '1', 'GuideName' => 'Channel 1', 'URL' => 'http://test/1'],
+            ]);
+        }
+
+        return Http::response([], 200);
+    });
+
+    $service = PlexManagementService::make($this->integration);
+    $result = $service->verifyDvrSync();
+
+    expect($lineupFetched)->toBeTrue('Expected lineup to be fetched from stored hdhr_base_url');
+    expect($result['success'])->toBeTrue();
+});
+
 it('stores hdhr_base_url in tuner entry when adding DVR device', function () {
     $hdhrBaseUrl = 'http://172.18.0.5:36400/test-uuid/hdhr';
 
