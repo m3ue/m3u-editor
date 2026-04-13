@@ -14,7 +14,7 @@ const OS_OPTIONS = {
 }
 
 const OS_SELECTORS = [
-    'body',
+    // 'body',
     '.fi-sidebar-nav',
 ].join(', ')
 
