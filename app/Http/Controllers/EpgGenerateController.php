@@ -702,14 +702,20 @@ class EpgGenerateController extends Controller
         // Get the content
         $filePath = null;
         if ($epg->url && str_starts_with($epg->url, 'http')) {
-            $filePath = Storage::disk('local')->path($epg->file_path);
+            $localPath = Storage::disk('local')->path($epg->file_path);
+            if (! file_exists($localPath)) {
+                Log::warning("EPG source file not found on disk for EPG \"{$epg->name}\": {$localPath}");
+
+                return;
+            }
+            $filePath = $localPath;
         } elseif ($epg->uploads && Storage::disk('local')->exists($epg->uploads)) {
             $filePath = Storage::disk('local')->path($epg->uploads);
         } elseif ($epg->url) {
             $filePath = $epg->url;
         }
 
-        if (! $filePath || ! file_exists($filePath)) {
+        if (! $filePath) {
             // Send notification
             $error = 'Invalid EPG file. Unable to read or download an associated EPG file. Please check the URL or uploaded file and try again.';
             Notification::make()
