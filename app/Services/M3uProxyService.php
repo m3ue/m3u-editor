@@ -1848,11 +1848,22 @@ class M3uProxyService
             $endpoint = $this->apiBaseUrl.'/transcode';
 
             // Build the payload for transcoding
-            $payload = [
-                'url' => $url,
-                'profile' => $profile->getProfileIdentifier(),  // Custom args template or predefined profile name
-                'metadata' => $metadata,
-            ];
+            if ($profile->isResolver()) {
+                // Resolver backend (streamlink / yt-dlp) — pass resolver fields, not FFmpeg profile
+                $payload = [
+                    'url' => $url,
+                    'resolver' => $profile->backend,
+                    'resolver_args' => $profile->args ?? '',
+                    'metadata' => $metadata,
+                ];
+            } else {
+                // FFmpeg backend — pass profile template/name as before
+                $payload = [
+                    'url' => $url,
+                    'profile' => $profile->getProfileIdentifier(),
+                    'metadata' => $metadata,
+                ];
+            }
 
             // Handle strict_live_ts flag if set in metadata
             if ($metadata['strict_live_ts'] ?? false) {

@@ -11,6 +11,7 @@ use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Resources\Resource;
+use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Enums\RecordActionsPosition;
@@ -55,7 +56,7 @@ class StreamProfileResource extends Resource implements CopilotResource
                     ->required()
                     ->columnSpanFull()
                     ->maxLength(255)
-                    ->helperText(__('A descriptive name for this transcoding profile (e.g., "720p Standard", "1080p High Quality")')),
+                    ->helperText(__('A descriptive name for this profile (e.g., "720p Standard", "Twitch Stream")')),
 
                 Textarea::make('description')
                     ->label(__('Description'))
@@ -64,23 +65,58 @@ class StreamProfileResource extends Resource implements CopilotResource
                     ->maxLength(255)
                     ->helperText(__('Optional description of what this profile does')),
 
+                Select::make('backend')
+                    ->label(__('Stream Backend'))
+                    ->options([
+                        'ffmpeg' => 'FFmpeg (transcoding)',
+                        'streamlink' => 'Streamlink',
+                        'ytdlp' => 'yt-dlp',
+                    ])
+                    ->searchable()
+                    ->default('ffmpeg')
+                    ->required()
+                    ->live()
+                    ->columnSpanFull()
+                    ->helperText(__('FFmpeg re-encodes the stream. Streamlink and yt-dlp extract and deliver streams directly from supported platforms (Twitch, YouTube, etc.) without re-encoding.')),
+
                 Textarea::make('args')
-                    ->label(__('FFmpeg Template'))
+                    ->label(fn (Get $get): string => match ($get('backend')) {
+                        'streamlink' => __('Quality & Options'),
+                        'ytdlp' => __('Format Selector & Options'),
+                        default => __('FFmpeg Template'),
+                    })
                     ->required()
                     ->columnSpanFull()
                     ->rows(4)
                     ->hintAction(
-                        Action::make('view_profile_docs')
+                        fn (Get $get) => Action::make('view_profile_docs')
                             ->label(__('View Docs'))
                             ->icon('heroicon-o-arrow-top-right-on-square')
                             ->iconPosition('after')
                             ->size('sm')
-                            ->url('https://m3ue.sparkison.dev/docs/proxy/transcoding')
+                            ->url(match ($get('backend')) {
+                                'streamlink' => 'https://streamlink.github.io/cli.html',
+                                'ytdlp' => 'https://github.com/yt-dlp/yt-dlp#usage-and-options',
+                                default => 'https://m3ue.sparkison.dev/docs/proxy/transcoding',
+                            })
                             ->openUrlInNewTab(true)
                     )
-                    ->default('-i {input_url} -c:v libx264 -preset faster -crf {crf|23} -maxrate {maxrate|2500k} -bufsize {bufsize|5000k} -c:a aac -b:a {audio_bitrate|192k} -f mpegts {output_args|pipe:1}')
-                    ->placeholder('-i {input_url} -c:v libx264 -preset faster -crf {crf|23} -maxrate {maxrate|2500k} -bufsize {bufsize|5000k} -c:a aac -b:a {audio_bitrate|192k} -f mpegts {output_args|pipe:1}')
-                    ->helperText('FFmpeg arguments for transcoding. Use placeholders like {crf|23} for configurable parameters with defaults. Hardware acceleration will be applied automatically by the proxy server.'),
+                    ->default(fn (Get $get): string => match ($get('backend')) {
+                        'streamlink' => 'best',
+                        'ytdlp' => 'bestvideo+bestaudio/best',
+                        default => '-i {input_url} -c:v libx264 -preset faster -crf {crf|23} -maxrate {maxrate|2500k} -bufsize {bufsize|5000k} -c:a aac -b:a {audio_bitrate|192k} -f mpegts {output_args|pipe:1}',
+                    })
+                    ->placeholder(fn (Get $get): string => match ($get('backend')) {
+                        'streamlink' => 'best',
+                        'ytdlp' => 'bestvideo+bestaudio/best',
+                        default => '-i {input_url} -c:v libx264 -preset faster -crf {crf|23} -maxrate {maxrate|2500k} -bufsize {bufsize|5000k} -c:a aac -b:a {audio_bitrate|192k} -f mpegts {output_args|pipe:1}',
+                    })
+                    ->helperText(fn (Get $get): string => match ($get('backend')) {
+                        'streamlink' => __('Quality selector (best, worst, 720p, etc.) followed by optional Streamlink flags. Example: best --hls-live-edge 3'),
+                        'ytdlp' => __('yt-dlp format selector followed by optional flags. Example: bestvideo+bestaudio/best --no-playlist'),
+                        default => __('FFmpeg arguments for transcoding. Use placeholders like {crf|23} for configurable parameters with defaults. Hardware acceleration will be applied automatically by the proxy server.'),
+                    }),
+
                 Select::make('format')
                     ->label(__('Stream Format'))
                     ->searchable()
@@ -98,7 +134,11 @@ class StreamProfileResource extends Resource implements CopilotResource
                     ])
                     ->default('ts')
                     ->required()
-                    ->helperText(__('The container format for the output stream.')),
+                    ->helperText(fn (Get $get): string => match ($get('backend')) {
+                        'streamlink' => __('The container format Streamlink will output. This sets the URL extension (e.g. .ts, .mp4) so players know how to handle the stream. Must match the format Streamlink actually produces for the selected quality.'),
+                        'ytdlp' => __('The container format yt-dlp will output. This sets the URL extension (e.g. .ts, .mp4) so players know how to handle the stream. Must match the format produced by your yt-dlp format selector.'),
+                        default => __('The container format FFmpeg will produce. Must match the -f muxer argument in your FFmpeg template above.'),
+                    }),
             ]);
     }
 
@@ -114,6 +154,20 @@ class StreamProfileResource extends Resource implements CopilotResource
                     ->label(__('Description'))
                     ->sortable()
                     ->searchable(),
+                TextColumn::make('backend')
+                    ->label(__('Backend'))
+                    ->badge()
+                    ->formatStateUsing(fn (string $state): string => match ($state) {
+                        'streamlink' => 'Streamlink',
+                        'ytdlp' => 'yt-dlp',
+                        default => 'FFmpeg',
+                    })
+                    ->color(fn (string $state): string => match ($state) {
+                        'streamlink' => 'info',
+                        'ytdlp' => 'warning',
+                        default => 'gray',
+                    })
+                    ->sortable(),
                 TextColumn::make('format')
                     ->label(__('Format'))
                     ->badge()

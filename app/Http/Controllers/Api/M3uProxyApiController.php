@@ -134,6 +134,7 @@ class M3uProxyApiController extends Controller
         $channel = Channel::query()->with([
             'playlist',
             'customPlaylist',
+            'streamProfile',
         ])->findOrFail($id);
 
         if ($uuid) {
@@ -142,14 +143,16 @@ class M3uProxyApiController extends Controller
             $playlist = $channel->getEffectivePlaylist();
         }
 
-        // Use in-app player transcoding profiles (from Preferences > In-App Player Transcoding).
+        // Channel-level profile takes priority over the global in-app player default.
         // Playlist-level stream profiles are for external clients only — they should not
-        // apply to the in-app floating/popout player.
+        // apply to the in-app floating/popout player. The global defaults (from Preferences >
+        // In-App Player Transcoding) serve as the fallback when no channel-level profile is set.
         $settings = app(GeneralSettings::class);
-        $profileId = $channel->is_vod
+        $globalProfileId = $channel->is_vod
             ? ($settings->default_vod_stream_profile_id ?? null)
             : ($settings->default_stream_profile_id ?? null);
-        $profile = $profileId ? StreamProfile::find($profileId) : null;
+        $profile = $channel->streamProfile
+            ?? ($globalProfileId ? StreamProfile::find($globalProfileId) : null);
 
         $url = app(M3uProxyService::class)
             ->getChannelUrl(

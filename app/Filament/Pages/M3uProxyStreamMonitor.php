@@ -303,12 +303,19 @@ class M3uProxyStreamMonitor extends Page
 
                 $transcoding = $stream['metadata']['transcoding'] ?? false;
                 $transcodingFormat = null;
+                $transcodingBackend = null;
                 if ($transcoding) {
                     $profile = StreamProfile::find($stream['metadata']['profile_id'] ?? null);
                     if ($profile) {
                         $transcodingFormat = $profile->format === 'm3u8'
                             ? 'HLS'
                             : strtoupper($profile->format);
+                        $transcodingBackend = match ($profile->backend) {
+                            'streamlink' => 'Streamlink',
+                            'ytdlp' => 'yt-dlp',
+                            'ffmpeg' => 'FFmpeg',
+                            default => null,
+                        };
                     }
                 }
 
@@ -360,6 +367,7 @@ class M3uProxyStreamMonitor extends Page
                     'segments_served' => $stream['total_segments_served'],
                     'transcoding' => $transcoding,
                     'transcoding_format' => $transcodingFormat,
+                    'transcoding_backend' => $transcodingBackend,
                     'playlist_name' => $playlistName,
                     'profiles_enabled' => $profilesEnabled,
                     'provider_profile' => $providerProfileName,

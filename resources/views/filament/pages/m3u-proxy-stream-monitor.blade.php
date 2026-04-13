@@ -191,6 +191,11 @@ echo $totalBandwidth > 1000 ? round($totalBandwidth / 1000, 1) . ' Mbps' : $tota
                                             {{ $stream['transcoding_format'] ?? 'N/A' }}
                                         </span>
                                     @endif
+                                    @if($stream['transcoding_backend'] ?? false)
+                                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-teal-100 dark:bg-teal-900 text-teal-800 dark:text-teal-200">
+                                            {{ $stream['transcoding_backend'] }}
+                                        </span>
+                                    @endif
                                     @if($stream['using_failover'])
                                         <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-orange-100 dark:bg-orange-900 text-orange-800 dark:text-orange-200">
                                             <x-heroicon-s-arrow-path class="w-3 h-3 mr-1" />

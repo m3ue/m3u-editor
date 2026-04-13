@@ -420,13 +420,23 @@ class Preferences extends SettingsPage
                                                         }
                                                         $details .= "\n";
 
+                                                        // Transcoding is available in all modes
+                                                        $details .= "**Transcoding:** ✅ Available\n";
+                                                        $details .= "\n";
+
                                                         // FFmpeg Version
                                                         $ffmpegVersion = $info['ffmpeg_version'] ?? 'Unknown';
                                                         $details .= "**FFmpeg Version:** \n\n{$ffmpegVersion}\n\n";
 
-                                                        // Transcoding is available in all modes
-                                                        $details .= "**Transcoding:** ✅ Available\n";
-                                                        $details .= "\n";
+                                                        // Streamlink
+                                                        $streamlinkVersion = $info['streamlink_version'] ?? null;
+                                                        $streamlinkStatus = $streamlinkVersion ? "✅ {$streamlinkVersion}" : '❌ Not installed';
+                                                        $details .= "**Streamlink:** {$streamlinkStatus}\n\n";
+
+                                                        // yt-dlp
+                                                        $ytdlpVersion = $info['ytdlp_version'] ?? null;
+                                                        $ytdlpStatus = $ytdlpVersion ? "✅ {$ytdlpVersion}" : '❌ Not installed';
+                                                        $details .= "**yt-dlp:** {$ytdlpStatus}\n\n";
 
                                                         // Redis Pooling
                                                         $poolingEnabled = $info['redis']['pooling_enabled'];

@@ -190,10 +190,15 @@ class Channel extends Model
     {
         $settings = app(GeneralSettings::class);
 
-        $profileId = $this->is_vod
+        // Channel-level profile takes priority; global in-app default is the fallback.
+        // Playlist-level profiles are for external clients and are intentionally excluded here.
+        $globalProfileId = $this->is_vod
             ? ($settings->default_vod_stream_profile_id ?? null)
             : ($settings->default_stream_profile_id ?? null);
-        $profile = $profileId ? StreamProfile::find($profileId) : null;
+        $profile = $this->relationLoaded('streamProfile')
+            ? $this->streamProfile
+            : $this->streamProfile()->first();
+        $profile ??= ($globalProfileId ? StreamProfile::find($globalProfileId) : null);
 
         // When no transcoding profile is set, the proxy delivers raw bytes (direct proxy),
         // not an HLS manifest. For VOD channels, use the actual container extension for both
