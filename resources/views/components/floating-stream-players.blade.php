@@ -105,9 +105,9 @@
                     :data-content-type="player.content_type || ''" :data-stream-id="player.stream_id || ''"
                     :data-playlist-id="player.playlist_id || ''" :data-series-id="player.series_id || ''"
                     :data-season-number="player.season_number || ''" x-init="
-                        if (window.streamPlayer && $el.dataset.streamUrl && $el.dataset.streamUrl !== '') {
+                        if (window.streamPlayer && player.url) {
                             playerInstance = window.streamPlayer();
-                            playerInstance.initPlayer($el.dataset.streamUrl, $el.dataset.streamFormat, $el.id);
+                            playerInstance.initPlayer(getStreamUrlWithSession(player), $el.dataset.streamFormat, $el.id);
                         }
                     ">
                     <p class="text-white p-4">Your browser does not support video playback.</p>
@@ -139,7 +139,7 @@
                             @click="
                                 const videoEl = document.getElementById(player.id + '-video');
                                 if (videoEl && videoEl._streamPlayer) {
-                                    videoEl._streamPlayer.initPlayer(player.url, player.format, player.id + '-video');
+                                    videoEl._streamPlayer.initPlayer(getStreamUrlWithSession(player), player.format, player.id + '-video');
                                 }
                             ">
                             Retry

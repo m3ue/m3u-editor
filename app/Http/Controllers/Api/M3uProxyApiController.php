@@ -18,6 +18,7 @@ use Exception;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Redis;
 use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -159,6 +160,10 @@ class M3uProxyApiController extends Controller
                 $profile
             );
 
+        // Register this player session so the stop endpoint knows how many
+        // in-app viewers are active for this content.
+        self::registerPlayerSession('channel', (string) $id, $request->input('player_session'));
+
         return redirect($url);
     }
 
@@ -196,6 +201,10 @@ class M3uProxyApiController extends Controller
                 null,
                 $request
             );
+
+        // Register this player session so the stop endpoint knows how many
+        // in-app viewers are active for this content.
+        self::registerPlayerSession('episode', (string) $id, $request->input('player_session'));
 
         return redirect($url);
     }
@@ -684,6 +693,11 @@ class M3uProxyApiController extends Controller
      * Called via sendBeacon from the browser when a floating/popout player is closed
      * or when the user navigates away. This is a best-effort signal; the proxy will
      * also detect the TCP connection drop independently.
+     *
+     * When a player_session is provided, the stream is only stopped if no other
+     * in-app player sessions remain for the same content. This prevents one
+     * player closure from killing streams used by other players, tabs, or
+     * external clients watching the same channel/episode.
      */
     public function stopPlayerStream(Request $request): Response
     {
@@ -704,6 +718,24 @@ class M3uProxyApiController extends Controller
             return response()->noContent(422);
         }
 
+        $playerSession = $request->input('player_session');
+
+        // If a player session is provided, unregister it and only stop the proxy
+        // stream when no other in-app sessions remain for this content.
+        if ($playerSession) {
+            $remaining = self::unregisterPlayerSession($type, (string) $id, $playerSession);
+
+            if ($remaining > 0) {
+                Log::debug("Player session removed but {$remaining} session(s) remain, skipping proxy stop", [
+                    'type' => $type,
+                    'id' => $id,
+                    'player_session' => $playerSession,
+                ]);
+
+                return response()->noContent();
+            }
+        }
+
         try {
             M3uProxyService::stopStreamsByMetadata($field, (string) $id);
         } catch (Exception $e) {
@@ -711,5 +743,49 @@ class M3uProxyApiController extends Controller
         }
 
         return response()->noContent();
+    }
+
+    /**
+     * Register an in-app player session for a piece of content.
+     *
+     * Each floating/popout player instance gets a unique session ID. The Redis
+     * set tracks how many in-app viewers are active so the stop endpoint can
+     * avoid killing streams that other viewers still need.
+     */
+    private static function registerPlayerSession(string $type, string $contentId, ?string $playerSession): void
+    {
+        if (! $playerSession) {
+            return;
+        }
+
+        $key = "player_sessions:{$type}:{$contentId}";
+
+        try {
+            Redis::sadd($key, $playerSession);
+            Redis::expire($key, 3600);
+        } catch (Exception $e) {
+            Log::debug("Failed to register player session: {$e->getMessage()}");
+        }
+    }
+
+    /**
+     * Unregister an in-app player session and return the remaining count.
+     *
+     * @return int Number of sessions still active for this content
+     */
+    private static function unregisterPlayerSession(string $type, string $contentId, string $playerSession): int
+    {
+        $key = "player_sessions:{$type}:{$contentId}";
+
+        try {
+            Redis::srem($key, $playerSession);
+
+            return (int) Redis::scard($key);
+        } catch (Exception $e) {
+            Log::debug("Failed to unregister player session: {$e->getMessage()}");
+
+            // On failure, fall through to stop the stream (safe default)
+            return 0;
+        }
     }
 }

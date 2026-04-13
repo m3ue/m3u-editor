@@ -19,6 +19,9 @@ function streamPlayer() {
         selectedAudioTrack: null,
         fragmentErrorCount: 0,
         _videoHandlers: {},
+        _stallTimer: null,
+        _stallReinitCount: 0,
+        _hasPlayed: false,
 
         // ── Watch Progress ────────────────────────────────────────────────
         progressConfig: null,   // { contentType, streamId, playlistId, seriesId, seasonNumber }
@@ -103,6 +106,36 @@ function streamPlayer() {
             if (this._progressTimer) {
                 clearInterval(this._progressTimer);
                 this._progressTimer = null;
+            }
+        },
+
+        // ── Stall detection for MPEG-TS discontinuity recovery ───────────
+        _startStallTimer(video, playerId) {
+            if (this._stallTimer) return; // already ticking
+            this._stallTimer = setTimeout(() => {
+                this._stallTimer = null;
+                // Guard: only act if the video is still waiting and mpegts exists
+                if (!this.mpegts || video.paused || video.readyState >= 3) return;
+
+                this._stallReinitCount++;
+                if (this._stallReinitCount > 3) {
+                    this.showError(playerId, 'Stream stalled');
+                    return;
+                }
+
+                console.warn(`[stream-viewer] Stall detected (attempt ${this._stallReinitCount}/3), reloading mpegts stream`);
+                this.updateStatus(playerId, 'Reconnecting...');
+                this._hasPlayed = false;
+                this.mpegts.unload();
+                this.mpegts.load();
+                video.play().catch(() => {});
+            }, 5000);
+        },
+
+        _clearStallTimer() {
+            if (this._stallTimer) {
+                clearTimeout(this._stallTimer);
+                this._stallTimer = null;
             }
         },
 
@@ -495,15 +528,24 @@ function streamPlayer() {
                     this.collectVideoMetadata(video, playerId);
                 },
                 canplay: () => {
+                    this._clearStallTimer();
                     this.updateStatus(playerId, 'Ready');
                     this.collectVideoMetadata(video, playerId);
                 },
                 playing: () => {
+                    this._clearStallTimer();
+                    this._hasPlayed = true;
+                    this._stallReinitCount = 0;
                     this.updateStatus(playerId, 'Playing');
                     this._startProgressTimer();
                     setTimeout(() => {
                         this.collectVideoMetadata(video, playerId);
                     }, 1000);
+                },
+                waiting: () => {
+                    // Only auto-recover mpegts streams that were already playing
+                    if (!this.mpegts || !this._hasPlayed) return;
+                    this._startStallTimer(video, playerId);
                 },
                 pause: () => {
                     this._saveProgress(true);
@@ -767,9 +809,12 @@ function streamPlayer() {
         },
 
         cleanup() {
-            // Save final progress and stop timer
+            // Save final progress and stop timers
             this._saveProgress(true);
             this._stopProgressTimer();
+            this._clearStallTimer();
+            this._hasPlayed = false;
+            this._stallReinitCount = 0;
 
             // Reset progress state
             this.progressConfig = null;
@@ -878,16 +923,21 @@ window.toggleStreamDetails = toggleStreamDetails;
  * Notify the proxy server to stop a player stream (best-effort via sendBeacon).
  * Shared by the floating player manager and the pop-out player.
  *
- * @param {string|number} id   - The stream/channel ID
- * @param {string}        type - 'channel' or 'episode'
+ * @param {string|number} id            - The stream/channel ID
+ * @param {string}        type          - 'channel' or 'episode'
+ * @param {string|null}   playerSession - Unique player instance ID for session-guarded stopping
  */
-function notifyProxyStreamStop(id, type) {
+function notifyProxyStreamStop(id, type, playerSession) {
     if (!id || !type) {
         return;
     }
     try {
+        const payload = { id, type };
+        if (playerSession) {
+            payload.player_session = playerSession;
+        }
         const data = new Blob(
-            [JSON.stringify({ id, type })],
+            [JSON.stringify(payload)],
             { type: 'application/json' }
         );
         navigator.sendBeacon('/api/m3u-proxy/player-stream/stop', data);

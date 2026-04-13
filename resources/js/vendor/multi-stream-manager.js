@@ -143,6 +143,22 @@ function multiStreamManager() {
             };
         },
 
+        /**
+         * Return the stream URL with a player_session query parameter appended.
+         * This lets the server track which in-app player instances are active
+         * for a given piece of content, so closing one player doesn't kill
+         * streams used by other players, tabs, or external clients.
+         */
+        getStreamUrlWithSession(player) {
+            try {
+                const url = new URL(player.url, window.location.origin);
+                url.searchParams.set('player_session', player.id);
+                return url.toString();
+            } catch (e) {
+                return player.url;
+            }
+        },
+
         initializePlayer(player) {
             const videoElement = document.getElementById(player.id + '-video');
             if (videoElement && window.streamPlayer) {
@@ -241,10 +257,12 @@ function multiStreamManager() {
         /**
          * Notify the server to stop the proxy stream for this player.
          * Delegates to the shared notifyProxyStreamStop utility in stream-viewer.js.
+         * Passes the unique player instance ID so the server only stops the proxy
+         * stream when the last in-app viewer for that content disconnects.
          */
         notifyServerStreamStop(player) {
             if (window.notifyProxyStreamStop) {
-                window.notifyProxyStreamStop(player.channelId, player.channelType);
+                window.notifyProxyStreamStop(player.channelId, player.channelType, player.id);
             }
         },
 
@@ -334,6 +352,7 @@ function multiStreamManager() {
                 playlist_id: player.playlist_id ?? '',
                 series_id: player.series_id ?? '',
                 season_number: player.season_number ?? '',
+                player_session: player.id ?? '',
             });
 
             window.open(popoutRoute + '?' + params.toString(), '_blank', 'noopener');

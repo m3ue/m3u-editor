@@ -47,6 +47,7 @@ class PlayerController extends Controller
         $playlistId = (int) $request->query('playlist_id', 0);
         $seriesId = (int) $request->query('series_id', 0);
         $seasonNumber = (int) $request->query('season_number', 0);
+        $playerSession = (string) $request->query('player_session', '');
 
         $channelTitle = (string) $request->query('display_title', $request->query('title', 'Channel Player'));
 
@@ -60,6 +61,7 @@ class PlayerController extends Controller
             'playlistId' => $playlistId ?: null,
             'seriesId' => $seriesId ?: null,
             'seasonNumber' => $seasonNumber ?: null,
+            'playerSession' => $playerSession ?: null,
         ]);
     }
 }

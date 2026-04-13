@@ -28,7 +28,7 @@
             <video id="popout-player" class="h-full w-full" controls autoplay preload="metadata"
                 data-url="{{ $streamUrl }}" data-format="{{ $streamFormat }}" data-content-type="{{ $contentType }}"
                 data-stream-id="{{ $streamId }}" data-playlist-id="{{ $playlistId }}" data-series-id="{{ $seriesId }}"
-                data-season-number="{{ $seasonNumber }}">
+                data-season-number="{{ $seasonNumber }}" data-player-session="{{ $playerSession }}">
                 <p class="p-4">Your browser does not support video playback.</p>
             </video>
 
@@ -123,8 +123,22 @@
             const streamUrl = videoElement.dataset.url ?? '';
             const streamFormat = videoElement.dataset.format ?? 'ts';
 
+            // Use the transferred player session from the floating player, or generate
+            // a new one if this popout was opened directly.
+            const playerSession = videoElement.dataset.playerSession || 'popout-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+
+            // Append player session to the stream URL so the server can track this viewer.
+            let sessionStreamUrl = streamUrl;
+            try {
+                const url = new URL(streamUrl, window.location.origin);
+                url.searchParams.set('player_session', playerSession);
+                sessionStreamUrl = url.toString();
+            } catch (e) {
+                // Fall back to original URL if parsing fails
+            }
+
             const player = window.streamPlayer();
-            player.initPlayer(streamUrl, streamFormat, 'popout-player');
+            player.initPlayer(sessionStreamUrl, streamFormat, 'popout-player');
 
             // Show PiP button if supported
             if (document.pictureInPictureEnabled) {
@@ -152,7 +166,7 @@
                 const streamId = videoElement.dataset.streamId || '';
                 const type = contentType === 'episode' ? 'episode' : 'channel';
                 if (window.notifyProxyStreamStop) {
-                    window.notifyProxyStreamStop(streamId, type);
+                    window.notifyProxyStreamStop(streamId, type, playerSession);
                 }
                 if (typeof player.cleanup === 'function') {
                     player.cleanup();
