@@ -71,19 +71,21 @@ class EpgCacheService
         }
 
         try {
-            // Check if EPG file has been modified since cache was created
-            $epgFilePath = Storage::disk('local')->path($epg->file_path);
-            if (! file_exists($epgFilePath)) {
-                return false;
-            }
-
             // Use json_decode for metadata parsing since it will be a small file
             $metadata = json_decode(Storage::disk('local')->get($metadataPath), true);
 
-            $epgFileModified = filemtime($epgFilePath);
-            $cacheCreated = $metadata['cache_created'] ?? 0;
+            // Check if EPG source file has been modified since cache was created.
+            // If the source file no longer exists (e.g. cleaned up after caching,
+            // or lost on a volume restart), treat the existing cache as still valid.
+            $epgFilePath = Storage::disk('local')->path($epg->file_path);
+            if (file_exists($epgFilePath)) {
+                $epgFileModified = filemtime($epgFilePath);
+                $cacheCreated = $metadata['cache_created'] ?? 0;
 
-            return $epgFileModified <= $cacheCreated;
+                return $epgFileModified <= $cacheCreated;
+            }
+
+            return true;
         } catch (Exception $e) {
             Log::warning("Invalid cache metadata for EPG {$epg->uuid}: {$e->getMessage()}");
 

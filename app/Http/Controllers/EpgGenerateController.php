@@ -18,6 +18,7 @@ use DOMDocument;
 use Exception;
 use Filament\Notifications\Notification;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use XMLReader;
@@ -379,7 +380,11 @@ class EpgGenerateController extends Controller
                 }
             } catch (Exception $e) {
                 // If cache fails, fallback to original XML reading
-                $this->processEpgWithXmlReader($epg, $channels, $playlist);
+                try {
+                    $this->processEpgWithXmlReader($epg, $channels, $playlist);
+                } catch (Exception $fallbackException) {
+                    Log::warning("EPG fallback XMLReader also failed for EPG {$epg->name}: {$fallbackException->getMessage()}");
+                }
             }
         }
 
@@ -697,7 +702,13 @@ class EpgGenerateController extends Controller
         // Get the content
         $filePath = null;
         if ($epg->url && str_starts_with($epg->url, 'http')) {
-            $filePath = Storage::disk('local')->path($epg->file_path);
+            $localPath = Storage::disk('local')->path($epg->file_path);
+            if (! file_exists($localPath)) {
+                Log::warning("EPG source file not found on disk for EPG \"{$epg->name}\": {$localPath}");
+
+                return;
+            }
+            $filePath = $localPath;
         } elseif ($epg->uploads && Storage::disk('local')->exists($epg->uploads)) {
             $filePath = Storage::disk('local')->path($epg->uploads);
         } elseif ($epg->url) {
@@ -723,7 +734,11 @@ class EpgGenerateController extends Controller
 
         // Set up the reader
         $programReader = new XMLReader;
-        $programReader->open('compress.zlib://'.$filePath);
+        if (! @$programReader->open('compress.zlib://'.$filePath)) {
+            Log::warning("Failed to open EPG file for XMLReader: {$filePath}");
+
+            return;
+        }
 
         // Loop through the XML data
         while (@$programReader->read()) {

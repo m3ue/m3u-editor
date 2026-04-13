@@ -24,6 +24,7 @@
         "easyqrcodejs": "^4.6.2",
         "hls.js": "^1.6.7",
         "mpegts.js": "^1.8.0",
+        "overlayscrollbars": "^2.15.1",
         "video.js": "^8.23.3"
     }
 }

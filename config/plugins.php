@@ -181,6 +181,7 @@ return [
         'number',
         'text',
         'textarea',
+        'tags',
         'select',
         'model_select',
     ],

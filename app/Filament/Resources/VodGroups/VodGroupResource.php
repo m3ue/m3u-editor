@@ -73,7 +73,7 @@ class VodGroupResource extends Resource implements CopilotResource
 
     public static function getPluralModelLabel(): string
     {
-        return __('VOD Groups');
+        return __('Groups');
     }
 
     public static function getNavigationSort(): ?int

@@ -6,7 +6,40 @@ use App\Filament\Auth\EditProfile;
 use App\Filament\Auth\Login;
 use App\Filament\CopilotTools\EpgMappingStateTool;
 use App\Filament\Pages\Backups;
+use App\Filament\Pages\CreatePlugin;
 use App\Filament\Pages\CustomDashboard;
+use App\Filament\Pages\LogViewer;
+use App\Filament\Pages\M3uProxyStreamMonitor;
+use App\Filament\Pages\PluginsDashboard;
+use App\Filament\Pages\Preferences;
+use App\Filament\Pages\ReleaseLogs;
+use App\Filament\Resources\Assets\AssetResource;
+use App\Filament\Resources\Categories\CategoryResource;
+use App\Filament\Resources\Channels\ChannelResource;
+use App\Filament\Resources\ChannelScrubbers\ChannelScrubberResource;
+use App\Filament\Resources\CustomPlaylists\CustomPlaylistResource;
+use App\Filament\Resources\EpgChannels\EpgChannelResource;
+use App\Filament\Resources\EpgMaps\EpgMapResource;
+use App\Filament\Resources\Epgs\EpgResource;
+use App\Filament\Resources\Groups\GroupResource;
+use App\Filament\Resources\MediaServerIntegrations\MediaServerIntegrationResource;
+use App\Filament\Resources\MergedEpgs\MergedEpgResource;
+use App\Filament\Resources\MergedPlaylists\MergedPlaylistResource;
+use App\Filament\Resources\Networks\NetworkResource;
+use App\Filament\Resources\PersonalAccessTokens\PersonalAccessTokenResource;
+use App\Filament\Resources\PlaylistAliases\PlaylistAliasResource;
+use App\Filament\Resources\PlaylistAuths\PlaylistAuthResource;
+use App\Filament\Resources\Playlists\PlaylistResource;
+use App\Filament\Resources\PlaylistViewers\PlaylistViewerResource;
+use App\Filament\Resources\PluginInstallReviews\PluginInstallReviewResource;
+use App\Filament\Resources\Plugins\PluginResource;
+use App\Filament\Resources\PostProcesses\PostProcessResource;
+use App\Filament\Resources\Series\SeriesResource;
+use App\Filament\Resources\StreamFileSettings\StreamFileSettingResource;
+use App\Filament\Resources\StreamProfiles\StreamProfileResource;
+use App\Filament\Resources\Users\UserResource;
+use App\Filament\Resources\VodGroups\VodGroupResource;
+use App\Filament\Resources\Vods\VodResource;
 use App\Filament\Widgets\DiscordWidget;
 use App\Filament\Widgets\DocumentsWidget;
 use App\Filament\Widgets\DonateCrypto;
@@ -35,6 +68,7 @@ use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
 use Filament\Http\Middleware\DisableBladeIconComponents;
 use Filament\Http\Middleware\DispatchServingFilamentEvent;
+use Filament\Navigation\NavigationBuilder;
 use Filament\Navigation\NavigationGroup;
 use Filament\Navigation\NavigationItem;
 use Filament\Panel;
@@ -123,43 +157,97 @@ class AdminPanelProvider extends PanelProvider
             ->pages([
                 CustomDashboard::class,
             ])
-            ->navigationGroups([
-                NavigationGroup::make(fn () => __('Playlist'))
-                    ->icon('heroicon-m-play-pause'),
-                NavigationGroup::make(fn () => __('Integrations'))
-                    ->icon('heroicon-m-server-stack'),
-                NavigationGroup::make(fn () => __('Live Channels'))
-                    ->icon('heroicon-m-tv'),
-                NavigationGroup::make(fn () => __('VOD Channels'))
-                    ->icon('heroicon-m-film'),
-                NavigationGroup::make(fn () => __('Series'))
-                    ->icon('heroicon-m-play'),
-                NavigationGroup::make(fn () => __('EPG'))
-                    ->icon('heroicon-m-calendar-days'),
-                NavigationGroup::make(fn () => __('Proxy'))
-                    ->icon('heroicon-m-arrows-right-left'),
-                NavigationGroup::make(fn () => __('Plugins'))
-                    ->icon('heroicon-m-puzzle-piece'),
-                NavigationGroup::make(fn () => __('Tools'))
-                    ->collapsed()
-                    ->icon('heroicon-m-wrench-screwdriver'),
-            ])
-            ->navigationItems([
-                NavigationItem::make('API Docs')
-                    ->label(fn () => __('API Docs').' ↗')
-                    ->url('/docs/api', shouldOpenInNewTab: true)
-                    ->group(fn () => __('Tools'))
-                    ->sort(sort: 9)
-                    ->icon(null)
-                    ->visible(fn (): bool => auth()->user()->isAdmin()),
-                NavigationItem::make('Queue Manager')
-                    ->label(fn () => __('Queue Manager').' ↗')
-                    ->url('/horizon', shouldOpenInNewTab: true)
-                    ->group(fn () => __('Tools'))
-                    ->sort(10)
-                    ->icon(null)
-                    ->visible(fn (): bool => auth()->user()->isAdmin()),
-            ])
+            ->navigation(function (NavigationBuilder $builder): NavigationBuilder {
+                return $builder
+                    ->items([
+                        ...CustomDashboard::getNavigationItems(),
+                        ...Preferences::getNavigationItems(),
+                        ...UserResource::getNavigationItems(),
+                    ])
+                    ->groups([
+                        NavigationGroup::make(fn () => __('Playlist'))
+                            ->icon('heroicon-m-play-pause')
+                            ->items([
+                                ...PlaylistResource::getNavigationItems(),
+                                ...CustomPlaylistResource::getNavigationItems(),
+                                ...MergedPlaylistResource::getNavigationItems(),
+                                ...PlaylistAliasResource::getNavigationItems(),
+                                ...PlaylistViewerResource::getNavigationItems(),
+                                ...PlaylistAuthResource::getNavigationItems(),
+                                ...StreamFileSettingResource::getNavigationItems(),
+                                ...ChannelScrubberResource::getNavigationItems(),
+                            ]),
+                        NavigationGroup::make(fn () => __('Integrations'))
+                            ->icon('heroicon-m-server-stack')
+                            ->items([
+                                ...MediaServerIntegrationResource::getNavigationItems(),
+                                ...NetworkResource::getNavigationItems(),
+                            ]),
+                        NavigationGroup::make(fn () => __('Live Channels'))
+                            ->icon('heroicon-m-tv')
+                            ->items([
+                                ...GroupResource::getNavigationItems(),
+                                ...ChannelResource::getNavigationItems(),
+                            ]),
+                        NavigationGroup::make(fn () => __('VOD Channels'))
+                            ->icon('heroicon-m-film')
+                            ->items([
+                                ...VodGroupResource::getNavigationItems(),
+                                ...VodResource::getNavigationItems(),
+                            ]),
+                        NavigationGroup::make(fn () => __('Series'))
+                            ->icon('heroicon-m-play')
+                            ->items([
+                                ...CategoryResource::getNavigationItems(),
+                                ...SeriesResource::getNavigationItems(),
+                            ]),
+                        NavigationGroup::make(fn () => __('EPG'))
+                            ->icon('heroicon-m-calendar-days')
+                            ->items([
+                                ...EpgResource::getNavigationItems(),
+                                ...MergedEpgResource::getNavigationItems(),
+                                ...EpgChannelResource::getNavigationItems(),
+                                ...EpgMapResource::getNavigationItems(),
+                            ]),
+                        NavigationGroup::make(fn () => __('Proxy'))
+                            ->icon('heroicon-m-arrows-right-left')
+                            ->items([
+                                ...StreamProfileResource::getNavigationItems(),
+                                ...M3uProxyStreamMonitor::getNavigationItems(),
+                            ]),
+                        NavigationGroup::make(fn () => __('Plugins'))
+                            ->icon('heroicon-m-puzzle-piece')
+                            ->items([
+                                ...PluginsDashboard::getNavigationItems(),
+                                ...PluginResource::getNavigationItems(),
+                                ...PluginInstallReviewResource::getNavigationItems(),
+                                ...CreatePlugin::getNavigationItems(),
+                            ]),
+                        NavigationGroup::make(fn () => __('Tools'))
+                            ->collapsed()
+                            ->icon('heroicon-m-wrench-screwdriver')
+                            ->items([
+                                ...PersonalAccessTokenResource::getNavigationItems(),
+                                ...AssetResource::getNavigationItems(),
+                                ...PostProcessResource::getNavigationItems(),
+                                ...LogViewer::getNavigationItems(),
+                                ...ReleaseLogs::getNavigationItems(),
+                                ...Backups::getNavigationItems(),
+                                NavigationItem::make('API Docs')
+                                    ->label(fn () => __('API Docs').' ↗')
+                                    ->url('/docs/api', shouldOpenInNewTab: true)
+                                    ->sort(9)
+                                    ->icon(null)
+                                    ->visible(fn (): bool => auth()->user()?->isAdmin() ?? false),
+                                NavigationItem::make('Queue Manager')
+                                    ->label(fn () => __('Queue Manager').' ↗')
+                                    ->url('/horizon', shouldOpenInNewTab: true)
+                                    ->sort(10)
+                                    ->icon(null)
+                                    ->visible(fn (): bool => auth()->user()?->isAdmin() ?? false),
+                            ]),
+                    ]);
+            })
             ->breadcrumbs($settings['show_breadcrumbs'])
             ->widgets([
                 UpdateNoticeWidget::class,

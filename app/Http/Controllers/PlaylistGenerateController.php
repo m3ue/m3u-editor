@@ -283,6 +283,10 @@ class PlaylistGenerateController extends Controller
                         ->get();
 
                     foreach ($series as $s) {
+                        // Get series movie DB ID's as fallbacks for episode
+                        $movieDbIds = $s->getMovieDbIds() ?? [];
+                        $seriesTmdbId = $movieDbIds['tmdb'] ?? $movieDbIds['tvdb'] ?? $movieDbIds['imdb'] ?? null;
+
                         // Append the episodes
                         foreach ($s->episodes as $episode) {
                             // Set channel variables
@@ -332,9 +336,20 @@ class PlaylistGenerateController extends Controller
                             }
 
                             $extInf = "#EXTINF:$runtime";
-                            $episodeTmdbId = $episode->tmdb_id ?: ($episode->info['tmdb_id'] ?? null);
+                            // Fallback to series TMDB ID if episode not set
+                            $episodeTmdbId = $episode->tmdb_id ?: ($episode->info['tmdb_id'] ?? null) ?: $seriesTmdbId;
                             if ($episodeTmdbId) {
                                 $extInf .= " tmdb-id=\"{$episodeTmdbId}\"";
+                            }
+
+                            // Add season and episode information
+                            $seasonNum = $episode->season;
+                            $episodeNum = $episode->episode_num;
+                            if ($seasonNum !== null) {
+                                $extInf .= " tvg-season=\"{$seasonNum}\"";
+                            }
+                            if ($episodeNum !== null) {
+                                $extInf .= " tvg-episode=\"{$episodeNum}\"";
                             }
                             $extInf .= " tvg-chno=\"$channelNo\" tvg-id=\"$tvgId\" tvg-name=\"$name\" tvg-logo=\"$icon\" group-title=\"$group\"";
                             echo "$extInf,".$title."\n";

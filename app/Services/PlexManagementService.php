@@ -420,6 +420,30 @@ class PlexManagementService
     }
 
     /**
+     * Get the stored HDHR base URL from a tuner entry.
+     *
+     * Looks up the tuner by device key and playlist UUID in the integration's
+     * plex_dvr_tuners JSON column and returns the stored hdhr_base_url if present.
+     * Returns null for legacy tuners that don't have a stored URL.
+     */
+    protected function getStoredHdhrBaseUrl(string $deviceKey, string $playlistUuid): ?string
+    {
+        $tuners = $this->integration->plex_dvr_tuners ?? [];
+
+        foreach ($tuners as $tuner) {
+            if (
+                ($tuner['device_key'] ?? '') === $deviceKey
+                && ($tuner['playlist_uuid'] ?? '') === $playlistUuid
+                && ! empty($tuner['hdhr_base_url'])
+            ) {
+                return $tuner['hdhr_base_url'];
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * Fetch discover.json from the same HDHR base URL we register in Plex.
      *
      * @return array{success: bool, data?: array, message?: string}
@@ -611,6 +635,7 @@ class PlexManagementService
                     $tuners[] = [
                         'device_key' => $deviceKey,
                         'playlist_uuid' => $playlistUuid,
+                        'hdhr_base_url' => $hdhrBaseUrl,
                     ];
                 }
                 $this->integration->update([
@@ -1231,13 +1256,28 @@ class PlexManagementService
     public function syncDvrChannelsForTuner(string $deviceKey, string $playlistUuid): array
     {
         try {
-            $urls = $this->resolvePlaylistUrls($playlistUuid);
-            if (! $urls || empty($urls['hdhr'])) {
+            // Memoize resolvePlaylistUrls so it is called at most once, whether we need it for
+            // the HDHR URL fallback, the EPG URL fallback, or both.
+            $resolvedUrls = null;
+            $resolveUrls = function () use (&$resolvedUrls, $playlistUuid): ?array {
+                return $resolvedUrls ??= $this->resolvePlaylistUrls($playlistUuid);
+            };
+
+            // Prefer the stored HDHR base URL from the tuner entry (set during DVR registration)
+            // so we use the same network path that was verified to work. Fall back to resolving
+            // from PlaylistFacade for legacy tuners that don't have a stored URL.
+            $hdhrBaseUrl = $this->getStoredHdhrBaseUrl($deviceKey, $playlistUuid);
+
+            if (! $hdhrBaseUrl) {
+                $hdhrBaseUrl = $resolveUrls()['hdhr'] ?? null;
+            }
+
+            if (! $hdhrBaseUrl) {
                 return ['success' => false, 'message' => 'Could not resolve playlist HDHR URL.'];
             }
 
             // Fetch current HDHR lineup from our own endpoint
-            $lineupUrl = rtrim($urls['hdhr'], '/').'/lineup.json';
+            $lineupUrl = rtrim($hdhrBaseUrl, '/').'/lineup.json';
             $lineupResponse = Http::timeout(15)->get($lineupUrl);
 
             if (! $lineupResponse->successful()) {
@@ -1254,7 +1294,7 @@ class PlexManagementService
 
             if (! $lineupId) {
                 // Fallback: rebuild from our known URL
-                $epgUrl = $urls['epg'] ?? null;
+                $epgUrl = $resolveUrls()['epg'] ?? null;
                 if (! $epgUrl) {
                     return ['success' => false, 'message' => 'Could not resolve playlist EPG URL.'];
                 }
@@ -1750,8 +1790,17 @@ class PlexManagementService
                 continue;
             }
 
-            $urls = $this->resolvePlaylistUrls($playlistUuid);
-            if (! $urls || empty($urls['hdhr'])) {
+            // Prefer stored HDHR base URL from tuner entry, fall back to resolving from playlist
+            $hdhrBaseUrl = $deviceKey !== null
+                ? $this->getStoredHdhrBaseUrl($deviceKey, $playlistUuid)
+                : null;
+
+            if (! $hdhrBaseUrl) {
+                $urls = $this->resolvePlaylistUrls($playlistUuid);
+                $hdhrBaseUrl = $urls['hdhr'] ?? null;
+            }
+
+            if (! $hdhrBaseUrl) {
                 $allInSync = false;
                 $tunerReports[] = [
                     'playlist' => $playlistUuid,
@@ -1766,7 +1815,7 @@ class PlexManagementService
             }
 
             // Fetch HDHR lineup for this tuner
-            $lineupUrl = rtrim($urls['hdhr'], '/').'/lineup.json';
+            $lineupUrl = rtrim($hdhrBaseUrl, '/').'/lineup.json';
             $hdhrChannelCount = 0;
             $hdhrNumbers = [];
             try {

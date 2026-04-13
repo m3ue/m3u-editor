@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "overlayscrollbars/overlayscrollbars.css";
 
 @import '../../vendor/filament/filament/resources/css/theme.css';
 
