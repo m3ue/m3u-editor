@@ -813,8 +813,10 @@ it('re-enriches VOD genre when it is a library name placeholder', function () {
     $channel->refresh();
 
     // Group should be updated from 'Movies' to TMDB primary genre
+    $actionGroup = Group::where('name', 'Action')->where('playlist_id', $this->playlist->id)->first();
     expect($channel->group)->toBe('Action')
-        ->and($channel->group_internal)->toBe('Action');
+        ->and($channel->group_internal)->toBe('Action')
+        ->and($channel->group_id)->toBe($actionGroup->id);
 
     // Info genre should be updated to TMDB genres
     expect($channel->info['genre'])->toContain('Action');
@@ -1119,6 +1121,79 @@ it('does not create categories for series when auto_create_groups is disabled', 
 
     // Series category should remain unset
     expect($series->category_id)->toBeNull();
+});
+
+it('creates categories for series when auto_create_groups is enabled', function () {
+    $this->mock(GeneralSettings::class, function ($mock) {
+        $mock->shouldReceive('getAttribute')->with('tmdb_api_key')->andReturn('fake-api-key');
+        $mock->shouldReceive('getAttribute')->with('tmdb_language')->andReturn('en-US');
+        $mock->shouldReceive('getAttribute')->with('tmdb_rate_limit')->andReturn(40);
+        $mock->shouldReceive('getAttribute')->with('tmdb_confidence_threshold')->andReturn(80);
+        $mock->shouldReceive('getAttribute')->with('tmdb_auto_create_groups')->andReturn(true);
+        $mock->tmdb_api_key = 'fake-api-key';
+        $mock->tmdb_language = 'en-US';
+        $mock->tmdb_rate_limit = 40;
+        $mock->tmdb_confidence_threshold = 80;
+        $mock->tmdb_auto_create_groups = true;
+    });
+
+    Http::fake([
+        'https://api.themoviedb.org/3/search/tv*' => Http::response([
+            'results' => [
+                [
+                    'id' => 1399,
+                    'name' => 'Game of Thrones',
+                    'first_air_date' => '2011-04-17',
+                    'popularity' => 90.0,
+                ],
+            ],
+        ], 200),
+        'https://api.themoviedb.org/3/tv/1399/external_ids*' => Http::response([
+            'tvdb_id' => 121361,
+            'imdb_id' => 'tt0944947',
+        ], 200),
+        'https://api.themoviedb.org/3/tv/1399*' => Http::response([
+            'id' => 1399,
+            'name' => 'Game of Thrones',
+            'overview' => 'Seven noble families fight for control of the mythical land of Westeros.',
+            'poster_path' => '/got.jpg',
+            'genres' => [
+                ['name' => 'Drama'],
+                ['name' => 'Fantasy'],
+            ],
+            'seasons' => [],
+        ], 200),
+    ]);
+
+    $series = Series::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'name' => 'Game of Thrones',
+        'genre' => 'Uncategorized',
+        'category_id' => null,
+        'metadata' => [],
+    ]);
+
+    $job = new TestableFetchTmdbIds(
+        seriesIds: [$series->id],
+        overwriteExisting: false,
+        user: $this->user,
+    );
+
+    $job->handle(app(TmdbService::class));
+
+    $series->refresh();
+
+    // TMDB IDs should be fetched
+    expect($series->tmdb_id)->toBe(1399);
+
+    // A new 'Drama' category should have been created
+    expect(Category::where('name', 'Drama')->where('playlist_id', $this->playlist->id)->exists())->toBeTrue();
+
+    // Series should be assigned to the primary TMDB genre category
+    $category = Category::where('name', 'Drama')->where('playlist_id', $this->playlist->id)->first();
+    expect($series->category_id)->toBe($category->id)
+        ->and($series->source_category_id)->toBe($category->id);
 });
 
 class TestableFetchTmdbIds extends FetchTmdbIds
