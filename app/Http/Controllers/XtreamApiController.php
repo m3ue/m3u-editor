@@ -1912,7 +1912,7 @@ class XtreamApiController extends Controller
      */
     public function m3u($playlist)
     {
-        return app()->call('App\\Http\\Controllers\\PlaylistGenerateController@__invoke', [
+        return app()->call(PlaylistGenerateController::class, [
             'uuid' => $playlist->uuid,
         ]);
     }
@@ -1940,7 +1940,7 @@ class XtreamApiController extends Controller
         }
 
         // Serve EPG directly instead of redirecting, so it works on the Xtream-only port
-        return app()->call('App\\Http\\Controllers\\EpgGenerateController@__invoke', [
+        return app()->call(EpgGenerateController::class, [
             'uuid' => $playlist->uuid,
         ]);
     }

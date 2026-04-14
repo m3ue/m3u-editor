@@ -16,6 +16,7 @@
  * - XtreamStreamController::handleVod() redirects directly when both channel and playlist proxy are off
  */
 
+use App\Http\Controllers\Api\M3uProxyApiController;
 use App\Models\Channel;
 use App\Models\CustomPlaylist;
 use App\Models\Episode;
@@ -532,7 +533,7 @@ test('episodePlayer() appends client_id to the redirect URL when provided', func
     ]);
 
     $response = app()->call(
-        'App\Http\Controllers\Api\M3uProxyApiController@episodePlayer',
+        [app(M3uProxyApiController::class), 'episodePlayer'],
         ['request' => $request, 'id' => $episode->id]
     );
 
@@ -557,7 +558,7 @@ test('episodePlayer() does not append client_id to the redirect URL when not pro
     $request = Request::create('/episodeplayer', 'GET');
 
     $response = app()->call(
-        'App\Http\Controllers\Api\M3uProxyApiController@episodePlayer',
+        [app(M3uProxyApiController::class), 'episodePlayer'],
         ['request' => $request, 'id' => $episode->id]
     );
 

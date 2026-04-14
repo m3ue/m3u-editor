@@ -229,7 +229,7 @@ class DispatcharrController extends Controller
         }
 
         if ($playlist->enable_proxy) {
-            return app()->call('App\Http\Controllers\Api\M3uProxyApiController@channel', [
+            return app()->call([app(M3uProxyApiController::class), 'channel'], [
                 'id' => $channel->id,
                 'uuid' => $playlist->uuid,
             ]);

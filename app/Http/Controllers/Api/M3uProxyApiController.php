@@ -38,7 +38,6 @@ class M3uProxyApiController extends Controller
             'streamProfile',
         ])->findOrFail($id);
 
-        // Get username from request (query parameter or header as fallback)
         $username = $request->input('username', $request->header('X-Username'));
 
         // If UUID provided, resolve that specific playlist (e.g., merged playlist)
@@ -88,7 +87,6 @@ class M3uProxyApiController extends Controller
             'playlist',
         ])->findOrFail($id);
 
-        // Get username from request (query parameter or header as fallback)
         $username = $request->input('username', $request->header('X-Username'));
 
         // If UUID provided, resolve that specific playlist (e.g., merged playlist)
@@ -143,7 +141,6 @@ class M3uProxyApiController extends Controller
             $playlist = $channel->getEffectivePlaylist();
         }
 
-        // Get username from request (query parameter or header as fallback)
         $username = $request->input('username', $request->header('X-Username'));
 
         // Channel-level profile takes priority over the global in-app player default.
@@ -166,15 +163,7 @@ class M3uProxyApiController extends Controller
                 $username
             );
 
-        // Forward the player's unique client_id to the proxy URL so each browser
-        // tab gets its own entry in stream_clients, preventing collision when
-        // multiple tabs on the same machine watch the same stream.
-        if ($clientId = $request->input('client_id')) {
-            $separator = str_contains($url, '?') ? '&' : '?';
-            $url .= $separator.'client_id='.rawurlencode($clientId);
-        }
-
-        return redirect($url);
+        return redirect($this->appendClientId($url, $request));
     }
 
     /**
@@ -196,7 +185,6 @@ class M3uProxyApiController extends Controller
             $playlist = $episode->playlist;
         }
 
-        // Get username from request (query parameter or header as fallback)
         $username = $request->input('username', $request->header('X-Username'));
 
         // Use in-app player VOD transcoding profile (from Preferences > In-App Player Transcoding).
@@ -215,15 +203,7 @@ class M3uProxyApiController extends Controller
                 $request
             );
 
-        // Forward the player's unique client_id to the proxy URL so each browser
-        // tab gets its own entry in stream_clients, preventing collision when
-        // multiple tabs on the same machine watch the same stream.
-        if ($clientId = $request->input('client_id')) {
-            $separator = str_contains($url, '?') ? '&' : '?';
-            $url .= $separator.'client_id='.rawurlencode($clientId);
-        }
-
-        return redirect($url);
+        return redirect($this->appendClientId($url, $request));
     }
 
     /**
@@ -702,6 +682,23 @@ class M3uProxyApiController extends Controller
                 $network->update(['broadcast_restart_locked' => false]);
             }
         }
+    }
+
+    /**
+     * Append a client_id query parameter to a URL if the request contains one.
+     *
+     * Each browser tab supplies a unique client_id so the proxy can maintain a
+     * separate stream_clients entry per tab, preventing collisions when multiple
+     * tabs on the same machine watch the same stream.
+     */
+    private function appendClientId(string $url, Request $request): string
+    {
+        if ($clientId = $request->input('client_id')) {
+            $separator = str_contains($url, '?') ? '&' : '?';
+            $url .= $separator.'client_id='.rawurlencode($clientId);
+        }
+
+        return $url;
     }
 
     /**
