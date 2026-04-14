@@ -247,38 +247,11 @@ class SeriesResource extends Resource implements CopilotResource
             Filter::make('has_metadata')
                 ->label(__('Has TMDB/TVDB/IMDB ID'))
                 ->toggle()
-                ->query(function ($query) {
-                    return $query->where(function ($q) {
-                        $q->whereNotNull('tmdb_id')
-                            ->orWhereNotNull('tvdb_id')
-                            ->orWhereNotNull('imdb_id')
-                            ->orWhereRaw("metadata::jsonb ?? 'tmdb_id'")
-                            ->orWhereRaw("metadata::jsonb ?? 'tmdb'")
-                            ->orWhereRaw("metadata::jsonb ?? 'tvdb_id'")
-                            ->orWhereRaw("metadata::jsonb ?? 'tvdb'")
-                            ->orWhereRaw("metadata::jsonb ?? 'imdb_id'")
-                            ->orWhereRaw("metadata::jsonb ?? 'imdb'");
-                    });
-                }),
+                ->query(fn ($query) => $query->hasSeriesId()),
             Filter::make('missing_metadata')
                 ->label(__('Missing TMDB/TVDB/IMDB ID'))
                 ->toggle()
-                ->query(function ($query) {
-                    return $query->whereNull('tmdb_id')
-                        ->whereNull('tvdb_id')
-                        ->whereNull('imdb_id')
-                        ->where(function ($q) {
-                            $q->whereNull('metadata')
-                                ->orWhere(function ($inner) {
-                                    $inner->whereRaw("NOT (metadata::jsonb ?? 'tmdb_id')")
-                                        ->whereRaw("NOT (metadata::jsonb ?? 'tmdb')")
-                                        ->whereRaw("NOT (metadata::jsonb ?? 'tvdb_id')")
-                                        ->whereRaw("NOT (metadata::jsonb ?? 'tvdb')")
-                                        ->whereRaw("NOT (metadata::jsonb ?? 'imdb_id')")
-                                        ->whereRaw("NOT (metadata::jsonb ?? 'imdb')");
-                                });
-                        });
-                }),
+                ->query(fn ($query) => $query->missingSeriesId()),
         ];
     }
 

@@ -300,6 +300,17 @@ class FetchTmdbIds implements ShouldQueue
             return null; // No criteria specified
         }
 
+        // When not overwriting, exclude only records that were already attempted
+        // but no ID was found at all. Records with an existing ID are kept since
+        // they may still need metadata population, episode enrichment, or genre
+        // re-enrichment — conditions too complex to detect reliably at DB level.
+        if (! $this->overwriteExisting) {
+            $query->where(function ($q) {
+                $q->whereNull('last_metadata_fetch')
+                    ->orWhere(fn ($inner) => $inner->hasMovieId());
+            });
+        }
+
         return $query;
     }
 
@@ -324,6 +335,17 @@ class FetchTmdbIds implements ShouldQueue
                 ->where('user_id', $this->user?->id);
         } else {
             return null; // No criteria specified
+        }
+
+        // When not overwriting, exclude only records that were already attempted
+        // but no ID was found at all. Records with an existing ID are kept since
+        // they may still need metadata population, episode enrichment, or genre
+        // re-enrichment — conditions too complex to detect reliably at DB level.
+        if (! $this->overwriteExisting) {
+            $query->where(function ($q) {
+                $q->whereNull('last_metadata_fetch')
+                    ->orWhere(fn ($inner) => $inner->hasSeriesId());
+            });
         }
 
         return $query;
@@ -394,10 +416,7 @@ class FetchTmdbIds implements ShouldQueue
         $hasMetadata = ! empty($info['plot']) && ! empty($info['cover_big']);
 
         // Determine the best existing TMDB ID we have
-        $tmdbId = $channel->tmdb_id
-            ?? $info['tmdb_id']
-            ?? $channel->movie_data['tmdb_id']
-            ?? null;
+        $tmdbId = $channel->getTmdbId();
 
         // If we have an ID AND metadata, and we're not overwriting, we can skip
         if ($tmdbId && $hasMetadata && ! $this->overwriteExisting) {

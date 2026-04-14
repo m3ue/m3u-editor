@@ -1157,6 +1157,90 @@ it('creates categories for series when auto_create_groups is enabled', function 
         ->and($series->source_category_id)->toBe($category->id);
 });
 
+it('excludes VOD channels that were attempted but had no match from query when overwrite is false', function () {
+    // This channel was already attempted but no TMDB match was found
+    Channel::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'is_vod' => true,
+        'enabled' => true,
+        'title' => 'Obscure Movie With No Match',
+        'tmdb_id' => null,
+        'imdb_id' => null,
+        'last_metadata_fetch' => now(),
+    ]);
+
+    $tmdb = Mockery::mock(TmdbService::class);
+    $tmdb->shouldReceive('isConfigured')->andReturn(true);
+    $tmdb->shouldNotReceive('searchMovie');
+    $tmdb->shouldNotReceive('getMovieDetails');
+
+    $job = new TestableFetchTmdbIds(
+        vodPlaylistId: $this->playlist->id,
+        overwriteExisting: false,
+        user: $this->user,
+    );
+    $job->handle($tmdb);
+});
+
+it('includes VOD channels with tmdb_id but missing metadata even when overwrite is false', function () {
+    $tmdb = Mockery::mock(TmdbService::class);
+    $tmdb->shouldReceive('isConfigured')->andReturn(true);
+    $tmdb->shouldReceive('getMovieDetails')->with(603)->andReturn([
+        'tmdb_id' => 603,
+        'overview' => 'A computer hacker learns about the true nature of reality.',
+        'poster_url' => 'https://image.tmdb.org/t/p/w500/matrix.jpg',
+    ]);
+
+    // Has tmdb_id and last_metadata_fetch but missing plot and cover
+    $needsMetadata = Channel::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'is_vod' => true,
+        'enabled' => true,
+        'title' => 'The Matrix',
+        'tmdb_id' => 603,
+        'last_metadata_fetch' => now(),
+        'info' => [],
+    ]);
+
+    $job = new TestableFetchTmdbIds(
+        vodPlaylistId: $this->playlist->id,
+        overwriteExisting: false,
+        user: $this->user,
+    );
+    $job->handle($tmdb);
+
+    $needsMetadata->refresh();
+    expect($needsMetadata->info)->toHaveKey('plot');
+});
+
+it('excludes series that were attempted but had no match from query when overwrite is false', function () {
+    // This series was already attempted but no TMDB/TVDB match was found
+    Series::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'enabled' => true,
+        'name' => 'Obscure Series With No Match',
+        'tmdb_id' => null,
+        'tvdb_id' => null,
+        'imdb_id' => null,
+        'last_metadata_fetch' => now(),
+    ]);
+
+    $tmdb = Mockery::mock(TmdbService::class);
+    $tmdb->shouldReceive('isConfigured')->andReturn(true);
+    $tmdb->shouldNotReceive('searchTvSeries');
+    $tmdb->shouldNotReceive('getTvSeriesDetails');
+
+    $job = new TestableFetchTmdbIds(
+        seriesPlaylistId: $this->playlist->id,
+        overwriteExisting: false,
+        user: $this->user,
+    );
+    $job->handle($tmdb);
+});
+
 class TestableFetchTmdbIds extends FetchTmdbIds
 {
     protected function sendCompletionNotification(): void {}

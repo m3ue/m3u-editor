@@ -447,45 +447,11 @@ class VodResource extends Resource implements CopilotResource
             Filter::make('has_tmdb_id')
                 ->label(__('Has TMDB/IMDB ID'))
                 ->toggle()
-                ->query(function ($query) {
-                    return $query->where('is_vod', true)
-                        ->where(function ($q) {
-                            $q->whereRaw("info::jsonb ?? 'tmdb_id'")
-                                ->orWhereRaw("info::jsonb ?? 'tmdb'")
-                                ->orWhereRaw("movie_data::jsonb ?? 'tmdb_id'")
-                                ->orWhereRaw("movie_data::jsonb ?? 'tmdb'")
-                                ->orWhereRaw("info::jsonb ?? 'imdb_id'")
-                                ->orWhereRaw("info::jsonb ?? 'imdb'")
-                                ->orWhereRaw("movie_data::jsonb ?? 'imdb_id'")
-                                ->orWhereRaw("movie_data::jsonb ?? 'imdb'");
-                        });
-                }),
+                ->query(fn ($query) => $query->where('is_vod', true)->hasMovieId()),
             Filter::make('missing_tmdb_id')
                 ->label(__('Missing TMDB/IMDB ID'))
                 ->toggle()
-                ->query(function ($query) {
-                    return $query->where('is_vod', true)
-                        ->where(function ($q) {
-                            $q->where(function ($inner) {
-                                $inner->whereNull('info')
-                                    ->orWhere(function ($i) {
-                                        $i->whereRaw("NOT (info::jsonb ?? 'tmdb_id')")
-                                            ->whereRaw("NOT (info::jsonb ?? 'tmdb')")
-                                            ->whereRaw("NOT (info::jsonb ?? 'imdb_id')")
-                                            ->whereRaw("NOT (info::jsonb ?? 'imdb')");
-                                    });
-                            })
-                                ->where(function ($inner) {
-                                    $inner->whereNull('movie_data')
-                                        ->orWhere(function ($i) {
-                                            $i->whereRaw("NOT (movie_data::jsonb ?? 'tmdb_id')")
-                                                ->whereRaw("NOT (movie_data::jsonb ?? 'tmdb')")
-                                                ->whereRaw("NOT (movie_data::jsonb ?? 'imdb_id')")
-                                                ->whereRaw("NOT (movie_data::jsonb ?? 'imdb')");
-                                        });
-                                });
-                        });
-                }),
+                ->query(fn ($query) => $query->where('is_vod', true)->missingMovieId()),
             Filter::make('mapped')
                 ->label(__('EPG is mapped'))
                 ->toggle()

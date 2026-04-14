@@ -792,7 +792,7 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                                                         : '';
 
                                                     $set('hdhr_base_url', $baseUrl."/{$uuid}/hdhr{$hdhrAuthPath}");
-                                                    $set('epg_url', $baseUrl."/epg/{$uuid}");
+                                                    $set('epg_url', $baseUrl."/{$uuid}/epg.xml");
                                                 })
                                                 ->required(),
                                             Placeholder::make('tvg_id_warning')

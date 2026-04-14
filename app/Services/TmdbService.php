@@ -152,6 +152,7 @@ class TmdbService
                     'tmdb_id' => $match['id'],
                     'imdb_id' => $externalIds['imdb_id'] ?? null,
                     'title' => $match['title'] ?? null,
+                    'original_title' => $match['original_title'] ?? null,
                     'release_date' => $match['release_date'] ?? null,
                     'confidence' => $match['_confidence'] ?? 0,
                 ];
@@ -292,6 +293,7 @@ class TmdbService
                 'tmdb_id' => $match['id'],
                 'imdb_id' => $externalIds['imdb_id'] ?? null,
                 'title' => $match['title'] ?? null,
+                'original_title' => $match['original_title'] ?? null,
                 'release_date' => $match['release_date'] ?? null,
                 'confidence' => 60, // Lower confidence for simple search
             ];
@@ -408,6 +410,7 @@ class TmdbService
                             'tvdb_id' => $externalIds['tvdb_id'] ?? null,
                             'imdb_id' => $externalIds['imdb_id'] ?? null,
                             'name' => $match['name'] ?? null,
+                            'original_name' => $match['original_name'] ?? null,
                             'first_air_date' => $match['first_air_date'] ?? null,
                             'confidence' => $match['_confidence'] ?? 0,
                         ];
