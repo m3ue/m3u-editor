@@ -300,20 +300,15 @@ class FetchTmdbIds implements ShouldQueue
             return null; // No criteria specified
         }
 
-        // When not overwriting, skip channels that are definitively done:
-        // - never attempted (last_metadata_fetch IS NULL) → needs processing
-        // - has tmdb_id but missing plot or cover → needs metadata fetch
-        // Everything else (attempted but not found, or fully complete) can be excluded.
+        // When not overwriting, exclude only records that were already attempted
+        // but no ID was found at all. Records with an existing ID are kept since
+        // they may still need metadata population, episode enrichment, or genre
+        // re-enrichment — conditions too complex to detect reliably at DB level.
         if (! $this->overwriteExisting) {
             $query->where(function ($q) {
                 $q->whereNull('last_metadata_fetch')
-                    ->orWhere(function ($inner) {
-                        $inner->whereNotNull('tmdb_id')
-                            ->where(function ($i) {
-                                $i->whereRaw("(info->>'plot') IS NULL")
-                                    ->orWhereRaw("(info->>'cover_big') IS NULL");
-                            });
-                    });
+                    ->orWhereNotNull('tmdb_id')
+                    ->orWhereNotNull('imdb_id');
             });
         }
 
@@ -343,20 +338,16 @@ class FetchTmdbIds implements ShouldQueue
             return null; // No criteria specified
         }
 
-        // When not overwriting, skip series that are definitively done:
-        // - never attempted (last_metadata_fetch IS NULL) → needs processing
-        // - has tmdb_id but missing plot or cover → needs metadata fetch
-        // Everything else (attempted but not found, or fully complete) can be excluded.
+        // When not overwriting, exclude only records that were already attempted
+        // but no ID was found at all. Records with an existing ID are kept since
+        // they may still need metadata population, episode enrichment, or genre
+        // re-enrichment — conditions too complex to detect reliably at DB level.
         if (! $this->overwriteExisting) {
             $query->where(function ($q) {
                 $q->whereNull('last_metadata_fetch')
-                    ->orWhere(function ($inner) {
-                        $inner->whereNotNull('tmdb_id')
-                            ->where(function ($i) {
-                                $i->whereNull('plot')
-                                    ->orWhereNull('cover');
-                            });
-                    });
+                    ->orWhereNotNull('tmdb_id')
+                    ->orWhereNotNull('tvdb_id')
+                    ->orWhereNotNull('imdb_id');
             });
         }
 

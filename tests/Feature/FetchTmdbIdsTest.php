@@ -1157,17 +1157,17 @@ it('creates categories for series when auto_create_groups is enabled', function 
         ->and($series->source_category_id)->toBe($category->id);
 });
 
-it('excludes fully-processed VOD channels from query when overwrite is false', function () {
-    // This channel is fully done: has tmdb_id + last_metadata_fetch + plot + cover
+it('excludes VOD channels that were attempted but had no match from query when overwrite is false', function () {
+    // This channel was already attempted but no TMDB match was found
     Channel::factory()->create([
         'playlist_id' => $this->playlist->id,
         'user_id' => $this->user->id,
         'is_vod' => true,
         'enabled' => true,
-        'title' => 'Fully Done Movie',
-        'tmdb_id' => 603,
+        'title' => 'Obscure Movie With No Match',
+        'tmdb_id' => null,
+        'imdb_id' => null,
         'last_metadata_fetch' => now(),
-        'info' => ['plot' => 'A plot.', 'cover_big' => 'https://example.com/cover.jpg'],
     ]);
 
     $tmdb = Mockery::mock(TmdbService::class);
@@ -1215,16 +1215,17 @@ it('includes VOD channels with tmdb_id but missing metadata even when overwrite 
     expect($needsMetadata->info)->toHaveKey('plot');
 });
 
-it('excludes fully-processed series from query when overwrite is false', function () {
+it('excludes series that were attempted but had no match from query when overwrite is false', function () {
+    // This series was already attempted but no TMDB/TVDB match was found
     Series::factory()->create([
         'playlist_id' => $this->playlist->id,
         'user_id' => $this->user->id,
         'enabled' => true,
-        'name' => 'Breaking Bad',
-        'tmdb_id' => 1396,
+        'name' => 'Obscure Series With No Match',
+        'tmdb_id' => null,
+        'tvdb_id' => null,
+        'imdb_id' => null,
         'last_metadata_fetch' => now(),
-        'plot' => 'A chemistry teacher turns to crime.',
-        'cover' => 'https://example.com/series.jpg',
     ]);
 
     $tmdb = Mockery::mock(TmdbService::class);
