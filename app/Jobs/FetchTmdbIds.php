@@ -300,6 +300,23 @@ class FetchTmdbIds implements ShouldQueue
             return null; // No criteria specified
         }
 
+        // When not overwriting, skip channels that are definitively done:
+        // - never attempted (last_metadata_fetch IS NULL) → needs processing
+        // - has tmdb_id but missing plot or cover → needs metadata fetch
+        // Everything else (attempted but not found, or fully complete) can be excluded.
+        if (! $this->overwriteExisting) {
+            $query->where(function ($q) {
+                $q->whereNull('last_metadata_fetch')
+                    ->orWhere(function ($inner) {
+                        $inner->whereNotNull('tmdb_id')
+                            ->where(function ($i) {
+                                $i->whereRaw("(info->>'plot') IS NULL")
+                                    ->orWhereRaw("(info->>'cover_big') IS NULL");
+                            });
+                    });
+            });
+        }
+
         return $query;
     }
 
@@ -324,6 +341,23 @@ class FetchTmdbIds implements ShouldQueue
                 ->where('user_id', $this->user?->id);
         } else {
             return null; // No criteria specified
+        }
+
+        // When not overwriting, skip series that are definitively done:
+        // - never attempted (last_metadata_fetch IS NULL) → needs processing
+        // - has tmdb_id but missing plot or cover → needs metadata fetch
+        // Everything else (attempted but not found, or fully complete) can be excluded.
+        if (! $this->overwriteExisting) {
+            $query->where(function ($q) {
+                $q->whereNull('last_metadata_fetch')
+                    ->orWhere(function ($inner) {
+                        $inner->whereNotNull('tmdb_id')
+                            ->where(function ($i) {
+                                $i->whereNull('plot')
+                                    ->orWhereNull('cover');
+                            });
+                    });
+            });
         }
 
         return $query;

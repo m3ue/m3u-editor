@@ -450,7 +450,9 @@ class VodResource extends Resource implements CopilotResource
                 ->query(function ($query) {
                     return $query->where('is_vod', true)
                         ->where(function ($q) {
-                            $q->whereRaw("info::jsonb ?? 'tmdb_id'")
+                            $q->whereNotNull('tmdb_id')
+                                ->orWhereNotNull('imdb_id')
+                                ->orWhereRaw("info::jsonb ?? 'tmdb_id'")
                                 ->orWhereRaw("info::jsonb ?? 'tmdb'")
                                 ->orWhereRaw("movie_data::jsonb ?? 'tmdb_id'")
                                 ->orWhereRaw("movie_data::jsonb ?? 'tmdb'")
@@ -465,6 +467,8 @@ class VodResource extends Resource implements CopilotResource
                 ->toggle()
                 ->query(function ($query) {
                     return $query->where('is_vod', true)
+                        ->whereNull('tmdb_id')
+                        ->whereNull('imdb_id')
                         ->where(function ($q) {
                             $q->where(function ($inner) {
                                 $inner->whereNull('info')
