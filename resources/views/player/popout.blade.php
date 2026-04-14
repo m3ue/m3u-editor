@@ -146,24 +146,29 @@
                 }
             };
 
-            window.addEventListener('beforeunload', () => {
-                if (typeof player.cleanup === 'function') {
-                    player.cleanup();
-                }
-            });
+            // Unified cleanup for page unload (beforeunload + pagehide for
+            // mobile Safari). Runs once to avoid duplicate proxy stop
+            // requests and double media teardown.
+            const streamType = (videoElement.dataset.contentType === 'episode') ? 'episode' : 'channel';
+            let popoutFinalized = false;
+            function finalizePopoutSession() {
+                if (popoutFinalized) return;
+                popoutFinalized = true;
 
-            window.addEventListener('pagehide', () => {
-                // Notify proxy to stop the stream before the page unloads
-                const contentType = videoElement.dataset.contentType || '';
-                const streamId = videoElement.dataset.streamId || '';
-                const type = contentType === 'episode' ? 'episode' : 'channel';
                 if (window.notifyProxyStreamStop) {
-                    window.notifyProxyStreamStop(streamId, type, popoutClientId);
+                    window.notifyProxyStreamStop(
+                        videoElement.dataset.streamId || '',
+                        streamType,
+                        popoutClientId,
+                    );
                 }
                 if (typeof player.cleanup === 'function') {
                     player.cleanup();
                 }
-            });
+            }
+
+            window.addEventListener('beforeunload', finalizePopoutSession);
+            window.addEventListener('pagehide', finalizePopoutSession);
 
             document.addEventListener('visibilitychange', () => {
                 const isLive = videoElement.dataset.contentType === 'live';

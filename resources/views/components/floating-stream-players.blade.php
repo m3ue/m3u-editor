@@ -28,10 +28,6 @@
         if (typeof cleanupAllStreams === 'function') {
             cleanupAllStreams();
         }
-    " x-on:livewire:navigating.window="
-        if (typeof cleanupAllStreams === 'function') {
-            cleanupAllStreams();
-        }
     " class="fixed inset-0 pointer-events-none z-[9999]">
     <!-- Multiple Floating Players -->
     <template x-for="player in players" :key="player.id">
