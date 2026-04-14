@@ -1059,6 +1059,35 @@ class ChannelResource extends Resource implements CopilotResource
                         ->modalIcon('heroicon-o-clock')
                         ->modalDescription(__('Set the timeshift value for the selected channels. Use 0 to disable catch-up.'))
                         ->modalSubmitActionLabel(__('Set timeshift')),
+                    BulkAction::make('set-epg-shift')
+                        ->label(__('Set EPG Shift'))
+                        ->schema([
+                            TextInput::make('tvg_shift')
+                                ->label(__('EPG Shift value'))
+                                ->helperText(__('Shift the EPG time for the selected channels by this many hours. Use values like -2, -1, 0, 1, 2, etc. Use 0 to reset.'))
+                                ->type('number')
+                                ->rules(['required', 'numeric'])
+                                ->default(0)
+                                ->required(),
+                        ])
+                        ->action(function (Collection $records, array $data): void {
+                            $value = (string) $data['tvg_shift'];
+                            foreach ($records->chunk(100) as $chunk) {
+                                Channel::whereIn('id', $chunk->pluck('id'))->update(['tvg_shift' => $value]);
+                            }
+                        })->after(function (array $data) {
+                            Notification::make()
+                                ->success()
+                                ->title(__('EPG Shift updated'))
+                                ->body("EPG Shift set to {$data['tvg_shift']} for the selected channels.")
+                                ->send();
+                        })
+                        ->deselectRecordsAfterCompletion()
+                        ->requiresConfirmation()
+                        ->icon('heroicon-o-clock')
+                        ->modalIcon('heroicon-o-clock')
+                        ->modalDescription(__('Set the EPG time shift (tvg-shift) for the selected channels. This shifts the EPG program schedule by the specified number of hours.'))
+                        ->modalSubmitActionLabel(__('Set EPG Shift')),
                     BulkAction::make('probe-streams')
                         ->label(__('Probe Streams'))
                         ->action(function (Collection $records): void {
