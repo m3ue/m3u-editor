@@ -13,6 +13,7 @@ use App\Traits\ProviderRequestDelay;
 use Carbon\Carbon;
 use Exception;
 use Filament\Notifications\Notification;
+use Illuminate\Bus\Batch;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Bus;
@@ -395,28 +396,41 @@ class ProcessEpgImport implements ShouldQueue
                 ]);
 
                 // Get the jobs for the batch
-                $jobs = [];
+                $chunkJobs = [];
                 $batchCount = Job::where('batch_no', $batchNo)->count();
                 $jobsBatch = Job::where('batch_no', $batchNo)->select('id')->cursor();
-                $jobsBatch->chunk(100)->each(function ($chunk) use (&$jobs, $batchCount) {
-                    $jobs[] = new ProcessEpgImportChunk($chunk->pluck('id')->toArray(), $batchCount);
+                $jobsBatch->chunk(100)->each(function ($chunk) use (&$chunkJobs, $batchCount) {
+                    $chunkJobs[] = new ProcessEpgImportChunk($chunk->pluck('id')->toArray(), $batchCount);
                 });
 
-                // Run completion after channels imported
-                $jobs[] = new ProcessEpgImportComplete($userId, $epgId, $batchNo, $start);
-                Bus::chain($jobs)
-                    ->onConnection('redis') // force to use redis connection
+                // Run import chunks in parallel via Bus::batch, then dispatch completion
+                $epgName = $epg->name;
+                $epgUserId = $userId;
+                $epgModelId = $epgId;
+                $batchNoCapture = $batchNo;
+                $startCapture = $start;
+
+                Bus::batch($chunkJobs)
+                    ->onConnection('redis')
                     ->onQueue('import')
-                    ->catch(function (Throwable $e) use ($epg) {
-                        $error = "Error processing \"{$epg->name}\": {$e->getMessage()}";
+                    ->allowFailures()
+                    ->then(function () use ($epgUserId, $epgModelId, $batchNoCapture, $startCapture): void {
+                        dispatch(new ProcessEpgImportComplete($epgUserId, $epgModelId, $batchNoCapture, $startCapture));
+                    })
+                    ->catch(function (Batch $batch, ?Throwable $e) use ($epgModelId, $epgName): void {
+                        $epg = Epg::find($epgModelId);
+                        if (! $epg) {
+                            return;
+                        }
+                        $error = "Error processing \"{$epgName}\": ".($e?->getMessage() ?? 'Unknown error');
                         Notification::make()
                             ->danger()
-                            ->title("Error processing \"{$epg->name}\"")
+                            ->title("Error processing \"{$epgName}\"")
                             ->body('Please view your notifications for details.')
                             ->broadcast($epg->user);
                         Notification::make()
                             ->danger()
-                            ->title("Error processing \"{$epg->name}\"")
+                            ->title("Error processing \"{$epgName}\"")
                             ->body($error)
                             ->sendToDatabase($epg->user);
                         $epg->update([

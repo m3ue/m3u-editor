@@ -45,7 +45,7 @@ class GenerateEpgCache extends Command
         set_time_limit(0); // No time limit for CLI
 
         $start = microtime(true);
-        $result = $cacheService->cacheEpgData($epg);
+        $result = $cacheService->cacheEpgData($epg, parallel: false);
         $duration = microtime(true) - $start;
 
         if ($result) {

@@ -5,11 +5,13 @@ namespace App\Jobs;
 use App\Models\Epg;
 use App\Models\EpgChannel;
 use App\Models\Job;
+use Illuminate\Bus\Batchable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 
 class ProcessEpgImportChunk implements ShouldQueue
 {
+    use Batchable;
     use Queueable;
 
     // Don't retry the job on failure
@@ -32,6 +34,10 @@ class ProcessEpgImportChunk implements ShouldQueue
      */
     public function handle(): void
     {
+        if ($this->batch()?->cancelled()) {
+            return;
+        }
+
         // Determine what percentage of the import this batch accounts for
         $totalJobsCount = $this->batchCount;
         $chunkSize = 10;
@@ -40,10 +46,10 @@ class ProcessEpgImportChunk implements ShouldQueue
         foreach (Job::whereIn('id', $this->jobs)->cursor() as $index => $job) {
             $bulk = [];
             if ($index % $chunkSize === 0) {
-                $epg = Epg::find($job->variables['epgId']);
-                $epg->update([
-                    'progress' => min(99, $epg->progress + (($chunkSize / $totalJobsCount) * 100)),
-                ]);
+                // Use atomic increment to avoid race conditions with parallel chunks
+                Epg::where('id', $job->variables['epgId'])
+                    ->where('progress', '<', 99)
+                    ->increment('progress', min(84, (int) ceil(($chunkSize / $totalJobsCount) * 100)));
             }
 
             // Add the channel for insert/update

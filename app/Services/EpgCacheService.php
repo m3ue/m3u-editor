@@ -94,9 +94,17 @@ class EpgCacheService
     }
 
     /**
-     * Cache EPG data from XML file
+     * Cache EPG data from XML file.
+     *
+     * In parallel mode (default when maxProcesses > 1), this performs a fast pre-scan
+     * that extracts channels and splits raw programme XML into chunk files, then returns
+     * chunk info so the caller can dispatch parallel jobs. In synchronous mode (SQLite
+     * or explicit), it does the full single-pass processing inline.
+     *
+     * @param  bool|null  $parallel  Force parallel (true) or sync (false) mode. Null = auto-detect.
+     * @return bool|array{chunk_count: int, chunk_paths: string[], channel_count: int, programme_count: int, date_range: array} Returns true/false in sync mode, or chunk info array in parallel mode.
      */
-    public function cacheEpgData(Epg $epg): bool
+    public function cacheEpgData(Epg $epg, ?bool $parallel = null): bool|array
     {
         // Get the content
         $filePath = null;
@@ -112,8 +120,12 @@ class EpgCacheService
 
             return false;
         }
+
+        // Auto-detect parallel mode: use parallel unless SQLite (single worker)
+        $useParallel = $parallel ?? (config('database.default') !== 'sqlite');
+
         try {
-            Log::debug("Starting EPG cache generation for {$epg->name}");
+            Log::debug("Starting EPG cache generation for {$epg->name}", ['parallel' => $useParallel]);
             set_time_limit(60 * 120); // 120 minutes
 
             // Get the channel count for progress tracking
@@ -125,8 +137,17 @@ class EpgCacheService
             $cacheDir = $this->getCacheDir($epg);
             Storage::disk('local')->makeDirectory($cacheDir);
 
-            // Parse and save channels and programmes in a single pass
-            Log::debug("Parsing EPG data for {$epg->name}");
+            if ($useParallel) {
+                // Parallel mode: pre-scan to extract channels and split programmes into chunks
+                Log::debug("Pre-scanning EPG data for {$epg->name} (parallel mode)");
+                $preScanResult = $this->extractChannelsAndSplitProgrammes($epg, $filePath, $totalChannels, $totalProgrammes);
+                Log::debug("Pre-scan complete for {$epg->name}: {$preScanResult['channel_count']} channels, {$preScanResult['programme_count']} programmes, {$preScanResult['chunk_count']} chunks");
+
+                return $preScanResult;
+            }
+
+            // Synchronous mode: full single-pass processing
+            Log::debug("Parsing EPG data for {$epg->name} (synchronous mode)");
             $stats = $this->parseAndSaveEpgDataSinglePass($epg, $filePath, $totalChannels, $totalProgrammes);
             Log::debug("Processed {$stats['channels']} channels and {$stats['programmes']} programmes across {$stats['date_count']} dates");
 
@@ -163,6 +184,210 @@ class EpgCacheService
 
             return false;
         }
+    }
+
+    /**
+     * Pre-scan EPG XML file: extract channels and split raw programme data into chunk files.
+     *
+     * This performs a single XMLReader pass that:
+     * - Fully parses and saves channels to channels.json
+     * - Extracts only programme attributes (channel, start, stop) + raw outerXml
+     * - Writes chunks of raw programme data to temporary JSONL files
+     *
+     * The expensive inner-XML parsing of programmes is deferred to parallel chunk jobs.
+     *
+     * @return array{chunk_count: int, chunk_paths: string[], channel_count: int, programme_count: int, date_range: array}
+     */
+    public function extractChannelsAndSplitProgrammes(Epg $epg, string $filePath, int $totalChannels, int $totalProgrammes): array
+    {
+        $reader = new XMLReader;
+        $reader->open('compress.zlib://'.$filePath);
+
+        $channelCount = 0;
+        $programmeCount = 0;
+        $channelBatchSize = 5000;
+        $channelBatch = [];
+        $dateRangeTracker = ['min_date' => null, 'max_date' => null];
+
+        // Chunk configuration for programme splitting
+        $chunkSize = 10000;
+        $currentChunkBuffer = [];
+        $currentChunkIndex = 0;
+        $chunkPaths = [];
+        $cacheDir = $this->getCacheDir($epg);
+        $tmpDir = "{$cacheDir}/tmp";
+        Storage::disk('local')->makeDirectory($tmpDir);
+
+        $lastProgressUpdate = 0;
+        $progressUpdateInterval = 5000;
+
+        try {
+            while (@$reader->read()) {
+                // Process channels (full parsing — channels are small)
+                if ($reader->nodeType == XMLReader::ELEMENT && $reader->name === 'channel') {
+                    $channelId = trim($reader->getAttribute('id') ?: '');
+                    $innerXML = $reader->readOuterXml();
+                    $innerReader = new XMLReader;
+                    $innerReader->xml($innerXML);
+
+                    $channel = [
+                        'id' => $channelId,
+                        'display_name' => '',
+                        'icon' => '',
+                        'lang' => 'en',
+                    ];
+
+                    while (@$innerReader->read()) {
+                        if ($innerReader->nodeType == XMLReader::ELEMENT) {
+                            switch ($innerReader->name) {
+                                case 'display-name':
+                                    if (! $channel['display_name']) {
+                                        $channel['display_name'] = trim($innerReader->readString() ?: '');
+                                        $channel['lang'] = trim($innerReader->getAttribute('lang') ?: '') ?: 'en';
+                                    }
+                                    break;
+                                case 'icon':
+                                    $channel['icon'] = trim($innerReader->getAttribute('src') ?: '');
+                                    break;
+                            }
+                        }
+                    }
+                    $innerReader->close();
+
+                    if ($channelId) {
+                        $channelBatch[$channelId] = $channel;
+                        $channelCount++;
+
+                        if (count($channelBatch) >= $channelBatchSize) {
+                            $this->saveChannelBatchOptimized($epg, $channelBatch, $channelCount <= $channelBatchSize);
+                            $channelBatch = [];
+                        }
+                    }
+                }
+                // Extract raw programme data (NO inner parsing — deferred to chunk jobs)
+                elseif ($reader->nodeType == XMLReader::ELEMENT && $reader->name === 'programme') {
+                    $programmeCount++;
+
+                    if ($programmeCount > self::MAX_PROGRAMMES) {
+                        Log::warning("Programme processing limit reached at {$programmeCount}");
+                        break;
+                    }
+
+                    $channelId = trim($reader->getAttribute('channel') ?: '');
+                    $start = trim($reader->getAttribute('start') ?: '');
+                    $stop = trim($reader->getAttribute('stop') ?: '');
+
+                    if (! $channelId || ! $start) {
+                        continue;
+                    }
+
+                    $startDateTime = $this->parseXmltvDateTime($start);
+                    $stopDateTime = $stop ? $this->parseXmltvDateTime($stop) : null;
+
+                    if (! $startDateTime) {
+                        continue;
+                    }
+
+                    $date = $startDateTime->format('Y-m-d');
+
+                    // Track date range
+                    if ($dateRangeTracker['min_date'] === null || $date < $dateRangeTracker['min_date']) {
+                        $dateRangeTracker['min_date'] = $date;
+                    }
+                    if ($dateRangeTracker['max_date'] === null || $date > $dateRangeTracker['max_date']) {
+                        $dateRangeTracker['max_date'] = $date;
+                    }
+
+                    // Get raw outer XML — inner parsing deferred to chunk jobs
+                    $outerXml = $reader->readOuterXml();
+
+                    $currentChunkBuffer[] = json_encode([
+                        'channel' => $channelId,
+                        'start' => $startDateTime->toISOString(),
+                        'stop' => $stopDateTime?->toISOString(),
+                        'date' => $date,
+                        'xml' => $outerXml,
+                    ], JSON_UNESCAPED_UNICODE);
+
+                    // Flush chunk buffer when full
+                    if (count($currentChunkBuffer) >= $chunkSize) {
+                        $chunkPath = "{$tmpDir}/chunk-{$currentChunkIndex}.jsonl";
+                        Storage::disk('local')->put($chunkPath, implode("\n", $currentChunkBuffer)."\n");
+                        $chunkPaths[] = $chunkPath;
+                        $currentChunkBuffer = [];
+                        $currentChunkIndex++;
+                    }
+
+                    // Update progress less frequently
+                    $totalProcessed = $channelCount + $programmeCount;
+                    if ($totalProcessed - $lastProgressUpdate >= $progressUpdateInterval) {
+                        $estimatedTotal = $totalChannels + $totalProgrammes;
+                        $progress = $estimatedTotal > 0
+                            ? min(30, round(($totalProcessed / $estimatedTotal) * 30))
+                            : 30;
+                        $epg->update(['cache_progress' => $progress]);
+                        $lastProgressUpdate = $totalProcessed;
+                    }
+                }
+            }
+
+            // Save remaining channels
+            if (! empty($channelBatch)) {
+                $this->saveChannelBatchOptimized($epg, $channelBatch, $channelCount <= $channelBatchSize);
+            }
+
+            // Flush remaining programme chunk buffer
+            if (! empty($currentChunkBuffer)) {
+                $chunkPath = "{$tmpDir}/chunk-{$currentChunkIndex}.jsonl";
+                Storage::disk('local')->put($chunkPath, implode("\n", $currentChunkBuffer)."\n");
+                $chunkPaths[] = $chunkPath;
+            }
+        } finally {
+            $reader->close();
+        }
+
+        return [
+            'chunk_count' => count($chunkPaths),
+            'chunk_paths' => $chunkPaths,
+            'channel_count' => $channelCount,
+            'programme_count' => $programmeCount,
+            'date_range' => $dateRangeTracker,
+        ];
+    }
+
+    /**
+     * Save metadata and finalize cache after all parallel chunk jobs complete.
+     */
+    public function finalizeCacheAfterChunks(Epg $epg, int $channelCount, int $programmeCount, array $dateRange): void
+    {
+        $metadata = [
+            'cache_created' => time(),
+            'cache_version' => self::CACHE_VERSION,
+            'epg_uuid' => $epg->uuid,
+            'total_channels' => $channelCount,
+            'total_programmes' => $programmeCount,
+            'programme_date_range' => $dateRange,
+        ];
+
+        Storage::disk('local')->put(
+            $this->getCacheFilePath($epg, self::METADATA_FILE),
+            json_encode($metadata, JSON_PRETTY_PRINT)
+        );
+
+        // Clean up temp chunk files
+        $tmpDir = $this->getCacheDir($epg).'/tmp';
+        Storage::disk('local')->deleteDirectory($tmpDir);
+
+        // Update EPG model
+        $epg->update([
+            'is_cached' => true,
+            'cache_progress' => 100,
+            'cache_meta' => $metadata,
+            'channel_count' => $channelCount,
+            'programme_count' => $programmeCount,
+        ]);
+
+        Log::debug('EPG cache generated successfully (parallel mode)', $metadata);
     }
 
     /**

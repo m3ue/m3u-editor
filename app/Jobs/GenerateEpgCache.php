@@ -7,8 +7,10 @@ use App\Models\Epg;
 use App\Plugins\PluginHookDispatcher;
 use App\Services\EpgCacheService;
 use Filament\Notifications\Notification;
+use Illuminate\Bus\Batch;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -69,57 +71,183 @@ class GenerateEpgCache implements ShouldQueue
             'processing_started_at' => now(),
             'processing_phase' => 'cache',
         ]);
+
         $result = $cacheService->cacheEpgData($epg);
+
+        // Parallel mode: result is an array with chunk info
+        if (is_array($result)) {
+            $this->dispatchParallelChunks($epg, $result, $start);
+
+            return;
+        }
+
+        // Synchronous mode: result is a bool
         $duration = microtime(true) - $start;
         if ($result) {
-            $epg->update([
-                'status' => Status::Completed,
-                'is_cached' => true,
-                'cache_progress' => 100,
-                'processing_started_at' => null,
-                'processing_phase' => null,
-            ]);
+            $this->handleSyncSuccess($epg, $duration);
+        } else {
+            $this->handleFailure($epg);
+        }
+    }
 
-            // Clear playlist EPG cache files AFTER new cache is generated
-            // This ensures users can still get cached EPG files during regeneration
-            foreach ($epg->getAllPlaylists() as $playlist) {
-                EpgCacheService::clearPlaylistEpgCacheFile($playlist);
-            }
+    /**
+     * Dispatch parallel chunk jobs via Bus::batch after pre-scan.
+     */
+    private function dispatchParallelChunks(Epg $epg, array $preScanResult, float $start): void
+    {
+        $chunkPaths = $preScanResult['chunk_paths'];
+        $chunkCount = $preScanResult['chunk_count'];
+        $channelCount = $preScanResult['channel_count'];
+        $programmeCount = $preScanResult['programme_count'];
+        $dateRange = $preScanResult['date_range'];
 
-            if ($this->notify) {
-                $msg = 'Cache generated successfully in '.round($duration, 2).' seconds';
+        if ($chunkCount === 0) {
+            Log::info("No programme chunks to process for EPG {$epg->name}, finalizing immediately.");
+            $cacheService = app(EpgCacheService::class);
+            $cacheService->finalizeCacheAfterChunks($epg, $channelCount, $programmeCount, $dateRange);
+            $this->handleSyncSuccess($epg, microtime(true) - $start);
+
+            return;
+        }
+
+        $chunkJobs = [];
+        foreach ($chunkPaths as $chunkPath) {
+            $chunkJobs[] = new GenerateEpgCacheChunk($epg->uuid, $chunkPath, $chunkCount);
+        }
+
+        $epgUuid = $epg->uuid;
+        $notify = $this->notify;
+
+        Bus::batch($chunkJobs)
+            ->onConnection('redis')
+            ->onQueue('import')
+            ->allowFailures()
+            ->then(function () use ($epgUuid, $channelCount, $programmeCount, $dateRange, $notify, $start): void {
+                $epg = Epg::where('uuid', $epgUuid)->first();
+                if (! $epg) {
+                    return;
+                }
+
+                $cacheService = app(EpgCacheService::class);
+                $cacheService->finalizeCacheAfterChunks($epg, $channelCount, $programmeCount, $dateRange);
+
+                $epg->update([
+                    'status' => Status::Completed,
+                    'is_cached' => true,
+                    'cache_progress' => 100,
+                    'processing_started_at' => null,
+                    'processing_phase' => null,
+                ]);
+
+                // Clear playlist EPG cache files AFTER new cache is generated
+                foreach ($epg->getAllPlaylists() as $playlist) {
+                    EpgCacheService::clearPlaylistEpgCacheFile($playlist);
+                }
+
+                $duration = microtime(true) - $start;
+                if ($notify) {
+                    $msg = 'Cache generated successfully in '.round($duration, 2).' seconds';
+                    Notification::make()
+                        ->success()
+                        ->title("EPG cache created for \"{$epg->name}\"")
+                        ->body($msg)
+                        ->broadcast($epg->user)
+                        ->sendToDatabase($epg->user);
+                }
+
+                app(PluginHookDispatcher::class)->dispatch('epg.cache.generated', [
+                    'epg_id' => $epg->id,
+                    'playlist_ids' => $epg->getAllPlaylists()->pluck('id')->all(),
+                    'user_id' => $epg->user_id,
+                ], [
+                    'user_id' => $epg->user_id,
+                    'dry_run' => true,
+                ]);
+            })
+            ->catch(function (Batch $batch, ?Throwable $e) use ($epgUuid): void {
+                $epg = Epg::where('uuid', $epgUuid)->first();
+                if (! $epg) {
+                    return;
+                }
+
+                Log::error("EPG cache batch failed for {$epg->name}: ".($e?->getMessage() ?? 'Unknown'));
+                $epg->update([
+                    'status' => Status::Failed,
+                    'is_cached' => false,
+                    'cache_progress' => 100,
+                    'processing_started_at' => null,
+                    'processing_phase' => null,
+                ]);
+
+                $error = 'Failed to generate cache. You can try to run the cache generation again manually from the EPG management page.';
                 Notification::make()
-                    ->success()
-                    ->title("EPG cache created for \"{$epg->name}\"")
-                    ->body($msg)
+                    ->danger()
+                    ->title("Error creating cache for \"{$epg->name}\"")
+                    ->body($error)
                     ->broadcast($epg->user)
                     ->sendToDatabase($epg->user);
-            }
+            })->dispatch();
 
-            app(PluginHookDispatcher::class)->dispatch('epg.cache.generated', [
-                'epg_id' => $epg->id,
-                'playlist_ids' => $epg->getAllPlaylists()->pluck('id')->all(),
-                'user_id' => $epg->user_id,
-            ], [
-                'user_id' => $epg->user_id,
-                'dry_run' => true,
-            ]);
-        } else {
-            $epg->update([
-                'status' => Status::Failed,
-                'is_cached' => false,
-                'cache_progress' => 100,
-                'processing_started_at' => null,
-                'processing_phase' => null,
-            ]);
-            $error = 'Failed to generate cache. You can try to run the cache generation again manually from the EPG management page.';
+        Log::info("Dispatched {$chunkCount} parallel cache chunk jobs for EPG {$epg->name}");
+    }
+
+    /**
+     * Handle successful synchronous cache generation.
+     */
+    private function handleSyncSuccess(Epg $epg, float $duration): void
+    {
+        $epg->update([
+            'status' => Status::Completed,
+            'is_cached' => true,
+            'cache_progress' => 100,
+            'processing_started_at' => null,
+            'processing_phase' => null,
+        ]);
+
+        // Clear playlist EPG cache files AFTER new cache is generated
+        foreach ($epg->getAllPlaylists() as $playlist) {
+            EpgCacheService::clearPlaylistEpgCacheFile($playlist);
+        }
+
+        if ($this->notify) {
+            $msg = 'Cache generated successfully in '.round($duration, 2).' seconds';
             Notification::make()
-                ->danger()
-                ->title("Error creating cache for \"{$epg->name}\"")
-                ->body($error)
+                ->success()
+                ->title("EPG cache created for \"{$epg->name}\"")
+                ->body($msg)
                 ->broadcast($epg->user)
                 ->sendToDatabase($epg->user);
         }
+
+        app(PluginHookDispatcher::class)->dispatch('epg.cache.generated', [
+            'epg_id' => $epg->id,
+            'playlist_ids' => $epg->getAllPlaylists()->pluck('id')->all(),
+            'user_id' => $epg->user_id,
+        ], [
+            'user_id' => $epg->user_id,
+            'dry_run' => true,
+        ]);
+    }
+
+    /**
+     * Handle cache generation failure.
+     */
+    private function handleFailure(Epg $epg): void
+    {
+        $epg->update([
+            'status' => Status::Failed,
+            'is_cached' => false,
+            'cache_progress' => 100,
+            'processing_started_at' => null,
+            'processing_phase' => null,
+        ]);
+        $error = 'Failed to generate cache. You can try to run the cache generation again manually from the EPG management page.';
+        Notification::make()
+            ->danger()
+            ->title("Error creating cache for \"{$epg->name}\"")
+            ->body($error)
+            ->broadcast($epg->user)
+            ->sendToDatabase($epg->user);
     }
 
     /**
