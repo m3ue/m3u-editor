@@ -89,7 +89,7 @@ class PluginSchemaMapper
             'number' => TextInput::make($name)->numeric(),
             'textarea' => Textarea::make($name)->rows(4),
             'tags' => TagsInput::make($name)->splitKeys(['Tab', 'Return']),
-            'select' => Select::make($name)->options($field['options'] ?? [])->searchable(),
+            'select' => $this->staticSelectComponent($name, $field),
             'model_select' => $this->modelSelectComponent($name, $field),
             'text' => TextInput::make($name),
             default => throw new InvalidArgumentException("Unsupported plugin field type [{$type}]"),
@@ -100,6 +100,19 @@ class PluginSchemaMapper
             ->default($default)
             ->helperText($helperText)
             ->required($required);
+    }
+
+    private function staticSelectComponent(string $name, array $field): Select
+    {
+        $select = Select::make($name)
+            ->options($field['options'] ?? [])
+            ->searchable();
+
+        if ((bool) ($field['multiple'] ?? false)) {
+            $select->multiple();
+        }
+
+        return $select;
     }
 
     private function modelSelectComponent(string $name, array $field): Select
@@ -149,9 +162,11 @@ class PluginSchemaMapper
             $name = $prefix.$fieldId;
             $required = (bool) ($field['required'] ?? false);
             $type = $field['type'] ?? 'text';
-            $multiple = $type === 'model_select' && (bool) ($field['multiple'] ?? false);
+            $multiple = (bool) ($field['multiple'] ?? false);
+            $isMultiSelect = $multiple && $type === 'select';
+            $isMultiModelSelect = $multiple && $type === 'model_select';
 
-            if ($multiple) {
+            if ($isMultiModelSelect) {
                 // Parent rule: nullable array (or required with at least one item).
                 $rules[$name] = [$required ? 'required' : 'nullable', 'array'];
                 if ($required) {
@@ -159,6 +174,16 @@ class PluginSchemaMapper
                 }
                 // Per-item rule applied via wildcard.
                 $rules[$name.'.*'] = ['integer', $this->modelSelectExistsRule($field)];
+
+                continue;
+            }
+
+            if ($isMultiSelect) {
+                $rules[$name] = [$required ? 'required' : 'nullable', 'array'];
+                if ($required) {
+                    $rules[$name][] = 'min:1';
+                }
+                $rules[$name.'.*'] = ['string', Rule::in(array_keys($field['options'] ?? []))];
 
                 continue;
             }
@@ -180,6 +205,7 @@ class PluginSchemaMapper
                     'textarea', 'text' => ['string'],
                     'select' => ['string', Rule::in(array_keys($field['options'] ?? []))],
                     'model_select' => ['integer', $this->modelSelectExistsRule($field)],
+                    'tags' => ['string'],
                     default => ['string'],
                 },
             ];
