@@ -12,6 +12,7 @@ use App\Settings\GeneralSettings;
 use Exception;
 use Filament\Notifications\Notification;
 use Illuminate\Database\Eloquent\Attributes\ObservedBy;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -52,6 +53,7 @@ class Channel extends Model
         'enable_proxy' => 'boolean',
         'tmdb_id' => 'integer',
         'tvdb_id' => 'integer',
+        'imdb_id' => 'string',
         'info' => 'array',
         'movie_data' => 'array',
         'sync_settings' => 'array',
@@ -579,7 +581,8 @@ class Channel extends Model
 
     public function getTmdbId(): ?string
     {
-        return $this->info['tmdb_id']
+        return $this->tmdb_id
+            ?? $this->info['tmdb_id']
             ?? $this->info['tmdb']
             ?? $this->movie_data['tmdb_id']
             ?? $this->movie_data['tmdb']
@@ -588,7 +591,8 @@ class Channel extends Model
 
     public function getImdbId(): ?string
     {
-        return $this->info['imdb_id']
+        return $this->imdb_id
+            ?? $this->info['imdb_id']
             ?? $this->info['imdb']
             ?? $this->movie_data['imdb_id']
             ?? $this->movie_data['imdb']
@@ -598,6 +602,56 @@ class Channel extends Model
     public function hasMovieId(): bool
     {
         return $this->getTmdbId() !== null || $this->getImdbId() !== null;
+    }
+
+    public function scopeHasMovieId(Builder $query): Builder
+    {
+        $isPgsql = config('database.connections.'.config('database.default').'.driver') === 'pgsql';
+
+        return $query->where(function (Builder $q) use ($isPgsql) {
+            $q->whereNotNull('tmdb_id')
+                ->orWhereNotNull('imdb_id');
+
+            if ($isPgsql) {
+                $q->orWhereRaw("info::jsonb ?? 'tmdb_id'")
+                    ->orWhereRaw("info::jsonb ?? 'tmdb'")
+                    ->orWhereRaw("movie_data::jsonb ?? 'tmdb_id'")
+                    ->orWhereRaw("movie_data::jsonb ?? 'tmdb'")
+                    ->orWhereRaw("info::jsonb ?? 'imdb_id'")
+                    ->orWhereRaw("info::jsonb ?? 'imdb'")
+                    ->orWhereRaw("movie_data::jsonb ?? 'imdb_id'")
+                    ->orWhereRaw("movie_data::jsonb ?? 'imdb'");
+            }
+        });
+    }
+
+    public function scopeMissingMovieId(Builder $query): Builder
+    {
+        $query->whereNull('tmdb_id')->whereNull('imdb_id');
+
+        if (config('database.connections.'.config('database.default').'.driver') !== 'pgsql') {
+            return $query;
+        }
+
+        return $query->where(function (Builder $q) {
+            $q->where(function (Builder $inner) {
+                $inner->whereNull('info')
+                    ->orWhere(function (Builder $i) {
+                        $i->whereRaw("NOT (info::jsonb ?? 'tmdb_id')")
+                            ->whereRaw("NOT (info::jsonb ?? 'tmdb')")
+                            ->whereRaw("NOT (info::jsonb ?? 'imdb_id')")
+                            ->whereRaw("NOT (info::jsonb ?? 'imdb')");
+                    });
+            })->where(function (Builder $inner) {
+                $inner->whereNull('movie_data')
+                    ->orWhere(function (Builder $i) {
+                        $i->whereRaw("NOT (movie_data::jsonb ?? 'tmdb_id')")
+                            ->whereRaw("NOT (movie_data::jsonb ?? 'tmdb')")
+                            ->whereRaw("NOT (movie_data::jsonb ?? 'imdb_id')")
+                            ->whereRaw("NOT (movie_data::jsonb ?? 'imdb')");
+                    });
+            });
+        });
     }
 
     /**

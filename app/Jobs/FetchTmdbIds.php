@@ -307,8 +307,7 @@ class FetchTmdbIds implements ShouldQueue
         if (! $this->overwriteExisting) {
             $query->where(function ($q) {
                 $q->whereNull('last_metadata_fetch')
-                    ->orWhereNotNull('tmdb_id')
-                    ->orWhereNotNull('imdb_id');
+                    ->orWhere(fn ($inner) => $inner->hasMovieId());
             });
         }
 
@@ -419,10 +418,7 @@ class FetchTmdbIds implements ShouldQueue
         $hasMetadata = ! empty($info['plot']) && ! empty($info['cover_big']);
 
         // Determine the best existing TMDB ID we have
-        $tmdbId = $channel->tmdb_id
-            ?? $info['tmdb_id']
-            ?? $channel->movie_data['tmdb_id']
-            ?? null;
+        $tmdbId = $channel->getTmdbId();
 
         // If we have an ID AND metadata, and we're not overwriting, we can skip
         if ($tmdbId && $hasMetadata && ! $this->overwriteExisting) {
