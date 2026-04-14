@@ -1854,6 +1854,7 @@ class M3uProxyService
                     'url' => $url,
                     'resolver' => $profile->backend,
                     'resolver_args' => $profile->args ?? '',
+                    'cookies' => $profile->cookies ?: null,
                     'metadata' => $metadata,
                 ];
             } else {

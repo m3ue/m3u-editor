@@ -117,6 +117,14 @@ class StreamProfileResource extends Resource implements CopilotResource
                         default => __('FFmpeg arguments for transcoding. Use placeholders like {crf|23} for configurable parameters with defaults. Hardware acceleration will be applied automatically by the proxy server.'),
                     }),
 
+                Textarea::make('cookies')
+                    ->label(__('Cookies (Netscape format)'))
+                    ->placeholder("# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t0\tCOOKIE_NAME\tCOOKIE_VALUE")
+                    ->helperText(__('Paste cookies.txt content for authenticated streams (e.g. YouTube members-only, age-gated). Get cookies using a browser extension like "Get cookies.txt LOCALLY".'))
+                    ->rows(5)
+                    ->columnSpanFull()
+                    ->visible(fn (Get $get): bool => in_array($get('backend'), ['streamlink', 'ytdlp'])),
+
                 Select::make('format')
                     ->label(__('Stream Format'))
                     ->searchable()
