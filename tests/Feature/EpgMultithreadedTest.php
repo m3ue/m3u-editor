@@ -12,6 +12,7 @@ use Illuminate\Bus\PendingBatch;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 
 uses(RefreshDatabase::class);
 
@@ -38,7 +39,7 @@ it('EpgCacheService pre-scan splits programmes into chunk files', function () {
 
     $user = User::factory()->create();
     $epg = Epg::factory()->for($user)->createQuietly([
-        'uuid' => 'test-prescan-uuid',
+        'uuid' => Str::uuid()->toString(),
         'url' => 'http://example.com/test.xml',
         'status' => Status::Processing,
         'is_cached' => false,
@@ -122,7 +123,7 @@ it('GenerateEpgCacheChunk parses raw XML and writes programme JSONL files', func
 
     $user = User::factory()->create();
     $epg = Epg::factory()->for($user)->createQuietly([
-        'uuid' => 'test-chunk-uuid',
+        'uuid' => Str::uuid()->toString(),
         'status' => Status::Processing,
         'cache_progress' => 10,
     ]);
@@ -185,7 +186,7 @@ it('finalizeCacheAfterChunks writes metadata and cleans up tmp', function () {
 
     $user = User::factory()->create();
     $epg = Epg::factory()->for($user)->createQuietly([
-        'uuid' => 'test-finalize-uuid',
+        'uuid' => Str::uuid()->toString(),
         'status' => Status::Processing,
         'is_cached' => false,
     ]);
@@ -227,7 +228,7 @@ it('cacheEpgData returns array in parallel mode for batch dispatch', function ()
 
     $user = User::factory()->create();
     $epg = Epg::factory()->for($user)->createQuietly([
-        'uuid' => 'test-parallel-uuid',
+        'uuid' => Str::uuid()->toString(),
         'url' => 'http://example.com/epg.xml',
         'status' => Status::Processing,
         'is_cached' => false,
@@ -257,7 +258,7 @@ it('cacheEpgData returns bool in synchronous mode', function () {
 
     $user = User::factory()->create();
     $epg = Epg::factory()->for($user)->createQuietly([
-        'uuid' => 'test-sync-uuid',
+        'uuid' => Str::uuid()->toString(),
         'url' => 'http://example.com/epg.xml',
         'status' => Status::Processing,
         'is_cached' => false,
@@ -290,7 +291,7 @@ it('GenerateEpgCache dispatches batch for parallel cache generation', function (
 
     $user = User::factory()->create();
     $epg = Epg::factory()->for($user)->createQuietly([
-        'uuid' => 'test-batch-dispatch-uuid',
+        'uuid' => Str::uuid()->toString(),
         'url' => 'http://example.com/epg.xml',
         'status' => Status::Completed,
         'is_cached' => false,
