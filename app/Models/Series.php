@@ -8,6 +8,7 @@ use App\Jobs\SyncSeriesStrmFiles;
 use App\Services\XtreamService;
 use App\Settings\GeneralSettings;
 use Filament\Notifications\Notification;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -38,6 +39,7 @@ class Series extends Model
         'category_id' => 'integer',
         'tmdb_id' => 'integer',
         'tvdb_id' => 'integer',
+        'imdb_id' => 'string',
         // 'release_date' => 'date', // Not always well formed date, don't attempt to cast
         'rating_5based' => 'integer',
         'enabled' => 'boolean',
@@ -98,6 +100,49 @@ class Series extends Model
             'tvdb' => $tvdbId,
             'imdb' => $imdbId,
         ];
+    }
+
+    public function scopeHasSeriesId(Builder $query): Builder
+    {
+        $isPgsql = config('database.connections.'.config('database.default').'.driver') === 'pgsql';
+
+        return $query->where(function (Builder $q) use ($isPgsql) {
+            $q->whereNotNull('tmdb_id')
+                ->orWhereNotNull('tvdb_id')
+                ->orWhereNotNull('imdb_id');
+
+            if ($isPgsql) {
+                $q->orWhereRaw("metadata::jsonb ?? 'tmdb_id'")
+                    ->orWhereRaw("metadata::jsonb ?? 'tmdb'")
+                    ->orWhereRaw("metadata::jsonb ?? 'tvdb_id'")
+                    ->orWhereRaw("metadata::jsonb ?? 'tvdb'")
+                    ->orWhereRaw("metadata::jsonb ?? 'imdb_id'")
+                    ->orWhereRaw("metadata::jsonb ?? 'imdb'");
+            }
+        });
+    }
+
+    public function scopeMissingSeriesId(Builder $query): Builder
+    {
+        $query->whereNull('tmdb_id')
+            ->whereNull('tvdb_id')
+            ->whereNull('imdb_id');
+
+        if (config('database.connections.'.config('database.default').'.driver') !== 'pgsql') {
+            return $query;
+        }
+
+        return $query->where(function (Builder $q) {
+            $q->whereNull('metadata')
+                ->orWhere(function (Builder $inner) {
+                    $inner->whereRaw("NOT (metadata::jsonb ?? 'tmdb_id')")
+                        ->whereRaw("NOT (metadata::jsonb ?? 'tmdb')")
+                        ->whereRaw("NOT (metadata::jsonb ?? 'tvdb_id')")
+                        ->whereRaw("NOT (metadata::jsonb ?? 'tvdb')")
+                        ->whereRaw("NOT (metadata::jsonb ?? 'imdb_id')")
+                        ->whereRaw("NOT (metadata::jsonb ?? 'imdb')");
+                });
+        });
     }
 
     /**

@@ -344,9 +344,7 @@ class FetchTmdbIds implements ShouldQueue
         if (! $this->overwriteExisting) {
             $query->where(function ($q) {
                 $q->whereNull('last_metadata_fetch')
-                    ->orWhereNotNull('tmdb_id')
-                    ->orWhereNotNull('tvdb_id')
-                    ->orWhereNotNull('imdb_id');
+                    ->orWhere(fn ($inner) => $inner->hasSeriesId());
             });
         }
 
