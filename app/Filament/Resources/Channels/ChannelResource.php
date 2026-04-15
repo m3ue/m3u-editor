@@ -495,700 +495,753 @@ class ChannelResource extends Resource implements CopilotResource
             BulkModalActionGroup::make('Bulk channel actions')
                 ->modalHeading(__('Bulk channel actions'))
                 ->gridColumns(2)
-                ->schema([
-                    PlaylistService::getAddToPlaylistBulkAction('add', 'channel')
-                        ->hidden(fn () => ! $addToCustom),
-                    BulkAction::make('move')
-                        ->label(__('Move to Group'))
+                ->schema(self::getBulkActionSchema($addToCustom, $includeRecount)),
+        ];
+    }
+
+    /**
+     * Create a compact section for the bulk actions modal, ensuring each
+     * action closes the parent modal when it completes.
+     */
+    private static function bulkActionSection(string $heading, array $actions): Fieldset
+    {
+        foreach ($actions as $action) {
+            if ($action instanceof BulkAction) {
+                $action->cancelParentActions();
+            }
+        }
+
+        return Fieldset::make(__($heading))
+            ->columns(2)
+            ->columnSpanFull()
+            ->schema($actions);
+    }
+
+    /**
+     * Build the sectioned schema for the bulk actions modal.
+     */
+    private static function getBulkActionSchema(bool $addToCustom, bool $includeRecount): array
+    {
+        return [
+            // -- Playlist & Groups --
+            self::bulkActionSection('Playlist & Groups', [
+                PlaylistService::getAddToPlaylistBulkAction('add', 'channel')
+                    ->hidden(fn () => ! $addToCustom),
+                BulkAction::make('move')
+                    ->label(__('Move to Group'))
+                    ->schema([
+                        Select::make('playlist')
+                            ->required()
+                            ->live()
+                            ->afterStateUpdated(function (Set $set) {
+                                $set('group', null);
+                            })
+                            ->label(__('Playlist'))
+                            ->helperText(__('Select a playlist - only channels in the selected playlist will be moved. Any channels selected from another playlist will be ignored.'))
+                            ->options(Playlist::where(['user_id' => auth()->id()])->get(['name', 'id'])->pluck('name', 'id'))
+                            ->searchable(),
+                        Select::make('group')
+                            ->required()
+                            ->live()
+                            ->label(__('Group'))
+                            ->helperText(fn (Get $get) => $get('playlist') === null ? 'Select a playlist first...' : 'Select the group you would like to move the items to.')
+                            ->options(fn (Get $get) => Group::where([
+                                'type' => 'live',
+                                'user_id' => auth()->id(),
+                                'playlist_id' => $get('playlist'),
+                            ])->get(['name', 'id'])->pluck('name', 'id'))
+                            ->searchable()
+                            ->disabled(fn (Get $get) => $get('playlist') === null),
+                    ])
+                    ->action(function (Collection $records, array $data): void {
+                        $filtered = $records->where('playlist_id', $data['playlist']);
+                        $group = Group::findOrFail($data['group']);
+                        foreach ($filtered as $record) {
+                            $record->update([
+                                'group' => $group->name,
+                                'group_id' => $group->id,
+                            ]);
+                        }
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title(__('Channels moved to group'))
+                            ->body(__('The selected channels have been moved to the chosen group.'))
+                            ->send();
+                    })
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-arrows-right-left')
+                    ->modalIcon('heroicon-o-arrows-right-left')
+                    ->modalDescription(__('Move the selected channel(s) to the chosen group.'))
+                    ->modalSubmitActionLabel(__('Move now')),
+                ...($includeRecount ? [
+                    BulkAction::make('recount')
+                        ->label(__('Recount Channels'))
+                        ->icon('heroicon-o-hashtag')
                         ->schema([
-                            Select::make('playlist')
-                                ->required()
-                                ->live()
-                                ->afterStateUpdated(function (Set $set) {
-                                    $set('group', null);
-                                })
-                                ->label(__('Playlist'))
-                                ->helperText(__('Select a playlist - only channels in the selected playlist will be moved. Any channels selected from another playlist will be ignored.'))
-                                ->options(Playlist::where(['user_id' => auth()->id()])->get(['name', 'id'])->pluck('name', 'id'))
-                                ->searchable(),
-                            Select::make('group')
-                                ->required()
-                                ->live()
-                                ->label(__('Group'))
-                                ->helperText(fn (Get $get) => $get('playlist') === null ? 'Select a playlist first...' : 'Select the group you would like to move the items to.')
-                                ->options(fn (Get $get) => Group::where([
-                                    'type' => 'live',
-                                    'user_id' => auth()->id(),
-                                    'playlist_id' => $get('playlist'),
-                                ])->get(['name', 'id'])->pluck('name', 'id'))
-                                ->searchable()
-                                ->disabled(fn (Get $get) => $get('playlist') === null),
+                            TextInput::make('start')
+                                ->label(__('Start Number'))
+                                ->numeric()
+                                ->default(1)
+                                ->required(),
                         ])
                         ->action(function (Collection $records, array $data): void {
-                            $filtered = $records->where('playlist_id', $data['playlist']);
-                            $group = Group::findOrFail($data['group']);
-                            foreach ($filtered as $record) {
-                                $record->update([
-                                    'group' => $group->name,
-                                    'group_id' => $group->id,
-                                ]);
-                            }
-                        })->after(function () {
+                            $start = (int) $data['start'];
+                            SortFacade::bulkRecountChannels($records, $start);
+                            dispatch(new SyncPlexDvrJob(trigger: 'channel_recount'));
+                        })
+                        ->after(function ($livewire) {
                             Notification::make()
                                 ->success()
-                                ->title(__('Channels moved to group'))
-                                ->body(__('The selected channels have been moved to the chosen group.'))
+                                ->title(__('Channels Recounted'))
+                                ->body(__('The selected channels have been recounted.'))
                                 ->send();
                         })
-                        ->deselectRecordsAfterCompletion()
                         ->requiresConfirmation()
-                        ->icon('heroicon-o-arrows-right-left')
-                        ->modalIcon('heroicon-o-arrows-right-left')
-                        ->modalDescription(__('Move the selected channel(s) to the chosen group.'))
-                        ->modalSubmitActionLabel(__('Move now')),
-                    BulkAction::make('preferred_logo')
-                        ->label(__('Update preferred icon'))
-                        ->schema([
-                            Select::make('logo_type')
-                                ->label(__('Preferred Icon'))
-                                ->helperText(__('Prefer logo from channel or EPG.'))
-                                ->options([
-                                    'channel' => 'Channel',
-                                    'epg' => 'EPG',
-                                ])
-                                ->searchable(),
+                        ->modalIcon('heroicon-o-hashtag')
+                        ->modalDescription(__('Recount the selected channels sequentially? Channel numbers will be assigned based on the current sort order.')),
+                ] : []),
+            ]),
 
-                        ])
-                        ->action(function (Collection $records, array $data): void {
-                            Channel::whereIn('id', $records->pluck('id')->toArray())
-                                ->update([
-                                    'logo_type' => $data['logo_type'],
-                                ]);
-                        })->after(function () {
-                            Notification::make()
-                                ->success()
-                                ->title(__('Preferred icon updated'))
-                                ->body(__('The preferred icon has been updated.'))
-                                ->send();
-                        })
-                        ->deselectRecordsAfterCompletion()
-                        ->requiresConfirmation()
-                        ->icon('heroicon-o-photo')
-                        ->modalIcon('heroicon-o-photo')
-                        ->modalDescription(__('Update the preferred icon for the selected channel(s).'))
-                        ->modalSubmitActionLabel(__('Update now')),
-                    BulkAction::make('set_logo_override_url')
-                        ->label(__('Set logo override URL'))
-                        ->schema([
-                            TextInput::make('logo')
-                                ->label(__('Logo override URL'))
-                                ->url()
-                                ->nullable()
-                                ->helperText(__('Leave empty to remove the custom logo and use provider/EPG logo.'))
-                                ->suffixActions([
-                                    AssetPickerAction::upload('logo'),
-                                    AssetPickerAction::browse('logo'),
-                                ]),
-                        ])
-                        ->action(function (Collection $records, array $data): void {
-                            Channel::whereIn('id', $records->pluck('id')->toArray())
-                                ->update([
-                                    'logo' => empty($data['logo']) ? null : $data['logo'],
-                                ]);
-                        })->after(function () {
-                            Notification::make()
-                                ->success()
-                                ->title(__('Logo override updated'))
-                                ->body(__('The logo override URL has been updated for the selected channels.'))
-                                ->send();
-                        })
-                        ->deselectRecordsAfterCompletion()
-                        ->requiresConfirmation()
-                        ->icon('heroicon-o-link')
-                        ->modalIcon('heroicon-o-link')
-                        ->modalDescription(__('Apply a single logo override URL to all selected channels. Leave empty to remove overrides.'))
-                        ->modalSubmitActionLabel(__('Apply URL')),
-                    BulkAction::make('refresh_logo_cache')
-                        ->label(__('Refresh logo cache (selected)'))
-                        ->action(function (Collection $records): void {
-                            $urls = [];
-
-                            foreach ($records as $record) {
-                                $urls[] = $record->logo;
-                                $urls[] = $record->logo_internal;
-                                $urls[] = $record->epgChannel?->icon_custom;
-                                $urls[] = $record->epgChannel?->icon;
-                            }
-
-                            $cleared = LogoCacheService::clearByUrls($urls);
-
-                            Notification::make()
-                                ->success()
-                                ->title(__('Selected logo cache refreshed'))
-                                ->body("Removed {$cleared} cache file(s) for selected channels.")
-                                ->send();
-                        })
-                        ->deselectRecordsAfterCompletion()
-                        ->requiresConfirmation()
-                        ->icon('heroicon-o-arrow-path')
-                        ->modalIcon('heroicon-o-arrow-path')
-                        ->modalDescription(__('Clear cached logos for selected channels so they are fetched again on the next request.'))
-                        ->modalSubmitActionLabel(__('Refresh selected cache')),
-                    BulkAction::make('failover')
-                        ->label(__('Add as failover'))
-                        ->schema(function (Collection $records) {
-                            $existingFailoverIds = $records->pluck('id')->toArray();
-                            $initialMasterOptions = [];
-                            foreach ($records as $record) {
-                                $displayTitle = $record->title_custom ?: $record->title;
-                                $playlistName = $record->getEffectivePlaylist()->name ?? 'Unknown';
-                                $initialMasterOptions[$record->id] = "{$displayTitle} [{$playlistName}]";
-                            }
-
-                            return [
-                                ToggleButtons::make('master_source')
-                                    ->label(__('Choose master from?'))
-                                    ->options([
-                                        'selected' => 'Selected Channels',
-                                        'searched' => 'Channel Search',
-                                    ])
-                                    ->icons([
-                                        'selected' => 'heroicon-o-check',
-                                        'searched' => 'heroicon-o-magnifying-glass',
-                                    ])
-                                    ->default('selected')
-                                    ->live()
-                                    ->grouped(),
-                                Select::make('selected_master_id')
-                                    ->label(__('Select master channel'))
-                                    ->helperText(__('From the selected channels'))
-                                    ->options($initialMasterOptions)
-                                    ->required()
-                                    ->hidden(fn (Get $get) => $get('master_source') !== 'selected')
-                                    ->searchable(),
-                                Select::make('master_channel_id')
-                                    ->label(__('Search for master channel'))
-                                    ->searchable()
-                                    ->required()
-                                    ->hidden(fn (Get $get) => $get('master_source') !== 'searched')
-                                    ->getSearchResultsUsing(function (string $search) use ($existingFailoverIds) {
-                                        $searchLower = strtolower($search);
-                                        $channels = auth()->user()->channels()
-                                            ->withoutEagerLoads()
-                                            ->with('playlist')
-                                            ->whereNotIn('id', $existingFailoverIds)
-                                            ->where(function ($query) use ($searchLower) {
-                                                $query->whereRaw('LOWER(title) LIKE ?', ["%{$searchLower}%"])
-                                                    ->orWhereRaw('LOWER(title_custom) LIKE ?', ["%{$searchLower}%"])
-                                                    ->orWhereRaw('LOWER(name) LIKE ?', ["%{$searchLower}%"])
-                                                    ->orWhereRaw('LOWER(name_custom) LIKE ?', ["%{$searchLower}%"])
-                                                    ->orWhereRaw('LOWER(stream_id) LIKE ?', ["%{$searchLower}%"])
-                                                    ->orWhereRaw('LOWER(stream_id_custom) LIKE ?', ["%{$searchLower}%"]);
-                                            })
-                                            ->limit(50) // Keep a reasonable limit
-                                            ->get();
-
-                                        // Create options array
-                                        $options = [];
-                                        foreach ($channels as $channel) {
-                                            $displayTitle = $channel->title_custom ?: $channel->title;
-                                            $playlistName = $channel->getEffectivePlaylist()->name ?? 'Unknown';
-                                            $options[$channel->id] = "{$displayTitle} [{$playlistName}]";
-                                        }
-
-                                        return $options;
-                                    })
-                                    ->helperText(__('To use as the master for the selected channel.'))
-                                    ->required(),
-                            ];
-                        })
-                        ->action(function (Collection $records, array $data): void {
-                            // Filter out the master channel from the records to be added as failovers
-                            $masterRecordId = $data['master_source'] === 'selected'
-                                ? $data['selected_master_id']
-                                : $data['master_channel_id'];
-                            $failoverRecords = $records->filter(function ($record) use ($masterRecordId) {
-                                return (int) $record->id !== (int) $masterRecordId;
-                            });
-
-                            foreach ($failoverRecords as $record) {
-                                ChannelFailover::updateOrCreate([
-                                    'channel_id' => $masterRecordId,
-                                    'channel_failover_id' => $record->id,
-                                ]);
-                            }
-                        })->after(function () {
-                            Notification::make()
-                                ->success()
-                                ->title(__('Channels as failover'))
-                                ->body(__('The selected channels have been added as failovers.'))
-                                ->send();
-                        })
-                        ->deselectRecordsAfterCompletion()
-                        ->requiresConfirmation()
-                        ->icon('heroicon-o-arrow-path-rounded-square')
-                        ->modalIcon('heroicon-o-arrow-path-rounded-square')
-                        ->modalDescription(__('Add the selected channel(s) to the chosen channel as failover sources.'))
-                        ->modalSubmitActionLabel(__('Add failovers now')),
-                    ...($includeRecount ? [
-                        BulkAction::make('recount')
-                            ->label(__('Recount Channels'))
-                            ->icon('heroicon-o-hashtag')
-                            ->schema([
-                                TextInput::make('start')
-                                    ->label(__('Start Number'))
-                                    ->numeric()
-                                    ->default(1)
-                                    ->required(),
+            // -- Logo --
+            self::bulkActionSection('Logo', [
+                BulkAction::make('preferred_logo')
+                    ->label(__('Update preferred icon'))
+                    ->schema([
+                        Select::make('logo_type')
+                            ->label(__('Preferred Icon'))
+                            ->helperText(__('Prefer logo from channel or EPG.'))
+                            ->options([
+                                'channel' => 'Channel',
+                                'epg' => 'EPG',
                             ])
-                            ->action(function (Collection $records, array $data): void {
-                                $start = (int) $data['start'];
-                                SortFacade::bulkRecountChannels($records, $start);
-                                dispatch(new SyncPlexDvrJob(trigger: 'channel_recount'));
-                            })
-                            ->after(function ($livewire) {
-                                Notification::make()
-                                    ->success()
-                                    ->title(__('Channels Recounted'))
-                                    ->body(__('The selected channels have been recounted.'))
-                                    ->send();
-                            })
-                            ->requiresConfirmation()
-                            ->modalIcon('heroicon-o-hashtag')
-                            ->modalDescription(__('Recount the selected channels sequentially? Channel numbers will be assigned based on the current sort order.')),
-                    ] : []),
-                    BulkAction::make('map')
-                        ->label(__('Map EPG to selected'))
-                        ->schema(EpgMapResource::getForm(showPlaylist: false, showEpg: true))
-                        ->action(function (Collection $records, array $data): void {
-                            app('Illuminate\Contracts\Bus\Dispatcher')
-                                ->dispatch(new MapPlaylistChannelsToEpg(
-                                    epg: (int) $data['epg_id'],
-                                    channels: $records->pluck('id')->toArray(),
-                                    force: $data['override'],
-                                    settings: $data['settings'] ?? [],
-                                ));
-                        })->after(function () {
-                            Notification::make()
-                                ->success()
-                                ->title(__('EPG to Channel mapping'))
-                                ->body(__('Mapping started, you will be notified when the process is complete.'))
-                                ->send();
-                        })
-                        ->deselectRecordsAfterCompletion()
-                        ->requiresConfirmation()
-                        ->icon('heroicon-o-link')
-                        ->modalIcon('heroicon-o-link')
-                        ->modalWidth(Width::FourExtraLarge)
-                        ->modalDescription(__('Map the selected EPG to the selected channel(s).'))
-                        ->modalSubmitActionLabel(__('Map now')),
-                    BulkAction::make('unmap')
-                        ->label(__('Undo EPG Map'))
-                        ->action(function (Collection $records): void {
-                            // Clear the EPG mapping
-                            Channel::whereIn('id', $records->pluck('id'))
-                                ->update(['epg_channel_id' => null]);
+                            ->searchable(),
 
-                            // Invalidate cached EPG XML for all playlists containing these channels
-                            // (regular, custom, and merged) so Xtream API clients receive updated
-                            // XMLTV data immediately instead of waiting for the cache TTL to expire
-                            $records->loadMissing(['playlist.mergedPlaylists', 'customPlaylists']);
+                    ])
+                    ->action(function (Collection $records, array $data): void {
+                        Channel::whereIn('id', $records->pluck('id')->toArray())
+                            ->update([
+                                'logo_type' => $data['logo_type'],
+                            ]);
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title(__('Preferred icon updated'))
+                            ->body(__('The preferred icon has been updated.'))
+                            ->send();
+                    })
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-photo')
+                    ->modalIcon('heroicon-o-photo')
+                    ->modalDescription(__('Update the preferred icon for the selected channel(s).'))
+                    ->modalSubmitActionLabel(__('Update now')),
+                BulkAction::make('set_logo_override_url')
+                    ->label(__('Set logo override URL'))
+                    ->schema([
+                        TextInput::make('logo')
+                            ->label(__('Logo override URL'))
+                            ->url()
+                            ->nullable()
+                            ->helperText(__('Leave empty to remove the custom logo and use provider/EPG logo.'))
+                            ->suffixActions([
+                                AssetPickerAction::upload('logo'),
+                                AssetPickerAction::browse('logo'),
+                            ]),
+                    ])
+                    ->action(function (Collection $records, array $data): void {
+                        Channel::whereIn('id', $records->pluck('id')->toArray())
+                            ->update([
+                                'logo' => empty($data['logo']) ? null : $data['logo'],
+                            ]);
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title(__('Logo override updated'))
+                            ->body(__('The logo override URL has been updated for the selected channels.'))
+                            ->send();
+                    })
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-link')
+                    ->modalIcon('heroicon-o-link')
+                    ->modalDescription(__('Apply a single logo override URL to all selected channels. Leave empty to remove overrides.'))
+                    ->modalSubmitActionLabel(__('Apply URL')),
+                BulkAction::make('refresh_logo_cache')
+                    ->label(__('Refresh logo cache (selected)'))
+                    ->action(function (Collection $records): void {
+                        $urls = [];
 
-                            $affectedPlaylists = collect();
-                            foreach ($records as $channel) {
-                                if ($channel->playlist) {
-                                    $affectedPlaylists->push($channel->playlist);
-                                    foreach ($channel->playlist->mergedPlaylists as $merged) {
-                                        $affectedPlaylists->push($merged);
-                                    }
-                                }
-                                foreach ($channel->customPlaylists as $custom) {
-                                    $affectedPlaylists->push($custom);
+                        foreach ($records as $record) {
+                            $urls[] = $record->logo;
+                            $urls[] = $record->logo_internal;
+                            $urls[] = $record->epgChannel?->icon_custom;
+                            $urls[] = $record->epgChannel?->icon;
+                        }
+
+                        $cleared = LogoCacheService::clearByUrls($urls);
+
+                        Notification::make()
+                            ->success()
+                            ->title(__('Selected logo cache refreshed'))
+                            ->body("Removed {$cleared} cache file(s) for selected channels.")
+                            ->send();
+                    })
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-arrow-path')
+                    ->modalIcon('heroicon-o-arrow-path')
+                    ->modalDescription(__('Clear cached logos for selected channels so they are fetched again on the next request.'))
+                    ->modalSubmitActionLabel(__('Refresh selected cache')),
+            ]),
+
+            // -- EPG --
+            self::bulkActionSection('EPG', [
+                BulkAction::make('map')
+                    ->label(__('Map EPG to selected'))
+                    ->schema(EpgMapResource::getForm(showPlaylist: false, showEpg: true))
+                    ->action(function (Collection $records, array $data): void {
+                        app('Illuminate\Contracts\Bus\Dispatcher')
+                            ->dispatch(new MapPlaylistChannelsToEpg(
+                                epg: (int) $data['epg_id'],
+                                channels: $records->pluck('id')->toArray(),
+                                force: $data['override'],
+                                settings: $data['settings'] ?? [],
+                            ));
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title(__('EPG to Channel mapping'))
+                            ->body(__('Mapping started, you will be notified when the process is complete.'))
+                            ->send();
+                    })
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-link')
+                    ->modalIcon('heroicon-o-link')
+                    ->modalWidth(Width::FourExtraLarge)
+                    ->modalDescription(__('Map the selected EPG to the selected channel(s).'))
+                    ->modalSubmitActionLabel(__('Map now')),
+                BulkAction::make('unmap')
+                    ->label(__('Undo EPG Map'))
+                    ->action(function (Collection $records): void {
+                        // Clear the EPG mapping
+                        Channel::whereIn('id', $records->pluck('id'))
+                            ->update(['epg_channel_id' => null]);
+
+                        // Invalidate cached EPG XML for all playlists containing these channels
+                        // (regular, custom, and merged) so Xtream API clients receive updated
+                        // XMLTV data immediately instead of waiting for the cache TTL to expire
+                        $records->loadMissing(['playlist.mergedPlaylists', 'customPlaylists']);
+
+                        $affectedPlaylists = collect();
+                        foreach ($records as $channel) {
+                            if ($channel->playlist) {
+                                $affectedPlaylists->push($channel->playlist);
+                                foreach ($channel->playlist->mergedPlaylists as $merged) {
+                                    $affectedPlaylists->push($merged);
                                 }
                             }
-                            $affectedPlaylists->unique(fn ($p) => $p->getTable().'-'.$p->id)
-                                ->each(fn ($p) => EpgCacheService::clearPlaylistEpgCacheFile($p));
-                        })->after(function () {
-                            Notification::make()
-                                ->success()
-                                ->title(__('EPG Channel mapping removed'))
-                                ->body(__('Channel mapping removed for the selected channels.'))
-                                ->send();
-                        })
-                        ->requiresConfirmation()
-                        ->icon('heroicon-o-arrow-uturn-left')
-                        ->color('warning')
-                        ->modalIcon('heroicon-o-arrow-uturn-left')
-                        ->modalDescription(__('Clear EPG mappings for the selected channels.'))
-                        ->modalSubmitActionLabel(__('Reset now')),
-                    BulkAction::make('find-replace')
-                        ->label(__('Find & Replace'))
-                        ->schema(function (): array {
-                            $savedPatterns = [];
-                            $savedPatternRules = [];
-                            $counter = 0;
-                            foreach (Playlist::where('user_id', auth()->id())->get() as $playlist) {
-                                foreach ($playlist->find_replace_rules ?? [] as $rule) {
-                                    if (is_array($rule) && ($rule['target'] ?? 'channels') === 'channels') {
-                                        $savedPatterns[$counter] = "{$playlist->name} - ".($rule['name'] ?? 'Unnamed');
-                                        $savedPatternRules[$counter] = $rule;
-                                        $counter++;
-                                    }
+                            foreach ($channel->customPlaylists as $custom) {
+                                $affectedPlaylists->push($custom);
+                            }
+                        }
+                        $affectedPlaylists->unique(fn ($p) => $p->getTable().'-'.$p->id)
+                            ->each(fn ($p) => EpgCacheService::clearPlaylistEpgCacheFile($p));
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title(__('EPG Channel mapping removed'))
+                            ->body(__('Channel mapping removed for the selected channels.'))
+                            ->send();
+                    })
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-arrow-uturn-left')
+                    ->color('warning')
+                    ->modalIcon('heroicon-o-arrow-uturn-left')
+                    ->modalDescription(__('Clear EPG mappings for the selected channels.'))
+                    ->modalSubmitActionLabel(__('Reset now')),
+                BulkAction::make('enable-epg-mapping')
+                    ->label(__('Enable EPG mapping'))
+                    ->action(function (Collection $records, array $data): void {
+                        $records->each(fn ($channel) => $channel->update([
+                            'epg_map_enabled' => true,
+                        ]));
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title(__('EPG map re-enabled for selected channels'))
+                            ->body(__('The EPG map has been re-enabled for the selected channels.'))
+                            ->send();
+                    })
+                    ->hidden(fn () => ! $addToCustom)
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-calendar')
+                    ->modalIcon('heroicon-o-calendar')
+                    ->modalDescription(__('Allow mapping EPG to selected channels when running EPG mapping jobs.'))
+                    ->modalSubmitActionLabel(__('Enable now')),
+                BulkAction::make('disable-epg-mapping')
+                    ->label(__('Disable EPG mapping'))
+                    ->color('warning')
+                    ->action(function (Collection $records, array $data): void {
+                        $records->each(fn ($channel) => $channel->update([
+                            'epg_map_enabled' => false,
+                        ]));
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title(__('EPG map disabled for selected channels'))
+                            ->body(__('The EPG map has been disabled for the selected channels.'))
+                            ->send();
+                    })
+                    ->hidden(fn () => ! $addToCustom)
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-calendar')
+                    ->modalIcon('heroicon-o-calendar')
+                    ->modalDescription(__('Don\\\'t map EPG to selected channels when running EPG mapping jobs.'))
+                    ->modalSubmitActionLabel(__('Disable now')),
+                BulkAction::make('set-timeshift')
+                    ->label(__('Set Timeshift'))
+                    ->schema([
+                        TextInput::make('shift')
+                            ->label(__('Timeshift value'))
+                            ->helperText(__('Set the timeshift (in hours) for the selected channels. Use 0 to disable catch-up.'))
+                            ->type('number')
+                            ->rules(['integer', 'min:0'])
+                            ->default(0)
+                            ->required(),
+                    ])
+                    ->action(function (Collection $records, array $data): void {
+                        $value = (int) $data['shift'];
+                        foreach ($records->chunk(100) as $chunk) {
+                            Channel::whereIn('id', $chunk->pluck('id'))->update(['shift' => $value]);
+                        }
+                    })->after(function (array $data) {
+                        Notification::make()
+                            ->success()
+                            ->title(__('Timeshift updated'))
+                            ->body("Timeshift set to {$data['shift']} for the selected channels.")
+                            ->send();
+                    })
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-clock')
+                    ->modalIcon('heroicon-o-clock')
+                    ->modalDescription(__('Set the timeshift value for the selected channels. Use 0 to disable catch-up.'))
+                    ->modalSubmitActionLabel(__('Set timeshift')),
+                BulkAction::make('set-epg-shift')
+                    ->label(__('Set EPG Shift'))
+                    ->schema([
+                        TextInput::make('tvg_shift')
+                            ->label(__('EPG Shift value'))
+                            ->helperText(__('Shift the EPG time for the selected channels by this many hours. Use values like -2, -1, 0, 1, 2, etc. Use 0 to reset.'))
+                            ->type('number')
+                            ->rules(['required', 'numeric'])
+                            ->default(0)
+                            ->required(),
+                    ])
+                    ->action(function (Collection $records, array $data): void {
+                        $value = (string) $data['tvg_shift'];
+                        foreach ($records->chunk(100) as $chunk) {
+                            Channel::whereIn('id', $chunk->pluck('id'))->update(['tvg_shift' => $value]);
+                        }
+                    })->after(function (array $data) {
+                        Notification::make()
+                            ->success()
+                            ->title(__('EPG Shift updated'))
+                            ->body("EPG Shift set to {$data['tvg_shift']} for the selected channels.")
+                            ->send();
+                    })
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-clock')
+                    ->modalIcon('heroicon-o-clock')
+                    ->modalDescription(__('Set the EPG time shift (tvg-shift) for the selected channels. This shifts the EPG program schedule by the specified number of hours.'))
+                    ->modalSubmitActionLabel(__('Set EPG Shift')),
+            ]),
+
+            // -- Find & Replace --
+            self::bulkActionSection('Find & Replace', [
+                BulkAction::make('find-replace')
+                    ->label(__('Find & Replace'))
+                    ->schema(function (): array {
+                        $savedPatterns = [];
+                        $savedPatternRules = [];
+                        $counter = 0;
+                        foreach (Playlist::where('user_id', auth()->id())->get() as $playlist) {
+                            foreach ($playlist->find_replace_rules ?? [] as $rule) {
+                                if (is_array($rule) && ($rule['target'] ?? 'channels') === 'channels') {
+                                    $savedPatterns[$counter] = "{$playlist->name} - ".($rule['name'] ?? 'Unnamed');
+                                    $savedPatternRules[$counter] = $rule;
+                                    $counter++;
                                 }
                             }
+                        }
 
-                            return [
-                                Select::make('saved_pattern')
-                                    ->label(__('Load saved pattern'))
-                                    ->searchable()
-                                    ->placeholder(__('Select a saved pattern...'))
-                                    ->options($savedPatterns)
-                                    ->hidden(empty($savedPatterns))
-                                    ->live()
-                                    ->afterStateUpdated(function (?string $state, Set $set) use ($savedPatternRules): void {
-                                        if ($state === null || $state === '') {
-                                            return;
-                                        }
-                                        $rule = $savedPatternRules[(int) $state] ?? null;
-                                        if (! $rule) {
-                                            return;
-                                        }
-                                        $set('use_regex', $rule['use_regex'] ?? true);
-                                        $set('column', $rule['column'] ?? 'title');
-                                        $set('find_replace', $rule['find_replace'] ?? '');
-                                        $set('replace_with', $rule['replace_with'] ?? '');
-                                    })
-                                    ->dehydrated(false),
-                                Toggle::make('use_regex')
-                                    ->label(__('Use Regex'))
-                                    ->live()
-                                    ->helperText(__('Use regex patterns to find and replace. If disabled, will use direct string comparison.'))
-                                    ->default(true),
-                                Select::make('column')
-                                    ->label(__('Column to modify'))
-                                    ->options([
-                                        'title' => 'Channel Title',
-                                        'name' => 'Channel Name (tvg-name)',
-                                    ])
-                                    ->default('title')
-                                    ->required()
-                                    ->columnSpan(1),
-                                TextInput::make('find_replace')
-                                    ->label(fn (Get $get) => ! $get('use_regex') ? 'String to replace' : 'Pattern to replace')
-                                    ->required()
-                                    ->placeholder(
-                                        fn (Get $get) => $get('use_regex')
-                                            ? '^(US- |UK- |CA- )'
-                                            : 'US -'
-                                    )->helperText(
-                                        fn (Get $get) => ! $get('use_regex')
-                                            ? 'This is the string you want to find and replace.'
-                                            : 'This is the regex pattern you want to find. Make sure to use valid regex syntax.'
-                                    ),
-                                TextInput::make('replace_with')
-                                    ->label(__('Replace with (optional)'))
-                                    ->placeholder(__('Leave empty to remove')),
-                            ];
-                        })
-                        ->action(function (Collection $records, array $data): void {
-                            app('Illuminate\Contracts\Bus\Dispatcher')
-                                ->dispatch(new ChannelFindAndReplace(
-                                    user_id: auth()->id(), // The ID of the user who owns the content
-                                    use_regex: $data['use_regex'] ?? true,
-                                    column: $data['column'] ?? 'title',
-                                    find_replace: $data['find_replace'] ?? null,
-                                    replace_with: $data['replace_with'] ?? '',
-                                    channels: $records
-                                ));
-                        })->after(function () {
-                            Notification::make()
-                                ->success()
-                                ->title(__('Find & Replace started'))
-                                ->body(__('Find & Replace working in the background. You will be notified once the process is complete.'))
-                                ->send();
-                        })
-                        ->requiresConfirmation()
-                        ->icon('heroicon-o-magnifying-glass')
-                        ->color('gray')
-                        ->modalIcon('heroicon-o-magnifying-glass')
-                        ->modalDescription(__('Select what you would like to find and replace in the selected channels.'))
-                        ->modalSubmitActionLabel(__('Replace now')),
-                    BulkAction::make('find-replace-reset')
-                        ->label(__('Undo Find & Replace'))
-                        ->schema([
+                        return [
+                            Select::make('saved_pattern')
+                                ->label(__('Load saved pattern'))
+                                ->searchable()
+                                ->placeholder(__('Select a saved pattern...'))
+                                ->options($savedPatterns)
+                                ->hidden(empty($savedPatterns))
+                                ->live()
+                                ->afterStateUpdated(function (?string $state, Set $set) use ($savedPatternRules): void {
+                                    if ($state === null || $state === '') {
+                                        return;
+                                    }
+                                    $rule = $savedPatternRules[(int) $state] ?? null;
+                                    if (! $rule) {
+                                        return;
+                                    }
+                                    $set('use_regex', $rule['use_regex'] ?? true);
+                                    $set('column', $rule['column'] ?? 'title');
+                                    $set('find_replace', $rule['find_replace'] ?? '');
+                                    $set('replace_with', $rule['replace_with'] ?? '');
+                                })
+                                ->dehydrated(false),
+                            Toggle::make('use_regex')
+                                ->label(__('Use Regex'))
+                                ->live()
+                                ->helperText(__('Use regex patterns to find and replace. If disabled, will use direct string comparison.'))
+                                ->default(true),
                             Select::make('column')
-                                ->label(__('Column to reset'))
+                                ->label(__('Column to modify'))
                                 ->options([
                                     'title' => 'Channel Title',
                                     'name' => 'Channel Name (tvg-name)',
-                                    'logo' => 'Channel Logo (tvg-logo)',
-                                    'url' => 'Custom URL (tvg-url)',
                                 ])
                                 ->default('title')
                                 ->required()
                                 ->columnSpan(1),
-                        ])
-                        ->action(function (Collection $records, array $data): void {
-                            app('Illuminate\Contracts\Bus\Dispatcher')
-                                ->dispatch(new ChannelFindAndReplaceReset(
-                                    user_id: auth()->id(), // The ID of the user who owns the content
-                                    column: $data['column'] ?? 'title',
-                                    channels: $records
-                                ));
-                        })->after(function () {
-                            Notification::make()
-                                ->success()
-                                ->title(__('Find & Replace reset started'))
-                                ->body(__('Find & Replace reset working in the background. You will be notified once the process is complete.'))
-                                ->send();
-                        })
-                        ->requiresConfirmation()
-                        ->icon('heroicon-o-arrow-uturn-left')
-                        ->color('warning')
-                        ->modalIcon('heroicon-o-arrow-uturn-left')
-                        ->modalDescription(__('Reset Find & Replace results back to playlist defaults for the selected channels. This will remove any custom values set in the selected column.'))
-                        ->modalSubmitActionLabel(__('Reset now')),
-                    BulkAction::make('enable-epg-mapping')
-                        ->label(__('Enable EPG mapping'))
-                        ->action(function (Collection $records, array $data): void {
-                            $records->each(fn ($channel) => $channel->update([
-                                'epg_map_enabled' => true,
-                            ]));
-                        })->after(function () {
-                            Notification::make()
-                                ->success()
-                                ->title(__('EPG map re-enabled for selected channels'))
-                                ->body(__('The EPG map has been re-enabled for the selected channels.'))
-                                ->send();
-                        })
-                        ->hidden(fn () => ! $addToCustom)
-                        ->deselectRecordsAfterCompletion()
-                        ->requiresConfirmation()
-                        ->icon('heroicon-o-calendar')
-                        ->modalIcon('heroicon-o-calendar')
-                        ->modalDescription(__('Allow mapping EPG to selected channels when running EPG mapping jobs.'))
-                        ->modalSubmitActionLabel(__('Enable now')),
-                    BulkAction::make('disable-epg-mapping')
-                        ->label(__('Disable EPG mapping'))
-                        ->color('warning')
-                        ->action(function (Collection $records, array $data): void {
-                            $records->each(fn ($channel) => $channel->update([
-                                'epg_map_enabled' => false,
-                            ]));
-                        })->after(function () {
-                            Notification::make()
-                                ->success()
-                                ->title(__('EPG map disabled for selected channels'))
-                                ->body(__('The EPG map has been disabled for the selected channels.'))
-                                ->send();
-                        })
-                        ->hidden(fn () => ! $addToCustom)
-                        ->deselectRecordsAfterCompletion()
-                        ->requiresConfirmation()
-                        ->icon('heroicon-o-calendar')
-                        ->modalIcon('heroicon-o-calendar')
-                        ->modalDescription(__('Don\\\'t map EPG to selected channels when running EPG mapping jobs.'))
-                        ->modalSubmitActionLabel(__('Disable now')),
-                    BulkAction::make('enable-merge')
-                        ->label(__('Enable Merge'))
-                        ->action(function (Collection $records, array $data): void {
-                            $records->each(fn ($channel) => $channel->update([
-                                'can_merge' => true,
-                            ]));
-                        })->after(function () {
-                            Notification::make()
-                                ->success()
-                                ->title(__('Merge re-enabled for selected channels'))
-                                ->body(__('The merge has been re-enabled for the selected channels. They can now be merged during "Merge Same ID" jobs.'))
-                                ->send();
-                        })
-                        ->hidden(fn () => ! $addToCustom)
-                        ->deselectRecordsAfterCompletion()
-                        ->requiresConfirmation()
-                        ->icon('heroicon-o-arrows-pointing-in')
-                        ->modalIcon('heroicon-o-arrows-pointing-in')
-                        ->modalDescription(__('Allow merging for selected channels when running "Merge Same ID" jobs.'))
-                        ->modalSubmitActionLabel(__('Enable now')),
-                    BulkAction::make('disable-merge')
-                        ->label(__('Disable Merge'))
-                        ->color('warning')
-                        ->action(function (Collection $records, array $data): void {
-                            $records->each(fn ($channel) => $channel->update([
-                                'can_merge' => false,
-                            ]));
-                        })->after(function () {
-                            Notification::make()
-                                ->success()
-                                ->title(__('Merge disabled for selected channels'))
-                                ->body(__('The merge has been disabled for the selected channels. They will not be merged during "Merge Same ID" jobs.'))
-                                ->send();
-                        })
-                        ->hidden(fn () => ! $addToCustom)
-                        ->deselectRecordsAfterCompletion()
-                        ->requiresConfirmation()
-                        ->icon('heroicon-o-arrows-pointing-in')
-                        ->modalIcon('heroicon-o-arrows-pointing-in')
-                        ->modalDescription(__('Don\\\'t allow merging for selected channels when running "Merge Same ID" jobs.'))
-                        ->modalSubmitActionLabel(__('Disable now')),
-                    BulkAction::make('set-timeshift')
-                        ->label(__('Set Timeshift'))
-                        ->schema([
-                            TextInput::make('shift')
-                                ->label(__('Timeshift value'))
-                                ->helperText(__('Set the timeshift (in hours) for the selected channels. Use 0 to disable catch-up.'))
-                                ->type('number')
-                                ->rules(['integer', 'min:0'])
-                                ->default(0)
-                                ->required(),
-                        ])
-                        ->action(function (Collection $records, array $data): void {
-                            $value = (int) $data['shift'];
-                            foreach ($records->chunk(100) as $chunk) {
-                                Channel::whereIn('id', $chunk->pluck('id'))->update(['shift' => $value]);
-                            }
-                        })->after(function (array $data) {
-                            Notification::make()
-                                ->success()
-                                ->title(__('Timeshift updated'))
-                                ->body("Timeshift set to {$data['shift']} for the selected channels.")
-                                ->send();
-                        })
-                        ->deselectRecordsAfterCompletion()
-                        ->requiresConfirmation()
-                        ->icon('heroicon-o-clock')
-                        ->modalIcon('heroicon-o-clock')
-                        ->modalDescription(__('Set the timeshift value for the selected channels. Use 0 to disable catch-up.'))
-                        ->modalSubmitActionLabel(__('Set timeshift')),
-                    BulkAction::make('set-epg-shift')
-                        ->label(__('Set EPG Shift'))
-                        ->schema([
-                            TextInput::make('tvg_shift')
-                                ->label(__('EPG Shift value'))
-                                ->helperText(__('Shift the EPG time for the selected channels by this many hours. Use values like -2, -1, 0, 1, 2, etc. Use 0 to reset.'))
-                                ->type('number')
-                                ->rules(['required', 'numeric'])
-                                ->default(0)
-                                ->required(),
-                        ])
-                        ->action(function (Collection $records, array $data): void {
-                            $value = (string) $data['tvg_shift'];
-                            foreach ($records->chunk(100) as $chunk) {
-                                Channel::whereIn('id', $chunk->pluck('id'))->update(['tvg_shift' => $value]);
-                            }
-                        })->after(function (array $data) {
-                            Notification::make()
-                                ->success()
-                                ->title(__('EPG Shift updated'))
-                                ->body("EPG Shift set to {$data['tvg_shift']} for the selected channels.")
-                                ->send();
-                        })
-                        ->deselectRecordsAfterCompletion()
-                        ->requiresConfirmation()
-                        ->icon('heroicon-o-clock')
-                        ->modalIcon('heroicon-o-clock')
-                        ->modalDescription(__('Set the EPG time shift (tvg-shift) for the selected channels. This shifts the EPG program schedule by the specified number of hours.'))
-                        ->modalSubmitActionLabel(__('Set EPG Shift')),
-                    BulkAction::make('probe-streams')
-                        ->label(__('Probe Streams'))
-                        ->action(function (Collection $records): void {
-                            dispatch(new ProbeChannelStreams(
-                                channelIds: $records->pluck('id')->all(),
+                            TextInput::make('find_replace')
+                                ->label(fn (Get $get) => ! $get('use_regex') ? 'String to replace' : 'Pattern to replace')
+                                ->required()
+                                ->placeholder(
+                                    fn (Get $get) => $get('use_regex')
+                                        ? '^(US- |UK- |CA- )'
+                                        : 'US -'
+                                )->helperText(
+                                    fn (Get $get) => ! $get('use_regex')
+                                        ? 'This is the string you want to find and replace.'
+                                        : 'This is the regex pattern you want to find. Make sure to use valid regex syntax.'
+                                ),
+                            TextInput::make('replace_with')
+                                ->label(__('Replace with (optional)'))
+                                ->placeholder(__('Leave empty to remove')),
+                        ];
+                    })
+                    ->action(function (Collection $records, array $data): void {
+                        app('Illuminate\Contracts\Bus\Dispatcher')
+                            ->dispatch(new ChannelFindAndReplace(
+                                user_id: auth()->id(), // The ID of the user who owns the content
+                                use_regex: $data['use_regex'] ?? true,
+                                column: $data['column'] ?? 'title',
+                                find_replace: $data['find_replace'] ?? null,
+                                replace_with: $data['replace_with'] ?? '',
+                                channels: $records
                             ));
-                        })->after(function () {
-                            Notification::make()
-                                ->success()
-                                ->title(__('Stream probing started'))
-                                ->body(__('Stream probing is running in the background. You will be notified once the process is complete.'))
-                                ->send();
-                        })
-                        ->deselectRecordsAfterCompletion()
-                        ->requiresConfirmation()
-                        ->icon('heroicon-o-signal')
-                        ->modalIcon('heroicon-o-signal')
-                        ->modalDescription(__('Probe the selected channels with ffprobe to collect stream metadata (codec, resolution, bitrate). This data enables fast channel switching in Emby.'))
-                        ->modalSubmitActionLabel(__('Start probing')),
-                    BulkAction::make('enable-probing')
-                        ->label(__('Enable Probing'))
-                        ->action(function (Collection $records): void {
-                            foreach ($records->chunk(100) as $chunk) {
-                                Channel::whereIn('id', $chunk->pluck('id'))->update(['probe_enabled' => true]);
-                            }
-                        })->after(function () {
-                            Notification::make()
-                                ->success()
-                                ->title(__('Stream probing enabled'))
-                                ->body(__('Stream probing has been enabled for the selected channels.'))
-                                ->send();
-                        })
-                        ->deselectRecordsAfterCompletion()
-                        ->requiresConfirmation()
-                        ->icon('heroicon-o-signal')
-                        ->modalIcon('heroicon-o-signal')
-                        ->modalDescription(__('Enable stream probing for the selected channels. They will be included in stream probing jobs.'))
-                        ->modalSubmitActionLabel(__('Enable now')),
-                    BulkAction::make('disable-probing')
-                        ->label(__('Disable Probing'))
-                        ->color('warning')
-                        ->action(function (Collection $records): void {
-                            foreach ($records->chunk(100) as $chunk) {
-                                Channel::whereIn('id', $chunk->pluck('id'))->update(['probe_enabled' => false]);
-                            }
-                        })->after(function () {
-                            Notification::make()
-                                ->success()
-                                ->title(__('Stream probing disabled'))
-                                ->body(__('Stream probing has been disabled for the selected channels.'))
-                                ->send();
-                        })
-                        ->deselectRecordsAfterCompletion()
-                        ->requiresConfirmation()
-                        ->icon('heroicon-o-signal-slash')
-                        ->modalIcon('heroicon-o-signal-slash')
-                        ->modalDescription(__('Disable stream probing for the selected channels. They will be excluded from stream probing jobs.'))
-                        ->modalSubmitActionLabel(__('Disable now')),
-                    BulkAction::make('enable')
-                        ->label(__('Enable selected'))
-                        ->action(function (Collection $records): void {
-                            foreach ($records->chunk(100) as $chunk) {
-                                Channel::whereIn('id', $chunk->pluck('id'))->update(['enabled' => true]);
-                            }
-                        })->after(function () {
-                            Notification::make()
-                                ->success()
-                                ->title(__('Selected channels enabled'))
-                                ->body(__('The selected channels have been enabled.'))
-                                ->send();
-                            dispatch(new SyncPlexDvrJob(trigger: 'channel_bulk_enable'));
-                        })
-                        ->color('success')
-                        ->deselectRecordsAfterCompletion()
-                        ->requiresConfirmation()
-                        ->icon('heroicon-o-check-circle')
-                        ->modalIcon('heroicon-o-check-circle')
-                        ->modalDescription(__('Enable the selected channel(s) now?'))
-                        ->modalSubmitActionLabel(__('Yes, enable now')),
-                    BulkAction::make('disable')
-                        ->label(__('Disable selected'))
-                        ->action(function (Collection $records): void {
-                            foreach ($records->chunk(100) as $chunk) {
-                                Channel::whereIn('id', $chunk->pluck('id'))->update(['enabled' => false]);
-                            }
-                        })->after(function () {
-                            Notification::make()
-                                ->success()
-                                ->title(__('Selected channels disabled'))
-                                ->body(__('The selected channels have been disabled.'))
-                                ->send();
-                            dispatch(new SyncPlexDvrJob(trigger: 'channel_bulk_disable'));
-                        })
-                        ->color('danger')
-                        ->deselectRecordsAfterCompletion()
-                        ->requiresConfirmation()
-                        ->icon('heroicon-o-x-circle')
-                        ->modalIcon('heroicon-o-x-circle')
-                        ->modalDescription(__('Disable the selected channel(s) now?'))
-                        ->modalSubmitActionLabel(__('Yes, disable now')),
-                ]),
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title(__('Find & Replace started'))
+                            ->body(__('Find & Replace working in the background. You will be notified once the process is complete.'))
+                            ->send();
+                    })
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-magnifying-glass')
+                    ->color('gray')
+                    ->modalIcon('heroicon-o-magnifying-glass')
+                    ->modalDescription(__('Select what you would like to find and replace in the selected channels.'))
+                    ->modalSubmitActionLabel(__('Replace now')),
+                BulkAction::make('find-replace-reset')
+                    ->label(__('Undo Find & Replace'))
+                    ->schema([
+                        Select::make('column')
+                            ->label(__('Column to reset'))
+                            ->options([
+                                'title' => 'Channel Title',
+                                'name' => 'Channel Name (tvg-name)',
+                                'logo' => 'Channel Logo (tvg-logo)',
+                                'url' => 'Custom URL (tvg-url)',
+                            ])
+                            ->default('title')
+                            ->required()
+                            ->columnSpan(1),
+                    ])
+                    ->action(function (Collection $records, array $data): void {
+                        app('Illuminate\Contracts\Bus\Dispatcher')
+                            ->dispatch(new ChannelFindAndReplaceReset(
+                                user_id: auth()->id(), // The ID of the user who owns the content
+                                column: $data['column'] ?? 'title',
+                                channels: $records
+                            ));
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title(__('Find & Replace reset started'))
+                            ->body(__('Find & Replace reset working in the background. You will be notified once the process is complete.'))
+                            ->send();
+                    })
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-arrow-uturn-left')
+                    ->color('warning')
+                    ->modalIcon('heroicon-o-arrow-uturn-left')
+                    ->modalDescription(__('Reset Find & Replace results back to playlist defaults for the selected channels. This will remove any custom values set in the selected column.'))
+                    ->modalSubmitActionLabel(__('Reset now')),
+            ]),
+
+            // -- Streaming --
+            self::bulkActionSection('Streaming', [
+                BulkAction::make('enable-merge')
+                    ->label(__('Enable Merge'))
+                    ->action(function (Collection $records, array $data): void {
+                        $records->each(fn ($channel) => $channel->update([
+                            'can_merge' => true,
+                        ]));
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title(__('Merge re-enabled for selected channels'))
+                            ->body(__('The merge has been re-enabled for the selected channels. They can now be merged during "Merge Same ID" jobs.'))
+                            ->send();
+                    })
+                    ->hidden(fn () => ! $addToCustom)
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-arrows-pointing-in')
+                    ->modalIcon('heroicon-o-arrows-pointing-in')
+                    ->modalDescription(__('Allow merging for selected channels when running "Merge Same ID" jobs.'))
+                    ->modalSubmitActionLabel(__('Enable now')),
+                BulkAction::make('disable-merge')
+                    ->label(__('Disable Merge'))
+                    ->color('warning')
+                    ->action(function (Collection $records, array $data): void {
+                        $records->each(fn ($channel) => $channel->update([
+                            'can_merge' => false,
+                        ]));
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title(__('Merge disabled for selected channels'))
+                            ->body(__('The merge has been disabled for the selected channels. They will not be merged during "Merge Same ID" jobs.'))
+                            ->send();
+                    })
+                    ->hidden(fn () => ! $addToCustom)
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-arrows-pointing-in')
+                    ->modalIcon('heroicon-o-arrows-pointing-in')
+                    ->modalDescription(__('Don\\\'t allow merging for selected channels when running "Merge Same ID" jobs.'))
+                    ->modalSubmitActionLabel(__('Disable now')),
+                BulkAction::make('failover')
+                    ->label(__('Add as failover'))
+                    ->schema(function (Collection $records) {
+                        $existingFailoverIds = $records->pluck('id')->toArray();
+                        $initialMasterOptions = [];
+                        foreach ($records as $record) {
+                            $displayTitle = $record->title_custom ?: $record->title;
+                            $playlistName = $record->getEffectivePlaylist()->name ?? 'Unknown';
+                            $initialMasterOptions[$record->id] = "{$displayTitle} [{$playlistName}]";
+                        }
+
+                        return [
+                            ToggleButtons::make('master_source')
+                                ->label(__('Choose master from?'))
+                                ->options([
+                                    'selected' => 'Selected Channels',
+                                    'searched' => 'Channel Search',
+                                ])
+                                ->icons([
+                                    'selected' => 'heroicon-o-check',
+                                    'searched' => 'heroicon-o-magnifying-glass',
+                                ])
+                                ->default('selected')
+                                ->live()
+                                ->grouped(),
+                            Select::make('selected_master_id')
+                                ->label(__('Select master channel'))
+                                ->helperText(__('From the selected channels'))
+                                ->options($initialMasterOptions)
+                                ->required()
+                                ->hidden(fn (Get $get) => $get('master_source') !== 'selected')
+                                ->searchable(),
+                            Select::make('master_channel_id')
+                                ->label(__('Search for master channel'))
+                                ->searchable()
+                                ->required()
+                                ->hidden(fn (Get $get) => $get('master_source') !== 'searched')
+                                ->getSearchResultsUsing(function (string $search) use ($existingFailoverIds) {
+                                    $searchLower = strtolower($search);
+                                    $channels = auth()->user()->channels()
+                                        ->withoutEagerLoads()
+                                        ->with('playlist')
+                                        ->whereNotIn('id', $existingFailoverIds)
+                                        ->where(function ($query) use ($searchLower) {
+                                            $query->whereRaw('LOWER(title) LIKE ?', ["%{$searchLower}%"])
+                                                ->orWhereRaw('LOWER(title_custom) LIKE ?', ["%{$searchLower}%"])
+                                                ->orWhereRaw('LOWER(name) LIKE ?', ["%{$searchLower}%"])
+                                                ->orWhereRaw('LOWER(name_custom) LIKE ?', ["%{$searchLower}%"])
+                                                ->orWhereRaw('LOWER(stream_id) LIKE ?', ["%{$searchLower}%"])
+                                                ->orWhereRaw('LOWER(stream_id_custom) LIKE ?', ["%{$searchLower}%"]);
+                                        })
+                                        ->limit(50) // Keep a reasonable limit
+                                        ->get();
+
+                                    // Create options array
+                                    $options = [];
+                                    foreach ($channels as $channel) {
+                                        $displayTitle = $channel->title_custom ?: $channel->title;
+                                        $playlistName = $channel->getEffectivePlaylist()->name ?? 'Unknown';
+                                        $options[$channel->id] = "{$displayTitle} [{$playlistName}]";
+                                    }
+
+                                    return $options;
+                                })
+                                ->helperText(__('To use as the master for the selected channel.'))
+                                ->required(),
+                        ];
+                    })
+                    ->action(function (Collection $records, array $data): void {
+                        // Filter out the master channel from the records to be added as failovers
+                        $masterRecordId = $data['master_source'] === 'selected'
+                            ? $data['selected_master_id']
+                            : $data['master_channel_id'];
+                        $failoverRecords = $records->filter(function ($record) use ($masterRecordId) {
+                            return (int) $record->id !== (int) $masterRecordId;
+                        });
+
+                        foreach ($failoverRecords as $record) {
+                            ChannelFailover::updateOrCreate([
+                                'channel_id' => $masterRecordId,
+                                'channel_failover_id' => $record->id,
+                            ]);
+                        }
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title(__('Channels as failover'))
+                            ->body(__('The selected channels have been added as failovers.'))
+                            ->send();
+                    })
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-arrow-path-rounded-square')
+                    ->modalIcon('heroicon-o-arrow-path-rounded-square')
+                    ->modalDescription(__('Add the selected channel(s) to the chosen channel as failover sources.'))
+                    ->modalSubmitActionLabel(__('Add failovers now')),
+            ]),
+
+            // -- Probing --
+            self::bulkActionSection('Probing', [
+                BulkAction::make('enable-probing')
+                    ->label(__('Enable Probing'))
+                    ->action(function (Collection $records): void {
+                        foreach ($records->chunk(100) as $chunk) {
+                            Channel::whereIn('id', $chunk->pluck('id'))->update(['probe_enabled' => true]);
+                        }
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title(__('Stream probing enabled'))
+                            ->body(__('Stream probing has been enabled for the selected channels.'))
+                            ->send();
+                    })
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-signal')
+                    ->modalIcon('heroicon-o-signal')
+                    ->modalDescription(__('Enable stream probing for the selected channels. They will be included in stream probing jobs.'))
+                    ->modalSubmitActionLabel(__('Enable now')),
+                BulkAction::make('disable-probing')
+                    ->label(__('Disable Probing'))
+                    ->color('warning')
+                    ->action(function (Collection $records): void {
+                        foreach ($records->chunk(100) as $chunk) {
+                            Channel::whereIn('id', $chunk->pluck('id'))->update(['probe_enabled' => false]);
+                        }
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title(__('Stream probing disabled'))
+                            ->body(__('Stream probing has been disabled for the selected channels.'))
+                            ->send();
+                    })
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-signal-slash')
+                    ->modalIcon('heroicon-o-signal-slash')
+                    ->modalDescription(__('Disable stream probing for the selected channels. They will be excluded from stream probing jobs.'))
+                    ->modalSubmitActionLabel(__('Disable now')),
+                BulkAction::make('probe-streams')
+                    ->label(__('Probe Streams'))
+                    ->action(function (Collection $records): void {
+                        dispatch(new ProbeChannelStreams(
+                            channelIds: $records->pluck('id')->all(),
+                        ));
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title(__('Stream probing started'))
+                            ->body(__('Stream probing is running in the background. You will be notified once the process is complete.'))
+                            ->send();
+                    })
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-signal')
+                    ->modalIcon('heroicon-o-signal')
+                    ->modalDescription(__('Probe the selected channels with ffprobe to collect stream metadata (codec, resolution, bitrate). This data enables fast channel switching in Emby.'))
+                    ->modalSubmitActionLabel(__('Start probing')),
+            ]),
+
+            // -- Enable / Disable --
+            self::bulkActionSection('Enable / Disable', [
+                BulkAction::make('enable')
+                    ->label(__('Enable selected'))
+                    ->action(function (Collection $records): void {
+                        foreach ($records->chunk(100) as $chunk) {
+                            Channel::whereIn('id', $chunk->pluck('id'))->update(['enabled' => true]);
+                        }
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title(__('Selected channels enabled'))
+                            ->body(__('The selected channels have been enabled.'))
+                            ->send();
+                        dispatch(new SyncPlexDvrJob(trigger: 'channel_bulk_enable'));
+                    })
+                    ->color('success')
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-check-circle')
+                    ->modalIcon('heroicon-o-check-circle')
+                    ->modalDescription(__('Enable the selected channel(s) now?'))
+                    ->modalSubmitActionLabel(__('Yes, enable now')),
+                BulkAction::make('disable')
+                    ->label(__('Disable selected'))
+                    ->action(function (Collection $records): void {
+                        foreach ($records->chunk(100) as $chunk) {
+                            Channel::whereIn('id', $chunk->pluck('id'))->update(['enabled' => false]);
+                        }
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title(__('Selected channels disabled'))
+                            ->body(__('The selected channels have been disabled.'))
+                            ->send();
+                        dispatch(new SyncPlexDvrJob(trigger: 'channel_bulk_disable'));
+                    })
+                    ->color('danger')
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-x-circle')
+                    ->modalIcon('heroicon-o-x-circle')
+                    ->modalDescription(__('Disable the selected channel(s) now?'))
+                    ->modalSubmitActionLabel(__('Yes, disable now')),
+            ]),
         ];
     }
 

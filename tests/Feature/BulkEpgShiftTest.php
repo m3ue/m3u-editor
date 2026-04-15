@@ -5,6 +5,7 @@ use App\Models\Channel;
 use App\Models\Playlist;
 use App\Models\User;
 use Filament\Actions\BulkAction;
+use Filament\Schemas\Components\Component;
 
 beforeEach(function () {
     $this->user = User::factory()->create();
@@ -14,6 +15,8 @@ beforeEach(function () {
 
 /**
  * Return the flat list of BulkAction names from the BulkModalActionGroup schema.
+ * The schema may contain Section components (each with its own child actions)
+ * or a Grid wrapping flat BulkActions. This helper handles both layouts.
  */
 function getBulkActionNames(): array
 {
@@ -23,16 +26,19 @@ function getBulkActionNames(): array
     $schemaProp = new ReflectionProperty($group, 'schema');
     $outerSchema = $schemaProp->getValue($group);
 
-    $grid = $outerSchema[0];
+    $childProp = new ReflectionProperty(Component::class, 'childComponents');
+    $names = [];
 
-    $childProp = new ReflectionProperty($grid, 'childComponents');
-    $children = $childProp->getValue($grid)['default'] ?? [];
+    foreach ($outerSchema as $component) {
+        $children = $childProp->getValue($component)['default'] ?? [];
+        foreach ($children as $child) {
+            if ($child instanceof BulkAction) {
+                $names[] = $child->getName();
+            }
+        }
+    }
 
-    return collect($children)
-        ->filter(fn ($c) => $c instanceof BulkAction)
-        ->map(fn ($c) => $c->getName())
-        ->values()
-        ->all();
+    return $names;
 }
 
 it('registers set-epg-shift bulk action inside the channel BulkModalActionGroup', function () {

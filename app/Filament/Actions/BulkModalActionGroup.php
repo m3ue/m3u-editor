@@ -51,7 +51,9 @@ class BulkModalActionGroup extends BulkAction
 
     public function schema(array|Closure|null $schema): static
     {
-        // Ensure child actions close the parent modal when they complete
+        // Ensure top-level child actions close the parent modal when they complete.
+        // When actions are nested inside layout components (Section, etc.),
+        // callers must call cancelParentActions() on each action themselves.
         if (is_array($schema)) {
             foreach ($schema as $component) {
                 if ($component instanceof BulkAction) {
@@ -60,11 +62,16 @@ class BulkModalActionGroup extends BulkAction
             }
         }
 
-        // Wrap the schema in our grid layout
-        $schema = [
-            Grid::make(columns: $this->gridColumns)
-                ->schema($schema),
-        ];
+        // When schema contains only flat BulkActions, wrap in a grid.
+        // When it contains layout components (Section, etc.), they manage their own layout.
+        $allBulkActions = is_array($schema) && collect($schema)->every(fn ($c) => $c instanceof BulkAction);
+
+        if ($allBulkActions) {
+            $schema = [
+                Grid::make(columns: $this->gridColumns)
+                    ->schema($schema),
+            ];
+        }
 
         return parent::schema($schema);
     }
