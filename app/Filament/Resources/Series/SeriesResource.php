@@ -49,7 +49,6 @@ use Filament\Infolists\Components\TextEntry;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Actions;
-use Filament\Schemas\Components\Fieldset;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
@@ -480,31 +479,13 @@ class SeriesResource extends Resource implements CopilotResource
     }
 
     /**
-     * Create a compact section for the bulk actions modal, ensuring each
-     * action closes the parent modal when it completes.
-     */
-    private static function bulkActionSection(string $heading, array $actions): Fieldset
-    {
-        foreach ($actions as $action) {
-            if ($action instanceof BulkAction) {
-                $action->cancelParentActions();
-            }
-        }
-
-        return Fieldset::make(__($heading))
-            ->columns(2)
-            ->columnSpanFull()
-            ->schema($actions);
-    }
-
-    /**
      * Build the sectioned schema for the bulk actions modal.
      */
     private static function getBulkActionSchema(bool $addToCustom): array
     {
         return [
             // -- Playlist & Groups --
-            self::bulkActionSection('Playlist & Groups', [
+            BulkModalActionGroup::section('Playlist & Groups', [
                 PlaylistService::getAddToPlaylistBulkAction('add', 'series')
                     ->hidden(fn () => ! $addToCustom),
                 BulkAction::make('move')
@@ -561,7 +542,7 @@ class SeriesResource extends Resource implements CopilotResource
             ]),
 
             // -- Poster --
-            self::bulkActionSection('Poster', [
+            BulkModalActionGroup::section('Poster', [
                 BulkAction::make('set_poster_url')
                     ->label(__('Set poster URL'))
                     ->schema([
@@ -619,7 +600,7 @@ class SeriesResource extends Resource implements CopilotResource
             ]),
 
             // -- Series Metadata --
-            self::bulkActionSection('Series Metadata', [
+            BulkModalActionGroup::section('Series Metadata', [
                 BulkAction::make('process')
                     ->label(__('Fetch Series Metadata'))
                     ->icon('heroicon-o-arrow-down-tray')
@@ -719,7 +700,7 @@ class SeriesResource extends Resource implements CopilotResource
             ]),
 
             // -- Find & Replace --
-            self::bulkActionSection('Find & Replace', [
+            BulkModalActionGroup::section('Find & Replace', [
                 BulkAction::make('find-replace')
                     ->label(__('Find & Replace'))
                     ->schema(function (): array {
@@ -816,7 +797,7 @@ class SeriesResource extends Resource implements CopilotResource
             ]),
 
             // -- Enable / Disable --
-            self::bulkActionSection('Enable / Disable', [
+            BulkModalActionGroup::section('Enable / Disable', [
                 BulkAction::make('enable')
                     ->label(__('Enable selected'))
                     ->action(function (Collection $records): void {

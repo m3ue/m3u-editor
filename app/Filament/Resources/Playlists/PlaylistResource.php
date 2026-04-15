@@ -2735,25 +2735,11 @@ class PlaylistResource extends Resource implements CopilotResource
             ->default(false);
     }
 
-    private static function actionSection(string $heading, array $actions): Fieldset
-    {
-        foreach ($actions as $action) {
-            if ($action instanceof Action) {
-                $action->cancelParentActions();
-            }
-        }
-
-        return Fieldset::make(__($heading))
-            ->columns(2)
-            ->columnSpanFull()
-            ->schema($actions);
-    }
-
     private static function getPlaylistActionSchema(): array
     {
         return [
             // -- Processing --
-            self::actionSection('Processing', [
+            ModalActionGroup::section('Processing', [
                 Action::make('process')
                     ->label(__('Sync and Process'))
                     ->icon('heroicon-o-arrow-path')
@@ -2881,7 +2867,7 @@ class PlaylistResource extends Resource implements CopilotResource
             ]),
 
             // -- Downloads & Links --
-            self::actionSection('Downloads & Links', [
+            ModalActionGroup::section('Downloads & Links', [
                 Action::make('Download M3U')
                     ->label(__('Download M3U'))
                     ->icon('heroicon-o-arrow-down-tray')
@@ -2903,7 +2889,7 @@ class PlaylistResource extends Resource implements CopilotResource
             ]),
 
             // -- Playlist Management --
-            self::actionSection('Playlist Management', [
+            ModalActionGroup::section('Playlist Management', [
                 Action::make('Duplicate')
                     ->label(__('Duplicate'))
                     ->schema([
@@ -3041,7 +3027,7 @@ class PlaylistResource extends Resource implements CopilotResource
             ]),
 
             // -- Reset & Delete --
-            self::actionSection('Reset & Delete', [
+            ModalActionGroup::section('Reset & Delete', [
                 Action::make('reset')
                     ->label(__('Reset status'))
                     ->icon('heroicon-o-arrow-uturn-left')

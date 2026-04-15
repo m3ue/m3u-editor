@@ -4,6 +4,7 @@ namespace App\Filament\Actions;
 
 use Closure;
 use Filament\Actions\Action;
+use Filament\Schemas\Components\Fieldset;
 use Filament\Schemas\Components\Grid;
 
 /**
@@ -62,10 +63,10 @@ class ModalActionGroup extends Action
         }
 
         // When schema contains only flat Actions, wrap in a grid.
-        // When it contains layout components (Section, etc.), they manage their own layout.
-        $allActions = is_array($schema) && collect($schema)->every(fn ($c) => $c instanceof Action);
+        // When it contains Fieldset groups, they manage their own layout.
+        $hasSections = is_array($schema) && collect($schema)->contains(fn ($c) => $c instanceof Fieldset);
 
-        if ($allActions) {
+        if (! $hasSections) {
             $schema = [
                 Grid::make(columns: $this->gridColumns)
                     ->schema($schema),
@@ -73,6 +74,24 @@ class ModalActionGroup extends Action
         }
 
         return parent::schema($schema);
+    }
+
+    /**
+     * Create a labeled group for the actions modal, ensuring each
+     * action closes the parent modal when it completes.
+     */
+    public static function section(string $heading, array $actions): Fieldset
+    {
+        foreach ($actions as $action) {
+            if ($action instanceof Action) {
+                $action->cancelParentActions();
+            }
+        }
+
+        return Fieldset::make(__($heading))
+            ->columns(2)
+            ->columnSpanFull()
+            ->schema($actions);
     }
 
     public function actions(array $actions): static
