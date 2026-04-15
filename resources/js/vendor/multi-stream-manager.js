@@ -302,10 +302,10 @@ function multiStreamManager() {
                 return;
             }
 
-            // Notify the proxy to de-register this floating player client so
-            // it doesn't linger as an orphan and block stream cleanup later.
-            // The pop-out window opens its own connection with a new client_id.
-            this.closeStream(player.id, { notifyServer: true });
+            // Close the floating player locally without notifying the proxy —
+            // the pop-out window inherits the same client_id so the proxy sees
+            // an uninterrupted connection with no gap at 0 clients.
+            this.closeStream(player.id, { notifyServer: false });
 
             const params = new URLSearchParams({
                 title: player.title ?? '',
@@ -318,6 +318,7 @@ function multiStreamManager() {
                 playlist_id: player.playlist_id ?? '',
                 series_id: player.series_id ?? '',
                 season_number: player.season_number ?? '',
+                client_id: player.id,
             });
 
             window.open(popoutRoute + '?' + params.toString(), '_blank', 'noopener');

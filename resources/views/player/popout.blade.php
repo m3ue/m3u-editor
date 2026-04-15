@@ -73,7 +73,8 @@
                 </div>
             </div>
 
-            <div class="absolute top-2 left-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex gap-1">
+            <div
+                class="absolute top-2 left-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex gap-1">
                 <button type="button" onclick="toggleStreamDetails('popout-player')"
                     class="rounded bg-black/75 hover:bg-black/90 px-2 py-1 text-xs text-white transition-colors"
                     title="Toggle Stream Details">
@@ -82,7 +83,8 @@
                 <button type="button" id="popout-pip-btn" onclick="togglePopoutPiP()"
                     class="rounded bg-black/75 hover:bg-black/90 px-2 py-1 text-xs text-white transition-colors"
                     title="Picture-in-Picture" style="display: none;">
-                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
                         <rect x="2" y="3" width="20" height="14" rx="2" />
                         <rect x="12" y="9" width="8" height="6" rx="1" fill="currentColor" />
                     </svg>
@@ -123,9 +125,11 @@
             const streamUrl = videoElement.dataset.url ?? '';
             const streamFormat = videoElement.dataset.format ?? 'ts';
 
-            // Generate a unique client_id for this popout window so the proxy
-            // distinguishes it from other tabs / players watching the same stream.
-            const popoutClientId = 'popout-' + Math.random().toString(36).substring(2, 11);
+            // Inherit the client_id from the floating player if this popout was
+            // opened via "open in new tab", so the proxy sees an uninterrupted
+            // connection. Fall back to a fresh id for direct popout loads.
+            const urlParams = new URLSearchParams(window.location.search);
+            const popoutClientId = urlParams.get('client_id') ?? 'popout-' + Math.random().toString(36).substr(2, 9);
             const clientIdSep = streamUrl.includes('?') ? '&' : '?';
             const streamUrlWithClientId = streamUrl + clientIdSep + 'client_id=' + encodeURIComponent(popoutClientId);
 
@@ -138,11 +142,11 @@
                 if (pipBtn) pipBtn.style.display = '';
             }
 
-            window.togglePopoutPiP = function() {
+            window.togglePopoutPiP = function () {
                 if (document.pictureInPictureElement === videoElement) {
-                    document.exitPictureInPicture().catch(() => {});
+                    document.exitPictureInPicture().catch(() => { });
                 } else if (document.pictureInPictureEnabled) {
-                    videoElement.requestPictureInPicture().catch(() => {});
+                    videoElement.requestPictureInPicture().catch(() => { });
                 }
             };
 
