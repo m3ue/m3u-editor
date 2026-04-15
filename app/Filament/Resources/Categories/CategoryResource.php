@@ -178,7 +178,7 @@ class CategoryResource extends Resource implements CopilotResource
             ])
             ->recordActions([
                 ActionGroup::make([
-                    PlaylistService::getAddToPlaylistAction('add', 'series', fn ($record) => $record->series()),
+                    PlaylistService::getAddGroupsToPlaylistAction('add', 'series'),
                     Action::make('move')
                         ->label(__('Move Series to Category'))
                         ->schema([
@@ -294,9 +294,7 @@ class CategoryResource extends Resource implements CopilotResource
             ], position: RecordActionsPosition::BeforeCells)
             ->toolbarActions([
                 BulkActionGroup::make([
-                    PlaylistService::getAddToPlaylistBulkAction('add', 'series', function (Collection $records) {
-                        return $records->flatMap->series;
-                    }),
+                    PlaylistService::getAddGroupsToPlaylistBulkAction('add', 'series'),
                     BulkAction::make('move')
                         ->label(__('Move Series to Category'))
                         ->schema([

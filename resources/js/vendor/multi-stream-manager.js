@@ -108,7 +108,7 @@ function multiStreamManager() {
                 return;
             }
 
-            const playerId = 'floating-player-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+            const playerId = 'floating-player-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9);
 
             const player = {
                 id: playerId,

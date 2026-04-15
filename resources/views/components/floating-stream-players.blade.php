@@ -4,7 +4,7 @@
 @endphp
 <div data-max-players="{{ $maxPlayers }}" x-data="(() => {
         // Create a unique instance ID to avoid conflicts
-        const instanceId = 'floating-streams-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+        const instanceId = 'floating-streams-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9);
         
         // Only create a new global manager if none exists, or if it's from a different instance
         if (!window._globalMultiStreamManager || window._globalMultiStreamManager._instanceId !== instanceId) {
@@ -37,8 +37,7 @@
             @mousedown="bringToFront(player.id)">
             <!-- Player Header/Title Bar -->
             <div class="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-600 cursor-move select-none hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors"
-                @mousedown="startDrag(player.id, $event)"
-                @touchstart="startDrag(player.id, $event)">
+                @mousedown="startDrag(player.id, $event)" @touchstart="startDrag(player.id, $event)">
                 <div class="flex items-center space-x-2 flex-1 min-w-0">
                     <img x-show="player.logo" :src="player.logo" :alt="player.title"
                         class="w-5 h-5 rounded object-cover flex-shrink-0" onerror="this.style.display='none'">
@@ -100,8 +99,7 @@
                     x-data="{ playerInstance: null }" :data-stream-url="player.url" :data-stream-format="player.format"
                     :data-player-id="player.id" :data-content-type="player.content_type || ''"
                     :data-stream-id="player.stream_id || ''" :data-playlist-id="player.playlist_id || ''"
-                    :data-series-id="player.series_id || ''" :data-season-number="player.season_number || ''"
-                    x-init="
+                    :data-series-id="player.series_id || ''" :data-season-number="player.season_number || ''" x-init="
                         if (window.streamPlayer && $el.dataset.streamUrl && $el.dataset.streamUrl !== '') {
                             playerInstance = window.streamPlayer();
                             const sep = $el.dataset.streamUrl.includes('?') ? '&' : '?';
@@ -211,8 +209,7 @@
 
                 <!-- Resize Handle -->
                 <div class="absolute bottom-0 right-0 w-4 h-4 cursor-se-resize opacity-50 hover:opacity-100 transition-opacity group"
-                    @mousedown.stop="startResize(player.id, $event)"
-                    @touchstart.stop="startResize(player.id, $event)"
+                    @mousedown.stop="startResize(player.id, $event)" @touchstart.stop="startResize(player.id, $event)"
                     title="Resize">
                     <!-- Visual resize indicator with lines -->
                     <div class="absolute bottom-1 right-1 space-y-0.5">

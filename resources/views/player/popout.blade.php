@@ -129,7 +129,7 @@
             // opened via "open in new tab", so the proxy sees an uninterrupted
             // connection. Fall back to a fresh id for direct popout loads.
             const urlParams = new URLSearchParams(window.location.search);
-            const popoutClientId = urlParams.get('client_id') ?? 'popout-' + Math.random().toString(36).substr(2, 9);
+            const popoutClientId = urlParams.get('client_id') ?? 'popout-' + Math.random().toString(36).substring(2, 9);
             const clientIdSep = streamUrl.includes('?') ? '&' : '?';
             const streamUrlWithClientId = streamUrl + clientIdSep + 'client_id=' + encodeURIComponent(popoutClientId);
 

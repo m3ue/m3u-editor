@@ -22,7 +22,7 @@ class EditCategory extends EditRecord
     {
         return [
             ActionGroup::make([
-                PlaylistService::getAddToPlaylistAction('add', 'series', fn ($record) => $record->series()),
+                PlaylistService::getAddGroupsToPlaylistAction('add', 'series'),
                 Action::make('move')
                     ->label(__('Move Series to Category'))
                     ->schema([
