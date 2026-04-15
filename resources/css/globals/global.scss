@@ -40,9 +40,12 @@ body::before {
 /* ── Glass topbar ─────────────────────────────────────────── */
 /* backdrop-filter on the element itself creates a stacking context that traps
    child dropdowns in Safari/Edge. Using a ::before pseudo-element keeps the
-   blur effect without scoping children's z-index to the topbar container. */
+   blur effect without scoping children's z-index to the topbar container.
+   Note: do NOT add transform here — it creates a containing block for
+   position:fixed descendants, which breaks Floating UI dropdown positioning.
+   Filament's default position:sticky already provides the containing block
+   needed for the ::before pseudo-element. */
 .fi-topbar-ctn {
-    transform: translateZ(0);
     background-color: rgba(255, 255, 255, 0.75) !important;
 
     &::before {

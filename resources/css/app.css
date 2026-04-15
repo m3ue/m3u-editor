@@ -44,7 +44,7 @@
 }
 
 .fi-dropdown-panel {
-    z-index: 20; /* Ensure dropdowns appear above other elements */
+    z-index: 40; /* Ensure dropdowns appear above the topbar (z-30) */
 }
 
 /* Force inclusion of commonly used Alpine.js classes for Tailwind v4 */
