@@ -500,31 +500,13 @@ class ChannelResource extends Resource implements CopilotResource
     }
 
     /**
-     * Create a compact section for the bulk actions modal, ensuring each
-     * action closes the parent modal when it completes.
-     */
-    private static function bulkActionSection(string $heading, array $actions): Fieldset
-    {
-        foreach ($actions as $action) {
-            if ($action instanceof BulkAction) {
-                $action->cancelParentActions();
-            }
-        }
-
-        return Fieldset::make(__($heading))
-            ->columns(2)
-            ->columnSpanFull()
-            ->schema($actions);
-    }
-
-    /**
      * Build the sectioned schema for the bulk actions modal.
      */
     private static function getBulkActionSchema(bool $addToCustom, bool $includeRecount): array
     {
         return [
             // -- Playlist & Groups --
-            self::bulkActionSection('Playlist & Groups', [
+            BulkModalActionGroup::section('Playlist & Groups', [
                 PlaylistService::getAddToPlaylistBulkAction('add', 'channel')
                     ->hidden(fn () => ! $addToCustom),
                 BulkAction::make('move')
@@ -605,7 +587,7 @@ class ChannelResource extends Resource implements CopilotResource
             ]),
 
             // -- Logo --
-            self::bulkActionSection('Logo', [
+            BulkModalActionGroup::section('Logo', [
                 BulkAction::make('preferred_logo')
                     ->label(__('Update preferred icon'))
                     ->schema([
@@ -697,7 +679,7 @@ class ChannelResource extends Resource implements CopilotResource
             ]),
 
             // -- EPG --
-            self::bulkActionSection('EPG', [
+            BulkModalActionGroup::section('EPG', [
                 BulkAction::make('map')
                     ->label(__('Map EPG to selected'))
                     ->schema(EpgMapResource::getForm(showPlaylist: false, showEpg: true))
@@ -864,7 +846,7 @@ class ChannelResource extends Resource implements CopilotResource
             ]),
 
             // -- Find & Replace --
-            self::bulkActionSection('Find & Replace', [
+            BulkModalActionGroup::section('Find & Replace', [
                 BulkAction::make('find-replace')
                     ->label(__('Find & Replace'))
                     ->schema(function (): array {
@@ -995,7 +977,7 @@ class ChannelResource extends Resource implements CopilotResource
             ]),
 
             // -- Streaming --
-            self::bulkActionSection('Streaming', [
+            BulkModalActionGroup::section('Streaming', [
                 BulkAction::make('enable-merge')
                     ->label(__('Enable Merge'))
                     ->action(function (Collection $records, array $data): void {
@@ -1136,7 +1118,7 @@ class ChannelResource extends Resource implements CopilotResource
             ]),
 
             // -- Probing --
-            self::bulkActionSection('Probing', [
+            BulkModalActionGroup::section('Probing', [
                 BulkAction::make('enable-probing')
                     ->label(__('Enable Probing'))
                     ->action(function (Collection $records): void {
@@ -1198,7 +1180,7 @@ class ChannelResource extends Resource implements CopilotResource
             ]),
 
             // -- Enable / Disable --
-            self::bulkActionSection('Enable / Disable', [
+            BulkModalActionGroup::section('Enable / Disable', [
                 BulkAction::make('enable')
                     ->label(__('Enable selected'))
                     ->action(function (Collection $records): void {

@@ -674,31 +674,13 @@ class VodResource extends Resource implements CopilotResource
     }
 
     /**
-     * Create a compact section for the bulk actions modal, ensuring each
-     * action closes the parent modal when it completes.
-     */
-    private static function bulkActionSection(string $heading, array $actions): Fieldset
-    {
-        foreach ($actions as $action) {
-            if ($action instanceof BulkAction) {
-                $action->cancelParentActions();
-            }
-        }
-
-        return Fieldset::make(__($heading))
-            ->columns(2)
-            ->columnSpanFull()
-            ->schema($actions);
-    }
-
-    /**
      * Build the sectioned schema for the bulk actions modal.
      */
     private static function getBulkActionSchema(bool $addToCustom, bool $includeRecount): array
     {
         return [
             // -- Playlist & Groups --
-            self::bulkActionSection('Playlist & Groups', [
+            BulkModalActionGroup::section('Playlist & Groups', [
                 PlaylistService::getAddToPlaylistBulkAction('add', 'vod')
                     ->hidden(fn () => ! $addToCustom),
                 BulkAction::make('move')
@@ -778,7 +760,7 @@ class VodResource extends Resource implements CopilotResource
             ]),
 
             // -- Logo --
-            self::bulkActionSection('Logo', [
+            BulkModalActionGroup::section('Logo', [
                 BulkAction::make('preferred_logo')
                     ->label(__('Update preferred icon'))
                     ->schema([
@@ -872,7 +854,7 @@ class VodResource extends Resource implements CopilotResource
             ]),
 
             // -- VOD Metadata --
-            self::bulkActionSection('VOD Metadata', [
+            BulkModalActionGroup::section('VOD Metadata', [
                 BulkAction::make('process_vod')
                     ->label(__('Fetch Metadata'))
                     ->icon('heroicon-o-arrow-down-tray')
@@ -977,7 +959,7 @@ class VodResource extends Resource implements CopilotResource
             ]),
 
             // -- Find & Replace --
-            self::bulkActionSection('Find & Replace', [
+            BulkModalActionGroup::section('Find & Replace', [
                 BulkAction::make('find-replace')
                     ->label(__('Find & Replace'))
                     ->schema(function (): array {
@@ -1110,7 +1092,7 @@ class VodResource extends Resource implements CopilotResource
             ]),
 
             // -- Streaming --
-            self::bulkActionSection('Streaming', [
+            BulkModalActionGroup::section('Streaming', [
                 BulkAction::make('enable-merge')
                     ->label(__('Enable Merge'))
                     ->action(function (Collection $records, array $data): void {
@@ -1251,7 +1233,7 @@ class VodResource extends Resource implements CopilotResource
             ]),
 
             // -- Enable / Disable --
-            self::bulkActionSection('Enable / Disable', [
+            BulkModalActionGroup::section('Enable / Disable', [
                 BulkAction::make('enable')
                     ->label(__('Enable selected'))
                     ->action(function (Collection $records): void {

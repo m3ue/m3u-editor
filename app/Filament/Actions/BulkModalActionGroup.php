@@ -4,6 +4,7 @@ namespace App\Filament\Actions;
 
 use Closure;
 use Filament\Actions\BulkAction;
+use Filament\Schemas\Components\Fieldset;
 use Filament\Schemas\Components\Grid;
 
 /**
@@ -63,10 +64,10 @@ class BulkModalActionGroup extends BulkAction
         }
 
         // When schema contains only flat BulkActions, wrap in a grid.
-        // When it contains layout components (Section, etc.), they manage their own layout.
-        $allBulkActions = is_array($schema) && collect($schema)->every(fn ($c) => $c instanceof BulkAction);
+        // When it contains Fieldset groups (from BulkModalActionGroup::group()), they manage their own layout.
+        $hasSections = is_array($schema) && collect($schema)->contains(fn ($c) => $c instanceof Fieldset);
 
-        if ($allBulkActions) {
+        if (! $hasSections) {
             $schema = [
                 Grid::make(columns: $this->gridColumns)
                     ->schema($schema),
@@ -74,6 +75,24 @@ class BulkModalActionGroup extends BulkAction
         }
 
         return parent::schema($schema);
+    }
+
+    /**
+     * Create a labeled group for the bulk actions modal, ensuring each
+     * action closes the parent modal when it completes.
+     */
+    public static function section(string $heading, array $actions): Fieldset
+    {
+        foreach ($actions as $action) {
+            if ($action instanceof BulkAction) {
+                $action->cancelParentActions();
+            }
+        }
+
+        return Fieldset::make(__($heading))
+            ->columns(2)
+            ->columnSpanFull()
+            ->schema($actions);
     }
 
     public function actions(array $actions): static
