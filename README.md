@@ -1,6 +1,12 @@
-# m3u editor
+<div align="center">
 
-![logo](./public/favicon.png)
+  <img src="./public/favicon.png" width="96">
+
+<h3>m3u editor</h3>
+
+English | [中文](./README-ZH.md)
+
+</div>
 
 A full-featured and powerful `IPTV` editor, including features similar to **xteve** or **threadfin**. Also includes full `EPG` management, full Xtream API output, series management with ability to store and sync .strm files, post processing with ability to call custom scripts, send webhook requests, or send an email, and much more!
 

@@ -38,10 +38,22 @@ body::before {
 }
 
 /* ── Glass topbar ─────────────────────────────────────────── */
-/* transform forces a GPU compositing layer; backdrop-filter requires one */
+/* backdrop-filter on the element itself creates a stacking context that traps
+   child dropdowns in Safari/Edge. Using a ::before pseudo-element keeps the
+   blur effect without scoping children's z-index to the topbar container. */
 .fi-topbar-ctn {
-    backdrop-filter: blur(14px) saturate(160%);
+    transform: translateZ(0);
     background-color: rgba(255, 255, 255, 0.75) !important;
+
+    &::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        -webkit-backdrop-filter: blur(14px) saturate(160%);
+        backdrop-filter: blur(14px) saturate(160%);
+        pointer-events: none;
+        z-index: -1;
+    }
 }
 
 .fi-topbar {
