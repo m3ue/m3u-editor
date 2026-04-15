@@ -11,7 +11,27 @@
 
 use App\Models\Job;
 use App\Providers\AppServiceProvider;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+
+// Isolate the jobs connection to a temp database so parallel test processes
+// don't interfere with each other via the shared jobs.sqlite file.
+beforeEach(function () {
+    $this->tempJobsDb = sys_get_temp_dir().'/jobs_test_'.uniqid().'.sqlite';
+    touch($this->tempJobsDb);
+    config(['database.connections.jobs.database' => $this->tempJobsDb]);
+    DB::purge('jobs');
+
+    // Set up the correct schema via the custom migration
+    $migration = require database_path('migrations/2025_02_13_215803_create_jobs_table.php');
+    $migration->up();
+});
+
+afterEach(function () {
+    DB::purge('jobs');
+    config(['database.connections.jobs.database' => database_path('jobs.sqlite')]);
+    @unlink($this->tempJobsDb);
+});
 
 test('custom jobs table has correct schema with title column', function () {
     // The jobs table on the 'jobs' connection should have our custom columns
