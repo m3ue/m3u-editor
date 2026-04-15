@@ -19,6 +19,7 @@ function streamPlayer() {
         selectedAudioTrack: null,
         fragmentErrorCount: 0,
         _videoHandlers: {},
+        _cleaned: false,
 
         // ── Watch Progress ────────────────────────────────────────────────
         progressConfig: null,   // { contentType, streamId, playlistId, seriesId, seasonNumber }
@@ -191,6 +192,7 @@ function streamPlayer() {
 
             // Clean up any existing players before binding the new video element
             this.cleanup();
+            this._cleaned = false;
 
             // Store reference to video element for cleanup
             this.player = video;
@@ -767,6 +769,9 @@ function streamPlayer() {
         },
 
         cleanup() {
+            if (this._cleaned) return;
+            this._cleaned = true;
+
             // Save final progress and stop timer
             this._saveProgress(true);
             this._stopProgressTimer();

@@ -150,6 +150,10 @@ class AdminPanelProvider extends PanelProvider
             // ->databaseNotificationsPolling('10s')
             ->colors([
                 'primary' => Color::Indigo,
+                'info' => Color::Sky,
+                'warning' => Color::Amber,
+                'danger' => Color::Rose,
+                'success' => Color::Emerald,
             ])
             ->globalSearchKeyBindings(['command+k', 'ctrl+k'])
             ->discoverResources(in: app_path('Filament/Resources'), for: 'App\\Filament\\Resources')
