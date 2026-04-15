@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Jobs\AddGroupsToCustomPlaylist;
 use App\Jobs\MergeChannels;
 use App\Jobs\UnmergeChannels;
 use App\Models\CustomPlaylist;
@@ -1240,6 +1241,75 @@ class PlaylistService
                     ->success()
                     ->title('Items added to custom playlist')
                     ->body('The selected items have been added to the chosen custom playlist.')
+                    ->send();
+            })
+            ->requiresConfirmation()
+            ->icon('heroicon-o-play')
+            ->modalIcon('heroicon-o-play')
+            ->modalDescription('Add the items to the chosen custom playlist.')
+            ->modalSubmitActionLabel('Add now');
+    }
+
+    /**
+     * Get the BulkAction for adding entire groups/categories to a custom playlist via a background job.
+     *
+     * Use this instead of getAddToPlaylistBulkAction when records are Group or Category models,
+     * as it dispatches a queued job to avoid HTTP timeouts on large datasets and correctly
+     * resolves the group's display name for 'original' mode.
+     */
+    public static function getAddGroupsToPlaylistBulkAction(string $name = 'add', string $type = 'channel'): BulkAction
+    {
+        return BulkAction::make($name)
+            ->label('Add to Custom Playlist')
+            ->schema(self::getAddToPlaylistSchema($type))
+            ->action(function (Collection $records, array $data) use ($type): void {
+                AddGroupsToCustomPlaylist::dispatch(
+                    userId: auth()->id(),
+                    groupIds: $records->pluck('id')->all(),
+                    customPlaylistId: (int) $data['playlist'],
+                    data: $data,
+                    type: $type,
+                );
+
+                Notification::make()
+                    ->info()
+                    ->title(__('Adding items to custom playlist'))
+                    ->body(__('The selected items are being added to the chosen custom playlist in the background. You will be notified when complete.'))
+                    ->send();
+            })
+            ->deselectRecordsAfterCompletion()
+            ->requiresConfirmation()
+            ->icon('heroicon-o-play')
+            ->modalIcon('heroicon-o-play')
+            ->modalDescription('Add the selected item(s) to the chosen custom playlist.')
+            ->modalSubmitActionLabel('Add now');
+    }
+
+    /**
+     * Get the Action for adding an entire group/category to a custom playlist via a background job.
+     *
+     * Use this instead of getAddToPlaylistAction when the record is a Group or Category model,
+     * as it dispatches a queued job to avoid HTTP timeouts on large datasets and correctly
+     * resolves the group's display name for 'original' mode.
+     */
+    public static function getAddGroupsToPlaylistAction(string $name = 'add', string $type = 'channel'): Action
+    {
+        return Action::make($name)
+            ->label('Add to Custom Playlist')
+            ->schema(self::getAddToPlaylistSchema($type))
+            ->action(function ($record, array $data) use ($type): void {
+                AddGroupsToCustomPlaylist::dispatch(
+                    userId: auth()->id(),
+                    groupIds: [$record->id],
+                    customPlaylistId: (int) $data['playlist'],
+                    data: $data,
+                    type: $type,
+                );
+
+                Notification::make()
+                    ->info()
+                    ->title(__('Adding items to custom playlist'))
+                    ->body(__('The selected items are being added to the chosen custom playlist in the background. You will be notified when complete.'))
                     ->send();
             })
             ->requiresConfirmation()

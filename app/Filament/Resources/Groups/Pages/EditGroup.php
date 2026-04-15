@@ -23,15 +23,7 @@ class EditGroup extends EditRecord
     {
         return [
             ActionGroup::make([
-                PlaylistService::getAddToPlaylistAction('add', 'channel', fn ($record) => $record->channels())
-                    ->after(function ($livewire) {
-                        $livewire->dispatch('refreshRelation');
-                        Notification::make()
-                            ->success()
-                            ->title(__('Group channels added to custom playlist'))
-                            ->body(__('The groups channels have been added to the chosen custom playlist.'))
-                            ->send();
-                    }),
+                PlaylistService::getAddGroupsToPlaylistAction('add', 'channel'),
                 Action::make('move')
                     ->label(__('Move to Group'))
                     ->schema([

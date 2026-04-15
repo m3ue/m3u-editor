@@ -171,14 +171,7 @@ class GroupResource extends Resource implements CopilotResource
             ])
             ->recordActions([
                 ActionGroup::make([
-                    PlaylistService::getAddToPlaylistAction('add', 'channel', fn ($record) => $record->channels())
-                        ->after(function () {
-                            Notification::make()
-                                ->success()
-                                ->title(__('Group channels added to custom playlist'))
-                                ->body(__('The groups channels have been added to the chosen custom playlist.'))
-                                ->send();
-                        }),
+                    PlaylistService::getAddGroupsToPlaylistAction('add', 'channel'),
                     Action::make('move')
                         ->label(__('Move Channels to Group'))
                         ->schema([
@@ -350,15 +343,7 @@ class GroupResource extends Resource implements CopilotResource
             ], position: RecordActionsPosition::BeforeCells)
             ->toolbarActions([
                 BulkActionGroup::make([
-                    PlaylistService::getAddToPlaylistBulkAction('add', 'channel', function (Collection $records) {
-                        return $records->flatMap->channels;
-                    })->after(function () {
-                        Notification::make()
-                            ->success()
-                            ->title(__('Group channels added to custom playlist'))
-                            ->body(__('The groups channels have been added to the chosen custom playlist.'))
-                            ->send();
-                    }),
+                    PlaylistService::getAddGroupsToPlaylistBulkAction('add', 'channel'),
                     BulkAction::make('move')
                         ->label(__('Move Channels to Group'))
                         ->schema([
