@@ -49,6 +49,7 @@ use Filament\Infolists\Components\TextEntry;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Actions;
+use Filament\Schemas\Components\Fieldset;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
@@ -482,7 +483,7 @@ class SeriesResource extends Resource implements CopilotResource
      * Create a compact section for the bulk actions modal, ensuring each
      * action closes the parent modal when it completes.
      */
-    private static function bulkActionSection(string $heading, array $actions): Section
+    private static function bulkActionSection(string $heading, array $actions): Fieldset
     {
         foreach ($actions as $action) {
             if ($action instanceof BulkAction) {
@@ -490,10 +491,9 @@ class SeriesResource extends Resource implements CopilotResource
             }
         }
 
-        return Section::make(__($heading))
+        return Fieldset::make(__($heading))
             ->columns(2)
             ->columnSpanFull()
-            ->compact()
             ->schema($actions);
     }
 

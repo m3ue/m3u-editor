@@ -677,7 +677,7 @@ class VodResource extends Resource implements CopilotResource
      * Create a compact section for the bulk actions modal, ensuring each
      * action closes the parent modal when it completes.
      */
-    private static function bulkActionSection(string $heading, array $actions): Section
+    private static function bulkActionSection(string $heading, array $actions): Fieldset
     {
         foreach ($actions as $action) {
             if ($action instanceof BulkAction) {
@@ -685,10 +685,9 @@ class VodResource extends Resource implements CopilotResource
             }
         }
 
-        return Section::make(__($heading))
+        return Fieldset::make(__($heading))
             ->columns(2)
             ->columnSpanFull()
-            ->compact()
             ->schema($actions);
     }
 

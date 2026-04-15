@@ -2735,7 +2735,7 @@ class PlaylistResource extends Resource implements CopilotResource
             ->default(false);
     }
 
-    private static function actionSection(string $heading, array $actions): Section
+    private static function actionSection(string $heading, array $actions): Fieldset
     {
         foreach ($actions as $action) {
             if ($action instanceof Action) {
@@ -2743,10 +2743,9 @@ class PlaylistResource extends Resource implements CopilotResource
             }
         }
 
-        return Section::make(__($heading))
+        return Fieldset::make(__($heading))
             ->columns(2)
             ->columnSpanFull()
-            ->compact()
             ->schema($actions);
     }
 
