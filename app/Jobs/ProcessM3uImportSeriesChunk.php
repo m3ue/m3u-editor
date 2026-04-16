@@ -7,6 +7,7 @@ use App\Models\Category;
 use App\Models\Playlist;
 use App\Models\Series;
 use App\Traits\ProviderRequestDelay;
+use Carbon\Carbon;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -150,8 +151,18 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
                 ->where('source_category_id', $sourceCategoryId)
                 ->first();
 
+            $lastModified = isset($item->last_modified) && $item->last_modified
+                ? Carbon::createFromTimestamp((int) $item->last_modified)->toDateTimeString()
+                : null;
+
+            Log::info('Processing series: '.$itemName.' (Series ID: '.$item->series_id.') in category ID '.$sourceCategoryId.' - Existing series ID: '.($existingSeries->id ?? 'None').' - Last modified: '.($item->last_modified ?? 'N/A'));
+
             if ($existingSeries) {
-                // If the series already exists, skip it
+                // Update last_modified if the provider has a newer value
+                if ($lastModified) {
+                    $existingSeries->update(['last_modified' => $lastModified]);
+                }
+
                 continue;
             }
 
@@ -176,6 +187,7 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
                 'rating_5based' => (float) ($item->rating_5based ?? 0),
                 'backdrop_path' => json_encode($item->backdrop_path ?? []),
                 'youtube_trailer' => $item->youtube_trailer ?? null,
+                'last_modified' => $lastModified,
             ];
         }
 

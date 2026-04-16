@@ -7,6 +7,7 @@ use App\Jobs\FetchTmdbIds;
 use App\Jobs\SyncSeriesStrmFiles;
 use App\Services\XtreamService;
 use App\Settings\GeneralSettings;
+use Carbon\Carbon;
 use Filament\Notifications\Notification;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -47,6 +48,7 @@ class Series extends Model
         'metadata' => 'array',
         'sync_settings' => 'array',
         'last_metadata_fetch' => 'datetime',
+        'last_modified' => 'datetime',
     ];
 
     public function user(): BelongsTo
@@ -159,164 +161,179 @@ class Series extends Model
 
     public function fetchMetadata($refresh = false, $sync = true, bool $dispatchTmdb = true)
     {
+        // Skip the provider call if data is still fresh (unless a forced refresh is requested).
+        $isFresh = false;
+        if (! $refresh && $this->last_metadata_fetch && $this->last_modified) {
+            $isFresh = $this->last_metadata_fetch >= $this->last_modified;
+        }
+
         try {
-            $playlist = $this->playlist;
+            if (! $isFresh) {
+                $playlist = $this->playlist;
 
-            // Get settings instance
-            $settings = app(GeneralSettings::class);
+                // Get settings instance
+                $settings = app(GeneralSettings::class);
 
-            // For Xtream playlists, use XtreamService
-            if (! $playlist->xtream && $playlist->source_type !== PlaylistSourceType::Xtream) {
-                // Not an Xtream playlist and not Emby, no metadata source available
-                return false;
-            }
-
-            $xtream = XtreamService::make($playlist);
-
-            if (! $xtream) {
-                Notification::make()
-                    ->danger()
-                    ->title('Series metadata sync failed')
-                    ->body('Unable to connect to Xtream API provider to get series info, unable to fetch metadata.')
-                    ->broadcast($playlist->user)
-                    ->sendToDatabase($playlist->user);
-
-                return false;
-            }
-
-            $detail = $xtream->getSeriesInfo($this->source_series_id);
-            $seasons = $detail['seasons'] ?? [];
-            $info = $detail['info'] ?? [];
-            $eps = $detail['episodes'] ?? [];
-            $batchNo = Str::orderedUuid()->toString();
-
-            $update = [
-                'last_metadata_fetch' => now(),
-                'metadata' => $info, // Store raw metadata
-            ];
-            if ($refresh) {
-                $item = $detail['info'] ?? null;
-                if ($item) {
-                    $backdropPath = $item['backdrop_path'] ?? [];
-                    $update = array_merge($update, [
-                        'name' => $item['name'],
-                        'cover' => $item['cover'] ?? null,
-                        'plot' => $item['plot'] ?? null,
-                        'genre' => $item['genre'] ?? null,
-                        'release_date' => $item['releaseDate'] ?? $item['release_date'] ?? null,
-                        'cast' => $item['cast'] ?? null,
-                        'director' => $item['director'] ?? null,
-                        'rating' => $item['rating'] ?? null,
-                        'rating_5based' => (float) ($item['rating_5based'] ?? 0),
-                        'backdrop_path' => is_string($backdropPath) ? json_decode($backdropPath, true) : $backdropPath,
-                        'youtube_trailer' => $item['youtube_trailer'] ?? null,
-                    ]);
+                // For Xtream playlists, use XtreamService
+                if (! $playlist->xtream && $playlist->source_type !== PlaylistSourceType::Xtream) {
+                    // Not an Xtream playlist and not Emby, no metadata source available
+                    return false;
                 }
-            }
 
-            // If episodes found, process them
-            if (count($eps) > 0) {
-                // Process the series episodes
-                $playlistCategory = $this->category;
-                $episodeCount = 0;
-                foreach ($eps as $season => $episodes) {
-                    // Check if the season exists in the playlist
-                    $playlistSeason = $this->seasons()
-                        ->where('season_number', $season)
-                        ->first();
+                $xtream = XtreamService::make($playlist);
 
-                    // Get season info if available
-                    $seasonInfo = $seasons[$season] ?? [];
+                if (! $xtream) {
+                    Notification::make()
+                        ->danger()
+                        ->title('Series metadata sync failed')
+                        ->body('Unable to connect to Xtream API provider to get series info, unable to fetch metadata.')
+                        ->broadcast($playlist->user)
+                        ->sendToDatabase($playlist->user);
 
-                    if (! $playlistSeason) {
-                        // Create the season if it doesn't exist
-                        $playlistSeason = $this->seasons()->create([
-                            'season_number' => $season,
-                            'name' => $seasonInfo['name'] ?? 'Season '.str_pad($season, 2, '0', STR_PAD_LEFT),
-                            'source_season_id' => $seasonInfo['id'] ?? null,
-                            'episode_count' => (int) ($seasonInfo['episode_count'] ?? 0),
-                            'cover' => $seasonInfo['cover'] ?? null,
-                            'cover_big' => $seasonInfo['cover_big'] ?? null,
-                            'user_id' => $playlist->user_id,
-                            'playlist_id' => $playlist->id,
-                            'series_id' => $this->id,
-                            'category_id' => $playlistCategory->id,
-                            'import_batch_no' => $batchNo,
-                            'metadata' => $seasonInfo,
-                        ]);
-                    } else {
-                        // Update the season if it exists
-                        $playlistSeason->update([
-                            'new' => false,
-                            'source_season_id' => $seasonInfo['id'] ?? null,
-                            'category_id' => $playlistCategory->id,
-                            'episode_count' => (int) ($seasonInfo['episode_count'] ?? 0),
-                            'cover' => $seasonInfo['cover'] ?? null,
-                            'cover_big' => $seasonInfo['cover_big'] ?? null,
-                            'series_id' => $this->id,
-                            'import_batch_no' => $batchNo,
-                            'metadata' => $seasonInfo,
+                    return false;
+                }
+
+                $detail = $xtream->getSeriesInfo($this->source_series_id);
+                $seasons = $detail['seasons'] ?? [];
+                $info = $detail['info'] ?? [];
+                $eps = $detail['episodes'] ?? [];
+                $batchNo = Str::orderedUuid()->toString();
+
+                // Use the provider-supplied timestamp when available; fall back to now + 24 hours
+                // so the freshness check treats this fetch as valid for one day.
+                $providerLastModified = isset($info['last_modified']) && $info['last_modified']
+                    ? Carbon::createFromTimestamp((int) $info['last_modified'])
+                    : now()->addDay();
+
+                $update = [
+                    'last_metadata_fetch' => now(),
+                    'last_modified' => $providerLastModified,
+                    'metadata' => $info, // Store raw metadata
+                ];
+                if ($refresh) {
+                    $item = $detail['info'] ?? null;
+                    if ($item) {
+                        $backdropPath = $item['backdrop_path'] ?? [];
+                        $update = array_merge($update, [
+                            'name' => $item['name'],
+                            'cover' => $item['cover'] ?? null,
+                            'plot' => $item['plot'] ?? null,
+                            'genre' => $item['genre'] ?? null,
+                            'release_date' => $item['releaseDate'] ?? $item['release_date'] ?? null,
+                            'cast' => $item['cast'] ?? null,
+                            'director' => $item['director'] ?? null,
+                            'rating' => $item['rating'] ?? null,
+                            'rating_5based' => (float) ($item['rating_5based'] ?? 0),
+                            'backdrop_path' => is_string($backdropPath) ? json_decode($backdropPath, true) : $backdropPath,
+                            'youtube_trailer' => $item['youtube_trailer'] ?? null,
                         ]);
                     }
+                }
 
-                    // Process each episode in the season
-                    $bulk = [];
-                    foreach ($episodes as $ep) {
-                        $episodeCount++;
-                        $url = $xtream->buildSeriesUrl($ep['id'], $ep['container_extension']);
-                        $title = preg_match('/S\d{2}E\d{2} - (.*)/', $ep['title'], $m) ? $m[1] : null;
-                        if (! $title) {
-                            $title = $ep['title'] ?? "Episode {$ep['episode_num']}";
+                // If episodes found, process them
+                if (count($eps) > 0) {
+                    // Process the series episodes
+                    $playlistCategory = $this->category;
+                    $episodeCount = 0;
+                    foreach ($eps as $season => $episodes) {
+                        // Check if the season exists in the playlist
+                        $playlistSeason = $this->seasons()
+                            ->where('season_number', $season)
+                            ->first();
+
+                        // Get season info if available
+                        $seasonInfo = $seasons[$season] ?? [];
+
+                        if (! $playlistSeason) {
+                            // Create the season if it doesn't exist
+                            $playlistSeason = $this->seasons()->create([
+                                'season_number' => $season,
+                                'name' => $seasonInfo['name'] ?? 'Season '.str_pad($season, 2, '0', STR_PAD_LEFT),
+                                'source_season_id' => $seasonInfo['id'] ?? null,
+                                'episode_count' => (int) ($seasonInfo['episode_count'] ?? 0),
+                                'cover' => $seasonInfo['cover'] ?? null,
+                                'cover_big' => $seasonInfo['cover_big'] ?? null,
+                                'user_id' => $playlist->user_id,
+                                'playlist_id' => $playlist->id,
+                                'series_id' => $this->id,
+                                'category_id' => $playlistCategory->id,
+                                'import_batch_no' => $batchNo,
+                                'metadata' => $seasonInfo,
+                            ]);
+                        } else {
+                            // Update the season if it exists
+                            $playlistSeason->update([
+                                'new' => false,
+                                'source_season_id' => $seasonInfo['id'] ?? null,
+                                'category_id' => $playlistCategory->id,
+                                'episode_count' => (int) ($seasonInfo['episode_count'] ?? 0),
+                                'cover' => $seasonInfo['cover'] ?? null,
+                                'cover_big' => $seasonInfo['cover_big'] ?? null,
+                                'series_id' => $this->id,
+                                'import_batch_no' => $batchNo,
+                                'metadata' => $seasonInfo,
+                            ]);
                         }
-                        $bulk[] = [
-                            'title' => $title,
-                            'source_episode_id' => (int) $ep['id'],
-                            'import_batch_no' => $batchNo,
-                            'user_id' => $playlist->user_id,
-                            'playlist_id' => $playlist->id,
-                            'series_id' => $this->id,
-                            'season_id' => $playlistSeason->id,
-                            'episode_num' => (int) $ep['episode_num'],
-                            'container_extension' => $ep['container_extension'],
-                            'custom_sid' => $ep['custom_sid'] ?? null,
-                            'added' => $ep['added'] ?? null,
-                            'season' => (int) $season,
-                            'url' => $url,
-                            'info' => json_encode([
-                                'release_date' => $ep['info']['release_date'] ?? null,
-                                'plot' => $ep['info']['plot'] ?? $seasonInfo['plot'] ?? null,
-                                'duration_secs' => $ep['info']['duration_secs'] ?? null,
-                                'duration' => $ep['info']['duration'] ?? null,
-                                'movie_image' => $ep['info']['movie_image'] ?? null,
-                                'bitrate' => $ep['info']['bitrate'] ?? 0,
-                                'rating' => $ep['info']['rating'] ?? null,
+
+                        // Process each episode in the season
+                        $bulk = [];
+                        foreach ($episodes as $ep) {
+                            $episodeCount++;
+                            $url = $xtream->buildSeriesUrl($ep['id'], $ep['container_extension']);
+                            $title = preg_match('/S\d{2}E\d{2} - (.*)/', $ep['title'], $m) ? $m[1] : null;
+                            if (! $title) {
+                                $title = $ep['title'] ?? "Episode {$ep['episode_num']}";
+                            }
+                            $bulk[] = [
+                                'title' => $title,
+                                'source_episode_id' => (int) $ep['id'],
+                                'import_batch_no' => $batchNo,
+                                'user_id' => $playlist->user_id,
+                                'playlist_id' => $playlist->id,
+                                'series_id' => $this->id,
+                                'season_id' => $playlistSeason->id,
+                                'episode_num' => (int) $ep['episode_num'],
+                                'container_extension' => $ep['container_extension'],
+                                'custom_sid' => $ep['custom_sid'] ?? null,
+                                'added' => $ep['added'] ?? null,
                                 'season' => (int) $season,
-                                'tmdb_id' => $ep['info']['tmdb_id'] ?? $seasonInfo['tmdb'] ?? null,
-                                'cover_big' => $ep['info']['cover_big'] ?? null,
-                            ]),
-                        ];
+                                'url' => $url,
+                                'info' => json_encode([
+                                    'release_date' => $ep['info']['release_date'] ?? null,
+                                    'plot' => $ep['info']['plot'] ?? $seasonInfo['plot'] ?? null,
+                                    'duration_secs' => $ep['info']['duration_secs'] ?? null,
+                                    'duration' => $ep['info']['duration'] ?? null,
+                                    'movie_image' => $ep['info']['movie_image'] ?? null,
+                                    'bitrate' => $ep['info']['bitrate'] ?? 0,
+                                    'rating' => $ep['info']['rating'] ?? null,
+                                    'season' => (int) $season,
+                                    'tmdb_id' => $ep['info']['tmdb_id'] ?? $seasonInfo['tmdb'] ?? null,
+                                    'cover_big' => $ep['info']['cover_big'] ?? null,
+                                ]),
+                            ];
+                        }
+
+                        // Upsert the episodes in bulk
+                        Episode::upsert(
+                            $bulk,
+                            uniqueBy: ['source_episode_id', 'playlist_id', 'series_id'],
+                            update: [
+                                'title',
+                                'import_batch_no',
+                                'episode_num',
+                                'container_extension',
+                                'custom_sid',
+                                'added',
+                                'season',
+                                'url',
+                                'info',
+                            ]
+                        );
                     }
 
-                    // Upsert the episodes in bulk
-                    Episode::upsert(
-                        $bulk,
-                        uniqueBy: ['source_episode_id', 'playlist_id', 'series_id'],
-                        update: [
-                            'title',
-                            'import_batch_no',
-                            'episode_num',
-                            'container_extension',
-                            'custom_sid',
-                            'added',
-                            'season',
-                            'url',
-                            'info',
-                        ]
-                    );
+                    // Update last fetched timestamp for the series
+                    $this->update($update);
                 }
-
-                // Update last fetched timestamp for the series
-                $this->update($update);
 
                 $jobs = [];
                 if ($dispatchTmdb && $settings->tmdb_auto_lookup_on_import && $this->enabled) {

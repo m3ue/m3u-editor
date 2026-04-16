@@ -509,59 +509,64 @@ class Channel extends Model
             return true;
         }
 
+        // Skip the provider call if data is still fresh (unless a forced refresh is requested).
+        $isFresh = ! $refresh && $this->last_metadata_fetch;
+
+        // Get settings instance
+        $settings = app(GeneralSettings::class);
+
         try {
-            $playlist = $this->playlist;
+            if (! $isFresh) {
+                $playlist = $this->playlist;
 
-            // Get settings instance
-            $settings = app(GeneralSettings::class);
+                // For Xtream playlists, use XtreamService
+                if (! $xtream) {
+                    if (! $playlist->xtream && $playlist->source_type !== PlaylistSourceType::Xtream) {
+                        // Not an Xtream playlist and not Emby, no metadata source available
+                        return false;
+                    }
+                    $xtream = XtreamService::make($playlist);
+                }
 
-            // For Xtream playlists, use XtreamService
-            if (! $xtream) {
-                if (! $playlist->xtream && $playlist->source_type !== PlaylistSourceType::Xtream) {
-                    // Not an Xtream playlist and not Emby, no metadata source available
+                if (! $xtream) {
+                    Notification::make()
+                        ->danger()
+                        ->title('VOD metadata sync failed')
+                        ->body('Unable to connect to Xtream API provider to get VOD info, unable to fetch metadata.')
+                        ->broadcast($playlist->user)
+                        ->sendToDatabase($playlist->user);
+
                     return false;
                 }
-                $xtream = XtreamService::make($playlist);
-            }
 
-            if (! $xtream) {
-                Notification::make()
-                    ->danger()
-                    ->title('VOD metadata sync failed')
-                    ->body('Unable to connect to Xtream API provider to get VOD info, unable to fetch metadata.')
-                    ->broadcast($playlist->user)
-                    ->sendToDatabase($playlist->user);
-
-                return false;
-            }
-
-            $movieData = $xtream->getVodInfo($this->source_id, timeout: 60);
-            $releaseDate = $movieData['info']['release_date'] ?? null;
-            $releaseDateAlt = $movieData['info']['releasedate'] ?? null;
-            $year = $this->year;
-            if (! $releaseDate && $releaseDateAlt) {
-                // Make sure base release_date is always set
-                $movieData['info']['release_date'] = $releaseDateAlt;
-            }
-            if ($releaseDate || $releaseDateAlt) {
-                // If either data is set, and year is not set, update it
-                $dateToParse = $releaseDate ?? $releaseDateAlt;
-                $year = null;
-                try {
-                    $date = new \DateTime($dateToParse);
-                    $year = (int) $date->format('Y');
-                } catch (Exception $e) {
-                    Log::warning("Unable to parse release date \"{$dateToParse}\" for VOD {$this->id}");
+                $movieData = $xtream->getVodInfo($this->source_id, timeout: 60);
+                $releaseDate = $movieData['info']['release_date'] ?? null;
+                $releaseDateAlt = $movieData['info']['releasedate'] ?? null;
+                $year = $this->year;
+                if (! $releaseDate && $releaseDateAlt) {
+                    // Make sure base release_date is always set
+                    $movieData['info']['release_date'] = $releaseDateAlt;
                 }
-            }
-            $update = [
-                'year' => $year,
-                'info' => $movieData['info'] ?? null,
-                'movie_data' => $movieData['movie_data'] ?? null,
-                'last_metadata_fetch' => now(),
-            ];
+                if ($releaseDate || $releaseDateAlt) {
+                    // If either data is set, and year is not set, update it
+                    $dateToParse = $releaseDate ?? $releaseDateAlt;
+                    $year = null;
+                    try {
+                        $date = new \DateTime($dateToParse);
+                        $year = (int) $date->format('Y');
+                    } catch (Exception $e) {
+                        Log::warning("Unable to parse release date \"{$dateToParse}\" for VOD {$this->id}");
+                    }
+                }
+                $update = [
+                    'year' => $year,
+                    'info' => $movieData['info'] ?? null,
+                    'movie_data' => $movieData['movie_data'] ?? null,
+                    'last_metadata_fetch' => now(),
+                ];
 
-            $this->update($update);
+                $this->update($update);
+            }
 
             if (! $skipTmdb && $settings->tmdb_auto_lookup_on_import && $this->enabled) {
                 dispatch(new FetchTmdbIds(

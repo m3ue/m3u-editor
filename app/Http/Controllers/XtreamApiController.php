@@ -930,7 +930,7 @@ class XtreamApiController extends Controller
                     }
 
                     $tmdb = $seriesItem->metadata['tmdb'] ?? '';
-                    $lastModified = $seriesItem->metadata['last_modified'] ?? null;
+                    $lastModified = $seriesItem->last_modified?->timestamp ?? $seriesItem->metadata['last_modified'] ?? null;
 
                     $cover = $seriesItem->cover ? (filter_var($seriesItem->cover, FILTER_VALIDATE_URL) ? $seriesItem->cover : $baseUrl."/$seriesItem->cover") : LogoCacheService::getPlaceholderUrl('poster');
                     $backdropPaths = $seriesItem->backdrop_path ?? [];
@@ -987,17 +987,15 @@ class XtreamApiController extends Controller
             // Check if this is a media server integration series (already has metadata from sync)
             $isMediaServerSeries = ! empty($seriesItem->metadata['media_server_id'] ?? null);
 
-            // Only try to fetch metadata for non-media-server series that need refresh
-            if (! $isMediaServerSeries && (! $seriesItem->last_metadata_fetch || $seriesItem->last_metadata_fetch < now()->subDays(1))) {
-                // Either no metadata, or stale metadata
+            // fetchMetadata() handles its own freshness check internally (comparing last_modified
+            // against last_metadata_fetch). It returns null when no fetch was needed, false on
+            // failure, or an episode count on success.
+            if (! $isMediaServerSeries) {
                 $results = $seriesItem->fetchMetadata(sync: false);
-                if ($results === false) {
-                    // For non-Xtream playlists without metadata, continue anyway with existing data
-                    // instead of returning an error
+                if ($results !== null && $results !== false) {
+                    // Provider returned new data — reload the model with fresh relations
+                    $seriesItem = $seriesItem->fresh(['seasons.episodes', 'category']) ?? $seriesItem;
                 }
-
-                // Metadata fetched successfully
-                $seriesItem = $seriesItem->fresh(['seasons.episodes', 'category']) ?? $seriesItem;
             }
 
             $cover = $seriesItem->cover ? (filter_var($seriesItem->cover, FILTER_VALIDATE_URL) ? $seriesItem->cover : $baseUrl."/$seriesItem->cover") : LogoCacheService::getPlaceholderUrl('poster');
@@ -1013,7 +1011,7 @@ class XtreamApiController extends Controller
 
             $now = Carbon::now();
             $tmdb = $seriesItem->metadata['tmdb'] ?? '';
-            $lastModified = $seriesItem->metadata['last_modified'] ?? null;
+            $lastModified = $seriesItem->last_modified?->timestamp ?? $seriesItem->metadata['last_modified'] ?? null;
 
             $seriesInfo = [
                 'name' => $seriesItem->name,
@@ -1023,7 +1021,7 @@ class XtreamApiController extends Controller
                 'director' => $seriesItem->director ?? '',
                 'genre' => $seriesItem->genre ?? '',
                 'releaseDate' => $seriesItem->release_date ?? '',
-                'last_modified' => (string) ($lastModified),
+                'last_modified' => (string) $lastModified,
                 'rating' => (string) ($seriesItem->rating ?? 0),
                 'rating_5based' => round((floatval($seriesItem->rating ?? 0)) / 2, 1),
                 'backdrop_path' => $backdropPaths,
