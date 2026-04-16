@@ -48,6 +48,21 @@ body::before {
 .fi-topbar-ctn {
     background-color: rgba(255, 255, 255, 0.75) !important;
 
+    .fi-global-search {
+        transform: translateZ(0);
+        flex-shrink: 0;
+    }
+
+    .fi-topbar-end {
+        @media screen and (min-width: 1024px) {
+            min-width: 300px;
+        }
+    }
+
+    .fi-dropdown.fi-user-menu {
+        flex-shrink: 0;
+    }
+
     &::before {
         content: '';
         position: absolute;
