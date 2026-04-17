@@ -50,11 +50,6 @@ class SyncListener
                     'dry_run' => false,
                     'user_id' => $playlist->user_id,
                 ]);
-
-                // Dispatch stream probing job if enabled for this playlist
-                if ($playlist->auto_probe_streams ?? false) {
-                    dispatch(new ProbeChannelStreams(playlistId: $playlist->id));
-                }
             }
         }
         if ($event->model instanceof Epg) {
@@ -112,19 +107,35 @@ class SyncListener
      */
     private function dispatchChannelScanJobs(Playlist $playlist): void
     {
+        // Merge channels first
         $mergeJob = ($playlist->auto_merge_channels_enabled ?? false)
             ? $this->getMergeJob($playlist)
             : null;
 
+        // Run scrubbers after merge completes (if enabled)
+        // This will enable/disable channels
         $scrubberJobs = $playlist->channelScrubbers()
             ->where('recurring', true)->get()
             ->map(fn ($scrubber) => new ProcessChannelScrubber($scrubber->id))
             ->toArray();
 
+        // Run probe last since it only runs against enabled channels, so should wait for merge + scrubber jobs to complete
+        $probeJob = ($playlist->auto_probe_streams ?? false)
+           ? (new ProbeChannelStreams(playlistId: $playlist->id))
+           : null;
+
+        $chain = [];
         if ($mergeJob) {
-            Bus::chain([$mergeJob, ...$scrubberJobs])->dispatch();
-        } elseif (! empty($scrubberJobs)) {
-            Bus::chain($scrubberJobs)->dispatch();
+            $chain[] = $mergeJob;
+        }
+        if (count($scrubberJobs) > 0) {
+            $chain = array_merge($chain, $scrubberJobs);
+        }
+        if ($probeJob) {
+            $chain[] = $probeJob;
+        }
+        if (count($chain) > 0) {
+            Bus::chain($chain)->dispatch();
         }
     }
 
