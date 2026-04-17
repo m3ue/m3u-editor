@@ -14,6 +14,7 @@ use App\Models\PlaylistAlias;
 use App\Models\StreamProfile;
 use App\Settings\GeneralSettings;
 use Exception;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
@@ -1513,7 +1514,10 @@ class M3uProxyService
 
         try {
             $endpoint = $this->apiBaseUrl.'/streams';
-            $response = Http::timeout(5)->acceptJson()
+            $response = Http::connectTimeout(2)
+                ->timeout(3)
+                ->retry(2, 100, fn (Exception $e) => $e instanceof ConnectionException, throw: false)
+                ->acceptJson()
                 ->withHeaders($this->apiToken ? [
                     'X-API-Token' => $this->apiToken,
                 ] : [])
@@ -1538,15 +1542,26 @@ class M3uProxyService
 
             return [
                 'success' => false,
-                'error' => 'M3U Proxy returned status '.$response->status(),
+                'error_category' => 'http',
+                'error' => 'M3U Proxy returned HTTP '.$response->status(),
                 'streams' => [],
             ];
-        } catch (Exception $e) {
-            Log::warning('Failed to fetch active streams from m3u-proxy: '.$e->getMessage());
+        } catch (ConnectionException $e) {
+            Log::warning('m3u-proxy connection error on /streams: '.$e->getMessage());
 
             return [
                 'success' => false,
-                'error' => 'Unable to connect to m3u-proxy: '.$e->getMessage(),
+                'error_category' => 'connection',
+                'error' => 'M3U Proxy unreachable (timeout or connection refused)',
+                'streams' => [],
+            ];
+        } catch (Exception $e) {
+            Log::warning('Unexpected error fetching active streams from m3u-proxy: '.$e->getMessage());
+
+            return [
+                'success' => false,
+                'error_category' => 'unknown',
+                'error' => 'Unexpected error fetching streams: '.$e->getMessage(),
                 'streams' => [],
             ];
         }
@@ -1568,7 +1583,10 @@ class M3uProxyService
 
         try {
             $endpoint = $this->apiBaseUrl.'/clients';
-            $response = Http::timeout(5)->acceptJson()
+            $response = Http::connectTimeout(2)
+                ->timeout(3)
+                ->retry(2, 100, fn (Exception $e) => $e instanceof ConnectionException, throw: false)
+                ->acceptJson()
                 ->withHeaders($this->apiToken ? [
                     'X-API-Token' => $this->apiToken,
                 ] : [])
@@ -1587,15 +1605,26 @@ class M3uProxyService
 
             return [
                 'success' => false,
-                'error' => 'M3U Proxy returned status '.$response->status(),
+                'error_category' => 'http',
+                'error' => 'M3U Proxy returned HTTP '.$response->status(),
                 'clients' => [],
             ];
-        } catch (Exception $e) {
-            Log::warning('Failed to fetch active clients from m3u-proxy: '.$e->getMessage());
+        } catch (ConnectionException $e) {
+            Log::warning('m3u-proxy connection error on /clients: '.$e->getMessage());
 
             return [
                 'success' => false,
-                'error' => 'Unable to connect to m3u-proxy: '.$e->getMessage(),
+                'error_category' => 'connection',
+                'error' => 'M3U Proxy unreachable (timeout or connection refused)',
+                'clients' => [],
+            ];
+        } catch (Exception $e) {
+            Log::warning('Unexpected error fetching active clients from m3u-proxy: '.$e->getMessage());
+
+            return [
+                'success' => false,
+                'error_category' => 'unknown',
+                'error' => 'Unexpected error fetching clients: '.$e->getMessage(),
                 'clients' => [],
             ];
         }
@@ -1617,7 +1646,10 @@ class M3uProxyService
 
         try {
             $endpoint = $this->apiBaseUrl.'/broadcast';
-            $response = Http::timeout(5)->acceptJson()
+            $response = Http::connectTimeout(2)
+                ->timeout(3)
+                ->retry(2, 100, fn (Exception $e) => $e instanceof ConnectionException, throw: false)
+                ->acceptJson()
                 ->withHeaders($this->apiToken ? [
                     'X-API-Token' => $this->apiToken,
                 ] : [])
@@ -1645,15 +1677,26 @@ class M3uProxyService
 
             return [
                 'success' => false,
-                'error' => 'M3U Proxy returned status '.$response->status(),
+                'error_category' => 'http',
+                'error' => 'M3U Proxy returned HTTP '.$response->status(),
                 'broadcasts' => [],
             ];
-        } catch (Exception $e) {
-            Log::warning('Failed to fetch broadcasts from m3u-proxy: '.$e->getMessage());
+        } catch (ConnectionException $e) {
+            Log::warning('m3u-proxy connection error on /broadcast: '.$e->getMessage());
 
             return [
                 'success' => false,
-                'error' => 'Unable to connect to m3u-proxy: '.$e->getMessage(),
+                'error_category' => 'connection',
+                'error' => 'M3U Proxy unreachable (timeout or connection refused)',
+                'broadcasts' => [],
+            ];
+        } catch (Exception $e) {
+            Log::warning('Unexpected error fetching broadcasts from m3u-proxy: '.$e->getMessage());
+
+            return [
+                'success' => false,
+                'error_category' => 'unknown',
+                'error' => 'Unexpected error fetching broadcasts: '.$e->getMessage(),
                 'broadcasts' => [],
             ];
         }
