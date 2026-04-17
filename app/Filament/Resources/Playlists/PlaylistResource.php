@@ -1406,16 +1406,6 @@ class PlaylistResource extends Resource implements CopilotResource
                         ->default(false)
                         ->helperText(__('When enabled, the playlist will fetch items by category.')),
 
-                    Toggle::make('auto_probe_streams')
-                        ->label(__('Probe streams after sync'))
-                        ->hintIcon(
-                            'heroicon-m-question-mark-circle',
-                            tooltip: 'Required for fast channel switching when using the emby-xtream plugin.'
-                        )
-                        ->helperText(__('When enabled, channels will be probed with ffprobe after sync to collect stream metadata (codec, resolution, bitrate) and store it to the database for fast retrieval.'))
-                        ->inline(true)
-                        ->default(false),
-
                     Toggle::make('import_prefs.preprocess')
                         ->label(__('Preprocess playlist'))
                         ->live()
@@ -1703,6 +1693,42 @@ class PlaylistResource extends Resource implements CopilotResource
                             '.mkv',
                             '.mp4',
                         ])->splitKeys(['Tab', 'Return']),
+                ]),
+
+            Section::make(__('Stream Probing'))
+                ->description(__('Configure automatic stream probing after each playlist sync.'))
+                ->columnSpanFull()
+                ->collapsible()
+                ->collapsed($creating)
+                ->columns(2)
+                ->schema([
+                    Toggle::make('auto_probe_streams')
+                        ->label(__('Probe streams after sync'))
+                        ->hintIcon(
+                            'heroicon-m-question-mark-circle',
+                            tooltip: 'Required for fast channel switching when using the emby-xtream plugin.'
+                        )
+                        ->helperText(__('When enabled, channels will be probed with ffprobe after sync to collect stream metadata (codec, resolution, bitrate) and store it to the database for fast retrieval.'))
+                        ->live()
+                        ->columnSpanFull()
+                        ->inline(true)
+                        ->default(false),
+
+                    Toggle::make('probe_use_batching')
+                        ->label(__('Parallel processing'))
+                        ->helperText(__('Process in parallel rather than one-at-a-time for significantly faster results.'))
+                        ->inline(true)
+                        ->default(false)
+                        ->visible(fn (Get $get): bool => (bool) $get('auto_probe_streams')),
+
+                    TextInput::make('probe_timeout')
+                        ->label(__('Probe timeout (seconds)'))
+                        ->helperText(__('Seconds to wait per stream (5–60). Streams that do not respond within this window will be skipped.'))
+                        ->numeric()
+                        ->minValue(5)
+                        ->maxValue(60)
+                        ->default(15)
+                        ->visible(fn (Get $get): bool => (bool) $get('auto_probe_streams')),
                 ]),
 
             Section::make(__('Auto-Enable Settings'))

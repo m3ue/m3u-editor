@@ -880,8 +880,8 @@ class Preferences extends SettingsPage
 
                         Tab::make(__('Sync Options'))
                             ->schema([
-                                Section::make(__('Provider Request Delay'))
-                                    ->description(__('Add a delay between requests to providers to avoid rate limiting.'))
+                                Section::make(__('Provider Rate Limiting & Concurrency'))
+                                    ->description(__('Control request concurrency for parallel processing and add delays between requests to avoid provider rate limiting.'))
                                     ->columnSpan('full')
                                     ->columns(4)
                                     ->collapsible(false)
@@ -903,9 +903,9 @@ class Preferences extends SettingsPage
                                             )
                                             ->minValue(1)
                                             ->default(2)
-                                            ->helperText(__('Maximum number of simultaneous requests to the provider.')),
+                                            ->helperText(__('Maximum number of simultaneous requests allowed. Also controls the level of parallelism for batch operations such as stream probing and channel scrubbing.')),
                                         TextInput::make('provider_request_delay_ms')
-                                            ->label(__('Request delay (milliseconds)'))
+                                            ->label(__('Request delay'))
                                             ->integer()
                                             ->required()
                                             ->hintIcon(
