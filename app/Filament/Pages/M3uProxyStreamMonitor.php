@@ -17,6 +17,7 @@ use Filament\Actions\Action;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Support\Enums\Size;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Shared Stream Monitor (External API-backed)
@@ -122,6 +123,10 @@ class M3uProxyStreamMonitor extends Page
 
     public function triggerFailover(string $streamId): void
     {
+        if (! $this->authorizeStreamAction($streamId)) {
+            return;
+        }
+
         try {
             $success = $this->apiService->triggerFailover($streamId);
             if ($success) {
@@ -148,6 +153,10 @@ class M3uProxyStreamMonitor extends Page
 
     public function stopStream(string $streamId): void
     {
+        if (! $this->authorizeStreamAction($streamId)) {
+            return;
+        }
+
         try {
             // Support stopping broadcasts via a special stream ID prefix
             if (str_starts_with($streamId, 'broadcast:')) {
@@ -192,6 +201,38 @@ class M3uProxyStreamMonitor extends Page
         }
 
         $this->refreshData();
+    }
+
+    /**
+     * Verify the authenticated user owns the stream or broadcast referenced by $streamId.
+     * Emits a user-facing notification and logs a warning on failure.
+     */
+    private function authorizeStreamAction(string $streamId): bool
+    {
+        if (str_starts_with($streamId, 'broadcast:')) {
+            $networkUuid = substr($streamId, 10);
+            $owned = Network::where('uuid', $networkUuid)
+                ->where('user_id', auth()->id())
+                ->exists();
+        } else {
+            $visible = $this->apiService->fetchActiveStreams();
+            $owned = collect($visible['streams'] ?? [])
+                ->contains(fn ($s) => ($s['stream_id'] ?? null) === $streamId);
+        }
+
+        if (! $owned) {
+            Log::warning('Unauthorized stream-monitor action blocked', [
+                'user_id' => auth()->id(),
+                'stream_id' => $streamId,
+            ]);
+
+            Notification::make()
+                ->title(__('Not authorized to manage this stream.'))
+                ->danger()
+                ->send();
+        }
+
+        return $owned;
     }
 
     protected function getActiveStreams(): array
