@@ -311,6 +311,13 @@ class EpgMapResource extends Resource implements CopilotResource
                         ->live()
                         ->default(false)
                         ->helperText(__('When enabled, channel attributes will be cleaned based on regex pattern instead of prefix before matching.')),
+                    Toggle::make('settings.regex_extract_mode')
+                        ->label(__('Regex extract mode'))
+                        ->columnSpanFull()
+                        ->inline(true)
+                        ->default(false)
+                        ->visible(fn (Get $get): bool => (bool) $get('settings.use_regex'))
+                        ->helperText(__('When enabled, the first capture group from the regex is used as the channel value instead of removing the match. For example, the pattern "(?<![A-Z])([A-Z]{4})(?![A-Z])" applied to "CBS 123 (OHIU) Local" extracts "OHIU".')),
                     Toggle::make('settings.remove_quality_indicators')
                         ->label(__('Remove quality indicators'))
                         ->columnSpanFull()
@@ -363,7 +370,7 @@ class EpgMapResource extends Resource implements CopilotResource
                         ->columnSpanFull(),
                 ]),
             TagsInput::make('settings.exclude_prefixes')
-                ->label(fn (Get $get) => ! $get('settings.use_regex') ? 'Channel prefixes to remove before matching' : 'Regex patterns to remove before matching')
+                ->label(fn (Get $get) => ! $get('settings.use_regex') ? 'Channel prefixes to remove before matching' : ($get('settings.regex_extract_mode') ? 'Regex patterns to extract from channel values' : 'Regex patterns to remove before matching'))
                 ->helperText(__('Press [tab] or [return] to add item. Leave empty to disable.'))
                 ->columnSpanFull()
                 ->suggestions([
@@ -376,6 +383,11 @@ class EpgMapResource extends Resource implements CopilotResource
                     '\[.*\]',
                 ])
                 ->splitKeys(['Tab', 'Return']),
+            Forms\Components\TextInput::make('settings.append_suffix')
+                ->label(__('Append suffix after pattern processing'))
+                ->placeholder(__('e.g. -DT'))
+                ->columnSpanFull()
+                ->helperText(__('Text appended to channel values after regex/prefix processing and before EPG matching. For example, enter "-DT" to append a station suffix.')),
         ];
     }
 }
