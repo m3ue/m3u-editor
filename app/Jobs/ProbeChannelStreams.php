@@ -4,6 +4,8 @@ namespace App\Jobs;
 
 use App\Models\Channel;
 use App\Models\Playlist;
+use App\Models\User;
+use Carbon\Carbon;
 use Filament\Notifications\Notification;
 use Illuminate\Bus\Batch;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -36,6 +38,8 @@ class ProbeChannelStreams implements ShouldQueue
      */
     public function handle(): void
     {
+        $start = now();
+
         $query = Channel::query();
 
         if ($this->channelIds) {
@@ -55,6 +59,8 @@ class ProbeChannelStreams implements ShouldQueue
         $total = count($channelIds);
 
         if ($total === 0) {
+            Log::info("ProbeChannelStreams: No probe-eligible channels found for playlist {$this->playlistId}.");
+
             return;
         }
 
@@ -62,7 +68,18 @@ class ProbeChannelStreams implements ShouldQueue
         $probeTimeout = $playlist?->probe_timeout ?? 15;
         $useBatching = (bool) ($playlist?->probe_use_batching ?? false);
 
-        $start = now();
+        Log::info("ProbeChannelStreams: Starting. playlist={$this->playlistId}, total={$total}, batching=".($useBatching ? 'yes' : 'no'));
+
+        // Notify user that probing has started.
+        $user = $playlist?->user;
+        if ($user) {
+            Notification::make()
+                ->info()
+                ->title(__('Stream probing started'))
+                ->body(__('Probing :total channel(s). You will be notified when complete.', ['total' => $total]))
+                ->broadcast($user)
+                ->sendToDatabase($user);
+        }
 
         $chunkJobs = collect(array_chunk($channelIds, 50))
             ->map(fn (array $chunk) => new ProbeChannelStreamsChunk(
@@ -71,17 +88,20 @@ class ProbeChannelStreams implements ShouldQueue
             ))
             ->all();
 
-        $completeJob = new ProbeChannelStreamsComplete(
-            playlistId: $this->playlistId,
-            channelIds: $this->channelIds,
-            total: $total,
-            start: $start,
-        );
+        try {
+            if ($useBatching) {
+                $this->dispatchAsBatch($chunkJobs, $this->playlistId, $this->channelIds, $total, $start, $playlist);
+            } else {
+                $this->dispatchAsChain($chunkJobs, $this->playlistId, $this->channelIds, $total, $start, $playlist);
+            }
 
-        if ($useBatching) {
-            $this->dispatchAsBatch($chunkJobs, $completeJob, $playlist);
-        } else {
-            $this->dispatchAsChain($chunkJobs, $completeJob, $playlist);
+            Log::info('ProbeChannelStreams: Dispatch complete.');
+        } catch (Throwable $e) {
+            Log::error("ProbeChannelStreams: Dispatch failed — {$e->getMessage()}", [
+                'exception' => $e,
+                'playlist_id' => $this->playlistId,
+            ]);
+            $this->notifyFailed($playlist, $e->getMessage());
         }
     }
 
@@ -93,20 +113,52 @@ class ProbeChannelStreams implements ShouldQueue
      */
     private function dispatchAsBatch(
         array $chunkJobs,
-        ProbeChannelStreamsComplete $completeJob,
+        ?int $playlistId,
+        ?array $channelIds,
+        int $total,
+        Carbon $start,
         ?Playlist $playlist,
     ): void {
-        Bus::batch($chunkJobs)
-            ->then(function () use ($completeJob) {
-                dispatch($completeJob);
+        // Capture only a scalar so the closure does not bind $this (the running
+        // job). $this carries an active RedisJob connection via InteractsWithQueue
+        // which makes PHP hang when SerializableClosure tries to serialize it.
+        $userId = $playlist?->user?->id;
+
+        $batch = Bus::batch($chunkJobs)
+            ->then(function () use ($playlistId, $channelIds, $total, $start) {
+                dispatch(new ProbeChannelStreamsComplete(
+                    playlistId: $playlistId,
+                    channelIds: $channelIds,
+                    total: $total,
+                    start: $start,
+                ));
             })
-            ->catch(function (Batch $batch, Throwable $e) use ($playlist) {
-                $this->notifyFailed($playlist, $e->getMessage());
+            ->catch(function (Batch $batch, Throwable $e) use ($userId) {
+                Log::error("ProbeChannelStreams batch failed: {$e->getMessage()}");
+
+                if (! $userId) {
+                    return;
+                }
+
+                $user = User::find($userId);
+
+                if (! $user) {
+                    return;
+                }
+
+                Notification::make()
+                    ->danger()
+                    ->title(__('Stream probing failed'))
+                    ->body($e->getMessage())
+                    ->broadcast($user)
+                    ->sendToDatabase($user);
             })
             ->onConnection('redis')
             ->onQueue('import')
             ->allowFailures()
             ->dispatch();
+
+        Log::info("ProbeChannelStreams: Batch dispatched. id={$batch->id}, total={$batch->totalJobs}");
     }
 
     /**
@@ -117,16 +169,48 @@ class ProbeChannelStreams implements ShouldQueue
      */
     private function dispatchAsChain(
         array $chunkJobs,
-        ProbeChannelStreamsComplete $completeJob,
+        ?int $playlistId,
+        ?array $channelIds,
+        int $total,
+        Carbon $start,
         ?Playlist $playlist,
     ): void {
-        Bus::chain([...$chunkJobs, $completeJob])
+        $userId = $playlist?->user?->id;
+
+        Bus::chain([
+            ...$chunkJobs,
+            new ProbeChannelStreamsComplete(
+                playlistId: $playlistId,
+                channelIds: $channelIds,
+                total: $total,
+                start: $start,
+            ),
+        ])
             ->onConnection('redis')
             ->onQueue('import')
-            ->catch(function (Throwable $e) use ($playlist) {
-                $this->notifyFailed($playlist, $e->getMessage());
+            ->catch(function (Throwable $e) use ($userId) {
+                Log::error("ProbeChannelStreams chain failed: {$e->getMessage()}");
+
+                if (! $userId) {
+                    return;
+                }
+
+                $user = User::find($userId);
+
+                if (! $user) {
+                    return;
+                }
+
+                Notification::make()
+                    ->danger()
+                    ->title(__('Stream probing failed'))
+                    ->body($e->getMessage())
+                    ->broadcast($user)
+                    ->sendToDatabase($user);
             })
             ->dispatch();
+
+        Log::info('ProbeChannelStreams: Chain dispatched.');
     }
 
     /**

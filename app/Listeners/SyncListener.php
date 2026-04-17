@@ -53,7 +53,7 @@ class SyncListener
 
                 // Dispatch stream probing job if enabled for this playlist
                 if ($playlist->auto_probe_streams ?? false) {
-                    dispatch(new ProbeChannelStreams(playlistId: $playlist->id));
+                    Bus::chain([new ProbeChannelStreams(playlistId: $playlist->id)])->dispatch();
                 }
             }
         }
