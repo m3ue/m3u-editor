@@ -90,12 +90,17 @@ class ProcessChannelScrubber implements ShouldQueue
                 'channel_count' => $channelCount,
             ]);
 
-            $channelIds = $query->pluck('id')->toArray();
-            $chunks = array_chunk($channelIds, 50);
+            Notification::make()
+                ->info()
+                ->title("Channel Scrubber \"{$scrubber->name}\" started")
+                ->body("Scanning {$channelCount} channel(s). You will be notified when complete.")
+                ->broadcast($scrubber->user)
+                ->sendToDatabase($scrubber->user);
 
-            $chunkJobs = [];
-            foreach ($chunks as $chunk) {
-                $chunkJobs[] = new ProcessChannelScrubberChunk(
+            $channelIds = $query->pluck('id')->toArray();
+
+            $chunkJobs = collect(array_chunk($channelIds, 50))
+                ->map(fn (array $chunk) => new ProcessChannelScrubberChunk(
                     channelIds: $chunk,
                     scrubberId: $scrubber->id,
                     logId: $log->id,
@@ -105,8 +110,8 @@ class ProcessChannelScrubber implements ShouldQueue
                     probeTimeout: $scrubber->probe_timeout ?? 10,
                     disableDead: $scrubber->disable_dead ?? true,
                     enableLive: $scrubber->enable_live ?? false,
-                );
-            }
+                ))
+                ->all();
 
             if ($scrubber->use_batching) {
                 $this->dispatchAsBatch($chunkJobs, $scrubber, $log->id, $batchNo, $start);
@@ -143,13 +148,6 @@ class ProcessChannelScrubber implements ShouldQueue
      *
      * @param  array<ProcessChannelScrubberChunk>  $chunkJobs
      */
-    /**
-     * Dispatch chunk jobs as a Bus::batch() so all chunks run in parallel across
-     * available Horizon workers. ProcessChannelScrubberComplete is dispatched via
-     * the batch's then() callback once every chunk has finished.
-     *
-     * @param  array<ProcessChannelScrubberChunk>  $chunkJobs
-     */
     private function dispatchAsBatch(
         array $chunkJobs,
         ChannelScrubber $scrubber,
@@ -157,18 +155,18 @@ class ProcessChannelScrubber implements ShouldQueue
         string $batchNo,
         Carbon $start,
     ): void {
+        $scrubberId = $scrubber->id;
+
         Bus::batch($chunkJobs)
-            ->then(function () use ($scrubber, $logId, $batchNo, $start) {
+            ->then(function () use ($scrubberId, $logId, $batchNo, $start) {
                 dispatch(new ProcessChannelScrubberComplete(
-                    scrubberId: $scrubber->id,
+                    scrubberId: $scrubberId,
                     logId: $logId,
                     batchNo: $batchNo,
                     start: $start,
                 ));
             })
-            ->catch(function (Batch $batch, Throwable $e) use ($scrubber) {
-                $this->notifyScrubberFailed($scrubber, $e->getMessage());
-            })
+            ->catch(fn (Batch $batch, Throwable $e) => self::handleScrubberFailure($scrubberId, $e))
             ->onConnection('redis')
             ->onQueue('import')
             ->allowFailures()
@@ -188,31 +186,35 @@ class ProcessChannelScrubber implements ShouldQueue
         string $batchNo,
         Carbon $start,
     ): void {
-        $jobs = [
+        $scrubberId = $scrubber->id;
+
+        Bus::chain([
             ...$chunkJobs,
             new ProcessChannelScrubberComplete(
-                scrubberId: $scrubber->id,
+                scrubberId: $scrubberId,
                 logId: $logId,
                 batchNo: $batchNo,
                 start: $start,
             ),
-        ];
-
-        Bus::chain($jobs)
+        ])
             ->onConnection('redis')
             ->onQueue('import')
-            ->catch(function (Throwable $e) use ($scrubber) {
-                $this->notifyScrubberFailed($scrubber, $e->getMessage());
-            })
+            ->catch(fn (Throwable $e) => self::handleScrubberFailure($scrubberId, $e))
             ->dispatch();
     }
 
     /**
      * Notify the scrubber owner of a failure and mark the scrubber as failed.
+     * Safe for use inside closures where $this cannot be serialized.
      */
-    private function notifyScrubberFailed(ChannelScrubber $scrubber, string $message): void
+    private static function handleScrubberFailure(int $scrubberId, Throwable $e): void
     {
-        $error = "Error running scrubber \"{$scrubber->name}\": {$message}";
+        $scrubber = ChannelScrubber::find($scrubberId);
+        if (! $scrubber) {
+            return;
+        }
+
+        $error = "Error running scrubber \"{$scrubber->name}\": {$e->getMessage()}";
 
         Notification::make()
             ->danger()

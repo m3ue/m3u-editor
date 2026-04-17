@@ -359,7 +359,7 @@ class Channel extends Model
      *
      * @return array{streams: array<int, array{codec_type: string, codec_name: string, codec_long_name: ?string, profile: ?string, width: ?int, height: ?int, bit_rate: ?string, avg_frame_rate: ?string, display_aspect_ratio: ?string, sample_rate: ?string, channels: ?int, channel_layout: ?string, level: ?int, bits_per_raw_sample: ?string}>}
      */
-    public function probeStreamStats(): array
+    public function probeStreamStats(int $timeout = 15): array
     {
         try {
             $url = $this->url_custom ?? $this->url;
@@ -368,7 +368,7 @@ class Channel extends Model
             }
 
             $process = new SymfonyProcess(['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_streams', $url]);
-            $process->setTimeout(15);
+            $process->setTimeout($timeout);
             $process->run();
 
             if ($process->getExitCode() !== 0) {

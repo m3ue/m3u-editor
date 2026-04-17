@@ -4,35 +4,42 @@ namespace App\Jobs;
 
 use App\Models\Channel;
 use App\Models\Playlist;
-use App\Traits\ProviderRequestDelay;
+use App\Models\User;
+use Carbon\Carbon;
 use Filament\Notifications\Notification;
+use Illuminate\Bus\Batch;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Log;
+use Throwable;
 
 class ProbeChannelStreams implements ShouldQueue
 {
-    use ProviderRequestDelay, Queueable;
+    use Queueable;
 
     public $tries = 1;
 
-    public $timeout = 60 * 60 * 4;
+    public $timeout = 60 * 60;
 
     public $deleteWhenMissingModels = true;
 
     /**
      * @param  int|null  $playlistId  Probe all enabled live channels for this playlist
      * @param  array<int>|null  $channelIds  Probe specific channel IDs (overrides playlistId)
-     * @param  int  $concurrency  Max parallel ffprobe processes
      */
     public function __construct(
         public ?int $playlistId = null,
         public ?array $channelIds = null,
-        public int $concurrency = 3,
     ) {}
 
+    /**
+     * Execute the job.
+     */
     public function handle(): void
     {
+        $start = now();
+
         $query = Channel::query();
 
         if ($this->channelIds) {
@@ -48,45 +55,169 @@ class ProbeChannelStreams implements ShouldQueue
             return;
         }
 
-        $channels = $query->get();
-        $total = $channels->count();
+        $channelIds = $query->pluck('id')->toArray();
+        $total = count($channelIds);
 
         if ($total === 0) {
+            Log::info("ProbeChannelStreams: No probe-eligible channels found for playlist {$this->playlistId}.");
+
             return;
         }
 
-        $probed = 0;
-        $failed = 0;
-
-        foreach ($channels->chunk($this->concurrency) as $chunk) {
-            foreach ($chunk as $channel) {
-                $stats = $this->withProviderThrottling(fn () => $channel->ensureStreamStats());
-
-                if (! empty($stats)) {
-                    $channel->updateQuietly([
-                        'stream_stats' => $stats,
-                        'stream_stats_probed_at' => now(),
-                    ]);
-                    $probed++;
-                } else {
-                    $failed++;
-                }
-            }
-        }
-
-        Log::info("ProbeChannelStreams: Completed. Probed: {$probed}, Failed: {$failed}, Total: {$total}");
-
-        // Notify the playlist owner
         $playlist = $this->playlistId ? Playlist::find($this->playlistId) : null;
-        $user = $playlist?->user ?? ($this->channelIds ? Channel::find($this->channelIds[0])?->user : null);
+        $probeTimeout = $playlist?->probe_timeout ?? 15;
+        $useBatching = (bool) ($playlist?->probe_use_batching ?? false);
 
+        Log::info("ProbeChannelStreams: Starting. playlist={$this->playlistId}, total={$total}, batching=".($useBatching ? 'yes' : 'no'));
+
+        // Notify user that probing has started.
+        $user = $playlist?->user;
         if ($user) {
             Notification::make()
-                ->success()
-                ->title('Stream probing completed')
-                ->body("Probed {$probed} of {$total} channels".($failed > 0 ? " ({$failed} failed)" : '').'.')
+                ->info()
+                ->title(__('Stream probing started'))
+                ->body(__('Probing :total channel(s). You will be notified when complete.', ['total' => $total]))
                 ->broadcast($user)
                 ->sendToDatabase($user);
         }
+
+        $chunkJobs = collect(array_chunk($channelIds, 50))
+            ->map(fn (array $chunk) => new ProbeChannelStreamsChunk(
+                channelIds: $chunk,
+                probeTimeout: $probeTimeout,
+            ))
+            ->all();
+
+        try {
+            if ($useBatching) {
+                $this->dispatchAsBatch($chunkJobs, $this->playlistId, $this->channelIds, $total, $start, $playlist);
+            } else {
+                $this->dispatchAsChain($chunkJobs, $this->playlistId, $this->channelIds, $total, $start, $playlist);
+            }
+
+            Log::info('ProbeChannelStreams: Dispatch complete.');
+        } catch (Throwable $e) {
+            Log::error("ProbeChannelStreams: Dispatch failed — {$e->getMessage()}", [
+                'exception' => $e,
+                'playlist_id' => $this->playlistId,
+            ]);
+            $this->notifyFailed($playlist, $e->getMessage());
+        }
+    }
+
+    /**
+     * Dispatch chunk jobs as a Bus::batch() so all chunks run in parallel.
+     * ProbeChannelStreamsComplete is dispatched via the batch's then() callback.
+     *
+     * @param  array<ProbeChannelStreamsChunk>  $chunkJobs
+     */
+    private function dispatchAsBatch(
+        array $chunkJobs,
+        ?int $playlistId,
+        ?array $channelIds,
+        int $total,
+        Carbon $start,
+        ?Playlist $playlist,
+    ): void {
+        // Capture only a scalar so the closure does not bind $this (the running
+        // job). $this carries an active RedisJob connection via InteractsWithQueue
+        // which makes PHP hang when SerializableClosure tries to serialize it.
+        $userId = $playlist?->user?->id;
+
+        $batch = Bus::batch($chunkJobs)
+            ->then(function () use ($playlistId, $channelIds, $total, $start) {
+                dispatch(new ProbeChannelStreamsComplete(
+                    playlistId: $playlistId,
+                    channelIds: $channelIds,
+                    total: $total,
+                    start: $start,
+                ));
+            })
+            ->catch(function (Batch $batch, Throwable $e) use ($userId) {
+                Log::error("ProbeChannelStreams batch failed: {$e->getMessage()}");
+                self::notifyUserOfFailure($userId, $e->getMessage());
+            })
+            ->onConnection('redis')
+            ->onQueue('import')
+            ->allowFailures()
+            ->dispatch();
+
+        Log::info("ProbeChannelStreams: Batch dispatched. id={$batch->id}, total={$batch->totalJobs}");
+    }
+
+    /**
+     * Dispatch chunk jobs as a Bus::chain() so chunks run one after another,
+     * with ProbeChannelStreamsComplete appended as the final step.
+     *
+     * @param  array<ProbeChannelStreamsChunk>  $chunkJobs
+     */
+    private function dispatchAsChain(
+        array $chunkJobs,
+        ?int $playlistId,
+        ?array $channelIds,
+        int $total,
+        Carbon $start,
+        ?Playlist $playlist,
+    ): void {
+        $userId = $playlist?->user?->id;
+
+        Bus::chain([
+            ...$chunkJobs,
+            new ProbeChannelStreamsComplete(
+                playlistId: $playlistId,
+                channelIds: $channelIds,
+                total: $total,
+                start: $start,
+            ),
+        ])
+            ->onConnection('redis')
+            ->onQueue('import')
+            ->catch(function (Throwable $e) use ($userId) {
+                Log::error("ProbeChannelStreams chain failed: {$e->getMessage()}");
+                self::notifyUserOfFailure($userId, $e->getMessage());
+            })
+            ->dispatch();
+
+        Log::info('ProbeChannelStreams: Chain dispatched.');
+    }
+
+    /**
+     * Notify the playlist owner of a probing failure.
+     */
+    private function notifyFailed(?Playlist $playlist, string $message): void
+    {
+        Log::error("ProbeChannelStreams failed: {$message}");
+        self::notifyUserOfFailure($playlist?->user?->id, $message);
+    }
+
+    /**
+     * Send a danger notification to a user by ID (safe for use inside closures
+     * where $this cannot be serialized).
+     */
+    private static function notifyUserOfFailure(?int $userId, string $message): void
+    {
+        if (! $userId) {
+            return;
+        }
+
+        $user = User::find($userId);
+        if (! $user) {
+            return;
+        }
+
+        Notification::make()
+            ->danger()
+            ->title(__('Stream probing failed'))
+            ->body($message)
+            ->broadcast($user)
+            ->sendToDatabase($user);
+    }
+
+    /**
+     * Handle a job failure.
+     */
+    public function failed(Throwable $exception): void
+    {
+        Log::error("ProbeChannelStreams orchestrator failed: {$exception->getMessage()}");
     }
 }

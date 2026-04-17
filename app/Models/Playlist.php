@@ -56,6 +56,8 @@ class Playlist extends Model
         'auto_merge_deactivate_failover' => 'boolean',
         'auto_merge_config' => 'array',
         'auto_probe_streams' => 'boolean',
+        'probe_use_batching' => 'boolean',
+        'probe_timeout' => 'integer',
         'find_replace_rules' => 'array',
         'sort_alpha_config' => 'array',
         'emby_config' => 'array',
