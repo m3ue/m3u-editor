@@ -59,7 +59,9 @@ class M3uProxyStreamMonitor extends Page
 
     public $systemStats = [];
 
-    public $refreshInterval = 5; // seconds
+    public $refreshInterval = 5; // seconds (default; the client persists its own choice in localStorage)
+
+    public ?string $lastUpdatedAt = null;
 
     public $connectionError = null;
 
@@ -94,6 +96,8 @@ class M3uProxyStreamMonitor extends Page
         ];
 
         $this->systemStats = []; // populate if external API provides system metrics
+
+        $this->lastUpdatedAt = now()->toIso8601String();
     }
 
     protected function getHeaderActions(): array
@@ -453,6 +457,7 @@ class M3uProxyStreamMonitor extends Page
             'globalStats' => $this->globalStats,
             'systemStats' => $this->systemStats,
             'refreshInterval' => $this->refreshInterval,
+            'lastUpdatedAt' => $this->lastUpdatedAt,
             'connectionError' => $this->connectionError,
         ];
     }
