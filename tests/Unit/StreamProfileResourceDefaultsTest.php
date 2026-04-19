@@ -17,3 +17,15 @@ test('ffmpeg backend keeps expected default args', function () {
         ->toContain('-i {input_url}')
         ->toContain('-f mpegts {output_args|pipe:1}');
 });
+
+test('null backend falls back to ffmpeg default', function () {
+    expect(StreamProfileResource::defaultArgsForBackend(null))
+        ->toContain('-i {input_url}')
+        ->toContain('-f mpegts {output_args|pipe:1}');
+});
+
+test('unknown backend falls back to ffmpeg default', function () {
+    expect(StreamProfileResource::defaultArgsForBackend('unknown'))
+        ->toContain('-i {input_url}')
+        ->toContain('-f mpegts {output_args|pipe:1}');
+});
