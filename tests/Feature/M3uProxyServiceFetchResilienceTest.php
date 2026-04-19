@@ -46,9 +46,12 @@ it('classifies HTTP errors as http category', function (string $method, string $
 it('retries on connection failure before giving up', function () {
     Http::fake(['*/streams' => Http::failedConnection()]);
 
-    app(M3uProxyService::class)->fetchActiveStreams();
+    $result = app(M3uProxyService::class)->fetchActiveStreams();
 
     Http::assertSentCount(2);
+    expect($result['success'])->toBeFalse()
+        ->and($result['error_category'])->toBe('connection')
+        ->and($result['streams'])->toBe([]);
 });
 
 it('does not retry on HTTP errors', function () {
