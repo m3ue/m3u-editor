@@ -1471,7 +1471,7 @@ class XtreamApiController extends Controller
             // Fill in missing info fields with channel data
             $defaultInfo = [
                 'kinopoisk_url' => $info['kinopoisk_url'] ?? '',
-                'tmdb_id' => (int) ($info['tmdb_id'] ?? 0),
+                'tmdb_id' => (int) ($channel->getTmdbId() ?? 0),
                 'name' => $info['name'] ?? $channel->name,
                 'o_name' => $info['o_name'] ?? $channel->name,
                 'cover_big' => $cover,

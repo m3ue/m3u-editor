@@ -98,7 +98,7 @@ class Series extends Model
         $imdbId = $this->imdb_id ?? $this->metadata['imdb_id'] ?? $this->metadata['imdb'] ?? null;
 
         return [
-            'tmdb' => $tmdbId,
+            'tmdb' => $tmdbId != null ? (int) $tmdbId : null,
             'tvdb' => $tvdbId,
             'imdb' => $imdbId,
         ];
@@ -275,6 +275,7 @@ class Series extends Model
 
                         // Process each episode in the season
                         $bulk = [];
+                        $seasonTmdbId = $seasonInfo['tmdb'] ?? $seasonInfo['tmdb_id'] ?? $seasonInfo['tvdb'] ?? $seasonInfo['tvdb_id'] ?? $seasonInfo['imdb'] ?? $seasonInfo['imdb_id'] ?? null;
                         foreach ($episodes as $ep) {
                             $episodeCount++;
                             $url = $xtream->buildSeriesUrl($ep['id'], $ep['container_extension']);
@@ -305,7 +306,7 @@ class Series extends Model
                                     'bitrate' => $ep['info']['bitrate'] ?? 0,
                                     'rating' => $ep['info']['rating'] ?? null,
                                     'season' => (int) $season,
-                                    'tmdb_id' => isset($ep['info']['tmdb_id']) ? (int) $ep['info']['tmdb_id'] : (isset($seasonInfo['tmdb']) ? (int) $seasonInfo['tmdb'] : null),
+                                    'tmdb_id' => $ep['info']['tmdb_id'] ?? $seasonTmdbId ?? null,
                                     'cover_big' => $ep['info']['cover_big'] ?? null,
                                 ]),
                             ];
