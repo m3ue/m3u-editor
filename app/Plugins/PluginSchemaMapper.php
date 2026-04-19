@@ -8,6 +8,7 @@ use Filament\Forms\Components\TagsInput;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
+use Filament\Schemas\Components\Section;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Schema;
@@ -55,6 +56,15 @@ class PluginSchemaMapper
         $defaults = [];
 
         foreach ($fields as $field) {
+            if (($field['type'] ?? null) === 'section') {
+                $defaults = [
+                    ...$defaults,
+                    ...$this->defaultsForFields($field['fields'] ?? [], $existing),
+                ];
+
+                continue;
+            }
+
             $fieldId = $field['id'] ?? null;
             if (! $fieldId) {
                 continue;
@@ -69,18 +79,23 @@ class PluginSchemaMapper
     private function componentsForFields(array $fields, string $prefix = '', array $existing = []): array
     {
         return collect($fields)
-            ->filter(fn (array $field): bool => filled($field['id'] ?? null))
+            ->filter(fn (array $field): bool => ($field['type'] ?? null) === 'section' || filled($field['id'] ?? null))
             ->map(fn (array $field) => $this->componentForField($field, $prefix, $existing))
             ->all();
     }
 
     private function componentForField(array $field, string $prefix = '', array $existing = [])
     {
-        $name = $prefix.($field['id'] ?? '');
         $type = $field['type'] ?? 'text';
         $label = $field['label'] ?? Str::headline((string) ($field['id'] ?? 'value'));
         $helperText = $field['helper_text'] ?? null;
         $required = (bool) ($field['required'] ?? false);
+
+        if ($type === 'section') {
+            return $this->sectionComponent($field, $prefix, $existing);
+        }
+
+        $name = $prefix.($field['id'] ?? '');
         $defaultKey = $field['default_from_setting'] ?? ($field['id'] ?? '');
         $default = Arr::get($existing, $defaultKey, $field['default'] ?? null);
 
@@ -100,6 +115,46 @@ class PluginSchemaMapper
             ->default($default)
             ->helperText($helperText)
             ->required($required);
+    }
+
+    /**
+     * Build a Filament Section component for a `section` field definition.
+     * Nested sections (sections within sections) are fully supported — each section's
+     * `fields` array is processed recursively through componentsForFields(), so any depth
+     * of nesting works for both rendering and defaults/rules flattening.
+     */
+    private function sectionComponent(array $field, string $prefix = '', array $existing = []): Section
+    {
+        $label = $field['label'] ?? Str::headline((string) ($field['id'] ?? 'Section'));
+        $description = $field['description'] ?? $field['helper_text'] ?? null;
+        $columns = (int) ($field['columns'] ?? 1);
+
+        $section = Section::make($label)
+            ->schema($this->componentsForFields($field['fields'] ?? [], $prefix, $existing))
+            ->columnSpanFull();
+
+        if (filled($description)) {
+            $section->description($description);
+        }
+
+        if (! empty($field['icon'])) {
+            $section->icon((string) $field['icon']);
+        }
+
+        if ((bool) ($field['compact'] ?? false)) {
+            $section->compact();
+        }
+
+        if ((bool) ($field['collapsible'] ?? false)) {
+            $section->collapsible();
+            $section->collapsed((bool) ($field['collapsed'] ?? false));
+        }
+
+        if ($columns > 1) {
+            $section->columns($columns);
+        }
+
+        return $section;
     }
 
     private function staticSelectComponent(string $name, array $field): Select
@@ -154,6 +209,15 @@ class PluginSchemaMapper
         $rules = [];
 
         foreach ($fields as $field) {
+            if (($field['type'] ?? null) === 'section') {
+                $rules = [
+                    ...$rules,
+                    ...$this->rulesForFields($field['fields'] ?? [], $prefix),
+                ];
+
+                continue;
+            }
+
             $fieldId = $field['id'] ?? null;
             if (! $fieldId) {
                 continue;

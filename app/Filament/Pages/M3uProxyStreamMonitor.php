@@ -17,6 +17,7 @@ use Filament\Actions\Action;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Support\Enums\Size;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Shared Stream Monitor (External API-backed)
@@ -59,7 +60,9 @@ class M3uProxyStreamMonitor extends Page
 
     public $systemStats = [];
 
-    public $refreshInterval = 5; // seconds
+    public $refreshInterval = 5; // seconds (default; the client persists its own choice in localStorage)
+
+    public ?string $lastUpdatedAt = null;
 
     public $connectionError = null;
 
@@ -94,6 +97,8 @@ class M3uProxyStreamMonitor extends Page
         ];
 
         $this->systemStats = []; // populate if external API provides system metrics
+
+        $this->lastUpdatedAt = now()->toIso8601String();
     }
 
     protected function getHeaderActions(): array
@@ -122,6 +127,10 @@ class M3uProxyStreamMonitor extends Page
 
     public function triggerFailover(string $streamId): void
     {
+        if (! $this->authorizeStreamAction($streamId)) {
+            return;
+        }
+
         try {
             $success = $this->apiService->triggerFailover($streamId);
             if ($success) {
@@ -148,6 +157,10 @@ class M3uProxyStreamMonitor extends Page
 
     public function stopStream(string $streamId): void
     {
+        if (! $this->authorizeStreamAction($streamId)) {
+            return;
+        }
+
         try {
             // Support stopping broadcasts via a special stream ID prefix
             if (str_starts_with($streamId, 'broadcast:')) {
@@ -194,6 +207,38 @@ class M3uProxyStreamMonitor extends Page
         $this->refreshData();
     }
 
+    /**
+     * Verify the authenticated user owns the stream or broadcast referenced by $streamId.
+     * Emits a user-facing notification and logs a warning on failure.
+     */
+    private function authorizeStreamAction(string $streamId): bool
+    {
+        if (str_starts_with($streamId, 'broadcast:')) {
+            $networkUuid = substr($streamId, strlen('broadcast:'));
+            $owned = Network::where('uuid', $networkUuid)
+                ->where('user_id', auth()->id())
+                ->exists();
+        } else {
+            $visible = $this->apiService->fetchActiveStreams();
+            $owned = collect($visible['streams'] ?? [])
+                ->contains(fn ($s) => ($s['stream_id'] ?? null) === $streamId);
+        }
+
+        if (! $owned) {
+            Log::warning('Unauthorized stream-monitor action blocked', [
+                'user_id' => auth()->id(),
+                'stream_id' => $streamId,
+            ]);
+
+            Notification::make()
+                ->title(__('Not authorized to manage this stream.'))
+                ->danger()
+                ->send();
+        }
+
+        return $owned;
+    }
+
     protected function getActiveStreams(): array
     {
         $apiStreams = $this->apiService->fetchActiveStreams();
@@ -237,6 +282,46 @@ class M3uProxyStreamMonitor extends Page
                 ->get(['id', 'uuid', 'name', 'profiles_enabled'])
                 ->keyBy('uuid');
 
+            // Pre-fetch Channel and Episode models referenced by stream metadata
+            $channelIds = collect($apiStreams['streams'])
+                ->filter(fn ($s) => ($s['metadata']['type'] ?? null) === 'channel')
+                ->pluck('metadata.id')
+                ->filter()
+                ->unique()
+                ->values();
+            $episodeIds = collect($apiStreams['streams'])
+                ->filter(fn ($s) => ($s['metadata']['type'] ?? null) === 'episode')
+                ->pluck('metadata.id')
+                ->filter()
+                ->unique()
+                ->values();
+
+            $channelsById = $channelIds->isNotEmpty()
+                ? Channel::whereIn('id', $channelIds)->get()->keyBy('id')
+                : collect();
+            $episodesById = $episodeIds->isNotEmpty()
+                ? Episode::whereIn('id', $episodeIds)->get()->keyBy('id')
+                : collect();
+
+            // Pre-fetch transcoding (StreamProfile) and provider (PlaylistProfile) profiles
+            $streamProfileIds = collect($apiStreams['streams'])
+                ->pluck('metadata.profile_id')
+                ->filter()
+                ->unique()
+                ->values();
+            $streamProfilesById = $streamProfileIds->isNotEmpty()
+                ? StreamProfile::whereIn('id', $streamProfileIds)->get(['id', 'format', 'backend'])->keyBy('id')
+                : collect();
+
+            $providerProfileIds = collect($apiStreams['streams'])
+                ->pluck('metadata.provider_profile_id')
+                ->filter()
+                ->unique()
+                ->values();
+            $providerProfilesById = $providerProfileIds->isNotEmpty()
+                ? PlaylistProfile::whereIn('id', $providerProfileIds)->get(['id', 'name', 'is_primary'])->keyBy('id')
+                : collect();
+
             foreach ($apiStreams['streams'] as $stream) {
                 $streamId = $stream['stream_id'];
                 $streamClients = $clientsByStream[$streamId] ?? [];
@@ -247,13 +332,13 @@ class M3uProxyStreamMonitor extends Page
                     $modelType = $stream['metadata']['type'];
                     $modelId = $stream['metadata']['id'];
                     if ($modelType === 'channel') {
-                        $channel = Channel::find($modelId);
+                        $channel = $channelsById[$modelId] ?? null;
                         if ($channel) {
                             $title = $channel->name_custom ?? $channel->name ?? $channel->title;
                             $logo = LogoFacade::getChannelLogoUrl($channel);
                         }
                     } elseif ($modelType === 'episode') {
-                        $episode = Episode::find($modelId);
+                        $episode = $episodesById[$modelId] ?? null;
                         if ($episode) {
                             $title = $episode->title;
                             $logo = LogoFacade::getEpisodeLogoUrl($episode);
@@ -305,7 +390,7 @@ class M3uProxyStreamMonitor extends Page
                 $transcodingFormat = null;
                 $transcodingBackend = null;
                 if ($transcoding) {
-                    $profile = StreamProfile::find($stream['metadata']['profile_id'] ?? null);
+                    $profile = $streamProfilesById[$stream['metadata']['profile_id'] ?? null] ?? null;
                     if ($profile) {
                         $transcodingFormat = $profile->format === 'm3u8'
                             ? 'HLS'
@@ -340,7 +425,7 @@ class M3uProxyStreamMonitor extends Page
                 $providerProfileName = null;
                 $providerProfileId = $stream['metadata']['provider_profile_id'] ?? null;
                 if ($providerProfileId) {
-                    $providerProfile = PlaylistProfile::find($providerProfileId);
+                    $providerProfile = $providerProfilesById[$providerProfileId] ?? null;
                     if ($providerProfile) {
                         $providerProfileName = $providerProfile->is_primary
                             ? 'Primary profile'
@@ -387,8 +472,17 @@ class M3uProxyStreamMonitor extends Page
 
         // Append any active network broadcasts (simplified output)
         if (! empty($apiBroadcasts['success']) && ! empty($apiBroadcasts['broadcasts'])) {
+            $broadcastNetworkUuids = collect($apiBroadcasts['broadcasts'])
+                ->pluck('network_id')
+                ->filter()
+                ->unique()
+                ->values();
+            $networksByUuid = Network::whereIn('uuid', $broadcastNetworkUuids)
+                ->get(['uuid', 'name'])
+                ->keyBy('uuid');
+
             foreach ($apiBroadcasts['broadcasts'] as $bcast) {
-                $network = Network::where('uuid', $bcast['network_id'])->first();
+                $network = $networksByUuid[$bcast['network_id']] ?? null;
 
                 $startedAt = isset($bcast['started_at']) ? Carbon::parse($bcast['started_at'], 'UTC') : null;
                 $uptime = $startedAt ? $startedAt->diffForHumans(null, true) : 'N/A';
@@ -453,6 +547,7 @@ class M3uProxyStreamMonitor extends Page
             'globalStats' => $this->globalStats,
             'systemStats' => $this->systemStats,
             'refreshInterval' => $this->refreshInterval,
+            'lastUpdatedAt' => $this->lastUpdatedAt,
             'connectionError' => $this->connectionError,
         ];
     }
