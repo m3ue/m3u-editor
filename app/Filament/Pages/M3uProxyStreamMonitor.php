@@ -278,6 +278,46 @@ class M3uProxyStreamMonitor extends Page
                 ->get(['id', 'uuid', 'name', 'profiles_enabled'])
                 ->keyBy('uuid');
 
+            // Pre-fetch Channel and Episode models referenced by stream metadata
+            $channelIds = collect($apiStreams['streams'])
+                ->filter(fn ($s) => ($s['metadata']['type'] ?? null) === 'channel')
+                ->pluck('metadata.id')
+                ->filter()
+                ->unique()
+                ->values();
+            $episodeIds = collect($apiStreams['streams'])
+                ->filter(fn ($s) => ($s['metadata']['type'] ?? null) === 'episode')
+                ->pluck('metadata.id')
+                ->filter()
+                ->unique()
+                ->values();
+
+            $channelsById = $channelIds->isNotEmpty()
+                ? Channel::whereIn('id', $channelIds)->get()->keyBy('id')
+                : collect();
+            $episodesById = $episodeIds->isNotEmpty()
+                ? Episode::whereIn('id', $episodeIds)->get()->keyBy('id')
+                : collect();
+
+            // Pre-fetch transcoding (StreamProfile) and provider (PlaylistProfile) profiles
+            $streamProfileIds = collect($apiStreams['streams'])
+                ->pluck('metadata.profile_id')
+                ->filter()
+                ->unique()
+                ->values();
+            $streamProfilesById = $streamProfileIds->isNotEmpty()
+                ? StreamProfile::whereIn('id', $streamProfileIds)->get(['id', 'format', 'backend'])->keyBy('id')
+                : collect();
+
+            $providerProfileIds = collect($apiStreams['streams'])
+                ->pluck('metadata.provider_profile_id')
+                ->filter()
+                ->unique()
+                ->values();
+            $providerProfilesById = $providerProfileIds->isNotEmpty()
+                ? PlaylistProfile::whereIn('id', $providerProfileIds)->get(['id', 'name', 'is_primary'])->keyBy('id')
+                : collect();
+
             foreach ($apiStreams['streams'] as $stream) {
                 $streamId = $stream['stream_id'];
                 $streamClients = $clientsByStream[$streamId] ?? [];
@@ -288,13 +328,13 @@ class M3uProxyStreamMonitor extends Page
                     $modelType = $stream['metadata']['type'];
                     $modelId = $stream['metadata']['id'];
                     if ($modelType === 'channel') {
-                        $channel = Channel::find($modelId);
+                        $channel = $channelsById[$modelId] ?? null;
                         if ($channel) {
                             $title = $channel->name_custom ?? $channel->name ?? $channel->title;
                             $logo = LogoFacade::getChannelLogoUrl($channel);
                         }
                     } elseif ($modelType === 'episode') {
-                        $episode = Episode::find($modelId);
+                        $episode = $episodesById[$modelId] ?? null;
                         if ($episode) {
                             $title = $episode->title;
                             $logo = LogoFacade::getEpisodeLogoUrl($episode);
@@ -346,7 +386,7 @@ class M3uProxyStreamMonitor extends Page
                 $transcodingFormat = null;
                 $transcodingBackend = null;
                 if ($transcoding) {
-                    $profile = StreamProfile::find($stream['metadata']['profile_id'] ?? null);
+                    $profile = $streamProfilesById[$stream['metadata']['profile_id'] ?? null] ?? null;
                     if ($profile) {
                         $transcodingFormat = $profile->format === 'm3u8'
                             ? 'HLS'
@@ -381,7 +421,7 @@ class M3uProxyStreamMonitor extends Page
                 $providerProfileName = null;
                 $providerProfileId = $stream['metadata']['provider_profile_id'] ?? null;
                 if ($providerProfileId) {
-                    $providerProfile = PlaylistProfile::find($providerProfileId);
+                    $providerProfile = $providerProfilesById[$providerProfileId] ?? null;
                     if ($providerProfile) {
                         $providerProfileName = $providerProfile->is_primary
                             ? 'Primary profile'
@@ -428,8 +468,17 @@ class M3uProxyStreamMonitor extends Page
 
         // Append any active network broadcasts (simplified output)
         if (! empty($apiBroadcasts['success']) && ! empty($apiBroadcasts['broadcasts'])) {
+            $broadcastNetworkUuids = collect($apiBroadcasts['broadcasts'])
+                ->pluck('network_id')
+                ->filter()
+                ->unique()
+                ->values();
+            $networksByUuid = Network::whereIn('uuid', $broadcastNetworkUuids)
+                ->get(['uuid', 'name'])
+                ->keyBy('uuid');
+
             foreach ($apiBroadcasts['broadcasts'] as $bcast) {
-                $network = Network::where('uuid', $bcast['network_id'])->first();
+                $network = $networksByUuid[$bcast['network_id']] ?? null;
 
                 $startedAt = isset($bcast['started_at']) ? Carbon::parse($bcast['started_at'], 'UTC') : null;
                 $uptime = $startedAt ? $startedAt->diffForHumans(null, true) : 'N/A';
