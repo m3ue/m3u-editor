@@ -36,13 +36,9 @@ return [
             'prefix' => '',
             'foreign_key_constraints' => env('DB_FOREIGN_KEYS', true),
             // Add these options for better concurrency
-            'options' => defined('PDO::SQLITE_ATTR_OPEN_FLAGS')
-                && defined('PDO::SQLITE_OPEN_READWRITE')
-                && defined('PDO::SQLITE_OPEN_CREATE')
-                ? [
-                    constant('PDO::SQLITE_ATTR_OPEN_FLAGS') => constant('PDO::SQLITE_OPEN_READWRITE') | constant('PDO::SQLITE_OPEN_CREATE'),
-                ]
-                : [],
+            'options' => [
+                PDO::SQLITE_ATTR_OPEN_FLAGS => PDO::SQLITE_OPEN_READWRITE | PDO::SQLITE_OPEN_CREATE,
+            ],
             'journal_mode' => 'WAL',
             'synchronous' => 'NORMAL',
             'cache_size' => 10000,
@@ -64,13 +60,9 @@ return [
             'prefix' => '',
             'foreign_key_constraints' => true,
             // Add these options for better concurrency
-            'options' => defined('PDO::SQLITE_ATTR_OPEN_FLAGS')
-                && defined('PDO::SQLITE_OPEN_READWRITE')
-                && defined('PDO::SQLITE_OPEN_CREATE')
-                ? [
-                    constant('PDO::SQLITE_ATTR_OPEN_FLAGS') => constant('PDO::SQLITE_OPEN_READWRITE') | constant('PDO::SQLITE_OPEN_CREATE'),
-                ]
-                : [],
+            'options' => [
+                PDO::SQLITE_ATTR_OPEN_FLAGS => PDO::SQLITE_OPEN_READWRITE | PDO::SQLITE_OPEN_CREATE,
+            ],
             'journal_mode' => 'WAL',
             'synchronous' => 'NORMAL',
             'cache_size' => 10000,
