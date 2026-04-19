@@ -58,7 +58,7 @@ class ListStreamProfiles extends ListRecords
                             'description' => 'For platforms supported by yt-dlp — extracts the best available quality without re-encoding.',
                             'backend' => 'ytdlp',
                             'format' => 'ts',
-                            'args' => 'bestvideo+bestaudio/best',
+                            'args' => 'bestvideo+bestaudio/best --no-playlist',
                         ],
                     ];
                     foreach ($defaultProfiles as $defaultProfile) {

@@ -103,12 +103,12 @@ class StreamProfileResource extends Resource implements CopilotResource
                     )
                     ->default(fn (Get $get): string => match ($get('backend')) {
                         'streamlink' => 'best',
-                        'ytdlp' => 'bestvideo+bestaudio/best',
+                        'ytdlp' => 'bestvideo+bestaudio/best --no-playlist',
                         default => '-i {input_url} -c:v libx264 -preset faster -crf {crf|23} -maxrate {maxrate|2500k} -bufsize {bufsize|5000k} -c:a aac -b:a {audio_bitrate|192k} -f mpegts {output_args|pipe:1}',
                     })
                     ->placeholder(fn (Get $get): string => match ($get('backend')) {
                         'streamlink' => 'best',
-                        'ytdlp' => 'bestvideo+bestaudio/best',
+                        'ytdlp' => 'bestvideo+bestaudio/best --no-playlist',
                         default => '-i {input_url} -c:v libx264 -preset faster -crf {crf|23} -maxrate {maxrate|2500k} -bufsize {bufsize|5000k} -c:a aac -b:a {audio_bitrate|192k} -f mpegts {output_args|pipe:1}',
                     })
                     ->helperText(fn (Get $get): string => match ($get('backend')) {
