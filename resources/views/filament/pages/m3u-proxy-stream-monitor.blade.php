@@ -76,7 +76,16 @@ echo $totalBandwidth > 1000 ? round($totalBandwidth / 1000, 1) . ' Mbps' : $tota
                 </label>
 
                 <x-filament::badge size="sm">
-                    Last updated: <span x-text="new Date().toLocaleTimeString()"></span>
+                    <span class="inline-flex items-center gap-1 whitespace-nowrap">
+                        Last updated:
+                        {{-- Spinner: shown during any refreshData call, after a 200ms delay so fast polls don't flash. --}}
+                        <svg wire:loading.delay wire:target="refreshData" class="animate-spin h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                        </svg>
+                        {{-- Timestamp: shown when no refreshData call is in flight. --}}
+                        <span wire:loading.delay.remove wire:target="refreshData" x-text="new Date().toLocaleTimeString()"></span>
+                    </span>
                 </x-filament::badge>
             </div>
 
