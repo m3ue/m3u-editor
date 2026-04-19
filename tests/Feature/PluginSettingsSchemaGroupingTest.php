@@ -54,6 +54,117 @@ it('renders grouped plugin settings sections and keeps nested rules flat', funct
     expect($rules)->toHaveKey('settings.channel_group');
 });
 
+it('rejects a section missing a label', function () {
+    $mapper = app(PluginValidator::class);
+
+    $fieldTypes = config('plugins.field_types');
+
+    $errors = (new ReflectionMethod($mapper, 'validateFieldDefinition'))
+        ->invoke($mapper, [
+            'id' => 'my_section',
+            'type' => 'section',
+            'fields' => [['id' => 'foo', 'type' => 'text']],
+        ], $fieldTypes, 'settings');
+
+    expect($errors)->toContain('settings.my_section section fields require [label]');
+});
+
+it('rejects a section with an empty fields array', function () {
+    $mapper = app(PluginValidator::class);
+
+    $fieldTypes = config('plugins.field_types');
+
+    $errors = (new ReflectionMethod($mapper, 'validateFieldDefinition'))
+        ->invoke($mapper, [
+            'id' => 'my_section',
+            'type' => 'section',
+            'label' => 'My Section',
+            'fields' => [],
+        ], $fieldTypes, 'settings');
+
+    expect($errors)->toContain('settings.my_section section fields require non-empty [fields]');
+});
+
+it('rejects a section containing a non-array nested field', function () {
+    $mapper = app(PluginValidator::class);
+
+    $fieldTypes = config('plugins.field_types');
+
+    $errors = (new ReflectionMethod($mapper, 'validateFieldDefinition'))
+        ->invoke($mapper, [
+            'id' => 'my_section',
+            'type' => 'section',
+            'label' => 'My Section',
+            'fields' => ['not-an-array'],
+        ], $fieldTypes, 'settings');
+
+    expect($errors)->toContain('settings.my_section section fields must be objects');
+});
+
+it('allows a section without an id, using the label as the error path identifier', function () {
+    $validator = app(PluginValidator::class);
+
+    $fieldTypes = config('plugins.field_types');
+
+    $errors = (new ReflectionMethod($validator, 'validateFieldDefinition'))
+        ->invoke($validator, [
+            'type' => 'section',
+            'label' => 'Unlabelled Section',
+            'fields' => [['id' => 'foo', 'type' => 'text']],
+        ], $fieldTypes, 'settings');
+
+    expect($errors)->toBe([]);
+});
+
+it('renders nested sections and flattens their fields for defaults and rules', function () {
+    $plugin = new Plugin([
+        'settings_schema' => [
+            [
+                'id' => 'outer',
+                'type' => 'section',
+                'label' => 'Outer Section',
+                'fields' => [
+                    [
+                        'id' => 'top_level_field',
+                        'type' => 'text',
+                        'label' => 'Top Level',
+                        'default' => 'top',
+                    ],
+                    [
+                        'id' => 'inner',
+                        'type' => 'section',
+                        'label' => 'Inner Section',
+                        'fields' => [
+                            [
+                                'id' => 'nested_field',
+                                'type' => 'text',
+                                'label' => 'Nested',
+                                'default' => 'deep',
+                            ],
+                        ],
+                    ],
+                ],
+            ],
+        ],
+        'settings' => [],
+    ]);
+
+    $mapper = app(PluginSchemaMapper::class);
+
+    $components = $mapper->settingsComponents($plugin);
+    expect($components)->toHaveCount(1);
+    expect($components[0])->toBeInstanceOf(Section::class);
+    expect($components[0]->getHeading())->toBe('Outer Section');
+
+    $defaults = $mapper->defaultsForFields($plugin->settings_schema, []);
+    expect($defaults)->toHaveKey('top_level_field', 'top')
+        ->and($defaults)->toHaveKey('nested_field', 'deep');
+
+    $rules = $mapper->settingsRules($plugin);
+    expect($rules)->toHaveKey('settings.top_level_field')
+        ->and($rules)->toHaveKey('settings.nested_field');
+});
+
 it('validates plugin manifests that use grouped settings sections', function () {
     $pluginId = 'grouped-schema-'.Str::lower(Str::random(6));
     $sourcePath = storage_path('app/testing-plugin-sources/'.$pluginId);

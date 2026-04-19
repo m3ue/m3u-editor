@@ -117,6 +117,12 @@ class PluginSchemaMapper
             ->required($required);
     }
 
+    /**
+     * Build a Filament Section component for a `section` field definition.
+     * Nested sections (sections within sections) are fully supported — each section's
+     * `fields` array is processed recursively through componentsForFields(), so any depth
+     * of nesting works for both rendering and defaults/rules flattening.
+     */
     private function sectionComponent(array $field, string $prefix = '', array $existing = []): Section
     {
         $label = $field['label'] ?? Str::headline((string) ($field['id'] ?? 'Section'));

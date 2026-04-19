@@ -545,39 +545,44 @@ class PluginValidator
         $type = $field['type'] ?? 'text';
         $fieldId = $field['id'] ?? null;
 
-        if (blank($fieldId)) {
-            return ["{$group} field is missing [id]"];
-        }
-
-        if (! in_array($type, $fieldTypes, true)) {
-            $errors[] = "{$group}.{$fieldId} uses unsupported type [{$type}]";
-        }
-
         if ($type === 'section') {
+            // Sections do not require an [id]; fall back to the label for readable error paths.
+            // Nested sections (sections within sections) are supported via recursive validation.
+            $qualifier = $fieldId ?? ($field['label'] ?? 'section');
+            $qualifiedGroup = "{$group}.{$qualifier}";
+
             if (blank($field['label'] ?? null)) {
-                $errors[] = "{$group}.{$fieldId} section fields require [label]";
+                $errors[] = "{$qualifiedGroup} section fields require [label]";
             }
 
             if (! is_array($field['fields'] ?? null) || ($field['fields'] ?? []) === []) {
-                $errors[] = "{$group}.{$fieldId} section fields require non-empty [fields]";
+                $errors[] = "{$qualifiedGroup} section fields require non-empty [fields]";
 
                 return $errors;
             }
 
             foreach ($field['fields'] as $nestedField) {
                 if (! is_array($nestedField)) {
-                    $errors[] = "{$group}.{$fieldId} section fields must be objects";
+                    $errors[] = "{$qualifiedGroup} section fields must be objects";
 
                     continue;
                 }
 
                 $errors = [
                     ...$errors,
-                    ...$this->validateFieldDefinition($nestedField, $fieldTypes, "{$group}.{$fieldId}"),
+                    ...$this->validateFieldDefinition($nestedField, $fieldTypes, $qualifiedGroup),
                 ];
             }
 
             return $errors;
+        }
+
+        if (blank($fieldId)) {
+            return ["{$group} field is missing [id]"];
+        }
+
+        if (! in_array($type, $fieldTypes, true)) {
+            $errors[] = "{$group}.{$fieldId} uses unsupported type [{$type}]";
         }
 
         if (in_array($type, ['select', 'model_select'], true) && blank($field['label'] ?? null)) {
