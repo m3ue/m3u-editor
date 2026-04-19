@@ -371,17 +371,17 @@ class PlaylistService
             'container_extension' => 'mkv',
             'info' => (object) [
                 'season' => 1,
-                'tmdb_id' => '1176693',
+                'tmdb_id' => 1176693,
                 'movie_image' => 'http://m3ueditor.test/logo-proxy/aHR0cDovLzIzLjIyNy4xNDcuMTcyOjgwL2ltYWdlcy9mODQyYjlkYTA5YWFjODFlYWRlYzU0YzY0NWU1ZDE3OS5qcGc=',
             ],
             'category' => 'Anime',
             'series' => (object) [
                 'name' => 'My Hero Academia (2016)',
                 'release_date' => '2016-04-03',
-                'tmdb_id' => '65930',
+                'tmdb_id' => 65930,
                 'metadata' => [
                     'name' => 'My Hero Academia (2016)',
-                    'tmdb_id' => '65930',
+                    'tmdb_id' => 65930,
                 ],
             ],
         ];

@@ -305,7 +305,7 @@ class Series extends Model
                                     'bitrate' => $ep['info']['bitrate'] ?? 0,
                                     'rating' => $ep['info']['rating'] ?? null,
                                     'season' => (int) $season,
-                                    'tmdb_id' => $ep['info']['tmdb_id'] ?? $seasonInfo['tmdb'] ?? null,
+                                    'tmdb_id' => isset($ep['info']['tmdb_id']) ? (int) $ep['info']['tmdb_id'] : (isset($seasonInfo['tmdb']) ? (int) $seasonInfo['tmdb'] : null),
                                     'cover_big' => $ep['info']['cover_big'] ?? null,
                                 ]),
                             ];
