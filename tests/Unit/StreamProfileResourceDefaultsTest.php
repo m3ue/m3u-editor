@@ -9,7 +9,7 @@ test('streamlink backend has optimized default args', function () {
 
 test('ytdlp backend keeps expected default args', function () {
     expect(StreamProfileResource::defaultArgsForBackend('ytdlp'))
-        ->toBe('bestvideo+bestaudio/best');
+        ->toBe('bestvideo+bestaudio/best --no-playlist');
 });
 
 test('ffmpeg backend keeps expected default args', function () {
