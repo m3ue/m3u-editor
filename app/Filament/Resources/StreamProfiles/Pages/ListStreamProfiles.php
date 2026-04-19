@@ -50,7 +50,7 @@ class ListStreamProfiles extends ListRecords
                             'description' => 'For platforms like Twitch and YouTube — extracts the stream directly without re-encoding.',
                             'backend' => 'streamlink',
                             'format' => 'ts',
-                            'args' => StreamProfileResource::defaultArgsForBackend('streamlink'),
+                            'args' => 'best --hls-live-edge 3',
                         ],
                         [
                             'user_id' => $userId,
@@ -58,7 +58,7 @@ class ListStreamProfiles extends ListRecords
                             'description' => 'For platforms supported by yt-dlp — extracts the best available quality without re-encoding.',
                             'backend' => 'ytdlp',
                             'format' => 'ts',
-                            'args' => StreamProfileResource::defaultArgsForBackend('ytdlp'),
+                            'args' => 'bestvideo+bestaudio/best',
                         ],
                     ];
                     foreach ($defaultProfiles as $defaultProfile) {
