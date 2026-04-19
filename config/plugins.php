@@ -182,6 +182,7 @@ return [
     ],
 
     'field_types' => [
+        'section',
         'boolean',
         'number',
         'text',

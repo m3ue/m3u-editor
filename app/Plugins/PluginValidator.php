@@ -542,15 +542,42 @@ class PluginValidator
     private function validateFieldDefinition(array $field, array $fieldTypes, string $group): array
     {
         $errors = [];
+        $type = $field['type'] ?? 'text';
         $fieldId = $field['id'] ?? null;
 
         if (blank($fieldId)) {
             return ["{$group} field is missing [id]"];
         }
 
-        $type = $field['type'] ?? 'text';
         if (! in_array($type, $fieldTypes, true)) {
             $errors[] = "{$group}.{$fieldId} uses unsupported type [{$type}]";
+        }
+
+        if ($type === 'section') {
+            if (blank($field['label'] ?? null)) {
+                $errors[] = "{$group}.{$fieldId} section fields require [label]";
+            }
+
+            if (! is_array($field['fields'] ?? null) || ($field['fields'] ?? []) === []) {
+                $errors[] = "{$group}.{$fieldId} section fields require non-empty [fields]";
+
+                return $errors;
+            }
+
+            foreach ($field['fields'] as $nestedField) {
+                if (! is_array($nestedField)) {
+                    $errors[] = "{$group}.{$fieldId} section fields must be objects";
+
+                    continue;
+                }
+
+                $errors = [
+                    ...$errors,
+                    ...$this->validateFieldDefinition($nestedField, $fieldTypes, "{$group}.{$fieldId}"),
+                ];
+            }
+
+            return $errors;
         }
 
         if (in_array($type, ['select', 'model_select'], true) && blank($field['label'] ?? null)) {
