@@ -210,7 +210,7 @@ class M3uProxyStreamMonitor extends Page
     private function authorizeStreamAction(string $streamId): bool
     {
         if (str_starts_with($streamId, 'broadcast:')) {
-            $networkUuid = substr($streamId, 10);
+            $networkUuid = substr($streamId, strlen('broadcast:'));
             $owned = Network::where('uuid', $networkUuid)
                 ->where('user_id', auth()->id())
                 ->exists();
