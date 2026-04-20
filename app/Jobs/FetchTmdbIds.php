@@ -527,8 +527,7 @@ class FetchTmdbIds implements ShouldQueue
             }
 
             // Fetch full movie details from TMDB to populate metadata
-            $id = $result['tmdb_id'] ? (int) $result['tmdb_id'] : null;
-            $details = $id !== null ? $tmdb->getMovieDetails($id) : null;
+            $details = $tmdb->getMovieDetails((int) $result['tmdb_id']);
             if ($details) {
                 // Populate IMDB ID if missing
                 if (! empty($details['imdb_id']) && empty($updateData['imdb_id'])) {
