@@ -12,6 +12,7 @@ use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Utilities\Get;
+use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Enums\RecordActionsPosition;
@@ -76,6 +77,21 @@ class StreamProfileResource extends Resource implements CopilotResource
                     ->default('ffmpeg')
                     ->required()
                     ->live()
+                    ->afterStateUpdated(function (?string $state, Get $get, Set $set): void {
+                        // Keep user-entered values, but replace untouched defaults
+                        // when switching backend during profile creation/editing.
+                        $currentArgs = trim((string) ($get('args') ?? ''));
+
+                        $knownDefaults = [
+                            self::defaultArgsForBackend('ffmpeg'),
+                            self::defaultArgsForBackend('streamlink'),
+                            self::defaultArgsForBackend('ytdlp'),
+                        ];
+
+                        if ($currentArgs === '' || in_array($currentArgs, $knownDefaults, true)) {
+                            $set('args', self::defaultArgsForBackend($state));
+                        }
+                    })
                     ->columnSpanFull()
                     ->helperText(__('FFmpeg re-encodes the stream. Streamlink and yt-dlp extract and deliver streams directly from supported platforms (Twitch, YouTube, etc.) without re-encoding.')),
 
@@ -101,16 +117,8 @@ class StreamProfileResource extends Resource implements CopilotResource
                             })
                             ->openUrlInNewTab(true)
                     )
-                    ->default(fn (Get $get): string => match ($get('backend')) {
-                        'streamlink' => 'best',
-                        'ytdlp' => 'bestvideo+bestaudio/best',
-                        default => '-i {input_url} -c:v libx264 -preset faster -crf {crf|23} -maxrate {maxrate|2500k} -bufsize {bufsize|5000k} -c:a aac -b:a {audio_bitrate|192k} -f mpegts {output_args|pipe:1}',
-                    })
-                    ->placeholder(fn (Get $get): string => match ($get('backend')) {
-                        'streamlink' => 'best',
-                        'ytdlp' => 'bestvideo+bestaudio/best',
-                        default => '-i {input_url} -c:v libx264 -preset faster -crf {crf|23} -maxrate {maxrate|2500k} -bufsize {bufsize|5000k} -c:a aac -b:a {audio_bitrate|192k} -f mpegts {output_args|pipe:1}',
-                    })
+                    ->default(fn (Get $get): string => self::defaultArgsForBackend($get('backend')))
+                    ->placeholder(fn (Get $get): string => self::defaultArgsForBackend($get('backend')))
                     ->helperText(fn (Get $get): string => match ($get('backend')) {
                         'streamlink' => __('Quality selector (best, worst, 720p, etc.) followed by optional Streamlink flags. Example: best --hls-live-edge 3'),
                         'ytdlp' => __('yt-dlp format selector followed by optional flags. Example: bestvideo+bestaudio/best --no-playlist'),
@@ -148,6 +156,15 @@ class StreamProfileResource extends Resource implements CopilotResource
                         default => __('The container format FFmpeg will produce. Must match the -f muxer argument in your FFmpeg template above.'),
                     }),
             ]);
+    }
+
+    public static function defaultArgsForBackend(?string $backend): string
+    {
+        return match ($backend) {
+            'streamlink' => 'best --hls-live-edge 3',
+            'ytdlp' => 'bestvideo+bestaudio/best --no-playlist',
+            default => '-i {input_url} -c:v libx264 -preset faster -crf {crf|23} -maxrate {maxrate|2500k} -bufsize {bufsize|5000k} -c:a aac -b:a {audio_bitrate|192k} -f mpegts {output_args|pipe:1}',
+        };
     }
 
     public static function table(Table $table): Table
