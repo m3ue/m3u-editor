@@ -497,6 +497,96 @@ class Channel extends Model
         return $result;
     }
 
+    /**
+     * Build a display-friendly stream_stats shape for the Technical Details infolist panel.
+     *
+     * @return array{
+     *     compact: array{
+     *         resolution: ?string,
+     *         source_fps: ?float,
+     *         video_codec_display: ?string,
+     *         ffmpeg_output_bitrate: ?float,
+     *         audio_codec: ?string,
+     *         audio_channels: ?string,
+     *         audio_bitrate: ?float,
+     *         audio_language: ?string
+     *     },
+     *     advanced: array{
+     *         video: array{codec_long_name: ?string, level: ?int, bit_depth: ?int, ref_frames: ?int, display_aspect_ratio: ?string},
+     *         audio: array{sample_rate: ?int, codec_long_name: ?string},
+     *         all_streams: ?array<int, array{index: ?int, type: ?string, codec: ?string, lang: ?string}>,
+     *         tags: ?array<string, string>
+     *     }
+     * }
+     */
+    public function getStreamStatsForDisplay(): array
+    {
+        return once(function (): array {
+            $emby = $this->getEmbyStreamStats();
+            $stats = $this->stream_stats ?? [];
+
+            $video = null;
+            $audio = null;
+            $allStreams = [];
+
+            foreach ($stats as $index => $entry) {
+                $stream = $entry['stream'] ?? $entry;
+                $type = $stream['codec_type'] ?? null;
+
+                $allStreams[] = [
+                    'index' => $stream['index'] ?? $index,
+                    'type' => $type,
+                    'codec' => $stream['codec_name'] ?? null,
+                    'lang' => $stream['tags']['language'] ?? null,
+                ];
+
+                if ($type === 'video' && $video === null) {
+                    $video = $stream;
+                } elseif ($type === 'audio' && $audio === null) {
+                    $audio = $stream;
+                }
+            }
+
+            $videoCodecDisplay = null;
+            if (! empty($emby['video_codec'])) {
+                $videoCodecDisplay = $emby['video_codec'];
+                if (! empty($emby['video_profile'])) {
+                    $videoCodecDisplay .= " ({$emby['video_profile']})";
+                }
+            }
+
+            $videoTags = ! empty($video['tags']) ? $video['tags'] : null;
+
+            return [
+                'compact' => [
+                    'resolution' => $emby['resolution'] ?? null,
+                    'source_fps' => $emby['source_fps'] ?? null,
+                    'video_codec_display' => $videoCodecDisplay,
+                    'ffmpeg_output_bitrate' => $emby['ffmpeg_output_bitrate'] ?? null,
+                    'audio_codec' => $emby['audio_codec'] ?? null,
+                    'audio_channels' => $emby['audio_channels'] ?? null,
+                    'audio_bitrate' => $emby['audio_bitrate'] ?? null,
+                    'audio_language' => $emby['audio_language'] ?? null,
+                ],
+                'advanced' => [
+                    'video' => [
+                        'codec_long_name' => $video['codec_long_name'] ?? null,
+                        'level' => isset($video['level']) ? (int) $video['level'] : null,
+                        'bit_depth' => isset($video['bits_per_raw_sample']) ? (int) $video['bits_per_raw_sample'] : null,
+                        'ref_frames' => isset($video['refs']) ? (int) $video['refs'] : null,
+                        'display_aspect_ratio' => $video['display_aspect_ratio'] ?? null,
+                    ],
+                    'audio' => [
+                        'sample_rate' => isset($audio['sample_rate']) ? (int) $audio['sample_rate'] : null,
+                        'codec_long_name' => $audio['codec_long_name'] ?? null,
+                    ],
+                    'all_streams' => count($allStreams) > 2 ? $allStreams : null,
+                    'tags' => $videoTags,
+                ],
+            ];
+        });
+    }
+
     public function fetchMetadata($xtream = null, $refresh = false, bool $skipTmdb = false)
     {
         if (! $this->is_vod) {
