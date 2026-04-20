@@ -61,7 +61,7 @@ class CustomPlaylist extends Model
     public function channels(): BelongsToMany
     {
         return $this->belongsToMany(Channel::class, 'channel_custom_playlist')
-            ->withPivot(['channel_number']);
+            ->withPivot(['channel_number', 'sort']);
     }
 
     public function enabled_channels(): BelongsToMany

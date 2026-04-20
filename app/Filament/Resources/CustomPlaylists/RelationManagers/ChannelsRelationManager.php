@@ -18,6 +18,7 @@ use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Schemas\Schema;
 use Filament\Tables;
 use Filament\Tables\Columns\SpatieTagsColumn;
+use Filament\Tables\Columns\TextInputColumn;
 use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Grouping\Group;
@@ -130,7 +131,7 @@ class ChannelsRelationManager extends RelationManager
         // Replace the global editable "channel" column with a custom-playlist pivot channel number column
         foreach ($defaultColumns as $i => $column) {
             if (method_exists($column, 'getName') && $column->getName() === 'channel') {
-                $defaultColumns[$i] = Tables\Columns\TextInputColumn::make('custom_channel_number')
+                $defaultColumns[$i] = TextInputColumn::make('custom_channel_number')
                     ->label(__('Channel'))
                     ->type('number')
                     ->rules(['nullable', 'numeric', 'min:0'])
@@ -147,8 +148,25 @@ class ChannelsRelationManager extends RelationManager
                     ->sortable(query: function (Builder $query, string $direction): Builder {
                         return $query->orderBy('channel_custom_playlist.channel_number', $direction);
                     });
-
-                break;
+            }
+            if (method_exists($column, 'getName') && $column->getName() === 'sort') {
+                $defaultColumns[$i] = TextInputColumn::make('sort')
+                    ->label(__('Sort Order'))
+                    ->type('number')
+                    ->rules(['nullable', 'numeric', 'min:0'])
+                    ->placeholder(fn ($record) => (string) $record->sort)
+                    ->getStateUsing(function ($record) {
+                        return $record->pivot?->sort ?? null;
+                    })
+                    ->updateStateUsing(function ($record, $state) use ($ownerRecord): void {
+                        $ownerRecord->channels()->updateExistingPivot(
+                            $record->id,
+                            ['sort' => ($state !== '' && $state !== null) ? (int) $state : null]
+                        );
+                    })
+                    ->sortable(query: function (Builder $query, string $direction): Builder {
+                        return $query->orderBy('channel_custom_playlist.sort', $direction);
+                    });
             }
         }
 
@@ -174,8 +192,8 @@ class ChannelsRelationManager extends RelationManager
             })
             ->paginated([10, 25, 50, 100])
             ->defaultPaginationPageOption(25)
-            ->defaultSort('sort', 'asc')
-            ->reorderable('sort')
+            ->defaultSort(fn (Builder $query, string $direction): Builder => $query->orderByRaw("COALESCE(channel_custom_playlist.sort, channels.sort) {$direction}"))
+            ->reorderable('channel_custom_playlist.sort')
             ->columns($defaultColumns)
             ->filters([
                 ...ChannelResource::getTableFilters(showPlaylist: true),
@@ -318,6 +336,46 @@ class ChannelsRelationManager extends RelationManager
                     ->modalIcon('heroicon-o-hashtag')
                     ->modalDescription(__('Recount the selected channels only inside this custom playlist. The original channel numbers will not change.'))
                     ->modalSubmitActionLabel(__('Recount now')),
+                BulkAction::make('sort_alpha_custom')
+                    ->label(__('Sort Alpha'))
+                    ->icon('heroicon-o-bars-arrow-down')
+                    ->schema([
+                        Select::make('column')
+                            ->label(__('Sort By'))
+                            ->options([
+                                'title' => 'Title (or override if set)',
+                                'name' => 'Name (or override if set)',
+                                'stream_id' => 'ID (or override if set)',
+                                'channel' => 'Channel No.',
+                            ])
+                            ->default('title')
+                            ->required(),
+                        Select::make('sort')
+                            ->label(__('Sort Order'))
+                            ->options([
+                                'ASC' => 'A to Z or 0 to 9',
+                                'DESC' => 'Z to A or 9 to 0',
+                            ])
+                            ->default('ASC')
+                            ->required(),
+                    ])
+                    ->action(function (Collection $records, array $data) use ($ownerRecord): void {
+                        $order = $data['sort'] ?? 'ASC';
+                        $column = $data['column'] ?? 'title';
+                        SortFacade::bulkSortAlphaCustomPlaylistChannels($ownerRecord, $records, $order, $column);
+                    })
+                    ->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title(__('Channels Sorted'))
+                            ->body(__('The selected channels have been sorted alphabetically.'))
+                            ->send();
+                    })
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->modalIcon('heroicon-o-bars-arrow-down')
+                    ->modalDescription(__('Sort the selected channels alphabetically? This will update their sort order within this custom playlist.'))
+                    ->modalSubmitActionLabel(__('Sort now')),
                 BulkAction::make('detach')
                     ->label(__('Detach Selected'))
                     ->action(function (Collection $records) use ($ownerRecord): void {
