@@ -919,7 +919,7 @@ class Preferences extends SettingsPage
                                             ->default(500)
                                             ->suffix('ms')
                                             ->hidden(fn ($get) => ! $get('enable_provider_request_delay'))
-                                            ->helperText(__('Delay in milliseconds between requests. 0 for no delay.')),
+                                            ->helperText(__('Delay in milliseconds between requests.')),
                                     ]),
                                 Section::make(__('Sync Invalidation'))
                                     ->description(__('Prevent sync from proceeding if conditions are met.'))
