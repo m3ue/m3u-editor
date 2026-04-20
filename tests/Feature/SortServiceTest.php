@@ -1,10 +1,12 @@
 <?php
 
 use App\Models\Channel;
+use App\Models\CustomPlaylist;
 use App\Models\Group;
 use App\Models\Playlist;
 use App\Models\User;
 use App\Services\SortService;
+use Illuminate\Support\Facades\DB;
 
 beforeEach(function () {
     $this->user = User::factory()->create();
@@ -80,3 +82,108 @@ it('ignores an invalid sort order and defaults to ASC', function () {
     expect($this->group->channels()->orderBy('sort')->pluck('title')->toArray())
         ->toBe(['Alpha', 'Zebra']);
 });
+
+// ---------------------------------------------------------------------------
+// bulkSortAlphaCustomPlaylistChannels — pivot-only sort
+// ---------------------------------------------------------------------------
+
+it('sorts custom playlist channels by title ASC via pivot sort', function () {
+    $customPlaylist = CustomPlaylist::factory()->for($this->user)->create();
+    $channelZ = Channel::factory()->for($this->user)->for($this->playlist)->for($this->group)->create(['title' => 'Zebra', 'sort' => 1]);
+    $channelA = Channel::factory()->for($this->user)->for($this->playlist)->for($this->group)->create(['title' => 'Alpha', 'sort' => 2]);
+    $channelM = Channel::factory()->for($this->user)->for($this->playlist)->for($this->group)->create(['title' => 'Mango', 'sort' => 3]);
+
+    $customPlaylist->channels()->attach([$channelZ->id, $channelA->id, $channelM->id]);
+    $channels = $customPlaylist->channels()->get();
+
+    $this->service->bulkSortAlphaCustomPlaylistChannels($customPlaylist, $channels, 'ASC', 'title');
+
+    $orderedTitles = DB::table('channel_custom_playlist')
+        ->join('channels', 'channels.id', '=', 'channel_custom_playlist.channel_id')
+        ->where('channel_custom_playlist.custom_playlist_id', $customPlaylist->id)
+        ->orderBy('channel_custom_playlist.sort')
+        ->pluck('channels.title')
+        ->toArray();
+
+    expect($orderedTitles)->toBe(['Alpha', 'Mango', 'Zebra']);
+});
+
+it('sorts custom playlist channels by title DESC via pivot sort', function () {
+    $customPlaylist = CustomPlaylist::factory()->for($this->user)->create();
+    $channelA = Channel::factory()->for($this->user)->for($this->playlist)->for($this->group)->create(['title' => 'Alpha', 'sort' => 1]);
+    $channelZ = Channel::factory()->for($this->user)->for($this->playlist)->for($this->group)->create(['title' => 'Zebra', 'sort' => 2]);
+
+    $customPlaylist->channels()->attach([$channelA->id, $channelZ->id]);
+    $channels = $customPlaylist->channels()->get();
+
+    $this->service->bulkSortAlphaCustomPlaylistChannels($customPlaylist, $channels, 'DESC', 'title');
+
+    $orderedTitles = DB::table('channel_custom_playlist')
+        ->join('channels', 'channels.id', '=', 'channel_custom_playlist.channel_id')
+        ->where('channel_custom_playlist.custom_playlist_id', $customPlaylist->id)
+        ->orderBy('channel_custom_playlist.sort')
+        ->pluck('channels.title')
+        ->toArray();
+
+    expect($orderedTitles)->toBe(['Zebra', 'Alpha']);
+});
+
+it('does not modify global channels.sort when sorting a custom playlist', function () {
+    $customPlaylist = CustomPlaylist::factory()->for($this->user)->create();
+    $channelZ = Channel::factory()->for($this->user)->for($this->playlist)->for($this->group)->create(['title' => 'Zebra', 'sort' => 1]);
+    $channelA = Channel::factory()->for($this->user)->for($this->playlist)->for($this->group)->create(['title' => 'Alpha', 'sort' => 2]);
+    $channelM = Channel::factory()->for($this->user)->for($this->playlist)->for($this->group)->create(['title' => 'Mango', 'sort' => 3]);
+
+    $customPlaylist->channels()->attach([$channelZ->id, $channelA->id, $channelM->id]);
+    $channels = $customPlaylist->channels()->get();
+
+    $this->service->bulkSortAlphaCustomPlaylistChannels($customPlaylist, $channels, 'ASC', 'title');
+
+    // Global sort values must be unchanged
+    expect((int) $channelZ->fresh()->sort)->toBe(1)
+        ->and((int) $channelA->fresh()->sort)->toBe(2)
+        ->and((int) $channelM->fresh()->sort)->toBe(3);
+});
+
+it('sorting one custom playlist does not affect another custom playlists pivot sort', function () {
+    $playlistA = CustomPlaylist::factory()->for($this->user)->create();
+    $playlistB = CustomPlaylist::factory()->for($this->user)->create();
+
+    $channelZ = Channel::factory()->for($this->user)->for($this->playlist)->for($this->group)->create(['title' => 'Zebra', 'sort' => 1]);
+    $channelA = Channel::factory()->for($this->user)->for($this->playlist)->for($this->group)->create(['title' => 'Alpha', 'sort' => 2]);
+
+    $playlistA->channels()->attach([$channelZ->id, $channelA->id]);
+    $playlistB->channels()->attach([$channelZ->id, $channelA->id]);
+
+    // Set explicit pivot sort values for playlist B
+    DB::table('channel_custom_playlist')
+        ->where('custom_playlist_id', $playlistB->id)
+        ->where('channel_id', $channelZ->id)
+        ->update(['sort' => 5]);
+    DB::table('channel_custom_playlist')
+        ->where('custom_playlist_id', $playlistB->id)
+        ->where('channel_id', $channelA->id)
+        ->update(['sort' => 10]);
+
+    // Sort playlist A
+    $channels = $playlistA->channels()->get();
+    $this->service->bulkSortAlphaCustomPlaylistChannels($playlistA, $channels, 'ASC', 'title');
+
+    // Playlist B's pivot sort must be unchanged
+    $pivotBSorts = DB::table('channel_custom_playlist')
+        ->where('custom_playlist_id', $playlistB->id)
+        ->pluck('sort', 'channel_id')
+        ->toArray();
+
+    expect($pivotBSorts[$channelZ->id])->toBe(5)
+        ->and($pivotBSorts[$channelA->id])->toBe(10);
+});
+
+it('rejects invalid column for custom playlist sort', function () {
+    $customPlaylist = CustomPlaylist::factory()->for($this->user)->create();
+    $channel = Channel::factory()->for($this->user)->for($this->playlist)->for($this->group)->create();
+    $customPlaylist->channels()->attach($channel->id);
+    $channels = $customPlaylist->channels()->get();
+
+    $this->service->bulkSortAlphaCustomPlaylistChannels($customPlaylist, $channels, 'ASC', 'created_at');
+})->throws(InvalidArgumentException::class, 'Invalid sort column provided.');

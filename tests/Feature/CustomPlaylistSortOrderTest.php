@@ -299,6 +299,85 @@ it('EPG XML falls back to global channel number when pivot channel_number is nul
     expect($content)->toContain('<channel id="77">');
 });
 
+// ---------------------------------------------------------------------------
+// getChannelQuery: COALESCE(pivot.sort, channels.sort) ordering
+// ---------------------------------------------------------------------------
+
+it('getChannelQuery orders channels by pivot sort when all channels have pivot sort set', function () {
+    // channelFirst has a high channels.sort (100) but pivot.sort=1 — should come first
+    $channelFirst = Channel::factory()->for($this->user)->for($this->playlist)->for($this->group)->create([
+        'enabled' => true,
+        'is_vod' => false,
+        'sort' => 100,
+        'title' => 'Channel First',
+    ]);
+    // channelSecond has a low channels.sort (2) but pivot.sort=50 — should come second
+    $channelSecond = Channel::factory()->for($this->user)->for($this->playlist)->for($this->group)->create([
+        'enabled' => true,
+        'is_vod' => false,
+        'sort' => 2,
+        'title' => 'Channel Second',
+    ]);
+
+    $this->customPlaylist->channels()->attach($channelFirst->id, ['sort' => 1]);
+    $this->customPlaylist->channels()->attach($channelSecond->id, ['sort' => 50]);
+
+    $channels = PlaylistGenerateController::getChannelQuery($this->customPlaylist)->get();
+
+    expect($channels->first()->id)->toBe($channelFirst->id)
+        ->and($channels->last()->id)->toBe($channelSecond->id);
+});
+
+it('getChannelQuery falls back to channels.sort when pivot sort is null', function () {
+    $channelFirst = Channel::factory()->for($this->user)->for($this->playlist)->for($this->group)->create([
+        'enabled' => true,
+        'is_vod' => false,
+        'sort' => 1,
+        'title' => 'Channel First',
+    ]);
+    $channelSecond = Channel::factory()->for($this->user)->for($this->playlist)->for($this->group)->create([
+        'enabled' => true,
+        'is_vod' => false,
+        'sort' => 2,
+        'title' => 'Channel Second',
+    ]);
+
+    // Attach without pivot sort (null)
+    $this->customPlaylist->channels()->attach([$channelFirst->id, $channelSecond->id]);
+
+    $channels = PlaylistGenerateController::getChannelQuery($this->customPlaylist)->get();
+
+    expect($channels->first()->id)->toBe($channelFirst->id)
+        ->and($channels->last()->id)->toBe($channelSecond->id);
+});
+
+it('getChannelQuery pivot sort takes precedence over channels.sort in mixed scenario', function () {
+    // channelA has pivot.sort=1 but a very high channels.sort — COALESCE picks pivot
+    $channelA = Channel::factory()->for($this->user)->for($this->playlist)->for($this->group)->create([
+        'enabled' => true,
+        'is_vod' => false,
+        'sort' => 100,
+        'title' => 'Channel A',
+    ]);
+    // channelB has no pivot sort — COALESCE falls back to channels.sort=2
+    $channelB = Channel::factory()->for($this->user)->for($this->playlist)->for($this->group)->create([
+        'enabled' => true,
+        'is_vod' => false,
+        'sort' => 2,
+        'title' => 'Channel B',
+    ]);
+
+    $this->customPlaylist->channels()->attach($channelA->id, ['sort' => 1]);
+    $this->customPlaylist->channels()->attach($channelB->id);
+
+    $channels = PlaylistGenerateController::getChannelQuery($this->customPlaylist)->get();
+
+    // COALESCE(1, 100)=1 for A, COALESCE(null, 2)=2 for B → A comes first
+    // Without COALESCE (channels.sort only): B(2) before A(100) — opposite result
+    expect($channels->first()->id)->toBe($channelA->id)
+        ->and($channels->last()->id)->toBe($channelB->id);
+});
+
 it('EPG channel ids match HDHR lineup GuideNumbers for custom playlists', function () {
     $channels = collect();
     for ($i = 1; $i <= 3; $i++) {

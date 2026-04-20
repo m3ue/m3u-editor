@@ -1,15 +1,40 @@
 <x-filament-panels::page>
-    <div x-data="{ 
-        refreshInterval: {{ $refreshInterval }},
-        autoRefresh: true,
-        intervalId: null
-    }" x-init="
-        intervalId = setInterval(() => {
-            if (autoRefresh) {
+    @php
+        $intervalOptions = [0 => 'Off', 3 => '3s', 5 => '5s', 10 => '10s', 30 => '30s'];
+    @endphp
+    <div x-data="{
+        intervalSeconds: (() => { const s = Number(localStorage.getItem('streamMonitor.refreshInterval')); return [0, 3, 5, 10, 30].includes(s) ? s : {{ $refreshInterval }}; })(),
+        intervalId: null,
+        startPolling() {
+            this.stopPolling();
+            if (this.intervalSeconds <= 0) return;
+            this.intervalId = setInterval(() => {
+                if (document.visibilityState === 'visible') {
+                    $wire.refreshData();
+                }
+            }, this.intervalSeconds * 1000);
+        },
+        stopPolling() {
+            if (this.intervalId) {
+                clearInterval(this.intervalId);
+                this.intervalId = null;
+            }
+        }
+    }"
+    x-init="
+        startPolling();
+        $watch('intervalSeconds', value => {
+            localStorage.setItem('streamMonitor.refreshInterval', value);
+            startPolling();
+        });
+        const onVisibilityChange = () => {
+            if (document.visibilityState === 'visible' && intervalSeconds > 0) {
                 $wire.refreshData();
             }
-        }, refreshInterval * 1000);
-    " x-on:before-unload.window="clearInterval(intervalId)">
+        };
+        document.addEventListener('visibilitychange', onVisibilityChange);
+        $cleanup(() => document.removeEventListener('visibilitychange', onVisibilityChange));
+    " x-on:beforeunload.window="stopPolling()">
         
         <!-- Global Statistics Cards -->
         <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
@@ -67,12 +92,18 @@ echo $totalBandwidth > 1000 ? round($totalBandwidth / 1000, 1) . ' Mbps' : $tota
             </x-filament::card>
         </div>
 
-        <!-- Auto-refresh toggle -->
+        <!-- Auto-refresh controls -->
         <div class="mb-4 flex items-center justify-between">
             <div class="flex items-center space-x-4">
-                <label class="flex items-center">
-                    <x-filament::input.checkbox x-model="autoRefresh" />
-                    <span class="ml-2 text-sm text-gray-600 dark:text-gray-400">Auto-refresh every {{ $refreshInterval }}s</span>
+                <label class="flex items-center space-x-2 text-sm text-gray-600 dark:text-gray-400">
+                    <span>Auto-refresh</span>
+                    <x-filament::input.wrapper>
+                        <x-filament::input.select x-model.number="intervalSeconds" aria-label="Auto-refresh interval">
+                            @foreach($intervalOptions as $seconds => $label)
+                                <option value="{{ $seconds }}">{{ $label }}</option>
+                            @endforeach
+                        </x-filament::input.select>
+                    </x-filament::input.wrapper>
                 </label>
 
                 <x-filament::badge size="sm">
@@ -84,13 +115,10 @@ echo $totalBandwidth > 1000 ? round($totalBandwidth / 1000, 1) . ' Mbps' : $tota
                             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
                         </svg>
                         {{-- Timestamp: shown when no refreshData call is in flight. --}}
-                        <span wire:loading.delay.remove wire:target="refreshData" x-text="new Date().toLocaleTimeString()"></span>
+                        <span wire:loading.delay.remove wire:target="refreshData" x-text="$wire.lastUpdatedAt ? new Date($wire.lastUpdatedAt).toLocaleTimeString() : '—'"></span>
                     </span>
                 </x-filament::badge>
             </div>
-
-            
-
         </div>
 
         <!-- Streams List -->
@@ -104,7 +132,7 @@ echo $totalBandwidth > 1000 ? round($totalBandwidth / 1000, 1) . ' Mbps' : $tota
                     </div>
                     <div class="flex-1">
                         <h3 class="text-lg font-semibold text-red-900 dark:text-red-100 mb-2">
-                            Unable to Connect to <strong>m3u proxy
+                            Unable to Connect to <strong>m3u proxy</strong>
                         </h3>
                         <p class="text-sm text-red-800 dark:text-red-200 mb-3">
                             {{ $connectionError }}
@@ -262,12 +290,14 @@ echo $totalBandwidth > 1000 ? round($totalBandwidth / 1000, 1) . ' Mbps' : $tota
                                 
                                 <div class="flex items-center space-x-2">
                                     @unless($stream['broadcast'] ?? false)
-                                        <button wire:click="triggerFailover('{{ $stream['stream_id'] }}')" 
-                                                class="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md text-white bg-yellow-600 hover:bg-yellow-700 focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-gray-800 focus:ring-yellow-500">
-                                            Trigger Failover
-                                        </button>
+                                    <button wire:click="triggerFailover('{{ $stream['stream_id'] }}')" 
+                                            wire:loading.attr="disabled"
+                                            class="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md text-white bg-yellow-600 hover:bg-yellow-700 focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-gray-800 focus:ring-yellow-500">
+                                        Trigger Failover
+                                    </button>
                                     @endunless
                                     <button wire:click="stopStream('{{ $stream['stream_id'] }}')" 
+                                            wire:loading.attr="disabled"
                                             class="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-gray-800 focus:ring-red-500">
                                         Remove Stream
                                     </button>

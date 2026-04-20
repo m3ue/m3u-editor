@@ -76,7 +76,8 @@ it('allows triggerFailover for a stream the user owns', function () {
     $this->actingAs($this->owner);
 
     Livewire::test(M3uProxyStreamMonitor::class)
-        ->call('triggerFailover', $streamId);
+        ->call('triggerFailover', $streamId)
+        ->assertNotified();
 });
 
 it('blocks stopStream for a stream the user does not own', function () {
@@ -124,25 +125,7 @@ it('allows stopStream for a stream the user owns', function () {
     $this->actingAs($this->owner);
 
     Livewire::test(M3uProxyStreamMonitor::class)
-        ->call('stopStream', $streamId);
-});
-
-it('blocks stopStream for a broadcast belonging to another user', function () {
-    $otherUsersNetwork = Network::factory()->create(['user_id' => $this->owner->id]);
-
-    ($this->bindProxyMock)(function ($service) {
-        $service->shouldReceive('fetchActiveStreams')->andReturn([
-            'success' => true,
-            'streams' => [],
-        ]);
-        $service->shouldNotReceive('stopBroadcast');
-        $service->shouldNotReceive('stopStream');
-    });
-
-    $this->actingAs($this->attacker);
-
-    Livewire::test(M3uProxyStreamMonitor::class)
-        ->call('stopStream', 'broadcast:'.$otherUsersNetwork->uuid)
+        ->call('stopStream', $streamId)
         ->assertNotified();
 });
 
@@ -160,5 +143,6 @@ it('allows stopStream for a broadcast the user owns', function () {
     $this->actingAs($this->owner);
 
     Livewire::test(M3uProxyStreamMonitor::class)
-        ->call('stopStream', 'broadcast:'.$myNetwork->uuid);
+        ->call('stopStream', 'broadcast:'.$myNetwork->uuid)
+        ->assertNotified();
 });

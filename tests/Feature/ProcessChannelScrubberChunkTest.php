@@ -7,6 +7,7 @@ use App\Models\ChannelScrubber;
 use App\Models\ChannelScrubberLog;
 use App\Models\Playlist;
 use App\Models\User;
+use Illuminate\Support\Facades\Http;
 
 beforeEach(function () {
     $this->user = User::factory()->create();
@@ -118,6 +119,7 @@ it('increments dead_count on the scrubber for each dead channel', function () {
     ))->handle();
 
     expect($this->scrubber->fresh()->dead_count)->toBe(2);
+    expect($this->log->fresh()->live_count)->toBe(0);
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -166,4 +168,73 @@ it('skips processing when the scrubber is cancelled', function () {
 
     $channel->refresh();
     expect($channel->enabled)->toBeTrue();
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// disableDead = false — dead channels are logged but not disabled
+// ──────────────────────────────────────────────────────────────────────────────
+
+it('does not disable dead channels when disableDead is false', function () {
+    $channel = Channel::factory()->for($this->playlist)->create([
+        'user_id' => $this->user->id,
+        'enabled' => true,
+        'url' => null,
+        'url_custom' => null,
+        'stream_stats' => null,
+    ]);
+
+    (new ProcessChannelScrubberChunk(
+        channelIds: [$channel->id],
+        scrubberId: $this->scrubber->id,
+        logId: $this->log->id,
+        checkMethod: 'ffprobe',
+        batchNo: $this->scrubber->uuid,
+        totalChannels: 1,
+        disableDead: false,
+    ))->handle();
+
+    $channel->refresh();
+    expect($channel->enabled)->toBeTrue();
+
+    $this->assertDatabaseHas('channel_scrubber_log_channels', [
+        'channel_scrubber_log_id' => $this->log->id,
+        'channel_id' => $channel->id,
+    ]);
+
+    expect($this->log->fresh()->disabled_count)->toBe(0);
+    expect($this->scrubber->fresh()->dead_count)->toBe(1);
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// enableLive = true — live channels that were disabled get re-enabled
+// ──────────────────────────────────────────────────────────────────────────────
+
+it('re-enables a previously disabled live channel when enableLive is true', function () {
+    $channel = Channel::factory()->for($this->playlist)->create([
+        'user_id' => $this->user->id,
+        'enabled' => false,
+        'url' => 'http://example.invalid/stream',
+        'url_custom' => null,
+        'stream_stats' => null,
+    ]);
+
+    // Fake a successful HTTP HEAD response so the channel is classified as live.
+    Http::fake([
+        'http://example.invalid/stream' => Http::response('', 200),
+    ]);
+
+    (new ProcessChannelScrubberChunk(
+        channelIds: [$channel->id],
+        scrubberId: $this->scrubber->id,
+        logId: $this->log->id,
+        checkMethod: 'http',
+        batchNo: $this->scrubber->uuid,
+        totalChannels: 1,
+        enableLive: true,
+    ))->handle();
+
+    $channel->refresh();
+    expect($channel->enabled)->toBeTrue();
+
+    expect($this->log->fresh()->live_count)->toBe(1);
 });

@@ -54,19 +54,23 @@
 
 @utility epg-grid-container {
     background-color: theme(colors.white);
-    background-color: theme(colors.gray.900 / 1);
     box-shadow: 0 0 0 1px theme(colors.gray.950 / 0.05);
-    box-shadow: 0 0 0 1px theme(colors.white / 0.1);
     border-radius: theme(borderRadius.md);
     overflow: hidden;
+    @variant dark {
+        background-color: theme(colors.gray.900);
+        box-shadow: 0 0 0 1px theme(colors.white / 0.1);
+    }
 }
 
 @utility epg-channel-row {
     border-bottom: 1px solid theme(colors.gray.100);
-    border-bottom: 1px solid theme(colors.gray.600);
     display: flex;
     align-items: center;
     gap: theme(spacing.2);
+    @variant dark {
+        border-bottom-color: theme(colors.gray.600);
+    }
 }
 
 @utility epg-programme-block {

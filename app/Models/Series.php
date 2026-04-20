@@ -98,7 +98,7 @@ class Series extends Model
         $imdbId = $this->imdb_id ?? $this->metadata['imdb_id'] ?? $this->metadata['imdb'] ?? null;
 
         return [
-            'tmdb' => $tmdbId,
+            'tmdb' => $tmdbId !== null ? (int) $tmdbId : null,
             'tvdb' => $tvdbId,
             'imdb' => $imdbId,
         ];
@@ -232,7 +232,6 @@ class Series extends Model
                 if (count($eps) > 0) {
                     // Process the series episodes
                     $playlistCategory = $this->category;
-                    $episodeCount = 0;
                     foreach ($eps as $season => $episodes) {
                         // Check if the season exists in the playlist
                         $playlistSeason = $this->seasons()
@@ -275,8 +274,8 @@ class Series extends Model
 
                         // Process each episode in the season
                         $bulk = [];
+                        $seasonTmdbId = $seasonInfo['tmdb'] ?? $seasonInfo['tmdb_id'] ?? null;
                         foreach ($episodes as $ep) {
-                            $episodeCount++;
                             $url = $xtream->buildSeriesUrl($ep['id'], $ep['container_extension']);
                             $title = preg_match('/S\d{2}E\d{2} - (.*)/', $ep['title'], $m) ? $m[1] : null;
                             if (! $title) {
@@ -305,7 +304,7 @@ class Series extends Model
                                     'bitrate' => $ep['info']['bitrate'] ?? 0,
                                     'rating' => $ep['info']['rating'] ?? null,
                                     'season' => (int) $season,
-                                    'tmdb_id' => $ep['info']['tmdb_id'] ?? $seasonInfo['tmdb'] ?? null,
+                                    'tmdb_id' => $ep['info']['tmdb_id'] ?? $seasonTmdbId ?? null,
                                     'cover_big' => $ep['info']['cover_big'] ?? null,
                                 ]),
                             ];
@@ -328,17 +327,17 @@ class Series extends Model
                             ]
                         );
                     }
-
-                    // Update last fetched timestamp for the series
-                    $this->update($update);
                 }
+
+                // Update last fetched timestamp for the series (always, regardless of episode count).
+                $this->update($update);
 
                 $jobs = [];
                 if ($dispatchTmdb && $settings->tmdb_auto_lookup_on_import && $this->enabled) {
                     // If TMDB auto lookup enabled, dispatch job to fetch TMDB metadata for episodes
                     $jobs[] = new FetchTmdbIds(
                         seriesIds: [$this->id],
-                        overwriteExisting: $refresh ?? false,
+                        overwriteExisting: $refresh,
                         sendCompletionNotification: false,
                     );
                 }
@@ -351,8 +350,10 @@ class Series extends Model
                     Bus::chain($jobs)->dispatch();
                 }
 
-                return $episodeCount;
             }
+
+            // Data is fresh, return true
+            return true;
         } catch (\Exception $e) {
             Log::error('Failed to fetch metadata for series '.$this->id, ['exception' => $e]);
         }

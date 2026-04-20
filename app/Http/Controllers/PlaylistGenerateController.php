@@ -698,7 +698,7 @@ class PlaylistGenerateController extends Controller
                     [Channel::class, $playlistUuid]
                 )
                 ->orderByRaw("COALESCE({$orderSubquery}, groups.sort_order)", [Channel::class, $playlistUuid])
-                ->orderBy('channels.sort')
+                ->orderByRaw('COALESCE(channel_custom_playlist.sort, channels.sort)')
                 ->orderBy('channels.channel')
                 ->orderBy('channels.title');
         } else {
