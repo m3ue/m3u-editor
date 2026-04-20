@@ -512,9 +512,6 @@ class Channel extends Model
         // Skip the provider call if data is still fresh (unless a forced refresh is requested).
         $isFresh = ! $refresh && $this->last_metadata_fetch;
 
-        // Get settings instance
-        $settings = app(GeneralSettings::class);
-
         try {
             if (! $isFresh) {
                 $playlist = $this->playlist;
@@ -568,12 +565,15 @@ class Channel extends Model
                 $this->update($update);
             }
 
-            if (! $skipTmdb && $settings->tmdb_auto_lookup_on_import && $this->enabled) {
-                dispatch(new FetchTmdbIds(
-                    vodChannelIds: [$this->id],
-                    overwriteExisting: $refresh ?? false,
-                    sendCompletionNotification: false,
-                ))->afterCommit();
+            if (! $skipTmdb && $this->enabled) {
+                $settings = app(GeneralSettings::class);
+                if ($settings->tmdb_auto_lookup_on_import) {
+                    dispatch(new FetchTmdbIds(
+                        vodChannelIds: [$this->id],
+                        overwriteExisting: $refresh,
+                        sendCompletionNotification: false,
+                    ))->afterCommit();
+                }
             }
 
             return true;

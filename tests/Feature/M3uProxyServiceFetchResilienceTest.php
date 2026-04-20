@@ -57,9 +57,12 @@ it('retries on connection failure before giving up', function () {
 it('does not retry on HTTP errors', function () {
     Http::fake(['*/clients' => Http::response('boom', 500)]);
 
-    app(M3uProxyService::class)->fetchActiveClients();
+    $result = app(M3uProxyService::class)->fetchActiveClients();
 
     Http::assertSentCount(1);
+    expect($result['success'])->toBeFalse()
+        ->and($result['error_category'])->toBe('http')
+        ->and($result['clients'])->toBe([]);
 });
 
 it('sends the api token header when configured', function () {

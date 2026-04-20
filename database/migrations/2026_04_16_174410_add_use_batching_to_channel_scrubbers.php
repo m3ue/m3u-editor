@@ -23,7 +23,7 @@ return new class extends Migration
             $table->unsignedBigInteger('live_count')->default(0)->after('disabled_count');
         });
 
-        // Backfill live_count for existing completed runs: checked - dead = live.
+        // Backfill live_count for existing completed runs: channel_count - dead_count = live_count.
         DB::statement('UPDATE channel_scrubber_logs SET live_count = CASE WHEN channel_count > dead_count THEN channel_count - dead_count ELSE 0 END WHERE status = \'completed\'');
     }
 

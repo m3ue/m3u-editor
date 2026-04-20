@@ -1208,6 +1208,7 @@
     "No video files were found in the configured paths.": "In den konfigurierten Pfaden wurden keine Videodateien gefunden.",
     "None": "Keiner",
     "None declared": "Keiner erklärt",
+    "Not authorized to manage this stream.": "Nicht berechtigt, diesen Stream zu verwalten.",
     "Not Configured": "Nicht konfiguriert",
     "Not set": "Nicht festgelegt",
     "Not started": "Nicht gestartet",

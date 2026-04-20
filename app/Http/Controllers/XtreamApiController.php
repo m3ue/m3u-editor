@@ -930,7 +930,8 @@ class XtreamApiController extends Controller
                     }
 
                     $tmdb = $seriesItem->metadata['tmdb'] ?? '';
-                    $lastModified = $seriesItem->last_modified?->timestamp ?? $seriesItem->metadata['last_modified'] ?? null;
+                    $lastModified = $seriesItem->last_modified?->timestamp
+                        ?? (isset($seriesItem->metadata['last_modified']) ? (int) $seriesItem->metadata['last_modified'] : null);
 
                     $cover = $seriesItem->cover ? (filter_var($seriesItem->cover, FILTER_VALIDATE_URL) ? $seriesItem->cover : $baseUrl."/$seriesItem->cover") : LogoCacheService::getPlaceholderUrl('poster');
                     $backdropPaths = $seriesItem->backdrop_path ?? [];
@@ -1471,7 +1472,7 @@ class XtreamApiController extends Controller
             // Fill in missing info fields with channel data
             $defaultInfo = [
                 'kinopoisk_url' => $info['kinopoisk_url'] ?? '',
-                'tmdb_id' => (int) ($channel->getTmdbId() ?? 0),
+                'tmdb_id' => $channel->getTmdbId() ?? 0,
                 'name' => $info['name'] ?? $channel->name,
                 'o_name' => $info['o_name'] ?? $channel->name,
                 'cover_big' => $cover,

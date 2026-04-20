@@ -1208,6 +1208,7 @@
     "No video files were found in the configured paths.": "在配置的路径中未找到视频文件。",
     "None": "无",
     "None declared": "未声明",
+    "Not authorized to manage this stream.": "未授权管理此流。",
     "Not Configured": "未配置",
     "Not set": "未设置",
     "Not started": "未开始",

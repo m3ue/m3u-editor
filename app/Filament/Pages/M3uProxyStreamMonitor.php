@@ -328,6 +328,8 @@ class M3uProxyStreamMonitor extends Page
 
                 // Get model information if metadata exists
                 $model = [];
+                $title = null;
+                $logo = null;
                 if (isset($stream['metadata']['type']) && isset($stream['metadata']['id'])) {
                     $modelType = $stream['metadata']['type'];
                     $modelId = $stream['metadata']['id'];
@@ -529,7 +531,7 @@ class M3uProxyStreamMonitor extends Page
         return substr($url, 0, $maxLength - 3).'...';
     }
 
-    protected function formatBytes(int $bytes, int $precision = 2): string
+    protected function formatBytes(int|float $bytes, int $precision = 2): string
     {
         $units = ['B', 'KB', 'MB', 'GB', 'TB'];
 

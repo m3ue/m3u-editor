@@ -34,7 +34,7 @@
         };
         document.addEventListener('visibilitychange', onVisibilityChange);
         $cleanup(() => document.removeEventListener('visibilitychange', onVisibilityChange));
-    " x-on:before-unload.window="stopPolling()">
+    " x-on:beforeunload.window="stopPolling()">
         
         <!-- Global Statistics Cards -->
         <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
@@ -124,7 +124,7 @@ echo $totalBandwidth > 1000 ? round($totalBandwidth / 1000, 1) . ' Mbps' : $tota
                     </div>
                     <div class="flex-1">
                         <h3 class="text-lg font-semibold text-red-900 dark:text-red-100 mb-2">
-                            Unable to Connect to <strong>m3u proxy
+                            Unable to Connect to <strong>m3u proxy</strong>
                         </h3>
                         <p class="text-sm text-red-800 dark:text-red-200 mb-3">
                             {{ $connectionError }}
@@ -282,12 +282,14 @@ echo $totalBandwidth > 1000 ? round($totalBandwidth / 1000, 1) . ' Mbps' : $tota
                                 
                                 <div class="flex items-center space-x-2">
                                     @unless($stream['broadcast'] ?? false)
-                                        <button wire:click="triggerFailover('{{ $stream['stream_id'] }}')" 
-                                                class="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md text-white bg-yellow-600 hover:bg-yellow-700 focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-gray-800 focus:ring-yellow-500">
-                                            Trigger Failover
-                                        </button>
+                                    <button wire:click="triggerFailover('{{ $stream['stream_id'] }}')" 
+                                            wire:loading.attr="disabled"
+                                            class="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md text-white bg-yellow-600 hover:bg-yellow-700 focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-gray-800 focus:ring-yellow-500">
+                                        Trigger Failover
+                                    </button>
                                     @endunless
                                     <button wire:click="stopStream('{{ $stream['stream_id'] }}')" 
+                                            wire:loading.attr="disabled"
                                             class="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-gray-800 focus:ring-red-500">
                                         Remove Stream
                                     </button>

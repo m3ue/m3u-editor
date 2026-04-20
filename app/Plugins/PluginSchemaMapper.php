@@ -81,19 +81,21 @@ class PluginSchemaMapper
         return collect($fields)
             ->filter(fn (array $field): bool => ($field['type'] ?? null) === 'section' || filled($field['id'] ?? null))
             ->map(fn (array $field) => $this->componentForField($field, $prefix, $existing))
+            ->values()
             ->all();
     }
 
     private function componentForField(array $field, string $prefix = '', array $existing = [])
     {
         $type = $field['type'] ?? 'text';
-        $label = $field['label'] ?? Str::headline((string) ($field['id'] ?? 'value'));
-        $helperText = $field['helper_text'] ?? null;
-        $required = (bool) ($field['required'] ?? false);
 
         if ($type === 'section') {
             return $this->sectionComponent($field, $prefix, $existing);
         }
+
+        $label = $field['label'] ?? Str::headline((string) ($field['id'] ?? 'value'));
+        $helperText = $field['helper_text'] ?? null;
+        $required = (bool) ($field['required'] ?? false);
 
         $name = $prefix.($field['id'] ?? '');
         $defaultKey = $field['default_from_setting'] ?? ($field['id'] ?? '');
