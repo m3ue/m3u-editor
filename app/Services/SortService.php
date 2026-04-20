@@ -154,7 +154,7 @@ class SortService
             'title', null => 'LOWER(COALESCE(c.title_custom, c.title))',
             'name' => 'LOWER(COALESCE(c.name_custom, c.name))',
             'stream_id' => 'LOWER(COALESCE(c.stream_id_custom, c.stream_id))',
-            'channel' => 'c.channel',
+            'channel' => 'COALESCE(ccp2.channel_number, c.channel)',
             default => throw new \InvalidArgumentException('Invalid sort column provided.'),
         };
 
@@ -218,12 +218,14 @@ class SortService
                 [$playlist->id, $playlist->id]
             );
         } else {
-            // Fallback: CASE update
+            // Fallback: CASE update. The subquery alias used above is ccp2; the fallback
+            // uses ccp, so substitute before interpolating into the ORDER BY clause.
+            $fallbackOrderByColumn = str_replace('ccp2.', 'ccp.', $lowerOrderByColumn);
             $orderedIds = DB::table('channel_custom_playlist as ccp')
                 ->join('channels as c', 'c.id', '=', 'ccp.channel_id')
                 ->where('ccp.custom_playlist_id', $playlist->id)
                 ->whereIn('ccp.channel_id', $ids)
-                ->orderByRaw("{$lowerOrderByColumn} {$direction}")
+                ->orderByRaw("{$fallbackOrderByColumn} {$direction}")
                 ->pluck('ccp.channel_id')
                 ->map(fn ($id) => (int) $id)
                 ->all();
