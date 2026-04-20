@@ -584,14 +584,16 @@ class Channel extends Model
         return false;
     }
 
-    public function getTmdbId(): ?string
+    public function getTmdbId(): ?int
     {
-        return $this->tmdb_id
+        $id = $this->tmdb_id
             ?? $this->info['tmdb_id']
             ?? $this->info['tmdb']
             ?? $this->movie_data['tmdb_id']
             ?? $this->movie_data['tmdb']
             ?? null;
+
+        return $id !== null ? (int) $id : null;
     }
 
     public function getImdbId(): ?string
