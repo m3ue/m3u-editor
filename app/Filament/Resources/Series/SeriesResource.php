@@ -294,12 +294,25 @@ class SeriesResource extends Resource implements CopilotResource
                     ->modalDescription(__('Fetch TMDB, TVDB, and IMDB IDs for this series from The Movie Database.'))
                     ->modalSubmitActionLabel(__('Fetch IDs now'))
                     ->action(function ($record) {
+                        $settings = app(GeneralSettings::class);
+                        if (empty($settings->tmdb_api_key)) {
+                            Notification::make()
+                                ->danger()
+                                ->title(__('TMDB API Key Required'))
+                                ->body(__('Please configure your TMDB API key in Settings > TMDB before using this feature.'))
+                                ->duration(10000)
+                                ->send();
+
+                            return;
+                        }
+
                         app('Illuminate\Contracts\Bus\Dispatcher')
                             ->dispatch(new FetchTmdbIds(
-                                seriesIds: [$record->id]
+                                seriesIds: [$record->id],
+                                overwriteExisting: true,
+                                user: auth()->user(),
                             ));
-                    })
-                    ->after(function () {
+
                         Notification::make()
                             ->success()
                             ->title(__('TMDB Search Started'))

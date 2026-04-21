@@ -1241,6 +1241,145 @@ it('excludes series that were attempted but had no match from query when overwri
     $job->handle($tmdb);
 });
 
+it('processes legacy VOD channel IDs when dispatched without a user (import pipeline)', function () {
+    Http::fake([
+        'https://api.themoviedb.org/3/search/movie*' => Http::response([
+            'results' => [
+                [
+                    'id' => 603,
+                    'title' => 'The Matrix',
+                    'release_date' => '1999-03-30',
+                    'popularity' => 85.5,
+                ],
+            ],
+        ], 200),
+        'https://api.themoviedb.org/3/movie/603/external_ids*' => Http::response([
+            'imdb_id' => 'tt0133093',
+        ], 200),
+        'https://api.themoviedb.org/3/movie/603*' => Http::response([
+            'id' => 603,
+            'title' => 'The Matrix',
+            'overview' => 'A computer hacker learns about the true nature of reality.',
+            'poster_path' => '/matrix.jpg',
+        ], 200),
+    ]);
+
+    $channel = Channel::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'is_vod' => true,
+        'title' => 'The Matrix',
+        'year' => 1999,
+        'info' => [],
+    ]);
+
+    $job = new TestableFetchTmdbIds(
+        vodChannelIds: [$channel->id],
+        seriesIds: null,
+        overwriteExisting: false,
+        user: null,
+    );
+
+    $job->handle(app(TmdbService::class));
+
+    $channel->refresh();
+
+    expect($channel->info['tmdb_id'])->toBe(603);
+});
+
+it('processes legacy series IDs when dispatched without a user (import pipeline)', function () {
+    Http::fake([
+        'https://api.themoviedb.org/3/search/tv*' => Http::response([
+            'results' => [
+                [
+                    'id' => 4592,
+                    'name' => 'ALF',
+                    'first_air_date' => '1986-09-22',
+                    'popularity' => 45.2,
+                ],
+            ],
+        ], 200),
+        'https://api.themoviedb.org/3/tv/4592/external_ids*' => Http::response([
+            'tvdb_id' => 78020,
+            'imdb_id' => 'tt0090390',
+        ], 200),
+        'https://api.themoviedb.org/3/tv/4592*' => Http::response([
+            'id' => 4592,
+            'name' => 'ALF',
+            'overview' => 'An alien lifestyle.',
+            'poster_path' => '/alf.jpg',
+        ], 200),
+    ]);
+
+    $series = Series::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'name' => 'ALF',
+        'release_date' => '1986-09-22',
+        'metadata' => [],
+    ]);
+
+    $job = new TestableFetchTmdbIds(
+        vodChannelIds: null,
+        seriesIds: [$series->id],
+        overwriteExisting: false,
+        user: null,
+    );
+
+    $job->handle(app(TmdbService::class));
+
+    $series->refresh();
+
+    expect($series->metadata['tmdb_id'])->toBe(4592);
+});
+
+it('retries a previously-attempted series when overwriteExisting is true (single-item action)', function () {
+    Http::fake([
+        'https://api.themoviedb.org/3/search/tv*' => Http::response([
+            'results' => [
+                [
+                    'id' => 4592,
+                    'name' => 'ALF',
+                    'first_air_date' => '1986-09-22',
+                    'popularity' => 45.2,
+                ],
+            ],
+        ], 200),
+        'https://api.themoviedb.org/3/tv/4592/external_ids*' => Http::response([
+            'tvdb_id' => 78020,
+            'imdb_id' => 'tt0090390',
+        ], 200),
+        'https://api.themoviedb.org/3/tv/4592*' => Http::response([
+            'id' => 4592,
+            'name' => 'ALF',
+            'overview' => 'An alien lifestyle.',
+            'poster_path' => '/alf.jpg',
+        ], 200),
+    ]);
+
+    $series = Series::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'name' => 'ALF',
+        'release_date' => '1986-09-22',
+        'metadata' => [],
+        'last_metadata_fetch' => now(),
+    ]);
+
+    $job = new TestableFetchTmdbIds(
+        vodChannelIds: null,
+        seriesIds: [$series->id],
+        overwriteExisting: true,
+        user: $this->user,
+    );
+
+    $job->handle(app(TmdbService::class));
+
+    $series->refresh();
+
+    expect($series->metadata['tmdb_id'])->toBe(4592);
+});
+
 class TestableFetchTmdbIds extends FetchTmdbIds
 {
     protected function sendCompletionNotification(): void {}

@@ -295,7 +295,7 @@ class FetchTmdbIds implements ShouldQueue
         } elseif (! empty($this->vodChannelIds)) {
             // Legacy: direct ID array support
             $query->whereIn('id', $this->vodChannelIds)
-                ->where('user_id', $this->user?->id);
+                ->when($this->user, fn ($q) => $q->where('user_id', $this->user->id));
         } else {
             return null; // No criteria specified
         }
@@ -332,7 +332,7 @@ class FetchTmdbIds implements ShouldQueue
         } elseif (! empty($this->seriesIds)) {
             // Legacy: direct ID array support
             $query->whereIn('id', $this->seriesIds)
-                ->where('user_id', $this->user?->id);
+                ->when($this->user, fn ($q) => $q->where('user_id', $this->user->id));
         } else {
             return null; // No criteria specified
         }
