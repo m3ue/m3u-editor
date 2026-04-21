@@ -2,6 +2,43 @@
 
 use App\Services\EpgCacheService;
 
+// ---------------------------------------------------------------------------
+// Helper: anonymous subclass that exposes parseProgrammesStream publicly so
+// tests can call it without resorting to reflection.
+// ---------------------------------------------------------------------------
+function makeTestEpgCacheService(): EpgCacheService
+{
+    return new class extends EpgCacheService
+    {
+        public function exposeParseProgrammesStream(string $filePath): Generator
+        {
+            return $this->parseProgrammesStream($filePath);
+        }
+    };
+}
+
+// ---------------------------------------------------------------------------
+// Fixture lifecycle: resolve the path inside the app context, not at load time.
+// ---------------------------------------------------------------------------
+beforeEach(function () {
+    $this->testGzPath = storage_path('framework/testing/epg-signals.xml.gz');
+
+    $directory = dirname($this->testGzPath);
+    if (! is_dir($directory)) {
+        mkdir($directory, 0755, true);
+    }
+});
+
+afterEach(function () {
+    if (file_exists($this->testGzPath)) {
+        unlink($this->testGzPath);
+    }
+});
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
 it('parses structural XMLTV signals into programme payloads', function () {
     $xml = <<<'XML'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -22,19 +59,10 @@ it('parses structural XMLTV signals into programme payloads', function () {
 </tv>
 XML;
 
-    $path = storage_path('framework/testing/epg-signals.xml.gz');
-    $directory = dirname($path);
-    if (! is_dir($directory)) {
-        mkdir($directory, 0755, true);
-    }
-    file_put_contents($path, gzencode($xml));
+    file_put_contents($this->testGzPath, gzencode($xml));
 
-    $service = new EpgCacheService;
-    $method = new ReflectionMethod($service, 'parseProgrammesStream');
-    $method->setAccessible(true);
-
-    $generator = $method->invoke($service, $path);
-    $programmes = iterator_to_array($generator, false);
+    $service = makeTestEpgCacheService();
+    $programmes = iterator_to_array($service->exposeParseProgrammesStream($this->testGzPath), false);
 
     expect($programmes)->toHaveCount(1);
 
@@ -54,6 +82,53 @@ XML;
             ['system' => 'tvdb', 'value' => 'https://thetvdb.com/series/alf'],
         ])
         ->and($programme['production_year'])->toBe(2024);
+});
 
-    @unlink($path);
+it('rejects malformed or unsafe url values from epg feeds', function () {
+    $xml = <<<'XML'
+<?xml version="1.0" encoding="UTF-8"?>
+<tv>
+  <programme start="20260421090000 +0000" stop="20260421093000 +0000" channel="demo.channel">
+    <title>Test Programme</title>
+    <url system="safe">https://www.imdb.com/title/tt0090390/</url>
+    <url system="bad-scheme">javascript:alert(1)</url>
+    <url system="not-a-url">not-a-url-at-all</url>
+  </programme>
+</tv>
+XML;
+
+    file_put_contents($this->testGzPath, gzencode($xml));
+
+    $service = makeTestEpgCacheService();
+    $programmes = iterator_to_array($service->exposeParseProgrammesStream($this->testGzPath), false);
+
+    expect($programmes)->toHaveCount(1);
+
+    // Only the valid HTTPS URL should be stored; javascript: and bare strings are rejected
+    expect($programmes[0]['urls'])->toBe([
+        ['system' => 'safe', 'value' => 'https://www.imdb.com/title/tt0090390/'],
+    ]);
+});
+
+it('sets previously_shown and premiere to false by default', function () {
+    $xml = <<<'XML'
+<?xml version="1.0" encoding="UTF-8"?>
+<tv>
+  <programme start="20260421100000 +0000" stop="20260421103000 +0000" channel="demo.channel">
+    <title>Plain Programme</title>
+  </programme>
+</tv>
+XML;
+
+    file_put_contents($this->testGzPath, gzencode($xml));
+
+    $service = makeTestEpgCacheService();
+    $programmes = iterator_to_array($service->exposeParseProgrammesStream($this->testGzPath), false);
+
+    expect($programmes)->toHaveCount(1)
+        ->and($programmes[0]['previously_shown'])->toBeFalse()
+        ->and($programmes[0]['premiere'])->toBeFalse()
+        ->and($programmes[0]['urls'])->toBe([])
+        ->and($programmes[0]['episode_nums'])->toBe([])
+        ->and($programmes[0]['production_year'])->toBeNull();
 });

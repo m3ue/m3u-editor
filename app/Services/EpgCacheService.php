@@ -31,6 +31,9 @@ class EpgCacheService
 {
     private const CACHE_VERSION = 'v2';
 
+    /** Older cache versions that are still served for reads until the next sync writes v2. */
+    private const PREVIOUS_CACHE_VERSIONS = ['v1'];
+
     private const CHANNELS_FILE = 'channels.json';
 
     private const METADATA_FILE = 'metadata.json';
@@ -46,11 +49,44 @@ class EpgCacheService
     }
 
     /**
-     * Get cache file path
+     * Get cache file path for write operations (always current version).
      */
     private function getCacheFilePath(Epg $epg, string $filename): string
     {
         return $this->getCacheDir($epg).'/'.$filename;
+    }
+
+    /**
+     * Returns the directory of the best available cache: current version first,
+     * then each legacy version in order. Falls back to the current version path
+     * (which may not yet exist) when no cache has been written yet.
+     *
+     * Used by read operations so existing v1 caches continue to be served until
+     * the next scheduled sync writes a fresh v2 cache.
+     */
+    private function getActiveCacheDir(Epg $epg): string
+    {
+        $currentDir = $this->getCacheDir($epg);
+        if (Storage::disk('local')->exists($currentDir.'/'.self::METADATA_FILE)) {
+            return $currentDir;
+        }
+
+        foreach (self::PREVIOUS_CACHE_VERSIONS as $version) {
+            $legacyDir = "epg-cache/{$epg->uuid}/{$version}";
+            if (Storage::disk('local')->exists($legacyDir.'/'.self::METADATA_FILE)) {
+                return $legacyDir;
+            }
+        }
+
+        return $currentDir;
+    }
+
+    /**
+     * Get cache file path for read operations (uses the active/best available version).
+     */
+    private function getActiveCacheFilePath(Epg $epg, string $filename): string
+    {
+        return $this->getActiveCacheDir($epg).'/'.$filename;
     }
 
     /**
@@ -64,7 +100,7 @@ class EpgCacheService
             return false;
         }
 
-        $metadataPath = $this->getCacheFilePath($epg, self::METADATA_FILE);
+        $metadataPath = $this->getActiveCacheFilePath($epg, self::METADATA_FILE);
 
         if (! Storage::disk('local')->exists($metadataPath)) {
             return false;
@@ -162,6 +198,104 @@ class EpgCacheService
             Log::error("Failed to cache EPG data for {$epg->name}: {$e->getMessage()}");
 
             return false;
+        }
+    }
+
+    /**
+     * Apply a single XMLTV programme child element's value to the $programme array.
+     *
+     * Shared by both the single-pass writer and the stream generator to avoid
+     * maintaining two identical switch blocks.
+     *
+     * @param  array<string, mixed>  $programme
+     */
+    private function applyProgrammeElement(XMLReader $reader, string $elementName, array &$programme): void
+    {
+        switch ($elementName) {
+            case 'title':
+                $programme['title'] = trim($reader->readString() ?: '');
+                break;
+            case 'sub-title':
+                $programme['subtitle'] = trim($reader->readString() ?: '');
+                break;
+            case 'desc':
+                $programme['desc'] = trim($reader->readString() ?: '');
+                break;
+            case 'category':
+                if (! $programme['category']) {
+                    $programme['category'] = trim($reader->readString() ?: '');
+                }
+                break;
+            case 'icon':
+                if (! $programme['icon']) {
+                    $programme['icon'] = trim($reader->getAttribute('src') ?: '');
+                } else {
+                    $imageUrl = trim($reader->getAttribute('src') ?: '');
+                    if ($imageUrl) {
+                        $programme['images'][] = [
+                            'url' => $imageUrl,
+                            'type' => trim($reader->getAttribute('type') ?: 'poster'),
+                            'width' => (int) ($reader->getAttribute('width') ?: 0),
+                            'height' => (int) ($reader->getAttribute('height') ?: 0),
+                            'orient' => trim($reader->getAttribute('orient') ?: 'P'),
+                            'size' => (int) ($reader->getAttribute('size') ?: 1),
+                        ];
+                    }
+                }
+                break;
+            case 'new':
+                $programme['new'] = true;
+                break;
+            case 'previously-shown':
+                // The <previously-shown> element may carry start/channel attributes;
+                // only the boolean presence is recorded — attributes are intentionally ignored.
+                $programme['previously_shown'] = true;
+                break;
+            case 'premiere':
+                // The <premiere> element may carry text content (a description);
+                // only the boolean presence is recorded — content is intentionally ignored.
+                $programme['premiere'] = true;
+                break;
+            case 'episode-num':
+                $episodeNumValue = trim($reader->readString() ?: '');
+                $episodeNumSystem = trim((string) ($reader->getAttribute('system') ?: ''));
+                if ($episodeNumValue !== '') {
+                    if ($programme['episode_num'] === '') {
+                        $programme['episode_num'] = $episodeNumValue;
+                    }
+                    $programme['episode_nums'][] = [
+                        'system' => $episodeNumSystem,
+                        'value' => $episodeNumValue,
+                    ];
+                }
+                break;
+            case 'url':
+                $urlValue = trim($reader->readString() ?: '');
+                $urlSystem = mb_strtolower(trim((string) ($reader->getAttribute('system') ?: '')));
+                // Validate to prevent storing malformed or unsafe URL values from untrusted EPG feeds.
+                if ($urlValue !== '' && filter_var($urlValue, FILTER_VALIDATE_URL)) {
+                    $programme['urls'][] = [
+                        'system' => $urlSystem,
+                        'value' => $urlValue,
+                    ];
+                }
+                break;
+            case 'date':
+                $dateValue = trim($reader->readString() ?: '');
+                if ($programme['production_year'] === null && preg_match('/^(\d{4})/', $dateValue, $matches)) {
+                    $programme['production_year'] = (int) $matches[1];
+                }
+                break;
+            case 'rating':
+                while (@$reader->read()) {
+                    if ($reader->nodeType == XMLReader::ELEMENT && $reader->name === 'value') {
+                        $programme['rating'] = trim($reader->readString() ?: '');
+                        break;
+                    } elseif ($reader->nodeType == XMLReader::END_ELEMENT && $reader->name === 'rating') {
+                        break;
+                    }
+                }
+                break;
         }
     }
 
@@ -290,88 +424,7 @@ class EpgCacheService
 
                     while (@$innerReader->read()) {
                         if ($innerReader->nodeType == XMLReader::ELEMENT) {
-                            switch ($innerReader->name) {
-                                case 'title':
-                                    $programme['title'] = trim($innerReader->readString() ?: '');
-                                    break;
-                                case 'sub-title':
-                                    $programme['subtitle'] = trim($innerReader->readString() ?: '');
-                                    break;
-                                case 'desc':
-                                    $programme['desc'] = trim($innerReader->readString() ?: '');
-                                    break;
-                                case 'category':
-                                    if (! $programme['category']) {
-                                        $programme['category'] = trim($innerReader->readString() ?: '');
-                                    }
-                                    break;
-                                case 'icon':
-                                    if (! $programme['icon']) {
-                                        $programme['icon'] = trim($innerReader->getAttribute('src') ?: '');
-                                    } else {
-                                        $imageUrl = trim($innerReader->getAttribute('src') ?: '');
-                                        if ($imageUrl) {
-                                            $imageData = [
-                                                'url' => $imageUrl,
-                                                'type' => trim($innerReader->getAttribute('type') ?: 'poster'),
-                                                'width' => (int) ($innerReader->getAttribute('width') ?: 0),
-                                                'height' => (int) ($innerReader->getAttribute('height') ?: 0),
-                                                'orient' => trim($innerReader->getAttribute('orient') ?: 'P'),
-                                                'size' => (int) ($innerReader->getAttribute('size') ?: 1),
-                                            ];
-                                            $programme['images'][] = $imageData;
-                                        }
-                                    }
-                                    break;
-                                case 'new':
-                                    $programme['new'] = true;
-                                    break;
-                                case 'previously-shown':
-                                    $programme['previously_shown'] = true;
-                                    break;
-                                case 'premiere':
-                                    $programme['premiere'] = true;
-                                    break;
-                                case 'episode-num':
-                                    $episodeNumValue = trim($innerReader->readString() ?: '');
-                                    $episodeNumSystem = trim((string) ($innerReader->getAttribute('system') ?: ''));
-                                    if ($episodeNumValue !== '') {
-                                        if ($programme['episode_num'] === '') {
-                                            $programme['episode_num'] = $episodeNumValue;
-                                        }
-                                        $programme['episode_nums'][] = [
-                                            'system' => $episodeNumSystem,
-                                            'value' => $episodeNumValue,
-                                        ];
-                                    }
-                                    break;
-                                case 'url':
-                                    $urlValue = trim($innerReader->readString() ?: '');
-                                    $urlSystem = mb_strtolower(trim((string) ($innerReader->getAttribute('system') ?: '')));
-                                    if ($urlValue !== '') {
-                                        $programme['urls'][] = [
-                                            'system' => $urlSystem,
-                                            'value' => $urlValue,
-                                        ];
-                                    }
-                                    break;
-                                case 'date':
-                                    $dateValue = trim($innerReader->readString() ?: '');
-                                    if ($programme['production_year'] === null && preg_match('/^(\d{4})/', $dateValue, $matches)) {
-                                        $programme['production_year'] = (int) $matches[1];
-                                    }
-                                    break;
-                                case 'rating':
-                                    while (@$innerReader->read()) {
-                                        if ($innerReader->nodeType == XMLReader::ELEMENT && $innerReader->name === 'value') {
-                                            $programme['rating'] = trim($innerReader->readString() ?: '');
-                                            break;
-                                        } elseif ($innerReader->nodeType == XMLReader::END_ELEMENT && $innerReader->name === 'rating') {
-                                            break;
-                                        }
-                                    }
-                                    break;
-                            }
+                            $this->applyProgrammeElement($innerReader, $innerReader->name, $programme);
                         }
                     }
                     $innerReader->close();
@@ -683,9 +736,12 @@ class EpgCacheService
     }
 
     /**
-     * Stream parse programmes from EPG file using generators
+     * Stream parse programmes from EPG file using generators.
+     *
+     * Visibility is protected (not private) to allow subclassing in tests
+     * without resorting to reflection.
      */
-    private function parseProgrammesStream(string $filePath): Generator
+    protected function parseProgrammesStream(string $filePath): Generator
     {
         $programReader = new XMLReader;
         $programReader->open('compress.zlib://'.$filePath);
@@ -742,90 +798,7 @@ class EpgCacheService
 
                 while (@$innerReader->read()) {
                     if ($innerReader->nodeType == XMLReader::ELEMENT) {
-                        switch ($innerReader->name) {
-                            case 'title':
-                                $programme['title'] = trim($innerReader->readString() ?: '');
-                                break;
-                            case 'sub-title':
-                                $programme['subtitle'] = trim($innerReader->readString() ?: '');
-                                break;
-                            case 'desc':
-                                $programme['desc'] = trim($innerReader->readString() ?: '');
-                                break;
-                            case 'category':
-                                if (! $programme['category']) {
-                                    $programme['category'] = trim($innerReader->readString() ?: '');
-                                }
-                                break;
-                            case 'icon':
-                                if (! $programme['icon']) {
-                                    $programme['icon'] = trim($innerReader->getAttribute('src') ?: '');
-                                } else {
-                                    // New: Parse additional XMLTV icon tags for program artwork
-                                    $imageUrl = trim($innerReader->getAttribute('src') ?: '');
-                                    if ($imageUrl) {
-                                        $imageData = [
-                                            'url' => $imageUrl,
-                                            'type' => trim($innerReader->getAttribute('type') ?: 'poster'),
-                                            'width' => (int) ($innerReader->getAttribute('width') ?: 0),
-                                            'height' => (int) ($innerReader->getAttribute('height') ?: 0),
-                                            'orient' => trim($innerReader->getAttribute('orient') ?: 'P'),
-                                            'size' => (int) ($innerReader->getAttribute('size') ?: 1),
-                                        ];
-                                        $programme['images'][] = $imageData;
-                                    }
-                                }
-                                break;
-                            case 'new':
-                                $programme['new'] = true;
-                                break;
-                            case 'previously-shown':
-                                $programme['previously_shown'] = true;
-                                break;
-                            case 'premiere':
-                                $programme['premiere'] = true;
-                                break;
-                            case 'episode-num':
-                                $episodeNumValue = trim($innerReader->readString() ?: '');
-                                $episodeNumSystem = trim((string) ($innerReader->getAttribute('system') ?: ''));
-                                if ($episodeNumValue !== '') {
-                                    if ($programme['episode_num'] === '') {
-                                        $programme['episode_num'] = $episodeNumValue;
-                                    }
-                                    $programme['episode_nums'][] = [
-                                        'system' => $episodeNumSystem,
-                                        'value' => $episodeNumValue,
-                                    ];
-                                }
-                                break;
-                            case 'url':
-                                $urlValue = trim($innerReader->readString() ?: '');
-                                $urlSystem = mb_strtolower(trim((string) ($innerReader->getAttribute('system') ?: '')));
-                                if ($urlValue !== '') {
-                                    $programme['urls'][] = [
-                                        'system' => $urlSystem,
-                                        'value' => $urlValue,
-                                    ];
-                                }
-                                break;
-                            case 'date':
-                                $dateValue = trim($innerReader->readString() ?: '');
-                                if ($programme['production_year'] === null && preg_match('/^(\d{4})/', $dateValue, $matches)) {
-                                    $programme['production_year'] = (int) $matches[1];
-                                }
-                                break;
-                            case 'rating':
-                                // Read rating value
-                                while (@$innerReader->read()) {
-                                    if ($innerReader->nodeType == XMLReader::ELEMENT && $innerReader->name === 'value') {
-                                        $programme['rating'] = trim($innerReader->readString() ?: '');
-                                        break;
-                                    } elseif ($innerReader->nodeType == XMLReader::END_ELEMENT && $innerReader->name === 'rating') {
-                                        break;
-                                    }
-                                }
-                                break;
-                        }
+                        $this->applyProgrammeElement($innerReader, $innerReader->name, $programme);
                     }
                 }
                 $innerReader->close();
@@ -885,7 +858,7 @@ class EpgCacheService
      */
     public function getCachedChannels(Epg $epg, int $page = 1, int $perPage = 50): array
     {
-        $channelsPath = $this->getCacheFilePath($epg, self::CHANNELS_FILE);
+        $channelsPath = $this->getActiveCacheFilePath($epg, self::CHANNELS_FILE);
 
         if (! Storage::disk('local')->exists($channelsPath)) {
             return [
@@ -967,7 +940,7 @@ class EpgCacheService
      */
     public function getCachedProgrammes(Epg $epg, string $date, array $channelIds = []): array
     {
-        $programmesPath = $this->getCacheFilePath($epg, "programmes-{$date}.jsonl");
+        $programmesPath = $this->getActiveCacheFilePath($epg, "programmes-{$date}.jsonl");
 
         if (! Storage::disk('local')->exists($programmesPath)) {
             return [];
@@ -1057,7 +1030,7 @@ class EpgCacheService
      */
     private function streamCachedProgrammesForDate(Epg $epg, string $date, array $channelIds = []): Generator
     {
-        $programmesPath = $this->getCacheFilePath($epg, "programmes-{$date}.jsonl");
+        $programmesPath = $this->getActiveCacheFilePath($epg, "programmes-{$date}.jsonl");
         if (! Storage::disk('local')->exists($programmesPath)) {
             return;
         }
@@ -1115,7 +1088,7 @@ class EpgCacheService
      */
     public function getCacheMetadata(Epg $epg): ?array
     {
-        $metadataPath = $this->getCacheFilePath($epg, self::METADATA_FILE);
+        $metadataPath = $this->getActiveCacheFilePath($epg, self::METADATA_FILE);
         if (! Storage::disk('local')->exists($metadataPath)) {
             return null;
         }
@@ -1135,8 +1108,6 @@ class EpgCacheService
      */
     public function clearCache(Epg $epg): bool
     {
-        // Get the cache directory
-        $cacheDir = $this->getCacheDir($epg);
         try {
             // Flag EPG as not cached
             $epg->update([
@@ -1145,8 +1116,13 @@ class EpgCacheService
                 'cache_progress' => 0,
             ]);
 
-            // Delete cache directory
-            Storage::disk('local')->deleteDirectory($cacheDir);
+            // Delete current version directory
+            Storage::disk('local')->deleteDirectory($this->getCacheDir($epg));
+
+            // Also delete any legacy version directories so stale data is not left on disk
+            foreach (self::PREVIOUS_CACHE_VERSIONS as $version) {
+                Storage::disk('local')->deleteDirectory("epg-cache/{$epg->uuid}/{$version}");
+            }
 
             // Log cache clearing
             Log::debug("Cleared cache for EPG {$epg->name}");

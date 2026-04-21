@@ -504,9 +504,12 @@ class TmdbService
      * Supported sources: imdb_id, tvdb_id, tmdb_id.
      * Returns a normalized payload with `_media_type` = tv|movie.
      *
+     * @param  string|null  $mediaType  Optional hint ('tv' or 'movie') used only when
+     *                                  $source is 'tmdb_id' to skip probing the wrong
+     *                                  endpoint and avoid a wasted API call.
      * @return array<string, mixed>|null
      */
-    public function findByExternalId(string $id, string $source): ?array
+    public function findByExternalId(string $id, string $source, ?string $mediaType = null): ?array
     {
         if (! $this->isConfigured()) {
             return null;
@@ -518,25 +521,31 @@ class TmdbService
             return null;
         }
 
-        // Native TMDB IDs are not supported by /find.
+        // Native TMDB IDs are not supported by /find — probe the details endpoints directly.
+        // getTvSeriesDetails() / getMovieDetails() each call waitForRateLimit() internally,
+        // so we intentionally skip the explicit waitForRateLimit() call here.
         if ($source === 'tmdb_id') {
             $tmdbId = (int) preg_replace('/\D+/', '', $id);
             if ($tmdbId <= 0) {
                 return null;
             }
 
-            $tvDetails = $this->getTvSeriesDetails($tmdbId);
-            if (is_array($tvDetails)) {
-                $tvDetails['_media_type'] = 'tv';
+            if ($mediaType !== 'movie') {
+                $tvDetails = $this->getTvSeriesDetails($tmdbId);
+                if (is_array($tvDetails)) {
+                    $tvDetails['_media_type'] = 'tv';
 
-                return $tvDetails;
+                    return $tvDetails;
+                }
             }
 
-            $movieDetails = $this->getMovieDetails($tmdbId);
-            if (is_array($movieDetails)) {
-                $movieDetails['_media_type'] = 'movie';
+            if ($mediaType !== 'tv') {
+                $movieDetails = $this->getMovieDetails($tmdbId);
+                if (is_array($movieDetails)) {
+                    $movieDetails['_media_type'] = 'movie';
 
-                return $movieDetails;
+                    return $movieDetails;
+                }
             }
 
             return null;
@@ -628,7 +637,7 @@ class TmdbService
                 'api_key' => $this->apiKey,
                 'query' => $this->normalizeTitle($query),
                 'language' => $this->language,
-                'include_adult' => false,
+                'include_adult' => 'false',
             ]);
 
             if (! $response->successful()) {
@@ -698,7 +707,7 @@ class TmdbService
      * @param  array<string, mixed>  $result
      * @return array<string, mixed>
      */
-    protected function normalizeFindResult(array $result, string $mediaType): array
+    private function normalizeFindResult(array $result, string $mediaType): array
     {
         $posterUrl = null;
         if (! empty($result['poster_path'])) {

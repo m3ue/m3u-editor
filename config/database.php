@@ -1,16 +1,5 @@
 <?php
 
-$sqliteOpenFlagsAttribute = defined('Pdo\\Sqlite::ATTR_OPEN_FLAGS')
-    ? constant('Pdo\\Sqlite::ATTR_OPEN_FLAGS')
-    : PDO::SQLITE_ATTR_OPEN_FLAGS;
-
-$sqliteOpenMode = (defined('Pdo\\Sqlite::OPEN_READWRITE')
-    ? constant('Pdo\\Sqlite::OPEN_READWRITE')
-    : PDO::SQLITE_OPEN_READWRITE)
-    | (defined('Pdo\\Sqlite::OPEN_CREATE')
-        ? constant('Pdo\\Sqlite::OPEN_CREATE')
-        : PDO::SQLITE_OPEN_CREATE);
-
 return [
 
     /*
@@ -46,10 +35,6 @@ return [
             'database' => database_path('database.sqlite'),
             'prefix' => '',
             'foreign_key_constraints' => env('DB_FOREIGN_KEYS', true),
-            // Add these options for better concurrency
-            'options' => [
-                $sqliteOpenFlagsAttribute => $sqliteOpenMode,
-            ],
             'journal_mode' => 'WAL',
             'synchronous' => 'NORMAL',
             'cache_size' => 10000,
@@ -70,10 +55,6 @@ return [
             'database' => database_path('jobs.sqlite'),
             'prefix' => '',
             'foreign_key_constraints' => true,
-            // Add these options for better concurrency
-            'options' => [
-                $sqliteOpenFlagsAttribute => $sqliteOpenMode,
-            ],
             'journal_mode' => 'WAL',
             'synchronous' => 'NORMAL',
             'cache_size' => 10000,
