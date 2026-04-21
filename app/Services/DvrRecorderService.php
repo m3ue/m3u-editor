@@ -65,17 +65,14 @@ class DvrRecorderService
         }
 
         // Refresh stream URL at start time — IPTV stream URLs expire, so we get
-        // a fresh URL from the channel. When proxy is enabled on the source
-        // playlist, use getProxyUrl() to get a fresh URL via m3u-proxy.
-        // Otherwise fall back to the channel's direct URL.
+        // a fresh URL from the channel. When use_proxy is enabled on the DVR
+        // setting, route the stream through the m3u-proxy so viewers can also
+        // watch the same channel while it is being recorded.
         $channel = $recording->channel;
         $streamUrl = null;
 
-        if ($channel) {
-            $playlist = $setting->playlist;
-            if ($playlist && ! empty($playlist->proxy_options['enabled'])) {
-                $streamUrl = $channel->getProxyUrl();
-            }
+        if ($channel && $setting->use_proxy) {
+            $streamUrl = $channel->getProxyUrl();
         }
 
         if (empty($streamUrl) && $channel) {

@@ -19,6 +19,7 @@ class DvrSetting extends Model
         'playlist_id',
         'user_id',
         'enabled',
+        'use_proxy',
         'storage_disk',
         'storage_path',
         'max_concurrent_recordings',
@@ -38,6 +39,7 @@ class DvrSetting extends Model
     {
         return [
             'enabled' => 'boolean',
+            'use_proxy' => 'boolean',
             'max_concurrent_recordings' => 'integer',
             'default_start_early_seconds' => 'integer',
             'default_end_late_seconds' => 'integer',

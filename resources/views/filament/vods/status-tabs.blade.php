@@ -8,6 +8,7 @@
         'disabled' => ['label' => 'Disabled', 'count' => $counts['disabled'], 'color' => 'danger'],
         'failover' => ['label' => 'Failover', 'count' => $counts['failover'], 'color' => 'info'],
         'custom' => ['label' => 'Custom', 'count' => $counts['custom'], 'color' => null],
+        'dvr' => ['label' => 'DVR', 'count' => $counts['dvr'], 'color' => null],
     ];
 @endphp
 

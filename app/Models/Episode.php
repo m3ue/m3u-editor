@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
@@ -38,6 +39,26 @@ class Episode extends Model
         'tmdb_id' => 'integer',
         'info' => 'array',
     ];
+
+    protected static function boot(): void
+    {
+        parent::boot();
+
+        static::deleting(function (Episode $episode): void {
+            if (! $episode->dvr_recording_id) {
+                return;
+            }
+
+            $recordingId = $episode->dvr_recording_id;
+
+            // Break the bi-directional link in the DB before cascading, so
+            // DvrRecording::deleting won't find this episode and re-delete it.
+            DB::table('episodes')->where('id', $episode->id)->update(['dvr_recording_id' => null]);
+
+            $recording = DvrRecording::find($recordingId);
+            $recording?->delete();
+        });
+    }
 
     public function user(): BelongsTo
     {

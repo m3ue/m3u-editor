@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Str;
 
 class DvrRecording extends Model
@@ -38,10 +39,13 @@ class DvrRecording extends Model
         'stream_url',
         'metadata',
         'error_message',
+        'post_processing_step',
         'programme_start',
         'programme_end',
         'epg_programme_data',
         'pid',
+        'temp_path',
+        'temp_manifest_path',
     ];
 
     /**
@@ -74,6 +78,28 @@ class DvrRecording extends Model
         static::creating(function (DvrRecording $recording): void {
             if (empty($recording->uuid)) {
                 $recording->uuid = (string) Str::uuid();
+            }
+        });
+
+        static::deleting(function (DvrRecording $recording): void {
+            // Delete the physical file from disk.
+            if ($recording->file_path && file_exists($recording->file_path)) {
+                @unlink($recording->file_path);
+            }
+
+            // Cascade to VOD channel: null dvr_recording_id first so the Channel's own
+            // deleting hook doesn't try to re-delete this recording (re-entrance guard).
+            if ($vodChannel = $recording->vodChannel) {
+                $vodChannel->dvr_recording_id = null;
+                $vodChannel->save();
+                $vodChannel->delete();
+            }
+
+            // Cascade to VOD episode (same re-entrance guard pattern).
+            if ($vodEpisode = $recording->vodEpisode) {
+                $vodEpisode->dvr_recording_id = null;
+                $vodEpisode->save();
+                $vodEpisode->delete();
             }
         });
     }
@@ -136,22 +162,6 @@ class DvrRecording extends Model
             DvrRecordingStatus::Scheduled->value,
             DvrRecordingStatus::Recording->value,
         ])->orderBy('scheduled_start');
-    }
-
-    /**
-     * Get the temporary HLS directory path (relative to the dvr disk).
-     */
-    public function getTempPathAttribute(): string
-    {
-        return 'live/'.$this->uuid;
-    }
-
-    /**
-     * Get the temporary M3U8 manifest path (relative to the dvr disk).
-     */
-    public function getTempManifestPathAttribute(): string
-    {
-        return 'live/'.$this->uuid.'/stream.m3u8';
     }
 
     /**

@@ -8,7 +8,9 @@ use App\Jobs\StopDvrRecording;
 use App\Models\DvrRecording;
 use BackedEnum;
 use Filament\Actions\Action;
+use Filament\Actions\ActionGroup;
 use Filament\Actions\BulkActionGroup;
+use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\ViewAction;
 use Filament\Infolists\Components\TextEntry;
@@ -16,8 +18,8 @@ use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
-use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 
@@ -25,7 +27,7 @@ class DvrRecordingResource extends Resource
 {
     protected static ?string $model = DvrRecording::class;
 
-    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedVideoCamera;
+    protected static string|BackedEnum|null $navigationIcon = null;
 
     public static function getNavigationGroup(): ?string
     {
@@ -66,6 +68,9 @@ class DvrRecordingResource extends Resource
                     TextEntry::make('title')->columnSpanFull(),
                     TextEntry::make('subtitle'),
                     TextEntry::make('status')->badge(),
+                    TextEntry::make('post_processing_step')
+                        ->label(__('Current Step'))
+                        ->hidden(fn ($record) => ! $record->post_processing_step),
                     TextEntry::make('channel.title')->label(__('Channel')),
                     TextEntry::make('dvrSetting.playlist.name')->label(__('Playlist')),
                     TextEntry::make('scheduled_start')->dateTime(),
@@ -106,7 +111,8 @@ class DvrRecordingResource extends Resource
                     ->description(fn (DvrRecording $record): string => $record->subtitle ?? ''),
                 TextColumn::make('status')
                     ->badge()
-                    ->sortable(),
+                    ->sortable()
+                    ->description(fn (DvrRecording $record): ?string => $record->post_processing_step),
                 TextColumn::make('channel.title')
                     ->label(__('Channel'))
                     ->searchable()
@@ -146,40 +152,44 @@ class DvrRecordingResource extends Resource
                     ->options(DvrRecordingStatus::class),
             ])
             ->recordActions([
-                ViewAction::make(),
-                Action::make('retry')
-                    ->label(__('Retry Post-Processing'))
-                    ->icon('heroicon-o-arrow-path')
-                    ->color('warning')
-                    ->visible(fn (DvrRecording $record): bool => $record->status === DvrRecordingStatus::Failed)
-                    ->requiresConfirmation()
-                    ->action(function (DvrRecording $record): void {
-                        $record->update(['status' => DvrRecordingStatus::PostProcessing, 'error_message' => null]);
-                        PostProcessDvrRecording::dispatch($record);
+                ActionGroup::make([
+                    ViewAction::make(),
+                    Action::make('retry')
+                        ->label(__('Retry Post-Processing'))
+                        ->icon('heroicon-o-arrow-path')
+                        ->color('warning')
+                        ->visible(fn (DvrRecording $record): bool => $record->status === DvrRecordingStatus::Failed)
+                        ->requiresConfirmation()
+                        ->action(function (DvrRecording $record): void {
+                            $record->update(['status' => DvrRecordingStatus::PostProcessing, 'error_message' => null]);
+                            PostProcessDvrRecording::dispatch($record);
 
-                        Notification::make()
-                            ->success()
-                            ->title(__('Post-processing queued'))
-                            ->send();
-                    }),
-                Action::make('cancel')
-                    ->label(__('Cancel'))
-                    ->icon('heroicon-o-x-circle')
-                    ->color('danger')
-                    ->visible(fn (DvrRecording $record): bool => in_array(
-                        $record->status,
-                        [DvrRecordingStatus::Scheduled, DvrRecordingStatus::Recording]
-                    ))
-                    ->requiresConfirmation()
-                    ->action(function (DvrRecording $record): void {
-                        StopDvrRecording::dispatch($record->id);
+                            Notification::make()
+                                ->success()
+                                ->title(__('Post-processing queued'))
+                                ->send();
+                        }),
+                    Action::make('cancel')
+                        ->label(__('Cancel'))
+                        ->icon('heroicon-o-x-circle')
+                        ->color('danger')
+                        ->visible(fn (DvrRecording $record): bool => in_array(
+                            $record->status,
+                            [DvrRecordingStatus::Scheduled, DvrRecordingStatus::Recording]
+                        ))
+                        ->requiresConfirmation()
+                        ->action(function (DvrRecording $record): void {
+                            StopDvrRecording::dispatch($record->id);
 
-                        Notification::make()
-                            ->success()
-                            ->title(__('Recording cancellation queued'))
-                            ->send();
-                    }),
-            ])
+                            Notification::make()
+                                ->success()
+                                ->title(__('Recording cancellation queued'))
+                                ->send();
+                        }),
+                    DeleteAction::make()
+                        ->modalDescription(__('Are you sure you want to delete this recording? The file on disk and any linked VOD entry will also be removed.')),
+                ])->button()->hiddenLabel()->size('sm'),
+            ], position: RecordActionsPosition::BeforeCells)
             ->toolbarActions([
                 BulkActionGroup::make([
                     DeleteBulkAction::make(),

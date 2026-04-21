@@ -15,9 +15,9 @@ use Illuminate\Support\Facades\Storage;
  * DvrPostProcessorService — Runs after ffmpeg stops.
  *
  * Pipeline:
- *   Step 1 (FATAL)     — Concatenate HLS segments → single .ts file via ffmpeg
+ *   Step 1 (FATAL)     — Concatenate HLS segments → single .mp4 file via ffmpeg
  *   Step 2 (non-fatal) — Move file to final library path, update DB
- *   Step 3 (non-fatal) — Dispatch EnrichDvrMetadata job
+ *   Step 3 (non-fatal) — Dispatch EnrichDvrMetadata or IntegrateDvrRecordingToVod
  *   Step 4             — Cleanup live/ temp dir, update DB to COMPLETED
  */
 class DvrPostProcessorService
@@ -28,11 +28,14 @@ class DvrPostProcessorService
     public function run(DvrRecording $recording): void
     {
         Log::info("DVR post-processing started for recording {$recording->id}", [
+            'recording_id' => $recording->id,
             'title' => $recording->title,
+            'status' => $recording->status->value,
         ]);
 
         if ($recording->status !== DvrRecordingStatus::PostProcessing) {
             Log::warning("DVR post-processor: recording {$recording->id} not in POST_PROCESSING state — skipping", [
+                'recording_id' => $recording->id,
                 'status' => $recording->status->value,
             ]);
 
@@ -47,17 +50,25 @@ class DvrPostProcessorService
         }
 
         $disk = $setting->storage_disk ?: config('dvr.storage_disk');
-        $livePath = $recording->temp_path; // e.g. live/{uuid}
-        $m3u8RelPath = $recording->temp_manifest_path; // e.g. live/{uuid}/stream.m3u8
-
+        $livePath = $recording->temp_path ?? 'live/'.$recording->uuid;
+        $m3u8RelPath = $recording->temp_manifest_path ?? ($livePath.'/stream.m3u8');
         $m3u8FullPath = Storage::disk($disk)->path($m3u8RelPath);
+
+        Log::debug('DVR post-processing: locating HLS manifest', [
+            'recording_id' => $recording->id,
+            'disk' => $disk,
+            'manifest_path' => $m3u8FullPath,
+        ]);
 
         if (! file_exists($m3u8FullPath)) {
             // FFmpeg writes to stream.m3u8.tmp while recording; if we caught it mid-segment,
             // only the .tmp file may exist. Try that before giving up.
             $tmpPath = preg_replace('/\.m3u8$/', '.m3u8.tmp', $m3u8FullPath);
             if (file_exists($tmpPath)) {
-                Log::warning("DVR: Finalized .m3u8 not found, using .m3u8.tmp for recording {$recording->id}");
+                Log::warning('DVR post-processing: finalized .m3u8 not found — falling back to .m3u8.tmp', [
+                    'recording_id' => $recording->id,
+                    'tmp_path' => $tmpPath,
+                ]);
                 $m3u8FullPath = $tmpPath;
             } else {
                 $this->markFailed($recording, "HLS manifest not found at {$m3u8FullPath}");
@@ -66,7 +77,7 @@ class DvrPostProcessorService
             }
         }
 
-        // ── Step 1: Concatenate HLS → single .ts ────────────────────────────
+        // ── Step 1: Concatenate HLS → single .mp4 ───────────────────────────
         $outputRelPath = $this->buildOutputPath($recording);
         $outputFullPath = Storage::disk($disk)->path($outputRelPath);
         $outputDir = dirname($outputFullPath);
@@ -77,7 +88,16 @@ class DvrPostProcessorService
 
         $ffmpegPath = $setting->getFfmpegPath();
 
+        $this->setStep($recording, 'Concatenating HLS segments to MP4');
+
         try {
+            $segmentCount = $this->countSegments($m3u8FullPath);
+            Log::info('DVR post-processing step 1: concatenating HLS segments', [
+                'recording_id' => $recording->id,
+                'segment_count' => $segmentCount,
+                'output_path' => $outputRelPath,
+            ]);
+
             $this->concatHls($ffmpegPath, $m3u8FullPath, $outputFullPath);
         } catch (Exception $e) {
             $this->markFailed($recording, "HLS concat failed: {$e->getMessage()}");
@@ -88,63 +108,103 @@ class DvrPostProcessorService
         $fileSize = file_exists($outputFullPath) ? filesize($outputFullPath) : null;
         $duration = $this->estimateDuration($recording);
 
-        Log::info('DVR post-processing step 1 complete: HLS concatenated', [
+        Log::info('DVR post-processing step 1 complete: MP4 concatenated', [
             'recording_id' => $recording->id,
             'output_path' => $outputRelPath,
-            'file_size' => $fileSize,
+            'file_size_bytes' => $fileSize,
+            'file_size_mb' => $fileSize ? round($fileSize / 1024 / 1024, 1) : null,
+            'duration_seconds' => $duration,
         ]);
 
         // ── Step 2: Update DB with file location ────────────────────────────
+        $this->setStep($recording, 'Saving to library');
+
         try {
             $recording->update([
                 'file_path' => $outputRelPath,
                 'file_size_bytes' => $fileSize,
                 'duration_seconds' => $duration,
             ]);
+
+            Log::debug('DVR post-processing step 2 complete: file_path saved', [
+                'recording_id' => $recording->id,
+                'file_path' => $outputRelPath,
+            ]);
         } catch (Exception $e) {
-            Log::warning("DVR post-processing step 2 failed: could not update file_path: {$e->getMessage()}");
+            Log::warning("DVR post-processing step 2 failed: could not update file_path: {$e->getMessage()}", [
+                'recording_id' => $recording->id,
+            ]);
         }
 
-        // ── Step 3: Dispatch metadata enrichment (non-fatal) ────────────────
+        // ── Step 3: Dispatch metadata enrichment or VOD integration ─────────
         try {
             if ($setting->enable_metadata_enrichment) {
+                $this->setStep($recording, 'Queuing metadata enrichment');
+
+                Log::info('DVR post-processing step 3: dispatching metadata enrichment', [
+                    'recording_id' => $recording->id,
+                ]);
+
                 EnrichDvrMetadata::dispatch($recording->id)->onQueue('dvr-meta');
             } else {
-                // Metadata enrichment disabled — integrate directly without metadata
+                $this->setStep($recording, 'Queuing VOD integration');
+
+                Log::info('DVR post-processing step 3: metadata enrichment disabled — dispatching VOD integration directly', [
+                    'recording_id' => $recording->id,
+                ]);
+
                 IntegrateDvrRecordingToVod::dispatch($recording->id)->onQueue('dvr-post');
             }
         } catch (Exception $e) {
-            Log::warning("DVR post-processing step 3: could not dispatch metadata enrichment: {$e->getMessage()}");
+            Log::warning("DVR post-processing step 3: failed to dispatch next job: {$e->getMessage()}", [
+                'recording_id' => $recording->id,
+            ]);
         }
 
         // ── Step 4: Cleanup temp dir + mark COMPLETED ───────────────────────
         try {
             Storage::disk($disk)->deleteDirectory($livePath);
+
+            Log::debug('DVR post-processing step 4: temp directory cleaned up', [
+                'recording_id' => $recording->id,
+                'live_path' => $livePath,
+            ]);
         } catch (Exception $e) {
-            Log::warning("DVR post-processing step 4: could not delete temp dir {$livePath}: {$e->getMessage()}");
+            Log::warning("DVR post-processing step 4: could not delete temp dir {$livePath}: {$e->getMessage()}", [
+                'recording_id' => $recording->id,
+            ]);
         }
 
         $recording->update([
             'status' => DvrRecordingStatus::Completed->value,
+            'post_processing_step' => null,
         ]);
 
         // Disable "once" rules after a successful recording so they don't re-schedule
         $rule = $recording->recordingRule;
         if ($rule && $rule->type === DvrRuleType::Once) {
             $rule->update(['enabled' => false]);
+
+            Log::debug('DVR post-processing: disabled once-rule after successful recording', [
+                'recording_id' => $recording->id,
+                'rule_id' => $rule->id,
+            ]);
         }
 
-        Log::info("DVR recording completed: {$recording->title}", [
+        Log::info('DVR post-processing complete', [
             'recording_id' => $recording->id,
+            'title' => $recording->title,
             'file_path' => $outputRelPath,
+            'file_size_mb' => $fileSize ? round($fileSize / 1024 / 1024, 1) : null,
+            'duration_seconds' => $duration,
         ]);
     }
 
     /**
      * Build the final output path for the recording (relative to the dvr disk).
      *
-     * Pattern: library/{Year}/{Title}/Title - SXXEYY.ts
-     * or:       library/{Year}/{Title}/Title - YYYY-MM-DD.ts
+     * Pattern: library/{Year}/{Title}/Title - SXXEYY.mp4
+     * or:       library/{Year}/{Title}/Title - YYYY-MM-DD.mp4
      */
     public function buildOutputPath(DvrRecording $recording): string
     {
@@ -158,16 +218,33 @@ class DvrPostProcessorService
             $episode = "{$title} - {$date}";
         }
 
-        return "library/{$year}/{$title}/{$episode}.ts";
+        return "library/{$year}/{$title}/{$episode}.mp4";
     }
 
     /**
-     * Concatenate HLS segments into a single .ts file using ffmpeg's concat demuxer.
+     * Update the post_processing_step on the recording and emit a log entry.
+     * Refreshes the model in-place so subsequent reads see the updated value.
+     */
+    private function setStep(DvrRecording $recording, string $step): void
+    {
+        $recording->update(['post_processing_step' => $step]);
+
+        Log::debug("DVR post-processing step: {$step}", [
+            'recording_id' => $recording->id,
+            'title' => $recording->title,
+        ]);
+    }
+
+    /**
+     * Concatenate HLS segments into a single .mp4 file using ffmpeg's concat demuxer.
      *
      * We build an explicit file list from the .m3u8 manifest and pass it via the
      * concat demuxer (-f concat) rather than feeding the .m3u8 directly as input.
      * This avoids issues with corrupt/bogus #EXTINF durations in the manifest that
      * can cause ffmpeg to treat a segment as hours long and stall at near-zero speed.
+     *
+     * Output is MP4 with -movflags +faststart so the moov atom (index) is written
+     * at the front of the file, enabling true random-access seeking in all players.
      */
     private function concatHls(string $ffmpegPath, string $m3u8Path, string $outputPath): void
     {
@@ -199,7 +276,7 @@ class DvrPostProcessorService
             '-safe', '0',
             '-i', $concatListPath,
             '-c', 'copy',
-            '-f', 'mpegts',
+            '-movflags', '+faststart',
             $outputPath,
         ];
 
@@ -229,6 +306,21 @@ class DvrPostProcessorService
     }
 
     /**
+     * Count the number of .ts segments listed in an HLS manifest.
+     */
+    private function countSegments(string $m3u8Path): int
+    {
+        if (! file_exists($m3u8Path)) {
+            return 0;
+        }
+
+        return count(array_filter(
+            array_map('trim', file($m3u8Path)),
+            fn (string $line) => $line !== '' && ! str_starts_with($line, '#')
+        ));
+    }
+
+    /**
      * Estimate duration in seconds from actual or scheduled times.
      */
     private function estimateDuration(DvrRecording $recording): ?int
@@ -245,15 +337,19 @@ class DvrPostProcessorService
     }
 
     /**
-     * Mark a recording as FAILED.
+     * Mark a recording as FAILED and clear any in-progress step label.
      */
     private function markFailed(DvrRecording $recording, string $reason): void
     {
-        Log::error("DVR post-processing FAILED for recording {$recording->id}: {$reason}");
+        Log::error("DVR post-processing FAILED for recording {$recording->id}: {$reason}", [
+            'recording_id' => $recording->id,
+            'title' => $recording->title,
+        ]);
 
         $recording->update([
             'status' => DvrRecordingStatus::Failed->value,
             'error_message' => $reason,
+            'post_processing_step' => null,
         ]);
     }
 

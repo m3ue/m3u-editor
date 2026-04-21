@@ -37,21 +37,56 @@ class DvrMetadataEnricherService
 
         // Attempt TMDB
         if ($tmdbKey) {
+            $recording->update(['post_processing_step' => 'Fetching TMDB metadata']);
+
             try {
                 $enriched = $this->enrichFromTmdb($recording, $tmdbKey);
             } catch (Exception $e) {
-                Log::warning("DVR metadata: TMDB enrichment failed for recording {$recording->id}: {$e->getMessage()}");
+                Log::warning("DVR metadata: TMDB enrichment failed for recording {$recording->id}: {$e->getMessage()}", [
+                    'recording_id' => $recording->id,
+                    'title' => $recording->title,
+                ]);
             }
         }
 
         // Fallback to TVMaze
         if (! $enriched) {
+            $recording->update(['post_processing_step' => 'Fetching TVMaze metadata']);
+
             try {
-                $this->enrichFromTvMaze($recording);
+                $enriched = $this->enrichFromTvMaze($recording);
             } catch (Exception $e) {
-                Log::warning("DVR metadata: TVMaze enrichment failed for recording {$recording->id}: {$e->getMessage()}");
+                Log::warning("DVR metadata: TVMaze enrichment failed for recording {$recording->id}: {$e->getMessage()}", [
+                    'recording_id' => $recording->id,
+                    'title' => $recording->title,
+                ]);
             }
         }
+
+        if (! $enriched) {
+            Log::info("DVR metadata: no metadata found for recording {$recording->id} — proceeding without enrichment", [
+                'recording_id' => $recording->id,
+                'title' => $recording->title,
+            ]);
+        }
+    }
+
+    /**
+     * Normalize a title for use as a search query.
+     *
+     * Strips Unicode decorations (superscripts, subscripts, combining marks,
+     * and other non-Latin symbols) that prevent TMDB/TVMaze from matching the
+     * actual show name.  The original title is preserved in the database.
+     */
+    private function normalizeSearchTitle(string $title): string
+    {
+        // Strip Unicode characters outside the basic Latin/extended Latin range.
+        // This removes superscripts like ᴸᶦᵛᵉ, emoji, and other decoration while
+        // preserving accented Latin characters (e.g. é, ñ, ü).
+        $normalized = preg_replace('/[^\x{0000}-\x{024F}\s]/u', '', $title) ?? $title;
+
+        // Collapse extra whitespace left behind after stripping
+        return trim((string) preg_replace('/\s{2,}/', ' ', $normalized));
     }
 
     /**
@@ -59,7 +94,7 @@ class DvrMetadataEnricherService
      */
     private function enrichFromTmdb(DvrRecording $recording, string $apiKey): bool
     {
-        $title = $recording->title;
+        $title = $this->normalizeSearchTitle($recording->title);
         $cacheKey = 'dvr.tmdb.'.md5("{$title}.{$recording->season}.{$recording->episode}");
 
         $data = Cache::remember($cacheKey, self::CACHE_TTL_SECONDS, function () use ($title, $recording, $apiKey) {
@@ -151,10 +186,11 @@ class DvrMetadataEnricherService
 
     /**
      * Enrich from TVMaze (free, no API key required).
+     * Returns true if a match was found and applied.
      */
-    private function enrichFromTvMaze(DvrRecording $recording): void
+    private function enrichFromTvMaze(DvrRecording $recording): bool
     {
-        $title = $recording->title;
+        $title = $this->normalizeSearchTitle($recording->title);
         $cacheKey = 'dvr.tvmaze.'.md5($title);
 
         $data = Cache::remember($cacheKey, self::CACHE_TTL_SECONDS, function () use ($title) {
@@ -162,7 +198,7 @@ class DvrMetadataEnricherService
         });
 
         if (empty($data)) {
-            return;
+            return false;
         }
 
         $metadata = $recording->metadata ?? [];
@@ -174,6 +210,8 @@ class DvrMetadataEnricherService
             'title' => $title,
             'tvmaze_id' => $data['id'] ?? null,
         ]);
+
+        return true;
     }
 
     /**

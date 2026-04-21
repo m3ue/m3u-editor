@@ -23,6 +23,7 @@ class DvrSettingFactory extends Factory
             'playlist_id' => Playlist::factory(),
             'user_id' => User::factory(),
             'enabled' => false,
+            'use_proxy' => false,
             'storage_disk' => 'dvr',
             'storage_path' => 'recordings',
             'max_concurrent_recordings' => 2,

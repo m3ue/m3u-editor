@@ -31,6 +31,7 @@ use App\Models\User;
 use App\Services\DvrMetadataEnricherService;
 use App\Services\DvrVodIntegrationService;
 use App\Services\PlaylistService;
+use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Route;
@@ -97,7 +98,7 @@ it('creates a VOD channel for a recording with TMDB movie metadata', function ()
         ->and($channel->name)->toBe('Inception')
         ->and($channel->playlist_id)->toBe($recording->dvrSetting->playlist_id)
         ->and($channel->user_id)->toBe($recording->user_id)
-        ->and($channel->container_extension)->toBe('ts')
+        ->and($channel->container_extension)->toBe('mp4')
         ->and($channel->tmdb_id)->toBe(27205)
         ->and($channel->source_id)->toBeNull();
 });
@@ -136,6 +137,8 @@ it('creates a VOD channel when there is no TMDB metadata and no season is set', 
         'season' => null,
         'episode' => null,
         'metadata' => null,
+        'description' => 'Recorded event description',
+        'programme_start' => Carbon::parse('2025-06-15'),
     ]);
 
     $this->service->integrateRecording($recording);
@@ -144,7 +147,40 @@ it('creates a VOD channel when there is no TMDB metadata and no season is set', 
 
     expect($channel)->not->toBeNull()
         ->and($channel->is_vod)->toBeTrue()
-        ->and($channel->name)->toBe('Unknown Show');
+        ->and($channel->name)->toBe('Unknown Show — Jun 15, 2025')
+        ->and($channel->info)->toBeArray()
+        ->and($channel->info['plot'])->toBe('Recorded event description')
+        ->and($channel->info['tmdb_id'])->toBeNull();
+});
+
+it('uses tvmaze metadata when tmdb metadata is unavailable on movie integration', function () {
+    $recording = makeCompletedRecording([
+        'title' => 'Unknown Show',
+        'season' => null,
+        'episode' => null,
+        'description' => null,
+        'metadata' => [
+            'tvmaze' => [
+                'id' => 123,
+                'name' => 'Unknown Show',
+                'overview' => 'TVMaze plot',
+                'poster_url' => 'https://tvmaze.test/poster.jpg',
+                'premiered' => '2025-01-02',
+            ],
+        ],
+    ]);
+
+    $this->service->integrateRecording($recording);
+
+    $channel = Channel::where('dvr_recording_id', $recording->id)->first();
+
+    expect($channel)->not->toBeNull()
+        ->and($channel->logo)->toBe('https://tvmaze.test/poster.jpg')
+        ->and($channel->year)->toBe('2025')
+        ->and($channel->info['plot'])->toBe('TVMaze plot')
+        ->and($channel->info['movie_image'])->toBe('https://tvmaze.test/poster.jpg')
+        ->and($channel->info['release_date'])->toBe('2025-01-02')
+        ->and($channel->info['tmdb_id'])->toBeNull();
 });
 
 // ── TV / Series path ──────────────────────────────────────────────────────────
@@ -227,6 +263,52 @@ it('takes the series path when season is set but TMDB metadata is absent', funct
 
     expect(Episode::where('dvr_recording_id', $recording->id)->exists())->toBeTrue();
     expect(Channel::where('dvr_recording_id', $recording->id)->exists())->toBeFalse();
+});
+
+it('appends recording date to episode title when no season/episode numbers and no metadata', function () {
+    $recording = makeCompletedRecording([
+        'title' => 'CNN News',
+        'subtitle' => null,
+        'season' => 1,
+        'episode' => null,
+        'metadata' => null,
+        'programme_start' => Carbon::parse('2026-04-21'),
+    ]);
+
+    $this->service->integrateRecording($recording);
+
+    $episode = Episode::where('dvr_recording_id', $recording->id)->firstOrFail();
+
+    expect($episode->title)->toBe('CNN News — Apr 21, 2026');
+});
+
+it('uses tvmaze metadata as fallback for series name and cover when tmdb is absent', function () {
+    $recording = makeCompletedRecording([
+        'title' => 'Some TV Show',
+        'season' => 1,
+        'episode' => 1,
+        'metadata' => [
+            'tvmaze' => [
+                'id' => 456,
+                'name' => 'Some TV Show',
+                'overview' => 'TVMaze plot for series',
+                'poster_url' => 'https://tvmaze.test/show-poster.jpg',
+                'premiered' => '2022-03-10',
+            ],
+        ],
+    ]);
+
+    $this->service->integrateRecording($recording);
+
+    $series = Series::whereNull('source_series_id')
+        ->where('name', 'Some TV Show')
+        ->first();
+
+    expect($series)->not->toBeNull()
+        ->and($series->cover)->toBe('https://tvmaze.test/show-poster.jpg')
+        ->and($series->plot)->toBe('TVMaze plot for series')
+        ->and($series->release_date)->toBe('2022-03-10')
+        ->and($series->tmdb_id)->toBeNull();
 });
 
 it('reuses the same Series and Season for two episodes of the same show', function () {

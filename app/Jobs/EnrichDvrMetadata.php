@@ -34,7 +34,18 @@ class EnrichDvrMetadata implements ShouldQueue
             return;
         }
 
+        Log::info("DVR metadata enrichment starting for recording {$recording->id}", [
+            'recording_id' => $recording->id,
+            'title' => $recording->title,
+        ]);
+
+        $recording->update(['post_processing_step' => 'Enriching metadata']);
+
         $enricher->enrich($recording);
+
+        Log::info("DVR metadata enrichment complete for recording {$recording->id} — dispatching VOD integration", [
+            'recording_id' => $recording->id,
+        ]);
 
         IntegrateDvrRecordingToVod::dispatch($recording->id);
     }

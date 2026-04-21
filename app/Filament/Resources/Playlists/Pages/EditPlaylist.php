@@ -84,6 +84,7 @@ class EditPlaylist extends EditRecord
 
         if ($dvr) {
             $data['dvr_enabled'] = $dvr->enabled;
+            $data['dvr_use_proxy'] = $dvr->use_proxy;
             $data['dvr_ffmpeg_path'] = $dvr->ffmpeg_path;
             $data['dvr_storage_path'] = $dvr->storage_path;
             $data['dvr_max_concurrent_recordings'] = $dvr->max_concurrent_recordings;
@@ -95,6 +96,7 @@ class EditPlaylist extends EditRecord
             $data['dvr_tmdb_api_key'] = $dvr->tmdb_api_key;
         } else {
             $data['dvr_enabled'] = false;
+            $data['dvr_use_proxy'] = false;
             $data['dvr_enable_metadata_enrichment'] = true;
         }
 
@@ -136,6 +138,7 @@ class EditPlaylist extends EditRecord
             [
                 'user_id' => $record->user_id,
                 'enabled' => $data['dvr_enabled'] ?? false,
+                'use_proxy' => $data['dvr_use_proxy'] ?? false,
                 'ffmpeg_path' => $data['dvr_ffmpeg_path'] ?? null,
                 'storage_path' => $data['dvr_storage_path'] ?? null,
                 'max_concurrent_recordings' => $data['dvr_max_concurrent_recordings'] ?? 2,

@@ -77,4 +77,21 @@ return [
 
     'tvmaze_base_url' => 'https://api.tvmaze.com',
 
+    /*
+    |--------------------------------------------------------------------------
+    | DVR — Stream base URL
+    |--------------------------------------------------------------------------
+    |
+    | Base URL used when building DVR recording stream URLs for VOD integration.
+    | This should be the URL that the proxy (or any internal service) uses to
+    | reach the editor — typically the Docker-internal service hostname when
+    | running in a containerised stack (e.g. http://m3u-local-editor:36460).
+    |
+    | When empty, falls back to PlaylistService::getBaseUrl() which respects
+    | the url_override general setting and APP_URL.
+    |
+    */
+
+    'stream_base_url' => env('DVR_STREAM_BASE_URL'),
+
 ];

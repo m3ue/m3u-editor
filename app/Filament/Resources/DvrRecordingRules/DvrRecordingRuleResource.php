@@ -8,6 +8,7 @@ use App\Models\DvrRecordingRule;
 use App\Models\DvrSetting;
 use BackedEnum;
 use Filament\Actions;
+use Filament\Actions\ActionGroup;
 use Filament\Forms\Components\DateTimePicker;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
@@ -15,9 +16,9 @@ use Filament\Forms\Components\Toggle;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
-use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Support\Facades\Auth;
@@ -26,7 +27,7 @@ class DvrRecordingRuleResource extends Resource
 {
     protected static ?string $model = DvrRecordingRule::class;
 
-    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedQueueList;
+    protected static string|BackedEnum|null $navigationIcon = null;
 
     public static function getNavigationGroup(): ?string
     {
@@ -186,9 +187,11 @@ class DvrRecordingRuleResource extends Resource
                     ->options(DvrRuleType::class),
             ])
             ->recordActions([
-                Actions\EditAction::make(),
-                Actions\DeleteAction::make(),
-            ])
+                ActionGroup::make([
+                    Actions\EditAction::make(),
+                    Actions\DeleteAction::make(),
+                ])->button()->hiddenLabel()->size('sm'),
+            ], position: RecordActionsPosition::BeforeCells)
             ->toolbarActions([
                 Actions\CreateAction::make(),
                 Actions\BulkActionGroup::make([

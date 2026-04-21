@@ -2810,6 +2810,12 @@ class PlaylistResource extends Resource implements CopilotResource
                             ->default(false)
                             ->inline(false)
                             ->live(),
+                        Toggle::make('dvr_use_proxy')
+                            ->label(__('Use Proxy for Recordings'))
+                            ->helperText(__('Route recording streams through the m3u-proxy. This allows other clients to watch the same channel while it is being recorded.'))
+                            ->default(false)
+                            ->inline(false)
+                            ->hidden(fn (Get $get): bool => ! $get('dvr_enabled')),
                         Grid::make()
                             ->columns(2)
                             ->columnSpanFull()

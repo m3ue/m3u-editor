@@ -37,6 +37,20 @@ class IntegrateDvrRecordingToVod implements ShouldQueue
             return;
         }
 
+        Log::info("DVR VOD integration starting for recording {$recording->id}", [
+            'recording_id' => $recording->id,
+            'title' => $recording->title,
+        ]);
+
+        $recording->update(['post_processing_step' => 'Creating VOD entry']);
+
         $integrator->integrateRecording($recording);
+
+        // Clear the step label now that the full pipeline is done
+        $recording->update(['post_processing_step' => null]);
+
+        Log::info("DVR VOD integration complete for recording {$recording->id}", [
+            'recording_id' => $recording->id,
+        ]);
     }
 }

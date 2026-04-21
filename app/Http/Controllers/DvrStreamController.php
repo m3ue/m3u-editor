@@ -14,6 +14,10 @@ class DvrStreamController extends Controller
      * Stream a completed DVR recording file to the client.
      *
      * GET /dvr/recordings/{uuid}/stream
+     *
+     * Supports HTTP range requests for seeking. MIME type is resolved from the
+     * file extension so that both legacy .ts recordings and new .mp4 recordings
+     * are served with the correct Content-Type.
      */
     public function stream(Request $request, string $uuid): Response|StreamedResponse
     {
@@ -36,7 +40,7 @@ class DvrStreamController extends Controller
 
         $fullPath = Storage::disk($disk)->path($recording->file_path);
         $fileSize = filesize($fullPath);
-        $mimeType = 'video/mp2t';
+        $mimeType = $this->resolveMimeType($recording->file_path);
 
         // Support range requests for seeking
         $range = $request->header('Range');
@@ -64,7 +68,6 @@ class DvrStreamController extends Controller
                     $chunkSize = min(8192, $remaining);
                     echo fread($handle, $chunkSize);
                     $remaining -= $chunkSize;
-                    flush();
                 }
 
                 fclose($handle);
@@ -88,5 +91,18 @@ class DvrStreamController extends Controller
 
             fclose($handle);
         }, 200, $headers);
+    }
+
+    /**
+     * Resolve the MIME type from the recording file extension.
+     * Handles both legacy .ts files and new .mp4 output.
+     */
+    private function resolveMimeType(string $filePath): string
+    {
+        return match (strtolower(pathinfo($filePath, PATHINFO_EXTENSION))) {
+            'mp4' => 'video/mp4',
+            'mkv' => 'video/x-matroska',
+            default => 'video/mp2t', // .ts and anything unrecognised
+        };
     }
 }
