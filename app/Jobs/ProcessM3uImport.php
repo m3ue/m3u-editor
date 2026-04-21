@@ -866,11 +866,13 @@ class ProcessM3uImport implements ShouldQueue
 
                 // Extract the channels and groups from the m3u
                 $excludeFileTypes = $playlist->import_prefs['ignored_file_types'] ?? [];
+                $liveEnabledByDefault = $playlist->enable_channels ?? false;
                 $collection = LazyCollection::make(function () use (
                     $filePath,
                     $channelFields,
                     $excludeFileTypes,
                     $autoSort,
+                    $liveEnabledByDefault,
                 ) {
                     // Keep track of channel number
                     $channelNo = 0;
@@ -897,7 +899,6 @@ class ProcessM3uImport implements ShouldQueue
                     // NOTE: max line length is set to 65536 to prevent memory issues
                     $this->m3uParser = new M3uParser;
                     $this->m3uParser->addDefaultTags();
-                    $liveEnabledByDefault = $playlist->enable_channels ?? false;
                     $count = 0;
                     foreach ($this->m3uParser->parseFile($filePath, max_length: 65536) as $item) {
                         // Increment channel number
