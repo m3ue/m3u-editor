@@ -1,5 +1,16 @@
 <?php
 
+$sqliteOpenFlagsAttribute = defined('Pdo\\Sqlite::ATTR_OPEN_FLAGS')
+    ? constant('Pdo\\Sqlite::ATTR_OPEN_FLAGS')
+    : PDO::SQLITE_ATTR_OPEN_FLAGS;
+
+$sqliteOpenMode = (defined('Pdo\\Sqlite::OPEN_READWRITE')
+    ? constant('Pdo\\Sqlite::OPEN_READWRITE')
+    : PDO::SQLITE_OPEN_READWRITE)
+    | (defined('Pdo\\Sqlite::OPEN_CREATE')
+        ? constant('Pdo\\Sqlite::OPEN_CREATE')
+        : PDO::SQLITE_OPEN_CREATE);
+
 return [
 
     /*
@@ -37,7 +48,7 @@ return [
             'foreign_key_constraints' => env('DB_FOREIGN_KEYS', true),
             // Add these options for better concurrency
             'options' => [
-                PDO::SQLITE_ATTR_OPEN_FLAGS => PDO::SQLITE_OPEN_READWRITE | PDO::SQLITE_OPEN_CREATE,
+                $sqliteOpenFlagsAttribute => $sqliteOpenMode,
             ],
             'journal_mode' => 'WAL',
             'synchronous' => 'NORMAL',
@@ -61,7 +72,7 @@ return [
             'foreign_key_constraints' => true,
             // Add these options for better concurrency
             'options' => [
-                PDO::SQLITE_ATTR_OPEN_FLAGS => PDO::SQLITE_OPEN_READWRITE | PDO::SQLITE_OPEN_CREATE,
+                $sqliteOpenFlagsAttribute => $sqliteOpenMode,
             ],
             'journal_mode' => 'WAL',
             'synchronous' => 'NORMAL',
