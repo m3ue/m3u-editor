@@ -24,9 +24,9 @@ use App\Services\LogoCacheService;
 use App\Services\M3uProxyService;
 use App\Settings\GeneralSettings;
 use Carbon\Carbon;
-use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Redirect;
 use Illuminate\Support\Str;
@@ -522,88 +522,56 @@ class XtreamApiController extends Controller
 
             $categoryId = $request->input('category_id');
 
-            $channelsQuery = $playlist->channels()
-                ->leftJoin('groups', 'channels.group_id', '=', 'groups.id')
-                ->where('channels.enabled', true)
-                ->where('channels.is_vod', false)
-                ->with(['epgChannel', 'tags', 'group'])
-                ->selectRaw('channels.*');
+            // Use the optimised query: JOINs instead of eager loads, SQL-level ordering, cursor-compatible.
+            $channelsQuery = PlaylistGenerateController::getChannelQuery($playlist, isVod: false);
 
-            // Apply category filtering if category_id is provided
+            // For custom playlists, pull the tag ID and pivot channel number via subqueries so we
+            // can resolve category_id and channel numbering without triggering N+1 tag queries.
+            if ($isCustomPlaylist) {
+                $channelsQuery
+                    ->selectRaw(
+                        '(SELECT t.id FROM taggables tb INNER JOIN tags t ON t.id = tb.tag_id WHERE tb.taggable_id = channels.id AND tb.taggable_type = ? AND t.type = ? ORDER BY t.order_column ASC LIMIT 1) as custom_group_id',
+                        [Channel::class, $tagUuid]
+                    )
+                    ->selectRaw('channel_custom_playlist.channel_number as pivot_channel_number');
+            }
+
+            // Apply category filtering when requested.
             if ($categoryId && $categoryId !== 'all') {
                 if ($isCustomPlaylist) {
                     $channelsQuery->where(function ($query) use ($categoryId, $tagUuid) {
-                        // Channels with custom tags matching the category ID
                         $query->whereHas('tags', function ($tagQuery) use ($categoryId, $tagUuid) {
                             $tagQuery->where('type', $tagUuid)
                                 ->where('id', $categoryId);
-                        })
-                            // OR channels without custom tags but with matching group_id
-                            ->orWhere(function ($subQuery) use ($categoryId, $tagUuid) {
-                                $subQuery->whereDoesntHave('tags', function ($tagQuery) use ($tagUuid) {
-                                    $tagQuery->where('type', $tagUuid);
-                                })->where('group_id', $categoryId);
-                            });
+                        })->orWhere(function ($subQuery) use ($categoryId, $tagUuid) {
+                            $subQuery->whereDoesntHave('tags', function ($tagQuery) use ($tagUuid) {
+                                $tagQuery->where('type', $tagUuid);
+                            })->where('group_id', $categoryId);
+                        });
                     });
                 } else {
-                    // For regular Playlist and MergedPlaylist, filter by group_id
                     $channelsQuery->where('group_id', $categoryId);
                 }
             }
 
-            $proxyEnabled = $playlist->enable_proxy;
+            $cursor = $channelsQuery->cursor();
 
-            $enabledChannels = $channelsQuery
-                ->orderBy('groups.sort_order')
-                ->orderBy('channels.sort')
-                ->orderBy('channels.channel')
-                ->orderBy('channels.title')
-                ->get();
-
-            // For custom playlists, re-sort by custom group order (if assigned), falling back to original group order
-            if ($isCustomPlaylist && $enabledChannels->isNotEmpty()) {
-                $enabledChannels = $enabledChannels->sort(function ($a, $b) use ($tagUuid) {
-                    // Get custom tag order for both channels
-                    $aTag = $a->tags->where('type', $tagUuid)->first();
-                    $bTag = $b->tags->where('type', $tagUuid)->first();
-
-                    $aOrder = $aTag ? ($aTag->order_column ?? 999999) : ($a->group->sort_order ?? 999999);
-                    $bOrder = $bTag ? ($bTag->order_column ?? 999999) : ($b->group->sort_order ?? 999999);
-
-                    // Primary sort by group/tag order
-                    if ($aOrder !== $bOrder) {
-                        return $aOrder <=> $bOrder;
-                    }
-
-                    // Secondary sort by channel sort
-                    $aSort = $a->sort ?? 999999;
-                    $bSort = $b->sort ?? 999999;
-                    if ($aSort !== $bSort) {
-                        return $aSort <=> $bSort;
-                    }
-
-                    // Tertiary sort by channel number
-                    $aCh = $a->channel ?? '';
-                    $bCh = $b->channel ?? '';
-                    if ($aCh !== $bCh) {
-                        return $aCh <=> $bCh;
-                    }
-
-                    // Final sort by title
-                    return ($a->title ?? '') <=> ($b->title ?? '');
-                })->values();
-            }
-
-            $liveStreams = [];
-            if ($enabledChannels instanceof Collection) {
+            return response()->stream(function () use ($cursor, $playlist, $baseUrl, $isCustomPlaylist, $disableCatchup) {
+                $idChannelBy = $playlist->id_channel_by;
                 $channelNumber = $playlist->auto_channel_increment ? $playlist->channel_start - 1 : 0;
-                foreach ($enabledChannels as $index => $channel) {
+
+                echo '[';
+                $first = true;
+                foreach ($cursor as $channel) {
+                    if (! $first) {
+                        echo ',';
+                    }
+
                     $streamIcon = $baseUrl.'/placeholder.png';
                     if ($channel->logo) {
-                        // Logo override takes precedence
                         $streamIcon = $channel->logo;
-                    } elseif ($channel->logo_type === ChannelLogoType::Epg && $channel->epgChannel && $channel->epgChannel->icon) {
-                        $streamIcon = $channel->epgChannel->icon;
+                    } elseif ($channel->logo_type === ChannelLogoType::Epg && $channel->epg_icon) {
+                        $streamIcon = $channel->epg_icon;
                     } elseif ($channel->logo_type === ChannelLogoType::Channel && ($channel->logo || $channel->logo_internal)) {
                         $logo = $channel->logo ?? $channel->logo_internal ?? '';
                         $streamIcon = filter_var($logo, FILTER_VALIDATE_URL) ? $logo : $baseUrl."/$logo";
@@ -612,31 +580,24 @@ class XtreamApiController extends Controller
                         $streamIcon = LogoProxyController::generateProxyUrl($streamIcon);
                     }
 
-                    // Determine category_id based on playlist type
                     $channelCategoryId = 'all';
                     if ($isCustomPlaylist) {
-                        $customGroup = $channel->tags()->where('type', $tagUuid)->first();
-                        if ($customGroup) {
-                            $channelCategoryId = (string) $customGroup->id; // Use tag ID
+                        if (! empty($channel->custom_group_id)) {
+                            $channelCategoryId = (string) $channel->custom_group_id;
                         } elseif ($channel->group_id) {
-                            $channelCategoryId = (string) $channel->group_id; // Use group_id
-                        }
-                    } else {
-                        // For regular playlists, use group_id
-                        if ($channel->group_id) {
                             $channelCategoryId = (string) $channel->group_id;
                         }
+                    } elseif ($channel->group_id) {
+                        $channelCategoryId = (string) $channel->group_id;
                     }
 
-                    $idChannelBy = $playlist->id_channel_by;
-                    $channelNo = ($isCustomPlaylist && ! empty($channel->pivot?->channel_number))
-                        ? (int) $channel->pivot->channel_number
+                    $channelNo = ($isCustomPlaylist && ! empty($channel->pivot_channel_number))
+                        ? (int) $channel->pivot_channel_number
                         : $channel->channel;
                     if (! $channelNo && ($playlist->auto_channel_increment || $idChannelBy === PlaylistChannelId::Number)) {
                         $channelNo = ++$channelNumber;
                     }
 
-                    // Get the TVG ID
                     switch ($idChannelBy) {
                         case PlaylistChannelId::ChannelId:
                             $tvgId = $channel->id;
@@ -655,24 +616,12 @@ class XtreamApiController extends Controller
                             break;
                     }
 
-                    // If no TVG ID still, fallback to the channel source ID or internal ID as a last resort
                     if (empty($tvgId)) {
                         $tvgId = $channel->source_id ?? $channel->id;
                     }
 
                     // Make sure TVG ID only contains characters and numbers
                     $tvgId = preg_replace(config('dev.tvgid.regex'), '', $tvgId);
-
-                    // Get the file extension from the URL
-                    $url = $channel->url_custom ?? $channel->url;
-                    $extension = pathinfo($url, PATHINFO_EXTENSION);
-                    if (empty($extension)) {
-                        $sourcePlaylist = $channel->getEffectivePlaylist();
-                        $extension = $sourcePlaylist->xtream_config['output'] ?? 'ts'; // Default to 'ts' if not set
-                    }
-
-                    // Use stream_icon as thumbnail (or a dedicated thumbnail if available)
-                    $thumbnail = $streamIcon;
 
                     $liveStream = [
                         'num' => $channelNo,
@@ -687,21 +636,27 @@ class XtreamApiController extends Controller
                         'tv_archive' => (! $disableCatchup && ($channel->catchup || $channel->shift)) ? 1 : 0,
                         'tv_archive_duration' => $disableCatchup ? 0 : ($channel->shift ?? 0),
                         'custom_sid' => $channel->stream_id_custom ?? '',
-                        'thumbnail' => $thumbnail,
+                        'thumbnail' => $streamIcon,
                         'direct_source' => '',
                     ];
 
-                    // Include emby-compatible stream_stats if probed data exists
                     $embyStats = $channel->getEmbyStreamStats();
                     if (! empty($embyStats)) {
                         $liveStream['stream_stats'] = $embyStats;
                     }
 
-                    $liveStreams[] = $liveStream;
+                    echo json_encode($liveStream);
+                    $first = false;
+                    if (ob_get_level() > 0) {
+                        ob_flush();
+                    }
+                    flush();
                 }
-            }
-
-            return response()->json($liveStreams);
+                echo ']';
+            }, 200, [
+                'Content-Type' => 'application/json',
+                'X-Accel-Buffering' => 'no',
+            ]);
         } elseif ($action === 'get_vod_streams') {
             // Network playlists don't have VOD streams
             if ($isNetworkPlaylist) {
@@ -710,86 +665,51 @@ class XtreamApiController extends Controller
 
             $categoryId = $request->input('category_id');
 
-            $channelsQuery = $playlist->channels()
-                ->leftJoin('groups', 'channels.group_id', '=', 'groups.id')
-                ->where('channels.enabled', true)
-                ->where('channels.is_vod', true)
-                ->with(['epgChannel', 'tags', 'group'])
-                ->selectRaw('channels.*');
+            $channelsQuery = PlaylistGenerateController::getChannelQuery($playlist, isVod: true);
 
-            // Apply category filtering if category_id is provided
+            if ($isCustomPlaylist) {
+                $channelsQuery
+                    ->selectRaw(
+                        '(SELECT t.id FROM taggables tb INNER JOIN tags t ON t.id = tb.tag_id WHERE tb.taggable_id = channels.id AND tb.taggable_type = ? AND t.type = ? ORDER BY t.order_column ASC LIMIT 1) as custom_group_id',
+                        [Channel::class, $tagUuid]
+                    )
+                    ->selectRaw('channel_custom_playlist.channel_number as pivot_channel_number');
+            }
+
             if ($categoryId && $categoryId !== 'all') {
                 if ($isCustomPlaylist) {
-                    // For CustomPlaylist, filter by tag ID or group_id
                     $channelsQuery->where(function ($query) use ($categoryId, $tagUuid) {
-                        // Channels with custom tags matching the category ID
                         $query->whereHas('tags', function ($tagQuery) use ($categoryId, $tagUuid) {
                             $tagQuery->where('type', $tagUuid)
                                 ->where('id', $categoryId);
-                        })
-                            // OR channels without custom tags but with matching group_id
-                            ->orWhere(function ($subQuery) use ($categoryId, $tagUuid) {
-                                $subQuery->whereDoesntHave('tags', function ($tagQuery) use ($tagUuid) {
-                                    $tagQuery->where('type', $tagUuid);
-                                })->where('group_id', $categoryId);
-                            });
+                        })->orWhere(function ($subQuery) use ($categoryId, $tagUuid) {
+                            $subQuery->whereDoesntHave('tags', function ($tagQuery) use ($tagUuid) {
+                                $tagQuery->where('type', $tagUuid);
+                            })->where('group_id', $categoryId);
+                        });
                     });
                 } else {
-                    // For regular Playlist and MergedPlaylist, filter by group_id
                     $channelsQuery->where('group_id', $categoryId);
                 }
             }
 
-            $enabledVodChannels = $channelsQuery
-                ->orderBy('groups.sort_order')
-                ->orderBy('channels.sort')
-                ->orderBy('channels.channel')
-                ->orderBy('channels.title')
-                ->get();
+            $cursor = $channelsQuery->cursor();
 
-            // For custom playlists, re-sort by custom group order (if assigned), falling back to original group order
-            if ($isCustomPlaylist && $enabledVodChannels->isNotEmpty()) {
-                $enabledVodChannels = $enabledVodChannels->sort(function ($a, $b) use ($tagUuid) {
-                    // Get custom tag order for both channels
-                    $aTag = $a->tags->where('type', $tagUuid)->first();
-                    $bTag = $b->tags->where('type', $tagUuid)->first();
-
-                    $aOrder = $aTag ? ($aTag->order_column ?? 999999) : ($a->group->sort_order ?? 999999);
-                    $bOrder = $bTag ? ($bTag->order_column ?? 999999) : ($b->group->sort_order ?? 999999);
-
-                    // Primary sort by group/tag order
-                    if ($aOrder !== $bOrder) {
-                        return $aOrder <=> $bOrder;
+            return response()->stream(function () use ($cursor, $playlist, $baseUrl, $isCustomPlaylist) {
+                $num = 0;
+                echo '[';
+                $first = true;
+                foreach ($cursor as $channel) {
+                    if (! $first) {
+                        echo ',';
                     }
+                    $num++;
 
-                    // Secondary sort by channel sort
-                    $aSort = $a->sort ?? 999999;
-                    $bSort = $b->sort ?? 999999;
-                    if ($aSort !== $bSort) {
-                        return $aSort <=> $bSort;
-                    }
-
-                    // Tertiary sort by channel number
-                    $aCh = $a->channel ?? '';
-                    $bCh = $b->channel ?? '';
-                    if ($aCh !== $bCh) {
-                        return $aCh <=> $bCh;
-                    }
-
-                    // Final sort by title
-                    return ($a->title ?? '') <=> ($b->title ?? '');
-                })->values();
-            }
-
-            $vodStreams = [];
-            if ($enabledVodChannels instanceof Collection) {
-                foreach ($enabledVodChannels as $index => $channel) {
                     $streamIcon = $baseUrl.'/placeholder.png';
                     if ($channel->logo) {
-                        // Logo override takes precedence
                         $streamIcon = $channel->logo;
-                    } elseif ($channel->logo_type === ChannelLogoType::Epg && $channel->epgChannel && $channel->epgChannel->icon) {
-                        $streamIcon = $channel->epgChannel->icon;
+                    } elseif ($channel->logo_type === ChannelLogoType::Epg && $channel->epg_icon) {
+                        $streamIcon = $channel->epg_icon;
                     } elseif ($channel->logo_type === ChannelLogoType::Channel && ($channel->logo || $channel->logo_internal)) {
                         $logo = $channel->logo ?? $channel->logo_internal ?? '';
                         $streamIcon = filter_var($logo, FILTER_VALIDATE_URL) ? $logo : $baseUrl."/$logo";
@@ -798,30 +718,23 @@ class XtreamApiController extends Controller
                         $streamIcon = LogoProxyController::generateProxyUrl($streamIcon);
                     }
 
-                    // Determine category_id based on playlist type
                     $channelCategoryId = 'all';
                     if ($isCustomPlaylist) {
-                        // For CustomPlaylist, prioritize custom tags over group_id
-                        $customGroup = $channel->tags()->where('type', $tagUuid)->first();
-                        if ($customGroup) {
-                            $channelCategoryId = (string) $customGroup->id; // Use tag ID
+                        if (! empty($channel->custom_group_id)) {
+                            $channelCategoryId = (string) $channel->custom_group_id;
                         } elseif ($channel->group_id) {
-                            $channelCategoryId = (string) $channel->group_id; // Use group_id
-                        }
-                    } else {
-                        // For regular playlists, use group_id
-                        if ($channel->group_id) {
                             $channelCategoryId = (string) $channel->group_id;
                         }
+                    } elseif ($channel->group_id) {
+                        $channelCategoryId = (string) $channel->group_id;
                     }
 
-                    $extension = $channel->container_extension ?? 'mkv';
                     $tmdb = $channel->info['tmdb_id'] ?? $channel->movie_data['tmdb_id'] ?? 0;
-                    $vodChannelNo = ($isCustomPlaylist && ! empty($channel->pivot?->channel_number))
-                        ? (int) $channel->pivot->channel_number
-                        : ($channel->channel ?: $index + 1);
+                    $vodChannelNo = ($isCustomPlaylist && ! empty($channel->pivot_channel_number))
+                        ? (int) $channel->pivot_channel_number
+                        : ($channel->channel ?: $num);
 
-                    $vodStreams[] = [
+                    echo json_encode([
                         'num' => $vodChannelNo,
                         'name' => $channel->title_custom ?? $channel->title,
                         'title' => $channel->title_custom ?? $channel->title,
@@ -839,11 +752,18 @@ class XtreamApiController extends Controller
                         'container_extension' => $channel->container_extension ?? 'mkv',
                         'custom_sid' => $channel->stream_id_custom ?? '',
                         'direct_source' => '',
-                    ];
+                    ]);
+                    $first = false;
+                    if (ob_get_level() > 0) {
+                        ob_flush();
+                    }
+                    flush();
                 }
-            }
-
-            return response()->json($vodStreams);
+                echo ']';
+            }, 200, [
+                'Content-Type' => 'application/json',
+                'X-Accel-Buffering' => 'no',
+            ]);
         } elseif ($action === 'get_series') {
             // Network playlists don't have series
             if ($isNetworkPlaylist) {
@@ -879,61 +799,63 @@ class XtreamApiController extends Controller
                 }
             }
 
-            $enabledSeries = $seriesQuery->get();
+            // Batch-load in groups of 500 to avoid pulling all series into memory at once.
+            // Tags and category are eager-loaded per batch so no N+1 queries occur.
+            $seriesIterable = $seriesQuery->lazyById(500);
 
-            // For custom playlists, re-sort by custom category order (if assigned), falling back to original category order
-            if ($isCustomPlaylist && $enabledSeries->isNotEmpty()) {
+            // Custom playlists need tag-based ordering — materialise to sort, then stream.
+            if ($isCustomPlaylist) {
                 $categoryTagType = $tagUuid.'-category';
-                $enabledSeries = $enabledSeries->sort(function ($a, $b) use ($categoryTagType) {
-                    // Get custom tag order for both series
+                $seriesIterable = $seriesIterable->sortBy(function ($a, $b) use ($categoryTagType) {
                     $aTag = $a->tags->where('type', $categoryTagType)->first();
                     $bTag = $b->tags->where('type', $categoryTagType)->first();
 
                     $aOrder = $aTag ? ($aTag->order_column ?? 999999) : ($a->category->sort_order ?? 999999);
                     $bOrder = $bTag ? ($bTag->order_column ?? 999999) : ($b->category->sort_order ?? 999999);
 
-                    // Primary sort by category/tag order
                     if ($aOrder !== $bOrder) {
                         return $aOrder <=> $bOrder;
                     }
 
-                    // Secondary sort by series sort
                     $aSort = $a->sort ?? 999999;
                     $bSort = $b->sort ?? 999999;
                     if ($aSort !== $bSort) {
                         return $aSort <=> $bSort;
                     }
 
-                    // Final sort by name
                     return ($a->name ?? '') <=> ($b->name ?? '');
-                })->values();
+                });
             }
 
-            $seriesList = [];
-            if ($enabledSeries instanceof Collection) {
-                foreach ($enabledSeries as $index => $seriesItem) {
-                    // Determine category_id based on playlist type
+            return response()->stream(function () use ($seriesIterable, $playlist, $baseUrl, $isCustomPlaylist, $tagUuid) {
+                $num = 0;
+                echo '[';
+                $first = true;
+                foreach ($seriesIterable as $seriesItem) {
+                    if (! $first) {
+                        echo ',';
+                    }
+                    $num++;
+
                     $seriesCategoryId = 'all';
                     if ($isCustomPlaylist) {
-                        // For CustomPlaylist, prioritize custom tags over category_id
                         $customCat = $seriesItem->tags->where('type', $tagUuid.'-category')->first();
                         if ($customCat) {
-                            $seriesCategoryId = (string) $customCat->id; // Use tag ID
+                            $seriesCategoryId = (string) $customCat->id;
                         } elseif ($seriesItem->category_id) {
-                            $seriesCategoryId = (string) $seriesItem->category_id; // Use category_id
-                        }
-                    } else {
-                        // For regular playlists, use category_id
-                        if ($seriesItem->category_id) {
                             $seriesCategoryId = (string) $seriesItem->category_id;
                         }
+                    } elseif ($seriesItem->category_id) {
+                        $seriesCategoryId = (string) $seriesItem->category_id;
                     }
 
                     $tmdb = $seriesItem->metadata['tmdb'] ?? '';
                     $lastModified = $seriesItem->last_modified?->timestamp
                         ?? (isset($seriesItem->metadata['last_modified']) ? (int) $seriesItem->metadata['last_modified'] : null);
 
-                    $cover = $seriesItem->cover ? (filter_var($seriesItem->cover, FILTER_VALIDATE_URL) ? $seriesItem->cover : $baseUrl."/$seriesItem->cover") : LogoCacheService::getPlaceholderUrl('poster');
+                    $cover = $seriesItem->cover
+                        ? (filter_var($seriesItem->cover, FILTER_VALIDATE_URL) ? $seriesItem->cover : $baseUrl."/$seriesItem->cover")
+                        : LogoCacheService::getPlaceholderUrl('poster');
                     $backdropPaths = $seriesItem->backdrop_path ?? [];
                     if (is_string($backdropPaths)) {
                         $backdropPaths = json_decode($backdropPaths, true) ?? [];
@@ -944,8 +866,8 @@ class XtreamApiController extends Controller
                         $backdropPaths = array_map(fn ($path) => LogoProxyController::generateProxyUrl($path), $backdropPaths);
                     }
 
-                    $seriesList[] = [
-                        'num' => $index + 1,
+                    echo json_encode([
+                        'num' => $num,
                         'name' => $seriesItem->name,
                         'series_id' => (int) $seriesItem->id,
                         'cover' => $cover,
@@ -963,11 +885,18 @@ class XtreamApiController extends Controller
                         'youtube_trailer' => $seriesItem->youtube_trailer ?? '',
                         'episode_run_time' => (string) ($seriesItem->episode_run_time ?? 0),
                         'category_id' => $seriesCategoryId,
-                    ];
+                    ]);
+                    $first = false;
+                    if (ob_get_level() > 0) {
+                        ob_flush();
+                    }
+                    flush();
                 }
-            }
-
-            return response()->json($seriesList);
+                echo ']';
+            }, 200, [
+                'Content-Type' => 'application/json',
+                'X-Accel-Buffering' => 'no',
+            ]);
         } elseif ($action === 'get_series_info') {
             $seriesId = $request->input('series_id');
 
@@ -2011,10 +1940,10 @@ class XtreamApiController extends Controller
     /**
      * Build a consistent mapping of network group name to category ID.
      *
-     * @param  \Illuminate\Support\Collection<int, Network>  $networks
+     * @param  Collection<int, Network>  $networks
      * @return array<string, string>
      */
-    private function buildNetworkCategoryMap(\Illuminate\Support\Collection $networks): array
+    private function buildNetworkCategoryMap(Collection $networks): array
     {
         $index = 1;
 

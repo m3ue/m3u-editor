@@ -271,7 +271,7 @@ class PlaylistGenerateController extends Controller
                 // If the playlist includes series in M3U, include the series episodes
                 if ($playlist->include_series_in_m3u) {
                     // Get the seasons
-                    $series = $playlist->series()
+                    foreach ($playlist->series()
                         ->where('series.enabled', true)
                         ->with([
                             'category',
@@ -280,9 +280,7 @@ class PlaylistGenerateController extends Controller
                             },
                         ])
                         ->orderBy('sort')
-                        ->get();
-
-                    foreach ($series as $s) {
+                        ->lazyById(50) as $s) {
                         // Get series movie DB ID's as fallbacks for episode
                         $movieDbIds = $s->getMovieDbIds() ?? [];
                         $seriesTmdbId = $movieDbIds['tmdb'] ?? $movieDbIds['tvdb'] ?? $movieDbIds['imdb'] ?? null;
@@ -656,7 +654,7 @@ class PlaylistGenerateController extends Controller
     /**
      * Build the base query for channels for a playlist.
      */
-    public static function getChannelQuery($playlist): mixed
+    public static function getChannelQuery($playlist, ?bool $isVod = null): mixed
     {
         // Build the base query for channels. We'll use cursor() to stream
         // results rather than loading all channels into memory.
@@ -667,9 +665,9 @@ class PlaylistGenerateController extends Controller
         $query = $playlist->channels()
             ->leftJoin('groups', 'channels.group_id', '=', 'groups.id')
             ->where('channels.enabled', true)
-            ->when(! $playlist->include_vod_in_m3u, function ($q) {
-                $q->where('channels.is_vod', false);
-            })
+            ->when($isVod === true, fn ($q) => $q->where('channels.is_vod', true))
+            ->when($isVod === false, fn ($q) => $q->where('channels.is_vod', false))
+            ->when($isVod === null && ! $playlist->include_vod_in_m3u, fn ($q) => $q->where('channels.is_vod', false))
             // Select the channel columns and also pull through group name and (for custom)
             // the custom tag name/order so we can order in SQL and avoid a PHP-side resort.
             ->selectRaw('channels.*')
