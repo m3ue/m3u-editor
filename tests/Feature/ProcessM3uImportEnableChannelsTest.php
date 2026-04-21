@@ -7,6 +7,8 @@ use App\Models\User;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
 
+// Isolate the jobs connection to a temp database so parallel test processes
+// don't interfere with each other via the shared jobs.sqlite file.
 beforeEach(function () {
     $this->tempJobsDb = sys_get_temp_dir().'/jobs_test_'.uniqid().'.sqlite';
     touch($this->tempJobsDb);
@@ -55,23 +57,18 @@ it('marks imported m3u channels as enabled when playlist auto-enable is on', fun
         ]);
     });
 
+    // Prevent ProcessM3uImportChunk / ProcessM3uImportComplete from being dispatched
+    // while still allowing processChannelCollection() to write Job staging records.
     Bus::fake();
 
-    $job = new ProcessM3uImport($playlist, force: true, isNew: false);
-    expect((bool) $playlist->fresh()->enable_channels)->toBeTrue();
-    expect((bool) $job->playlist->enable_channels)->toBeTrue();
+    (new ProcessM3uImport($playlist, force: true, isNew: false))->handle();
 
-    $method = new ReflectionMethod($job, 'processM3uPlus');
-    $method->invoke($job);
+    $importJobs = Job::all();
+    expect($importJobs)->not->toBeEmpty();
 
-    $importJob = Job::query()->first();
+    $allEnabled = $importJobs
+        ->flatMap(fn (Job $job): array => $job->payload)
+        ->every(fn (array $channel): bool => (bool) ($channel['enabled'] ?? false));
 
-    expect($importJob)->not->toBeNull();
-
-    $payload = $importJob->payload;
-    expect($payload)->toBeArray()
-        ->and($payload)->not->toBeEmpty();
-
-    $allEnabled = collect($payload)->every(fn (array $channel): bool => (bool) ($channel['enabled'] ?? false));
-    $this->assertTrue($allEnabled, 'Unexpected payload: '.json_encode($payload));
+    expect($allEnabled)->toBeTrue();
 });
