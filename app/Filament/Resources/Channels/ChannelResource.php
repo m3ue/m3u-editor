@@ -1285,7 +1285,6 @@ class ChannelResource extends Resource implements CopilotResource
                             })
                             ->icon('heroicon-o-arrow-path')
                             ->visible(fn ($record) => $record && $record->probe_enabled)
-                            ->requiresConfirmation(false)
                             ->action(function ($record) {
                                 dispatch(new ProbeChannelStreams(channelIds: [$record->id]));
 
@@ -1358,6 +1357,7 @@ class ChannelResource extends Resource implements CopilotResource
                         Section::make(__('Advanced'))
                             ->collapsible()
                             ->collapsed()
+                            ->compact()
                             ->columnSpanFull()
                             ->columns(2)
                             ->visible(fn ($record) => self::resolveTechnicalDetailsState($record) === 'ok')
