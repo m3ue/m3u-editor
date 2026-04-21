@@ -29,7 +29,7 @@ use XMLReader;
  */
 class EpgCacheService
 {
-    private const CACHE_VERSION = 'v1';
+    private const CACHE_VERSION = 'v2';
 
     private const CHANNELS_FILE = 'channels.json';
 
@@ -277,10 +277,15 @@ class EpgCacheService
                         'desc' => '',
                         'category' => '',
                         'episode_num' => '',
+                        'episode_nums' => [],
                         'rating' => '',
                         'icon' => '',
                         'images' => [],
                         'new' => false,
+                        'previously_shown' => false,
+                        'premiere' => false,
+                        'urls' => [],
+                        'production_year' => null,
                     ];
 
                     while (@$innerReader->read()) {
@@ -321,8 +326,40 @@ class EpgCacheService
                                 case 'new':
                                     $programme['new'] = true;
                                     break;
+                                case 'previously-shown':
+                                    $programme['previously_shown'] = true;
+                                    break;
+                                case 'premiere':
+                                    $programme['premiere'] = true;
+                                    break;
                                 case 'episode-num':
-                                    $programme['episode_num'] = trim($innerReader->readString() ?: '');
+                                    $episodeNumValue = trim($innerReader->readString() ?: '');
+                                    $episodeNumSystem = trim((string) ($innerReader->getAttribute('system') ?: ''));
+                                    if ($episodeNumValue !== '') {
+                                        if ($programme['episode_num'] === '') {
+                                            $programme['episode_num'] = $episodeNumValue;
+                                        }
+                                        $programme['episode_nums'][] = [
+                                            'system' => $episodeNumSystem,
+                                            'value' => $episodeNumValue,
+                                        ];
+                                    }
+                                    break;
+                                case 'url':
+                                    $urlValue = trim($innerReader->readString() ?: '');
+                                    $urlSystem = mb_strtolower(trim((string) ($innerReader->getAttribute('system') ?: '')));
+                                    if ($urlValue !== '') {
+                                        $programme['urls'][] = [
+                                            'system' => $urlSystem,
+                                            'value' => $urlValue,
+                                        ];
+                                    }
+                                    break;
+                                case 'date':
+                                    $dateValue = trim($innerReader->readString() ?: '');
+                                    if ($programme['production_year'] === null && preg_match('/^(\d{4})/', $dateValue, $matches)) {
+                                        $programme['production_year'] = (int) $matches[1];
+                                    }
                                     break;
                                 case 'rating':
                                     while (@$innerReader->read()) {
@@ -692,10 +729,15 @@ class EpgCacheService
                     'desc' => '',
                     'category' => '',
                     'episode_num' => '',
+                    'episode_nums' => [],
                     'rating' => '',
                     'icon' => '',
                     'images' => [], // New: store program artwork
                     'new' => false,
+                    'previously_shown' => false,
+                    'premiere' => false,
+                    'urls' => [],
+                    'production_year' => null,
                 ];
 
                 while (@$innerReader->read()) {
@@ -737,8 +779,40 @@ class EpgCacheService
                             case 'new':
                                 $programme['new'] = true;
                                 break;
+                            case 'previously-shown':
+                                $programme['previously_shown'] = true;
+                                break;
+                            case 'premiere':
+                                $programme['premiere'] = true;
+                                break;
                             case 'episode-num':
-                                $programme['episode_num'] = trim($innerReader->readString() ?: '');
+                                $episodeNumValue = trim($innerReader->readString() ?: '');
+                                $episodeNumSystem = trim((string) ($innerReader->getAttribute('system') ?: ''));
+                                if ($episodeNumValue !== '') {
+                                    if ($programme['episode_num'] === '') {
+                                        $programme['episode_num'] = $episodeNumValue;
+                                    }
+                                    $programme['episode_nums'][] = [
+                                        'system' => $episodeNumSystem,
+                                        'value' => $episodeNumValue,
+                                    ];
+                                }
+                                break;
+                            case 'url':
+                                $urlValue = trim($innerReader->readString() ?: '');
+                                $urlSystem = mb_strtolower(trim((string) ($innerReader->getAttribute('system') ?: '')));
+                                if ($urlValue !== '') {
+                                    $programme['urls'][] = [
+                                        'system' => $urlSystem,
+                                        'value' => $urlValue,
+                                    ];
+                                }
+                                break;
+                            case 'date':
+                                $dateValue = trim($innerReader->readString() ?: '');
+                                if ($programme['production_year'] === null && preg_match('/^(\d{4})/', $dateValue, $matches)) {
+                                    $programme['production_year'] = (int) $matches[1];
+                                }
                                 break;
                             case 'rating':
                                 // Read rating value

@@ -4,6 +4,7 @@ use App\Services\TmdbService;
 use App\Settings\GeneralSettings;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\RateLimiter;
 
 uses(RefreshDatabase::class);
 
@@ -14,6 +15,10 @@ beforeEach(function () {
     $this->settings->tmdb_language = 'en-US';
     $this->settings->tmdb_rate_limit = 40;
     $this->settings->tmdb_confidence_threshold = 80;
+
+    // Avoid Redis dependency from TmdbService::waitForRateLimit() in tests.
+    RateLimiter::shouldReceive('tooManyAttempts')->andReturnFalse();
+    RateLimiter::shouldReceive('hit')->andReturnNull();
 });
 
 it('returns null when API key is not configured', function () {
@@ -169,4 +174,97 @@ it('handles API errors gracefully', function () {
     $result = $service->searchMovie('The Matrix');
 
     expect($result)->toBeNull();
+});
+
+it('can resolve an external imdb id via TMDB find', function () {
+    Http::fake([
+        'https://api.themoviedb.org/3/find/tt0090390*' => Http::response([
+            'tv_results' => [
+                [
+                    'id' => 4592,
+                    'name' => 'ALF',
+                    'original_name' => 'ALF',
+                    'first_air_date' => '1986-09-22',
+                    'poster_path' => '/alf-poster.jpg',
+                    'backdrop_path' => '/alf-backdrop.jpg',
+                    'popularity' => 45.2,
+                ],
+            ],
+            'movie_results' => [],
+        ], 200),
+    ]);
+
+    $service = new TmdbService($this->settings);
+    $result = $service->findByExternalId('tt0090390', 'imdb_id');
+
+    expect($result)->not->toBeNull()
+        ->and($result['tmdb_id'])->toBe(4592)
+        ->and($result['_media_type'])->toBe('tv');
+});
+
+it('can resolve a raw tmdb id by probing details endpoints', function () {
+    Http::fake([
+        'https://api.themoviedb.org/3/tv/4592*' => Http::response([
+            'id' => 4592,
+            'name' => 'ALF',
+            'original_name' => 'ALF',
+            'overview' => 'Alien life form sitcom.',
+            'poster_path' => '/alf-poster.jpg',
+            'backdrop_path' => '/alf-backdrop.jpg',
+            'first_air_date' => '1986-09-22',
+            'genres' => [],
+            'external_ids' => [
+                'imdb_id' => 'tt0090390',
+                'tvdb_id' => 78020,
+            ],
+            'credits' => ['cast' => [], 'crew' => []],
+            'videos' => ['results' => []],
+        ], 200),
+    ]);
+
+    $service = new TmdbService($this->settings);
+    $result = $service->findByExternalId('4592', 'tmdb_id');
+
+    expect($result)->not->toBeNull()
+        ->and($result['tmdb_id'])->toBe(4592)
+        ->and($result['_media_type'])->toBe('tv')
+        ->and($result['name'])->toBe('ALF');
+});
+
+it('can search across multi endpoint and return media type', function () {
+    Http::fake([
+        'https://api.themoviedb.org/3/search/multi*' => Http::response([
+            'results' => [
+                [
+                    'id' => 4592,
+                    'media_type' => 'tv',
+                    'name' => 'ALF',
+                    'original_name' => 'ALF',
+                    'overview' => 'Alien life form sitcom.',
+                    'first_air_date' => '1986-09-22',
+                    'poster_path' => '/alf-poster.jpg',
+                    'backdrop_path' => '/alf-backdrop.jpg',
+                    'popularity' => 45.2,
+                ],
+                [
+                    'id' => 9999,
+                    'media_type' => 'movie',
+                    'title' => 'Different Movie',
+                    'original_title' => 'Different Movie',
+                    'release_date' => '2020-01-01',
+                    'poster_path' => '/movie-poster.jpg',
+                    'backdrop_path' => '/movie-backdrop.jpg',
+                    'popularity' => 20.0,
+                ],
+            ],
+        ], 200),
+    ]);
+
+    $service = new TmdbService($this->settings);
+    $result = $service->searchMulti('ALF');
+
+    expect($result)->not->toBeNull()
+        ->and($result['tmdb_id'])->toBe(4592)
+        ->and($result['_media_type'])->toBe('tv')
+        ->and($result['name'])->toBe('ALF');
 });
