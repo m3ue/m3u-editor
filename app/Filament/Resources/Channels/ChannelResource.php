@@ -1273,7 +1273,203 @@ class ChannelResource extends Resource implements CopilotResource
                             ->trueColor('success')
                             ->falseColor('danger'),
                     ]),
+                Section::make(__('Technical Details'))
+                    ->collapsible()
+                    ->visible(fn ($record) => $record && ! $record->is_vod)
+                    ->headerActions([
+                        Action::make('probe')
+                            ->label(fn ($record) => match (self::resolveTechnicalDetailsState($record)) {
+                                'ok' => __('Re-probe'),
+                                'failed' => __('Retry probe'),
+                                default => __('Probe now'),
+                            })
+                            ->icon('heroicon-o-arrow-path')
+                            ->visible(fn ($record) => $record && $record->probe_enabled)
+                            ->action(function ($record) {
+                                dispatch(new ProbeChannelStreams(channelIds: [$record->id]));
+
+                                Notification::make()
+                                    ->success()
+                                    ->title(__('Probing started'))
+                                    ->body(__('You will be notified when complete.'))
+                                    ->send();
+                            }),
+                    ])
+                    ->columns(2)
+                    ->schema([
+                        TextEntry::make('tech.resolution')
+                            ->label(__('Resolution'))
+                            ->state(fn ($record) => $record?->getStreamStatsForDisplay()['compact']['resolution'] ?? null)
+                            ->visible(fn ($record) => self::resolveTechnicalDetailsState($record) === 'ok'
+                                && ! empty($record->getStreamStatsForDisplay()['compact']['resolution'])),
+                        TextEntry::make('tech.source_fps')
+                            ->label(__('Frame rate'))
+                            ->state(function ($record) {
+                                $fps = $record?->getStreamStatsForDisplay()['compact']['source_fps'] ?? null;
+
+                                return $fps !== null ? "{$fps} fps" : null;
+                            })
+                            ->visible(fn ($record) => self::resolveTechnicalDetailsState($record) === 'ok'
+                                && ($record->getStreamStatsForDisplay()['compact']['source_fps'] ?? null) !== null),
+                        TextEntry::make('tech.video_codec_display')
+                            ->label(__('Video codec'))
+                            ->state(fn ($record) => $record?->getStreamStatsForDisplay()['compact']['video_codec_display'] ?? null)
+                            ->visible(fn ($record) => self::resolveTechnicalDetailsState($record) === 'ok'
+                                && ! empty($record->getStreamStatsForDisplay()['compact']['video_codec_display'])),
+                        TextEntry::make('tech.ffmpeg_output_bitrate')
+                            ->label(__('Video bitrate'))
+                            ->state(function ($record) {
+                                $v = $record?->getStreamStatsForDisplay()['compact']['ffmpeg_output_bitrate'] ?? null;
+
+                                return $v !== null ? number_format($v, 0).' kbps' : null;
+                            })
+                            ->visible(fn ($record) => self::resolveTechnicalDetailsState($record) === 'ok'
+                                && ($record->getStreamStatsForDisplay()['compact']['ffmpeg_output_bitrate'] ?? null) !== null),
+                        TextEntry::make('tech.audio_codec')
+                            ->label(__('Audio codec'))
+                            ->state(fn ($record) => $record?->getStreamStatsForDisplay()['compact']['audio_codec'] ?? null)
+                            ->visible(fn ($record) => self::resolveTechnicalDetailsState($record) === 'ok'
+                                && ! empty($record->getStreamStatsForDisplay()['compact']['audio_codec'])),
+                        TextEntry::make('tech.audio_channels')
+                            ->label(__('Audio channels'))
+                            ->state(fn ($record) => $record?->getStreamStatsForDisplay()['compact']['audio_channels'] ?? null)
+                            ->visible(fn ($record) => self::resolveTechnicalDetailsState($record) === 'ok'
+                                && ! empty($record->getStreamStatsForDisplay()['compact']['audio_channels'])),
+                        TextEntry::make('tech.audio_bitrate')
+                            ->label(__('Audio bitrate'))
+                            ->state(function ($record) {
+                                $v = $record?->getStreamStatsForDisplay()['compact']['audio_bitrate'] ?? null;
+
+                                return $v !== null ? number_format($v, 0).' kbps' : null;
+                            })
+                            ->visible(fn ($record) => self::resolveTechnicalDetailsState($record) === 'ok'
+                                && ($record->getStreamStatsForDisplay()['compact']['audio_bitrate'] ?? null) !== null),
+                        TextEntry::make('tech.audio_language')
+                            ->label(__('Audio language'))
+                            ->state(fn ($record) => $record?->getStreamStatsForDisplay()['compact']['audio_language'] ?? null)
+                            ->visible(fn ($record) => self::resolveTechnicalDetailsState($record) === 'ok'
+                                && ! empty($record->getStreamStatsForDisplay()['compact']['audio_language'])),
+                        TextEntry::make('tech.probed_at')
+                            ->label(__('Last probed'))
+                            ->state(fn ($record) => $record?->stream_stats_probed_at?->diffForHumans())
+                            ->tooltip(fn ($record) => $record?->stream_stats_probed_at?->toDayDateTimeString())
+                            ->visible(fn ($record) => self::resolveTechnicalDetailsState($record) === 'ok'),
+                        Section::make(__('Advanced'))
+                            ->collapsible()
+                            ->collapsed()
+                            ->compact()
+                            ->columnSpanFull()
+                            ->columns(2)
+                            ->visible(fn ($record) => self::resolveTechnicalDetailsState($record) === 'ok')
+                            ->schema([
+                                TextEntry::make('tech.adv.video_codec_long_name')
+                                    ->label(__('Codec long name'))
+                                    ->state(fn ($record) => $record?->getStreamStatsForDisplay()['advanced']['video']['codec_long_name'] ?? null)
+                                    ->visible(fn ($record) => ! empty($record?->getStreamStatsForDisplay()['advanced']['video']['codec_long_name'])),
+                                TextEntry::make('tech.adv.video_level')
+                                    ->label(__('Level'))
+                                    ->state(fn ($record) => $record?->getStreamStatsForDisplay()['advanced']['video']['level'])
+                                    ->visible(fn ($record) => ($record?->getStreamStatsForDisplay()['advanced']['video']['level'] ?? null) !== null),
+                                TextEntry::make('tech.adv.video_bit_depth')
+                                    ->label(__('Bit depth'))
+                                    ->state(fn ($record) => $record?->getStreamStatsForDisplay()['advanced']['video']['bit_depth'])
+                                    ->visible(fn ($record) => ($record?->getStreamStatsForDisplay()['advanced']['video']['bit_depth'] ?? null) !== null),
+                                TextEntry::make('tech.adv.video_ref_frames')
+                                    ->label(__('Ref frames'))
+                                    ->state(fn ($record) => $record?->getStreamStatsForDisplay()['advanced']['video']['ref_frames'])
+                                    ->visible(fn ($record) => ($record?->getStreamStatsForDisplay()['advanced']['video']['ref_frames'] ?? null) !== null),
+                                TextEntry::make('tech.adv.video_dar')
+                                    ->label(__('Display aspect ratio'))
+                                    ->state(fn ($record) => $record?->getStreamStatsForDisplay()['advanced']['video']['display_aspect_ratio'] ?? null)
+                                    ->visible(fn ($record) => ! empty($record?->getStreamStatsForDisplay()['advanced']['video']['display_aspect_ratio'])),
+                                TextEntry::make('tech.adv.audio_sample_rate')
+                                    ->label(__('Sample rate'))
+                                    ->state(fn ($record) => $record?->getStreamStatsForDisplay()['advanced']['audio']['sample_rate'])
+                                    ->visible(fn ($record) => ($record?->getStreamStatsForDisplay()['advanced']['audio']['sample_rate'] ?? null) !== null),
+                                TextEntry::make('tech.adv.audio_codec_long_name')
+                                    ->label(__('Codec long name'))
+                                    ->state(fn ($record) => $record?->getStreamStatsForDisplay()['advanced']['audio']['codec_long_name'] ?? null)
+                                    ->visible(fn ($record) => ! empty($record?->getStreamStatsForDisplay()['advanced']['audio']['codec_long_name'])),
+                                TextEntry::make('tech.adv.all_streams')
+                                    ->label(__('All streams'))
+                                    ->columnSpanFull()
+                                    ->state(function ($record) {
+                                        $streams = $record?->getStreamStatsForDisplay()['advanced']['all_streams'] ?? null;
+                                        if (! $streams) {
+                                            return null;
+                                        }
+                                        $rows = array_map(function (array $s) {
+                                            $parts = ["#{$s['index']}", $s['type'], $s['codec']];
+                                            if ($s['lang'] !== null && $s['lang'] !== '') {
+                                                $parts[] = $s['lang'];
+                                            }
+
+                                            return implode(' · ', array_filter($parts, fn ($p) => $p !== null && $p !== ''));
+                                        }, $streams);
+
+                                        return implode("\n", $rows);
+                                    })
+                                    ->visible(fn ($record) => ! empty($record?->getStreamStatsForDisplay()['advanced']['all_streams'])),
+                                TextEntry::make('tech.adv.tags')
+                                    ->label(__('Tags'))
+                                    ->columnSpanFull()
+                                    ->state(function ($record) {
+                                        $tags = $record?->getStreamStatsForDisplay()['advanced']['tags'] ?? null;
+                                        if (! $tags) {
+                                            return null;
+                                        }
+                                        $rows = [];
+                                        foreach ($tags as $k => $v) {
+                                            $rows[] = "{$k}: {$v}";
+                                        }
+
+                                        return implode("\n", $rows);
+                                    })
+                                    ->visible(fn ($record) => ! empty($record?->getStreamStatsForDisplay()['advanced']['tags'])),
+                            ]),
+                        TextEntry::make('tech.placeholder_never')
+                            ->hiddenLabel()
+                            ->columnSpanFull()
+                            ->icon('heroicon-o-information-circle')
+                            ->state(fn () => __("This channel hasn't been probed yet. Run a probe to capture stream details."))
+                            ->visible(fn ($record) => self::resolveTechnicalDetailsState($record) === 'never'),
+                        TextEntry::make('tech.placeholder_failed')
+                            ->hiddenLabel()
+                            ->columnSpanFull()
+                            ->icon('heroicon-o-exclamation-triangle')
+                            ->state(function ($record) {
+                                $when = $record?->stream_stats_probed_at?->diffForHumans();
+
+                                return __('Last probe returned no data — the stream may have been unreachable.')
+                                    .($when ? " ({$when})" : '');
+                            })
+                            ->visible(fn ($record) => self::resolveTechnicalDetailsState($record) === 'failed'),
+                        TextEntry::make('tech.placeholder_disabled')
+                            ->hiddenLabel()
+                            ->columnSpanFull()
+                            ->icon('heroicon-o-no-symbol')
+                            ->state(fn () => __("Probing is disabled for this channel. Enable it in the channel's edit form to allow probe data collection."))
+                            ->visible(fn ($record) => self::resolveTechnicalDetailsState($record) === 'disabled'),
+                    ]),
             ]);
+    }
+
+    private static function resolveTechnicalDetailsState(?Channel $record): string
+    {
+        if (! $record) {
+            return 'disabled';
+        }
+        if (! $record->probe_enabled) {
+            return 'disabled';
+        }
+        if ($record->stream_stats_probed_at === null) {
+            return 'never';
+        }
+        if (empty($record->stream_stats)) {
+            return 'failed';
+        }
+
+        return 'ok';
     }
 
     public static function getForm($customPlaylist = null, $edit = false): array
