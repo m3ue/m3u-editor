@@ -525,15 +525,20 @@ class XtreamApiController extends Controller
             // Use the optimised query: JOINs instead of eager loads, SQL-level ordering, cursor-compatible.
             $channelsQuery = PlaylistGenerateController::getChannelQuery($playlist, isVod: false);
 
-            // For custom playlists, pull the tag ID and pivot channel number via subqueries so we
-            // can resolve category_id and channel numbering without triggering N+1 tag queries.
+            // For custom playlists, pull the tag ID and pivot channel number via correlated subqueries
+            // so category_id and channel numbering are resolved without N+1 tag queries or relying
+            // on the BelongsToMany pivot hydration (which cursor() does not trigger).
             if ($isCustomPlaylist) {
+                $customPlaylistId = ($playlist instanceof PlaylistAlias) ? $playlist->custom_playlist_id : $playlist->id;
                 $channelsQuery
                     ->selectRaw(
                         '(SELECT t.id FROM taggables tb INNER JOIN tags t ON t.id = tb.tag_id WHERE tb.taggable_id = channels.id AND tb.taggable_type = ? AND t.type = ? ORDER BY t.order_column ASC LIMIT 1) as custom_group_id',
                         [Channel::class, $tagUuid]
                     )
-                    ->selectRaw('channel_custom_playlist.channel_number as pivot_channel_number');
+                    ->selectRaw(
+                        '(SELECT ccp.channel_number FROM channel_custom_playlist ccp WHERE ccp.channel_id = channels.id AND ccp.custom_playlist_id = ?) as ccp_channel_number',
+                        [$customPlaylistId]
+                    );
             }
 
             // Apply category filtering when requested.
@@ -591,8 +596,8 @@ class XtreamApiController extends Controller
                         $channelCategoryId = (string) $channel->group_id;
                     }
 
-                    $channelNo = ($isCustomPlaylist && ! empty($channel->pivot_channel_number))
-                        ? (int) $channel->pivot_channel_number
+                    $channelNo = ($isCustomPlaylist && ! empty($channel->ccp_channel_number))
+                        ? (int) $channel->ccp_channel_number
                         : $channel->channel;
                     if (! $channelNo && ($playlist->auto_channel_increment || $idChannelBy === PlaylistChannelId::Number)) {
                         $channelNo = ++$channelNumber;
@@ -668,12 +673,16 @@ class XtreamApiController extends Controller
             $channelsQuery = PlaylistGenerateController::getChannelQuery($playlist, isVod: true);
 
             if ($isCustomPlaylist) {
+                $customPlaylistId = ($playlist instanceof PlaylistAlias) ? $playlist->custom_playlist_id : $playlist->id;
                 $channelsQuery
                     ->selectRaw(
                         '(SELECT t.id FROM taggables tb INNER JOIN tags t ON t.id = tb.tag_id WHERE tb.taggable_id = channels.id AND tb.taggable_type = ? AND t.type = ? ORDER BY t.order_column ASC LIMIT 1) as custom_group_id',
                         [Channel::class, $tagUuid]
                     )
-                    ->selectRaw('channel_custom_playlist.channel_number as pivot_channel_number');
+                    ->selectRaw(
+                        '(SELECT ccp.channel_number FROM channel_custom_playlist ccp WHERE ccp.channel_id = channels.id AND ccp.custom_playlist_id = ?) as ccp_channel_number',
+                        [$customPlaylistId]
+                    );
             }
 
             if ($categoryId && $categoryId !== 'all') {
@@ -730,8 +739,8 @@ class XtreamApiController extends Controller
                     }
 
                     $tmdb = $channel->info['tmdb_id'] ?? $channel->movie_data['tmdb_id'] ?? 0;
-                    $vodChannelNo = ($isCustomPlaylist && ! empty($channel->pivot_channel_number))
-                        ? (int) $channel->pivot_channel_number
+                    $vodChannelNo = ($isCustomPlaylist && ! empty($channel->ccp_channel_number))
+                        ? (int) $channel->ccp_channel_number
                         : ($channel->channel ?: $num);
 
                     echo json_encode([
