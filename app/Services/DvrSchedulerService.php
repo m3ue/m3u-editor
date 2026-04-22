@@ -180,9 +180,11 @@ class DvrSchedulerService
             return;
         }
 
-        // Check dedup — only block active recordings, not Cancelled/Failed
+        // Check dedup — only block active recordings, not Cancelled/Failed.
+        // Use programme_start (= manual_start) not scheduled_start, because scheduled_start
+        // is offset by start_early_seconds and may not match the stored value.
         $exists = DvrRecording::where('dvr_recording_rule_id', $rule->id)
-            ->where('scheduled_start', $rule->manual_start)
+            ->where('programme_start', $rule->manual_start)
             ->whereIn('status', [
                 DvrRecordingStatus::Scheduled->value,
                 DvrRecordingStatus::Recording->value,

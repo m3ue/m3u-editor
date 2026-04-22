@@ -1660,12 +1660,21 @@ class M3uProxyService
             if ($response->successful()) {
                 $data = $response->json() ?: [];
 
-                // Only include broadcasts for networks owned by the current user
-                // Get networks for current user
+                // Only include broadcasts for networks or DVR recordings owned by the current user
+                $userId = (string) auth()->id();
                 $userNetworkUuids = Network::where('user_id', auth()->id())->pluck('uuid')->toArray();
 
-                $broadcasts = array_filter($data['broadcasts'] ?? [], function ($b) use ($userNetworkUuids) {
-                    return isset($b['network_id']) && in_array($b['network_id'], $userNetworkUuids);
+                $broadcasts = array_filter($data['broadcasts'] ?? [], function ($b) use ($userNetworkUuids, $userId) {
+                    // Network broadcasts: network_id matches a user-owned network UUID
+                    if (isset($b['network_id']) && in_array($b['network_id'], $userNetworkUuids)) {
+                        return true;
+                    }
+                    // DVR broadcasts: metadata.type === 'dvr' and user_id matches
+                    if (($b['metadata']['type'] ?? null) === 'dvr' && ($b['metadata']['user_id'] ?? null) === $userId) {
+                        return true;
+                    }
+
+                    return false;
                 });
 
                 return [
