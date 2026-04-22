@@ -400,7 +400,6 @@ class EpgApiController extends Controller
                 ->when(! $vod, function ($query) {
                     return $query->where('channels.is_vod', false);
                 })
-                ->where('enabled', true)
                 ->count();
 
             $channels = $playlistChannelData;

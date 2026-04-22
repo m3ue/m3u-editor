@@ -18,6 +18,8 @@ use App\Filament\Resources\Categories\CategoryResource;
 use App\Filament\Resources\Channels\ChannelResource;
 use App\Filament\Resources\ChannelScrubbers\ChannelScrubberResource;
 use App\Filament\Resources\CustomPlaylists\CustomPlaylistResource;
+use App\Filament\Resources\DvrRecordingRules\DvrRecordingRuleResource;
+use App\Filament\Resources\DvrRecordings\DvrRecordingResource;
 use App\Filament\Resources\EpgChannels\EpgChannelResource;
 use App\Filament\Resources\EpgMaps\EpgMapResource;
 use App\Filament\Resources\Epgs\EpgResource;
@@ -221,6 +223,12 @@ class AdminPanelProvider extends PanelProvider
                             ->items([
                                 ...StreamProfileResource::getNavigationItems(),
                                 ...M3uProxyStreamMonitor::getNavigationItems(),
+                            ]),
+                        NavigationGroup::make(fn () => __('DVR'))
+                            ->icon('heroicon-m-video-camera')
+                            ->items([
+                                ...DvrRecordingResource::getNavigationItems(),
+                                ...DvrRecordingRuleResource::getNavigationItems(),
                             ]),
                         NavigationGroup::make(fn () => __('Plugins'))
                             ->icon('heroicon-m-puzzle-piece')
