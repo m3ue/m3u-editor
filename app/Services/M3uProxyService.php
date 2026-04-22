@@ -2546,6 +2546,24 @@ class M3uProxyService
     }
 
     /**
+     * Get the DVR callback URL for m3u-proxy to notify the editor when a DVR broadcast ends.
+     *
+     * The proxy calls this endpoint from within the Docker network, so we MUST use the
+     * internal LAN address (failoverResolverUrl), not the public editor URL. Returns null
+     * when the resolver URL is not configured — callers should treat this as a hard block.
+     *
+     * @return string|null The DVR callback endpoint URL, or null if the resolver is not configured
+     */
+    public function getDvrCallbackUrl(): ?string
+    {
+        if (! empty($this->failoverResolverUrl)) {
+            return "{$this->failoverResolverUrl}/api/dvr/callback";
+        }
+
+        return null;
+    }
+
+    /**
      * Get the webhook callback URL for m3u-proxy to send webhook events.
      *
      * @return string|null The webhook callback endpoint URL, or null if not configured
@@ -2579,7 +2597,15 @@ class M3uProxyService
         }
 
         $networkId = $recording->uuid;
-        $callbackUrl = ProxyFacade::getBaseUrl().'/api/dvr/callback';
+        $callbackUrl = $this->getDvrCallbackUrl();
+
+        if (empty($callbackUrl)) {
+            throw new Exception(
+                'DVR callback URL cannot be resolved: the proxy calls back from within the Docker network, '.
+                'so the internal editor URL must be configured via Settings → Proxy → "Failover Resolver URL" '.
+                '(e.g. http://m3u-editor:36400). DVR recording is unavailable until this value is set.'
+            );
+        }
 
         $durationSeconds = 0;
         if ($recording->scheduled_start && $recording->scheduled_end) {
