@@ -180,6 +180,7 @@ class EpgApiController extends Controller
         $skip = max(0, ($page - 1) * $perPage);
         $search = $request->get('search', null);
         $group = $request->get('group', null) ?: null;
+        $vod = (bool) $request->get('vod', false);
         $username = $request->get('username', null);
         $password = $request->get('password', null);
 
@@ -395,6 +396,9 @@ class EpgApiController extends Controller
                     $coalesce = 'COALESCE('.$g->wrap('channels.group').', '.$g->wrap('channels.group_internal').')';
 
                     return $queryBuilder->whereRaw("LOWER({$coalesce}) = ?", [Str::lower($group)]);
+                })
+                ->when(! $vod, function ($query) {
+                    return $query->where('channels.is_vod', false);
                 })
                 ->count();
 

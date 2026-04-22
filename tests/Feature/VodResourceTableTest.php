@@ -3,6 +3,7 @@
 use App\Events\PlaylistCreated;
 use App\Filament\Resources\Vods\Pages\ListVod;
 use App\Models\Channel;
+use App\Models\DvrRecording;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
@@ -133,3 +134,39 @@ it('missing_tmdb_id filter excludes channels with dedicated tmdb_id column', fun
         ->assertCanNotSeeTableRecords([$withId])
         ->assertCanSeeTableRecords([$withoutId]);
 })->skip(fn () => DB::connection()->getDriverName() !== 'pgsql', 'Requires PostgreSQL for JSON operations');
+
+it('separates custom and dvr status filters', function () {
+    $customVod = Channel::factory()->create([
+        'user_id' => $this->user->id,
+        'is_vod' => true,
+        'is_custom' => true,
+        'dvr_recording_id' => null,
+        'title' => 'Manual Custom VOD',
+    ]);
+
+    $dvrRecording = DvrRecording::factory()->create([
+        'user_id' => $this->user->id,
+    ]);
+
+    $dvrVod = Channel::factory()->create([
+        'user_id' => $this->user->id,
+        'is_vod' => true,
+        'is_custom' => true,
+        'dvr_recording_id' => $dvrRecording->id,
+        'title' => 'DVR VOD',
+    ]);
+
+    Livewire::test(ListVod::class)
+        ->assertOk()
+        ->set('statusFilter', 'custom')
+        ->loadTable()
+        ->assertCanSeeTableRecords([$customVod])
+        ->assertCanNotSeeTableRecords([$dvrVod]);
+
+    Livewire::test(ListVod::class)
+        ->assertOk()
+        ->set('statusFilter', 'dvr')
+        ->loadTable()
+        ->assertCanSeeTableRecords([$dvrVod])
+        ->assertCanNotSeeTableRecords([$customVod]);
+});

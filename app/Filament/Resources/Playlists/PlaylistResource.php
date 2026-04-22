@@ -44,6 +44,7 @@ use App\Services\DateFormatService;
 use App\Services\EpgCacheService;
 use App\Services\M3uProxyService;
 use App\Services\ProfileService;
+use App\Settings\GeneralSettings;
 use App\Tables\Columns\ProgressColumn;
 use App\Traits\HasUserFiltering;
 use Carbon\Carbon;
@@ -2794,6 +2795,112 @@ class PlaylistResource extends Resource implements CopilotResource
                 ->icon($icon)
                 ->schema($fields);
         }
+
+        // DVR tab — settings for the dvrSetting HasOne relationship.
+        // Fields are prefixed with dvr_ and hydrated/dehydrated via EditPlaylist hooks.
+        $tabs[] = Tab::make(__('DVR'))
+            ->icon('heroicon-m-video-camera')
+            ->schema([
+                Section::make(__('DVR Settings'))
+                    ->icon('heroicon-m-video-camera')
+                    ->description(__('Configure digital video recording for this playlist. Enable DVR to schedule recordings from the EPG guide.'))
+                    ->schema([
+                        Toggle::make('dvr_enabled')
+                            ->label(__('Enable DVR'))
+                            ->helperText(__('When enabled, the EPG guide will show record buttons and the scheduler will process recording rules.'))
+                            ->default(false)
+                            ->inline(false)
+                            ->live(),
+                        Select::make('dvr_output_format')
+                            ->label(__('Output Format'))
+                            ->helperText(__('Container format for the final recording file. All options use stream copy (no re-encoding) — only the container changes.'))
+                            ->options([
+                                'ts' => 'MPEG-TS (.ts) — fastest, direct segment join, no remuxing',
+                                'mp4' => 'MP4 (.mp4) — best compatibility with media players',
+                                'mkv' => 'MKV (.mkv) — flexible container, good player support',
+                            ])
+                            ->default('ts')
+                            ->required()
+                            ->hidden(fn (Get $get): bool => ! $get('dvr_enabled')),
+                        Grid::make()
+                            ->columns(2)
+                            ->columnSpanFull()
+                            ->hidden(fn (Get $get): bool => ! $get('dvr_enabled'))
+                            ->schema([
+                                TextInput::make('dvr_storage_path')
+                                    ->label(__('Storage Path'))
+                                    ->helperText(__('Subdirectory within the DVR storage disk for this playlist\'s recordings.'))
+                                    ->placeholder('recordings')
+                                    ->maxLength(255),
+                                TextInput::make('dvr_max_concurrent_recordings')
+                                    ->label(__('Max Concurrent Recordings'))
+                                    ->helperText(__('Maximum number of recordings that can run simultaneously for this playlist.'))
+                                    ->numeric()
+                                    ->minValue(1)
+                                    ->maxValue(20)
+                                    ->default(2),
+                                TextInput::make('dvr_default_start_early_seconds')
+                                    ->label(__('Start Early (seconds)'))
+                                    ->helperText(__('Start recordings this many seconds before the scheduled start time.'))
+                                    ->numeric()
+                                    ->minValue(0)
+                                    ->maxValue(600)
+                                    ->default(30),
+                                TextInput::make('dvr_default_end_late_seconds')
+                                    ->label(__('End Late (seconds)'))
+                                    ->helperText(__('Continue recording this many seconds after the scheduled end time.'))
+                                    ->numeric()
+                                    ->minValue(0)
+                                    ->maxValue(600)
+                                    ->default(60),
+                                TextInput::make('dvr_retention_days')
+                                    ->label(__('Retention (days)'))
+                                    ->helperText(__('Automatically delete recordings older than this many days. Set to 0 to disable automatic deletion.'))
+                                    ->numeric()
+                                    ->minValue(0)
+                                    ->default(0),
+                                TextInput::make('dvr_global_disk_quota_gb')
+                                    ->label(__('Disk Quota (GB)'))
+                                    ->helperText(__('Maximum total disk usage for DVR recordings. Oldest recordings are deleted first when quota is exceeded. Set to 0 for no limit.'))
+                                    ->numeric()
+                                    ->minValue(0)
+                                    ->default(0),
+                            ]),
+                        Grid::make()
+                            ->columns(2)
+                            ->columnSpanFull()
+                            ->hidden(fn (Get $get): bool => ! $get('dvr_enabled'))
+                            ->schema([
+                                Toggle::make('dvr_enable_metadata_enrichment')
+                                    ->label(__('Enable Metadata Enrichment'))
+                                    ->helperText(__('Automatically fetch metadata (artwork, descriptions, episode info) from TMDB and TVMaze after recording.'))
+                                    ->default(true)
+                                    ->inline(false)
+                                    ->live(),
+                                Placeholder::make('dvr_tmdb_status')
+                                    ->label(__('TMDB'))
+                                    ->content(function (): HtmlString {
+                                        $hasKey = ! empty(app(GeneralSettings::class)->tmdb_api_key);
+
+                                        if ($hasKey) {
+                                            return new HtmlString(
+                                                '<span class="text-sm text-success-600 dark:text-success-400 font-medium">✓ TMDB API key configured in Settings</span>'
+                                            );
+                                        }
+
+                                        $url = route('filament.admin.pages.preferences').'#tmdb';
+
+                                        return new HtmlString(
+                                            '<span class="text-sm text-warning-600 dark:text-warning-400">No TMDB API key found. '
+                                            .'<a href="'.e($url).'" class="underline font-medium">Configure it in Settings → TMDB</a> '
+                                            .'to enable TMDB metadata lookups. TVMaze will be used as a fallback.</span>'
+                                        );
+                                    })
+                                    ->hidden(fn (Get $get): bool => ! $get('dvr_enable_metadata_enrichment')),
+                            ]),
+                    ]),
+            ])
+            ->hiddenOn('create');
 
         // Compose the form with tabs and sections
         return [

@@ -453,6 +453,12 @@ class ListVod extends ListRecords
                 return $query->where('group_id', $relationId);
             })->count();
         $customCount = Channel::query()->where([...$where, ['is_custom', true]])
+            ->whereNull('dvr_recording_id')
+            ->when($relationId, function ($query, $relationId) {
+                return $query->where('group_id', $relationId);
+            })->count();
+        $dvrCount = Channel::query()->where($where)
+            ->whereNotNull('dvr_recording_id')
             ->when($relationId, function ($query, $relationId) {
                 return $query->where('group_id', $relationId);
             })->count();
@@ -478,8 +484,11 @@ class ListVod extends ListRecords
                 ->modifyQueryUsing(fn ($query) => $query->whereHas('failovers'))
                 ->badge($withFailoverCount),
             'custom' => Tab::make(__('Custom'))
-                ->modifyQueryUsing(fn ($query) => $query->where('is_custom', true))
+                ->modifyQueryUsing(fn ($query) => $query->where('is_custom', true)->whereNull('dvr_recording_id'))
                 ->badge($customCount),
+            'dvr' => Tab::make(__('DVR'))
+                ->modifyQueryUsing(fn ($query) => $query->whereNotNull('dvr_recording_id'))
+                ->badge($dvrCount),
         ];
     }
 
@@ -502,7 +511,8 @@ class ListVod extends ListRecords
             'enabled' => $query->where('enabled', true),
             'disabled' => $query->where('enabled', false),
             'failover' => $query->whereHas('failovers'),
-            'custom' => $query->where('is_custom', true),
+            'custom' => $query->where('is_custom', true)->whereNull('dvr_recording_id'),
+            'dvr' => $query->whereNotNull('dvr_recording_id'),
             default => $query,
         };
     }
@@ -525,7 +535,7 @@ class ListVod extends ListRecords
         }
 
         $counts = (clone $baseQuery)
-            ->selectRaw('count(*) as all_count, sum(case when enabled then 1 else 0 end) as enabled_count, sum(case when not enabled then 1 else 0 end) as disabled_count, sum(case when is_custom then 1 else 0 end) as custom_count')
+            ->selectRaw('count(*) as all_count, sum(case when enabled then 1 else 0 end) as enabled_count, sum(case when not enabled then 1 else 0 end) as disabled_count, sum(case when is_custom and dvr_recording_id is null then 1 else 0 end) as custom_count, sum(case when dvr_recording_id is not null then 1 else 0 end) as dvr_count')
             ->first();
 
         return [
@@ -534,6 +544,7 @@ class ListVod extends ListRecords
             'disabled' => (int) ($counts->disabled_count ?? 0),
             'failover' => (clone $baseQuery)->whereHas('failovers')->count(),
             'custom' => (int) ($counts->custom_count ?? 0),
+            'dvr' => (int) ($counts->dvr_count ?? 0),
         ];
     }
 

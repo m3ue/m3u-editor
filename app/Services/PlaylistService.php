@@ -71,7 +71,7 @@ class PlaylistService
         // Manually construct base URL to ensure port is included (if not using HTTPS)
         $url = rtrim(config('app.url'), '/');
         $port = config('app.port');
-        if (! Str::contains($url, 'https') && $port) {
+        if (! Str::contains($url, 'https') && $port && ! Str::contains($url, ':'.$port)) {
             $url .= ':'.$port;
         }
 

@@ -6,6 +6,8 @@ use App\Facades\PlaylistFacade;
 use App\Facades\ProxyFacade;
 use App\Models\Channel;
 use App\Models\CustomPlaylist;
+use App\Models\DvrRecording;
+use App\Models\DvrSetting;
 use App\Models\Episode;
 use App\Models\MergedPlaylist;
 use App\Models\Network;
@@ -1658,12 +1660,17 @@ class M3uProxyService
             if ($response->successful()) {
                 $data = $response->json() ?: [];
 
-                // Only include broadcasts for networks owned by the current user
-                // Get networks for current user
+                // Only include broadcasts for networks or DVR recordings owned by the current user
                 $userNetworkUuids = Network::where('user_id', auth()->id())->pluck('uuid')->toArray();
+                $userDvrUuids = DvrRecording::where('user_id', auth()->id())->pluck('uuid')->toArray();
 
-                $broadcasts = array_filter($data['broadcasts'] ?? [], function ($b) use ($userNetworkUuids) {
-                    return isset($b['network_id']) && in_array($b['network_id'], $userNetworkUuids);
+                $broadcasts = array_filter($data['broadcasts'] ?? [], function ($b) use ($userNetworkUuids, $userDvrUuids) {
+                    if (isset($b['network_id'])) {
+                        return in_array($b['network_id'], $userNetworkUuids)
+                            || in_array($b['network_id'], $userDvrUuids);
+                    }
+
+                    return false;
                 });
 
                 return [
@@ -2556,6 +2563,129 @@ class M3uProxyService
         }
 
         // Return null if not configured, as webhooks are optional and may not be needed if the resolver URL is not set
+        return null;
+    }
+
+    /**
+     * Start a DVR broadcast on the proxy.
+     *
+     * Uses the proxy's BroadcastManager with dvr_mode=true so all HLS segments
+     * are preserved for post-processing. The recording UUID is used as the
+     * network_id so it is globally unique and traceable.
+     *
+     * Returns the network_id (= recording UUID) on success.
+     *
+     * @throws Exception when the proxy is unreachable or returns an error
+     */
+    public function startDvrBroadcast(DvrRecording $recording, DvrSetting $setting, string $streamUrl): string
+    {
+        if (empty($this->apiBaseUrl)) {
+            throw new Exception('M3U Proxy base URL is not configured');
+        }
+
+        $networkId = $recording->uuid;
+
+        $durationSeconds = 0;
+        if ($recording->scheduled_start && $recording->scheduled_end) {
+            $durationSeconds = (int) abs($recording->scheduled_end->diffInSeconds($recording->scheduled_start));
+            // Add end-late buffer
+            $durationSeconds += (int) $setting->resolveEndLateSeconds(null);
+        }
+
+        $payload = [
+            'stream_url' => $streamUrl,
+            'duration_seconds' => $durationSeconds,
+            'dvr_mode' => true,
+            'metadata' => [
+                'type' => 'dvr',
+                'recording_id' => $recording->uuid,
+                'recording_db_id' => (string) $recording->id,
+                'title' => $recording->title,
+            ],
+        ];
+
+        $endpoint = $this->apiBaseUrl.'/broadcast/'.rawurlencode($networkId).'/start';
+        $response = Http::timeout(10)
+            ->acceptJson()
+            ->withHeaders($this->apiToken ? ['X-API-Token' => $this->apiToken] : [])
+            ->post($endpoint, $payload);
+
+        if (! $response->successful()) {
+            throw new Exception("Proxy returned HTTP {$response->status()} starting DVR broadcast: ".$response->body());
+        }
+
+        return $networkId;
+    }
+
+    /**
+     * Stop a running DVR broadcast on the proxy.
+     */
+    public function stopDvrBroadcast(string $networkId): bool
+    {
+        if (empty($this->apiBaseUrl)) {
+            Log::warning('DVR stop: M3U Proxy base URL not configured');
+
+            return false;
+        }
+
+        try {
+            $endpoint = $this->apiBaseUrl.'/broadcast/'.rawurlencode($networkId).'/stop';
+            $response = Http::timeout(10)
+                ->acceptJson()
+                ->withHeaders($this->apiToken ? ['X-API-Token' => $this->apiToken] : [])
+                ->post($endpoint);
+
+            if ($response->successful()) {
+                Log::debug("DVR broadcast {$networkId} stopped on proxy");
+
+                return true;
+            }
+
+            Log::warning("Failed to stop DVR broadcast {$networkId}: ".$response->body());
+
+            return false;
+        } catch (Exception $e) {
+            Log::error("Error stopping DVR broadcast {$networkId}: ".$e->getMessage());
+
+            return false;
+        }
+    }
+
+    /**
+     * Get the public live HLS URL for an in-progress DVR recording.
+     * Clients can connect to this URL to watch the recording in real time.
+     */
+    public function getDvrBroadcastLiveUrl(string $networkId): string
+    {
+        return $this->getPublicUrl().'/broadcast/'.rawurlencode($networkId).'/live.m3u8';
+    }
+
+    /**
+     * Fetch the filesystem path to the HLS segment directory for a DVR broadcast.
+     *
+     * Called before stopping a broadcast so we know where segments are stored.
+     * Returns null if the broadcast is not found or the proxy is unreachable.
+     */
+    public function getDvrBroadcastHlsDir(string $networkId): ?string
+    {
+        if (empty($this->apiBaseUrl)) {
+            return null;
+        }
+
+        try {
+            $endpoint = $this->apiBaseUrl.'/broadcast/'.rawurlencode($networkId).'/status';
+            $response = Http::timeout(5)
+                ->acceptJson()
+                ->withHeaders($this->apiToken ? ['X-API-Token' => $this->apiToken] : [])
+                ->get($endpoint);
+
+            if ($response->successful()) {
+                return $response->json('hls_dir') ?: null;
+            }
+        } catch (Exception $e) {
+            Log::warning("DVR: Could not fetch hls_dir for broadcast {$networkId}: {$e->getMessage()}");
+        }
+
         return null;
     }
 }

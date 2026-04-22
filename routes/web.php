@@ -4,6 +4,8 @@ use App\Http\Controllers\Api\DispatcharrController;
 use App\Http\Controllers\AssetPreviewController;
 use App\Http\Controllers\Auth\OidcController;
 use App\Http\Controllers\ChannelController;
+use App\Http\Controllers\DvrCallbackController;
+use App\Http\Controllers\DvrStreamController;
 use App\Http\Controllers\EpgController;
 use App\Http\Controllers\EpgFileController;
 use App\Http\Controllers\EpgGenerateController;
@@ -346,3 +348,15 @@ Route::get('/webdav-media/{integration}/stream/{item}', [
     MediaServerProxyController::class,
     'streamWebDavMedia',
 ])->name('webdav-media.stream');
+
+/*
+ * DVR routes — file streaming and proxy callbacks
+ * Stream auth mirrors the Xtream stream pattern: username + password (playlist UUID)
+ * or PlaylistAuth credentials embedded in the URL.
+ * The callback route is unauthenticated (validated by API token in the controller).
+ */
+Route::get('/dvr/{username}/{password}/{uuid}.{format?}', [DvrStreamController::class, 'stream'])
+    ->name('dvr.recording.stream');
+
+Route::post('/api/dvr/callback', [DvrCallbackController::class, 'handle'])
+    ->name('dvr.callback');

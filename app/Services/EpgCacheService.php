@@ -6,7 +6,10 @@ use App\Enums\EpgSourceType;
 use App\Enums\Status;
 use App\Facades\PlaylistFacade;
 use App\Models\CustomPlaylist;
+use App\Models\DvrSetting;
 use App\Models\Epg;
+use App\Models\EpgMap;
+use App\Models\EpgProgramme;
 use App\Models\MergedPlaylist;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
@@ -192,6 +195,9 @@ class EpgCacheService
             ]);
 
             Log::debug('EPG cache generated successfully', $metadata);
+
+            // Populate epg_programmes DB table for DVR-enabled playlists
+            $this->populateDvrProgrammes($epg);
 
             return true;
         } catch (Exception $e) {
@@ -1498,5 +1504,147 @@ class EpgCacheService
                 }
             })
             ->modalSubmitActionLabel('Download EPG');
+    }
+
+    /**
+     * Populate the epg_programmes DB table for any DVR-enabled playlists that use this EPG.
+     *
+     * Reads from the JSONL cache files (covering yesterday through 7 days ahead) and
+     * upserts rows into epg_programmes so the DVR scheduler can query them without
+     * touching the filesystem.
+     */
+    private function populateDvrProgrammes(Epg $epg): void
+    {
+        // Find all DVR-enabled playlists whose EpgMap references this EPG
+        $playlistIds = DvrSetting::where('enabled', true)
+            ->pluck('playlist_id');
+
+        if ($playlistIds->isEmpty()) {
+            return;
+        }
+
+        // Check at least one of those playlists is mapped to this EPG
+        $hasMapping = EpgMap::whereIn('playlist_id', $playlistIds)
+            ->where('epg_id', $epg->id)
+            ->exists();
+
+        if (! $hasMapping) {
+            return;
+        }
+
+        Log::debug("Populating epg_programmes for EPG {$epg->name} (id={$epg->id})");
+
+        // Delete stale rows for this EPG so we do a clean refresh
+        EpgProgramme::where('epg_id', $epg->id)->delete();
+
+        $cacheDir = $this->getCacheDir($epg);
+        $now = now();
+        $from = $now->copy()->subDay()->startOfDay();
+        $to = $now->copy()->addDays(7)->endOfDay();
+
+        $batch = [];
+        $batchSize = 500;
+        $inserted = 0;
+        $skipped = 0;
+
+        // Iterate over date files within the window
+        $current = $from->copy();
+        while ($current->lte($to)) {
+            $date = $current->format('Y-m-d');
+            $filePath = $this->getCacheFilePath($epg, "programmes-{$date}.jsonl");
+
+            if (! Storage::disk('local')->exists($filePath)) {
+                $current->addDay();
+
+                continue;
+            }
+
+            $fullPath = Storage::disk('local')->path($filePath);
+            $handle = fopen($fullPath, 'r');
+            if (! $handle) {
+                $current->addDay();
+
+                continue;
+            }
+
+            while (($line = fgets($handle)) !== false) {
+                $line = trim($line);
+                if (empty($line)) {
+                    continue;
+                }
+
+                try {
+                    $record = json_decode($line, true);
+                    if (! $record || ! isset($record['channel'], $record['programme'])) {
+                        continue;
+                    }
+
+                    $p = $record['programme'];
+                    $startTime = isset($p['start']) ? Carbon::parse($p['start']) : null;
+                    $endTime = isset($p['stop']) ? Carbon::parse($p['stop']) : null;
+
+                    if (! $startTime || ! $endTime) {
+                        $skipped++;
+
+                        continue;
+                    }
+
+                    // Parse episode info from xmltv episode-num (e.g. "1.2.0/1" → S2E3)
+                    $season = null;
+                    $episode = null;
+                    if (! empty($p['episode_num'])) {
+                        $parts = explode('.', $p['episode_num']);
+                        if (isset($parts[0]) && is_numeric(trim($parts[0]))) {
+                            $season = (int) trim($parts[0]) + 1;
+                        }
+                        if (isset($parts[1]) && is_numeric(trim($parts[1]))) {
+                            $episode = (int) trim($parts[1]) + 1;
+                        }
+                    }
+
+                    $batch[] = [
+                        'epg_id' => $epg->id,
+                        'epg_channel_id' => $record['channel'],
+                        'title' => $p['title'] ?? '',
+                        'subtitle' => $p['subtitle'] ?? null,
+                        'description' => $p['desc'] ?? null,
+                        'category' => $p['category'] ?? null,
+                        'start_time' => $startTime->toDateTimeString(),
+                        'end_time' => $endTime->toDateTimeString(),
+                        'episode_num' => $p['episode_num'] ?? null,
+                        'season' => $season,
+                        'episode' => $episode,
+                        'is_new' => (bool) ($p['new'] ?? false),
+                        'icon' => $p['icon'] ?? null,
+                        'rating' => $p['rating'] ?? null,
+                        'created_at' => now()->toDateTimeString(),
+                        'updated_at' => now()->toDateTimeString(),
+                    ];
+
+                    if (count($batch) >= $batchSize) {
+                        EpgProgramme::insert($batch);
+                        $inserted += count($batch);
+                        $batch = [];
+                    }
+                } catch (Exception $e) {
+                    Log::warning("Failed to parse programme line for DVR: {$e->getMessage()}");
+                    $skipped++;
+                }
+            }
+
+            fclose($handle);
+            $current->addDay();
+        }
+
+        // Flush remaining
+        if (! empty($batch)) {
+            EpgProgramme::insert($batch);
+            $inserted += count($batch);
+        }
+
+        Log::debug("EPG programmes populated for DVR: {$inserted} inserted, {$skipped} skipped", [
+            'epg_id' => $epg->id,
+            'epg_name' => $epg->name,
+        ]);
     }
 }
