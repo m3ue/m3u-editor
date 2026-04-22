@@ -58,7 +58,7 @@ class DvrSchedulerService
     private function matchAndSchedule(int $lookaheadMinutes): void
     {
         $rules = DvrRecordingRule::enabled()
-            ->with(['dvrSetting', 'channel', 'epgChannel'])
+            ->with(['dvrSetting.playlist', 'channel', 'epgChannel'])
             ->get();
 
         if ($rules->isEmpty()) {
@@ -123,10 +123,13 @@ class DvrSchedulerService
 
     /**
      * ONCE rule: match a specific programme by start time + channel.
+     * Falls back to the current dummy EPG slot when no programme is linked.
      */
     private function matchOnceRule(DvrRecordingRule $rule, int $lookaheadMinutes): void
     {
         if (empty($rule->programme_id)) {
+            $this->matchOnceRuleViaDummyEpg($rule, $lookaheadMinutes);
+
             return;
         }
 
@@ -213,6 +216,90 @@ class DvrSchedulerService
             'programme_start' => $rule->manual_start,
             'programme_end' => $rule->manual_end,
             'stream_url' => $streamUrl,
+        ]);
+    }
+
+    /**
+     * ONCE rule fallback: schedule the current dummy EPG slot when no programme_id is set.
+     *
+     * Dummy EPG slots are aligned to midnight in blocks of `dummy_epg_length` minutes.
+     * After scheduling, the rule is disabled so only one recording is created.
+     */
+    private function matchOnceRuleViaDummyEpg(DvrRecordingRule $rule, int $lookaheadMinutes): void
+    {
+        $setting = $rule->dvrSetting;
+        if (! $setting || ! $setting->enabled) {
+            return;
+        }
+
+        $playlist = $setting->playlist;
+        if (! $playlist || ! $playlist->dummy_epg || ! $rule->channel_id) {
+            return;
+        }
+
+        $dummyEpgLength = (int) ($playlist->dummy_epg_length ?? 120);
+
+        $now = now();
+        $startOfDay = $now->copy()->startOfDay();
+        $minutesSinceMidnight = (int) floor($startOfDay->diffInMinutes($now));
+        $slotIndex = (int) floor($minutesSinceMidnight / $dummyEpgLength);
+        $slotStart = $startOfDay->copy()->addMinutes($slotIndex * $dummyEpgLength);
+        $slotEnd = $slotStart->copy()->addMinutes($dummyEpgLength);
+        $lookahead = $now->copy()->addMinutes($lookaheadMinutes);
+
+        $isCurrentlyAiring = $slotStart <= $now && $slotEnd > $now;
+        $isUpcoming = $slotStart > $now && $slotStart <= $lookahead;
+
+        if (! $isCurrentlyAiring && ! $isUpcoming) {
+            return;
+        }
+
+        if ($setting->isAtCapacity()) {
+            return;
+        }
+
+        $exists = DvrRecording::where('dvr_recording_rule_id', $rule->id)
+            ->where('programme_start', $slotStart)
+            ->whereIn('status', [
+                DvrRecordingStatus::Scheduled->value,
+                DvrRecordingStatus::Recording->value,
+                DvrRecordingStatus::PostProcessing->value,
+            ])
+            ->exists();
+
+        if ($exists) {
+            return;
+        }
+
+        $startEarly = $setting->resolveStartEarlySeconds($rule->start_early_seconds);
+        $endLate = $setting->resolveEndLateSeconds($rule->end_late_seconds);
+
+        $channel = $rule->channel;
+        $title = $channel ? ($channel->title_custom ?? $channel->title ?? 'Recording') : 'Recording';
+        $streamUrl = $this->resolveStreamUrl($rule, $setting);
+
+        DvrRecording::create([
+            'uuid' => (string) Str::uuid(),
+            'user_id' => $setting->user_id,
+            'dvr_setting_id' => $setting->id,
+            'dvr_recording_rule_id' => $rule->id,
+            'channel_id' => $rule->channel_id,
+            'status' => DvrRecordingStatus::Scheduled->value,
+            'title' => $title,
+            'scheduled_start' => $slotStart->copy()->subSeconds($startEarly),
+            'scheduled_end' => $slotEnd->copy()->addSeconds($endLate),
+            'programme_start' => $slotStart,
+            'programme_end' => $slotEnd,
+            'stream_url' => $streamUrl,
+        ]);
+
+        // Disable once the recording is scheduled — "once" means record this slot, then stop.
+        $rule->update(['enabled' => false]);
+
+        Log::info("DVR: Scheduled once recording via dummy EPG for '{$title}'", [
+            'rule_id' => $rule->id,
+            'slot_start' => $slotStart,
+            'slot_end' => $slotEnd,
         ]);
     }
 

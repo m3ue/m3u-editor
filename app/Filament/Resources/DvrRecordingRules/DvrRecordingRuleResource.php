@@ -83,6 +83,19 @@ class DvrRecordingRuleResource extends Resource
                     ->required()
                     ->live(),
 
+                DateTimePicker::make('manual_start')
+                    ->label(__('Manual Start'))
+                    ->native(false)
+                    ->visible(fn (Get $get): bool => self::isRuleType($get('type'), DvrRuleType::Manual))
+                    ->requiredIf('type', DvrRuleType::Manual->value),
+
+                DateTimePicker::make('manual_end')
+                    ->label(__('Manual End'))
+                    ->native(false)
+                    ->visible(fn (Get $get): bool => self::isRuleType($get('type'), DvrRuleType::Manual))
+                    ->requiredIf('type', DvrRuleType::Manual->value)
+                    ->after('manual_start'),
+
                 Select::make('channel_id')
                     ->label(__('Channel'))
                     ->options(fn () => Channel::query()
@@ -95,23 +108,12 @@ class DvrRecordingRuleResource extends Resource
                 TextInput::make('series_title')
                     ->label(__('Series Title'))
                     ->placeholder(__('e.g. Breaking Bad'))
-                    ->visible(fn (Get $get): bool => $get('type') === DvrRuleType::Series->value)
+                    ->visible(fn (Get $get): bool => self::isRuleType($get('type'), DvrRuleType::Series))
                     ->requiredIf('type', DvrRuleType::Series->value),
-
-                DateTimePicker::make('manual_start')
-                    ->label(__('Manual Start'))
-                    ->visible(fn (Get $get): bool => $get('type') === DvrRuleType::Manual->value)
-                    ->requiredIf('type', DvrRuleType::Manual->value),
-
-                DateTimePicker::make('manual_end')
-                    ->label(__('Manual End'))
-                    ->visible(fn (Get $get): bool => $get('type') === DvrRuleType::Manual->value)
-                    ->requiredIf('type', DvrRuleType::Manual->value)
-                    ->after('manual_start'),
 
                 Toggle::make('new_only')
                     ->label(__('New Episodes Only'))
-                    ->visible(fn (Get $get): bool => $get('type') === DvrRuleType::Series->value)
+                    ->visible(fn (Get $get): bool => self::isRuleType($get('type'), DvrRuleType::Series))
                     ->default(false),
 
                 TextInput::make('start_early_seconds')
@@ -206,6 +208,17 @@ class DvrRecordingRuleResource extends Resource
                     Actions\DeleteBulkAction::make(),
                 ]),
             ]);
+    }
+
+    /**
+     * Compare a form field value against a rule type, handling both enum instances and backing strings.
+     *
+     * Filament may return a DvrRuleType enum instance (when editing an existing record)
+     * or the raw string backing value (when creating or after a live() Select change).
+     */
+    private static function isRuleType(mixed $value, DvrRuleType $type): bool
+    {
+        return $value === $type || $value === $type->value;
     }
 
     public static function getRelations(): array

@@ -157,6 +157,77 @@ it('disables a once rule when the programme_id no longer exists', function () {
     expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(0);
 });
 
+// --- Once rules (dummy EPG fallback) ---
+
+it('schedules a once rule with no programme_id using the current dummy epg slot', function () {
+    // Override the DVR setting's playlist to have dummy EPG enabled
+    $this->setting->playlist->update([
+        'dummy_epg' => true,
+        'dummy_epg_length' => 60,
+    ]);
+
+    $channel = \App\Models\Channel::factory()->for($this->setting->playlist)->create();
+
+    $rule = DvrRecordingRule::factory()
+        ->for($this->setting, 'dvrSetting')
+        ->for($this->user)
+        ->create([
+            'type' => DvrRuleType::Once,
+            'programme_id' => null,
+            'channel_id' => $channel->id,
+        ]);
+
+    $this->service->tick();
+
+    expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(1);
+    expect($rule->fresh()->enabled)->toBeFalse();
+});
+
+it('does not schedule a once rule with no programme_id when playlist has no dummy epg', function () {
+    $this->setting->playlist->update(['dummy_epg' => false]);
+
+    $channel = \App\Models\Channel::factory()->for($this->setting->playlist)->create();
+
+    $rule = DvrRecordingRule::factory()
+        ->for($this->setting, 'dvrSetting')
+        ->for($this->user)
+        ->create([
+            'type' => DvrRuleType::Once,
+            'programme_id' => null,
+            'channel_id' => $channel->id,
+        ]);
+
+    $this->service->tick();
+
+    expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(0);
+    expect($rule->fresh()->enabled)->toBeTrue();
+});
+
+it('does not duplicate a dummy epg once recording on subsequent ticks', function () {
+    $this->setting->playlist->update([
+        'dummy_epg' => true,
+        'dummy_epg_length' => 60,
+    ]);
+
+    $channel = \App\Models\Channel::factory()->for($this->setting->playlist)->create();
+
+    $rule = DvrRecordingRule::factory()
+        ->for($this->setting, 'dvrSetting')
+        ->for($this->user)
+        ->create([
+            'type' => DvrRuleType::Once,
+            'programme_id' => null,
+            'channel_id' => $channel->id,
+        ]);
+
+    $this->service->tick();
+    // Re-enable the rule and tick again to verify dedup works (not just the disabled-rule guard)
+    $rule->update(['enabled' => true]);
+    $this->service->tick();
+
+    expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(1);
+});
+
 // --- Manual rules ---
 
 it('creates a scheduled recording for a manual rule within the lookahead window', function () {
