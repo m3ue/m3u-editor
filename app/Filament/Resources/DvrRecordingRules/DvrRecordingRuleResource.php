@@ -6,6 +6,7 @@ use App\Enums\DvrRuleType;
 use App\Models\Channel;
 use App\Models\DvrRecordingRule;
 use App\Models\DvrSetting;
+use App\Traits\HasUserFiltering;
 use BackedEnum;
 use Filament\Actions;
 use Filament\Actions\ActionGroup;
@@ -25,6 +26,8 @@ use Illuminate\Support\Facades\Auth;
 
 class DvrRecordingRuleResource extends Resource
 {
+    use HasUserFiltering;
+
     protected static ?string $model = DvrRecordingRule::class;
 
     protected static string|BackedEnum|null $navigationIcon = null;
@@ -77,6 +80,7 @@ class DvrRecordingRuleResource extends Resource
                 Select::make('channel_id')
                     ->label(__('Channel'))
                     ->options(fn () => Channel::query()
+                        ->where('user_id', Auth::id())
                         ->orderBy('title')
                         ->pluck('title', 'id'))
                     ->searchable()

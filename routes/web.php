@@ -349,7 +349,9 @@ Route::get('/webdav-media/{integration}/stream/{item}', [
 ])->name('webdav-media.stream');
 
 /*
- * DVR routes — file streaming and M3U playlist generation
+ * DVR routes — file streaming
+ * Authentication mirrors the Xtream stream pattern: username + password (playlist UUID)
+ * or PlaylistAuth credentials embedded in the URL.
  */
-Route::get('/dvr/recordings/{uuid}/stream', [DvrStreamController::class, 'stream'])
+Route::get('/dvr/{username}/{password}/{uuid}.{format?}', [DvrStreamController::class, 'stream'])
     ->name('dvr.recording.stream');

@@ -6,6 +6,7 @@ use App\Enums\DvrRecordingStatus;
 use App\Jobs\PostProcessDvrRecording;
 use App\Jobs\StopDvrRecording;
 use App\Models\DvrRecording;
+use App\Traits\HasUserFiltering;
 use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
@@ -25,6 +26,8 @@ use Filament\Tables\Table;
 
 class DvrRecordingResource extends Resource
 {
+    use HasUserFiltering;
+
     protected static ?string $model = DvrRecording::class;
 
     protected static string|BackedEnum|null $navigationIcon = null;

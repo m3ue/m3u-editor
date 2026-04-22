@@ -2,7 +2,14 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\CustomPlaylist;
 use App\Models\DvrRecording;
+use App\Models\MergedPlaylist;
+use App\Models\Playlist;
+use App\Models\PlaylistAlias;
+use App\Models\PlaylistAuth;
+use App\Models\User;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Storage;
@@ -11,17 +18,32 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 class DvrStreamController extends Controller
 {
     /**
-     * Stream a completed DVR recording file to the client.
+     * Stream a DVR recording.
      *
-     * GET /dvr/recordings/{uuid}/stream
+     * GET /dvr/{username}/{password}/{uuid}.{format?}
      *
-     * Supports HTTP range requests for seeking. MIME type is resolved from the
-     * file extension so that both legacy .ts recordings and new .mp4 recordings
-     * are served with the correct Content-Type.
+     * Authentication mirrors the Xtream stream pattern:
+     * - Method 1: PlaylistAuth credentials
+     * - Method 2: username = playlist owner's name, password = playlist UUID
+     *
+     * Once authenticated, the recording must belong to that user.
+     * Supports HTTP range requests for seeking.
      */
-    public function stream(Request $request, string $uuid): Response|StreamedResponse
+    public function stream(Request $request, string $username, string $password, string $uuid): Response|StreamedResponse
     {
-        $recording = DvrRecording::where('uuid', $uuid)->firstOrFail();
+        $user = $this->resolveUser($username, $password);
+
+        if (! $user) {
+            abort(401, 'Invalid credentials');
+        }
+
+        $recording = DvrRecording::where('uuid', $uuid)
+            ->where('user_id', $user->id)
+            ->first();
+
+        if (! $recording) {
+            abort(404, 'Recording not found');
+        }
 
         if (! $recording->hasFile()) {
             abort(404, 'Recording file not available');
@@ -42,7 +64,6 @@ class DvrStreamController extends Controller
         $fileSize = filesize($fullPath);
         $mimeType = $this->resolveMimeType($recording->file_path);
 
-        // Support range requests for seeking
         $range = $request->header('Range');
 
         if ($range) {
@@ -94,15 +115,53 @@ class DvrStreamController extends Controller
     }
 
     /**
-     * Resolve the MIME type from the recording file extension.
-     * Handles both legacy .ts files and new .mp4 output.
+     * Resolve a User from credentials using the same two-step auth as XtreamStreamController:
+     * 1. PlaylistAuth username/password lookup
+     * 2. Fallback: username = user's name, password = any playlist UUID owned by that user
+     *
+     * Returns the owning User model or null on failure.
+     */
+    private function resolveUser(string $username, string $password): ?User
+    {
+        // Method 1: PlaylistAuth credentials
+        $playlistAuth = PlaylistAuth::where('username', $username)
+            ->where('password', $password)
+            ->where('enabled', true)
+            ->first();
+
+        if ($playlistAuth && ! $playlistAuth->isExpired()) {
+            $playlist = $playlistAuth->getAssignedModel();
+
+            return $playlist?->user;
+        }
+
+        // Method 2: password = playlist UUID, username = owner's name
+        $playlistTypes = [Playlist::class, MergedPlaylist::class, CustomPlaylist::class, PlaylistAlias::class];
+
+        foreach ($playlistTypes as $type) {
+            try {
+                $playlist = $type::with('user')->where('uuid', $password)->firstOrFail();
+
+                if ($playlist->user && $playlist->user->name === $username) {
+                    return $playlist->user;
+                }
+            } catch (ModelNotFoundException) {
+                // Try next type
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Resolve MIME type from the recording file extension.
      */
     private function resolveMimeType(string $filePath): string
     {
         return match (strtolower(pathinfo($filePath, PATHINFO_EXTENSION))) {
             'mp4' => 'video/mp4',
             'mkv' => 'video/x-matroska',
-            default => 'video/mp2t', // .ts and anything unrecognised
+            default => 'video/mp2t',
         };
     }
 }
