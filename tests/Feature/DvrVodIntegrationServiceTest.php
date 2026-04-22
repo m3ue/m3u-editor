@@ -30,11 +30,9 @@ use App\Models\Series;
 use App\Models\User;
 use App\Services\DvrMetadataEnricherService;
 use App\Services\DvrVodIntegrationService;
-use App\Services\PlaylistService;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
-use Illuminate\Support\Facades\Route;
 
 uses(RefreshDatabase::class);
 
@@ -60,11 +58,6 @@ function makeCompletedRecording(array $overrides = []): DvrRecording
 
 beforeEach(function () {
     Queue::fake();
-
-    // Ensure the named route exists in the test environment
-    if (! Route::has('dvr.recording.stream')) {
-        Route::get('/dvr/recordings/{uuid}/stream', fn () => '')->name('dvr.recording.stream');
-    }
 
     $this->service = app(DvrVodIntegrationService::class);
 });
@@ -98,12 +91,12 @@ it('creates a VOD channel for a recording with TMDB movie metadata', function ()
         ->and($channel->name)->toBe('Inception')
         ->and($channel->playlist_id)->toBe($recording->dvrSetting->playlist_id)
         ->and($channel->user_id)->toBe($recording->user_id)
-        ->and($channel->container_extension)->toBe('mp4')
+        ->and($channel->container_extension)->toBe('ts')
         ->and($channel->tmdb_id)->toBe(27205)
         ->and($channel->source_id)->toBeNull();
 });
 
-it('sets the VOD channel URL to the dvr stream path via PlaylistService', function () {
+it('sets the VOD channel URL to the authenticated dvr stream route', function () {
     $recording = makeCompletedRecording([
         'season' => null,
         'episode' => null,
@@ -113,7 +106,13 @@ it('sets the VOD channel URL to the dvr stream path via PlaylistService', functi
     $this->service->integrateRecording($recording);
 
     $channel = Channel::where('dvr_recording_id', $recording->id)->firstOrFail();
-    $expectedUrl = PlaylistService::getBaseUrl('/dvr/recordings/'.$recording->uuid.'/stream');
+    $setting = $recording->dvrSetting;
+    $expectedUrl = route('dvr.recording.stream', [
+        'username' => $recording->user->name,
+        'password' => $setting->playlist->uuid,
+        'uuid' => $recording->uuid,
+        'format' => $setting->dvr_output_format ?? 'ts',
+    ]);
 
     expect($channel->url)->toBe($expectedUrl);
 });
@@ -223,7 +222,7 @@ it('creates Series, Season, and Episode for a recording with TMDB tv metadata', 
         ->and($series->source_series_id)->toBeNull();
 });
 
-it('sets the episode URL to the dvr stream path via PlaylistService', function () {
+it('sets the episode URL to the authenticated dvr stream route', function () {
     $recording = makeCompletedRecording([
         'season' => 1,
         'episode' => 2,
@@ -233,7 +232,13 @@ it('sets the episode URL to the dvr stream path via PlaylistService', function (
     $this->service->integrateRecording($recording);
 
     $episode = Episode::where('dvr_recording_id', $recording->id)->firstOrFail();
-    $expectedUrl = PlaylistService::getBaseUrl('/dvr/recordings/'.$recording->uuid.'/stream');
+    $setting = $recording->dvrSetting;
+    $expectedUrl = route('dvr.recording.stream', [
+        'username' => $recording->user->name,
+        'password' => $setting->playlist->uuid,
+        'uuid' => $recording->uuid,
+        'format' => $setting->dvr_output_format ?? 'ts',
+    ]);
 
     expect($episode->url)->toBe($expectedUrl);
 });
