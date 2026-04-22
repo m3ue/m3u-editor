@@ -79,21 +79,33 @@ class DvrVodIntegrationService
     }
 
     /**
-     * Build the stream URL for a DVR recording.
+     * Build the authenticated stream URL for a DVR recording.
      *
-     * Uses DVR_STREAM_BASE_URL when set (for Docker-internal proxy access),
-     * falling back to the general url_override / APP_URL via PlaylistService.
+     * Generates the same URL format as the "Watch" action:
+     *   /dvr/{username}/{playlist-uuid}/{recording-uuid}.{ext}
+     *
+     * DvrStreamController authenticates via the playlist UUID (no session required),
+     * so this URL works in any media player without additional login.
      */
     private function buildStreamUrl(DvrRecording $recording): string
     {
-        $path = '/dvr/recordings/'.$recording->uuid.'/stream';
-        $base = config('dvr.stream_base_url');
+        $setting = $recording->dvrSetting;
+        $playlist = $setting?->playlist;
+        $user = $recording->user;
 
-        if ($base) {
-            return rtrim($base, '/').$path;
+        if ($playlist && $user) {
+            $ext = $setting->dvr_output_format ?? 'ts';
+
+            return route('dvr.recording.stream', [
+                'username' => $user->name,
+                'password' => $playlist->uuid,
+                'uuid' => $recording->uuid,
+                'format' => $ext,
+            ]);
         }
 
-        return PlaylistService::getBaseUrl($path);
+        // Fallback: path-only URL (playlist or user not resolvable)
+        return url('/dvr/recordings/'.$recording->uuid.'/stream');
     }
 
     /**
@@ -102,6 +114,7 @@ class DvrVodIntegrationService
     private function integrateAsMovie(DvrRecording $recording, int $playlistId, int $userId, ?array $tmdb): void
     {
         $streamUrl = $this->buildStreamUrl($recording);
+        $containerExt = $recording->dvrSetting?->dvr_output_format ?? 'ts';
         $cleanTitle = $this->stripUnicodeDecorations($recording->title);
         $tvmaze = is_array($recording->metadata) ? ($recording->metadata['tvmaze'] ?? null) : null;
 
@@ -122,7 +135,7 @@ class DvrVodIntegrationService
             $channel->is_vod = true;
             $channel->is_custom = true;
             $channel->enabled = true;
-            $channel->container_extension = 'mp4';
+            $channel->container_extension = $containerExt;
             $channel->dvr_recording_id = $recording->id;
             $channel->source_id = null;
 
@@ -183,6 +196,7 @@ class DvrVodIntegrationService
         $seasonNumber = $recording->season ?? 1;
         $episodeNumber = $recording->episode ?? 1;
         $streamUrl = $this->buildStreamUrl($recording);
+        $containerExt = $recording->dvrSetting?->dvr_output_format ?? 'ts';
         $sourceLogo = $this->resolveSourceChannelLogo($recording);
 
         // Find-or-create the DVR category for this playlist
@@ -206,7 +220,7 @@ class DvrVodIntegrationService
             $episode->season_id = $season->id;
             $episode->season = $seasonNumber;
             $episode->episode_num = $episodeNumber;
-            $episode->container_extension = 'mp4';
+            $episode->container_extension = $containerExt;
             $episode->enabled = true;
             $episode->source_episode_id = null;
             $episode->import_batch_no = 'dvr';
