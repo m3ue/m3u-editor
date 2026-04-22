@@ -16,9 +16,6 @@ uses(RefreshDatabase::class);
 function mockSeriesCompleteSettings(bool $tmdbAutoLookupOnImport): void
 {
     $mock = Mockery::mock(GeneralSettings::class);
-    $mock->shouldReceive('getAttribute')
-        ->with('tmdb_auto_lookup_on_import')
-        ->andReturn($tmdbAutoLookupOnImport);
     $mock->tmdb_auto_lookup_on_import = $tmdbAutoLookupOnImport;
 
     app()->instance(GeneralSettings::class, $mock);
@@ -65,7 +62,10 @@ it('does not dispatch FetchTmdbIds when the global auto-lookup setting is disabl
     Bus::assertNotDispatched(FetchTmdbIds::class);
 });
 
-it('does not dispatch FetchTmdbIds when episode metadata sync will run afterwards', function () {
+it('dispatches FetchTmdbIds even when episode metadata sync is also enabled', function () {
+    // On subsequent imports with auto_fetch_series_metadata on, CheckSeriesImportProgress
+    // will also dispatch FetchTmdbIds. We always dispatch here too; the second run is a
+    // near no-op because overwriteExisting defaults to false.
     mockSeriesCompleteSettings(tmdbAutoLookupOnImport: true);
 
     $this->playlist->update(['auto_fetch_series_metadata' => true]);
@@ -82,21 +82,19 @@ it('does not dispatch FetchTmdbIds when episode metadata sync will run afterward
 
     $job->handle(app(GeneralSettings::class));
 
-    // CheckSeriesImportProgress handles the TMDB dispatch at the end of the
-    // metadata sync flow — firing here too would duplicate work.
-    Bus::assertNotDispatched(FetchTmdbIds::class);
+    Bus::assertDispatched(FetchTmdbIds::class);
 });
 
-it('still dispatches FetchTmdbIds when metadata toggle is on but no series are enabled', function () {
+it('dispatches FetchTmdbIds on a first-time import when no series exist yet at cleanup time', function () {
+    // On the very first sync, ProcessM3uImportComplete runs before series chunks
+    // populate the DB, so it skips dispatching ProcessM3uImportSeries. Without this
+    // dispatch, TMDB IDs would never be assigned. We simulate that scenario here by
+    // having auto_fetch_series_metadata enabled but zero series in the DB.
     mockSeriesCompleteSettings(tmdbAutoLookupOnImport: true);
 
     $this->playlist->update(['auto_fetch_series_metadata' => true]);
 
-    $category = Category::factory()->for($this->playlist)->for($this->user)->create();
-    Series::factory()->for($this->playlist)->for($this->user)->for($category)->create([
-        'enabled' => false,
-    ]);
-
+    // No Series records — mirrors the state of a brand-new playlist's first import.
     $job = new ProcessM3uImportSeriesComplete(
         playlist: $this->playlist->fresh(),
         batchNo: 'test-batch',

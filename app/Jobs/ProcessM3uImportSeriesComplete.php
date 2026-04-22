@@ -58,17 +58,16 @@ class ProcessM3uImportSeriesComplete implements ShouldQueue
 
         // Mirror the VOD pipeline (ProcessVodChannelsComplete) by auto-fetching
         // TMDB IDs for newly imported series when the global setting is enabled.
-        // Skip when the follow-up episode metadata sync will run afterwards —
-        // CheckSeriesImportProgress dispatches its own FetchTmdbIds at the end
-        // of that flow, and running both would duplicate work.
+        //
+        // We always dispatch here regardless of auto_fetch_series_metadata. If episode
+        // metadata sync is also enabled, CheckSeriesImportProgress will dispatch its own
+        // FetchTmdbIds afterwards, but with overwriteExisting=false that second run is a
+        // near no-op for series that already received IDs. Always dispatching here ensures
+        // first-time imports are covered: on the very first sync, ProcessM3uImportComplete
+        // runs before the series chunks populate the DB, so it skips dispatching
+        // ProcessM3uImportSeries — meaning CheckSeriesImportProgress never fires and TMDB
+        // IDs would never be assigned without this dispatch.
         if (! $settings->tmdb_auto_lookup_on_import) {
-            return;
-        }
-
-        $willRunMetadataFetch = $this->playlist->auto_fetch_series_metadata
-            && $this->playlist->series()->where('enabled', true)->exists();
-
-        if ($willRunMetadataFetch) {
             return;
         }
 
