@@ -20,6 +20,7 @@ use App\Enums\DvrRecordingStatus;
 use App\Enums\DvrRuleType;
 use App\Jobs\StartDvrRecording;
 use App\Jobs\StopDvrRecording;
+use App\Models\Channel;
 use App\Models\DvrRecording;
 use App\Models\DvrRecordingRule;
 use App\Models\DvrSetting;
@@ -166,7 +167,7 @@ it('schedules a once rule with no programme_id using the current dummy epg slot'
         'dummy_epg_length' => 60,
     ]);
 
-    $channel = \App\Models\Channel::factory()->for($this->setting->playlist)->create();
+    $channel = Channel::factory()->for($this->setting->playlist)->create();
 
     $rule = DvrRecordingRule::factory()
         ->for($this->setting, 'dvrSetting')
@@ -186,7 +187,7 @@ it('schedules a once rule with no programme_id using the current dummy epg slot'
 it('does not schedule a once rule with no programme_id when playlist has no dummy epg', function () {
     $this->setting->playlist->update(['dummy_epg' => false]);
 
-    $channel = \App\Models\Channel::factory()->for($this->setting->playlist)->create();
+    $channel = Channel::factory()->for($this->setting->playlist)->create();
 
     $rule = DvrRecordingRule::factory()
         ->for($this->setting, 'dvrSetting')
@@ -209,7 +210,7 @@ it('does not duplicate a dummy epg once recording on subsequent ticks', function
         'dummy_epg_length' => 60,
     ]);
 
-    $channel = \App\Models\Channel::factory()->for($this->setting->playlist)->create();
+    $channel = Channel::factory()->for($this->setting->playlist)->create();
 
     $rule = DvrRecordingRule::factory()
         ->for($this->setting, 'dvrSetting')
