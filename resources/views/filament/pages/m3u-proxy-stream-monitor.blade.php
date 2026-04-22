@@ -210,7 +210,12 @@ echo $totalBandwidth > 1000 ? round($totalBandwidth / 1000, 1) . ' Mbps' : $tota
                                     <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200">
                                         {{ $stream['format'] }}
                                     </span>
-                                    @if($stream['broadcast'] ?? false)
+                                    @if($stream['is_dvr'] ?? false)
+                                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200">
+                                            <x-heroicon-s-video-camera class="w-3 h-3 mr-1" />
+                                            DVR
+                                        </span>
+                                    @elseif($stream['broadcast'] ?? false)
                                         <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 dark:bg-indigo-900 text-indigo-800 dark:text-indigo-200 ml-2">
                                             Broadcast
                                         </span>

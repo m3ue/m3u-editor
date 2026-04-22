@@ -84,8 +84,7 @@ class EditPlaylist extends EditRecord
 
         if ($dvr) {
             $data['dvr_enabled'] = $dvr->enabled;
-            $data['dvr_use_proxy'] = $dvr->use_proxy;
-            $data['dvr_ffmpeg_path'] = $dvr->ffmpeg_path;
+            $data['dvr_output_format'] = $dvr->dvr_output_format ?? 'ts';
             $data['dvr_storage_path'] = $dvr->storage_path;
             $data['dvr_max_concurrent_recordings'] = $dvr->max_concurrent_recordings;
             $data['dvr_default_start_early_seconds'] = $dvr->default_start_early_seconds;
@@ -93,10 +92,9 @@ class EditPlaylist extends EditRecord
             $data['dvr_retention_days'] = $dvr->retention_days;
             $data['dvr_global_disk_quota_gb'] = $dvr->global_disk_quota_gb;
             $data['dvr_enable_metadata_enrichment'] = $dvr->enable_metadata_enrichment;
-            $data['dvr_tmdb_api_key'] = $dvr->tmdb_api_key;
         } else {
             $data['dvr_enabled'] = false;
-            $data['dvr_use_proxy'] = false;
+            $data['dvr_output_format'] = 'ts';
             $data['dvr_enable_metadata_enrichment'] = true;
         }
 
@@ -138,8 +136,8 @@ class EditPlaylist extends EditRecord
             [
                 'user_id' => $record->user_id,
                 'enabled' => $data['dvr_enabled'] ?? false,
-                'use_proxy' => $data['dvr_use_proxy'] ?? false,
-                'ffmpeg_path' => $data['dvr_ffmpeg_path'] ?? null,
+                'use_proxy' => true,
+                'dvr_output_format' => $data['dvr_output_format'] ?? 'ts',
                 'storage_path' => $data['dvr_storage_path'] ?? null,
                 'max_concurrent_recordings' => $data['dvr_max_concurrent_recordings'] ?? 2,
                 'default_start_early_seconds' => $data['dvr_default_start_early_seconds'] ?? 30,
@@ -147,7 +145,6 @@ class EditPlaylist extends EditRecord
                 'retention_days' => $data['dvr_retention_days'] ?? 0,
                 'global_disk_quota_gb' => $data['dvr_global_disk_quota_gb'] ?? 0,
                 'enable_metadata_enrichment' => $data['dvr_enable_metadata_enrichment'] ?? true,
-                'tmdb_api_key' => $data['dvr_tmdb_api_key'] ?? null,
             ]
         );
     }

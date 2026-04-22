@@ -20,6 +20,7 @@ class DvrSetting extends Model
         'user_id',
         'enabled',
         'use_proxy',
+        'dvr_output_format',
         'storage_disk',
         'storage_path',
         'max_concurrent_recordings',

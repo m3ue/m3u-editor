@@ -6,22 +6,25 @@ use App\Enums\DvrRecordingStatus;
 use App\Models\DvrRecording;
 use Exception;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Storage;
 
 /**
- * DvrRecorderService — Manages FFmpeg child processes for active recordings.
+ * DvrRecorderService — Delegates FFmpeg process management to the m3u-proxy.
  *
  * Responsibilities:
- * - Spawn ffmpeg in HLS mode for each recording
- * - Monitor process exit (success/failure)
- * - Graceful shutdown: SIGINT → wait → SIGKILL
- * - Crash recovery: mark stale RECORDING rows as FAILED on app boot
+ * - Start a DVR broadcast on the proxy (via BroadcastManager)
+ * - Stop a running broadcast via the proxy API
+ * - Recover stale RECORDING rows on app boot
+ *
+ * The proxy handles all FFmpeg lifecycle, HLS segment preservation (dvr_mode),
+ * hardware acceleration, and post-recording callbacks. No PIDs or sleep loops here.
  */
 class DvrRecorderService
 {
+    public function __construct(protected M3uProxyService $proxy) {}
+
     /**
      * Recover from a crash by marking any stale RECORDING rows as FAILED.
-     * Should be called once on application boot (e.g. via a queued job or service provider).
+     * Called once on application boot.
      */
     public function recoverFromCrash(): void
     {
@@ -38,15 +41,15 @@ class DvrRecorderService
         DvrRecording::recording()->update([
             'status' => DvrRecordingStatus::Failed->value,
             'error_message' => 'Server restarted during recording',
-            'pid' => null,
+            'proxy_network_id' => null,
         ]);
     }
 
     /**
-     * Start recording: spawn ffmpeg in HLS mode, update DB, detach the process.
+     * Start recording by launching a DVR broadcast on the proxy.
      *
-     * We use `proc_open` so we can track the PID. The process is intentionally
-     * left running in the background — `StopDvrRecording` will terminate it.
+     * The proxy manages the FFmpeg process, preserves all HLS segments (dvr_mode=true),
+     * and calls back the editor when the recording ends or fails.
      */
     public function start(DvrRecording $recording): void
     {
@@ -64,197 +67,91 @@ class DvrRecorderService
             throw new Exception("DvrSetting not found for recording {$recording->id}");
         }
 
-        // Refresh stream URL at start time — IPTV stream URLs expire, so we get
-        // a fresh URL from the channel. When use_proxy is enabled on the DVR
-        // setting, route the stream through the m3u-proxy so viewers can also
-        // watch the same channel while it is being recorded.
+        // Always route through the proxy — it handles stream URL refresh, reconnects,
+        // and concurrent viewer access via its pooled stream feature.
         $channel = $recording->channel;
-        $streamUrl = null;
-
-        if ($channel && $setting->use_proxy) {
-            $streamUrl = $channel->getProxyUrl();
-        }
-
-        if (empty($streamUrl) && $channel) {
-            $streamUrl = $channel->url;
-        }
-
-        if (empty($streamUrl)) {
-            $streamUrl = $recording->stream_url;
-        }
+        $streamUrl = $channel?->getProxyUrl() ?? $recording->stream_url;
 
         if (empty($streamUrl)) {
             throw new Exception("Recording {$recording->id} has no stream_url — cannot start");
         }
 
-        // Update stored URL so post-processor/streamer uses the same URL we record from
         if ($streamUrl !== $recording->stream_url) {
             $recording->stream_url = $streamUrl;
             $recording->saveQuietly();
         }
 
-        // 1. Generate temp paths if not already set
-        $livePath = $recording->temp_path ?? 'live/'.$recording->uuid;
-        $m3u8RelPath = $livePath.'/stream.m3u8';
-
-        // Persist temp paths so post-processor can find them
-        $recording->update([
-            'temp_path' => $livePath,
-            'temp_manifest_path' => $m3u8RelPath,
-        ]);
-
-        // 2. Create the HLS output directory on the dvr disk
-        Storage::disk($setting->storage_disk ?: config('dvr.storage_disk'))
-            ->makeDirectory($livePath);
-
-        $fullLiveDir = Storage::disk($setting->storage_disk ?: config('dvr.storage_disk'))
-            ->path($livePath);
-
-        $m3u8Path = $fullLiveDir.'/stream.m3u8';
-        $segmentPattern = $fullLiveDir.'/segment_%04d.ts';
-
-        $ffmpegPath = $setting->getFfmpegPath();
-        $segmentSeconds = (int) config('dvr.hls_segment_seconds', 6);
-
-        $args = [
-            $ffmpegPath,
-            '-y',
-            '-i', $streamUrl,
-            '-c', 'copy',
-            '-f', 'hls',
-            '-hls_time', (string) $segmentSeconds,
-            '-hls_list_size', '0',
-            '-hls_flags', 'append_list+omit_endlist',
-            '-hls_segment_filename', $segmentPattern,
-            $m3u8Path,
-        ];
-
-        $cmd = implode(' ', array_map('escapeshellarg', $args));
-
-        // 2. Spawn ffmpeg (stdout/stderr to log file, detached)
-        $logFile = $fullLiveDir.'/ffmpeg.log';
-        $descriptor = [
-            0 => ['file', '/dev/null', 'r'],
-            1 => ['file', $logFile, 'w'],
-            2 => ['file', $logFile, 'a'],
-        ];
-
-        Log::info('DVR: Starting ffmpeg recording', [
+        Log::info('DVR: Starting proxy broadcast', [
             'recording_id' => $recording->id,
             'title' => $recording->title,
             'stream_url' => $streamUrl,
         ]);
 
-        $process = proc_open($cmd, $descriptor, $pipes);
+        $networkId = $this->proxy->startDvrBroadcast($recording, $setting, $streamUrl);
 
-        if (! is_resource($process)) {
-            throw new Exception("proc_open failed for recording {$recording->id}");
-        }
-
-        $status = proc_get_status($process);
-        $pid = $status['pid'] ?? null;
-
-        // 3. Update DB
         $recording->update([
             'status' => DvrRecordingStatus::Recording->value,
             'actual_start' => now(),
-            'pid' => $pid,
+            'proxy_network_id' => $networkId,
         ]);
 
-        // Close proc handle (process continues in background)
-        proc_close($process);
-
-        Log::info('DVR: Recording started', [
+        Log::info('DVR: Proxy broadcast started', [
             'recording_id' => $recording->id,
-            'pid' => $pid,
+            'proxy_network_id' => $networkId,
             'title' => $recording->title,
         ]);
     }
 
     /**
-     * Stop recording: send SIGINT, wait for graceful exit, fall back to SIGKILL.
+     * Stop recording by signalling the proxy to terminate the broadcast.
      *
-     * After stopping, the recording is handed off to DvrPostProcessorService via
-     * the PostProcessDvrRecording job.
+     * The proxy handles graceful FFmpeg shutdown and will call back the editor
+     * via the dvr.callback route when done — PostProcessDvrRecording is dispatched
+     * from the callback, not here.
      */
     public function stop(DvrRecording $recording): void
     {
-        $pid = $recording->pid;
+        $networkId = $recording->proxy_network_id;
 
-        if (! $pid) {
-            Log::warning('DVR stop: no PID on recording — assuming already stopped', [
+        if (! $networkId) {
+            Log::warning('DVR stop: no proxy_network_id on recording — assuming already stopped', [
                 'recording_id' => $recording->id,
             ]);
-            $this->finalizeStop($recording, false);
+            $this->finalizeStop($recording);
 
             return;
         }
 
-        Log::info('DVR: Stopping recording (SIGINT)', [
+        Log::info('DVR: Stopping proxy broadcast', [
             'recording_id' => $recording->id,
-            'pid' => $pid,
+            'proxy_network_id' => $networkId,
         ]);
 
-        // Send SIGINT for graceful stop
-        if (function_exists('posix_kill')) {
-            posix_kill($pid, SIGINT);
-        } else {
-            exec("kill -INT {$pid} 2>/dev/null");
-        }
+        $this->proxy->stopDvrBroadcast($networkId);
 
-        // Wait up to the configured timeout for the process to exit
-        $timeout = (int) config('dvr.graceful_stop_timeout_seconds', 10);
-        $waited = 0;
-        $exited = false;
-
-        while ($waited < $timeout) {
-            sleep(1);
-            $waited++;
-            if (! $this->isProcessRunning($pid)) {
-                $exited = true;
-                break;
-            }
-        }
-
-        if (! $exited) {
-            Log::warning('DVR: ffmpeg did not exit after SIGINT — sending SIGKILL', [
-                'recording_id' => $recording->id,
-                'pid' => $pid,
-            ]);
-
-            if (function_exists('posix_kill')) {
-                posix_kill($pid, SIGKILL);
-            } else {
-                exec("kill -9 {$pid} 2>/dev/null");
-            }
-
-            sleep(1);
-        }
-
-        $this->finalizeStop($recording, $exited);
+        $this->finalizeStop($recording);
     }
 
     /**
-     * Cancel a recording (same as stop but marks status as CANCELLED).
-     * Note: we do NOT override the status here because cancel() is called from
-     * stop() which transitions to PostProcessing. Overriding would break the
-     * PostProcessDvrRecording job. The error_message set by stop() is sufficient.
+     * Cancel a recording — stops the proxy broadcast and marks as cancelled.
      */
     public function cancel(DvrRecording $recording): void
     {
         $this->stop($recording);
 
         $recording->update([
+            'status' => DvrRecordingStatus::Cancelled->value,
             'error_message' => 'Cancelled by user',
         ]);
     }
 
     /**
-     * After ffmpeg exits, transition status to POST_PROCESSING (or FAILED).
+     * Transition a stopped recording to POST_PROCESSING.
+     * Called after the proxy broadcast has been signalled to stop.
+     * The proxy callback will trigger the actual post-processing job.
      */
-    private function finalizeStop(DvrRecording $recording, bool $cleanExit): void
+    private function finalizeStop(DvrRecording $recording): void
     {
-        // Don't overwrite CANCELLED or FAILED status
         if (in_array($recording->status, [
             DvrRecordingStatus::Cancelled,
             DvrRecordingStatus::Failed,
@@ -265,22 +162,7 @@ class DvrRecorderService
         $recording->update([
             'status' => DvrRecordingStatus::PostProcessing->value,
             'actual_end' => now(),
-            'pid' => null,
-            'error_message' => $cleanExit ? null : 'ffmpeg did not exit cleanly',
+            'proxy_network_id' => null,
         ]);
-    }
-
-    /**
-     * Check if a process with the given PID is still running.
-     */
-    private function isProcessRunning(int $pid): bool
-    {
-        if (function_exists('posix_kill')) {
-            return posix_kill($pid, 0);
-        }
-
-        exec("kill -0 {$pid} 2>/dev/null", $output, $exitCode);
-
-        return $exitCode === 0;
     }
 }

@@ -9,9 +9,11 @@ use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Log;
 
 /**
- * StopDvrRecording — Gracefully stop a running ffmpeg recording.
- * After stopping, the recording transitions to POST_PROCESSING and
- * PostProcessDvrRecording is dispatched automatically.
+ * StopDvrRecording — Signal the proxy to stop a running DVR broadcast.
+ *
+ * The proxy handles graceful FFmpeg shutdown and fires a callback to
+ * DvrCallbackController when done, which dispatches PostProcessDvrRecording.
+ * No blocking sleep loops needed here.
  */
 class StopDvrRecording implements ShouldQueue
 {
@@ -19,8 +21,7 @@ class StopDvrRecording implements ShouldQueue
 
     public int $tries = 1;
 
-    /** Allow extra time for graceful stop + SIGKILL fallback */
-    public int $timeout = 60;
+    public int $timeout = 15;
 
     public function __construct(public int $recordingId)
     {
@@ -38,10 +39,5 @@ class StopDvrRecording implements ShouldQueue
         }
 
         $recorder->stop($recording);
-
-        // Reload to get updated status, then dispatch post-processor
-        $recording->refresh();
-
-        PostProcessDvrRecording::dispatch($recording->id)->onQueue('dvr-post');
     }
 }

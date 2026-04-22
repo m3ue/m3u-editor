@@ -88,7 +88,8 @@ class DvrPostProcessorService
 
         $ffmpegPath = $setting->getFfmpegPath();
 
-        $this->setStep($recording, 'Concatenating HLS segments to MP4');
+        $outputFormat = $setting->dvr_output_format ?? 'mp4';
+        $this->setStep($recording, 'Concatenating HLS segments to '.strtoupper($outputFormat));
 
         try {
             $segmentCount = $this->countSegments($m3u8FullPath);
@@ -98,7 +99,7 @@ class DvrPostProcessorService
                 'output_path' => $outputRelPath,
             ]);
 
-            $this->concatHls($ffmpegPath, $m3u8FullPath, $outputFullPath);
+            $this->concatHls($ffmpegPath, $m3u8FullPath, $outputFullPath, $outputFormat);
         } catch (Exception $e) {
             $this->markFailed($recording, "HLS concat failed: {$e->getMessage()}");
 
@@ -108,7 +109,7 @@ class DvrPostProcessorService
         $fileSize = file_exists($outputFullPath) ? filesize($outputFullPath) : null;
         $duration = $this->estimateDuration($recording);
 
-        Log::info('DVR post-processing step 1 complete: MP4 concatenated', [
+        Log::info('DVR post-processing step 1 complete: '.strtoupper($outputFormat).' concatenated', [
             'recording_id' => $recording->id,
             'output_path' => $outputRelPath,
             'file_size_bytes' => $fileSize,
@@ -203,13 +204,16 @@ class DvrPostProcessorService
     /**
      * Build the final output path for the recording (relative to the dvr disk).
      *
-     * Pattern: library/{Year}/{Title}/Title - SXXEYY.mp4
-     * or:       library/{Year}/{Title}/Title - YYYY-MM-DD.mp4
+     * Pattern: library/{Year}/{Title}/Title - SXXEYY.{ext}
+     * or:       library/{Year}/{Title}/Title - YYYY-MM-DD.{ext}
+     *
+     * The extension is derived from the DvrSetting's dvr_output_format (mp4, mkv, ts).
      */
     public function buildOutputPath(DvrRecording $recording): string
     {
         $title = $this->sanitizeFileName($recording->title);
         $year = ($recording->programme_start ?? $recording->scheduled_start)?->format('Y') ?? now()->format('Y');
+        $ext = $recording->dvrSetting?->dvr_output_format ?? 'mp4';
 
         if ($recording->season !== null && $recording->episode !== null) {
             $episode = sprintf('%s - S%02dE%02d', $title, $recording->season, $recording->episode);
@@ -218,7 +222,7 @@ class DvrPostProcessorService
             $episode = "{$title} - {$date}";
         }
 
-        return "library/{$year}/{$title}/{$episode}.mp4";
+        return "library/{$year}/{$title}/{$episode}.{$ext}";
     }
 
     /**
@@ -236,33 +240,56 @@ class DvrPostProcessorService
     }
 
     /**
-     * Concatenate HLS segments into a single .mp4 file using ffmpeg's concat demuxer.
+     * Concatenate HLS segments into a single output file.
      *
-     * We build an explicit file list from the .m3u8 manifest and pass it via the
-     * concat demuxer (-f concat) rather than feeding the .m3u8 directly as input.
-     * This avoids issues with corrupt/bogus #EXTINF durations in the manifest that
-     * can cause ffmpeg to treat a segment as hours long and stall at near-zero speed.
+     * For MPEG-TS output: binary-concatenates the raw .ts segment files directly —
+     * no FFmpeg needed, fastest possible path, zero re-encoding overhead.
      *
-     * Output is MP4 with -movflags +faststart so the moov atom (index) is written
-     * at the front of the file, enabling true random-access seeking in all players.
+     * For MP4/MKV output: uses FFmpeg's concat demuxer with -c copy (stream copy only,
+     * no re-encoding). We build an explicit file list from the .m3u8 manifest rather than
+     * feeding the manifest directly, which avoids stalls caused by corrupt #EXTINF durations.
+     *
+     * Output format is determined by the $format parameter: 'ts', 'mp4', or 'mkv'.
      */
-    private function concatHls(string $ffmpegPath, string $m3u8Path, string $outputPath): void
+    private function concatHls(string $ffmpegPath, string $m3u8Path, string $outputPath, string $format = 'ts'): void
     {
         $segmentDir = dirname($m3u8Path);
-        $concatListPath = $segmentDir.'/concat-list.txt';
-        $logFile = $segmentDir.'/ffmpeg-concat.log';
 
         // Parse segment filenames from the .m3u8 manifest (lines not starting with #)
-        $segments = array_filter(
+        $segments = array_values(array_filter(
             array_map('trim', file($m3u8Path)),
             fn (string $line) => $line !== '' && ! str_starts_with($line, '#')
-        );
+        ));
 
         if (empty($segments)) {
             throw new Exception('No segments found in HLS manifest');
         }
 
-        // Write the ffmpeg concat list file
+        // Fast path: MPEG-TS is just a binary concat of the segment files
+        if ($format === 'ts') {
+            $out = fopen($outputPath, 'wb');
+            if (! $out) {
+                throw new Exception("Could not open output file for writing: {$outputPath}");
+            }
+            foreach ($segments as $seg) {
+                $segPath = "{$segmentDir}/{$seg}";
+                if (! file_exists($segPath)) {
+                    fclose($out);
+                    throw new Exception("Segment not found: {$segPath}");
+                }
+                $in = fopen($segPath, 'rb');
+                stream_copy_to_stream($in, $out);
+                fclose($in);
+            }
+            fclose($out);
+
+            return;
+        }
+
+        // MP4 / MKV: use FFmpeg concat demuxer with stream copy
+        $concatListPath = $segmentDir.'/concat-list.txt';
+        $logFile = $segmentDir.'/ffmpeg-concat.log';
+
         $listContent = implode("\n", array_map(
             fn (string $seg) => "file '".addslashes("{$segmentDir}/{$seg}")."'",
             $segments
@@ -276,9 +303,14 @@ class DvrPostProcessorService
             '-safe', '0',
             '-i', $concatListPath,
             '-c', 'copy',
-            '-movflags', '+faststart',
-            $outputPath,
         ];
+
+        match ($format) {
+            'mkv' => array_push($args, '-f', 'matroska'),
+            default => array_push($args, '-movflags', '+faststart'), // mp4
+        };
+
+        $args[] = $outputPath;
 
         $cmd = implode(' ', array_map('escapeshellarg', $args)).' 2>&1';
 

@@ -4,8 +4,9 @@
  * Tests for DvrRecorderService
  *
  * Covers:
- * - When use_proxy = false, recording uses the channel's direct URL
- * - When use_proxy = true, recording uses the channel's proxy URL
+ * - Recording always uses the channel's proxy URL (proxy manages FFmpeg)
+ * - start() stores proxy_network_id and sets status to Recording
+ * - stop() clears proxy_network_id and transitions to PostProcessing
  * - DvrSetting use_proxy defaults to false
  */
 
@@ -16,9 +17,9 @@ use App\Models\DvrSetting;
 use App\Models\Playlist;
 use App\Models\User;
 use App\Services\DvrRecorderService;
+use App\Services\M3uProxyService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
-use Illuminate\Support\Facades\Storage;
 
 uses(RefreshDatabase::class);
 
@@ -32,9 +33,8 @@ beforeEach(function () {
  * Build a SCHEDULED DvrRecording with a real Channel attached.
  *
  * @param  array<string, mixed>  $settingOverrides
- * @param  array<string, mixed>  $channelOverrides
  */
-function makeScheduledRecording(array $settingOverrides = [], array $channelOverrides = []): DvrRecording
+function makeScheduledRecording(array $settingOverrides = []): DvrRecording
 {
     $user = User::factory()->create();
     $playlist = Playlist::factory()->for($user)->create();
@@ -47,7 +47,7 @@ function makeScheduledRecording(array $settingOverrides = [], array $channelOver
     $channel = Channel::factory()
         ->for($user)
         ->for($playlist)
-        ->create(array_merge(['url' => 'http://direct.example.com/stream.ts'], $channelOverrides));
+        ->create(['url' => 'http://direct.example.com/stream.ts']);
 
     return DvrRecording::factory()
         ->for($setting, 'dvrSetting')
@@ -63,44 +63,80 @@ function makeScheduledRecording(array $settingOverrides = [], array $channelOver
 }
 
 /**
- * Attempt to start a recording, swallowing any proc_open / ffmpeg failures
- * that are expected in a test environment (no real FFmpeg binary or stream).
- * The URL-selection logic runs and persists to the DB before proc_open is called.
+ * Build a mock M3uProxyService that returns a predictable network_id.
  */
-function attemptStart(DvrRecording $recording): void
+function mockProxy(string $networkId = 'test-network-id')
 {
-    Storage::fake('dvr');
-    config(['dvr.storage_disk' => 'dvr', 'dvr.ffmpeg_path' => '/nonexistent/ffmpeg']);
+    $mock = Mockery::mock(M3uProxyService::class);
+    $mock->shouldReceive('startDvrBroadcast')->andReturn($networkId);
+    $mock->shouldReceive('stopDvrBroadcast')->andReturn(true);
+    app()->instance(M3uProxyService::class, $mock);
 
-    try {
-        app(DvrRecorderService::class)->start($recording);
-    } catch (Exception) {
-        // Expected — proc_open fails in test environment
-    }
+    return $mock;
 }
 
 // ── URL selection ─────────────────────────────────────────────────────────────
 
-it('uses the channel direct URL when use_proxy is false', function () {
+it('always routes through the proxy URL regardless of use_proxy setting', function () {
+    // The proxy manages FFmpeg, so we always pass a proxy URL so the proxy can
+    // reach the source stream internally (even if use_proxy is false for UI purposes).
     $recording = makeScheduledRecording(['use_proxy' => false]);
+    mockProxy($recording->uuid);
 
-    attemptStart($recording);
+    app(DvrRecorderService::class)->start($recording);
 
-    expect($recording->fresh()->stream_url)->toBe('http://direct.example.com/stream.ts');
-});
-
-it('uses the channel proxy URL when use_proxy is true', function () {
-    $recording = makeScheduledRecording(['use_proxy' => true]);
-
-    attemptStart($recording);
-
-    $proxyUrl = $recording->fresh()->stream_url;
-
-    // Proxy URL is built by Channel::getProxyUrl() — verify it is a proxy URL
-    // rather than the direct stream URL, and contains the ?proxy=true marker.
-    expect($proxyUrl)
+    expect($recording->fresh()->stream_url)
         ->not->toBe('http://direct.example.com/stream.ts')
         ->toContain('proxy=true');
+});
+
+// ── start() ───────────────────────────────────────────────────────────────────
+
+it('stores proxy_network_id and transitions to Recording on start', function () {
+    $recording = makeScheduledRecording();
+    mockProxy($recording->uuid);
+
+    app(DvrRecorderService::class)->start($recording);
+
+    $fresh = $recording->fresh();
+    expect($fresh->status)->toBe(DvrRecordingStatus::Recording);
+    expect($fresh->proxy_network_id)->toBe($recording->uuid);
+    expect($fresh->actual_start)->not->toBeNull();
+});
+
+it('skips start when recording is not in SCHEDULED state', function () {
+    $recording = makeScheduledRecording();
+    $recording->update(['status' => DvrRecordingStatus::Recording]);
+
+    $proxy = Mockery::mock(M3uProxyService::class);
+    $proxy->shouldNotReceive('startDvrBroadcast');
+    app()->instance(M3uProxyService::class, $proxy);
+
+    app(DvrRecorderService::class)->start($recording);
+
+    expect($recording->fresh()->status)->toBe(DvrRecordingStatus::Recording);
+});
+
+// ── stop() ────────────────────────────────────────────────────────────────────
+
+it('calls proxy stop and transitions to PostProcessing', function () {
+    $recording = makeScheduledRecording();
+    $networkId = $recording->uuid;
+    $recording->update([
+        'status' => DvrRecordingStatus::Recording,
+        'proxy_network_id' => $networkId,
+    ]);
+
+    $proxy = Mockery::mock(M3uProxyService::class);
+    $proxy->shouldReceive('stopDvrBroadcast')->once()->with($networkId)->andReturn(true);
+    app()->instance(M3uProxyService::class, $proxy);
+
+    app(DvrRecorderService::class)->stop($recording);
+
+    $fresh = $recording->fresh();
+    expect($fresh->status)->toBe(DvrRecordingStatus::PostProcessing);
+    expect($fresh->proxy_network_id)->toBeNull();
+    expect($fresh->actual_end)->not->toBeNull();
 });
 
 // ── use_proxy default ─────────────────────────────────────────────────────────

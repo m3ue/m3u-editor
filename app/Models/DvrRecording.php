@@ -19,6 +19,7 @@ class DvrRecording extends Model
      */
     protected $fillable = [
         'uuid',
+        'proxy_network_id',
         'user_id',
         'dvr_setting_id',
         'dvr_recording_rule_id',

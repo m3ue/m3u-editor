@@ -44,6 +44,7 @@ use App\Services\DateFormatService;
 use App\Services\EpgCacheService;
 use App\Services\M3uProxyService;
 use App\Services\ProfileService;
+use App\Settings\GeneralSettings;
 use App\Tables\Columns\ProgressColumn;
 use App\Traits\HasUserFiltering;
 use Carbon\Carbon;
@@ -2810,22 +2811,22 @@ class PlaylistResource extends Resource implements CopilotResource
                             ->default(false)
                             ->inline(false)
                             ->live(),
-                        Toggle::make('dvr_use_proxy')
-                            ->label(__('Use Proxy for Recordings'))
-                            ->helperText(__('Route recording streams through the m3u-proxy. This allows other clients to watch the same channel while it is being recorded.'))
-                            ->default(false)
-                            ->inline(false)
+                        Select::make('dvr_output_format')
+                            ->label(__('Output Format'))
+                            ->helperText(__('Container format for the final recording file. All options use stream copy (no re-encoding) — only the container changes.'))
+                            ->options([
+                                'ts' => 'MPEG-TS (.ts) — fastest, direct segment join, no remuxing',
+                                'mp4' => 'MP4 (.mp4) — best compatibility with media players',
+                                'mkv' => 'MKV (.mkv) — flexible container, good player support',
+                            ])
+                            ->default('ts')
+                            ->required()
                             ->hidden(fn (Get $get): bool => ! $get('dvr_enabled')),
                         Grid::make()
                             ->columns(2)
                             ->columnSpanFull()
                             ->hidden(fn (Get $get): bool => ! $get('dvr_enabled'))
                             ->schema([
-                                TextInput::make('dvr_ffmpeg_path')
-                                    ->label(__('FFmpeg Path'))
-                                    ->helperText(__('Override the default FFmpeg binary path. Leave blank to use the system default.'))
-                                    ->placeholder('/usr/bin/ffmpeg')
-                                    ->maxLength(255),
                                 TextInput::make('dvr_storage_path')
                                     ->label(__('Storage Path'))
                                     ->helperText(__('Subdirectory within the DVR storage disk for this playlist\'s recordings.'))
@@ -2876,12 +2877,25 @@ class PlaylistResource extends Resource implements CopilotResource
                                     ->default(true)
                                     ->inline(false)
                                     ->live(),
-                                TextInput::make('dvr_tmdb_api_key')
-                                    ->label(__('TMDB API Key'))
-                                    ->helperText(__('Your TMDB API key for metadata enrichment. Required for TMDB lookups. Leave blank to fall back to TVMaze only.'))
-                                    ->password()
-                                    ->revealable()
-                                    ->maxLength(255)
+                                Placeholder::make('dvr_tmdb_status')
+                                    ->label(__('TMDB'))
+                                    ->content(function (): HtmlString {
+                                        $hasKey = ! empty(app(GeneralSettings::class)->tmdb_api_key);
+
+                                        if ($hasKey) {
+                                            return new HtmlString(
+                                                '<span class="text-sm text-success-600 dark:text-success-400 font-medium">✓ TMDB API key configured in Settings</span>'
+                                            );
+                                        }
+
+                                        $url = route('filament.admin.pages.preferences').'#tmdb';
+
+                                        return new HtmlString(
+                                            '<span class="text-sm text-warning-600 dark:text-warning-400">No TMDB API key found. '
+                                            .'<a href="'.e($url).'" class="underline font-medium">Configure it in Settings → TMDB</a> '
+                                            .'to enable TMDB metadata lookups. TVMaze will be used as a fallback.</span>'
+                                        );
+                                    })
                                     ->hidden(fn (Get $get): bool => ! $get('dvr_enable_metadata_enrichment')),
                             ]),
                     ]),

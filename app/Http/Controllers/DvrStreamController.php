@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\DvrRecordingStatus;
 use App\Models\CustomPlaylist;
 use App\Models\DvrRecording;
 use App\Models\MergedPlaylist;
@@ -9,7 +10,9 @@ use App\Models\Playlist;
 use App\Models\PlaylistAlias;
 use App\Models\PlaylistAuth;
 use App\Models\User;
+use App\Services\M3uProxyService;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Storage;
@@ -29,7 +32,7 @@ class DvrStreamController extends Controller
      * Once authenticated, the recording must belong to that user.
      * Supports HTTP range requests for seeking.
      */
-    public function stream(Request $request, string $username, string $password, string $uuid): Response|StreamedResponse
+    public function stream(Request $request, string $username, string $password, string $uuid): Response|StreamedResponse|RedirectResponse
     {
         $user = $this->resolveUser($username, $password);
 
@@ -43,6 +46,15 @@ class DvrStreamController extends Controller
 
         if (! $recording) {
             abort(404, 'Recording not found');
+        }
+
+        // In-progress recording — redirect to the live HLS stream on the proxy.
+        // Clients (VLC, Infuse, etc.) will play the live HLS just as they would
+        // play the completed file, and will naturally see new segments as they arrive.
+        if ($recording->status === DvrRecordingStatus::Recording && $recording->proxy_network_id) {
+            $liveUrl = app(M3uProxyService::class)->getDvrBroadcastLiveUrl($recording->proxy_network_id);
+
+            return redirect($liveUrl);
         }
 
         if (! $recording->hasFile()) {
