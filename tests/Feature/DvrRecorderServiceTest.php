@@ -70,6 +70,7 @@ function mockProxy(string $networkId = 'test-network-id')
     $mock = Mockery::mock(M3uProxyService::class);
     $mock->shouldReceive('startDvrBroadcast')->andReturn($networkId);
     $mock->shouldReceive('stopDvrBroadcast')->andReturn(true);
+    $mock->shouldReceive('getDvrBroadcastHlsDir')->andReturn('/tmp/m3u-proxy-dvr/broadcast_'.$networkId);
     app()->instance(M3uProxyService::class, $mock);
 
     return $mock;
@@ -129,6 +130,7 @@ it('calls proxy stop and transitions to PostProcessing', function () {
 
     $proxy = Mockery::mock(M3uProxyService::class);
     $proxy->shouldReceive('stopDvrBroadcast')->once()->with($networkId)->andReturn(true);
+    $proxy->shouldReceive('getDvrBroadcastHlsDir')->once()->with($networkId)->andReturn('/tmp/m3u-proxy-dvr/broadcast_'.$networkId);
     app()->instance(M3uProxyService::class, $proxy);
 
     app(DvrRecorderService::class)->stop($recording);
