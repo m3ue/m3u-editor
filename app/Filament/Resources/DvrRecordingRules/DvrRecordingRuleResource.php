@@ -9,7 +9,6 @@ use App\Models\DvrSetting;
 use App\Traits\HasUserFiltering;
 use BackedEnum;
 use Filament\Actions;
-use Filament\Actions\ActionGroup;
 use Filament\Forms\Components\DateTimePicker;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
@@ -19,6 +18,7 @@ use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Columns\ToggleColumn;
 use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
@@ -61,6 +61,12 @@ class DvrRecordingRuleResource extends Resource
     {
         return $schema
             ->components([
+                Toggle::make('enabled')
+                    ->label(__('Enabled'))
+                    ->default(true)
+                    ->columnSpanFull()
+                    ->required(),
+
                 Select::make('dvr_setting_id')
                     ->label(__('DVR Setting (Playlist)'))
                     ->options(fn () => DvrSetting::with('playlist')
@@ -131,22 +137,25 @@ class DvrRecordingRuleResource extends Resource
                     ->numeric()
                     ->default(50)
                     ->required(),
-
-                Toggle::make('enabled')
-                    ->label(__('Enabled'))
-                    ->default(true)
-                    ->required(),
             ]);
     }
 
     public static function table(Table $table): Table
     {
         return $table
+            ->filtersTriggerAction(function ($action) {
+                return $action->button()->label(__('Filters'));
+            })
             ->defaultSort('created_at', 'desc')
             ->columns([
                 TextColumn::make('type')
                     ->label(__('Type'))
                     ->badge()
+                    ->sortable(),
+
+                ToggleColumn::make('enabled')
+                    ->label(__('Enabled'))
+                    ->toggleable()
                     ->sortable(),
 
                 TextColumn::make('series_title')
@@ -176,11 +185,6 @@ class DvrRecordingRuleResource extends Resource
                     ->boolean()
                     ->toggleable(),
 
-                IconColumn::make('enabled')
-                    ->label(__('Enabled'))
-                    ->boolean()
-                    ->sortable(),
-
                 TextColumn::make('created_at')
                     ->dateTime()
                     ->sortable()
@@ -191,13 +195,13 @@ class DvrRecordingRuleResource extends Resource
                     ->options(DvrRuleType::class),
             ])
             ->recordActions([
-                ActionGroup::make([
-                    Actions\EditAction::make(),
-                    Actions\DeleteAction::make(),
-                ])->button()->hiddenLabel()->size('sm'),
+                Actions\DeleteAction::make()->button()
+                    ->hiddenLabel()->size('sm'),
+                Actions\EditAction::make()->button()
+                    ->hiddenLabel()->size('sm')
+                    ->slideOver(),
             ], position: RecordActionsPosition::BeforeCells)
             ->toolbarActions([
-                Actions\CreateAction::make(),
                 Actions\BulkActionGroup::make([
                     Actions\DeleteBulkAction::make(),
                 ]),
@@ -213,8 +217,8 @@ class DvrRecordingRuleResource extends Resource
     {
         return [
             'index' => Pages\ListDvrRecordingRules::route('/'),
-            'create' => Pages\CreateDvrRecordingRule::route('/create'),
-            'edit' => Pages\EditDvrRecordingRule::route('/{record}/edit'),
+            // 'create' => Pages\CreateDvrRecordingRule::route('/create'),
+            // 'edit' => Pages\EditDvrRecordingRule::route('/{record}/edit'),
         ];
     }
 }

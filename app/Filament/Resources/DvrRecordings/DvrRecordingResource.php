@@ -106,6 +106,9 @@ class DvrRecordingResource extends Resource
     public static function table(Table $table): Table
     {
         return $table
+            ->filtersTriggerAction(function ($action) {
+                return $action->button()->label(__('Filters'));
+            })
             ->defaultSort('scheduled_start', 'desc')
             ->columns([
                 TextColumn::make('title')
