@@ -2551,24 +2551,6 @@ class M3uProxyService
     }
 
     /**
-     * Get the DVR callback URL for m3u-proxy to notify the editor when a DVR broadcast ends.
-     *
-     * The proxy calls this endpoint from within the Docker network, so we MUST use the
-     * internal LAN address (failoverResolverUrl), not the public editor URL. Returns null
-     * when the resolver URL is not configured — callers should treat this as a hard block.
-     *
-     * @return string|null The DVR callback endpoint URL, or null if the resolver is not configured
-     */
-    public function getDvrCallbackUrl(): ?string
-    {
-        if (! empty($this->failoverResolverUrl)) {
-            return "{$this->failoverResolverUrl}/api/dvr/callback";
-        }
-
-        return null;
-    }
-
-    /**
      * Get the webhook callback URL for m3u-proxy to send webhook events.
      *
      * @return string|null The webhook callback endpoint URL, or null if not configured
@@ -2602,15 +2584,6 @@ class M3uProxyService
         }
 
         $networkId = $recording->uuid;
-        $callbackUrl = $this->getDvrCallbackUrl();
-
-        if (empty($callbackUrl)) {
-            throw new Exception(
-                'DVR callback URL cannot be resolved: the proxy calls back from within the Docker network, '.
-                'so the internal editor URL must be configured via Settings → Proxy → "Failover Resolver URL" '.
-                '(e.g. http://m3u-editor:36400). DVR recording is unavailable until this value is set.'
-            );
-        }
 
         $durationSeconds = 0;
         if ($recording->scheduled_start && $recording->scheduled_end) {
@@ -2623,7 +2596,6 @@ class M3uProxyService
             'stream_url' => $streamUrl,
             'duration_seconds' => $durationSeconds,
             'dvr_mode' => true,
-            'callback_url' => $callbackUrl,
             'metadata' => [
                 'type' => 'dvr',
                 'recording_id' => $recording->uuid,
@@ -2686,5 +2658,34 @@ class M3uProxyService
     public function getDvrBroadcastLiveUrl(string $networkId): string
     {
         return $this->getPublicUrl().'/broadcast/'.rawurlencode($networkId).'/live.m3u8';
+    }
+
+    /**
+     * Fetch the filesystem path to the HLS segment directory for a DVR broadcast.
+     *
+     * Called before stopping a broadcast so we know where segments are stored.
+     * Returns null if the broadcast is not found or the proxy is unreachable.
+     */
+    public function getDvrBroadcastHlsDir(string $networkId): ?string
+    {
+        if (empty($this->apiBaseUrl)) {
+            return null;
+        }
+
+        try {
+            $endpoint = $this->apiBaseUrl.'/broadcast/'.rawurlencode($networkId).'/status';
+            $response = Http::timeout(5)
+                ->acceptJson()
+                ->withHeaders($this->apiToken ? ['X-API-Token' => $this->apiToken] : [])
+                ->get($endpoint);
+
+            if ($response->successful()) {
+                return $response->json('hls_dir') ?: null;
+            }
+        } catch (Exception $e) {
+            Log::warning("DVR: Could not fetch hls_dir for broadcast {$networkId}: {$e->getMessage()}");
+        }
+
+        return null;
     }
 }

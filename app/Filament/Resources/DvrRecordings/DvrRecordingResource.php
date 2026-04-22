@@ -160,6 +160,29 @@ class DvrRecordingResource extends Resource
             ->recordActions([
                 ActionGroup::make([
                     ViewAction::make(),
+                    Action::make('watch')
+                        ->label(__('Watch'))
+                        ->icon('heroicon-o-play-circle')
+                        ->color('success')
+                        ->visible(fn (DvrRecording $record): bool => in_array($record->status, [
+                            DvrRecordingStatus::Recording,
+                            DvrRecordingStatus::Completed,
+                        ]) && $record->dvrSetting?->playlist)
+                        ->url(function (DvrRecording $record): string {
+                            $playlist = $record->dvrSetting->playlist;
+                            $username = $record->user->name;
+                            $ext = $record->status === DvrRecordingStatus::Completed
+                                ? ($record->dvrSetting->dvr_output_format ?? 'mp4')
+                                : 'm3u8';
+
+                            return route('dvr.recording.stream', [
+                                'username' => $username,
+                                'password' => $playlist->uuid,
+                                'uuid' => $record->uuid,
+                                'format' => $ext,
+                            ]);
+                        })
+                        ->openUrlInNewTab(),
                     Action::make('retry')
                         ->label(__('Retry Post-Processing'))
                         ->icon('heroicon-o-arrow-path')
