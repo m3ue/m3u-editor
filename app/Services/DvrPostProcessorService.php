@@ -51,8 +51,18 @@ class DvrPostProcessorService
 
         $disk = $setting->storage_disk ?: config('dvr.storage_disk');
         $livePath = $recording->temp_path ?? 'live/'.$recording->uuid;
-        $m3u8RelPath = $recording->temp_manifest_path ?? ($livePath.'/stream.m3u8');
-        $m3u8FullPath = Storage::disk($disk)->path($m3u8RelPath);
+
+        // The proxy callback sends temp_path as an absolute filesystem path.
+        // Resolve the manifest path appropriately: absolute paths are used directly,
+        // relative paths are resolved through the storage disk.
+        if ($recording->temp_manifest_path) {
+            $m3u8FullPath = $recording->temp_manifest_path;
+        } elseif (str_starts_with($livePath, '/')) {
+            // Absolute path from proxy callback — the broadcast manager uses live.m3u8
+            $m3u8FullPath = rtrim($livePath, '/').'/'.'live.m3u8';
+        } else {
+            $m3u8FullPath = Storage::disk($disk)->path($livePath.'/live.m3u8');
+        }
 
         Log::debug('DVR post-processing: locating HLS manifest', [
             'recording_id' => $recording->id,
@@ -61,8 +71,7 @@ class DvrPostProcessorService
         ]);
 
         if (! file_exists($m3u8FullPath)) {
-            // FFmpeg writes to stream.m3u8.tmp while recording; if we caught it mid-segment,
-            // only the .tmp file may exist. Try that before giving up.
+            // The proxy may still be writing the final segment: try the .tmp variant
             $tmpPath = preg_replace('/\.m3u8$/', '.m3u8.tmp', $m3u8FullPath);
             if (file_exists($tmpPath)) {
                 Log::warning('DVR post-processing: finalized .m3u8 not found — falling back to .m3u8.tmp', [
