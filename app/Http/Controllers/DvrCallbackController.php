@@ -71,17 +71,36 @@ class DvrCallbackController extends Controller
 
     private function handleRecordingStopped(DvrRecording $recording, ?string $hlsDir, array $data): JsonResponse
     {
-        // Skip if already past this point (e.g. duplicate callback)
-        if (! in_array($recording->status, [DvrRecordingStatus::Recording, DvrRecordingStatus::Scheduled])) {
+        // Accept Recording/Scheduled and also PostProcessing: the stop() method transitions
+        // to PostProcessing immediately when signalling the proxy, but the callback arrives
+        // later (after FFmpeg actually exits). We still need to store hls_dir and dispatch
+        // the post-processing job regardless of which side set the status first.
+        $validStatuses = [
+            DvrRecordingStatus::Recording,
+            DvrRecordingStatus::Scheduled,
+            DvrRecordingStatus::PostProcessing,
+        ];
+
+        if (! in_array($recording->status, $validStatuses)) {
             return response()->json(['status' => 'ignored', 'reason' => 'not in recording state']);
         }
 
-        $recording->update([
+        $updateData = [
             'status' => DvrRecordingStatus::PostProcessing->value,
-            'actual_end' => now(),
             'proxy_network_id' => null,
-            'temp_path' => $hlsDir ?? $recording->temp_path,
-        ]);
+        ];
+
+        // Preserve actual_end if already set by finalizeStop(); set it now if not.
+        if (! $recording->actual_end) {
+            $updateData['actual_end'] = now();
+        }
+
+        // Always store hls_dir from the callback — finalizeStop() doesn't know the path.
+        if ($hlsDir) {
+            $updateData['temp_path'] = $hlsDir;
+        }
+
+        $recording->update($updateData);
 
         PostProcessDvrRecording::dispatch($recording->id)->onQueue('dvr-post');
 
