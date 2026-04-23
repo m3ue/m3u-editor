@@ -277,6 +277,11 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
         return $this->hasPermission('use_ai_copilot');
     }
 
+    public function canUseDvr(): bool
+    {
+        return $this->hasPermission('use_dvr');
+    }
+
     /**
      * Get all available permissions.
      */
@@ -290,6 +295,7 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
             'use_scrubber' => 'Use Scrubber',
             'view_release_logs' => 'View Release Logs',
             'use_ai_copilot' => 'Use AI Copilot',
+            'use_dvr' => 'Use DVR',
         ];
     }
 }

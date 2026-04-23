@@ -32,6 +32,11 @@ class DvrRecordingResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = null;
 
+    public static function canAccess(): bool
+    {
+        return auth()->check() && auth()->user()->canUseDvr();
+    }
+
     public static function getNavigationGroup(): ?string
     {
         return __('DVR');

@@ -2800,6 +2800,7 @@ class PlaylistResource extends Resource implements CopilotResource
         // Fields are prefixed with dvr_ and hydrated/dehydrated via EditPlaylist hooks.
         $tabs[] = Tab::make(__('DVR'))
             ->icon('heroicon-m-video-camera')
+            ->hidden(fn () => ! auth()->user()->canUseDvr())
             ->schema([
                 Section::make(__('DVR Settings'))
                     ->icon('heroicon-m-video-camera')
