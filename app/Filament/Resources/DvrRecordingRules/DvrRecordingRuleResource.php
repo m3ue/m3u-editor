@@ -91,12 +91,14 @@ class DvrRecordingRuleResource extends Resource
                 DateTimePicker::make('manual_start')
                     ->label(__('Manual Start'))
                     ->native(false)
+                    ->prefixIcon('heroicon-o-calendar')
                     ->visible(fn (Get $get): bool => self::isRuleType($get('type'), DvrRuleType::Manual))
                     ->requiredIf('type', DvrRuleType::Manual->value),
 
                 DateTimePicker::make('manual_end')
                     ->label(__('Manual End'))
                     ->native(false)
+                    ->prefixIcon('heroicon-o-calendar')
                     ->visible(fn (Get $get): bool => self::isRuleType($get('type'), DvrRuleType::Manual))
                     ->requiredIf('type', DvrRuleType::Manual->value)
                     ->after('manual_start'),

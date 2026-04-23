@@ -4,7 +4,7 @@
  * Tests for DvrRecorderService
  *
  * Covers:
- * - Recording always uses the channel's proxy URL (proxy manages FFmpeg)
+ * - Recording uses the raw source URL (url_custom ?? url) — no double-proxying
  * - start() stores proxy_network_id and sets status to Recording
  * - stop() clears proxy_network_id and transitions to PostProcessing
  * - DvrSetting use_proxy defaults to false
@@ -78,17 +78,18 @@ function mockProxy(string $networkId = 'test-network-id')
 
 // ── URL selection ─────────────────────────────────────────────────────────────
 
-it('always routes through the proxy URL regardless of use_proxy setting', function () {
-    // The proxy manages FFmpeg, so we always pass a proxy URL so the proxy can
-    // reach the source stream internally (even if use_proxy is false for UI purposes).
+it('uses the raw channel URL to avoid double-proxying through the editor', function () {
+    // DVR broadcasts run inside the proxy, which handles reconnects natively.
+    // We must NOT use getProxyUrl() here — that returns an editor-routed URL
+    // (/live/…?proxy=true) which would loop back through XtreamStreamController
+    // → m3u-proxy pooled stream, causing double-proxying.
     $recording = makeScheduledRecording(['use_proxy' => false]);
     mockProxy($recording->uuid);
 
     app(DvrRecorderService::class)->start($recording);
 
     expect($recording->fresh()->stream_url)
-        ->not->toBe('http://direct.example.com/stream.ts')
-        ->toContain('proxy=true');
+        ->toBe('http://direct.example.com/stream.ts');
 });
 
 // ── start() ───────────────────────────────────────────────────────────────────

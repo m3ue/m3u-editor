@@ -68,11 +68,14 @@ class DvrRecorderService
             throw new Exception("DvrSetting not found for recording {$recording->id}");
         }
 
-        // Always route through the proxy — it handles stream URL refresh, reconnects,
-        // and concurrent viewer access via its pooled stream feature.
+        // Use the raw source URL so the proxy connects directly to the provider.
+        // getProxyUrl() would generate an editor-routed URL (/live/…?proxy=true) that
+        // loops back through XtreamStreamController → m3u-proxy pooled stream, causing
+        // double-proxying. The DVR broadcast already runs inside the proxy, which handles
+        // its own reconnects and buffering natively.
         $channel = $recording->channel;
         if ($channel) {
-            $streamUrl = $channel->getProxyUrl() ?: $recording->stream_url;
+            $streamUrl = $channel->url_custom ?? $channel->url ?? $recording->stream_url;
         } else {
             $streamUrl = $recording->stream_url;
         }
