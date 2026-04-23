@@ -518,8 +518,10 @@ class M3uProxyStreamMonitor extends Page
                     'format' => 'HLS',
                     'status' => (($bcast['status'] ?? '') === 'running') ? 'active' : 'idle',
                     'client_count' => 0,
-                    'bandwidth_kbps' => 0,
-                    'bytes_transferred' => 'N/A',
+                    'bandwidth_kbps' => $startedAt && ($durationSecs = $startedAt->diffInSeconds(now())) > 0
+                        ? round(($bcast['bytes_written'] * 8) / $durationSecs / 1000, 2)
+                        : 0,
+                    'bytes_transferred' => $this->formatBytes($bcast['bytes_written'] ?? 0),
                     'uptime' => $uptime,
                     'started_at' => $startedAt ? $startedAt->format('Y-m-d H:i:s') : null,
                     'process_running' => (($bcast['status'] ?? '') === 'running'),
