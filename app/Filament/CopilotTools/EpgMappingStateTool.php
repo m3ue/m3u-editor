@@ -76,14 +76,19 @@ class EpgMappingStateTool extends BaseTool
 
         $lines = ['Available playlists (id | name | mapped/total | unmapped):', ''];
 
+        $playlistIds = $playlists->pluck('id');
+        $channelStats = Channel::whereIn('playlist_id', $playlistIds)
+            ->where('user_id', auth()->id())
+            ->select('playlist_id')
+            ->selectRaw('COUNT(*) as total, COUNT(epg_channel_id) as mapped')
+            ->groupBy('playlist_id')
+            ->get()
+            ->keyBy('playlist_id');
+
         foreach ($playlists as $playlist) {
-            $total = Channel::where('playlist_id', $playlist->id)
-                ->where('user_id', auth()->id())
-                ->count();
-            $mapped = Channel::where('playlist_id', $playlist->id)
-                ->where('user_id', auth()->id())
-                ->whereNotNull('epg_channel_id')
-                ->count();
+            $stats = $channelStats->get($playlist->id);
+            $total = $stats ? (int) $stats->total : 0;
+            $mapped = $stats ? (int) $stats->mapped : 0;
             $unmapped = $total - $mapped;
 
             $lines[] = "  #{$playlist->id} {$playlist->name} — {$mapped}/{$total} mapped, {$unmapped} unmapped";
