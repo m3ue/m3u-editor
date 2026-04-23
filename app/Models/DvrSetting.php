@@ -24,7 +24,6 @@ class DvrSetting extends Model
         'storage_disk',
         'storage_path',
         'max_concurrent_recordings',
-        'ffmpeg_path',
         'default_start_early_seconds',
         'default_end_late_seconds',
         'enable_metadata_enrichment',
@@ -100,13 +99,5 @@ class DvrSetting extends Model
         return $this->recordings()
             ->whereIn('status', [DvrRecordingStatus::Recording, DvrRecordingStatus::PostProcessing])
             ->count() >= $this->max_concurrent_recordings;
-    }
-
-    /**
-     * Get the resolved ffmpeg binary path.
-     */
-    public function getFfmpegPath(): string
-    {
-        return $this->ffmpeg_path ?: (string) config('dvr.ffmpeg_path', '/usr/bin/ffmpeg');
     }
 }

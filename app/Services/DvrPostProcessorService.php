@@ -98,7 +98,7 @@ class DvrPostProcessorService
             return;
         }
 
-        $ffmpegPath = $setting->getFfmpegPath();
+        $ffmpegPath = (string) config('dvr.ffmpeg_path', '/usr/bin/ffmpeg');
 
         $outputFormat = $setting->dvr_output_format ?? 'mp4';
         $this->setStep($recording, 'Concatenating HLS segments to '.strtoupper($outputFormat));

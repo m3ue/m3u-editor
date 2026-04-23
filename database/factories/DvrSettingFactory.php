@@ -27,7 +27,6 @@ class DvrSettingFactory extends Factory
             'storage_disk' => 'dvr',
             'storage_path' => 'recordings',
             'max_concurrent_recordings' => 2,
-            'ffmpeg_path' => null,
             'default_start_early_seconds' => 30,
             'default_end_late_seconds' => 30,
             'enable_metadata_enrichment' => true,

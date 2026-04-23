@@ -7,7 +7,7 @@ return [
     | DVR — FFmpeg binary path
     |--------------------------------------------------------------------------
     |
-    | Full path to the ffmpeg executable. Can be overridden per-DvrSetting.
+    | Full path to the ffmpeg executable.
     |
     */
 
