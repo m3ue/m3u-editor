@@ -8,6 +8,7 @@ use App\Jobs\EnrichDvrMetadata;
 use App\Jobs\IntegrateDvrRecordingToVod;
 use App\Models\DvrRecording;
 use Exception;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
@@ -91,8 +92,10 @@ class DvrPostProcessorService
         $outputFullPath = Storage::disk($disk)->path($outputRelPath);
         $outputDir = dirname($outputFullPath);
 
-        if (! is_dir($outputDir)) {
-            mkdir($outputDir, 0755, true);
+        if (! is_dir($outputDir) && ! mkdir($outputDir, 0755, true)) {
+            $this->markFailed($recording, "Could not create output directory: {$outputDir}");
+
+            return;
         }
 
         $ffmpegPath = $setting->getFfmpegPath();
@@ -173,7 +176,14 @@ class DvrPostProcessorService
 
         // ── Step 4: Cleanup temp dir + mark COMPLETED ───────────────────────
         try {
-            Storage::disk($disk)->deleteDirectory($livePath);
+            // $livePath may be an absolute filesystem path (from the proxy callback)
+            // or a relative path. Storage::disk()->deleteDirectory() silently fails
+            // on absolute paths, so we must use File::deleteDirectory() in that case.
+            if (str_starts_with($livePath, '/')) {
+                File::deleteDirectory($livePath);
+            } else {
+                Storage::disk($disk)->deleteDirectory($livePath);
+            }
 
             Log::debug('DVR post-processing step 4: temp directory cleaned up', [
                 'recording_id' => $recording->id,
@@ -265,8 +275,13 @@ class DvrPostProcessorService
         $segmentDir = dirname($m3u8Path);
 
         // Parse segment filenames from the .m3u8 manifest (lines not starting with #)
+        $rawLines = file($m3u8Path);
+        if ($rawLines === false) {
+            throw new Exception("Could not read HLS manifest: {$m3u8Path}");
+        }
+
         $segments = array_values(array_filter(
-            array_map('trim', file($m3u8Path)),
+            array_map('trim', $rawLines),
             fn (string $line) => $line !== '' && ! str_starts_with($line, '#')
         ));
 
@@ -287,6 +302,10 @@ class DvrPostProcessorService
                     throw new Exception("Segment not found: {$segPath}");
                 }
                 $in = fopen($segPath, 'rb');
+                if (! $in) {
+                    fclose($out);
+                    throw new Exception("Could not open segment for reading: {$segPath}");
+                }
                 stream_copy_to_stream($in, $out);
                 fclose($in);
             }
@@ -300,7 +319,7 @@ class DvrPostProcessorService
         $logFile = $segmentDir.'/ffmpeg-concat.log';
 
         $listContent = implode("\n", array_map(
-            fn (string $seg) => "file '".addslashes("{$segmentDir}/{$seg}")."'",
+            fn (string $seg) => "file '".str_replace("'", "'\\''", "{$segmentDir}/{$seg}")."'",
             $segments
         ));
         file_put_contents($concatListPath, $listContent);
@@ -355,8 +374,13 @@ class DvrPostProcessorService
             return 0;
         }
 
+        $rawLines = file($m3u8Path);
+        if ($rawLines === false) {
+            return 0;
+        }
+
         return count(array_filter(
-            array_map('trim', file($m3u8Path)),
+            array_map('trim', $rawLines),
             fn (string $line) => $line !== '' && ! str_starts_with($line, '#')
         ));
     }

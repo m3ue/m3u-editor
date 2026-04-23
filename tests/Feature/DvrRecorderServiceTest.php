@@ -107,7 +107,7 @@ it('stores proxy_network_id and transitions to Recording on start', function () 
 
 it('skips start when recording is not in SCHEDULED state', function () {
     $recording = makeScheduledRecording();
-    $recording->update(['status' => DvrRecordingStatus::Recording]);
+    $recording->update(['status' => DvrRecordingStatus::Completed]);
 
     $proxy = Mockery::mock(M3uProxyService::class);
     $proxy->shouldNotReceive('startDvrBroadcast');
@@ -115,7 +115,7 @@ it('skips start when recording is not in SCHEDULED state', function () {
 
     app(DvrRecorderService::class)->start($recording);
 
-    expect($recording->fresh()->status)->toBe(DvrRecordingStatus::Recording);
+    expect($recording->fresh()->status)->toBe(DvrRecordingStatus::Completed);
 });
 
 // ── stop() ────────────────────────────────────────────────────────────────────

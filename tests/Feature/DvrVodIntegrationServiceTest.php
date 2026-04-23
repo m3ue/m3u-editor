@@ -18,6 +18,7 @@
  * - DvrPostProcessorService dispatches IntegrateDvrRecordingToVod when metadata enrichment disabled
  */
 
+use App\Enums\DvrRecordingStatus;
 use App\Jobs\EnrichDvrMetadata;
 use App\Jobs\IntegrateDvrRecordingToVod;
 use App\Models\Channel;
@@ -29,10 +30,12 @@ use App\Models\Season;
 use App\Models\Series;
 use App\Models\User;
 use App\Services\DvrMetadataEnricherService;
+use App\Services\DvrPostProcessorService;
 use App\Services\DvrVodIntegrationService;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Storage;
 
 uses(RefreshDatabase::class);
 
@@ -372,14 +375,38 @@ it('EnrichDvrMetadata dispatches IntegrateDvrRecordingToVod after enrichment', f
 });
 
 it('DvrPostProcessorService dispatches IntegrateDvrRecordingToVod when metadata enrichment is disabled', function () {
-    $setting = DvrSetting::factory()->enabled()->create(['enable_metadata_enrichment' => false]);
+    Storage::fake('dvr');
 
-    expect($setting->enable_metadata_enrichment)->toBeFalse();
+    $user = User::factory()->create();
+    $playlist = Playlist::factory()->for($user)->create();
+    $setting = DvrSetting::factory()->enabled()->for($user)->for($playlist)->create([
+        'storage_disk' => 'dvr',
+        'enable_metadata_enrichment' => false,
+        'dvr_output_format' => 'ts',
+    ]);
 
-    // Simulate the dispatch logic from step 3 of DvrPostProcessorService
-    if (! $setting->enable_metadata_enrichment) {
-        IntegrateDvrRecordingToVod::dispatch(999)->onQueue('dvr-post');
-    }
+    $recording = DvrRecording::factory()
+        ->for($setting, 'dvrSetting')
+        ->for($user)
+        ->create([
+            'status' => DvrRecordingStatus::PostProcessing,
+            'temp_path' => 'live/test-uuid',
+            'programme_start' => now()->subHour(),
+            'scheduled_start' => now()->subHour(),
+            'season' => null,
+            'episode' => null,
+        ]);
 
-    Queue::assertPushed(IntegrateDvrRecordingToVod::class, fn ($job) => $job->recordingId === 999);
+    // Write a minimal single-segment HLS manifest and its TS segment
+    Storage::disk('dvr')->put(
+        'live/test-uuid/live.m3u8',
+        "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:10\n#EXTINF:10.0,\nseg000.ts\n#EXT-X-ENDLIST\n"
+    );
+    Storage::disk('dvr')->put('live/test-uuid/seg000.ts', str_repeat("\x00", 188));
+
+    app(DvrPostProcessorService::class)->run($recording);
+
+    $recording->refresh();
+    expect($recording->status)->toBe(DvrRecordingStatus::Completed);
+    Queue::assertPushed(IntegrateDvrRecordingToVod::class, fn ($job) => $job->recordingId === $recording->id);
 });

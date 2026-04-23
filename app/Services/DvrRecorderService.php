@@ -71,7 +71,11 @@ class DvrRecorderService
         // Always route through the proxy — it handles stream URL refresh, reconnects,
         // and concurrent viewer access via its pooled stream feature.
         $channel = $recording->channel;
-        $streamUrl = $channel?->getProxyUrl() ?? $recording->stream_url;
+        if ($channel) {
+            $streamUrl = $channel->getProxyUrl() ?: $recording->stream_url;
+        } else {
+            $streamUrl = $recording->stream_url;
+        }
 
         if (empty($streamUrl)) {
             throw new Exception("Recording {$recording->id} has no stream_url — cannot start");

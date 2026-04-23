@@ -62,6 +62,7 @@ class DvrVodIntegrationService
             Log::error("DvrVodIntegration: failed for recording {$recording->id}: {$e->getMessage()}", [
                 'exception' => $e,
             ]);
+            throw $e;
         }
     }
 
@@ -175,7 +176,7 @@ class DvrVodIntegrationService
 
         $channel->year = $releaseDate ? substr($releaseDate, 0, 4) : null;
 
-        if (! $tmdb) {
+        if (! $tmdb && empty($channel->tmdb_id)) {
             $channel->tmdb_id = null;
         }
 
@@ -231,7 +232,7 @@ class DvrVodIntegrationService
         $episode->title = $this->buildEpisodeTitle($recording);
         $episode->url = $streamUrl;
         $episode->info = [
-            'plot' => $recording->description ?? ($tmdb['overview'] ?? null),
+            'plot' => $tmdb['overview'] ?? $recording->description ?? null,
             'release_date' => $recording->programme_start?->toDateString(),
             'duration_secs' => $recording->duration_seconds,
             'movie_image' => $tmdb['poster_url'] ?? $sourceLogo ?? null,
@@ -383,14 +384,36 @@ class DvrVodIntegrationService
      */
     private function findOrCreateSeries(string $name, int $playlistId, int $userId, int $categoryId, ?array $tmdb, ?string $sourceLogo = null, ?array $tvmaze = null): Series
     {
-        // Look for an existing DVR-created series by name + playlist
-        // (source_series_id is NULL for DVR series, so we match on name)
-        $series = Series::where('playlist_id', $playlistId)
-            ->whereNull('source_series_id')
-            ->where('name', $name)
-            ->first();
+        $defaults = [
+            'user_id' => $userId,
+            'category_id' => $categoryId,
+            'enabled' => true,
+            'source_series_id' => null,
+            'import_batch_no' => 'dvr',
+        ];
 
-        if ($series) {
+        if ($tmdb) {
+            $defaults['cover'] = $tmdb['poster_url'] ?? $sourceLogo;
+            $defaults['plot'] = $tmdb['overview'] ?? null;
+            $defaults['release_date'] = $tmdb['first_air_date'] ?? $tmdb['release_date'] ?? null;
+            $defaults['metadata'] = $tmdb;
+            if (! empty($tmdb['id'])) {
+                $defaults['tmdb_id'] = $tmdb['id'];
+            }
+        } elseif ($tvmaze) {
+            $defaults['cover'] = $tvmaze['poster_url'] ?? $sourceLogo;
+            $defaults['plot'] = $tvmaze['overview'] ?? null;
+            $defaults['release_date'] = $tvmaze['premiered'] ?? null;
+        } elseif ($sourceLogo) {
+            $defaults['cover'] = $sourceLogo;
+        }
+
+        $series = Series::firstOrCreate(
+            ['playlist_id' => $playlistId, 'source_series_id' => null, 'name' => $name],
+            $defaults
+        );
+
+        if (! $series->wasRecentlyCreated) {
             // Update metadata if we now have TMDB data and didn't before
             if ($tmdb && empty($series->tmdb_id)) {
                 $series->cover = $tmdb['poster_url'] ?? $series->cover;
@@ -414,37 +437,7 @@ class DvrVodIntegrationService
                 $series->cover = $sourceLogo;
                 $series->save();
             }
-
-            return $series;
         }
-
-        $series = new Series;
-        $series->name = $name;
-        $series->user_id = $userId;
-        $series->playlist_id = $playlistId;
-        $series->category_id = $categoryId;
-        $series->enabled = true;
-        $series->source_series_id = null;
-        $series->import_batch_no = 'dvr';
-
-        if ($tmdb) {
-            $series->cover = $tmdb['poster_url'] ?? $sourceLogo;
-            $series->plot = $tmdb['overview'] ?? null;
-            $series->release_date = $tmdb['first_air_date'] ?? $tmdb['release_date'] ?? null;
-            $series->metadata = $tmdb;
-
-            if (! empty($tmdb['id'])) {
-                $series->tmdb_id = $tmdb['id'];
-            }
-        } elseif ($tvmaze) {
-            $series->cover = $tvmaze['poster_url'] ?? $sourceLogo;
-            $series->plot = $tvmaze['overview'] ?? null;
-            $series->release_date = $tvmaze['premiered'] ?? null;
-        } elseif ($sourceLogo) {
-            $series->cover = $sourceLogo;
-        }
-
-        $series->save();
 
         return $series;
     }
@@ -454,26 +447,16 @@ class DvrVodIntegrationService
      */
     private function findOrCreateSeason(Series $series, int $seasonNumber, int $playlistId, int $userId, int $categoryId): Season
     {
-        $season = Season::where('series_id', $series->id)
-            ->where('season_number', $seasonNumber)
-            ->first();
-
-        if ($season) {
-            return $season;
-        }
-
-        $season = new Season;
-        $season->series_id = $series->id;
-        $season->playlist_id = $playlistId;
-        $season->user_id = $userId;
-        $season->category_id = $categoryId;
-        $season->season_number = $seasonNumber;
-        $season->name = 'Season '.str_pad((string) $seasonNumber, 2, '0', STR_PAD_LEFT);
-        $season->source_season_id = null;
-        $season->import_batch_no = 'dvr';
-
-        $season->save();
-
-        return $season;
+        return Season::firstOrCreate(
+            ['series_id' => $series->id, 'season_number' => $seasonNumber],
+            [
+                'playlist_id' => $playlistId,
+                'user_id' => $userId,
+                'category_id' => $categoryId,
+                'name' => 'Season '.str_pad((string) $seasonNumber, 2, '0', STR_PAD_LEFT),
+                'source_season_id' => null,
+                'import_batch_no' => 'dvr',
+            ]
+        );
     }
 }

@@ -73,9 +73,9 @@ return [
 
     'tmdb_api_key' => env('DVR_TMDB_API_KEY'),
 
-    'tmdb_base_url' => 'https://api.themoviedb.org/3',
+    'tmdb_base_url' => env('DVR_TMDB_BASE_URL', 'https://api.themoviedb.org/3'),
 
-    'tvmaze_base_url' => 'https://api.tvmaze.com',
+    'tvmaze_base_url' => env('DVR_TVMAZE_BASE_URL', 'https://api.tvmaze.com'),
 
     /*
     |--------------------------------------------------------------------------

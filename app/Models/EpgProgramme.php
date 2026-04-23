@@ -64,8 +64,10 @@ class EpgProgramme extends Model
      */
     public function scopeUpcoming(Builder $query, int $minutes = 30): Builder
     {
-        return $query->where('start_time', '<=', now()->addMinutes($minutes))
-            ->where('end_time', '>=', now());
+        $now = now();
+
+        return $query->where('start_time', '<=', $now->copy()->addMinutes($minutes))
+            ->where('end_time', '>=', $now);
     }
 
     /**

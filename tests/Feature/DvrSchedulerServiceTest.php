@@ -353,3 +353,107 @@ it('dispatches StopDvrRecording for recordings whose scheduled_end has passed', 
 
     Queue::assertPushed(StopDvrRecording::class, fn ($job) => $job->recordingId === $recording->id);
 });
+
+// --- Re-scheduling after failure ---
+
+it('re-schedules the same programme after a failed recording', function () {
+    $rule = DvrRecordingRule::factory()
+        ->series()
+        ->for($this->setting, 'dvrSetting')
+        ->for($this->user)
+        ->create(['series_title' => 'Retry Show']);
+
+    $programme = EpgProgramme::factory()->upcoming(10)->create([
+        'title' => 'Retry Show',
+        'epg_channel_id' => 'channel.retry',
+    ]);
+
+    // Pre-existing Failed recording for this programme slot
+    DvrRecording::factory()
+        ->failed()
+        ->for($this->setting, 'dvrSetting')
+        ->for($this->user)
+        ->create([
+            'dvr_recording_rule_id' => $rule->id,
+            'programme_start' => $programme->start_time,
+            'epg_programme_data' => ['epg_channel_id' => 'channel.retry'],
+        ]);
+
+    $this->service->tick();
+
+    // A new Scheduled recording should have been created alongside the Failed one
+    expect(
+        DvrRecording::where('dvr_recording_rule_id', $rule->id)
+            ->where('status', DvrRecordingStatus::Scheduled)
+            ->count()
+    )->toBe(1);
+});
+
+// --- Offset application ---
+
+it('applies default_start_early_seconds and default_end_late_seconds offsets', function () {
+    $this->setting->update([
+        'default_start_early_seconds' => 60,
+        'default_end_late_seconds' => 120,
+    ]);
+
+    $rule = DvrRecordingRule::factory()
+        ->series()
+        ->for($this->setting, 'dvrSetting')
+        ->for($this->user)
+        ->create(['series_title' => 'Offset Show']);
+
+    $programme = EpgProgramme::factory()->upcoming(10)->create(['title' => 'Offset Show']);
+
+    $this->service->tick();
+
+    $recording = DvrRecording::where('dvr_recording_rule_id', $rule->id)->firstOrFail();
+
+    // scheduled_start should be 60 s before programme.start_time
+    expect($recording->scheduled_start->timestamp)
+        ->toBe($programme->fresh()->start_time->subSeconds(60)->timestamp);
+
+    // scheduled_end should be 120 s after programme.end_time
+    expect($recording->scheduled_end->timestamp)
+        ->toBe($programme->fresh()->end_time->addSeconds(120)->timestamp);
+});
+
+// --- Manual rule dedup ---
+
+it('does not create a duplicate manual recording on a second tick', function () {
+    $rule = DvrRecordingRule::factory()
+        ->for($this->setting, 'dvrSetting')
+        ->for($this->user)
+        ->create([
+            'type' => DvrRuleType::Manual,
+            'manual_start' => now()->addMinutes(10),
+            'manual_end' => now()->addMinutes(70),
+        ]);
+
+    $this->service->tick();
+    $this->service->tick();
+
+    expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(1);
+});
+
+// --- Once rule with currently-airing programme ---
+
+it('schedules a once rule for a programme that is currently airing', function () {
+    $programme = EpgProgramme::factory()->create([
+        'title' => 'Airing Now',
+        'start_time' => now()->subMinutes(5),
+        'end_time' => now()->addMinutes(55),
+    ]);
+
+    $rule = DvrRecordingRule::factory()
+        ->for($this->setting, 'dvrSetting')
+        ->for($this->user)
+        ->create([
+            'type' => DvrRuleType::Once,
+            'programme_id' => $programme->id,
+        ]);
+
+    $this->service->tick();
+
+    expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(1);
+});

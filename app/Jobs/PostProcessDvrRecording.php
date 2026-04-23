@@ -20,17 +20,18 @@ class PostProcessDvrRecording implements ShouldQueue
     /** Allow time for large concat operations */
     public int $timeout = 3600;
 
-    public function __construct(public int $recordingId)
+    public function __construct(public readonly int $recordingId)
     {
         $this->onQueue('dvr-post');
     }
 
     public function handle(DvrPostProcessorService $postProcessor): void
     {
-        $recording = DvrRecording::find($this->recordingId);
+        $recording = DvrRecording::with(['dvrSetting.playlist', 'user', 'channel'])->find($this->recordingId);
 
         if (! $recording) {
             Log::warning("PostProcessDvrRecording: recording {$this->recordingId} not found");
+            $this->fail(new \Exception("PostProcessDvrRecording: recording {$this->recordingId} not found"));
 
             return;
         }

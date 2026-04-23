@@ -20,6 +20,8 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class DvrStreamController extends Controller
 {
+    public function __construct(protected M3uProxyService $proxy) {}
+
     /**
      * Stream a DVR recording.
      *
@@ -52,12 +54,12 @@ class DvrStreamController extends Controller
         // Clients (VLC, Infuse, etc.) will play the live HLS just as they would
         // play the completed file, and will naturally see new segments as they arrive.
         if ($recording->status === DvrRecordingStatus::Recording && $recording->proxy_network_id) {
-            $liveUrl = app(M3uProxyService::class)->getDvrBroadcastLiveUrl($recording->proxy_network_id);
+            $liveUrl = $this->proxy->getDvrBroadcastLiveUrl($recording->proxy_network_id);
 
             return redirect($liveUrl);
         }
 
-        if (! $recording->hasFile()) {
+        if (! $recording->hasFilePath()) {
             abort(404, 'Recording file not available');
         }
 
@@ -78,8 +80,7 @@ class DvrStreamController extends Controller
 
         $range = $request->header('Range');
 
-        if ($range) {
-            preg_match('/bytes=(\d+)-(\d*)/', $range, $matches);
+        if ($range && preg_match('/bytes=(\d+)-(\d*)/', $range, $matches)) {
             $start = (int) $matches[1];
             $end = isset($matches[2]) && $matches[2] !== '' ? (int) $matches[2] : $fileSize - 1;
             $length = $end - $start + 1;
@@ -94,6 +95,9 @@ class DvrStreamController extends Controller
 
             return response()->stream(function () use ($fullPath, $start, $length) {
                 $handle = fopen($fullPath, 'rb');
+                if ($handle === false) {
+                    return;
+                }
                 fseek($handle, $start);
                 $remaining = $length;
 
@@ -116,6 +120,9 @@ class DvrStreamController extends Controller
 
         return response()->stream(function () use ($fullPath) {
             $handle = fopen($fullPath, 'rb');
+            if ($handle === false) {
+                return;
+            }
 
             while (! feof($handle)) {
                 echo fread($handle, 8192);

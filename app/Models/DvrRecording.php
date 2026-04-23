@@ -8,6 +8,9 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 class DvrRecording extends Model
@@ -83,25 +86,37 @@ class DvrRecording extends Model
         });
 
         static::deleting(function (DvrRecording $recording): void {
-            // Delete the physical file from disk.
-            if ($recording->file_path && file_exists($recording->file_path)) {
-                @unlink($recording->file_path);
+            // Delete the physical file from disk using the storage facade (file_path is relative).
+            if ($recording->file_path) {
+                $disk = $recording->dvrSetting?->storage_disk ?: config('dvr.storage_disk', 'local');
+
+                try {
+                    if (Storage::disk($disk)->exists($recording->file_path)) {
+                        Storage::disk($disk)->delete($recording->file_path);
+                    }
+                } catch (\Throwable $e) {
+                    Log::warning("DvrRecording deleting hook: could not delete file {$recording->file_path}: {$e->getMessage()}", [
+                        'recording_id' => $recording->id,
+                    ]);
+                }
             }
 
-            // Cascade to VOD channel: null dvr_recording_id first so the Channel's own
-            // deleting hook doesn't try to re-delete this recording (re-entrance guard).
-            if ($vodChannel = $recording->vodChannel) {
-                $vodChannel->dvr_recording_id = null;
-                $vodChannel->save();
-                $vodChannel->delete();
-            }
+            // Cascade to VOD channel and episode inside a transaction so both nulls + deletes
+            // are atomic. The dvr_recording_id is nulled first so the Channel/Episode deleting
+            // hooks don't attempt to re-delete this recording (re-entrance guard).
+            DB::transaction(function () use ($recording): void {
+                if ($vodChannel = $recording->vodChannel) {
+                    $vodChannel->dvr_recording_id = null;
+                    $vodChannel->save();
+                    $vodChannel->delete();
+                }
 
-            // Cascade to VOD episode (same re-entrance guard pattern).
-            if ($vodEpisode = $recording->vodEpisode) {
-                $vodEpisode->dvr_recording_id = null;
-                $vodEpisode->save();
-                $vodEpisode->delete();
-            }
+                if ($vodEpisode = $recording->vodEpisode) {
+                    $vodEpisode->dvr_recording_id = null;
+                    $vodEpisode->save();
+                    $vodEpisode->delete();
+                }
+            });
         });
     }
 
@@ -139,36 +154,36 @@ class DvrRecording extends Model
 
     public function scopeScheduled(Builder $query): Builder
     {
-        return $query->where('status', DvrRecordingStatus::Scheduled->value);
+        return $query->where('status', DvrRecordingStatus::Scheduled);
     }
 
     public function scopeRecording(Builder $query): Builder
     {
-        return $query->where('status', DvrRecordingStatus::Recording->value);
+        return $query->where('status', DvrRecordingStatus::Recording);
     }
 
     public function scopeCompleted(Builder $query): Builder
     {
-        return $query->where('status', DvrRecordingStatus::Completed->value);
+        return $query->where('status', DvrRecordingStatus::Completed);
     }
 
     public function scopeFailed(Builder $query): Builder
     {
-        return $query->where('status', DvrRecordingStatus::Failed->value);
+        return $query->where('status', DvrRecordingStatus::Failed);
     }
 
     public function scopeUpcoming(Builder $query): Builder
     {
         return $query->whereIn('status', [
-            DvrRecordingStatus::Scheduled->value,
-            DvrRecordingStatus::Recording->value,
+            DvrRecordingStatus::Scheduled,
+            DvrRecordingStatus::Recording,
         ])->orderBy('scheduled_start');
     }
 
     /**
      * Whether this recording has a completed file on disk.
      */
-    public function hasFile(): bool
+    public function hasFilePath(): bool
     {
         return $this->status === DvrRecordingStatus::Completed && ! empty($this->file_path);
     }

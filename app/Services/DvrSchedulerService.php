@@ -11,8 +11,8 @@ use App\Models\DvrRecordingRule;
 use App\Models\DvrSetting;
 use App\Models\EpgProgramme;
 use Exception;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Str;
 
 /**
  * DvrSchedulerService — Runs every minute via the DvrSchedulerTick job.
@@ -82,7 +82,7 @@ class DvrSchedulerService
         match ($rule->type) {
             DvrRuleType::Series => $this->matchSeriesRule($rule, $lookaheadMinutes),
             DvrRuleType::Once => $this->matchOnceRule($rule, $lookaheadMinutes),
-            DvrRuleType::Manual => $this->matchManualRule($rule),
+            DvrRuleType::Manual => $this->matchManualRule($rule, $lookaheadMinutes),
         };
     }
 
@@ -159,14 +159,14 @@ class DvrSchedulerService
     /**
      * MANUAL rule: create a recording for the specified manual_start/manual_end window.
      */
-    private function matchManualRule(DvrRecordingRule $rule): void
+    private function matchManualRule(DvrRecordingRule $rule, int $lookaheadMinutes): void
     {
         if (! $rule->manual_start || ! $rule->manual_end) {
             return;
         }
 
         $now = now();
-        $lookahead = now()->addMinutes((int) config('dvr.scheduler_lookahead_minutes', 30));
+        $lookahead = now()->addMinutes($lookaheadMinutes);
 
         $isUpcoming = $rule->manual_start >= $now && $rule->manual_start <= $lookahead;
         $isCurrentlyAiring = $rule->manual_start < $now && $rule->manual_end > $now;
@@ -180,45 +180,50 @@ class DvrSchedulerService
             return;
         }
 
-        // Check dedup — only block active recordings, not Cancelled/Failed.
-        // Use programme_start (= manual_start) not scheduled_start, because scheduled_start
-        // is offset by start_early_seconds and may not match the stored value.
-        $exists = DvrRecording::where('dvr_recording_rule_id', $rule->id)
-            ->where('programme_start', $rule->manual_start)
-            ->whereIn('status', [
-                DvrRecordingStatus::Scheduled->value,
-                DvrRecordingStatus::Recording->value,
-                DvrRecordingStatus::PostProcessing->value,
-            ])
-            ->exists();
+        DB::transaction(function () use ($rule, $setting): void {
+            // Check capacity inside transaction so lockForUpdate is effective.
+            if ($setting->isAtCapacity()) {
+                Log::debug("DVR: Skipping manual recording for rule {$rule->id} — at capacity");
 
-        if ($exists) {
-            return;
-        }
+                return;
+            }
 
-        $startEarly = $setting->resolveStartEarlySeconds($rule->start_early_seconds);
-        $endLate = $setting->resolveEndLateSeconds($rule->end_late_seconds);
+            // Check dedup — only block active recordings, not Cancelled/Failed.
+            $exists = DvrRecording::where('dvr_recording_rule_id', $rule->id)
+                ->where('programme_start', $rule->manual_start)
+                ->whereIn('status', [
+                    DvrRecordingStatus::Scheduled,
+                    DvrRecordingStatus::Recording,
+                    DvrRecordingStatus::PostProcessing,
+                ])
+                ->exists();
 
-        $scheduledStart = $rule->manual_start->subSeconds($startEarly);
-        $scheduledEnd = $rule->manual_end->addSeconds($endLate);
+            if ($exists) {
+                return;
+            }
 
-        // Resolve stream URL from the rule's channel (if set)
-        $streamUrl = $this->resolveStreamUrl($rule, $setting);
+            $startEarly = $setting->resolveStartEarlySeconds($rule->start_early_seconds);
+            $endLate = $setting->resolveEndLateSeconds($rule->end_late_seconds);
 
-        DvrRecording::create([
-            'uuid' => (string) Str::uuid(),
-            'user_id' => $setting->user_id,
-            'dvr_setting_id' => $setting->id,
-            'dvr_recording_rule_id' => $rule->id,
-            'channel_id' => $rule->channel_id,
-            'status' => DvrRecordingStatus::Scheduled->value,
-            'title' => 'Manual Recording',
-            'scheduled_start' => $scheduledStart,
-            'scheduled_end' => $scheduledEnd,
-            'programme_start' => $rule->manual_start,
-            'programme_end' => $rule->manual_end,
-            'stream_url' => $streamUrl,
-        ]);
+            $scheduledStart = $rule->manual_start->subSeconds($startEarly);
+            $scheduledEnd = $rule->manual_end->addSeconds($endLate);
+
+            $streamUrl = $this->resolveStreamUrl($rule, $setting);
+
+            DvrRecording::create([
+                'user_id' => $setting->user_id,
+                'dvr_setting_id' => $setting->id,
+                'dvr_recording_rule_id' => $rule->id,
+                'channel_id' => $rule->channel_id,
+                'status' => DvrRecordingStatus::Scheduled,
+                'title' => 'Manual Recording',
+                'scheduled_start' => $scheduledStart,
+                'scheduled_end' => $scheduledEnd,
+                'programme_start' => $rule->manual_start,
+                'programme_end' => $rule->manual_end,
+                'stream_url' => $streamUrl,
+            ]);
+        });
     }
 
     /**
@@ -256,53 +261,54 @@ class DvrSchedulerService
             return;
         }
 
-        if ($setting->isAtCapacity()) {
-            return;
-        }
+        DB::transaction(function () use ($rule, $setting, $slotStart, $slotEnd): void {
+            if ($setting->isAtCapacity()) {
+                return;
+            }
 
-        $exists = DvrRecording::where('dvr_recording_rule_id', $rule->id)
-            ->where('programme_start', $slotStart)
-            ->whereIn('status', [
-                DvrRecordingStatus::Scheduled->value,
-                DvrRecordingStatus::Recording->value,
-                DvrRecordingStatus::PostProcessing->value,
-            ])
-            ->exists();
+            $exists = DvrRecording::where('dvr_recording_rule_id', $rule->id)
+                ->where('programme_start', $slotStart)
+                ->whereIn('status', [
+                    DvrRecordingStatus::Scheduled,
+                    DvrRecordingStatus::Recording,
+                    DvrRecordingStatus::PostProcessing,
+                ])
+                ->exists();
 
-        if ($exists) {
-            return;
-        }
+            if ($exists) {
+                return;
+            }
 
-        $startEarly = $setting->resolveStartEarlySeconds($rule->start_early_seconds);
-        $endLate = $setting->resolveEndLateSeconds($rule->end_late_seconds);
+            $startEarly = $setting->resolveStartEarlySeconds($rule->start_early_seconds);
+            $endLate = $setting->resolveEndLateSeconds($rule->end_late_seconds);
 
-        $channel = $rule->channel;
-        $title = $channel ? ($channel->title_custom ?? $channel->title ?? 'Recording') : 'Recording';
-        $streamUrl = $this->resolveStreamUrl($rule, $setting);
+            $channel = $rule->channel;
+            $title = $channel ? ($channel->title_custom ?? $channel->title ?? 'Recording') : 'Recording';
+            $streamUrl = $this->resolveStreamUrl($rule, $setting);
 
-        DvrRecording::create([
-            'uuid' => (string) Str::uuid(),
-            'user_id' => $setting->user_id,
-            'dvr_setting_id' => $setting->id,
-            'dvr_recording_rule_id' => $rule->id,
-            'channel_id' => $rule->channel_id,
-            'status' => DvrRecordingStatus::Scheduled->value,
-            'title' => $title,
-            'scheduled_start' => $slotStart->copy()->subSeconds($startEarly),
-            'scheduled_end' => $slotEnd->copy()->addSeconds($endLate),
-            'programme_start' => $slotStart,
-            'programme_end' => $slotEnd,
-            'stream_url' => $streamUrl,
-        ]);
+            DvrRecording::create([
+                'user_id' => $setting->user_id,
+                'dvr_setting_id' => $setting->id,
+                'dvr_recording_rule_id' => $rule->id,
+                'channel_id' => $rule->channel_id,
+                'status' => DvrRecordingStatus::Scheduled,
+                'title' => $title,
+                'scheduled_start' => $slotStart->copy()->subSeconds($startEarly),
+                'scheduled_end' => $slotEnd->copy()->addSeconds($endLate),
+                'programme_start' => $slotStart,
+                'programme_end' => $slotEnd,
+                'stream_url' => $streamUrl,
+            ]);
 
-        // Disable once the recording is scheduled — "once" means record this slot, then stop.
-        $rule->update(['enabled' => false]);
+            // Disable once the recording is scheduled — "once" means record this slot, then stop.
+            $rule->update(['enabled' => false]);
 
-        Log::info("DVR: Scheduled once recording via dummy EPG for '{$title}'", [
-            'rule_id' => $rule->id,
-            'slot_start' => $slotStart,
-            'slot_end' => $slotEnd,
-        ]);
+            Log::info("DVR: Scheduled once recording via dummy EPG for '{$title}'", [
+                'rule_id' => $rule->id,
+                'slot_start' => $slotStart,
+                'slot_end' => $slotEnd,
+            ]);
+        });
     }
 
     /**
@@ -315,70 +321,71 @@ class DvrSchedulerService
             return;
         }
 
-        // Check capacity
-        if ($setting->isAtCapacity()) {
-            Log::debug("DVR: Skipping schedule for rule {$rule->id} — at capacity");
+        DB::transaction(function () use ($rule, $setting, $programme): void {
+            // Check capacity inside transaction so lockForUpdate is effective.
+            if ($setting->isAtCapacity()) {
+                Log::debug("DVR: Skipping schedule for rule {$rule->id} — at capacity");
 
-            return;
-        }
+                return;
+            }
 
-        // Dedup: only block if there's an active recording (Scheduled/Recording/PostProcessing).
-        // Cancelled and Failed recordings should not block re-scheduling.
-        $exists = DvrRecording::where('dvr_setting_id', $setting->id)
-            ->where('programme_start', $programme->start_time)
-            ->where('epg_programme_data->epg_channel_id', $programme->epg_channel_id)
-            ->whereIn('status', [
-                DvrRecordingStatus::Scheduled->value,
-                DvrRecordingStatus::Recording->value,
-                DvrRecordingStatus::PostProcessing->value,
-            ])
-            ->exists();
+            // Dedup: only block if there's an active recording (Scheduled/Recording/PostProcessing).
+            // Cancelled and Failed recordings should not block re-scheduling.
+            $exists = DvrRecording::where('dvr_setting_id', $setting->id)
+                ->where('programme_start', $programme->start_time)
+                ->where('epg_programme_data->epg_channel_id', $programme->epg_channel_id)
+                ->whereIn('status', [
+                    DvrRecordingStatus::Scheduled,
+                    DvrRecordingStatus::Recording,
+                    DvrRecordingStatus::PostProcessing,
+                ])
+                ->exists();
 
-        if ($exists) {
-            return;
-        }
+            if ($exists) {
+                return;
+            }
 
-        $startEarly = $setting->resolveStartEarlySeconds($rule->start_early_seconds);
-        $endLate = $setting->resolveEndLateSeconds($rule->end_late_seconds);
+            $startEarly = $setting->resolveStartEarlySeconds($rule->start_early_seconds);
+            $endLate = $setting->resolveEndLateSeconds($rule->end_late_seconds);
 
-        $scheduledStart = $programme->start_time->copy()->subSeconds($startEarly);
-        $scheduledEnd = $programme->end_time->copy()->addSeconds($endLate);
+            $scheduledStart = $programme->start_time->copy()->subSeconds($startEarly);
+            $scheduledEnd = $programme->end_time->copy()->addSeconds($endLate);
 
-        $streamUrl = $this->resolveStreamUrl($rule, $setting);
+            $streamUrl = $this->resolveStreamUrl($rule, $setting);
 
-        DvrRecording::create([
-            'uuid' => (string) Str::uuid(),
-            'user_id' => $setting->user_id,
-            'dvr_setting_id' => $setting->id,
-            'dvr_recording_rule_id' => $rule->id,
-            'channel_id' => $rule->channel_id,
-            'status' => DvrRecordingStatus::Scheduled->value,
-            'title' => $programme->title,
-            'subtitle' => $programme->subtitle,
-            'description' => $programme->description,
-            'season' => $programme->season,
-            'episode' => $programme->episode,
-            'scheduled_start' => $scheduledStart,
-            'scheduled_end' => $scheduledEnd,
-            'programme_start' => $programme->start_time,
-            'programme_end' => $programme->end_time,
-            'stream_url' => $streamUrl,
-            'epg_programme_data' => [
-                'epg_id' => $programme->epg_id,
-                'epg_channel_id' => $programme->epg_channel_id,
-                'episode_num' => $programme->episode_num,
-                'category' => $programme->category,
-                'icon' => $programme->icon,
-                'rating' => $programme->rating,
-                'is_new' => $programme->is_new,
-            ],
-        ]);
+            DvrRecording::create([
+                'user_id' => $setting->user_id,
+                'dvr_setting_id' => $setting->id,
+                'dvr_recording_rule_id' => $rule->id,
+                'channel_id' => $rule->channel_id,
+                'status' => DvrRecordingStatus::Scheduled,
+                'title' => $programme->title,
+                'subtitle' => $programme->subtitle,
+                'description' => $programme->description,
+                'season' => $programme->season,
+                'episode' => $programme->episode,
+                'scheduled_start' => $scheduledStart,
+                'scheduled_end' => $scheduledEnd,
+                'programme_start' => $programme->start_time,
+                'programme_end' => $programme->end_time,
+                'stream_url' => $streamUrl,
+                'epg_programme_data' => [
+                    'epg_id' => $programme->epg_id,
+                    'epg_channel_id' => $programme->epg_channel_id,
+                    'episode_num' => $programme->episode_num,
+                    'category' => $programme->category,
+                    'icon' => $programme->icon,
+                    'rating' => $programme->rating,
+                    'is_new' => $programme->is_new,
+                ],
+            ]);
 
-        Log::info("DVR: Scheduled recording for '{$programme->title}'", [
-            'rule_id' => $rule->id,
-            'scheduled_start' => $scheduledStart,
-            'scheduled_end' => $scheduledEnd,
-        ]);
+            Log::info("DVR: Scheduled recording for '{$programme->title}'", [
+                'rule_id' => $rule->id,
+                'scheduled_start' => $scheduledStart,
+                'scheduled_end' => $scheduledEnd,
+            ]);
+        });
     }
 
     /**

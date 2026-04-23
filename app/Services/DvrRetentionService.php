@@ -133,9 +133,14 @@ class DvrRetentionService
                 break;
             }
 
-            $usedBytes -= (int) ($recording->file_size_bytes ?? 0);
-            $this->deleteRecordingFile($recording, $setting);
-            Log::info("DVR retention: quota-based deleted recording {$recording->id} ({$recording->title})");
+            $fileSize = (int) ($recording->file_size_bytes ?? 0);
+
+            if ($this->deleteRecordingFile($recording, $setting)) {
+                $usedBytes -= $fileSize;
+                Log::info("DVR retention: quota-based deleted recording {$recording->id} ({$recording->title})");
+            } else {
+                Log::warning("DVR retention: skipping size deduction for recording {$recording->id} — file deletion failed");
+            }
         }
     }
 
@@ -143,10 +148,10 @@ class DvrRetentionService
      * Delete the file on disk and set file_path to null on the recording.
      * Does NOT delete the recording row itself (keep history).
      */
-    private function deleteRecordingFile(DvrRecording $recording, DvrSetting $setting): void
+    private function deleteRecordingFile(DvrRecording $recording, DvrSetting $setting): bool
     {
         if (empty($recording->file_path)) {
-            return;
+            return true;
         }
 
         $disk = $setting->storage_disk ?: config('dvr.storage_disk');
@@ -155,13 +160,17 @@ class DvrRetentionService
             if (Storage::disk($disk)->exists($recording->file_path)) {
                 Storage::disk($disk)->delete($recording->file_path);
             }
+
+            $recording->update([
+                'file_path' => null,
+                'file_size_bytes' => null,
+            ]);
+
+            return true;
         } catch (\Exception $e) {
             Log::warning("DVR retention: failed to delete file {$recording->file_path}: {$e->getMessage()}");
-        }
 
-        $recording->update([
-            'file_path' => null,
-            'file_size_bytes' => null,
-        ]);
+            return false;
+        }
     }
 }

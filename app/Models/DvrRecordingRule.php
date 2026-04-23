@@ -77,6 +77,11 @@ class DvrRecordingRule extends Model
         return $this->hasMany(DvrRecording::class);
     }
 
+    public function programme(): BelongsTo
+    {
+        return $this->belongsTo(EpgProgramme::class, 'programme_id');
+    }
+
     public function scopeEnabled(Builder $query): Builder
     {
         return $query->where('enabled', true);

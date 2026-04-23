@@ -24,7 +24,11 @@ class DvrMetadataEnricherService
 
     private const TVMAZE_BASE_URL = 'https://api.tvmaze.com';
 
-    private const CACHE_TTL_SECONDS = 86400; // 24 hours
+    private const CACHE_TTL_SECONDS = 86400; // 24 hours — positive results
+
+    private const CACHE_MISS_TTL_SECONDS = 3600; // 1 hour — confirmed misses (no match found)
+
+    public function __construct(private readonly GeneralSettings $generalSettings) {}
 
     /**
      * Enrich a recording with metadata.
@@ -95,11 +99,22 @@ class DvrMetadataEnricherService
     private function enrichFromTmdb(DvrRecording $recording, string $apiKey): bool
     {
         $title = $this->normalizeSearchTitle($recording->title);
-        $cacheKey = 'dvr.tmdb.'.md5("{$title}.{$recording->season}.{$recording->episode}");
+        $cacheKey = 'dvr.tmdb.'.md5($title);
 
-        $data = Cache::remember($cacheKey, self::CACHE_TTL_SECONDS, function () use ($title, $recording, $apiKey) {
-            return $this->fetchTmdb($title, $recording->season, $apiKey);
-        });
+        if (Cache::has($cacheKey)) {
+            $data = Cache::get($cacheKey);
+            // false is a cached "no match found" sentinel — avoid re-querying the API.
+            if ($data === false) {
+                return false;
+            }
+        } else {
+            $data = $this->fetchTmdb($title, $apiKey);
+            if ($data !== null) {
+                Cache::put($cacheKey, $data, self::CACHE_TTL_SECONDS);
+            } else {
+                Cache::put($cacheKey, false, self::CACHE_MISS_TTL_SECONDS);
+            }
+        }
 
         if (empty($data)) {
             return false;
@@ -123,7 +138,7 @@ class DvrMetadataEnricherService
      *
      * @return array<string, mixed>|null
      */
-    private function fetchTmdb(string $title, ?int $season, string $apiKey): ?array
+    private function fetchTmdb(string $title, string $apiKey): ?array
     {
         // Search TV shows first (most DVR content is TV)
         $searchUrl = self::TMDB_BASE_URL.'/search/tv';
@@ -193,9 +208,20 @@ class DvrMetadataEnricherService
         $title = $this->normalizeSearchTitle($recording->title);
         $cacheKey = 'dvr.tvmaze.'.md5($title);
 
-        $data = Cache::remember($cacheKey, self::CACHE_TTL_SECONDS, function () use ($title) {
-            return $this->fetchTvMaze($title);
-        });
+        if (Cache::has($cacheKey)) {
+            $data = Cache::get($cacheKey);
+            // false is a cached "no match found" sentinel — avoid re-querying the API.
+            if ($data === false) {
+                return false;
+            }
+        } else {
+            $data = $this->fetchTvMaze($title);
+            if ($data !== null) {
+                Cache::put($cacheKey, $data, self::CACHE_TTL_SECONDS);
+            } else {
+                Cache::put($cacheKey, false, self::CACHE_MISS_TTL_SECONDS);
+            }
+        }
 
         if (empty($data)) {
             return false;
@@ -238,7 +264,7 @@ class DvrMetadataEnricherService
         return [
             'id' => $show['id'],
             'name' => $show['name'] ?? $title,
-            'overview' => $show['summary'] ? strip_tags($show['summary']) : null,
+            'overview' => $show['summary'] ? html_entity_decode(strip_tags($show['summary'])) : null,
             'poster_url' => $show['image']['original'] ?? $show['image']['medium'] ?? null,
             'premiered' => $show['premiered'] ?? null,
             'genres' => $show['genres'] ?? [],
@@ -257,7 +283,7 @@ class DvrMetadataEnricherService
             return $setting->tmdb_api_key;
         }
 
-        $globalKey = app(GeneralSettings::class)->tmdb_api_key;
+        $globalKey = $this->generalSettings->tmdb_api_key;
         if (! empty($globalKey)) {
             return $globalKey;
         }

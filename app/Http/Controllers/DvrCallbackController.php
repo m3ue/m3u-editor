@@ -7,6 +7,7 @@ use App\Jobs\PostProcessDvrRecording;
 use App\Models\DvrRecording;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -100,9 +101,10 @@ class DvrCallbackController extends Controller
             $updateData['temp_path'] = $hlsDir;
         }
 
-        $recording->update($updateData);
-
-        PostProcessDvrRecording::dispatch($recording->id)->onQueue('dvr-post');
+        DB::transaction(function () use ($recording, $updateData): void {
+            $recording->update($updateData);
+            PostProcessDvrRecording::dispatch($recording->id)->onQueue('dvr-post');
+        });
 
         Log::info('DVR callback: dispatched post-processing', [
             'recording_id' => $recording->id,
@@ -144,12 +146,15 @@ class DvrCallbackController extends Controller
 
         // If no token is configured, accept all callbacks (dev/open deployments)
         if (empty($configuredToken)) {
+            Log::warning('DVR callback: no proxy token configured — accepting all callbacks (open deployment)');
+
             return true;
         }
 
         $providedToken = $request->header('X-API-Token')
-            ?? $request->query('api_token');
+            ?? $request->query('api_token')
+            ?? '';
 
-        return $providedToken === $configuredToken;
+        return hash_equals((string) $configuredToken, $providedToken);
     }
 }

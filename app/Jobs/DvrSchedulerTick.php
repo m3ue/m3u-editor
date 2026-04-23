@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Services\DvrSchedulerService;
+use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Log;
@@ -12,7 +13,7 @@ use Illuminate\Support\Facades\Log;
  *
  * Dispatches onto the 'dvr' queue so it runs inside the dvr-queue Horizon supervisor.
  */
-class DvrSchedulerTick implements ShouldQueue
+class DvrSchedulerTick implements ShouldBeUnique, ShouldQueue
 {
     use Queueable;
 

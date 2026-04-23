@@ -49,34 +49,43 @@ it('deletes excess completed recordings beyond keep_last', function () {
         ->for($this->user)
         ->create(['keep_last' => 2]);
 
-    // Create 4 completed recordings for this rule, each at different times
-    foreach (range(1, 4) as $i) {
-        DvrRecording::factory()
-            ->completed()
-            ->for($this->setting, 'dvrSetting')
-            ->for($this->user)
-            ->create([
-                'dvr_recording_rule_id' => $rule->id,
-                'scheduled_start' => now()->subHours($i),
-                'actual_end' => now()->subHours($i),
-                'file_path' => null, // No real file to delete
-            ]);
+    // Create 4 completed recordings ordered newest → oldest (subHours(1) … subHours(4))
+    $recordings = collect(range(1, 4))->map(fn ($i) => DvrRecording::factory()
+        ->completed()
+        ->for($this->setting, 'dvrSetting')
+        ->for($this->user)
+        ->create([
+            'dvr_recording_rule_id' => $rule->id,
+            'scheduled_start' => now()->subHours($i),
+            'actual_end' => now()->subHours($i),
+            'file_path' => "recordings/ep{$i}.ts",
+            'file_size_bytes' => 100_000_000,
+        ])
+    );
+
+    // Place files on the fake disk so the service can delete them
+    foreach ($recordings as $recording) {
+        Storage::disk('dvr')->put($recording->file_path, 'fake-content');
     }
 
     $this->service->runAll();
 
+    // All 4 rows are preserved (history kept)
     expect(
         DvrRecording::where('dvr_recording_rule_id', $rule->id)
             ->where('status', DvrRecordingStatus::Completed)
             ->count()
-    )->toBe(4); // Rows are kept (history preserved)
+    )->toBe(4);
 
-    // The 2 oldest should have their file_path nulled
-    // (factory already sets file_path to null in this case so we check count of keep)
-    $withFilePath = DvrRecording::where('dvr_recording_rule_id', $rule->id)
-        ->whereNotNull('file_path')
-        ->count();
-    expect($withFilePath)->toBe(0); // No files existed to begin with
+    $recordings->each->refresh();
+
+    // 2 newest (subHours(1), subHours(2)) keep their file_path
+    expect($recordings->get(0)->file_path)->not->toBeNull();
+    expect($recordings->get(1)->file_path)->not->toBeNull();
+
+    // 2 oldest (subHours(3), subHours(4)) have file_path nulled
+    expect($recordings->get(2)->file_path)->toBeNull();
+    expect($recordings->get(3)->file_path)->toBeNull();
 });
 
 it('keeps only the most recent N recordings for a rule with keep_last', function () {

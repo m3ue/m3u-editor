@@ -19,17 +19,24 @@ class EnrichDvrMetadata implements ShouldQueue
 
     public int $timeout = 60;
 
-    public function __construct(public int $recordingId)
+    public function __construct(public readonly int $recordingId)
     {
         $this->onQueue('dvr-meta');
     }
 
+    /** @return array<int, int> */
+    public function backoff(): array
+    {
+        return [10, 30, 60];
+    }
+
     public function handle(DvrMetadataEnricherService $enricher): void
     {
-        $recording = DvrRecording::find($this->recordingId);
+        $recording = DvrRecording::with(['dvrSetting.playlist', 'user', 'channel'])->find($this->recordingId);
 
         if (! $recording) {
             Log::warning("EnrichDvrMetadata: recording {$this->recordingId} not found");
+            $this->fail(new \Exception("EnrichDvrMetadata: recording {$this->recordingId} not found"));
 
             return;
         }
@@ -47,6 +54,6 @@ class EnrichDvrMetadata implements ShouldQueue
             'recording_id' => $recording->id,
         ]);
 
-        IntegrateDvrRecordingToVod::dispatch($recording->id);
+        IntegrateDvrRecordingToVod::dispatch($recording->id)->onQueue('dvr-post');
     }
 }

@@ -22,17 +22,18 @@ class IntegrateDvrRecordingToVod implements ShouldQueue
 
     public int $timeout = 30;
 
-    public function __construct(public int $recordingId)
+    public function __construct(public readonly int $recordingId)
     {
         $this->onQueue('dvr-post');
     }
 
     public function handle(DvrVodIntegrationService $integrator): void
     {
-        $recording = DvrRecording::find($this->recordingId);
+        $recording = DvrRecording::with(['dvrSetting.playlist', 'user', 'channel'])->find($this->recordingId);
 
         if (! $recording) {
             Log::warning("IntegrateDvrRecordingToVod: recording {$this->recordingId} not found");
+            $this->fail(new \Exception("IntegrateDvrRecordingToVod: recording {$this->recordingId} not found"));
 
             return;
         }

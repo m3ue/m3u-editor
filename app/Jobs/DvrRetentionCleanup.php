@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Services\DvrRetentionService;
+use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Log;
@@ -12,7 +13,7 @@ use Illuminate\Support\Facades\Log;
  *
  * Should be scheduled hourly.
  */
-class DvrRetentionCleanup implements ShouldQueue
+class DvrRetentionCleanup implements ShouldBeUnique, ShouldQueue
 {
     use Queueable;
 

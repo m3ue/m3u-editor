@@ -89,11 +89,16 @@ class DvrSetting extends Model
 
     /**
      * Check if the DVR is at concurrent recording capacity.
+     *
+     * Concurrent safety is provided at the scheduler level: DvrSchedulerTick implements
+     * ShouldBeUnique, ensuring only one tick executes at a time. The three
+     * createScheduledRecording paths additionally wrap their check + insert in a
+     * DB::transaction, giving row-level isolation there.
      */
     public function isAtCapacity(): bool
     {
         return $this->recordings()
-            ->whereIn('status', [DvrRecordingStatus::Recording->value, DvrRecordingStatus::PostProcessing->value])
+            ->whereIn('status', [DvrRecordingStatus::Recording, DvrRecordingStatus::PostProcessing])
             ->count() >= $this->max_concurrent_recordings;
     }
 
