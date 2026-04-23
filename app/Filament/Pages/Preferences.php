@@ -5,6 +5,8 @@ namespace App\Filament\Pages;
 use App\Filament\CopilotTools\EpgChannelMatcherTool;
 use App\Filament\CopilotTools\EpgMappingApplyTool;
 use App\Filament\CopilotTools\EpgMappingStateTool;
+use App\Filament\CopilotTools\ExecuteDatabaseQueryTool;
+use App\Filament\CopilotTools\GetDatabaseSchemaTool;
 use App\Filament\CopilotTools\SearchDocsTool;
 use App\Filament\Resources\Assets\AssetResource;
 use App\Jobs\RestartQueue;
@@ -1481,6 +1483,8 @@ class Preferences extends SettingsPage
                                                 EpgMappingStateTool::class => __('EPG Mapper: Mapping State'),
                                                 EpgChannelMatcherTool::class => __('EPG Mapper: Channel Matcher'),
                                                 EpgMappingApplyTool::class => __('EPG Mapper: Apply Mappings'),
+                                                GetDatabaseSchemaTool::class => __('Database: Get Schema'),
+                                                ExecuteDatabaseQueryTool::class => __('Database: Execute Query'),
                                             ])
                                             ->afterStateHydrated(function ($component, $state) {
                                                 // Strip built-in tools that were saved by older versions.
