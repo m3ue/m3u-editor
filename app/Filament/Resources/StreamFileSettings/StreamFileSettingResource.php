@@ -83,6 +83,7 @@ class StreamFileSettingResource extends Resource implements CopilotResource
                     ->options([
                         'series' => 'Series',
                         'vod' => 'VOD',
+                        'sports' => 'Sports (Kodi / SportsDB)',
                     ])
                     ->required()
                     ->live()
@@ -91,6 +92,17 @@ class StreamFileSettingResource extends Resource implements CopilotResource
                         if ($state === 'series') {
                             $set('path_structure', ['category', 'series', 'season']);
                             $set('folder_metadata', []);
+                        } elseif ($state === 'sports') {
+                            $set('path_structure', ['league', 'season']);
+                            $set('folder_metadata', []);
+                            $set('filename_metadata', []);
+                            $set('sports_league_source', 'group');
+                            $set('sports_season_source', 'title_year');
+                            $set('sports_episode_strategy', 'sequential_per_season');
+                            $set('sports_repeat_league_in_filename', true);
+                            $set('sports_include_event_title', true);
+
+                            return;
                         } else {
                             $set('path_structure', ['group', 'title']);
                             $set('folder_metadata', ['year', 'tmdb_id']);
@@ -216,6 +228,35 @@ class StreamFileSettingResource extends Resource implements CopilotResource
                             return $preview;
                         }
 
+                        if ($type === 'sports') {
+                            $path = $get('location') ?? '';
+                            $pathStructure = $get('path_structure') ?? [];
+                            $repeatLeague = (bool) ($get('sports_repeat_league_in_filename') ?? true);
+                            $includeEventTitle = (bool) ($get('sports_include_event_title') ?? true);
+
+                            $league = 'Formula 1';
+                            $seasonYear = 2026;
+                            $eventTitle = 'GP Japan - Qualifying';
+                            $episodeCode = "S{$seasonYear}E01";
+
+                            $preview = 'Preview: '.$path;
+
+                            if (in_array('league', $pathStructure, true)) {
+                                $preview .= '/'.$league;
+                            }
+
+                            if (in_array('season', $pathStructure, true)) {
+                                $preview .= "/Season {$seasonYear}";
+                            }
+
+                            $filename = $repeatLeague ? "{$league} {$episodeCode}" : $episodeCode;
+                            if ($includeEventTitle) {
+                                $filename .= " {$eventTitle}";
+                            }
+
+                            return $preview.'/'.PlaylistService::makeFilesystemSafe($filename).'.strm';
+                        }
+
                         // Default to series preview
                         $series = PlaylistService::getEpisodeExample();
 
@@ -301,14 +342,16 @@ class StreamFileSettingResource extends Resource implements CopilotResource
                     ->live()
                     ->multiple()
                     ->grouped()
-                    ->options(fn ($get) => $get('type') === 'series'
-                        ? ['category' => 'Category', 'series' => 'Series', 'season' => 'Season']
-                        : ['group' => 'Group', 'title' => 'Title']
-                    )
-                    ->default(fn ($get) => $get('type') === 'series'
-                        ? ['category', 'series', 'season']
-                        : ['group', 'title']
-                    )
+                    ->options(fn ($get) => match ($get('type')) {
+                        'series' => ['category' => 'Category', 'series' => 'Series', 'season' => 'Season'],
+                        'sports' => ['league' => 'League', 'season' => 'Season'],
+                        default => ['group' => 'Group', 'title' => 'Title'],
+                    })
+                    ->default(fn ($get) => match ($get('type')) {
+                        'series' => ['category', 'series', 'season'],
+                        'sports' => ['league', 'season'],
+                        default => ['group', 'title'],
+                    })
                     ->afterStateUpdated(function ($state, Set $set, Get $get): void {
                         if ($get('type') !== 'vod') {
                             return;
@@ -347,6 +390,7 @@ class StreamFileSettingResource extends Resource implements CopilotResource
                                     'tmdb_id' => 'TMDB ID',
                                     'category' => 'Category',
                                 ],
+                                $get('type') === 'sports' => [],
                                 $get('type') === 'vod' && in_array('title', $get('path_structure') ?? []) => [
                                     'year' => 'Year',
                                     'group' => 'Group',
@@ -384,6 +428,56 @@ class StreamFileSettingResource extends Resource implements CopilotResource
                             ->hidden(fn (Get $get): bool => $get('type') !== 'series' || ! in_array('tmdb_id', $get('filename_metadata') ?? [])),
                     ])
                     ->hidden(fn ($get) => ! $get('enabled')),
+
+                Fieldset::make(__('Sports Schema'))
+                    ->columnSpanFull()
+                    ->columns(2)
+                    ->schema([
+                        Select::make('sports_league_source')
+                            ->label(__('League source'))
+                            ->options([
+                                'group' => 'Group',
+                                'category' => 'Category',
+                                'series_name' => 'Series name',
+                                'vod_title' => 'VOD title',
+                                'static' => 'Static value',
+                            ])
+                            ->default('group')
+                            ->native(false)
+                            ->live(),
+                        TextInput::make('sports_static_league')
+                            ->label(__('Static league value'))
+                            ->placeholder('Formula 1')
+                            ->visible(fn (Get $get): bool => $get('sports_league_source') === 'static'),
+                        Select::make('sports_season_source')
+                            ->label(__('Season year source'))
+                            ->options([
+                                'title_year' => 'Parse year from title',
+                                'release_date' => 'Release/Air date year',
+                                'current_year' => 'Current year',
+                            ])
+                            ->default('title_year')
+                            ->native(false),
+                        ToggleButtons::make('sports_episode_strategy')
+                            ->label(__('Episode numbering strategy'))
+                            ->inline()
+                            ->grouped()
+                            ->options([
+                                'sequential_per_season' => 'Sequential per season',
+                                'date_code' => 'Date code',
+                                'from_episode_field' => 'Episode field',
+                            ])
+                            ->default('sequential_per_season'),
+                        Toggle::make('sports_repeat_league_in_filename')
+                            ->label(__('Repeat league in filename'))
+                            ->default(true)
+                            ->inline(false),
+                        Toggle::make('sports_include_event_title')
+                            ->label(__('Include event title in filename'))
+                            ->default(true)
+                            ->inline(false),
+                    ])
+                    ->visible(fn (Get $get): bool => $get('enabled') && $get('type') === 'sports'),
 
                 Fieldset::make(__('Filename Cleansing'))
                     ->columnSpanFull()
@@ -497,6 +591,7 @@ class StreamFileSettingResource extends Resource implements CopilotResource
                     ->colors([
                         'primary' => 'series',
                         'success' => 'vod',
+                        'warning' => 'sports',
                     ])
                     ->sortable(),
                 TextColumn::make('location')
@@ -527,6 +622,7 @@ class StreamFileSettingResource extends Resource implements CopilotResource
                     ->options([
                         'series' => 'Series',
                         'vod' => 'VOD',
+                        'sports' => 'Sports',
                     ]),
             ])
             ->recordActions([
