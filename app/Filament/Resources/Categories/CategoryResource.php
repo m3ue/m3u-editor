@@ -92,6 +92,12 @@ class CategoryResource extends Resource implements CopilotResource
                 ->label(__('Auto Enable New Channels'))
                 ->helperText(__('Automatically enable newly added channels to this group.'))
                 ->default(true),
+            TextInput::make('sort_order')
+                ->label(__('Sort Order'))
+                ->numeric()
+                ->default(9999)
+                ->helperText(__('Enter a number to define the sort order (e.g., 1, 2, 3). Lower numbers appear first.'))
+                ->rules(['integer', 'min:0']),
             Select::make('stream_file_setting_id')
                 ->label(__('Stream File Setting Profile'))
                 ->searchable()
@@ -145,6 +151,14 @@ class CategoryResource extends Resource implements CopilotResource
                             ->orderBy('name_internal', $direction)
                             ->orderBy('name', $direction);
                     })
+                    ->toggleable(),
+                TextInputColumn::make('sort_order')
+                    ->label(__('Sort Order'))
+                    ->rules(['min:0'])
+                    ->type('number')
+                    ->placeholder(__('Sort Order'))
+                    ->sortable()
+                    ->tooltip(__('Category sort order'))
                     ->toggleable(),
                 ToggleColumn::make('enabled')
                     ->label(__('Auto Enable'))
