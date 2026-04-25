@@ -28,6 +28,7 @@ class CheckVodStrmProgress implements ShouldQueue
         public ?int $playlist_id = null,
         public ?int $user_id = null,
         public bool $needsCleanup = false,
+        public ?array $channel_ids = null,
     ) {
         $this->onQueue('file_sync');
     }
@@ -58,6 +59,7 @@ class CheckVodStrmProgress implements ShouldQueue
                     playlist_id: $this->playlist_id,
                     user_id: $this->user_id,
                     isCleanupJob: true,
+                    channel_ids: $this->channel_ids,
                 ));
             } else {
                 if ($this->notify && $this->user_id) {
@@ -92,6 +94,7 @@ class CheckVodStrmProgress implements ShouldQueue
                 batchOffset: $offset,
                 totalBatches: $totalBatches,
                 currentBatch: $batchNumber,
+                channel_ids: $this->channel_ids,
             );
         }
 
@@ -104,6 +107,7 @@ class CheckVodStrmProgress implements ShouldQueue
             playlist_id: $this->playlist_id,
             user_id: $this->user_id,
             needsCleanup: $this->needsCleanup,
+            channel_ids: $this->channel_ids,
         );
 
         Log::info('STRM Sync: Dispatching next VOD chain', [

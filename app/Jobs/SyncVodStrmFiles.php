@@ -40,6 +40,11 @@ class SyncVodStrmFiles implements ShouldQueue
 
     /**
      * Create a new job instance.
+     *
+     * @param  array<int>|null  $channel_ids  Optional list of explicit Channel IDs to sync.
+     *                                        When provided, batches and cleanup/refresh are scoped to these IDs only.
+     *                                        This avoids dispatching N independent jobs (and N media server refreshes)
+     *                                        when bulk-syncing a user-selected subset of VOD channels.
      */
     public function __construct(
         public bool $notify = true,
@@ -53,6 +58,7 @@ class SyncVodStrmFiles implements ShouldQueue
         public ?int $totalBatches = null,
         public ?int $currentBatch = null,
         public bool $isCleanupJob = false,
+        public ?array $channel_ids = null,
     ) {
         // Run file synces on the dedicated queue
         $this->onQueue('file_sync');
@@ -164,6 +170,7 @@ class SyncVodStrmFiles implements ShouldQueue
                 batchOffset: $offset,
                 totalBatches: $totalBatches,
                 currentBatch: $batch + 1,
+                channel_ids: $this->channel_ids,
             );
         }
 
@@ -176,6 +183,7 @@ class SyncVodStrmFiles implements ShouldQueue
             playlist_id: $this->resolvePlaylistId(),
             user_id: $this->resolveUserId(),
             needsCleanup: true,
+            channel_ids: $this->channel_ids,
         );
 
         Bus::chain($jobs)->dispatch();
@@ -563,6 +571,9 @@ class SyncVodStrmFiles implements ShouldQueue
                 if (! $this->all_playlists && $playlistId) {
                     $query->where('playlist_id', $playlistId);
                 }
+                if ($this->channel_ids !== null) {
+                    $query->whereIn('id', $this->channel_ids);
+                }
             })
             ->get();
 
@@ -585,6 +596,11 @@ class SyncVodStrmFiles implements ShouldQueue
                 }
                 if (! $this->all_playlists && $playlistId) {
                     $query->where('playlist_id', $playlistId);
+                }
+                if ($this->channel_ids !== null) {
+                    $query->whereHas('channels', function ($q) {
+                        $q->whereIn('id', $this->channel_ids);
+                    });
                 }
             })
             ->get();
@@ -623,6 +639,9 @@ class SyncVodStrmFiles implements ShouldQueue
             })
             ->when(! $this->all_playlists && $playlistId, function ($query) use ($playlistId) {
                 $query->where('playlist_id', $playlistId);
+            })
+            ->when($this->channel_ids !== null, function ($query) {
+                $query->whereIn('id', $this->channel_ids);
             });
     }
 

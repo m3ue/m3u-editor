@@ -233,12 +233,15 @@ class CategoryResource extends Resource implements CopilotResource
                     Action::make('sync')
                         ->label(__('Sync Series .strm files'))
                         ->action(function ($record) {
-                            foreach ($record->enabled_series as $series) {
-                                app('Illuminate\Contracts\Bus\Dispatcher')
-                                    ->dispatch(new SyncSeriesStrmFiles(
-                                        series: $series,
-                                    ));
+                            $seriesIds = $record->enabled_series->pluck('id')->all();
+                            if (empty($seriesIds)) {
+                                return;
                             }
+                            app('Illuminate\Contracts\Bus\Dispatcher')
+                                ->dispatch(new SyncSeriesStrmFiles(
+                                    user_id: auth()->id(),
+                                    series_ids: $seriesIds,
+                                ));
                         })->after(function () {
                             Notification::make()
                                 ->success()
@@ -374,14 +377,19 @@ class CategoryResource extends Resource implements CopilotResource
                     BulkAction::make('sync')
                         ->label(__('Sync Series .strm files'))
                         ->action(function (Collection $records) {
-                            foreach ($records as $record) {
-                                foreach ($record->enabled_series as $series) {
-                                    app('Illuminate\Contracts\Bus\Dispatcher')
-                                        ->dispatch(new SyncSeriesStrmFiles(
-                                            series: $series,
-                                        ));
-                                }
+                            $seriesIds = $records
+                                ->flatMap(fn ($record) => $record->enabled_series->pluck('id'))
+                                ->unique()
+                                ->values()
+                                ->all();
+                            if (empty($seriesIds)) {
+                                return;
                             }
+                            app('Illuminate\Contracts\Bus\Dispatcher')
+                                ->dispatch(new SyncSeriesStrmFiles(
+                                    user_id: auth()->id(),
+                                    series_ids: $seriesIds,
+                                ));
                         })->after(function () {
                             Notification::make()
                                 ->success()

@@ -304,12 +304,15 @@ class VodGroupResource extends Resource implements CopilotResource
                     Action::make('sync_vod')
                         ->label(__('Sync VOD .strm file'))
                         ->action(function ($record) {
-                            foreach ($record->enabled_channels as $channel) {
-                                app('Illuminate\Contracts\Bus\Dispatcher')
-                                    ->dispatch(new SyncVodStrmFiles(
-                                        channel: $channel,
-                                    ));
+                            $channelIds = $record->enabled_channels->pluck('id')->all();
+                            if (empty($channelIds)) {
+                                return;
                             }
+                            app('Illuminate\Contracts\Bus\Dispatcher')
+                                ->dispatch(new SyncVodStrmFiles(
+                                    user_id: auth()->id(),
+                                    channel_ids: $channelIds,
+                                ));
                         })->after(function () {
                             Notification::make()
                                 ->success()
@@ -504,14 +507,19 @@ class VodGroupResource extends Resource implements CopilotResource
                     BulkAction::make('sync_bulk_vod')
                         ->label(__('Sync VOD .strm file'))
                         ->action(function (Collection $records) {
-                            foreach ($records as $record) {
-                                foreach ($record->enabled_channels as $channel) {
-                                    app('Illuminate\Contracts\Bus\Dispatcher')
-                                        ->dispatch(new SyncVodStrmFiles(
-                                            channel: $channel,
-                                        ));
-                                }
+                            $channelIds = $records
+                                ->flatMap(fn ($record) => $record->enabled_channels->pluck('id'))
+                                ->unique()
+                                ->values()
+                                ->all();
+                            if (empty($channelIds)) {
+                                return;
                             }
+                            app('Illuminate\Contracts\Bus\Dispatcher')
+                                ->dispatch(new SyncVodStrmFiles(
+                                    user_id: auth()->id(),
+                                    channel_ids: $channelIds,
+                                ));
                         })->after(function () {
                             Notification::make()
                                 ->success()

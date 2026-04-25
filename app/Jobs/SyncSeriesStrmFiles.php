@@ -39,6 +39,11 @@ class SyncSeriesStrmFiles implements ShouldQueue
 
     /**
      * Create a new job instance.
+     *
+     * @param  array<int>|null  $series_ids  Optional list of explicit Series IDs to sync.
+     *                                       When provided, batches and cleanup/refresh are scoped to these IDs only.
+     *                                       This avoids dispatching N independent jobs (and N media server refreshes)
+     *                                       when bulk-syncing a user-selected subset of series.
      */
     public function __construct(
         public ?Series $series = null,
@@ -50,6 +55,7 @@ class SyncSeriesStrmFiles implements ShouldQueue
         public ?int $totalBatches = null,
         public ?int $currentBatch = null,
         public bool $isCleanupJob = false, // Special flag for final cleanup
+        public ?array $series_ids = null,
     ) {
         // Run file synces on the dedicated queue
         $this->onQueue('file_sync');
@@ -110,6 +116,9 @@ class SyncSeriesStrmFiles implements ShouldQueue
             ->when($this->playlist_id, function ($query) {
                 $query->where('playlist_id', $this->playlist_id);
             })
+            ->when($this->series_ids !== null, function ($query) {
+                $query->whereIn('id', $this->series_ids);
+            })
             ->count();
 
         if ($totalCount === 0) {
@@ -147,6 +156,7 @@ class SyncSeriesStrmFiles implements ShouldQueue
                 batchOffset: $offset,
                 totalBatches: $totalBatches,
                 currentBatch: $batch + 1,
+                series_ids: $this->series_ids,
             );
         }
 
@@ -160,6 +170,7 @@ class SyncSeriesStrmFiles implements ShouldQueue
             playlist_id: $this->playlist_id,
             user_id: $this->user_id,
             needsCleanup: true, // Cleanup will run after all chains complete
+            series_ids: $this->series_ids,
         );
 
         // Dispatch the chain
@@ -186,6 +197,9 @@ class SyncSeriesStrmFiles implements ShouldQueue
             ])
             ->when($this->playlist_id, function ($query) {
                 $query->where('playlist_id', $this->playlist_id);
+            })
+            ->when($this->series_ids !== null, function ($query) {
+                $query->whereIn('id', $this->series_ids);
             })
             ->orderBy('id')
             ->skip($this->batchOffset)
@@ -320,6 +334,9 @@ class SyncSeriesStrmFiles implements ShouldQueue
                 if ($this->playlist_id) {
                     $query->where('playlist_id', $this->playlist_id);
                 }
+                if ($this->series_ids !== null) {
+                    $query->whereIn('id', $this->series_ids);
+                }
             })
             ->get();
 
@@ -341,6 +358,11 @@ class SyncSeriesStrmFiles implements ShouldQueue
                 $query->where('user_id', $this->user_id);
                 if ($this->playlist_id) {
                     $query->where('playlist_id', $this->playlist_id);
+                }
+                if ($this->series_ids !== null) {
+                    $query->whereHas('series', function ($q) {
+                        $q->whereIn('id', $this->series_ids);
+                    });
                 }
             })
             ->get();

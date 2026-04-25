@@ -78,12 +78,15 @@ class EditCategory extends EditRecord
                 Action::make('sync')
                     ->label(__('Sync Series .strm files'))
                     ->action(function ($record) {
-                        foreach ($record->enabled_series as $series) {
-                            app('Illuminate\Contracts\Bus\Dispatcher')
-                                ->dispatch(new SyncSeriesStrmFiles(
-                                    series: $series,
-                                ));
+                        $seriesIds = $record->enabled_series->pluck('id')->all();
+                        if (empty($seriesIds)) {
+                            return;
                         }
+                        app('Illuminate\Contracts\Bus\Dispatcher')
+                            ->dispatch(new SyncSeriesStrmFiles(
+                                user_id: auth()->id(),
+                                series_ids: $seriesIds,
+                            ));
                     })->after(function () {
                         Notification::make()
                             ->success()

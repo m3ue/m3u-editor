@@ -691,12 +691,15 @@ class SeriesResource extends Resource implements CopilotResource
                 BulkAction::make('sync')
                     ->label(__('Sync Series .strm files'))
                     ->action(function ($records) {
-                        foreach ($records as $record) {
-                            app('Illuminate\Contracts\Bus\Dispatcher')
-                                ->dispatch(new SyncSeriesStrmFiles(
-                                    series: $record,
-                                ));
+                        $seriesIds = $records->pluck('id')->all();
+                        if (empty($seriesIds)) {
+                            return;
                         }
+                        app('Illuminate\Contracts\Bus\Dispatcher')
+                            ->dispatch(new SyncSeriesStrmFiles(
+                                user_id: auth()->id(),
+                                series_ids: $seriesIds,
+                            ));
                     })->after(function () {
                         Notification::make()
                             ->success()

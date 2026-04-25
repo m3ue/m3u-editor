@@ -5,11 +5,12 @@ namespace App\Jobs;
 use App\Models\MediaServerIntegration;
 use App\Services\MediaServerService;
 use Filament\Notifications\Notification;
+use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Log;
 
-class RefreshMediaServerLibraryJob implements ShouldQueue
+class RefreshMediaServerLibraryJob implements ShouldBeUnique, ShouldQueue
 {
     use Queueable;
 
@@ -24,6 +25,17 @@ class RefreshMediaServerLibraryJob implements ShouldQueue
     public int $backoff = 10;
 
     /**
+     * Debounce window in seconds.
+     *
+     * Prevents library refresh spam when many sync jobs (e.g. a bulk STRM
+     * sync of 2000+ series) each try to dispatch a refresh for the same
+     * media server. While a job for a given integration is queued or
+     * running, additional dispatches within this window are silently
+     * dropped by the queue.
+     */
+    public int $uniqueFor = 300;
+
+    /**
      * Create a new job instance.
      */
     public function __construct(
@@ -31,6 +43,18 @@ class RefreshMediaServerLibraryJob implements ShouldQueue
         public bool $notify = true,
     ) {
         $this->onQueue('default');
+    }
+
+    /**
+     * Get the unique ID for the job.
+     *
+     * Scoped per integration so refreshes for different media servers do
+     * not block each other, but repeated refreshes for the same server
+     * collapse into a single execution.
+     */
+    public function uniqueId(): string
+    {
+        return 'refresh-media-server-'.$this->integration->id;
     }
 
     /**
