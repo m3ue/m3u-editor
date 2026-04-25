@@ -22,7 +22,7 @@ class GetDatabaseSchemaTool extends BaseTool
     {
         return [
             'table' => $schema->string()
-                ->description('Optional. The name of a specific table to get the schema for. If omitted, returns all accessible tables.'),
+                ->description(__('Optional. The name of a specific table to get the schema for. If omitted, returns all accessible tables.')),
         ];
     }
 

@@ -127,7 +127,7 @@ class StreamProfileResource extends Resource implements CopilotResource
 
                 Textarea::make('cookies')
                     ->label(__('Cookies (Netscape format)'))
-                    ->placeholder("# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t0\tCOOKIE_NAME\tCOOKIE_VALUE")
+                    ->placeholder(__('# Netscape HTTP Cookie File\\n.youtube.com\\tTRUE\\t/\\tTRUE\\t0\\tCOOKIE_NAME\\tCOOKIE_VALUE'))
                     ->helperText(__('Paste cookies.txt content for authenticated streams (e.g. YouTube members-only, age-gated). Get cookies using a browser extension like "Get cookies.txt LOCALLY".'))
                     ->rows(5)
                     ->columnSpanFull()

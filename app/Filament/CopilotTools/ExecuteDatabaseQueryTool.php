@@ -23,19 +23,19 @@ class ExecuteDatabaseQueryTool extends BaseTool
     {
         return [
             'table' => $schema->string()
-                ->description('The database table to query.')
+                ->description(__('The database table to query.'))
                 ->required(),
             'action' => $schema->string()
-                ->description('The action to perform: "select", "update", or "delete".')
+                ->description(__('The action to perform: "select", "update", or "delete".'))
                 ->required(),
             'where' => $schema->string()
                 ->description('Optional JSON array of where conditions. Example: [{"column": "playlist_id", "operator": "=", "value": "5"}]'),
             'columns' => $schema->string()
-                ->description('Optional JSON array of columns to return for a select query. Defaults to ["*"].'),
+                ->description(__('Optional JSON array of columns to return for a select query. Defaults to ["*"].')),
             'update_data' => $schema->string()
-                ->description('JSON object containing key-value pairs for an update action.'),
+                ->description(__('JSON object containing key-value pairs for an update action.')),
             'limit' => $schema->integer()
-                ->description('Optional limit for select queries. Defaults to 50.'),
+                ->description(__('Optional limit for select queries. Defaults to 50.')),
         ];
     }
 
