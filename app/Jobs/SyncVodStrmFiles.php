@@ -510,6 +510,21 @@ class SyncVodStrmFiles implements ShouldQueue
 
         $syncLocations = StrmFileMapping::query()
             ->where('syncable_type', Channel::class)
+            ->when($this->playlist_id, function ($query, $playlistId) {
+                $query->whereHasMorph('syncable', [Channel::class], function ($q) use ($playlistId) {
+                    $q->where('playlist_id', $playlistId);
+                });
+            })
+            ->when($this->channel?->id, function ($query, $channelId) {
+                $query->whereHasMorph('syncable', [Channel::class], function ($q) use ($channelId) {
+                    $q->where('id', $channelId);
+                });
+            })
+            ->when($this->channel_ids, function ($query, $channelIds) {
+                $query->whereHasMorph('syncable', [Channel::class], function ($q) use ($channelIds) {
+                    $q->whereIn('id', $channelIds);
+                });
+            })
             ->distinct()
             ->pluck('sync_location')
             ->toArray();

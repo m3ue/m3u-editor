@@ -81,16 +81,14 @@ it('dispatches a single SyncVodStrmFiles job with channel_ids when bulk-syncing 
         'playlist_id' => $playlist->id,
     ]);
 
-    $channelIds = collect();
     foreach ($groups as $group) {
-        $channels = Channel::factory()->count(3)->create([
+        Channel::factory()->count(3)->create([
             'user_id' => $this->user->id,
             'playlist_id' => $playlist->id,
             'group_id' => $group->id,
             'is_vod' => true,
             'enabled' => true,
         ]);
-        $channelIds = $channelIds->merge($channels->pluck('id'));
     }
 
     $this->actingAs($this->user);
