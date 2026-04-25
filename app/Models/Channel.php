@@ -357,7 +357,12 @@ class Channel extends Model
     /**
      * Run ffprobe against this channel's stream URL and return parsed stats.
      *
-     * @return array{streams: array<int, array{codec_type: string, codec_name: string, codec_long_name: ?string, profile: ?string, width: ?int, height: ?int, bit_rate: ?string, avg_frame_rate: ?string, display_aspect_ratio: ?string, sample_rate: ?string, channels: ?int, channel_layout: ?string, level: ?int, bits_per_raw_sample: ?string}>}
+     * Returns a list of entries. Per-stream entries are keyed under `stream` and
+     * carry a `codec_type`. A trailing entry keyed under `format` carries
+     * container-level metadata (bit_rate, duration, format_name) used as a
+     * fallback when per-stream video `bit_rate` is null (common for MPEG-TS).
+     *
+     * @return array<int, array{stream?: array<string, mixed>, format?: array{bit_rate: ?string, duration: ?string, format_name: ?string}}>
      */
     public function probeStreamStats(int $timeout = 15): array
     {
@@ -367,7 +372,7 @@ class Channel extends Model
                 return [];
             }
 
-            $process = new SymfonyProcess(['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_streams', $url]);
+            $process = new SymfonyProcess(['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_streams', '-show_format', $url]);
             $process->setTimeout($timeout);
             $process->run();
 
@@ -404,6 +409,16 @@ class Channel extends Model
                     }
                 }
 
+                if (isset($json['format']) && is_array($json['format'])) {
+                    $streamStats[] = [
+                        'format' => [
+                            'bit_rate' => $json['format']['bit_rate'] ?? null,
+                            'duration' => $json['format']['duration'] ?? null,
+                            'format_name' => $json['format']['format_name'] ?? null,
+                        ],
+                    ];
+                }
+
                 return $streamStats;
             }
         } catch (Exception $e) {
@@ -427,7 +442,13 @@ class Channel extends Model
 
         $video = null;
         $audio = null;
+        $format = null;
         foreach ($stats as $entry) {
+            if (isset($entry['format']) && is_array($entry['format'])) {
+                $format = $entry['format'];
+
+                continue;
+            }
             $stream = $entry['stream'] ?? $entry;
             if (($stream['codec_type'] ?? '') === 'video' && ! $video) {
                 $video = $stream;
@@ -462,8 +483,15 @@ class Channel extends Model
                 $result['source_fps'] = $fps ? (float) $fps : null;
             }
 
-            // Convert bps to kbps
+            // Per-stream video bit_rate is often null for MPEG-TS / HLS containers.
+            // Fall back to (format.bit_rate − audio.bit_rate). Includes muxing overhead
+            // (~3-5% inflation) but is good enough for ranking and Technical Details display.
             $bitRate = $video['bit_rate'] ?? null;
+            if ($bitRate === null && $format !== null && isset($format['bit_rate'])) {
+                $audioBps = isset($audio['bit_rate']) ? (float) $audio['bit_rate'] : 0.0;
+                $videoBps = max(0.0, (float) $format['bit_rate'] - $audioBps);
+                $bitRate = $videoBps > 0 ? $videoBps : null;
+            }
             $result['ffmpeg_output_bitrate'] = $bitRate ? round((float) $bitRate / 1000, 1) : null;
         }
 
@@ -530,6 +558,9 @@ class Channel extends Model
             $allStreams = [];
 
             foreach ($stats as $index => $entry) {
+                if (isset($entry['format']) && ! isset($entry['stream'])) {
+                    continue;
+                }
                 $stream = $entry['stream'] ?? $entry;
                 $type = $stream['codec_type'] ?? null;
 

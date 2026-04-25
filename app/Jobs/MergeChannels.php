@@ -26,6 +26,8 @@ class MergeChannels implements ShouldQueue
         'group_priority',
         'catchup_support',
         'resolution',
+        'fps',
+        'bitrate',
         'codec',
         'keyword_match',
     ];
@@ -390,6 +392,8 @@ class MergeChannels implements ShouldQueue
                 'group_priority' => $this->getGroupPriorityScore($channel),
                 'catchup_support' => $this->getCatchupScore($channel),
                 'resolution' => $this->getResolutionScore($channel),
+                'fps' => $this->getFpsScore($channel),
+                'bitrate' => $this->getBitrateScore($channel),
                 'codec' => $this->getCodecScore($channel),
                 'keyword_match' => $this->getKeywordScore($channel),
                 default => 0,
@@ -484,6 +488,28 @@ class MergeChannels implements ShouldQueue
 
         // Normalize: 4K (3840x2160 = 8294400) = 100, 1080p = ~25, 720p = ~11
         return min(100, (int) ($resolution / 82944));
+    }
+
+    /**
+     * Get FPS score (normalized 0-100).
+     */
+    protected function getFpsScore(Channel $channel): int
+    {
+        $fps = $this->getFps($channel);
+
+        // Normalize: 25/30 fps = ~25-30, 50/60 fps = ~50-60, 100+ fps caps at 100
+        return min(100, (int) round($fps));
+    }
+
+    /**
+     * Get bitrate score (normalized 0-100).
+     */
+    protected function getBitrateScore(Channel $channel): int
+    {
+        $kbps = $this->getBitrate($channel);
+
+        // Normalize: 5000 kbps = 50, 10000+ kbps caps at 100
+        return min(100, (int) ($kbps / 100));
     }
 
     /**
@@ -643,6 +669,34 @@ class MergeChannels implements ShouldQueue
         }
 
         return 0;
+    }
+
+    /**
+     * Get video frame rate (FPS) from channel stream stats.
+     *
+     * Routes through getEmbyStreamStats() so the fractional-rate parsing
+     * (e.g. "30000/1001" → 29.97) is reused.
+     */
+    protected function getFps(Channel $channel): float
+    {
+        $channel->ensureStreamStats();
+        $emby = $channel->getEmbyStreamStats();
+
+        return (float) ($emby['source_fps'] ?? 0.0);
+    }
+
+    /**
+     * Get video bitrate (kbps) from channel stream stats.
+     *
+     * Routes through getEmbyStreamStats() so the format-level bitrate
+     * fallback (used when per-stream video bit_rate is null for MPEG-TS) applies.
+     */
+    protected function getBitrate(Channel $channel): int
+    {
+        $channel->ensureStreamStats();
+        $emby = $channel->getEmbyStreamStats();
+
+        return (int) ($emby['ffmpeg_output_bitrate'] ?? 0);
     }
 
     protected function sendCompletionNotification(int $processed, int $deactivatedCount = 0): void

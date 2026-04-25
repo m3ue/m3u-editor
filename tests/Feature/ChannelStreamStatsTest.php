@@ -208,3 +208,153 @@ it('returns empty array and does not persist when probe yields nothing', functio
     expect($channel->stream_stats)->toBe([])
         ->and($channel->stream_stats_probed_at)->toBeNull();
 });
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Format-level fallback for video bitrate (Issue #330 — Smart Channels)
+// ──────────────────────────────────────────────────────────────────────────────
+
+it('falls back to format.bit_rate minus audio.bit_rate when video bit_rate is null', function () {
+    $channel = Channel::factory()->for($this->playlist)->create([
+        'stream_stats' => [
+            ['stream' => [
+                'codec_type' => 'video',
+                'codec_name' => 'h264',
+                'width' => 1920,
+                'height' => 1080,
+                'bit_rate' => null, // typical for MPEG-TS
+            ]],
+            ['stream' => [
+                'codec_type' => 'audio',
+                'codec_name' => 'aac',
+                'channels' => 2,
+                'bit_rate' => '128000',
+            ]],
+            ['format' => [
+                'bit_rate' => '5128000',
+                'duration' => '10.0',
+                'format_name' => 'mpegts',
+            ]],
+        ],
+    ]);
+
+    expect($channel->getEmbyStreamStats()['ffmpeg_output_bitrate'])->toBe(5000.0);
+});
+
+it('prefers per-stream video bit_rate over format-level fallback', function () {
+    $channel = Channel::factory()->for($this->playlist)->create([
+        'stream_stats' => [
+            ['stream' => [
+                'codec_type' => 'video',
+                'codec_name' => 'h264',
+                'width' => 1920,
+                'height' => 1080,
+                'bit_rate' => '4500000',
+            ]],
+            ['format' => [
+                'bit_rate' => '9999000',
+                'duration' => '10.0',
+                'format_name' => 'mpegts',
+            ]],
+        ],
+    ]);
+
+    expect($channel->getEmbyStreamStats()['ffmpeg_output_bitrate'])->toBe(4500.0);
+});
+
+it('uses format.bit_rate directly when audio bit_rate is unavailable', function () {
+    $channel = Channel::factory()->for($this->playlist)->create([
+        'stream_stats' => [
+            ['stream' => [
+                'codec_type' => 'video',
+                'codec_name' => 'h264',
+                'width' => 1920,
+                'height' => 1080,
+                'bit_rate' => null,
+            ]],
+            ['stream' => [
+                'codec_type' => 'audio',
+                'codec_name' => 'aac',
+                'bit_rate' => null,
+            ]],
+            ['format' => [
+                'bit_rate' => '5000000',
+                'duration' => '10.0',
+                'format_name' => 'mpegts',
+            ]],
+        ],
+    ]);
+
+    expect($channel->getEmbyStreamStats()['ffmpeg_output_bitrate'])->toBe(5000.0);
+});
+
+it('clamps fallback video bitrate to null when audio bit_rate exceeds format bit_rate', function () {
+    $channel = Channel::factory()->for($this->playlist)->create([
+        'stream_stats' => [
+            ['stream' => [
+                'codec_type' => 'video',
+                'codec_name' => 'h264',
+                'width' => 1920,
+                'height' => 1080,
+                'bit_rate' => null,
+            ]],
+            ['stream' => [
+                'codec_type' => 'audio',
+                'codec_name' => 'aac',
+                'bit_rate' => '10000000',
+            ]],
+            ['format' => [
+                'bit_rate' => '5000000',
+                'duration' => '10.0',
+                'format_name' => 'mpegts',
+            ]],
+        ],
+    ]);
+
+    expect($channel->getEmbyStreamStats()['ffmpeg_output_bitrate'])->toBeNull();
+});
+
+it('parses old stream_stats rows without a format entry without errors', function () {
+    $channel = Channel::factory()->for($this->playlist)->create([
+        'stream_stats' => [
+            ['stream' => [
+                'codec_type' => 'video',
+                'codec_name' => 'h264',
+                'width' => 1920,
+                'height' => 1080,
+                'bit_rate' => null,
+            ]],
+            ['stream' => [
+                'codec_type' => 'audio',
+                'codec_name' => 'aac',
+                'bit_rate' => '128000',
+            ]],
+        ],
+    ]);
+
+    $result = $channel->getEmbyStreamStats();
+
+    expect($result['ffmpeg_output_bitrate'])->toBeNull()
+        ->and($result['resolution'])->toBe('1920x1080')
+        ->and($result['audio_bitrate'])->toBe(128.0);
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// getStreamStatsForDisplay() with format entry
+// ──────────────────────────────────────────────────────────────────────────────
+
+it('skips format entries when building all_streams display list', function () {
+    $channel = Channel::factory()->for($this->playlist)->create([
+        'stream_stats' => [
+            ['stream' => ['codec_type' => 'video', 'codec_name' => 'h264', 'width' => 1920, 'height' => 1080, 'tags' => []]],
+            ['stream' => ['codec_type' => 'audio', 'codec_name' => 'aac', 'channels' => 2, 'tags' => ['language' => 'eng']]],
+            ['stream' => ['codec_type' => 'audio', 'codec_name' => 'ac3', 'channels' => 6, 'tags' => ['language' => 'spa']]],
+            ['format' => ['bit_rate' => '5000000', 'duration' => '10.0', 'format_name' => 'mpegts']],
+        ],
+    ]);
+
+    $display = $channel->getStreamStatsForDisplay();
+
+    expect($display['advanced']['all_streams'])->toHaveCount(3)
+        ->and(collect($display['advanced']['all_streams'])->pluck('codec')->all())
+        ->toBe(['h264', 'aac', 'ac3']);
+});
