@@ -359,8 +359,12 @@ class Channel extends Model
      *
      * Returns a list of entries. Per-stream entries are keyed under `stream` and
      * carry a `codec_type`. A trailing entry keyed under `format` carries
-     * container-level metadata (bit_rate, duration, format_name) used as a
-     * fallback when per-stream video `bit_rate` is null (common for MPEG-TS).
+     * container-level metadata (bit_rate, duration, format_name).
+     *
+     * For live MPEG-TS / HLS streams, neither the per-stream video `bit_rate`
+     * nor the format-level `bit_rate` is typically populated (no known
+     * duration). In that case a short packet-sampling probe measures the actual
+     * throughput and back-fills the video stream's `bit_rate` field.
      *
      * @return array<int, array{stream?: array<string, mixed>, format?: array{bit_rate: ?string, duration: ?string, format_name: ?string}}>
      */
@@ -386,8 +390,12 @@ class Channel extends Model
             $json = json_decode($output, true);
             if (isset($json['streams']) && is_array($json['streams'])) {
                 $streamStats = [];
+                $videoBitRateMissing = false;
                 foreach ($json['streams'] as $stream) {
                     if (isset($stream['codec_name'])) {
+                        if (($stream['codec_type'] ?? '') === 'video' && empty($stream['bit_rate'])) {
+                            $videoBitRateMissing = true;
+                        }
                         $streamStats[]['stream'] = [
                             'codec_type' => $stream['codec_type'],
                             'codec_name' => $stream['codec_name'],
@@ -409,6 +417,19 @@ class Channel extends Model
                     }
                 }
 
+                if ($videoBitRateMissing) {
+                    $sampledBps = $this->sampleVideoBitrate($url, $timeout);
+                    if ($sampledBps !== null) {
+                        foreach ($streamStats as &$entry) {
+                            if (isset($entry['stream']) && ($entry['stream']['codec_type'] ?? '') === 'video') {
+                                $entry['stream']['bit_rate'] = (string) $sampledBps;
+                                break;
+                            }
+                        }
+                        unset($entry);
+                    }
+                }
+
                 if (isset($json['format']) && is_array($json['format'])) {
                     $streamStats[] = [
                         'format' => [
@@ -426,6 +447,74 @@ class Channel extends Model
         }
 
         return [];
+    }
+
+    /**
+     * Measure video bitrate by sampling packets from the live stream.
+     *
+     * Used when ffprobe's metadata pass leaves both per-stream and format-level
+     * `bit_rate` null (common for live MPEG-TS / HLS). Reads ~5 seconds of
+     * video packets and computes (bytes * 8 / duration). Returns bps as an
+     * integer, or null if no usable packets were captured.
+     */
+    protected function sampleVideoBitrate(string $url, int $timeout): ?int
+    {
+        try {
+            $process = new SymfonyProcess([
+                'ffprobe',
+                '-v', 'quiet',
+                '-print_format', 'json',
+                '-read_intervals', '%+5',
+                '-select_streams', 'v:0',
+                '-show_entries', 'packet=size,pts_time',
+                $url,
+            ]);
+            $process->setTimeout($timeout);
+            $process->run();
+
+            if ($process->getExitCode() !== 0) {
+                return null;
+            }
+
+            $json = json_decode($process->getOutput(), true);
+
+            return self::computeBitrateFromPackets($json['packets'] ?? []);
+        } catch (Exception $e) {
+            Log::error("Error sampling video bitrate for channel \"{$this->title}\": {$e->getMessage()}");
+
+            return null;
+        }
+    }
+
+    /**
+     * Compute bitrate (bps) from a sequence of ffprobe `-show_packets` entries.
+     *
+     * Returns null when there are too few packets, the time span is non-positive,
+     * or the total byte count is zero — i.e. when no meaningful measurement can
+     * be derived.
+     *
+     * @param  array<int, array{size?: string|int, pts_time?: string|float}>  $packets
+     */
+    public static function computeBitrateFromPackets(array $packets): ?int
+    {
+        if (count($packets) < 2) {
+            return null;
+        }
+
+        $totalBytes = 0;
+        foreach ($packets as $packet) {
+            $totalBytes += (int) ($packet['size'] ?? 0);
+        }
+
+        $firstPts = (float) ($packets[0]['pts_time'] ?? 0);
+        $lastPts = (float) ($packets[count($packets) - 1]['pts_time'] ?? 0);
+        $duration = $lastPts - $firstPts;
+
+        if ($duration <= 0 || $totalBytes <= 0) {
+            return null;
+        }
+
+        return (int) round($totalBytes * 8 / $duration);
     }
 
     /**

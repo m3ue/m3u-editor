@@ -342,6 +342,49 @@ it('parses old stream_stats rows without a format entry without errors', functio
 // getStreamStatsForDisplay() with format entry
 // ──────────────────────────────────────────────────────────────────────────────
 
+// ──────────────────────────────────────────────────────────────────────────────
+// computeBitrateFromPackets() — packet-sampling math used as a fallback when
+// neither per-stream nor format-level bit_rate is populated.
+// ──────────────────────────────────────────────────────────────────────────────
+
+it('computes bitrate from packet sizes and pts span', function () {
+    // 125 packets totalling ~3.75 MB over ~5 s ≈ 6 Mbps
+    $packets = [
+        ['size' => '750000', 'pts_time' => '88441.900000'],
+        ['size' => '750000', 'pts_time' => '88443.150000'],
+        ['size' => '750000', 'pts_time' => '88444.400000'],
+        ['size' => '750000', 'pts_time' => '88445.650000'],
+        ['size' => '750000', 'pts_time' => '88446.900000'],
+    ];
+
+    $bps = Channel::computeBitrateFromPackets($packets);
+
+    expect($bps)->toBe(6_000_000);
+});
+
+it('returns null when there are fewer than 2 packets', function () {
+    expect(Channel::computeBitrateFromPackets([]))->toBeNull()
+        ->and(Channel::computeBitrateFromPackets([['size' => '1000', 'pts_time' => '0.0']]))->toBeNull();
+});
+
+it('returns null when packet pts span is zero or negative', function () {
+    $packets = [
+        ['size' => '1000', 'pts_time' => '5.0'],
+        ['size' => '1000', 'pts_time' => '5.0'],
+    ];
+
+    expect(Channel::computeBitrateFromPackets($packets))->toBeNull();
+});
+
+it('returns null when total packet bytes is zero', function () {
+    $packets = [
+        ['size' => '0', 'pts_time' => '0.0'],
+        ['size' => '0', 'pts_time' => '5.0'],
+    ];
+
+    expect(Channel::computeBitrateFromPackets($packets))->toBeNull();
+});
+
 it('skips format entries when building all_streams display list', function () {
     $channel = Channel::factory()->for($this->playlist)->create([
         'stream_stats' => [
