@@ -14,6 +14,7 @@ use App\Jobs\ChannelFindAndReplace;
 use App\Jobs\ChannelFindAndReplaceReset;
 use App\Jobs\MapPlaylistChannelsToEpg;
 use App\Jobs\ProbeChannelStreams;
+use App\Jobs\RescoreChannelFailovers;
 use App\Jobs\SyncPlexDvrJob;
 use App\Models\Channel;
 use App\Models\ChannelFailover;
@@ -1530,6 +1531,40 @@ class ChannelResource extends Resource implements CopilotResource
                             ->state(fn () => __("Probing is disabled for this channel. Enable it in the channel's edit form to allow probe data collection."))
                             ->visible(fn ($record) => self::resolveTechnicalDetailsState($record) === 'disabled'),
                     ]),
+                Section::make(__('Failover Ranking'))
+                    ->description(__('Failovers ranked by score. Stored from the last merge or rescore — click "Rescore now" to recalculate against current stream stats.'))
+                    ->collapsible()
+                    ->visible(fn ($record) => $record && $record->failovers()->exists())
+                    ->headerActions([
+                        Action::make('rescore_failovers_inline')
+                            ->label(__('Rescore now'))
+                            ->icon('heroicon-o-arrow-path')
+                            ->color('info')
+                            ->action(function ($record) {
+                                dispatch(new RescoreChannelFailovers(
+                                    playlistId: $record->playlist_id,
+                                    channelIds: [$record->id],
+                                ));
+
+                                Notification::make()
+                                    ->success()
+                                    ->title(__('Rescoring queued'))
+                                    ->body(__('Failovers will be re-scored in the background. Refresh this page in a moment to see the updated ranking.'))
+                                    ->duration(6000)
+                                    ->send();
+                            })
+                            ->requiresConfirmation()
+                            ->modalIcon('heroicon-o-arrow-path')
+                            ->modalDescription(__('Re-score this channel\'s failovers against current stream stats. Stale channels may be re-probed (subject to the playlist\'s staleness window). The master channel is never altered — only the failover order changes.'))
+                            ->modalSubmitActionLabel(__('Rescore')),
+                    ])
+                    ->schema([
+                        TextEntry::make('failover_ranking_html')
+                            ->hiddenLabel()
+                            ->columnSpanFull()
+                            ->state(fn ($record) => self::renderFailoverRankingHtml($record))
+                            ->html(),
+                    ]),
             ]);
     }
 
@@ -1549,6 +1584,64 @@ class ChannelResource extends Resource implements CopilotResource
         }
 
         return 'ok';
+    }
+
+    /**
+     * Render the channel's failover ranking as an HTML table for the infolist.
+     *
+     * Pulls each failover's persisted score and per-attribute breakdown from
+     * channel_failovers.metadata. Returns null when the channel has no
+     * failovers attached so the section can hide itself.
+     */
+    private static function renderFailoverRankingHtml(?Channel $record): ?HtmlString
+    {
+        if (! $record) {
+            return null;
+        }
+
+        $failovers = $record->failovers()
+            ->with('channelFailover')
+            ->orderBy('sort')
+            ->get();
+
+        if ($failovers->isEmpty()) {
+            return null;
+        }
+
+        $bodyRows = $failovers->map(function ($failover, int $index) {
+            $channel = $failover->channelFailover;
+            if (! $channel) {
+                return '';
+            }
+
+            $metadata = $failover->metadata ?? [];
+            $score = $metadata['score'] ?? null;
+            $breakdown = $metadata['attribute_scores'] ?? [];
+
+            $rankBadge = '<span class="font-mono text-xs text-gray-500 dark:text-gray-400">#'.($index + 1).'</span>';
+            $displayTitle = e($channel->title_custom ?: $channel->title ?: $channel->name);
+            $playlistName = e($channel->getEffectivePlaylist()->name ?? 'Unknown');
+            $titleCell = "<div class=\"font-medium\">{$displayTitle}</div><div class=\"text-xs text-gray-500 dark:text-gray-400\">{$playlistName}</div>";
+
+            $scoreCell = $score !== null
+                ? '<span class="font-mono text-sm">'.number_format((int) $score).'</span>'
+                : '<span class="text-xs text-gray-400 italic">not scored</span>';
+
+            $breakdownParts = [];
+            foreach ($breakdown as $attribute => $value) {
+                $label = e(str_replace('_', ' ', $attribute));
+                $breakdownParts[] = "<span class=\"inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-xs mr-1 mb-1\"><span class=\"text-gray-500 dark:text-gray-400\">{$label}</span><span class=\"font-mono\">".(int) $value.'</span></span>';
+            }
+            $breakdownCell = $breakdownParts
+                ? '<div class="flex flex-wrap">'.implode('', $breakdownParts).'</div>'
+                : '<span class="text-xs text-gray-400 italic">—</span>';
+
+            return "<tr class=\"border-t border-gray-200 dark:border-gray-700\"><td class=\"py-2 pr-2 align-top\">{$rankBadge}</td><td class=\"py-2 pr-2 align-top\">{$titleCell}</td><td class=\"py-2 pr-2 align-top\">{$scoreCell}</td><td class=\"py-2 align-top\">{$breakdownCell}</td></tr>";
+        })->implode('');
+
+        $headerRow = '<thead><tr class="text-left text-xs uppercase text-gray-500 dark:text-gray-400"><th class="py-1 pr-2">Rank</th><th class="py-1 pr-2">Channel</th><th class="py-1 pr-2">Score</th><th class="py-1">Breakdown (per attribute, 0-100)</th></tr></thead>';
+
+        return new HtmlString("<table class=\"w-full text-sm\">{$headerRow}<tbody>{$bodyRows}</tbody></table>");
     }
 
     public static function getForm($customPlaylist = null, $edit = false): array
