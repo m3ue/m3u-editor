@@ -1355,7 +1355,7 @@ class ChannelResource extends Resource implements CopilotResource
                     ]),
                 Section::make(__('Technical Details'))
                     ->collapsible()
-                    ->visible(fn ($record) => $record && ! $record->is_vod)
+                    ->visible(fn ($record) => $record && ! $record->is_vod && ! ($record->is_custom && empty($record->url)))
                     ->headerActions([
                         Action::make('probe')
                             ->label(fn ($record) => match (self::resolveTechnicalDetailsState($record)) {
@@ -1587,11 +1587,13 @@ class ChannelResource extends Resource implements CopilotResource
     }
 
     /**
-     * Render the channel's failover ranking as an HTML table for the infolist.
+     * Render the channel's failover ranking as a stack of expandable cards.
      *
-     * Pulls each failover's persisted score and per-attribute breakdown from
-     * channel_failovers.metadata. Returns null when the channel has no
-     * failovers attached so the section can hide itself.
+     * Each card's summary row shows rank + title + score; expanding reveals
+     * the per-attribute breakdown plus the failover's probed technical
+     * details (resolution, fps, bitrate, codec, audio info, last probed).
+     * Returns null when the channel has no failovers attached so the section
+     * can hide itself.
      */
     private static function renderFailoverRankingHtml(?Channel $record): ?HtmlString
     {
@@ -1608,7 +1610,7 @@ class ChannelResource extends Resource implements CopilotResource
             return null;
         }
 
-        $bodyRows = $failovers->map(function ($failover, int $index) {
+        $cards = $failovers->map(function ($failover, int $index) {
             $channel = $failover->channelFailover;
             if (! $channel) {
                 return '';
@@ -1618,30 +1620,103 @@ class ChannelResource extends Resource implements CopilotResource
             $score = $metadata['score'] ?? null;
             $breakdown = $metadata['attribute_scores'] ?? [];
 
-            $rankBadge = '<span class="font-mono text-xs text-gray-500 dark:text-gray-400">#'.($index + 1).'</span>';
             $displayTitle = e($channel->title_custom ?: $channel->title ?: $channel->name);
             $playlistName = e($channel->getEffectivePlaylist()->name ?? 'Unknown');
-            $titleCell = "<div class=\"font-medium\">{$displayTitle}</div><div class=\"text-xs text-gray-500 dark:text-gray-400\">{$playlistName}</div>";
 
-            $scoreCell = $score !== null
-                ? '<span class="font-mono text-sm">'.number_format((int) $score).'</span>'
-                : '<span class="text-xs text-gray-400 italic">not scored</span>';
+            $scoreBadge = $score !== null
+                ? '<span class="font-mono text-sm whitespace-nowrap px-2 py-1 rounded bg-primary-50 text-primary-700 dark:bg-primary-950 dark:text-primary-300">Score '.(int) $score.'</span>'
+                : '<span class="text-xs text-gray-400 italic whitespace-nowrap">not scored</span>';
 
-            $breakdownParts = [];
-            foreach ($breakdown as $attribute => $value) {
-                $label = e(str_replace('_', ' ', $attribute));
-                $breakdownParts[] = "<span class=\"inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-xs mr-1 mb-1\"><span class=\"text-gray-500 dark:text-gray-400\">{$label}</span><span class=\"font-mono\">".(int) $value.'</span></span>';
+            $summary = '<summary class="cursor-pointer flex items-center gap-3 list-none select-none">
+                <span class="text-gray-400 group-open:rotate-90 transition-transform inline-block w-3">▸</span>
+                <span class="font-mono text-xs text-gray-500 dark:text-gray-400 w-8">#'.($index + 1).'</span>
+                <div class="flex-1 min-w-0">
+                    <div class="font-medium truncate">'.$displayTitle.'</div>
+                    <div class="text-xs text-gray-500 dark:text-gray-400 truncate">'.$playlistName.'</div>
+                </div>
+                '.$scoreBadge.'
+            </summary>';
+
+            $expanded = '<div class="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700 space-y-3">';
+
+            if (! empty($breakdown)) {
+                $breakdownParts = [];
+                foreach ($breakdown as $attribute => $value) {
+                    $label = e(str_replace('_', ' ', $attribute));
+                    $breakdownParts[] = '<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-xs"><span class="text-gray-500 dark:text-gray-400">'.$label.'</span><span class="font-mono">'.(int) $value.'</span></span>';
+                }
+                $expanded .= '<div>
+                    <div class="text-xs uppercase text-gray-500 dark:text-gray-400 mb-1.5">Score breakdown (per attribute, 0-100)</div>
+                    <div class="flex flex-wrap gap-1.5">'.implode('', $breakdownParts).'</div>
+                </div>';
             }
-            $breakdownCell = $breakdownParts
-                ? '<div class="flex flex-wrap">'.implode('', $breakdownParts).'</div>'
-                : '<span class="text-xs text-gray-400 italic">—</span>';
 
-            return "<tr class=\"border-t border-gray-200 dark:border-gray-700\"><td class=\"py-2 pr-2 align-top\">{$rankBadge}</td><td class=\"py-2 pr-2 align-top\">{$titleCell}</td><td class=\"py-2 pr-2 align-top\">{$scoreCell}</td><td class=\"py-2 align-top\">{$breakdownCell}</td></tr>";
+            $expanded .= self::renderFailoverTechDetails($channel);
+            $expanded .= '</div>';
+
+            return '<details class="group rounded border border-gray-200 dark:border-gray-700 p-3 hover:bg-gray-50 dark:hover:bg-gray-900/50">'.$summary.$expanded.'</details>';
         })->implode('');
 
-        $headerRow = '<thead><tr class="text-left text-xs uppercase text-gray-500 dark:text-gray-400"><th class="py-1 pr-2">Rank</th><th class="py-1 pr-2">Channel</th><th class="py-1 pr-2">Score</th><th class="py-1">Breakdown (per attribute, 0-100)</th></tr></thead>';
+        return new HtmlString('<div class="space-y-2">'.$cards.'</div>');
+    }
 
-        return new HtmlString("<table class=\"w-full text-sm\">{$headerRow}<tbody>{$bodyRows}</tbody></table>");
+    /**
+     * Render a single failover channel's technical details for the expandable
+     * ranking card. Returns a "not yet probed" hint when no stream stats are
+     * available so users know whether re-probing might help.
+     */
+    private static function renderFailoverTechDetails(Channel $channel): string
+    {
+        if (empty($channel->stream_stats)) {
+            $hint = $channel->probe_enabled
+                ? __('Not yet probed — run a probe on this channel to capture stream details.')
+                : __('Probing is disabled for this channel.');
+
+            return '<div>
+                <div class="text-xs uppercase text-gray-500 dark:text-gray-400 mb-1.5">Technical details</div>
+                <div class="text-sm text-gray-500 italic">'.e($hint).'</div>
+            </div>';
+        }
+
+        $compact = $channel->getStreamStatsForDisplay()['compact'] ?? [];
+        $rows = [];
+
+        $append = function (string $label, $value, ?string $suffix = null) use (&$rows) {
+            if ($value === null || $value === '') {
+                return;
+            }
+            $formatted = is_numeric($value) && $suffix === ' kbps'
+                ? number_format((float) $value, 0).$suffix
+                : ($suffix ? $value.$suffix : $value);
+            $rows[] = '<div class="text-xs text-gray-500 dark:text-gray-400">'.e($label).'</div><div class="text-sm font-mono">'.e((string) $formatted).'</div>';
+        };
+
+        $append('Resolution', $compact['resolution'] ?? null);
+        $append('Frame rate', isset($compact['source_fps']) ? $compact['source_fps'] : null, ' fps');
+        $append('Video codec', $compact['video_codec_display'] ?? null);
+        $append('Video bitrate', $compact['ffmpeg_output_bitrate'] ?? null, ' kbps');
+        $append('Audio codec', $compact['audio_codec'] ?? null);
+        $append('Audio channels', $compact['audio_channels'] ?? null);
+        $append('Audio bitrate', $compact['audio_bitrate'] ?? null, ' kbps');
+        $append('Audio language', $compact['audio_language'] ?? null);
+
+        if (empty($rows)) {
+            return '<div>
+                <div class="text-xs uppercase text-gray-500 dark:text-gray-400 mb-1.5">Technical details</div>
+                <div class="text-sm text-gray-500 italic">'.e(__('Probe ran but returned no usable details.')).'</div>
+            </div>';
+        }
+
+        $probedAt = $channel->stream_stats_probed_at?->diffForHumans();
+        $footer = $probedAt
+            ? '<div class="text-xs text-gray-400 dark:text-gray-500 mt-2">'.e(__('Last probed').': '.$probedAt).'</div>'
+            : '';
+
+        return '<div>
+            <div class="text-xs uppercase text-gray-500 dark:text-gray-400 mb-1.5">Technical details</div>
+            <div class="grid grid-cols-2 gap-x-4 gap-y-1">'.implode('', $rows).'</div>
+            '.$footer.'
+        </div>';
     }
 
     public static function getForm($customPlaylist = null, $edit = false): array
