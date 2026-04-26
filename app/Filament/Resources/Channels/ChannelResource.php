@@ -21,6 +21,7 @@ use App\Models\CustomPlaylist;
 use App\Models\Group;
 use App\Models\Playlist;
 use App\Models\StreamProfile;
+use App\Services\Channels\VirtualPrimaryCreator;
 use App\Services\DateFormatService;
 use App\Services\EpgCacheService;
 use App\Services\LogoCacheService;
@@ -1115,6 +1116,48 @@ class ChannelResource extends Resource implements CopilotResource
                     ->modalIcon('heroicon-o-arrow-path-rounded-square')
                     ->modalDescription(__('Add the selected channel(s) to the chosen channel as failover sources.'))
                     ->modalSubmitActionLabel(__('Add failovers now')),
+                BulkAction::make('make_virtual_primary')
+                    ->label(__('Make virtual primary'))
+                    ->schema([
+                        TextInput::make('title')
+                            ->label(__('Virtual channel title'))
+                            ->helperText(__('Leave empty to copy the highest-scoring source\'s title.'))
+                            ->maxLength(255),
+                        Toggle::make('disable_sources')
+                            ->label(__('Disable source channels'))
+                            ->helperText(__('When enabled, the selected source channels will be disabled after being attached as failovers. They\'ll only be reachable via the new virtual primary.'))
+                            ->default(false)
+                            ->inline(false),
+                    ])
+                    ->action(function (Collection $records, array $data): void {
+                        if ($records->isEmpty()) {
+                            return;
+                        }
+
+                        $playlists = $records->pluck('playlist_id')->unique();
+                        $playlistForScoring = $playlists->count() === 1
+                            ? Playlist::find($playlists->first())
+                            : null;
+
+                        VirtualPrimaryCreator::fromPlaylist($playlistForScoring)->create(
+                            channels: $records,
+                            title: $data['title'] ?? null,
+                            disableSources: (bool) ($data['disable_sources'] ?? false),
+                        );
+                    })
+                    ->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title(__('Virtual primary created'))
+                            ->body(__('A custom channel was created with the selected sources attached as failovers, ranked by quality.'))
+                            ->send();
+                    })
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-arrow-trending-up')
+                    ->modalIcon('heroicon-o-arrow-trending-up')
+                    ->modalDescription(__('Create a custom "virtual primary" channel from the selected channels. The highest-scoring source\'s title, logo, and EPG mapping will be copied. All selected channels become failovers, sorted by score, and the playlist will stream the top failover automatically.'))
+                    ->modalSubmitActionLabel(__('Create virtual primary')),
             ]),
 
             // -- Probing --

@@ -1,0 +1,160 @@
+<?php
+
+use App\Filament\Resources\Channels\ChannelResource;
+use App\Models\Channel;
+use App\Models\ChannelFailover;
+use App\Models\EpgChannel;
+use App\Models\Playlist;
+use App\Models\User;
+use App\Services\Channels\VirtualPrimaryCreator;
+use App\Services\PlaylistUrlService;
+use Filament\Actions\BulkAction;
+use Filament\Schemas\Components\Component;
+
+beforeEach(function () {
+    $this->user = User::factory()->create();
+    $this->actingAs($this->user);
+    $this->playlist = Playlist::factory()->for($this->user)->createQuietly();
+});
+
+function vpChannel(User $user, Playlist $playlist, array $overrides, ?array $stats = null): Channel
+{
+    return Channel::factory()->for($user)->for($playlist)->create(array_merge([
+        'enabled' => true,
+        'can_merge' => true,
+        'probe_enabled' => true,
+        'is_custom' => false,
+        'stream_stats' => $stats ?? [
+            ['stream' => [
+                'codec_type' => 'video',
+                'codec_name' => 'h264',
+                'width' => 1920,
+                'height' => 1080,
+                'bit_rate' => '5000000',
+                'avg_frame_rate' => '25/1',
+            ]],
+        ],
+        'stream_stats_probed_at' => now(),
+    ], $overrides));
+}
+
+it('registers make_virtual_primary in the channel BulkModalActionGroup', function () {
+    $bulkActions = ChannelResource::getTableBulkActions();
+    $group = $bulkActions[0];
+
+    $schemaProp = new ReflectionProperty($group, 'schema');
+    $outerSchema = $schemaProp->getValue($group);
+
+    $childProp = new ReflectionProperty(Component::class, 'childComponents');
+    $names = [];
+
+    foreach ($outerSchema as $component) {
+        $children = $childProp->getValue($component)['default'] ?? [];
+        foreach ($children as $child) {
+            if ($child instanceof BulkAction) {
+                $names[] = $child->getName();
+            }
+        }
+    }
+
+    expect($names)->toContain('make_virtual_primary');
+});
+
+it('creates a custom channel with copied identity from the highest-scoring source', function () {
+    $epg = EpgChannel::factory()->create();
+
+    $high = vpChannel($this->user, $this->playlist, [
+        'title' => 'BBC One HD',
+        'name' => 'BBC One HD',
+        'logo' => 'http://logos.example/bbc-hd.png',
+        'epg_channel_id' => $epg->id,
+    ]);
+
+    $low = vpChannel($this->user, $this->playlist, [
+        'title' => 'BBC One SD',
+        'logo' => 'http://logos.example/bbc-sd.png',
+    ], stats: [
+        ['stream' => ['codec_type' => 'video', 'codec_name' => 'h264', 'width' => 720, 'height' => 480]],
+    ]);
+
+    $virtual = VirtualPrimaryCreator::fromPlaylist($this->playlist)->create(collect([$low, $high]));
+
+    expect($virtual->is_custom)->toBeTrue()
+        ->and($virtual->url)->toBeNull()
+        ->and($virtual->title)->toBe('BBC One HD')
+        ->and($virtual->logo)->toBe('http://logos.example/bbc-hd.png')
+        ->and($virtual->epg_channel_id)->toBe($epg->id);
+});
+
+it('attaches all selected channels as failovers in score order', function () {
+    $hd = vpChannel($this->user, $this->playlist, ['title' => 'HD']);
+    $sd = vpChannel($this->user, $this->playlist, ['title' => 'SD'], stats: [
+        ['stream' => ['codec_type' => 'video', 'codec_name' => 'h264', 'width' => 720, 'height' => 480]],
+    ]);
+    $uhd = vpChannel($this->user, $this->playlist, ['title' => '4K'], stats: [
+        ['stream' => ['codec_type' => 'video', 'codec_name' => 'hevc', 'width' => 3840, 'height' => 2160]],
+    ]);
+
+    $virtual = VirtualPrimaryCreator::fromPlaylist($this->playlist)->create(collect([$sd, $hd, $uhd]));
+
+    $sorted = ChannelFailover::where('channel_id', $virtual->id)->orderBy('sort')->get();
+
+    expect($sorted)->toHaveCount(3)
+        ->and($sorted[0]->channel_failover_id)->toBe($uhd->id)
+        ->and($sorted[1]->channel_failover_id)->toBe($hd->id)
+        ->and($sorted[2]->channel_failover_id)->toBe($sd->id);
+});
+
+it('streams the highest-ranked source URL via PlaylistUrlService fallback', function () {
+    $hd = vpChannel($this->user, $this->playlist, ['title' => 'HD', 'url' => 'http://hd.example/stream']);
+    $sd = vpChannel($this->user, $this->playlist, ['title' => 'SD', 'url' => 'http://sd.example/stream'], stats: [
+        ['stream' => ['codec_type' => 'video', 'codec_name' => 'h264', 'width' => 720, 'height' => 480]],
+    ]);
+
+    $virtual = VirtualPrimaryCreator::fromPlaylist($this->playlist)->create(collect([$sd, $hd]));
+
+    expect((new PlaylistUrlService)->getChannelUrl($virtual->fresh(), 'http://m3u.test'))->toContain('hd.example');
+});
+
+it('disables source channels when the disableSources flag is set', function () {
+    $hd = vpChannel($this->user, $this->playlist, ['title' => 'HD']);
+    $sd = vpChannel($this->user, $this->playlist, ['title' => 'SD'], stats: [
+        ['stream' => ['codec_type' => 'video', 'codec_name' => 'h264', 'width' => 720, 'height' => 480]],
+    ]);
+
+    VirtualPrimaryCreator::fromPlaylist($this->playlist)->create(
+        channels: collect([$hd, $sd]),
+        disableSources: true,
+    );
+
+    expect($hd->fresh()->enabled)->toBeFalse()
+        ->and($sd->fresh()->enabled)->toBeFalse();
+});
+
+it('leaves source channels enabled when disableSources is false', function () {
+    $hd = vpChannel($this->user, $this->playlist, ['title' => 'HD']);
+    $sd = vpChannel($this->user, $this->playlist, ['title' => 'SD'], stats: [
+        ['stream' => ['codec_type' => 'video', 'codec_name' => 'h264', 'width' => 720, 'height' => 480]],
+    ]);
+
+    VirtualPrimaryCreator::fromPlaylist($this->playlist)->create(collect([$hd, $sd]));
+
+    expect($hd->fresh()->enabled)->toBeTrue()
+        ->and($sd->fresh()->enabled)->toBeTrue();
+});
+
+it('uses the provided title when one is supplied', function () {
+    $hd = vpChannel($this->user, $this->playlist, ['title' => 'BBC One HD']);
+
+    $virtual = VirtualPrimaryCreator::fromPlaylist($this->playlist)->create(
+        channels: collect([$hd]),
+        title: 'BBC One',
+    );
+
+    expect($virtual->title)->toBe('BBC One')
+        ->and($virtual->name)->toBe('BBC One');
+});
+
+it('throws when called with an empty channel collection', function () {
+    VirtualPrimaryCreator::fromPlaylist($this->playlist)->create(collect());
+})->throws(InvalidArgumentException::class);

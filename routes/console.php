@@ -72,6 +72,11 @@ Schedule::command('networks:regenerate-schedules')
     ->hourly()
     ->withoutOverlapping();
 
+// Re-score failover channels for playlists with auto_rescore_failovers_interval set
+Schedule::command('app:rescore-channel-failovers')
+    ->hourly()
+    ->withoutOverlapping();
+
 // Run scheduled plugin invocations
 Schedule::command('plugins:run-scheduled')
     ->everyMinute()

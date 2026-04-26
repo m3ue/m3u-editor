@@ -19,6 +19,7 @@ use App\Jobs\DuplicatePlaylist;
 use App\Jobs\ProcessM3uImport;
 use App\Jobs\ProcessM3uImportSeries;
 use App\Jobs\ProcessVodChannels;
+use App\Jobs\RescoreChannelFailovers;
 use App\Jobs\SyncMediaServer;
 use App\Livewire\EpgViewer;
 use App\Livewire\MediaFlowProxyUrl;
@@ -615,6 +616,26 @@ class PlaylistResource extends Resource implements CopilotResource
                             ->send();
                     })
                     ->visible(fn ($record) => $record->isProcessing()),
+                Action::make('rescore_failovers')
+                    ->label(__('Re-score failovers now'))
+                    ->icon('heroicon-o-arrow-trending-up')
+                    ->color('info')
+                    ->action(function ($record) {
+                        app('Illuminate\Contracts\Bus\Dispatcher')
+                            ->dispatch(new RescoreChannelFailovers($record->id));
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title(__('Failover rescoring queued'))
+                            ->body(__('Failover groups will be re-scored in the background. You can keep using the app while this runs.'))
+                            ->duration(5000)
+                            ->send();
+                    })
+                    ->visible(fn ($record): bool => (bool) ($record->auto_merge_channels_enabled ?? false))
+                    ->requiresConfirmation()
+                    ->modalIcon('heroicon-o-arrow-trending-up')
+                    ->modalDescription(__('Queue a one-off failover rescore for this playlist? Stale channels will be re-probed (subject to the configured staleness window) and failovers re-sorted so the highest-quality source sits first.'))
+                    ->modalSubmitActionLabel(__('Yes, rescore now')),
                 Action::make('Download M3U')
                     ->label(__('Download M3U'))
                     ->icon('heroicon-o-arrow-down-tray')
@@ -2093,6 +2114,28 @@ class PlaylistResource extends Resource implements CopilotResource
                                         $component->state($formatted);
                                     }
                                 }),
+                        ]),
+
+                    Fieldset::make(__('Periodic Failover Rescoring (optional)'))
+                        ->columnSpanFull()
+                        ->columns(2)
+                        ->hidden(fn (Get $get): bool => ! $get('auto_merge_channels_enabled'))
+                        ->schema([
+                            Select::make('auto_rescore_failovers_interval')
+                                ->label(__('Re-score failovers'))
+                                ->options([
+                                    'daily' => __('Daily'),
+                                    'weekly' => __('Weekly'),
+                                ])
+                                ->placeholder(__('Off'))
+                                ->helperText(__('Periodically re-score this playlist\'s failover groups so the highest-quality source bubbles to the top. Master channels are never promoted or replaced; only failover sort order changes.')),
+                            TextInput::make('failover_rescore_staleness_days')
+                                ->label(__('Re-probe channels older than (days)'))
+                                ->numeric()
+                                ->default(7)
+                                ->minValue(0)
+                                ->maxValue(365)
+                                ->helperText(__('Channels whose stream stats are older than this will be re-probed during rescoring. Set to 0 to always re-probe.')),
                         ]),
                 ]),
             Section::make(__('Find & Replace Rules'))
