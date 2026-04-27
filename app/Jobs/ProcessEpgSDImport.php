@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Enums\Status;
 use App\Models\Epg;
 use App\Services\SchedulesDirectService;
 use Carbon\Carbon;
@@ -79,6 +80,16 @@ class ProcessEpgSDImport implements ShouldQueue
                 ->body("SchedulesDirect Data Synced successfully for EPG \"{$epg->name}\". Completed in {$completedInRounded} seconds. Now parsing data and generating EPG cache...")
                 ->broadcast($epg->user)
                 ->sendToDatabase($epg->user);
+
+            // Mark EPG as processing and dispatch cache generation
+            $epg->update([
+                'status' => Status::Processing,
+                'is_cached' => false,
+                'cache_meta' => null,
+                'processing_started_at' => null,
+                'processing_phase' => null,
+            ]);
+            dispatch(new GenerateEpgCache($epg->uuid, notify: true));
 
             return true;
         } catch (Exception $e) {
