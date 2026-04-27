@@ -100,4 +100,12 @@ class DvrSetting extends Model
             ->whereIn('status', [DvrRecordingStatus::Recording, DvrRecordingStatus::PostProcessing])
             ->count() >= $this->max_concurrent_recordings;
     }
+
+    /**
+     * Get the resolved ffmpeg binary path.
+     */
+    public function getFfmpegPath(): string
+    {
+        return $this->ffmpeg_path ?: (string) config('dvr.ffmpeg_path', '/usr/bin/ffmpeg');
+    }
 }

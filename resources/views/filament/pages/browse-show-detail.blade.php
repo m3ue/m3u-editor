@@ -65,7 +65,7 @@
 
                             {{-- Synopsis --}}
                             @if($airing['description'])
-                                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1 line-clamp-2">{{ $airing['description'] }}</p>
+                                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">{{ $airing['description'] }}</p>
                             @endif
                         </div>
 

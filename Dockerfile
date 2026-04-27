@@ -137,6 +137,8 @@ ARG GIT_BRANCH
 ARG GIT_COMMIT
 ARG GIT_TAG
 ARG INSTALL_CLAMAV=false
+# Docker BuildKit sets TARGETARCH automatically (amd64, arm64, etc.)
+ARG TARGETARCH
 
 # Set environment variables
 ENV GIT_BRANCH=${GIT_BRANCH} \
@@ -145,12 +147,8 @@ ENV GIT_BRANCH=${GIT_BRANCH} \
     WWWGROUP="m3ue" \
     WWWUSER="m3ue"
 
-# Add Alpine edge repositories and install ALL system packages in a single layer
-# This maximizes layer caching and reduces image size
-RUN echo "@edge https://dl-cdn.alpinelinux.org/alpine/edge/main" >> /etc/apk/repositories && \
-    echo "@edge https://dl-cdn.alpinelinux.org/alpine/edge/community" >> /etc/apk/repositories && \
-    apk update && apk add --no-cache \
-    # Core utilities
+# Install system packages from stable Alpine 3.21 repos
+RUN apk add --no-cache \
     coreutils \
     openssl \
     supervisor \
@@ -164,28 +162,15 @@ RUN echo "@edge https://dl-cdn.alpinelinux.org/alpine/edge/main" >> /etc/apk/rep
     ca-certificates \
     bash \
     tzdata \
-    # Node.js runtime (for Reverb/websockets if needed)
     nodejs \
     npm \
-    # Redis server
     redis \
-    # FFmpeg 8.0 from Alpine edge (with matching edge deps to avoid symbol mismatches)
-    # glslang-libs, spirv-tools, and vulkan-loader must also come from edge
-    # to match the ABI that ffmpeg@edge was built against.
-    ffmpeg@edge \
-    glslang-libs@edge \
-    spirv-tools@edge \
-    vulkan-loader@edge \
-    # Nginx web server
     nginx \
-    # PostgreSQL server & client
     postgresql \
     postgresql-client \
     postgresql-contrib \
-    # Python runtime and pip (for m3u-proxy)
     python3 \
     py3-pip \
-    # PHP 8.4 and all required extensions
     php84-cli \
     php84-fpm \
     php84-posix \
@@ -224,10 +209,23 @@ RUN echo "@edge https://dl-cdn.alpinelinux.org/alpine/edge/main" >> /etc/apk/rep
             sed -i 's/^\s*NotifyClamd/# NotifyClamd/' /etc/clamav/freshclam.conf; \
         fi; \
     fi && \
-    # Create PHP symlink
     ln -s /usr/bin/php84 /usr/bin/php && \
-    # Clean up apk cache
     rm -rf /var/cache/apk/*
+
+# Install FFmpeg 7.x static binary from johnvansickle.com (truly static, works on Alpine musl)
+# BtbN builds are glibc-linked and won't run on Alpine; JVS builds are fully self-contained.
+# Supports amd64 and arm64; binaries placed in /usr/local/bin
+RUN case "${TARGETARCH}" in \
+        amd64) FFMPEG_ARCH="amd64" ;; \
+        arm64) FFMPEG_ARCH="arm64" ;; \
+        *) FFMPEG_ARCH="amd64" ;; \
+    esac && \
+    wget -q "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-${FFMPEG_ARCH}-static.tar.xz" -O /tmp/ffmpeg.tar.xz && \
+    tar -xf /tmp/ffmpeg.tar.xz -C /tmp && \
+    mv /tmp/ffmpeg-*-${FFMPEG_ARCH}-static/ffmpeg /usr/local/bin/ffmpeg && \
+    mv /tmp/ffmpeg-*-${FFMPEG_ARCH}-static/ffprobe /usr/local/bin/ffprobe && \
+    chmod +x /usr/local/bin/ffmpeg /usr/local/bin/ffprobe && \
+    rm -rf /tmp/ffmpeg*
 
 # Create user and group early for proper file ownership
 RUN addgroup ${WWWGROUP} && \
@@ -278,7 +276,8 @@ COPY --chown=${WWWUSER}:${WWWGROUP} . /var/www/html
 RUN echo "GIT_BRANCH=${GIT_BRANCH}" > /var/www/html/.git-info && \
     echo "GIT_COMMIT=${GIT_COMMIT}" >> /var/www/html/.git-info && \
     echo "GIT_TAG=${GIT_TAG}" >> /var/www/html/.git-info && \
-    echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> /var/www/html/.git-info
+    echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> /var/www/html/.git-info && \
+    chown ${WWWUSER}:${WWWGROUP} /var/www/html/.git-info
 
 # Copy build artifacts from builder stages (overwrite source files)
 # Vendor directory from composer builder
@@ -291,9 +290,12 @@ COPY --from=node_builder --chown=${WWWUSER}:${WWWGROUP} /app/public/build /var/w
 RUN echo -e '#!/bin/bash\nphp artisan app:"$@"' > /usr/bin/m3ue && \
     chmod +x /usr/bin/m3ue
 
-# Ensure proper permissions for storage and cache directories
-RUN chown -R ${WWWUSER}:${WWWGROUP} /var/www/html && \
-    chmod -R 775 /var/www/html/storage /var/www/html/bootstrap/cache 2>/dev/null || true
+# Set write permissions on storage and cache directories.
+# chown is intentionally omitted here — all COPY statements above already use
+# --chown=${WWWUSER}:${WWWGROUP}, so ownership is set at copy time without an
+# extra layer walk. A redundant chown -R /var/www/html would re-traverse the
+# entire vendor tree and is the primary cause of slow builds.
+RUN chmod -R 775 /var/www/html/storage /var/www/html/bootstrap/cache 2>/dev/null || true
 
 # Note: Ports are configured via environment variables (APP_PORT, REVERB_PORT, etc.)
 # and should be exposed in docker-compose.yml or via -p flags as needed.
