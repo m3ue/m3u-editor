@@ -137,8 +137,6 @@ ARG GIT_BRANCH
 ARG GIT_COMMIT
 ARG GIT_TAG
 ARG INSTALL_CLAMAV=false
-# Docker BuildKit sets TARGETARCH automatically (amd64, arm64, etc.)
-ARG TARGETARCH
 
 # Set environment variables
 ENV GIT_BRANCH=${GIT_BRANCH} \
@@ -147,8 +145,11 @@ ENV GIT_BRANCH=${GIT_BRANCH} \
     WWWGROUP="m3ue" \
     WWWUSER="m3ue"
 
-# Install system packages from stable Alpine 3.21 repos
-RUN apk add --no-cache \
+# Add Alpine edge repositories and install ALL system packages in a single layer
+# This maximizes layer caching and reduces image size
+RUN echo "@edge https://dl-cdn.alpinelinux.org/alpine/edge/main" >> /etc/apk/repositories && \
+    echo "@edge https://dl-cdn.alpinelinux.org/alpine/edge/community" >> /etc/apk/repositories && \
+    apk update && apk add --no-cache \
     coreutils \
     openssl \
     supervisor \
@@ -165,6 +166,13 @@ RUN apk add --no-cache \
     nodejs \
     npm \
     redis \
+    # FFmpeg 8.0 from Alpine edge (with matching edge deps to avoid symbol mismatches)
+    # glslang-libs, spirv-tools, and vulkan-loader must also come from edge
+    # to match the ABI that ffmpeg@edge was built against.
+    ffmpeg@edge \
+    glslang-libs@edge \
+    spirv-tools@edge \
+    vulkan-loader@edge \
     nginx \
     postgresql \
     postgresql-client \
@@ -211,21 +219,6 @@ RUN apk add --no-cache \
     fi && \
     ln -s /usr/bin/php84 /usr/bin/php && \
     rm -rf /var/cache/apk/*
-
-# Install FFmpeg 7.x static binary from johnvansickle.com (truly static, works on Alpine musl)
-# BtbN builds are glibc-linked and won't run on Alpine; JVS builds are fully self-contained.
-# Supports amd64 and arm64; binaries placed in /usr/local/bin
-RUN case "${TARGETARCH}" in \
-        amd64) FFMPEG_ARCH="amd64" ;; \
-        arm64) FFMPEG_ARCH="arm64" ;; \
-        *) FFMPEG_ARCH="amd64" ;; \
-    esac && \
-    wget -q "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-${FFMPEG_ARCH}-static.tar.xz" -O /tmp/ffmpeg.tar.xz && \
-    tar -xf /tmp/ffmpeg.tar.xz -C /tmp && \
-    mv /tmp/ffmpeg-*-${FFMPEG_ARCH}-static/ffmpeg /usr/local/bin/ffmpeg && \
-    mv /tmp/ffmpeg-*-${FFMPEG_ARCH}-static/ffprobe /usr/local/bin/ffprobe && \
-    chmod +x /usr/local/bin/ffmpeg /usr/local/bin/ffprobe && \
-    rm -rf /tmp/ffmpeg*
 
 # Create user and group early for proper file ownership
 RUN addgroup ${WWWGROUP} && \
