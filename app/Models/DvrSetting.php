@@ -100,5 +100,4 @@ class DvrSetting extends Model
             ->whereIn('status', [DvrRecordingStatus::Recording, DvrRecordingStatus::PostProcessing])
             ->count() >= $this->max_concurrent_recordings;
     }
-
 }
