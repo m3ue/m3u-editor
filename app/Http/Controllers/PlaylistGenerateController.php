@@ -294,7 +294,7 @@ class PlaylistGenerateController extends Controller
                             $url = PlaylistUrlService::getEpisodeUrl($episode, $playlist);
                             $title = $episode->title;
                             $runtime = $episode->info['duration_secs'] ?? -1;
-                            $icon = $episode->info['movie_image'] ?? $streamId->info['cover'] ?? '';
+                            $icon = $episode->info['movie_image'] ?? $s->cover ?? '';
                             if (empty($icon)) {
                                 $icon = url('/placeholder.png');
                             }
