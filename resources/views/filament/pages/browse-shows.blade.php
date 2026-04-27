@@ -264,11 +264,8 @@
                             <button class="flex-1 min-w-0 text-left"
                                 wire:click="openShowDetail({{ \Illuminate\Support\Js::from($show['title']) }})">
                                 <p class="text-sm font-semibold text-gray-900 dark:text-white truncate">{{ $show['title'] }}</p>
-                                <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate">
+                                <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                                     <span class="font-semibold text-gray-600 dark:text-gray-300">{{ __('Airing Next:') }}</span> {{ $show['next_air_date_human'] ?? '—' }}
-                                    @if($show['airing_count'] > 1)
-                                        &middot; {{ $show['airing_count'] }} {{ __('airings') }}
-                                    @endif
                                 </p>
                             </button>
 
