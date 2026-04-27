@@ -27,8 +27,7 @@
                     <span class="text-sm font-medium leading-6 text-gray-950 dark:text-white">{{ __('DVR Setting (Playlist)') }}</span>
                 </label>
                 <x-filament::input.wrapper>
-                    <x-filament::input.select wire:model.live="dvr_setting_id"
-                            wire:change="$wire.set('group_id', null); $wire.set('channel_id', null)">
+                    <x-filament::input.select wire:model.live="dvr_setting_id">
                         <option value="">{{ __('— Any —') }}</option>
                         @foreach($this->dvrSettingOptions as $id => $label)
                             <option value="{{ $id }}" @selected($dvr_setting_id == $id)>{{ $label }}</option>
@@ -70,108 +69,31 @@
                 </x-filament::input.wrapper>
             </div>
 
-            {{-- Group (searchable) --}}
-            <div class="flex flex-col gap-1"
-                 x-data="{
-                     open: false,
-                     search: '',
-                     allOptions: @js($this->groupOptions),
-                     get filtered() {
-                         if (!this.search) return this.allOptions;
-                         const q = this.search.toLowerCase();
-                         return Object.fromEntries(
-                             Object.entries(this.allOptions).filter(([id, label]) => label.toLowerCase().includes(q))
-                         );
-                     }
-                 }"
-                 x-effect="if (!$wire.group_id) search = ''"
-                 x-init="$watch('$wire.dvr_setting_id', () => { allOptions = @js($this->groupOptions) })">
+            {{-- Group (server-rendered select — groups are small) --}}
+            <div class="flex flex-col gap-1">
                 <label class="fi-fo-field-wrp-label inline-flex items-center gap-x-3">
                     <span class="text-sm font-medium leading-6 text-gray-950 dark:text-white">{{ __('Group') }}</span>
                 </label>
-                <div class="relative">
-                    <input type="text"
-                           x-model="search"
-                           @focus="open = true"
-                           @keydown.escape="open = false"
-                           :placeholder="!$wire.group_id ? '{{ __('— Any —') }}' : ''"
-                           :disabled="!$wire.dvr_setting_id"
-                           class="w-full rounded-lg border border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-white text-sm shadow-sm outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500 disabled:opacity-50 disabled:cursor-not-allowed placeholder-gray-400 dark:placeholder-gray-500 py-2 pl-3" />
-                    <div x-show="open && Object.keys(filtered).length > 0"
-                         x-transition
-                         @click.stop
-                         @keydown.escape="open = false"
-                         class="absolute z-50 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-white/10 rounded-lg shadow-lg max-h-60 overflow-y-auto">
-                        <button type="button"
-                                @click="search = ''; $wire.group_id = ''; open = false"
-                                class="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-white/10 transition border-b border-gray-100 dark:border-white/5"
-                                :class="!$wire.group_id ? 'text-primary-600 dark:text-primary-400 font-medium' : 'text-gray-600 dark:text-gray-300'">
-                            {{ __('— Any —') }}
-                        </button>
-                        <template x-for="[id, label] in Object.entries(filtered)" :key="id">
-                            <button type="button"
-                                    @click="search = label; $wire.group_id = parseInt(id); open = false"
-                                    class="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-white/10 transition"
-                                    :class="$wire.group_id == id ? 'text-primary-600 dark:text-primary-400 font-medium' : 'text-gray-700 dark:text-gray-200'"
-                                    x-text="label"></button>
-                        </template>
-                        <div x-show="Object.keys(filtered).length === 0" class="px-3 py-2 text-sm text-gray-400 dark:text-gray-500">
-                            {{ __('No matches') }}
-                        </div>
-                    </div>
-                </div>
+                <x-filament::input.wrapper>
+                    <x-filament::input.select wire:model="group_id" :disabled="! $dvr_setting_id">
+                        <option value="">{{ __('— Any —') }}</option>
+                        @foreach($this->groupOptions as $id => $name)
+                            <option value="{{ $id }}" @selected($group_id == $id)>{{ $name }}</option>
+                        @endforeach
+                    </x-filament::input.select>
+                </x-filament::input.wrapper>
             </div>
 
-            {{-- Channel (searchable) --}}
-            <div class="flex flex-col gap-1"
-                 x-data="{
-                     open: false,
-                     search: '',
-                     allOptions: @js($this->channelOptions),
-                     get filtered() {
-                         if (!this.search) return this.allOptions;
-                         const q = this.search.toLowerCase();
-                         return Object.fromEntries(
-                             Object.entries(this.allOptions).filter(([id, label]) => label.toLowerCase().includes(q))
-                         );
-                     }
-                 }"
-                 x-effect="if (!$wire.channel_id) search = ''"
-                 x-init="$watch('$wire.dvr_setting_id', () => { allOptions = @js($this->channelOptions) })">
+            {{-- Channel (text search — avoids loading tens of thousands of options) --}}
+            <div class="flex flex-col gap-1">
                 <label class="fi-fo-field-wrp-label inline-flex items-center gap-x-3">
-                    <span class="text-sm font-medium leading-6 text-gray-950 dark:text-white">{{ __('Channel') }}</span>
+                    <span class="text-sm font-medium leading-6 text-gray-950 dark:text-white">{{ __('Channel (contains)') }}</span>
                 </label>
-                <div class="relative">
-                    <input type="text"
-                           x-model="search"
-                           @focus="open = true"
-                           @keydown.escape="open = false"
-                           :placeholder="!$wire.channel_id ? '{{ __('— Any —') }}' : ''"
-                           :disabled="!$wire.dvr_setting_id"
-                           class="w-full rounded-lg border border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-white text-sm shadow-sm outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500 disabled:opacity-50 disabled:cursor-not-allowed placeholder-gray-400 dark:placeholder-gray-500 py-2 pl-3" />
-                    <div x-show="open && Object.keys(filtered).length > 0"
-                         x-transition
-                         @click.stop
-                         @keydown.escape="open = false"
-                         class="absolute z-50 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-white/10 rounded-lg shadow-lg max-h-60 overflow-y-auto">
-                        <button type="button"
-                                @click="search = ''; $wire.channel_id = ''; open = false"
-                                class="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-white/10 transition border-b border-gray-100 dark:border-white/5"
-                                :class="!$wire.channel_id ? 'text-primary-600 dark:text-primary-400 font-medium' : 'text-gray-600 dark:text-gray-300'">
-                            {{ __('— Any —') }}
-                        </button>
-                        <template x-for="[id, label] in Object.entries(filtered)" :key="id">
-                            <button type="button"
-                                    @click="search = label; $wire.channel_id = parseInt(id); open = false"
-                                    class="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-white/10 transition"
-                                    :class="$wire.channel_id == id ? 'text-primary-600 dark:text-primary-400 font-medium' : 'text-gray-700 dark:text-gray-200'"
-                                    x-text="label"></button>
-                        </template>
-                        <div x-show="Object.keys(filtered).length === 0" class="px-3 py-2 text-sm text-gray-400 dark:text-gray-500">
-                            {{ __('No matches') }}
-                        </div>
-                    </div>
-                </div>
+                <x-filament::input.wrapper>
+                    <x-filament::input type="text" wire:model="channel_name"
+                        placeholder="{{ __('e.g. HBO, CNN...') }}"
+                        :disabled="! $dvr_setting_id" />
+                </x-filament::input.wrapper>
             </div>
 
             {{-- Days --}}
@@ -207,12 +129,12 @@
                 {{ trans_choice(':count show found.|:count shows found.', count($groupedShows), ['count' => count($groupedShows)]) }}
             </div>
 
-            {{-- Poster Card Grid --}}
-            <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-                @foreach($groupedShows as $show)
+            {{-- Single Alpine instance tracks which card menu is open --}}
+            <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4"
+                 x-data="{ openMenu: null }">
+                @foreach($groupedShows as $index => $show)
                     <div class="relative flex flex-col rounded-xl overflow-visible bg-gray-100 dark:bg-gray-900 border border-gray-200 dark:border-white/10 shadow"
-                         style="content-visibility: auto; contain-intrinsic-size: 350px 520px;"
-                         x-data="{ menuOpen: false }">
+                         style="content-visibility: auto; contain-intrinsic-size: 350px 520px;">
 
                         {{-- Poster area --}}
                         <button type="button"
@@ -269,17 +191,17 @@
                                 </p>
                             </button>
 
-                            {{-- Kebab menu --}}
+                            {{-- Kebab menu — single Alpine state on grid parent --}}
                             <div class="relative flex-shrink-0">
-                                <button @click.stop="menuOpen = !menuOpen"
+                                <button @click.stop="openMenu = openMenu === {{ $index }} ? null : {{ $index }}"
                                         class="p-1.5 rounded-lg text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/30 transition">
                                     <svg class="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
                                         <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
                                     </svg>
                                 </button>
 
-                                <div x-show="menuOpen"
-                                     @click.outside="menuOpen = false"
+                                <div x-show="openMenu === {{ $index }}"
+                                     @click.outside="openMenu = null"
                                      x-transition:enter="transition ease-out duration-100"
                                      x-transition:enter-start="opacity-0 scale-95"
                                      x-transition:enter-end="opacity-100 scale-100"
@@ -289,7 +211,7 @@
                                      class="absolute right-0 bottom-full mb-1 z-20 w-52 rounded-xl shadow-2xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-white/10 py-1 text-sm"
                                      style="display: none;">
                                     <button wire:click="openShowDetail({{ \Illuminate\Support\Js::from($show['title']) }})"
-                                            @click="menuOpen = false"
+                                            @click="openMenu = null"
                                             class="w-full text-left px-4 py-2.5 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition flex items-center gap-2">
                                         <svg class="w-4 h-4 opacity-60" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -297,7 +219,7 @@
                                         {{ __('View Details') }}
                                     </button>
                                     <button wire:click="quickRecordNextAiring({{ \Illuminate\Support\Js::from($show['title']) }})"
-                                            @click="menuOpen = false"
+                                            @click="openMenu = null"
                                             class="w-full text-left px-4 py-2.5 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition flex items-center gap-2">
                                         <svg class="w-4 h-4 opacity-60" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
@@ -306,7 +228,7 @@
                                         {{ __('Quick Record Next Airing') }}
                                     </button>
                                     <button wire:click="recordSeriesDefaults({{ \Illuminate\Support\Js::from($show['title']) }})"
-                                            @click="menuOpen = false"
+                                            @click="openMenu = null"
                                             class="w-full text-left px-4 py-2.5 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition flex items-center gap-2">
                                         <svg class="w-4 h-4 opacity-60" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16" />
@@ -369,7 +291,7 @@
             {{-- Content --}}
             <div class="p-4 flex-1 overflow-y-auto">
                 @php $selectedShow = collect($groupedShows)->firstWhere('title', $selectedShowTitle); @endphp
-                @include('filament.pages.browse-show-detail', ['show' => $selectedShow ?? null, 'channelOptions' => $this->channelOptions])
+                @include('filament.pages.browse-show-detail', ['show' => $selectedShow ?? null])
             </div>
         </div>
     </div>

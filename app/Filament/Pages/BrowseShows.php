@@ -15,7 +15,7 @@ use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Livewire\Attributes\On;
 
 class BrowseShows extends Page
@@ -51,7 +51,7 @@ class BrowseShows extends Page
 
     public ?int $group_id = null;
 
-    public ?int $channel_id = null;
+    public string $channel_name = '';
 
     public int $days = 14;
 
@@ -61,24 +61,16 @@ class BrowseShows extends Page
 
     public bool $postersLoaded = false;
 
-    /** @var array<int, array<string, mixed>> */
-    public array $groupedShows = [];
+    /** Short cache key so large show data never lives in the Livewire snapshot. */
+    public string $showsCacheKey = '';
 
     public string $selectedShowTitle = '';
-
-    /**
-     * Whether the application timezone has been explicitly set by the user.
-     */
-    public function getTimezoneNotSetProperty(): bool
-    {
-        return empty(app(GeneralSettings::class)->app_timezone);
-    }
 
     // --- Series options form state ---
 
     public bool $seriesNewOnly = false;
 
-    public ?int $seriesChannelId = null;
+    public string $seriesChannelName = '';
 
     public int $seriesPriority = 50;
 
@@ -88,17 +80,12 @@ class BrowseShows extends Page
 
     public ?int $seriesKeepLast = null;
 
-    // --- Lifecycle ---
-
-    public function mount(): void
-    {
-        $settings = DvrSetting::where('user_id', Auth::id())->get();
-        if ($settings->count() === 1) {
-            $this->dvr_setting_id = $settings->first()->id;
-        }
-    }
-
     // --- Computed helpers ---
+
+    public function getTimezoneNotSetProperty(): bool
+    {
+        return empty(app(GeneralSettings::class)->app_timezone);
+    }
 
     /**
      * @return array<int, string>
@@ -133,38 +120,53 @@ class BrowseShows extends Page
             ->all();
     }
 
-    /**
-     * @return array<int, string>
-     */
-    public function getChannelOptionsProperty(): array
+    // --- Lifecycle ---
+
+    public function mount(): void
     {
-        if (! $this->dvr_setting_id) {
-            return [];
+        $this->showsCacheKey = 'browse-shows-'.Auth::id().'-'.Str::random(16);
+
+        $settings = DvrSetting::where('user_id', Auth::id())->get();
+        if ($settings->count() === 1) {
+            $this->dvr_setting_id = $settings->first()->id;
         }
-
-        $playlistId = DvrSetting::find($this->dvr_setting_id)?->playlist_id;
-
-        if (! $playlistId) {
-            return [];
-        }
-
-        return Channel::where('playlist_id', $playlistId)
-            ->orderBy('title')
-            ->pluck('title', 'id')
-            ->all();
     }
 
-    // --- Slide-over actions ---
+    public function updatedDvrSettingId(): void
+    {
+        $this->group_id = null;
+        $this->channel_name = '';
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function getViewData(): array
+    {
+        return [
+            'groupedShows' => $this->getGroupedShows(),
+        ];
+    }
+
+    // --- Cache helpers ---
+
+    /** @return array<int, array<string, mixed>> */
+    protected function getGroupedShows(): array
+    {
+        return cache()->get($this->showsCacheKey, []);
+    }
+
+    /** @param array<int, array<string, mixed>> $shows */
+    protected function setGroupedShows(array $shows): void
+    {
+        cache()->put($this->showsCacheKey, $shows, now()->addHour());
+    }
+
+    // --- Slide-over ---
 
     public function openShowDetail(string $title): void
     {
-        Log::info('openShowDetail called: '.$title);
         $this->selectedShowTitle = $title;
-    }
-
-    public function testMethod(): void
-    {
-        Log::info('testMethod called');
     }
 
     public function closeShowDetail(): void
@@ -180,7 +182,7 @@ class BrowseShows extends Page
         $this->postersLoaded = false;
 
         $programmes = $this->runSearch();
-        $this->groupedShows = $this->buildGroupedShows($programmes);
+        $this->setGroupedShows($this->buildGroupedShows($programmes));
 
         $this->dispatch('start-poster-load');
     }
@@ -188,19 +190,22 @@ class BrowseShows extends Page
     #[On('start-poster-load')]
     public function loadPosters(): void
     {
-        if (empty($this->groupedShows)) {
+        $shows = $this->getGroupedShows();
+
+        if (empty($shows)) {
             $this->postersLoaded = true;
 
             return;
         }
 
-        $titles = array_column($this->groupedShows, 'title');
+        $titles = array_column($shows, 'title');
         $posterUrls = app(ShowMetadataService::class)->resolvePosters($titles);
 
-        foreach ($this->groupedShows as $index => $show) {
-            $this->groupedShows[$index]['poster_url'] = $posterUrls[$show['title']] ?? null;
+        foreach ($shows as $index => $show) {
+            $shows[$index]['poster_url'] = $posterUrls[$show['title']] ?? null;
         }
 
+        $this->setGroupedShows($shows);
         $this->postersLoaded = true;
     }
 
@@ -253,7 +258,7 @@ class BrowseShows extends Page
 
     public function quickRecordNextAiring(string $title): void
     {
-        $show = collect($this->groupedShows)->firstWhere('title', $title);
+        $show = collect($this->getGroupedShows())->firstWhere('title', $title);
 
         if (! $show || empty($show['airings'])) {
             Notification::make()
@@ -277,9 +282,20 @@ class BrowseShows extends Page
 
     public function recordSeriesWithOptions(string $title): void
     {
+        $channelId = null;
+
+        if ($this->seriesChannelName && $this->dvr_setting_id) {
+            $playlistId = DvrSetting::find($this->dvr_setting_id)?->playlist_id;
+            if ($playlistId) {
+                $channelId = Channel::where('playlist_id', $playlistId)
+                    ->where('title', 'like', '%'.$this->seriesChannelName.'%')
+                    ->value('id');
+            }
+        }
+
         $this->createSeriesRule($title, [
             'new_only' => $this->seriesNewOnly,
-            'channel_id' => $this->seriesChannelId ?: null,
+            'channel_id' => $channelId,
             'priority' => $this->seriesPriority,
             'start_early_seconds' => $this->seriesStartEarly,
             'end_late_seconds' => $this->seriesEndLate,
@@ -333,30 +349,38 @@ class BrowseShows extends Page
 
     private function refreshRuleBadgeForTitle(string $title, string $type): void
     {
-        foreach ($this->groupedShows as $index => $show) {
+        $shows = $this->getGroupedShows();
+
+        foreach ($shows as $index => $show) {
             if ($show['title'] === $title) {
                 if ($type === 'series') {
-                    $this->groupedShows[$index]['has_series_rule'] = true;
+                    $shows[$index]['has_series_rule'] = true;
                 } elseif ($type === 'once') {
-                    $this->groupedShows[$index]['has_once_rule'] = true;
+                    $shows[$index]['has_once_rule'] = true;
                 }
                 break;
             }
         }
+
+        $this->setGroupedShows($shows);
     }
 
     private function refreshRuleBadgeForProgramme(int $programmeId, string $type): void
     {
-        foreach ($this->groupedShows as $index => $show) {
+        $shows = $this->getGroupedShows();
+
+        foreach ($shows as $index => $show) {
             foreach ($show['airings'] as $airing) {
                 if ($airing['id'] === $programmeId) {
                     if ($type === 'once') {
-                        $this->groupedShows[$index]['has_once_rule'] = true;
+                        $shows[$index]['has_once_rule'] = true;
                     }
                     break 2;
                 }
             }
         }
+
+        $this->setGroupedShows($shows);
     }
 
     /**
@@ -392,8 +416,6 @@ class BrowseShows extends Page
         $shows = [];
         $timezone = app(GeneralSettings::class)->app_timezone ?? 'UTC';
 
-        // Pre-pass: collect all (title, season, episode) tuples so we can resolve
-        // TVMaze air dates in a single batched call before building the output arrays.
         $episodeLookups = [];
         foreach ($programmes as $p) {
             [$season, $episode] = $this->parseSeasonEpisode($p);
@@ -468,14 +490,7 @@ class BrowseShows extends Page
     }
 
     /**
-     * Parse season, episode, subtitle, and description from an EpgProgramme.
-     *
-     * Some EPG providers embed "SXX EXX Title\nSynopsis" in the description field
-     * rather than using the proper season/episode/subtitle columns. This helper
-     * extracts those values so they can be used consistently across the build loop
-     * (pre-pass for TVMaze lookup and the per-airing map closure).
-     *
-     * @return array{0: int|null, 1: int|null, 2: string|null, 3: string|null} [season, episode, subtitle, description]
+     * @return array{0: int|null, 1: int|null, 2: string|null, 3: string|null}
      */
     private function parseSeasonEpisode(EpgProgramme $p): array
     {
@@ -566,11 +581,19 @@ class BrowseShows extends Page
      */
     private function resolveEpgChannelScope(int $playlistId): ?array
     {
-        if ($this->channel_id) {
-            $channel = Channel::with('epgChannel')->find($this->channel_id);
-            $epgId = $channel?->epgChannel?->channel_id;
+        if ($this->channel_name) {
+            $ids = Channel::where('playlist_id', $playlistId)
+                ->where('title', 'like', '%'.$this->channel_name.'%')
+                ->whereNotNull('epg_channel_id')
+                ->with('epgChannel')
+                ->get()
+                ->map(fn (Channel $c) => $c->epgChannel?->channel_id)
+                ->filter()
+                ->unique()
+                ->values()
+                ->all();
 
-            return $epgId ? [$epgId] : null;
+            return ! empty($ids) ? $ids : null;
         }
 
         if ($this->group_id) {

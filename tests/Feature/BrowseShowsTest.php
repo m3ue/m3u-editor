@@ -42,7 +42,7 @@ it('returns grouped shows after calling search', function () {
         ->set('keyword', 'The Wire')
         ->call('search')
         ->assertSet('searched', true)
-        ->assertSet('groupedShows', fn (array $shows) => count($shows) === 1
+        ->assertViewHas('groupedShows', fn (array $shows) => count($shows) === 1
             && $shows[0]['title'] === 'The Wire');
 });
 
@@ -61,7 +61,7 @@ it('filters search results by keyword', function () {
     Livewire::test(BrowseShows::class)
         ->set('keyword', 'Wire')
         ->call('search')
-        ->assertSet('groupedShows', fn (array $shows) => count($shows) === 1);
+        ->assertViewHas('groupedShows', fn (array $shows) => count($shows) === 1);
 });
 
 it('returns empty grouped shows when no programmes match', function () {
@@ -69,7 +69,7 @@ it('returns empty grouped shows when no programmes match', function () {
         ->set('keyword', 'Nonexistent Show XYZ')
         ->call('search')
         ->assertSet('searched', true)
-        ->assertSet('groupedShows', []);
+        ->assertViewHas('groupedShows', []);
 });
 
 it('groups multiple airings of the same title into one card', function () {
@@ -87,7 +87,7 @@ it('groups multiple airings of the same title into one card', function () {
     Livewire::test(BrowseShows::class)
         ->set('keyword', 'The Wire')
         ->call('search')
-        ->assertSet('groupedShows', fn (array $shows) => count($shows) === 1
+        ->assertViewHas('groupedShows', fn (array $shows) => count($shows) === 1
             && count($shows[0]['airings']) === 2);
 });
 
@@ -102,7 +102,8 @@ it('grouped show card contains expected keys', function () {
         ->set('keyword', 'Breaking Bad')
         ->call('search');
 
-    $show = $component->get('groupedShows')[0];
+    $shows = cache()->get($component->get('showsCacheKey'), []);
+    $show = $shows[0];
 
     expect($show)->toHaveKeys([
         'title', 'next_air_date', 'next_air_date_human', 'flags',
@@ -150,7 +151,7 @@ it('populates poster_url on grouped shows after loadPosters', function () {
         ->set('keyword', 'The Wire')
         ->call('search')
         ->call('loadPosters')
-        ->assertSet('groupedShows', fn (array $shows) => $shows[0]['poster_url'] === 'https://example.com/poster.jpg');
+        ->assertViewHas('groupedShows', fn (array $shows) => $shows[0]['poster_url'] === 'https://example.com/poster.jpg');
 });
 
 it('sets postersLoaded true immediately when groupedShows is empty', function () {

@@ -135,13 +135,9 @@
                         </x-filament::input.select>
                     </x-filament::input.wrapper>
 
-                    <x-filament::input.wrapper label="{{ __('Channel') }}">
-                        <x-filament::input.select wire:model.live="seriesChannelId">
-                            <option value="">{{ __('Any channel') }}</option>
-                            @foreach($channelOptions as $id => $label)
-                                <option value="{{ $id }}">{{ $label }}</option>
-                            @endforeach
-                        </x-filament::input.select>
+                    <x-filament::input.wrapper label="{{ __('Channel (contains)') }}">
+                        <x-filament::input type="text" wire:model.live="seriesChannelName"
+                            placeholder="{{ __('Any channel') }}" />
                     </x-filament::input.wrapper>
 
                     <x-filament::input.wrapper label="{{ __('Priority') }}">

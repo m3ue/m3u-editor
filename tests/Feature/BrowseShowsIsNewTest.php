@@ -48,7 +48,7 @@ it('marks show as is_new when any airing has is_new=true', function () {
         ->set('dvr_setting_id', $this->setting->id)
         ->set('keyword', 'Real Housewives')
         ->call('search')
-        ->assertSet('groupedShows', fn (array $shows) => count($shows) === 1
+        ->assertViewHas('groupedShows', fn (array $shows) => count($shows) === 1
             && $shows[0]['flags']['is_new'] === true);
 });
 
@@ -71,7 +71,7 @@ it('does not mark season premiere (E01) as new when TVMaze has no data', functio
         ->set('keyword', 'Great British')
         ->call('search');
 
-    $shows = $component->get('groupedShows');
+    $shows = cache()->get($component->get('showsCacheKey'), []);
     $airing = $shows[0]['airings'][0];
 
     expect($airing['is_new'])->toBeFalse();
@@ -106,7 +106,7 @@ it('marks season premiere (E01) as new when TVMaze reports a recent airdate', fu
         ->set('keyword', 'Great British')
         ->call('search');
 
-    $shows = $component->get('groupedShows');
+    $shows = cache()->get($component->get('showsCacheKey'), []);
     $airing = $shows[0]['airings'][0];
 
     expect($airing['is_new'])->toBeTrue();
@@ -129,7 +129,7 @@ it('does not mark regular episode (non-E01) as new without SD flag', function ()
         ->set('keyword', 'Breaking Bad')
         ->call('search');
 
-    $shows = $component->get('groupedShows');
+    $shows = cache()->get($component->get('showsCacheKey'), []);
     $airing = $shows[0]['airings'][0];
 
     expect($airing['is_new'])->toBeFalse();
@@ -168,7 +168,7 @@ it('marks airing as is_new when TVMaze reports a recent airdate', function () {
         ->set('keyword', 'Breaking Bad')
         ->call('search');
 
-    $shows = $component->get('groupedShows');
+    $shows = cache()->get($component->get('showsCacheKey'), []);
 
     expect($shows[0]['airings'][0]['is_new'])->toBeTrue();
     expect($shows[0]['flags']['is_new'])->toBeTrue();
@@ -203,7 +203,7 @@ it('does not mark airing as is_new when TVMaze reports an old airdate', function
         ->set('keyword', 'Breaking Bad')
         ->call('search');
 
-    $shows = $component->get('groupedShows');
+    $shows = cache()->get($component->get('showsCacheKey'), []);
 
     expect($shows[0]['airings'][0]['is_new'])->toBeFalse();
 });
@@ -239,7 +239,7 @@ it('marks description-embedded episode as is_new when TVMaze reports a recent ai
         ->set('keyword', 'Real Housewives')
         ->call('search');
 
-    $shows = $component->get('groupedShows');
+    $shows = cache()->get($component->get('showsCacheKey'), []);
 
     expect($shows[0]['airings'][0]['is_new'])->toBeTrue();
     expect($shows[0]['flags']['is_new'])->toBeTrue();
