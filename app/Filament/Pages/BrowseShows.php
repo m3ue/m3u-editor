@@ -392,17 +392,42 @@ class BrowseShows extends Page
         $shows = [];
         $timezone = app(GeneralSettings::class)->app_timezone ?? 'UTC';
 
+        // Pre-pass: collect all (title, season, episode) tuples so we can resolve
+        // TVMaze air dates in a single batched call before building the output arrays.
+        $episodeLookups = [];
+        foreach ($programmes as $p) {
+            [$season, $episode] = $this->parseSeasonEpisode($p);
+            if ($season !== null && $episode !== null) {
+                $episodeLookups[] = [
+                    'title' => (string) $p->title,
+                    'season' => $season,
+                    'episode' => $episode,
+                ];
+            }
+        }
+
+        $episodeIsNewMap = app(ShowMetadataService::class)->resolveEpisodeIsNew($episodeLookups);
+
         foreach ($programmes->groupBy('title') as $title => $airings) {
             /** @var EpgProgramme $first */
             $first = $airings->first();
             $hasOnceRule = $airings->contains(fn (EpgProgramme $p) => isset($onceProgrammeIds[$p->id]));
+
+            $anyNewFromTvMaze = $airings->contains(function (EpgProgramme $p) use ($episodeIsNewMap) {
+                [$season, $episode] = $this->parseSeasonEpisode($p);
+                if ($season === null || $episode === null) {
+                    return false;
+                }
+
+                return $episodeIsNewMap[md5("{$p->title}:{$season}:{$episode}")] ?? false;
+            });
 
             $shows[] = [
                 'title' => (string) $title,
                 'next_air_date' => $first->start_time?->format('Y-m-d H:i'),
                 'next_air_date_human' => $first->start_time?->shiftTimezone('UTC')->timezone($timezone)->format('D M j, g:ia'),
                 'flags' => [
-                    'is_new' => $airings->contains('is_new', true),
+                    'is_new' => $airings->contains('is_new', true) || $anyNewFromTvMaze,
                     'premiere' => $airings->contains('premiere', true),
                     'previously_shown' => $airings->every(fn (EpgProgramme $p) => $p->previously_shown),
                 ],
@@ -413,26 +438,14 @@ class BrowseShows extends Page
                 'airing_count' => $airings->count(),
                 'category' => $first->category,
                 'description' => $first->description,
-                'airings' => $airings->map(function (EpgProgramme $p) use ($channelNames, $timezone) {
+                'airings' => $airings->map(function (EpgProgramme $p) use ($channelNames, $timezone, $episodeIsNewMap) {
                     $startTime = $p->start_time?->shiftTimezone('UTC')->timezone($timezone);
 
-                    // Some EPG providers embed "SXX EXX Title\nSynopsis" in description
-                    // rather than using the proper season/episode/subtitle fields.
-                    $season = $p->season;
-                    $episode = $p->episode;
-                    $subtitle = $p->subtitle;
-                    $description = $p->description;
+                    [$season, $episode, $subtitle, $description] = $this->parseSeasonEpisode($p);
 
-                    if (empty($subtitle) && empty($season) && empty($episode) && ! empty($description)) {
-                        $lines = explode("\n", $description, 2);
-                        $firstLine = trim($lines[0]);
-                        if (preg_match('/^S(\d+)\s+E(\d+)\s+(.+)$/i', $firstLine, $matches)) {
-                            $season = (int) $matches[1];
-                            $episode = (int) $matches[2];
-                            $subtitle = trim($matches[3]);
-                            $description = isset($lines[1]) ? trim($lines[1]) : '';
-                        }
-                    }
+                    $isNewFromTvMaze = $season !== null && $episode !== null
+                        ? ($episodeIsNewMap[md5("{$p->title}:{$season}:{$episode}")] ?? false)
+                        : false;
 
                     return [
                         'id' => $p->id,
@@ -444,7 +457,7 @@ class BrowseShows extends Page
                         'episode' => $episode,
                         'subtitle' => $subtitle,
                         'description' => $description,
-'is_new' => $p->is_new || ($p->season !== null && $p->episode === 1 && ! $p->premiere),
+                        'is_new' => $p->is_new || $isNewFromTvMaze,
                         'premiere' => $p->premiere,
                     ];
                 })->values()->all(),
@@ -452,6 +465,37 @@ class BrowseShows extends Page
         }
 
         return $shows;
+    }
+
+    /**
+     * Parse season, episode, subtitle, and description from an EpgProgramme.
+     *
+     * Some EPG providers embed "SXX EXX Title\nSynopsis" in the description field
+     * rather than using the proper season/episode/subtitle columns. This helper
+     * extracts those values so they can be used consistently across the build loop
+     * (pre-pass for TVMaze lookup and the per-airing map closure).
+     *
+     * @return array{0: int|null, 1: int|null, 2: string|null, 3: string|null} [season, episode, subtitle, description]
+     */
+    private function parseSeasonEpisode(EpgProgramme $p): array
+    {
+        $season = $p->season;
+        $episode = $p->episode;
+        $subtitle = $p->subtitle;
+        $description = $p->description;
+
+        if (empty($subtitle) && empty($season) && empty($episode) && ! empty($description)) {
+            $lines = explode("\n", $description, 2);
+            $firstLine = trim($lines[0]);
+            if (preg_match('/^S(\d+)\s+E(\d+)\s+(.+)$/i', $firstLine, $matches)) {
+                $season = (int) $matches[1];
+                $episode = (int) $matches[2];
+                $subtitle = trim($matches[3]);
+                $description = isset($lines[1]) ? trim($lines[1]) : '';
+            }
+        }
+
+        return [$season, $episode, $subtitle, $description];
     }
 
     /**
