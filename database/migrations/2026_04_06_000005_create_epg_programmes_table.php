@@ -27,8 +27,6 @@ return new class extends Migration
             $table->unsignedSmallInteger('season')->nullable();
             $table->unsignedSmallInteger('episode')->nullable();
             $table->boolean('is_new')->default(false);
-            $table->boolean('previously_shown')->default(false);
-            $table->boolean('premiere')->default(false);
             $table->string('icon', 500)->nullable();
             $table->string('rating', 50)->nullable();
             $table->timestamps();
