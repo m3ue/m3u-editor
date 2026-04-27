@@ -72,3 +72,4 @@ compose.dev.yaml
 compose.services.yaml
 mediaserver.env
 .env.testing
+debug-browse-shows.md
