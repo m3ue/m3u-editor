@@ -444,7 +444,7 @@ class BrowseShows extends Page
                         'episode' => $episode,
                         'subtitle' => $subtitle,
                         'description' => $description,
-                        'is_new' => $p->is_new || (! $p->previously_shown && ! $p->premiere),
+'is_new' => $p->is_new || ($p->season !== null && $p->episode === 1 && ! $p->premiere),
                         'premiere' => $p->premiere,
                     ];
                 })->values()->all(),

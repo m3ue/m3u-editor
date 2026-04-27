@@ -17,8 +17,8 @@ beforeEach(function () {
 });
 
 it('marks show as is_new when any airing has is_new=true', function () {
-    // S15E19: SD is_new=false, not previously_shown, not premiere → heuristic makes it new
-    // S15E20: SD is_new=true → new
+    // S15E19 (E19, not E01) - not flagged by SD, not E01 → not new
+    // S15E20 (E20, not E01) - SD is_new=true → new
     EpgProgramme::factory()->create([
         'title' => 'Real Housewives of Beverly Hills',
         'subtitle' => 'Reunion Part 1',
@@ -48,58 +48,44 @@ it('marks show as is_new when any airing has is_new=true', function () {
             && $shows[0]['flags']['is_new'] === true);
 });
 
-it('passes is_new and premiere flags correctly to each airing in the slide-out', function () {
+it('marks season premiere (E01) as new without SD flag', function () {
+    // E01 without SD is_new=true → heuristic marks it new
     EpgProgramme::factory()->create([
-        'title' => 'Real Housewives of Beverly Hills',
-        'subtitle' => 'Reunion Part 1',
-        'season' => 15,
-        'episode' => 19,
-        'start_time' => now()->addDays(1),
-        'end_time' => now()->addDays(1)->addHour(),
-        'is_new' => false,
-        'previously_shown' => false,
-    ]);
-
-    EpgProgramme::factory()->create([
-        'title' => 'Real Housewives of Beverly Hills',
-        'subtitle' => 'Reunion Part 2',
-        'season' => 15,
-        'episode' => 20,
-        'start_time' => now()->addDays(1)->addHours(2),
-        'end_time' => now()->addDays(1)->addHours(3),
-        'is_new' => true,
-    ]);
-
-    $component = Livewire::test(BrowseShows::class)
-        ->set('dvr_setting_id', $this->setting->id)
-        ->set('keyword', 'Real Housewives')
-        ->call('search');
-
-    $shows = $component->get('groupedShows');
-    $airings = $shows[0]['airings'];
-
-    $part1 = collect($airings)->first(fn ($a) => $a['episode'] === 19);
-    $part2 = collect($airings)->first(fn ($a) => $a['episode'] === 20);
-
-    // With heuristic: not previously_shown && not premiere → true
-    expect($part1['is_new'])->toBeTrue()
-        && expect($part2['is_new'])->toBeTrue();
-});
-
-it('does not mark as new if previously_shown is true', function () {
-    EpgProgramme::factory()->create([
-        'title' => 'Rerun Episode',
-        'season' => 1,
+        'title' => 'The Great British Bake Off',
+        'subtitle' => 'Episode 1',
+        'season' => 10,
         'episode' => 1,
         'start_time' => now()->addDays(1),
         'end_time' => now()->addDays(1)->addHour(),
         'is_new' => false,
-        'previously_shown' => true,
+        'premiere' => false,
     ]);
 
     $component = Livewire::test(BrowseShows::class)
         ->set('dvr_setting_id', $this->setting->id)
-        ->set('keyword', 'Rerun')
+        ->set('keyword', 'Great British')
+        ->call('search');
+
+    $shows = $component->get('groupedShows');
+    $airing = $shows[0]['airings'][0];
+
+    expect($airing['is_new'])->toBeTrue();
+});
+
+it('does not mark regular episode (non-E01) as new without SD flag', function () {
+    EpgProgramme::factory()->create([
+        'title' => 'Breaking Bad',
+        'subtitle' => 'Felina',
+        'season' => 5,
+        'episode' => 16,
+        'start_time' => now()->addDays(1),
+        'end_time' => now()->addDays(1)->addHour(),
+        'is_new' => false,
+    ]);
+
+    $component = Livewire::test(BrowseShows::class)
+        ->set('dvr_setting_id', $this->setting->id)
+        ->set('keyword', 'Breaking Bad')
         ->call('search');
 
     $shows = $component->get('groupedShows');
