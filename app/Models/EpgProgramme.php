@@ -28,6 +28,8 @@ class EpgProgramme extends Model
         'season',
         'episode',
         'is_new',
+        'previously_shown',
+        'premiere',
         'icon',
         'rating',
     ];
@@ -43,6 +45,8 @@ class EpgProgramme extends Model
             'season' => 'integer',
             'episode' => 'integer',
             'is_new' => 'boolean',
+            'previously_shown' => 'boolean',
+            'premiere' => 'boolean',
         ];
     }
 
