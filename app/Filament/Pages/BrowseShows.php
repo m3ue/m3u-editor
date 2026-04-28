@@ -84,7 +84,7 @@ class BrowseShows extends Page
 
     public function getTimezoneNotSetProperty(): bool
     {
-        return empty(app(GeneralSettings::class)->app_timezone);
+        return empty(config('dev.timezone')) && empty(app(GeneralSettings::class)->app_timezone);
     }
 
     /**
@@ -415,7 +415,7 @@ class BrowseShows extends Page
             : [];
 
         $shows = [];
-        $timezone = app(GeneralSettings::class)->app_timezone ?? 'UTC';
+        $timezone = config('dev.timezone') ?? app(GeneralSettings::class)->app_timezone ?? 'UTC';
 
         $episodeLookups = [];
         foreach ($programmes as $p) {
