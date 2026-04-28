@@ -237,11 +237,25 @@ class BrowseShows extends Page
             return;
         }
 
+        // epg_programmes.epg_channel_id is the string channel ID from the EPG XML;
+        // channels.epg_channel_id is an integer FK to epg_channels.id — resolve via EpgChannel first.
+        $channel = null;
+        if ($programme->epg_channel_id) {
+            $epgChannelId = EpgChannel::where('channel_id', $programme->epg_channel_id)->value('id');
+            if ($epgChannelId) {
+                $channel = Channel::where('user_id', Auth::id())
+                    ->where('epg_channel_id', $epgChannelId)
+                    ->first();
+            }
+        }
+
         DvrRecordingRule::create([
             'user_id' => Auth::id(),
             'dvr_setting_id' => $this->dvr_setting_id,
             'type' => DvrRuleType::Once,
             'programme_id' => $programmeId,
+            'series_title' => $programme->title,
+            'channel_id' => $channel?->id,
             'enabled' => true,
             'priority' => 50,
         ]);
