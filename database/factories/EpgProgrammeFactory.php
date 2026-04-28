@@ -34,6 +34,8 @@ class EpgProgrammeFactory extends Factory
             'season' => fake()->optional()->numberBetween(1, 20),
             'episode' => fake()->optional()->numberBetween(1, 24),
             'is_new' => false,
+            'previously_shown' => false,
+            'premiere' => false,
             'icon' => null,
             'rating' => fake()->optional()->randomElement(['TV-G', 'TV-PG', 'TV-14', 'TV-MA']),
         ];

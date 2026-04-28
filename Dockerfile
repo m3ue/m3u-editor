@@ -150,7 +150,6 @@ ENV GIT_BRANCH=${GIT_BRANCH} \
 RUN echo "@edge https://dl-cdn.alpinelinux.org/alpine/edge/main" >> /etc/apk/repositories && \
     echo "@edge https://dl-cdn.alpinelinux.org/alpine/edge/community" >> /etc/apk/repositories && \
     apk update && apk add --no-cache \
-    # Core utilities
     coreutils \
     openssl \
     supervisor \
@@ -164,10 +163,8 @@ RUN echo "@edge https://dl-cdn.alpinelinux.org/alpine/edge/main" >> /etc/apk/rep
     ca-certificates \
     bash \
     tzdata \
-    # Node.js runtime (for Reverb/websockets if needed)
     nodejs \
     npm \
-    # Redis server
     redis \
     # FFmpeg 8.0 from Alpine edge (with matching edge deps to avoid symbol mismatches)
     # glslang-libs, spirv-tools, and vulkan-loader must also come from edge
@@ -176,16 +173,12 @@ RUN echo "@edge https://dl-cdn.alpinelinux.org/alpine/edge/main" >> /etc/apk/rep
     glslang-libs@edge \
     spirv-tools@edge \
     vulkan-loader@edge \
-    # Nginx web server
     nginx \
-    # PostgreSQL server & client
     postgresql \
     postgresql-client \
     postgresql-contrib \
-    # Python runtime and pip (for m3u-proxy)
     python3 \
     py3-pip \
-    # PHP 8.4 and all required extensions
     php84-cli \
     php84-fpm \
     php84-posix \
@@ -224,9 +217,7 @@ RUN echo "@edge https://dl-cdn.alpinelinux.org/alpine/edge/main" >> /etc/apk/rep
             sed -i 's/^\s*NotifyClamd/# NotifyClamd/' /etc/clamav/freshclam.conf; \
         fi; \
     fi && \
-    # Create PHP symlink
     ln -s /usr/bin/php84 /usr/bin/php && \
-    # Clean up apk cache
     rm -rf /var/cache/apk/*
 
 # Create user and group early for proper file ownership
@@ -278,7 +269,8 @@ COPY --chown=${WWWUSER}:${WWWGROUP} . /var/www/html
 RUN echo "GIT_BRANCH=${GIT_BRANCH}" > /var/www/html/.git-info && \
     echo "GIT_COMMIT=${GIT_COMMIT}" >> /var/www/html/.git-info && \
     echo "GIT_TAG=${GIT_TAG}" >> /var/www/html/.git-info && \
-    echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> /var/www/html/.git-info
+    echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> /var/www/html/.git-info && \
+    chown ${WWWUSER}:${WWWGROUP} /var/www/html/.git-info
 
 # Copy build artifacts from builder stages (overwrite source files)
 # Vendor directory from composer builder
@@ -291,9 +283,12 @@ COPY --from=node_builder --chown=${WWWUSER}:${WWWGROUP} /app/public/build /var/w
 RUN echo -e '#!/bin/bash\nphp artisan app:"$@"' > /usr/bin/m3ue && \
     chmod +x /usr/bin/m3ue
 
-# Ensure proper permissions for storage and cache directories
-RUN chown -R ${WWWUSER}:${WWWGROUP} /var/www/html && \
-    chmod -R 775 /var/www/html/storage /var/www/html/bootstrap/cache 2>/dev/null || true
+# Set write permissions on storage and cache directories.
+# chown is intentionally omitted here — all COPY statements above already use
+# --chown=${WWWUSER}:${WWWGROUP}, so ownership is set at copy time without an
+# extra layer walk. A redundant chown -R /var/www/html would re-traverse the
+# entire vendor tree and is the primary cause of slow builds.
+RUN chmod -R 775 /var/www/html/storage /var/www/html/bootstrap/cache 2>/dev/null || true
 
 # Note: Ports are configured via environment variables (APP_PORT, REVERB_PORT, etc.)
 # and should be exposed in docker-compose.yml or via -p flags as needed.

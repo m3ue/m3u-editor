@@ -450,7 +450,7 @@ class DvrSchedulerService
         // Use the proxy URL when the source playlist has proxy enabled
         $playlist = $setting->playlist;
         if ($playlist && ! empty($playlist->proxy_options['enabled'])) {
-            [$proxyUrl] = $channel->getProxyUrl();
+            $proxyUrl = $channel->getProxyUrl();
 
             return $proxyUrl ?: $channel->url;
         }

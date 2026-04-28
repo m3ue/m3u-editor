@@ -2,12 +2,14 @@
 
 namespace App\Jobs;
 
+use App\Enums\DvrRecordingStatus;
 use App\Models\DvrRecording;
 use App\Services\DvrRecorderService;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Log;
+use Throwable;
 
 /**
  * StartDvrRecording — Spawn an ffmpeg process for a scheduled recording.
@@ -45,6 +47,15 @@ class StartDvrRecording implements ShouldBeUnique, ShouldQueue
             return;
         }
 
-        $recorder->start($recording);
+        try {
+            $recorder->start($recording);
+        } catch (Throwable $e) {
+            Log::error("StartDvrRecording: recording {$this->recordingId} failed to start — {$e->getMessage()}");
+
+            $recording->update([
+                'status' => DvrRecordingStatus::Failed->value,
+                'error_message' => $e->getMessage(),
+            ]);
+        }
     }
 }

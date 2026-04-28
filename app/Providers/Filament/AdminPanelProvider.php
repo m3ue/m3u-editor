@@ -6,6 +6,7 @@ use App\Filament\Auth\EditProfile;
 use App\Filament\Auth\Login;
 use App\Filament\CopilotTools\EpgMappingStateTool;
 use App\Filament\Pages\Backups;
+use App\Filament\Pages\BrowseShows;
 use App\Filament\Pages\CreatePlugin;
 use App\Filament\Pages\CustomDashboard;
 use App\Filament\Pages\LogViewer;
@@ -191,6 +192,7 @@ class AdminPanelProvider extends PanelProvider
                             ->items([
                                 ...DvrRecordingResource::getNavigationItems(),
                                 ...DvrRecordingRuleResource::getNavigationItems(),
+                                ...BrowseShows::getNavigationItems(),
                             ]),
                         NavigationGroup::make(fn () => __('Integrations'))
                             ->icon('heroicon-m-server-stack')

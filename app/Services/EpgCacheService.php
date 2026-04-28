@@ -1615,6 +1615,8 @@ class EpgCacheService
                         'season' => $season,
                         'episode' => $episode,
                         'is_new' => (bool) ($p['new'] ?? false),
+                        'previously_shown' => (bool) ($p['previously_shown'] ?? false),
+                        'premiere' => (bool) ($p['premiere'] ?? false),
                         'icon' => $p['icon'] ?? null,
                         'rating' => $p['rating'] ?? null,
                         'created_at' => now()->toDateTimeString(),
