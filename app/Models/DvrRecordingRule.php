@@ -18,6 +18,7 @@ class DvrRecordingRule extends Model
      */
     protected $fillable = [
         'user_id',
+        'playlist_auth_id',
         'dvr_setting_id',
         'type',
         'programme_id',
@@ -55,6 +56,11 @@ class DvrRecordingRule extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function playlistAuth(): BelongsTo
+    {
+        return $this->belongsTo(PlaylistAuth::class);
     }
 
     public function dvrSetting(): BelongsTo

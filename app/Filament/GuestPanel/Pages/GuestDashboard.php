@@ -23,6 +23,11 @@ class GuestDashboard extends Page implements HasSchemas
 
     protected static ?string $slug = 'live';
 
+    public static function shouldRegisterNavigation(): bool
+    {
+        return static::isSessionAuthenticated();
+    }
+
     public function getTitle(): string|Htmlable
     {
         return '';
@@ -43,7 +48,13 @@ class GuestDashboard extends Page implements HasSchemas
 
     public static function getNavigationBadge(): ?string
     {
-        $playlist = PlaylistFacade::resolvePlaylistByUuid(static::getCurrentUuid());
+        $uuid = static::getCurrentUuid();
+        $prefix = $uuid ? base64_encode($uuid).'_' : '';
+        if (! session("{$prefix}guest_auth_username")) {
+            return null;
+        }
+
+        $playlist = PlaylistFacade::resolvePlaylistByUuid($uuid);
         if ($playlist) {
             return (string) $playlist->channels()->where([
                 ['enabled', true],
@@ -51,6 +62,6 @@ class GuestDashboard extends Page implements HasSchemas
             ])->count();
         }
 
-        return '';
+        return null;
     }
 }

@@ -24,6 +24,7 @@ class DvrRecording extends Model
         'uuid',
         'proxy_network_id',
         'user_id',
+        'playlist_auth_id',
         'dvr_setting_id',
         'dvr_recording_rule_id',
         'channel_id',
@@ -123,6 +124,11 @@ class DvrRecording extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function playlistAuth(): BelongsTo
+    {
+        return $this->belongsTo(PlaylistAuth::class);
     }
 
     public function dvrSetting(): BelongsTo
