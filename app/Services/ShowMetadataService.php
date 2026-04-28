@@ -210,10 +210,9 @@ class ShowMetadataService
 
         foreach ($titles as $title) {
             $key = $cacheKey($title);
-            $cached = Cache::get($key);
 
-            if ($cached !== null) {
-                $hits[$title] = $cached;
+            if (Cache::has($key)) {
+                $hits[$title] = Cache::get($key); // null = "no poster found", still a valid hit
             } else {
                 $misses[] = $title;
             }

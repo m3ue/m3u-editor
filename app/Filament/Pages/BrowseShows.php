@@ -287,8 +287,9 @@ class BrowseShows extends Page
         if ($this->seriesChannelName && $this->dvr_setting_id) {
             $playlistId = DvrSetting::find($this->dvr_setting_id)?->playlist_id;
             if ($playlistId) {
+                $seriesChannelKw = mb_strtolower($this->seriesChannelName);
                 $channelId = Channel::where('playlist_id', $playlistId)
-                    ->where('title', 'like', '%'.$this->seriesChannelName.'%')
+                    ->whereRaw('LOWER(title) LIKE ?', ["%{$seriesChannelKw}%"])
                     ->value('id');
             }
         }
@@ -546,18 +547,20 @@ class BrowseShows extends Page
             ->orderBy('start_time');
 
         if (! empty($this->keyword)) {
-            $query->where('title', 'like', '%'.$this->keyword.'%');
+            $kw = mb_strtolower($this->keyword);
+            $query->whereRaw('LOWER(title) LIKE ?', ["%{$kw}%"]);
         }
 
         if (! empty($this->category)) {
-            $query->where('category', 'like', '%'.$this->category.'%');
+            $kw = mb_strtolower($this->category);
+            $query->whereRaw('LOWER(category) LIKE ?', ["%{$kw}%"]);
         }
 
         if (! empty($this->description_keyword)) {
-            $kw = $this->description_keyword;
+            $kw = mb_strtolower($this->description_keyword);
             $query->where(function ($q) use ($kw): void {
-                $q->where('description', 'like', '%'.$kw.'%')
-                    ->orWhere('subtitle', 'like', '%'.$kw.'%');
+                $q->whereRaw('LOWER(description) LIKE ?', ["%{$kw}%"])
+                    ->orWhereRaw('LOWER(subtitle) LIKE ?', ["%{$kw}%"]);
             });
         }
 
@@ -581,14 +584,15 @@ class BrowseShows extends Page
      */
     private function resolveEpgChannelScope(int $playlistId): ?array
     {
+        $base = Channel::whereNotNull('channels.epg_channel_id')
+            ->join('epg_channels', 'epg_channels.id', '=', 'channels.epg_channel_id');
+
         if ($this->channel_name) {
-            $ids = Channel::where('playlist_id', $playlistId)
-                ->where('title', 'like', '%'.$this->channel_name.'%')
-                ->whereNotNull('epg_channel_id')
-                ->with('epgChannel')
-                ->get()
-                ->map(fn (Channel $c) => $c->epgChannel?->channel_id)
-                ->filter()
+            $channelKw = mb_strtolower($this->channel_name);
+            $ids = (clone $base)
+                ->where('channels.playlist_id', $playlistId)
+                ->whereRaw('LOWER(channels.title) LIKE ?', ["%{$channelKw}%"])
+                ->pluck('epg_channels.channel_id')
                 ->unique()
                 ->values()
                 ->all();
@@ -597,12 +601,9 @@ class BrowseShows extends Page
         }
 
         if ($this->group_id) {
-            $ids = Channel::where('group_id', $this->group_id)
-                ->whereNotNull('epg_channel_id')
-                ->with('epgChannel')
-                ->get()
-                ->map(fn (Channel $c) => $c->epgChannel?->channel_id)
-                ->filter()
+            $ids = (clone $base)
+                ->where('channels.group_id', $this->group_id)
+                ->pluck('epg_channels.channel_id')
                 ->unique()
                 ->values()
                 ->all();
@@ -610,12 +611,9 @@ class BrowseShows extends Page
             return ! empty($ids) ? $ids : null;
         }
 
-        $ids = Channel::where('playlist_id', $playlistId)
-            ->whereNotNull('epg_channel_id')
-            ->with('epgChannel')
-            ->get()
-            ->map(fn (Channel $c) => $c->epgChannel?->channel_id)
-            ->filter()
+        $ids = (clone $base)
+            ->where('channels.playlist_id', $playlistId)
+            ->pluck('epg_channels.channel_id')
             ->unique()
             ->values()
             ->all();
