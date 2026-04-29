@@ -1507,13 +1507,6 @@ class EpgCacheService
     }
 
     /**
-     * Populate the epg_programmes DB table for any DVR-enabled playlists that use this EPG.
-     *
-     * Reads from the JSONL cache files (covering yesterday through 7 days ahead) and
-     * upserts rows into epg_programmes so the DVR scheduler can query them without
-     * touching the filesystem.
-     */
-    /**
      * Populate the epg_programmes DB table from the JSONL cache for DVR-enabled playlists.
      *
      * Public so it can be called directly (e.g. from an artisan command) when a DVR

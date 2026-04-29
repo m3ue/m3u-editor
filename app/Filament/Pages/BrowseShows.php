@@ -542,24 +542,23 @@ class BrowseShows extends Page
      */
     private function runSearch(): Collection
     {
-        $query = EpgProgramme::query()
+        $base = EpgProgramme::query()
             ->where('start_time', '>=', now())
-            ->where('start_time', '<=', now()->addDays($this->days))
-            ->orderBy('start_time');
+            ->where('start_time', '<=', now()->addDays($this->days));
 
         if (! empty($this->keyword)) {
             $kw = mb_strtolower($this->keyword);
-            $query->whereRaw('LOWER(title) LIKE ?', ["%{$kw}%"]);
+            $base->whereRaw('LOWER(title) LIKE ?', ["%{$kw}%"]);
         }
 
         if (! empty($this->category)) {
             $kw = mb_strtolower($this->category);
-            $query->whereRaw('LOWER(category) LIKE ?', ["%{$kw}%"]);
+            $base->whereRaw('LOWER(category) LIKE ?', ["%{$kw}%"]);
         }
 
         if (! empty($this->description_keyword)) {
             $kw = mb_strtolower($this->description_keyword);
-            $query->where(function ($q) use ($kw): void {
+            $base->where(function ($q) use ($kw): void {
                 $q->whereRaw('LOWER(description) LIKE ?', ["%{$kw}%"])
                     ->orWhereRaw('LOWER(subtitle) LIKE ?', ["%{$kw}%"]);
             });
@@ -572,12 +571,30 @@ class BrowseShows extends Page
                 $epgChannelIds = $this->resolveEpgChannelScope($playlistId);
 
                 if ($epgChannelIds !== null) {
-                    $query->whereIn('epg_channel_id', $epgChannelIds);
+                    $base->whereIn('epg_channel_id', $epgChannelIds);
                 }
             }
         }
 
-        return $query->limit(100)->get();
+        // Step 1: Get up to 50 distinct show titles ordered by first air time.
+        // Limiting on titles (not raw rows) ensures all channels airing a show
+        // are included, regardless of how many affiliates share the same time slot.
+        $titles = (clone $base)
+            ->select('title')
+            ->groupBy('title')
+            ->orderByRaw('MIN(start_time)')
+            ->limit(50)
+            ->pluck('title');
+
+        if ($titles->isEmpty()) {
+            return collect();
+        }
+
+        // Step 2: Fetch every airing of those shows within the window.
+        return (clone $base)
+            ->whereIn('title', $titles)
+            ->orderBy('start_time')
+            ->get();
     }
 
     /**
