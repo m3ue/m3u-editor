@@ -1590,9 +1590,8 @@ class EpgCacheService
                         continue;
                     }
 
-                    // Parse episode_num — honours xmltv_ns (0-indexed dot notation),
-                    // onscreen (SxxExx), and falls back to heuristic on the raw string.
-                    [$season, $episode] = EpisodeNumberParser::fromProgramme($p);
+                    // Parse season/episode from all episode-num entries in the programme.
+                    [$season, $episode] = $this->parseEpisodeNumbers($p);
 
                     $batch[] = [
                         'epg_id' => $epg->id,
@@ -1668,5 +1667,71 @@ class EpgCacheService
         }
 
         return $maxLength !== null ? mb_substr($value, 0, $maxLength) : $value;
+    }
+
+    /**
+     * Parse season and episode integers from XMLTV episode-num data.
+     *
+     * Priority order:
+     *   1. Explicit `system="xmltv_ns"` entry — 0-indexed dot notation ("S.E.P"),
+     *      converted to 1-indexed integers (e.g. "1.2." → season 2, episode 3).
+     *   2. Explicit `system="onscreen"` entry — 1-indexed SxxExx literal
+     *      (e.g. "S02E05" → season 2, episode 5).
+     *   3. Heuristic on the raw `episode_num` string when no explicit system tag:
+     *      dots → treated as xmltv_ns (0-indexed); SxxExx → treated as onscreen (1-indexed).
+     *
+     * @param  array<string, mixed>  $programme  Parsed programme payload from parseProgrammesStream
+     * @return array{0: int|null, 1: int|null} [season, episode]
+     */
+    protected function parseEpisodeNumbers(array $programme): array
+    {
+        $season = null;
+        $episode = null;
+
+        // Priority 1: explicit xmltv_ns system (0-indexed dot notation)
+        foreach ($programme['episode_nums'] as $en) {
+            if (strtolower($en['system']) === 'xmltv_ns') {
+                $parts = explode('.', $en['value']);
+                if (isset($parts[0]) && is_numeric(trim($parts[0]))) {
+                    $season = min(32767, (int) trim($parts[0]) + 1);
+                }
+                if (isset($parts[1]) && is_numeric(trim($parts[1]))) {
+                    $episode = min(32767, (int) trim($parts[1]) + 1);
+                }
+                break; // xmltv_ns is authoritative
+            }
+        }
+
+        // Priority 2: explicit onscreen system (1-indexed SxxExx)
+        if ($season === null && $episode === null) {
+            foreach ($programme['episode_nums'] as $en) {
+                if (strtolower($en['system']) === 'onscreen' && preg_match('/S(\d+)E(\d+)/i', $en['value'], $m)) {
+                    $season = min(32767, (int) $m[1]);
+                    $episode = min(32767, (int) $m[2]);
+                    break;
+                }
+            }
+        }
+
+        // Priority 3: heuristic on raw episode_num string (no explicit system tag)
+        if ($season === null && $episode === null && ! empty($programme['episode_num'])) {
+            $raw = $programme['episode_num'];
+            if (str_contains($raw, '.')) {
+                // Looks like xmltv_ns dots format (0-indexed)
+                $parts = explode('.', $raw);
+                if (isset($parts[0]) && is_numeric(trim($parts[0]))) {
+                    $season = min(32767, (int) trim($parts[0]) + 1);
+                }
+                if (isset($parts[1]) && is_numeric(trim($parts[1]))) {
+                    $episode = min(32767, (int) trim($parts[1]) + 1);
+                }
+            } elseif (preg_match('/S(\d+)E(\d+)/i', $raw, $m)) {
+                // Looks like onscreen SxxExx format (1-indexed)
+                $season = min(32767, (int) $m[1]);
+                $episode = min(32767, (int) $m[2]);
+            }
+        }
+
+        return [$season, $episode];
     }
 }

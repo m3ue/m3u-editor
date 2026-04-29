@@ -475,3 +475,127 @@ it('DvrPostProcessorService dispatches IntegrateDvrRecordingToVod when metadata 
     // Bell notification sent on completion
     Notification::assertSentTo($user, DatabaseNotification::class);
 });
+
+// ── Fix #2: created_at fallback in formatRecordingDate ────────────────────────
+
+it('uses scheduled_start as date fallback when programme_start is null', function () {
+    $recording = makeCompletedRecording([
+        'title' => 'Late Night Show',
+        'season' => null,
+        'episode' => null,
+        'metadata' => null,
+        'programme_start' => null,
+        'scheduled_start' => Carbon::parse('2025-11-08 20:00:00'),
+    ]);
+
+    $this->service->integrateRecording($recording);
+
+    $channel = Channel::where('dvr_recording_id', $recording->id)->firstOrFail();
+
+    expect($channel->name)->toBe('Late Night Show — Nov 8, 2025');
+});
+
+// ── Fix #3: date-based episode numbers when episode is null ───────────────────
+
+it('derives a date-based episode number (MMDD) when season is set but episode is null', function () {
+    $recording = makeCompletedRecording([
+        'title' => 'Daily News',
+        'season' => 2025,
+        'episode' => null,
+        'metadata' => null,
+        'programme_start' => Carbon::parse('2025-04-21'),
+    ]);
+
+    $this->service->integrateRecording($recording);
+
+    $episode = Episode::where('dvr_recording_id', $recording->id)->firstOrFail();
+
+    // Apr 21 → 4 * 100 + 21 = 421
+    expect($episode->episode_num)->toBe(421);
+});
+
+it('two recordings on different dates with no episode number get distinct episode_nums', function () {
+    $user = User::factory()->create();
+    $playlist = Playlist::factory()->for($user)->create();
+    $setting = DvrSetting::factory()->enabled()->for($user)->for($playlist)->create();
+
+    $ep1 = DvrRecording::factory()->completed()->for($setting, 'dvrSetting')->for($user)->create([
+        'title' => 'Daily News',
+        'season' => 2025,
+        'episode' => null,
+        'metadata' => null,
+        'programme_start' => Carbon::parse('2025-04-21'),
+    ]);
+
+    $ep2 = DvrRecording::factory()->completed()->for($setting, 'dvrSetting')->for($user)->create([
+        'title' => 'Daily News',
+        'season' => 2025,
+        'episode' => null,
+        'metadata' => null,
+        'programme_start' => Carbon::parse('2025-04-22'),
+    ]);
+
+    $this->service->integrateRecording($ep1);
+    $this->service->integrateRecording($ep2);
+
+    $nums = Episode::whereIn('dvr_recording_id', [$ep1->id, $ep2->id])
+        ->pluck('episode_num')
+        ->sort()
+        ->values();
+
+    expect($nums->toArray())->toBe([421, 422]);
+});
+
+it('date-based episode number is idempotent — re-running integration does not change episode_num', function () {
+    $recording = makeCompletedRecording([
+        'title' => 'Daily News',
+        'season' => 2025,
+        'episode' => null,
+        'metadata' => null,
+        'programme_start' => Carbon::parse('2025-06-15'),
+    ]);
+
+    $this->service->integrateRecording($recording);
+    $first = Episode::where('dvr_recording_id', $recording->id)->value('episode_num');
+
+    $this->service->integrateRecording($recording);
+    $second = Episode::where('dvr_recording_id', $recording->id)->value('episode_num');
+
+    expect($first)->toBe(615)->and($second)->toBe(615);
+    expect(Episode::where('dvr_recording_id', $recording->id)->count())->toBe(1);
+});
+
+// ── Fix #4: case-insensitive series name deduplication ───────────────────────
+
+it('reuses the same Series when a recording title differs only in case from an existing series', function () {
+    $user = User::factory()->create();
+    $playlist = Playlist::factory()->for($user)->create();
+    $setting = DvrSetting::factory()->enabled()->for($user)->for($playlist)->create();
+
+    // First recording — no TMDB, stores title as-is ("breaking bad")
+    $ep1 = DvrRecording::factory()->completed()->for($setting, 'dvrSetting')->for($user)->create([
+        'title' => 'breaking bad',
+        'season' => 1,
+        'episode' => 1,
+        'metadata' => null,
+    ]);
+
+    // Second recording — TMDB enriched with canonical casing ("Breaking Bad")
+    $ep2 = DvrRecording::factory()->completed()->for($setting, 'dvrSetting')->for($user)->create([
+        'title' => 'Breaking Bad',
+        'season' => 1,
+        'episode' => 2,
+        'metadata' => ['tmdb' => ['id' => 1396, 'type' => 'tv', 'name' => 'Breaking Bad']],
+    ]);
+
+    $this->service->integrateRecording($ep1);
+    $this->service->integrateRecording($ep2);
+
+    // Should be exactly one Series, not two
+    expect(Series::where('playlist_id', $playlist->id)->whereNull('source_series_id')->count())->toBe(1);
+
+    // The TMDB backfill should have upgraded the name and set tmdb_id
+    $series = Series::where('playlist_id', $playlist->id)->whereNull('source_series_id')->first();
+    expect($series->name)->toBe('Breaking Bad')
+        ->and($series->tmdb_id)->toBe(1396);
+});

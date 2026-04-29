@@ -205,7 +205,11 @@ class DvrVodIntegrationService
     {
         $seriesName = $tmdb['name'] ?? $tvmaze['name'] ?? $this->stripUnicodeDecorations($recording->title);
         $seasonNumber = $recording->season ?? 1;
-        $episodeNumber = $recording->episode ?? 1;
+
+        // When EPG provides a season but no episode number (common for daily shows),
+        // derive a unique episode number from the air date (compact MMDD: Apr 21 → 421)
+        // so multiple recordings of the same show never collide at E01.
+        $episodeNumber = $recording->episode ?? $this->deriveDateEpisodeNumber($recording);
         $streamUrl = $this->buildStreamUrl($recording);
         $containerExt = $recording->dvrSetting?->dvr_output_format ?? 'ts';
         $sourceLogo = $this->resolveSourceChannelLogo($recording);
@@ -320,9 +324,28 @@ class DvrVodIntegrationService
      */
     private function formatRecordingDate(DvrRecording $recording): string
     {
-        $date = $recording->programme_start ?? $recording->scheduled_start ?? now();
+        $date = $recording->programme_start
+            ?? $recording->scheduled_start
+            ?? $recording->created_at  // deterministic fallback — always set
+            ?? now();
 
         return $date->format('M j, Y');
+    }
+
+    /**
+     * Derive a compact date-based episode number (MMDD) for recordings that have
+     * a season but no EPG episode number (e.g. daily news, sports events).
+     *
+     * Apr 21 → 421, Dec 3 → 1203.  Deterministic and sortable within a season year.
+     */
+    private function deriveDateEpisodeNumber(DvrRecording $recording): int
+    {
+        $date = $recording->programme_start
+            ?? $recording->scheduled_start
+            ?? $recording->created_at
+            ?? now();
+
+        return $date->month * 100 + $date->day;
     }
 
     /**
@@ -395,6 +418,10 @@ class DvrVodIntegrationService
 
     /**
      * Find an existing DVR series by name + playlist, or create a new one.
+     *
+     * The name lookup is case-insensitive so that a recording with title
+     * "breaking bad" and a later recording enriched with TMDB name "Breaking Bad"
+     * resolve to the same series rather than creating a duplicate.
      */
     private function findOrCreateSeries(string $name, int $playlistId, int $userId, int $categoryId, ?array $tmdb, ?string $sourceLogo = null, ?array $tvmaze = null): Series
     {
@@ -422,10 +449,20 @@ class DvrVodIntegrationService
             $defaults['cover'] = $sourceLogo;
         }
 
-        $series = Series::firstOrCreate(
-            ['playlist_id' => $playlistId, 'source_series_id' => null, 'name' => $name],
-            $defaults
-        );
+        // Case-insensitive lookup so "breaking bad" and "Breaking Bad" don't
+        // create duplicate series when metadata arrives at different times.
+        $normalizedName = mb_strtolower(trim($name));
+        $series = Series::where('playlist_id', $playlistId)
+            ->whereNull('source_series_id')
+            ->whereRaw('LOWER(TRIM(name)) = ?', [$normalizedName])
+            ->first();
+
+        if (! $series) {
+            $series = Series::create(array_merge(
+                ['playlist_id' => $playlistId, 'source_series_id' => null, 'name' => $name],
+                $defaults
+            ));
+        }
 
         if (! $series->wasRecentlyCreated) {
             // Update metadata if we now have TMDB data and didn't before
@@ -434,6 +471,8 @@ class DvrVodIntegrationService
                 $series->plot = $tmdb['overview'] ?? $series->plot;
                 $series->release_date = $tmdb['first_air_date'] ?? $tmdb['release_date'] ?? $series->release_date;
                 $series->metadata = $tmdb;
+                // Upgrade the display name to the canonical TMDB name
+                $series->name = $name;
 
                 if (! empty($tmdb['id'])) {
                     $series->tmdb_id = $tmdb['id'];
