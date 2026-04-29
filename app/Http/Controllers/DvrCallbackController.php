@@ -86,11 +86,11 @@ class DvrCallbackController extends Controller
             return response()->json(['status' => 'ignored', 'reason' => 'not in recording state']);
         }
 
+        // proxy_network_id is intentionally NOT cleared here — the post-processing
+        // pipeline needs it to download HLS segments from the proxy. It is cleared
+        // after successful cleanup at the end of DvrPostProcessorService::run().
         $updateData = [
             'status' => DvrRecordingStatus::PostProcessing->value,
-            // proxy_network_id is intentionally preserved here — DvrPostProcessorService
-            // uses it to download HLS segments from the proxy via HTTP and clears it
-            // itself once the download and cleanup are complete.
         ];
 
         // Preserve actual_end if already set by finalizeStop(); set it now if not.
@@ -98,11 +98,9 @@ class DvrCallbackController extends Controller
             $updateData['actual_end'] = now();
         }
 
-        // Store hls_dir from the callback for legacy shared-volume deployments that
-        // don't use the HTTP-download path (i.e. when proxy_network_id is absent).
-        if ($hlsDir && ! $recording->proxy_network_id) {
-            $updateData['temp_path'] = $hlsDir;
-        }
+        // hls_dir from the callback is informational only — the downloader pulls
+        // files via HTTP from the proxy, not from a shared filesystem path. We
+        // intentionally do NOT write it to temp_path.
 
         DB::transaction(function () use ($recording, $updateData): void {
             $recording->update($updateData);

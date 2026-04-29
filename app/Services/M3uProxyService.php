@@ -2687,32 +2687,41 @@ class M3uProxyService
     }
 
     /**
-     * Fetch the filesystem path to the HLS segment directory for a DVR broadcast.
+     * Cleanup HLS files for a DVR broadcast on the proxy.
      *
-     * Called before stopping a broadcast so we know where segments are stored.
-     * Returns null if the broadcast is not found or the proxy is unreachable.
+     * The proxy retains segment files after /stop so they remain available for
+     * post-processing download. Once we've successfully fetched everything we
+     * need, call this to free disk space on the proxy host.
      */
-    public function getDvrBroadcastHlsDir(string $networkId): ?string
+    public function cleanupDvrBroadcast(string $networkId): bool
     {
         if (empty($this->apiBaseUrl)) {
-            return null;
+            Log::warning('DVR cleanup: M3U Proxy base URL not configured');
+
+            return false;
         }
 
         try {
-            $endpoint = $this->apiBaseUrl.'/broadcast/'.rawurlencode($networkId).'/status';
-            $response = Http::timeout(5)
+            $endpoint = $this->apiBaseUrl.'/broadcast/'.rawurlencode($networkId);
+            $response = Http::timeout(10)
                 ->acceptJson()
                 ->withHeaders($this->apiToken ? ['X-API-Token' => $this->apiToken] : [])
-                ->get($endpoint);
+                ->delete($endpoint);
 
             if ($response->successful()) {
-                return $response->json('hls_dir') ?: null;
-            }
-        } catch (Exception $e) {
-            Log::warning("DVR: Could not fetch hls_dir for broadcast {$networkId}: {$e->getMessage()}");
-        }
+                Log::debug("DVR broadcast {$networkId} cleaned up on proxy");
 
-        return null;
+                return true;
+            }
+
+            Log::warning("Failed to cleanup DVR broadcast {$networkId}: ".$response->body());
+
+            return false;
+        } catch (Exception $e) {
+            Log::error("Error cleaning up DVR broadcast {$networkId}: ".$e->getMessage());
+
+            return false;
+        }
     }
 
     /**

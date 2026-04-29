@@ -33,7 +33,9 @@ use App\Services\DvrMetadataEnricherService;
 use App\Services\DvrPostProcessorService;
 use App\Services\DvrVodIntegrationService;
 use Carbon\Carbon;
+use Filament\Notifications\DatabaseNotification;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 
@@ -375,6 +377,8 @@ it('EnrichDvrMetadata dispatches IntegrateDvrRecordingToVod after enrichment', f
 });
 
 it('DvrPostProcessorService dispatches IntegrateDvrRecordingToVod when metadata enrichment is disabled', function () {
+    Queue::fake();
+    Notification::fake();
     Storage::fake('dvr');
 
     $user = User::factory()->create();
@@ -390,23 +394,27 @@ it('DvrPostProcessorService dispatches IntegrateDvrRecordingToVod when metadata 
         ->for($user)
         ->create([
             'status' => DvrRecordingStatus::PostProcessing,
-            'temp_path' => 'live/test-uuid',
             'programme_start' => now()->subHour(),
             'scheduled_start' => now()->subHour(),
             'season' => null,
             'episode' => null,
+            'proxy_network_id' => null,
         ]);
 
     // Write a minimal single-segment HLS manifest and its TS segment
+    // (no proxy_network_id → post-processor falls back to local files at live/<recording_uuid>/)
     Storage::disk('dvr')->put(
-        'live/test-uuid/live.m3u8',
+        "live/{$recording->uuid}/live.m3u8",
         "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:10\n#EXTINF:10.0,\nseg000.ts\n#EXT-X-ENDLIST\n"
     );
-    Storage::disk('dvr')->put('live/test-uuid/seg000.ts', str_repeat("\x00", 188));
+    Storage::disk('dvr')->put("live/{$recording->uuid}/seg000.ts", str_repeat("\x00", 188));
 
     app(DvrPostProcessorService::class)->run($recording);
 
     $recording->refresh();
     expect($recording->status)->toBe(DvrRecordingStatus::Completed);
     Queue::assertPushed(IntegrateDvrRecordingToVod::class, fn ($job) => $job->recordingId === $recording->id);
+
+    // Bell notification sent on completion
+    Notification::assertSentTo($user, DatabaseNotification::class);
 });

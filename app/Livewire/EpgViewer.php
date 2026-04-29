@@ -267,8 +267,17 @@ class EpgViewer extends Component implements HasActions, HasForms
 
         $ruleType = DvrRuleType::from($data['rule_type']);
         $title = $this->programmeData['title'] ?? null;
-        $startTime = isset($this->programmeData['start']) ? Carbon::parse($this->programmeData['start']) : null;
-        $endTime = isset($this->programmeData['stop']) ? Carbon::parse($this->programmeData['stop']) : null;
+        // Carbon::parse honors the offset in the ISO string. We must convert to
+        // app.timezone wall-clock before persisting because the `datetime` cast
+        // on EpgProgramme stores raw wall-clock (no tz conversion on write) and
+        // reads it back as `app.timezone` — a tz mismatch would cause hour drift.
+        $appTz = config('app.timezone');
+        $startTime = isset($this->programmeData['start'])
+            ? Carbon::parse($this->programmeData['start'])->tz($appTz)
+            : null;
+        $endTime = isset($this->programmeData['stop'])
+            ? Carbon::parse($this->programmeData['stop'])->tz($appTz)
+            : null;
 
         // For 'once' rules, find or create the EpgProgramme record so the scheduler can match it
         $programmeId = null;

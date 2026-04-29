@@ -9,7 +9,6 @@ use App\Jobs\IntegrateDvrRecordingToVod;
 use App\Models\DvrRecording;
 use Exception;
 use Filament\Notifications\Notification;
-use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
@@ -18,10 +17,10 @@ use Illuminate\Support\Facades\Storage;
  *
  * Pipeline:
  *   Step 0 (FATAL)     — Download HLS manifest + segments from proxy via HTTP (if proxy_network_id set)
- *   Step 1 (FATAL)     — Concatenate HLS segments → single output file via ffmpeg
- *   Step 2 (non-fatal) — Update DB with file location + size
+ *   Step 1 (FATAL)     — Concatenate HLS segments → single .mp4 file via ffmpeg
+ *   Step 2 (non-fatal) — Move file to final library path, update DB
  *   Step 3 (non-fatal) — Dispatch EnrichDvrMetadata or IntegrateDvrRecordingToVod
- *   Step 4             — Cleanup local temp dir + proxy broadcast, update DB to COMPLETED
+ *   Step 4             — Cleanup live/ temp dir + proxy broadcast, update DB to COMPLETED
  */
 class DvrPostProcessorService
 {
@@ -60,7 +59,7 @@ class DvrPostProcessorService
         $disk = $setting->storage_disk ?: config('dvr.storage_disk');
         $livePath = 'live/'.$recording->uuid;
 
-        // ── Step 0: Download HLS files from proxy via HTTP ───────────────────
+        // ── Step 0: Download HLS files from proxy (if not already local) ─────
         // The proxy stores HLS segments inside its own container; we fetch them
         // over HTTP rather than relying on a shared filesystem.
         if ($recording->proxy_network_id) {
@@ -82,20 +81,7 @@ class DvrPostProcessorService
             // No proxy_network_id — recording predates the HTTP-download flow,
             // or stop() was called without a known broadcast. Fall back to
             // looking for files already on the local disk.
-            if ($recording->temp_manifest_path) {
-                $m3u8FullPath = $recording->temp_manifest_path;
-                $livePath = dirname($m3u8FullPath);
-            } elseif ($recording->temp_path && str_starts_with($recording->temp_path, '/')) {
-                // Absolute path from proxy callback (shared-volume deployment)
-                $livePath = rtrim($recording->temp_path, '/');
-                $m3u8FullPath = $livePath.'/live.m3u8';
-            } elseif ($recording->temp_path) {
-                // Relative path stored at start/stop time (e.g. "live/test-uuid")
-                $livePath = rtrim($recording->temp_path, '/');
-                $m3u8FullPath = Storage::disk($disk)->path($livePath.'/live.m3u8');
-            } else {
-                $m3u8FullPath = Storage::disk($disk)->path($livePath.'/live.m3u8');
-            }
+            $m3u8FullPath = Storage::disk($disk)->path($livePath.'/live.m3u8');
         }
 
         Log::debug('DVR post-processing: locating HLS manifest', [
@@ -120,7 +106,7 @@ class DvrPostProcessorService
             }
         }
 
-        // ── Step 1: Concatenate HLS → single output file ────────────────────
+        // ── Step 1: Concatenate HLS → single .mp4 ───────────────────────────
         $outputRelPath = $this->buildOutputPath($recording);
         $outputFullPath = Storage::disk($disk)->path($outputRelPath);
         $outputDir = dirname($outputFullPath);
@@ -209,25 +195,19 @@ class DvrPostProcessorService
 
         // ── Step 4: Cleanup local temp dir + proxy broadcast + mark COMPLETED ─
         try {
-            // HTTP-downloaded recordings use a relative live/{uuid} path; legacy
-            // shared-volume recordings may have an absolute filesystem path.
-            if (str_starts_with($livePath, '/')) {
-                File::deleteDirectory($livePath);
-            } else {
-                Storage::disk($disk)->deleteDirectory($livePath);
-            }
+            Storage::disk($disk)->deleteDirectory($livePath);
 
             Log::debug('DVR post-processing step 4: local temp directory cleaned up', [
                 'recording_id' => $recording->id,
                 'live_path' => $livePath,
             ]);
         } catch (Exception $e) {
-            Log::warning("DVR post-processing step 4: could not delete temp dir: {$e->getMessage()}", [
+            Log::warning("DVR post-processing step 4: could not delete temp dir {$livePath}: {$e->getMessage()}", [
                 'recording_id' => $recording->id,
             ]);
         }
 
-        // Notify the proxy to delete its own HLS segment storage now that we have the output.
+        // Cleanup proxy-side HLS files now that we have the concatenated output.
         if ($recording->proxy_network_id) {
             $this->proxy->cleanupDvrBroadcast($recording->proxy_network_id);
         }

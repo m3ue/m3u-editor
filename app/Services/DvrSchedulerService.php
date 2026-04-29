@@ -6,9 +6,11 @@ use App\Enums\DvrRecordingStatus;
 use App\Enums\DvrRuleType;
 use App\Jobs\StartDvrRecording;
 use App\Jobs\StopDvrRecording;
+use App\Models\Channel;
 use App\Models\DvrRecording;
 use App\Models\DvrRecordingRule;
 use App\Models\DvrSetting;
+use App\Models\EpgChannel;
 use App\Models\EpgProgramme;
 use Exception;
 use Illuminate\Support\Facades\DB;
@@ -58,7 +60,7 @@ class DvrSchedulerService
     private function matchAndSchedule(int $lookaheadMinutes): void
     {
         $rules = DvrRecordingRule::enabled()
-            ->with(['dvrSetting.playlist', 'channel', 'epgChannel'])
+            ->with(['dvrSetting.playlist', 'channel.epgChannel', 'epgChannel'])
             ->get();
 
         if ($rules->isEmpty()) {
@@ -88,6 +90,8 @@ class DvrSchedulerService
 
     /**
      * SERIES rule: match all upcoming programmes by title (case-insensitive contains).
+     * Scopes the programme query to EPG channels that belong to the DVR setting's
+     * playlist to avoid matching programmes from unrelated EPG feeds.
      */
     private function matchSeriesRule(DvrRecordingRule $rule, int $lookaheadMinutes): void
     {
@@ -95,16 +99,19 @@ class DvrSchedulerService
             return;
         }
 
+        $epgChannelStringIds = $this->resolveSeriesEpgScope($rule);
+
+        if (empty($epgChannelStringIds)) {
+            return;
+        }
+
         $now = now();
         $lookahead = now()->addMinutes($lookaheadMinutes);
 
         $query = EpgProgramme::where('title', 'like', '%'.$rule->series_title.'%')
+            ->whereIn('epg_channel_id', $epgChannelStringIds)
             ->where('start_time', '>=', $now)
             ->where('start_time', '<=', $lookahead);
-
-        if (! empty($rule->epg_channel_id)) {
-            $query->where('epg_channel_id', $rule->epg_channel_id);
-        }
 
         if ($rule->new_only) {
             $query->where('is_new', true);
@@ -115,10 +122,51 @@ class DvrSchedulerService
             return;
         }
 
-        // Batch dedup: find existing recording rows for these programme start/channel combinations
         foreach ($programmes as $programme) {
             $this->createScheduledRecordingFromProgramme($rule, $programme);
         }
+    }
+
+    /**
+     * Resolve the EPG channel string IDs (e.g. "CNN", "BBC One") that a series rule
+     * should match programmes against. This prevents cross-playlist contamination and
+     * ensures the EPG fallback in resolveStreamUrl can always find a channel.
+     *
+     * Priority:
+     *   1. Rule has epg_channel_id (int FK to epg_channels) → use that channel's string ID
+     *   2. Rule has channel_id → use that channel's EPG channel string ID
+     *   3. Neither → all EPG-mapped channels in the DVR setting's playlist
+     *
+     * @return list<string>
+     */
+    private function resolveSeriesEpgScope(DvrRecordingRule $rule): array
+    {
+        // 1. Explicit EPG channel set on the rule
+        if ($rule->epg_channel_id) {
+            $stringId = $rule->epgChannel?->channel_id;
+
+            return $stringId ? [$stringId] : [];
+        }
+
+        // 2. Pinned channel: derive EPG scope from that channel's mapping
+        if ($rule->channel_id) {
+            $stringId = $rule->channel?->epgChannel?->channel_id;
+
+            return $stringId ? [$stringId] : [];
+        }
+
+        // 3. No explicit channel: scope to all EPG-mapped channels in the playlist
+        $playlistId = $rule->dvrSetting->playlist_id;
+
+        return Channel::where('playlist_id', $playlistId)
+            ->whereNotNull('epg_channel_id')
+            ->with('epgChannel')
+            ->get()
+            ->map(fn (Channel $c) => $c->epgChannel?->channel_id)
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
     }
 
     /**
@@ -143,13 +191,10 @@ class DvrSchedulerService
             return;
         }
 
-        $now = now();
-        $lookahead = now()->addMinutes($lookaheadMinutes);
-
-        $isUpcoming = $programme->start_time >= $now && $programme->start_time <= $lookahead;
-        $isCurrentlyAiring = $programme->start_time < $now && $programme->end_time > $now;
-
-        if (! $isUpcoming && ! $isCurrentlyAiring) {
+        // For a Once rule targeting a specific programme we schedule as soon as the rule
+        // exists — as long as the programme hasn't finished airing. The 30-minute lookahead
+        // is irrelevant here because we already know the exact air-time.
+        if ($programme->end_time <= now()) {
             return;
         }
 
@@ -165,13 +210,10 @@ class DvrSchedulerService
             return;
         }
 
-        $now = now();
-        $lookahead = now()->addMinutes($lookaheadMinutes);
-
-        $isUpcoming = $rule->manual_start >= $now && $rule->manual_start <= $lookahead;
-        $isCurrentlyAiring = $rule->manual_start < $now && $rule->manual_end > $now;
-
-        if (! $isUpcoming && ! $isCurrentlyAiring) {
+        // Schedule immediately as long as the manual window hasn't ended.
+        // There is no reason to hold off until 30 minutes before manual_start —
+        // the user explicitly set a start time and expects it to appear scheduled right away.
+        if ($rule->manual_end <= now()) {
             return;
         }
 
@@ -208,9 +250,9 @@ class DvrSchedulerService
             $scheduledStart = $rule->manual_start->subSeconds($startEarly);
             $scheduledEnd = $rule->manual_end->addSeconds($endLate);
 
-            $streamUrl = $this->resolveStreamUrl($rule, $setting);
+            [$streamUrl] = $this->resolveStreamUrl($rule, $setting);
 
-            DvrRecording::create([
+            $recording = DvrRecording::create([
                 'user_id' => $setting->user_id,
                 'dvr_setting_id' => $setting->id,
                 'dvr_recording_rule_id' => $rule->id,
@@ -223,6 +265,12 @@ class DvrSchedulerService
                 'programme_end' => $rule->manual_end,
                 'stream_url' => $streamUrl,
             ]);
+
+            // If the manual window is already in progress, dispatch immediately.
+            if ($scheduledStart->lte(now())) {
+                Log::info("DVR: Manual recording for rule {$rule->id} already in progress — dispatching StartDvrRecording immediately");
+                StartDvrRecording::dispatch($recording->id)->onQueue('dvr');
+            }
         });
     }
 
@@ -284,7 +332,14 @@ class DvrSchedulerService
 
             $channel = $rule->channel;
             $title = $channel ? ($channel->title_custom ?? $channel->title ?? 'Recording') : 'Recording';
-            $streamUrl = $this->resolveStreamUrl($rule, $setting);
+            [$streamUrl] = $this->resolveStreamUrl($rule, $setting);
+
+            $startEarly = $setting->resolveStartEarlySeconds($rule->start_early_seconds);
+            $endLate = $setting->resolveEndLateSeconds($rule->end_late_seconds);
+
+            $channel = $rule->channel;
+            $title = $channel ? ($channel->title_custom ?? $channel->title ?? 'Recording') : 'Recording';
+            [$streamUrl] = $this->resolveStreamUrl($rule, $setting);
 
             DvrRecording::create([
                 'user_id' => $setting->user_id,
@@ -351,13 +406,13 @@ class DvrSchedulerService
             $scheduledStart = $programme->start_time->copy()->subSeconds($startEarly);
             $scheduledEnd = $programme->end_time->copy()->addSeconds($endLate);
 
-            $streamUrl = $this->resolveStreamUrl($rule, $setting);
+            [$streamUrl, $resolvedChannelId] = $this->resolveStreamUrl($rule, $setting, $programme);
 
-            DvrRecording::create([
+            $recording = DvrRecording::create([
                 'user_id' => $setting->user_id,
                 'dvr_setting_id' => $setting->id,
                 'dvr_recording_rule_id' => $rule->id,
-                'channel_id' => $rule->channel_id,
+                'channel_id' => $resolvedChannelId ?? $rule->channel_id,
                 'status' => DvrRecordingStatus::Scheduled,
                 'title' => $programme->title,
                 'subtitle' => $programme->subtitle,
@@ -385,6 +440,14 @@ class DvrSchedulerService
                 'scheduled_start' => $scheduledStart,
                 'scheduled_end' => $scheduledEnd,
             ]);
+
+            // If the programme is already in progress (scheduledStart <= now),
+            // dispatch StartDvrRecording immediately instead of waiting for the next tick.
+            // This avoids up to 60s of delay for in-progress recordings.
+            if ($scheduledStart->lte(now())) {
+                Log::info("DVR: Programme '{$programme->title}' already in progress — dispatching StartDvrRecording immediately");
+                StartDvrRecording::dispatch($recording->id)->onQueue('dvr');
+            }
         });
     }
 
@@ -435,26 +498,50 @@ class DvrSchedulerService
      * Resolve the stream URL to use for a recording.
      *
      * Uses the channel proxy URL if the source playlist has proxy enabled.
+     * When the rule has no channel_id, falls back to resolving via the programme's
+     * EPG channel ID so that rules created without an explicit channel still record.
+     *
+     * @return array{0: string|null, 1: int|null} [streamUrl, resolvedChannelId]
      */
-    private function resolveStreamUrl(DvrRecordingRule $rule, DvrSetting $setting): ?string
+    private function resolveStreamUrl(DvrRecordingRule $rule, DvrSetting $setting, ?EpgProgramme $programme = null): array
     {
-        if (! $rule->channel_id) {
-            return null;
+        $channel = null;
+
+        if ($rule->channel_id) {
+            $channel = $rule->channel;
+        } elseif ($programme?->epg_channel_id) {
+            // Rule was created without an explicit channel (e.g. series defaults or guest once rule).
+            // Attempt to resolve the matching channel from the programme's EPG channel ID.
+            $epgChannelPk = EpgChannel::where('channel_id', $programme->epg_channel_id)->value('id');
+
+            if ($epgChannelPk) {
+                $channel = Channel::where('playlist_id', $setting->playlist_id)
+                    ->where('epg_channel_id', $epgChannelPk)
+                    ->first();
+
+                if ($channel) {
+                    Log::debug('DVR: Resolved channel via EPG fallback', [
+                        'rule_id' => $rule->id,
+                        'epg_channel_id' => $programme->epg_channel_id,
+                        'channel_id' => $channel->id,
+                    ]);
+                }
+            }
         }
 
-        $channel = $rule->channel;
         if (! $channel) {
-            return null;
+            return [null, null];
         }
 
         // Use the proxy URL when the source playlist has proxy enabled
         $playlist = $setting->playlist;
         if ($playlist && ! empty($playlist->proxy_options['enabled'])) {
             $proxyUrl = $channel->getProxyUrl();
-
-            return $proxyUrl ?: $channel->url;
+            $streamUrl = $proxyUrl ?: $channel->url;
+        } else {
+            $streamUrl = $channel->url;
         }
 
-        return $channel->url;
+        return [$streamUrl, $channel->id];
     }
 }

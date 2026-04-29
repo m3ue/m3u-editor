@@ -4,23 +4,21 @@ namespace App\Services;
 
 use App\Models\DvrRecording;
 use Exception;
-use Illuminate\Http\Client\Pool;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
-use Throwable;
 
 /**
  * DvrHlsDownloaderService — Downloads HLS manifest + segments from m3u-proxy via HTTP.
  *
- * The m3u-proxy writes HLS files to its own container filesystem, which is not shared
- * with the editor container. Rather than coupling the two services via a shared volume,
- * we mirror the NetworkHlsController pattern: pull the manifest and segments over HTTP
- * from the proxy's /broadcast/<id>/live.m3u8 and /broadcast/<id>/segment/<file> endpoints.
+ * The m3u-proxy writes HLS files to its own container's /tmp/m3u-proxy-broadcasts/<id>/
+ * directory, which is not shared with the editor container. Rather than coupling the
+ * two services via a shared volume, we mirror the NetworkHlsController pattern: pull
+ * the manifest and segments over HTTP from the proxy's /broadcast/<id>/live.m3u8 and
+ * /broadcast/<id>/segment/<file>.ts endpoints.
  *
- * Segments are downloaded in parallel batches via Http::pool() for maximum throughput.
  * The downloaded files are placed under the dvr storage disk at live/<recording_uuid>/,
- * which is the path DvrPostProcessorService uses for concatenation.
+ * which is the path DvrPostProcessorService already falls back to when temp_path is null.
  */
 class DvrHlsDownloaderService
 {
@@ -60,7 +58,9 @@ class DvrHlsDownloaderService
             'local_dir' => $localDir,
         ]);
 
-        $this->downloadSegmentsPooled($networkId, $segments, $localDir);
+        foreach ($segments as $segment) {
+            $this->downloadSegment($networkId, $segment, $localDir);
+        }
 
         Log::info('DVR HLS download: complete', [
             'recording_id' => $recording->id,
@@ -92,7 +92,6 @@ class DvrHlsDownloaderService
         }
 
         $body = $response->body();
-
         if ($body === '') {
             throw new Exception("HLS manifest from proxy is empty: {$url}");
         }
@@ -109,51 +108,25 @@ class DvrHlsDownloaderService
     }
 
     /**
-     * Download all segments in parallel batches using Http::pool().
-     *
-     * Segments are fetched $batchSize at a time to avoid opening too many
-     * concurrent connections. Each batch completes before the next begins,
-     * maintaining segment order on disk while maximising throughput.
-     *
-     * @param  array<int, string>  $segments
+     * Download a single .ts segment from the proxy.
      *
      * @throws Exception
      */
-    protected function downloadSegmentsPooled(
-        string $networkId,
-        array $segments,
-        string $localDir,
-        int $batchSize = 10,
-    ): void {
-        $baseUrl = rtrim($this->proxy->getApiBaseUrl(), '/');
-        $headers = $this->authHeaders();
+    protected function downloadSegment(string $networkId, string $segment, string $localDir): void
+    {
+        $url = rtrim($this->proxy->getApiBaseUrl(), '/')."/broadcast/{$networkId}/segment/{$segment}";
 
-        foreach (array_chunk($segments, $batchSize) as $batch) {
-            $responses = Http::pool(fn (Pool $pool) => array_map(
-                fn (string $segment) => $pool
-                    ->as($segment)
-                    ->timeout(60)
-                    ->withHeaders($headers)
-                    ->get("{$baseUrl}/broadcast/{$networkId}/segment/{$segment}"),
-                $batch
-            ));
+        $response = Http::timeout(60)
+            ->withHeaders($this->authHeaders())
+            ->get($url);
 
-            foreach ($batch as $segment) {
-                $response = $responses[$segment];
+        if (! $response->successful()) {
+            throw new Exception("Failed to download segment {$segment} from proxy: HTTP {$response->status()}");
+        }
 
-                if ($response instanceof Throwable) {
-                    throw new Exception("Failed to download segment {$segment}: {$response->getMessage()}");
-                }
-
-                if (! $response->successful()) {
-                    throw new Exception("Failed to download segment {$segment} from proxy: HTTP {$response->status()}");
-                }
-
-                $localPath = $localDir.'/'.$segment;
-                if (file_put_contents($localPath, $response->body()) === false) {
-                    throw new Exception("Could not write segment to: {$localPath}");
-                }
-            }
+        $localPath = $localDir.'/'.$segment;
+        if (file_put_contents($localPath, $response->body()) === false) {
+            throw new Exception("Could not write segment to: {$localPath}");
         }
     }
 

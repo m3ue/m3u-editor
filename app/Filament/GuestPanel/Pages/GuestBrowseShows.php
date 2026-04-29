@@ -110,6 +110,7 @@ class GuestBrowseShows extends Page
         }
 
         return Group::where('playlist_id', $playlistId)
+            ->where('enabled', true)
             ->orderBy('name')
             ->pluck('name', 'id')
             ->all();
@@ -126,6 +127,7 @@ class GuestBrowseShows extends Page
         }
 
         return Channel::where('playlist_id', $playlistId)
+            ->where('enabled', true)
             ->orderBy('title')
             ->pluck('title', 'id')
             ->all();
@@ -137,6 +139,12 @@ class GuestBrowseShows extends Page
     {
         Log::info('GuestBrowseShows: openShowDetail called: '.$title);
         $this->selectedShowTitle = $title;
+        $this->seriesNewOnly = false;
+        $this->seriesPriority = 50;
+        $this->seriesStartEarly = 0;
+        $this->seriesEndLate = 0;
+        $this->seriesKeepLast = null;
+        $this->seriesChannelId = $this->resolveDefaultChannelIdForShow($title);
     }
 
     public function closeShowDetail(): void
@@ -208,12 +216,33 @@ class GuestBrowseShows extends Page
             return;
         }
 
+        // Resolve the channel from the programme's EPG channel ID so the scheduler
+        // can start the recording without relying on the EPG fallback alone.
+        $channel = null;
+        if ($programme->epg_channel_id) {
+            $epgChannelPk = EpgChannel::where('channel_id', $programme->epg_channel_id)->value('id');
+            if ($epgChannelPk) {
+                $channel = Channel::where('playlist_id', $dvrSetting->playlist_id)
+                    ->where('epg_channel_id', $epgChannelPk)
+                    ->first();
+            }
+        }
+
+        if (! $channel) {
+            Notification::make()
+                ->title(__('No matching channel found for ":title". The recording may not start — check your channel EPG mapping.', ['title' => $programme->title]))
+                ->warning()
+                ->send();
+        }
+
         DvrRecordingRule::create([
             'user_id' => $dvrSetting->user_id,
             'playlist_auth_id' => $auth?->id,
             'dvr_setting_id' => $dvrSetting->id,
             'type' => DvrRuleType::Once,
             'programme_id' => $programmeId,
+            'series_title' => $programme->title,
+            'channel_id' => $channel?->id,
             'enabled' => true,
             'priority' => 50,
         ]);
@@ -401,7 +430,7 @@ class GuestBrowseShows extends Page
             $shows[] = [
                 'title' => (string) $title,
                 'next_air_date' => $first->start_time?->format('Y-m-d H:i'),
-                'next_air_date_human' => $first->start_time?->shiftTimezone('UTC')->timezone($timezone)->format('D M j, g:ia'),
+                'next_air_date_human' => $first->start_time?->timezone($timezone)->format('D M j, g:ia'),
                 'flags' => [
                     'is_new' => $airings->contains('is_new', true) || $anyNewFromTvMaze,
                     'premiere' => $airings->contains('premiere', true),
@@ -415,7 +444,7 @@ class GuestBrowseShows extends Page
                 'category' => $first->category,
                 'description' => $first->description,
                 'airings' => $airings->map(function (EpgProgramme $p) use ($channelNames, $timezone, $episodeIsNewMap) {
-                    $startTime = $p->start_time?->shiftTimezone('UTC')->timezone($timezone);
+                    $startTime = $p->start_time?->timezone($timezone);
 
                     [$season, $episode, $subtitle, $description] = $this->parseSeasonEpisode($p);
 
@@ -497,8 +526,8 @@ class GuestBrowseShows extends Page
         $dvrSetting = static::getDvrSetting();
 
         $query = EpgProgramme::query()
-            ->where('start_time', '>=', now()->utc())
-            ->where('start_time', '<=', now()->utc()->addDays($this->days))
+            ->where('start_time', '>=', now())
+            ->where('start_time', '<=', now()->addDays($this->days))
             ->orderBy('start_time');
 
         if (! empty($this->keyword)) {
@@ -534,7 +563,10 @@ class GuestBrowseShows extends Page
     private function resolveEpgChannelScope(int $playlistId): ?array
     {
         if ($this->channel_id) {
-            $channel = Channel::with('epgChannel')->find($this->channel_id);
+            $channel = Channel::where('id', $this->channel_id)
+                ->where('enabled', true)
+                ->with('epgChannel')
+                ->first();
             $epgId = $channel?->epgChannel?->channel_id;
 
             return $epgId ? [$epgId] : null;
@@ -542,6 +574,7 @@ class GuestBrowseShows extends Page
 
         if ($this->group_id) {
             $ids = Channel::where('group_id', $this->group_id)
+                ->where('enabled', true)
                 ->whereNotNull('epg_channel_id')
                 ->with('epgChannel')
                 ->get()
@@ -555,6 +588,7 @@ class GuestBrowseShows extends Page
         }
 
         $ids = Channel::where('playlist_id', $playlistId)
+            ->where('enabled', true)
             ->whereNotNull('epg_channel_id')
             ->with('epgChannel')
             ->get()
@@ -565,5 +599,37 @@ class GuestBrowseShows extends Page
             ->all();
 
         return ! empty($ids) ? $ids : null;
+    }
+
+    /**
+     * Resolve the channel that a show most likely airs on within the current DVR
+     * setting's playlist. Used to pre-populate the series options form so the user
+     * sees the right channel pre-selected when they open the advanced options panel.
+     */
+    private function resolveDefaultChannelIdForShow(string $title): ?int
+    {
+        $playlistId = static::getDvrSetting()?->playlist_id;
+        if (! $playlistId) {
+            return null;
+        }
+
+        $show = collect($this->groupedShows)->firstWhere('title', $title);
+        if (! $show || empty($show['airings'])) {
+            return null;
+        }
+
+        $firstProgramme = EpgProgramme::find($show['airings'][0]['id']);
+        if (! $firstProgramme?->epg_channel_id) {
+            return null;
+        }
+
+        $epgChannelPk = EpgChannel::where('channel_id', $firstProgramme->epg_channel_id)->value('id');
+        if (! $epgChannelPk) {
+            return null;
+        }
+
+        return Channel::where('playlist_id', $playlistId)
+            ->where('epg_channel_id', $epgChannelPk)
+            ->value('id');
     }
 }

@@ -6,6 +6,7 @@ use App\Enums\DvrRuleType;
 use App\Models\Channel;
 use App\Models\DvrRecordingRule;
 use App\Models\DvrSetting;
+use App\Settings\GeneralSettings;
 use App\Traits\HasUserFiltering;
 use BackedEnum;
 use Filament\Actions;
@@ -91,6 +92,8 @@ class DvrRecordingRuleResource extends Resource
                 DateTimePicker::make('manual_start')
                     ->label(__('Manual Start'))
                     ->native(false)
+                    ->seconds(false)
+                    ->timezone(app(GeneralSettings::class)->app_timezone ?: config('app.timezone'))
                     ->prefixIcon('heroicon-o-calendar')
                     ->visible(fn (Get $get): bool => self::isRuleType($get('type'), DvrRuleType::Manual))
                     ->requiredIf('type', DvrRuleType::Manual->value),
@@ -98,6 +101,8 @@ class DvrRecordingRuleResource extends Resource
                 DateTimePicker::make('manual_end')
                     ->label(__('Manual End'))
                     ->native(false)
+                    ->seconds(false)
+                    ->timezone(app(GeneralSettings::class)->app_timezone ?: config('app.timezone'))
                     ->prefixIcon('heroicon-o-calendar')
                     ->visible(fn (Get $get): bool => self::isRuleType($get('type'), DvrRuleType::Manual))
                     ->requiredIf('type', DvrRuleType::Manual->value)
@@ -169,6 +174,8 @@ class DvrRecordingRuleResource extends Resource
 
                 TextColumn::make('series_title')
                     ->label(__('Title / Pattern'))
+                    ->state(fn (DvrRecordingRule $record): ?string => $record->series_title
+                        ?? ($record->type === DvrRuleType::Once ? $record->programme?->title : null))
                     ->description(fn (DvrRecordingRule $record): string => match ($record->type) {
                         DvrRuleType::Once => __('One-time recording'),
                         DvrRuleType::Manual => $record->manual_start?->format('d M Y H:i') ?? '—',

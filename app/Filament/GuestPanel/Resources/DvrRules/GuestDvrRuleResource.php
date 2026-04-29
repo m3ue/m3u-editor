@@ -6,6 +6,7 @@ use App\Enums\DvrRuleType;
 use App\Filament\GuestPanel\Pages\Concerns\HasGuestDvr;
 use App\Models\Channel;
 use App\Models\DvrRecordingRule;
+use App\Settings\GeneralSettings;
 use Filament\Actions\Action;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\EditAction;
@@ -134,6 +135,8 @@ class GuestDvrRuleResource extends Resource
             DateTimePicker::make('manual_start')
                 ->label(__('Start Time'))
                 ->native(false)
+                ->seconds(false)
+                ->timezone(app(GeneralSettings::class)->app_timezone ?: config('app.timezone'))
                 ->prefixIcon('heroicon-o-calendar')
                 ->visible(fn (Get $get): bool => self::isRuleType($get('type'), DvrRuleType::Manual))
                 ->requiredIf('type', DvrRuleType::Manual->value),
@@ -141,6 +144,8 @@ class GuestDvrRuleResource extends Resource
             DateTimePicker::make('manual_end')
                 ->label(__('End Time'))
                 ->native(false)
+                ->seconds(false)
+                ->timezone(app(GeneralSettings::class)->app_timezone ?: config('app.timezone'))
                 ->prefixIcon('heroicon-o-calendar')
                 ->visible(fn (Get $get): bool => self::isRuleType($get('type'), DvrRuleType::Manual))
                 ->requiredIf('type', DvrRuleType::Manual->value)

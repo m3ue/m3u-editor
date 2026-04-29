@@ -196,6 +196,12 @@ class BrowseShows extends Page
     public function openShowDetail(string $title): void
     {
         $this->selectedShowTitle = $title;
+        $this->seriesNewOnly = false;
+        $this->seriesPriority = 50;
+        $this->seriesStartEarly = 0;
+        $this->seriesEndLate = 0;
+        $this->seriesKeepLast = null;
+        $this->seriesChannelName = '';
         $this->selectedShowDetail = $this->buildShowDetail($title);
     }
 
@@ -719,10 +725,12 @@ class BrowseShows extends Page
         $epgMapBase = DB::table('channels')
             ->join('epg_channels', 'epg_channels.id', '=', 'channels.epg_channel_id')
             ->where('channels.playlist_id', $playlistId)
+            ->where('channels.enabled', true)
             ->whereNotNull('channels.epg_channel_id');
 
         $streamIdBase = DB::table('channels')
             ->where('channels.playlist_id', $playlistId)
+            ->where('channels.enabled', true)
             ->whereNotNull('channels.stream_id')
             ->where('channels.stream_id', '!=', '');
 

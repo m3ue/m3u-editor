@@ -24,6 +24,7 @@ use App\Models\Channel;
 use App\Models\DvrRecording;
 use App\Models\DvrRecordingRule;
 use App\Models\DvrSetting;
+use App\Models\EpgChannel;
 use App\Models\EpgProgramme;
 use App\Models\User;
 use App\Services\DvrSchedulerService;
@@ -43,6 +44,13 @@ beforeEach(function () {
         'default_end_late_seconds' => 0,
     ]);
 
+    // Create an EPG channel + playlist channel so series rules can scope programmes
+    // and resolve a stream URL without a pinned channel_id on the rule.
+    $this->epgChannel = EpgChannel::factory()->create(['channel_id' => 'test.channel']);
+    $this->channel = Channel::factory()
+        ->for($this->setting->playlist)
+        ->create(['epg_channel_id' => $this->epgChannel->id]);
+
     $this->service = app(DvrSchedulerService::class);
 });
 
@@ -55,7 +63,10 @@ it('creates a scheduled recording for a matching series programme', function () 
         ->for($this->user)
         ->create(['series_title' => 'Breaking Bad']);
 
-    EpgProgramme::factory()->upcoming(10)->create(['title' => 'Breaking Bad']);
+    EpgProgramme::factory()->upcoming(10)->create([
+        'title' => 'Breaking Bad',
+        'epg_channel_id' => 'test.channel',
+    ]);
 
     $this->service->tick();
 
@@ -73,7 +84,7 @@ it('does not duplicate a recording for a programme already scheduled', function 
 
     $programme = EpgProgramme::factory()->upcoming(10)->create([
         'title' => 'Breaking Bad',
-        'epg_channel_id' => 'channel.001',
+        'epg_channel_id' => 'test.channel',
     ]);
 
     // Pre-create the recording to simulate a previous tick
@@ -83,7 +94,7 @@ it('does not duplicate a recording for a programme already scheduled', function 
         ->create([
             'dvr_recording_rule_id' => $rule->id,
             'programme_start' => $programme->start_time,
-            'epg_programme_data' => ['epg_channel_id' => 'channel.001'],
+            'epg_programme_data' => ['epg_channel_id' => 'test.channel'],
             'status' => DvrRecordingStatus::Scheduled,
         ]);
 
@@ -101,6 +112,7 @@ it('skips non-new programmes when new_only is enabled', function () {
 
     EpgProgramme::factory()->upcoming(10)->create([
         'title' => 'Some Show',
+        'epg_channel_id' => 'test.channel',
         'is_new' => false,
     ]);
 
@@ -116,7 +128,10 @@ it('schedules a new-only programme when is_new is true', function () {
         ->for($this->user)
         ->create(['series_title' => 'Some Show', 'new_only' => true]);
 
-    EpgProgramme::factory()->upcoming(10)->isNew()->create(['title' => 'Some Show']);
+    EpgProgramme::factory()->upcoming(10)->isNew()->create([
+        'title' => 'Some Show',
+        'epg_channel_id' => 'test.channel',
+    ]);
 
     $this->service->tick();
 
@@ -249,7 +264,7 @@ it('creates a scheduled recording for a manual rule within the lookahead window'
         ->toBe('Manual Recording');
 });
 
-it('skips a manual rule that is outside the lookahead window', function () {
+it('creates a scheduled recording for a manual rule more than 30 minutes in the future', function () {
     $rule = DvrRecordingRule::factory()
         ->for($this->setting, 'dvrSetting')
         ->for($this->user)
@@ -257,6 +272,21 @@ it('skips a manual rule that is outside the lookahead window', function () {
             'type' => DvrRuleType::Manual,
             'manual_start' => now()->addHours(2),
             'manual_end' => now()->addHours(3),
+        ]);
+
+    $this->service->tick();
+
+    expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(1);
+});
+
+it('skips a manual rule whose end time has already passed', function () {
+    $rule = DvrRecordingRule::factory()
+        ->for($this->setting, 'dvrSetting')
+        ->for($this->user)
+        ->create([
+            'type' => DvrRuleType::Manual,
+            'manual_start' => now()->subHours(2),
+            'manual_end' => now()->subMinutes(5),
         ]);
 
     $this->service->tick();
@@ -281,7 +311,10 @@ it('does not schedule when the dvr setting is at capacity', function () {
         ->for($this->user)
         ->create(['series_title' => 'Capacity Show']);
 
-    EpgProgramme::factory()->upcoming(10)->create(['title' => 'Capacity Show']);
+    EpgProgramme::factory()->upcoming(10)->create([
+        'title' => 'Capacity Show',
+        'epg_channel_id' => 'test.channel',
+    ]);
 
     $this->service->tick();
 
@@ -298,7 +331,10 @@ it('does not process disabled rules', function () {
         ->for($this->user)
         ->create(['series_title' => 'Hidden Show']);
 
-    EpgProgramme::factory()->upcoming(10)->create(['title' => 'Hidden Show']);
+    EpgProgramme::factory()->upcoming(10)->create([
+        'title' => 'Hidden Show',
+        'epg_channel_id' => 'test.channel',
+    ]);
 
     $this->service->tick();
 
@@ -365,7 +401,7 @@ it('re-schedules the same programme after a failed recording', function () {
 
     $programme = EpgProgramme::factory()->upcoming(10)->create([
         'title' => 'Retry Show',
-        'epg_channel_id' => 'channel.retry',
+        'epg_channel_id' => 'test.channel',
     ]);
 
     // Pre-existing Failed recording for this programme slot
@@ -376,7 +412,7 @@ it('re-schedules the same programme after a failed recording', function () {
         ->create([
             'dvr_recording_rule_id' => $rule->id,
             'programme_start' => $programme->start_time,
-            'epg_programme_data' => ['epg_channel_id' => 'channel.retry'],
+            'epg_programme_data' => ['epg_channel_id' => 'test.channel'],
         ]);
 
     $this->service->tick();
@@ -403,7 +439,10 @@ it('applies default_start_early_seconds and default_end_late_seconds offsets', f
         ->for($this->user)
         ->create(['series_title' => 'Offset Show']);
 
-    $programme = EpgProgramme::factory()->upcoming(10)->create(['title' => 'Offset Show']);
+    $programme = EpgProgramme::factory()->upcoming(10)->create([
+        'title' => 'Offset Show',
+        'epg_channel_id' => 'test.channel',
+    ]);
 
     $this->service->tick();
 
@@ -438,6 +477,26 @@ it('does not create a duplicate manual recording on a second tick', function () 
 
 // --- Once rule with currently-airing programme ---
 
+it('schedules a once rule for a programme starting more than 30 minutes in the future', function () {
+    $programme = EpgProgramme::factory()->create([
+        'title' => 'Future Show',
+        'start_time' => now()->addHours(2),
+        'end_time' => now()->addHours(4),
+    ]);
+
+    $rule = DvrRecordingRule::factory()
+        ->for($this->setting, 'dvrSetting')
+        ->for($this->user)
+        ->create([
+            'type' => DvrRuleType::Once,
+            'programme_id' => $programme->id,
+        ]);
+
+    $this->service->tick();
+
+    expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(1);
+});
+
 it('schedules a once rule for a programme that is currently airing', function () {
     $programme = EpgProgramme::factory()->create([
         'title' => 'Airing Now',
@@ -456,4 +515,53 @@ it('schedules a once rule for a programme that is currently airing', function ()
     $this->service->tick();
 
     expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(1);
+});
+
+// --- Stream URL resolution via EPG fallback ---
+
+it('resolves stream_url via programme epg_channel_id when rule has no channel_id', function () {
+    $epgChannel = EpgChannel::factory()->create(['channel_id' => 'channel.test.epg.fallback']);
+
+    $channel = Channel::factory()
+        ->for($this->setting->playlist)
+        ->create([
+            'epg_channel_id' => $epgChannel->id,
+            'url' => 'http://example.com/stream.m3u8',
+        ]);
+
+    $rule = DvrRecordingRule::factory()
+        ->series()
+        ->for($this->setting, 'dvrSetting')
+        ->for($this->user)
+        ->create(['series_title' => 'EPG Fallback Show', 'channel_id' => null]);
+
+    EpgProgramme::factory()->upcoming(10)->create([
+        'title' => 'EPG Fallback Show',
+        'epg_channel_id' => 'channel.test.epg.fallback',
+    ]);
+
+    $this->service->tick();
+
+    $recording = DvrRecording::where('dvr_recording_rule_id', $rule->id)->firstOrFail();
+
+    expect($recording->stream_url)->toBe('http://example.com/stream.m3u8')
+        ->and($recording->channel_id)->toBe($channel->id);
+});
+
+it('does not schedule a programme whose EPG channel has no playlist mapping', function () {
+    $rule = DvrRecordingRule::factory()
+        ->series()
+        ->for($this->setting, 'dvrSetting')
+        ->for($this->user)
+        ->create(['series_title' => 'Unmapped Show', 'channel_id' => null]);
+
+    // Programme's epg_channel_id has no corresponding Channel in this playlist
+    EpgProgramme::factory()->upcoming(10)->create([
+        'title' => 'Unmapped Show',
+        'epg_channel_id' => 'channel.no.match',
+    ]);
+
+    $this->service->tick();
+
+    expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(0);
 });

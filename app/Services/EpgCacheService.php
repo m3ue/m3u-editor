@@ -1601,8 +1601,12 @@ class EpgCacheService
                         'subtitle' => $this->nullableString($p['subtitle'] ?? null, 500),
                         'description' => $this->nullableString($p['desc'] ?? null),
                         'category' => $this->nullableString($p['category'] ?? null, 255),
-                        'start_time' => $startTime->toDateTimeString(),
-                        'end_time' => $endTime->toDateTimeString(),
+                        // Raw insert bypasses Eloquent casts. The `start_time`/`end_time`
+                        // columns are cast as `datetime` which Eloquent interprets in
+                        // `app.timezone`. We must therefore write the wall-clock of
+                        // `app.timezone` (NOT UTC) so round-tripping yields correct UTC.
+                        'start_time' => $startTime->copy()->tz(config('app.timezone'))->toDateTimeString(),
+                        'end_time' => $endTime->copy()->tz(config('app.timezone'))->toDateTimeString(),
                         'episode_num' => $this->nullableString($p['episode_num'] ?? null, 255),
                         'season' => $season,
                         'episode' => $episode,
