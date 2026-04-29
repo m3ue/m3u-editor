@@ -348,6 +348,63 @@ it('reuses the same Series and Season for two episodes of the same show', functi
     expect(Episode::whereIn('dvr_recording_id', [$ep1->id, $ep2->id])->count())->toBe(2);
 });
 
+it('sets episode_count to 1 on the season after a single TV recording is integrated', function () {
+    $recording = makeCompletedRecording([
+        'season' => 1,
+        'episode' => 1,
+        'metadata' => ['tmdb' => ['id' => 1, 'type' => 'tv', 'name' => 'Count Show']],
+    ]);
+
+    $this->service->integrateRecording($recording);
+
+    $episode = Episode::where('dvr_recording_id', $recording->id)->firstOrFail();
+    $season = Season::find($episode->season_id);
+
+    expect($season->episode_count)->toBe(1);
+});
+
+it('increments episode_count when a second recording is added to the same season', function () {
+    $user = User::factory()->create();
+    $playlist = Playlist::factory()->for($user)->create();
+    $setting = DvrSetting::factory()->enabled()->for($user)->for($playlist)->create();
+
+    $ep1 = DvrRecording::factory()->completed()->for($setting, 'dvrSetting')->for($user)->create([
+        'title' => 'Count Show',
+        'season' => 1,
+        'episode' => 1,
+        'metadata' => ['tmdb' => ['id' => 1, 'type' => 'tv', 'name' => 'Count Show']],
+    ]);
+    $ep2 = DvrRecording::factory()->completed()->for($setting, 'dvrSetting')->for($user)->create([
+        'title' => 'Count Show',
+        'season' => 1,
+        'episode' => 2,
+        'metadata' => ['tmdb' => ['id' => 1, 'type' => 'tv', 'name' => 'Count Show']],
+    ]);
+
+    $this->service->integrateRecording($ep1);
+    $this->service->integrateRecording($ep2);
+
+    $season = Season::where('season_number', 1)->first();
+
+    expect($season->episode_count)->toBe(2);
+});
+
+it('keeps episode_count at 1 when the same recording is integrated twice (idempotency)', function () {
+    $recording = makeCompletedRecording([
+        'season' => 2,
+        'episode' => 1,
+        'metadata' => ['tmdb' => ['id' => 1, 'type' => 'tv', 'name' => 'Idempotent Show']],
+    ]);
+
+    $this->service->integrateRecording($recording);
+    $this->service->integrateRecording($recording);
+
+    $episode = Episode::where('dvr_recording_id', $recording->id)->firstOrFail();
+    $season = Season::find($episode->season_id);
+
+    expect($season->episode_count)->toBe(1);
+});
+
 // ── Edge cases ────────────────────────────────────────────────────────────────
 
 it('skips gracefully when DvrSetting is missing', function () {

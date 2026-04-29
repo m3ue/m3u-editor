@@ -926,10 +926,14 @@ class XtreamApiController extends Controller
             // Check if this is a media server integration series (already has metadata from sync)
             $isMediaServerSeries = ! empty($seriesItem->metadata['media_server_id'] ?? null);
 
+            // DVR-generated series have no upstream Xtream source; skip the provider
+            // fetch entirely to avoid calling getSeriesInfo(null) and corrupting the response.
+            $isDvrSeries = $seriesItem->import_batch_no === 'dvr';
+
             // fetchMetadata() handles its own freshness check internally (comparing last_modified
             // against last_metadata_fetch). It returns null when no fetch was needed, false on
             // failure, or an episode count on success.
-            if (! $isMediaServerSeries) {
+            if (! $isMediaServerSeries && ! $isDvrSeries) {
                 $results = $seriesItem->fetchMetadata(sync: false);
                 if ($results !== null && $results !== false) {
                     // Provider returned new data — reload the model with fresh relations

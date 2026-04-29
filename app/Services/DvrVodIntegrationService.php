@@ -242,6 +242,10 @@ class DvrVodIntegrationService
 
         $episode->save();
 
+        // Keep episode_count accurate so players show the season correctly.
+        $season->episode_count = $season->episodes()->count();
+        $season->save();
+
         Log::info('DvrVodIntegration: '.($isNew ? 'created' : 'updated')." episode {$episode->id} for recording {$recording->id}", [
             'series' => $seriesName,
             'season' => $seasonNumber,
