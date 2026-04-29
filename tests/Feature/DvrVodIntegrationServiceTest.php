@@ -599,3 +599,122 @@ it('reuses the same Series when a recording title differs only in case from an e
     expect($series->name)->toBe('Breaking Bad')
         ->and($series->tmdb_id)->toBe(1396);
 });
+
+// ── Gap 2: isTvContent routes via epg_programme_data.episode_num ─────────────
+
+it('routes to series when episode_num is in epg_programme_data even if season/episode columns are null', function () {
+    $recording = makeCompletedRecording([
+        'title' => 'Breaking Bad',
+        'season' => null,
+        'episode' => null,
+        'metadata' => null,
+        'epg_programme_data' => ['episode_num' => 'S01E03'],
+    ]);
+
+    $this->service->integrateRecording($recording);
+
+    // Must create a Series/Episode, NOT a movie VOD channel
+    expect(Episode::where('dvr_recording_id', $recording->id)->exists())->toBeTrue();
+    expect(Channel::where('dvr_recording_id', $recording->id)->exists())->toBeFalse();
+});
+
+it('routes to movie when epg_programme_data has no episode_num and season is null', function () {
+    $recording = makeCompletedRecording([
+        'title' => 'A Movie',
+        'season' => null,
+        'episode' => null,
+        'metadata' => null,
+        'epg_programme_data' => ['epg_channel_id' => 'test.ch'],
+    ]);
+
+    $this->service->integrateRecording($recording);
+
+    expect(Channel::where('dvr_recording_id', $recording->id)->exists())->toBeTrue();
+    expect(Episode::where('dvr_recording_id', $recording->id)->exists())->toBeFalse();
+});
+
+// ── Gap 2: resolveEpisodeNumber parses episode_num when episode column is null ─
+
+it('parses episode_num from epg_programme_data to get episode number when recording.episode is null', function () {
+    $recording = makeCompletedRecording([
+        'title' => 'Breaking Bad',
+        'season' => 1,
+        'episode' => null,
+        'metadata' => null,
+        'epg_programme_data' => ['episode_num' => 'S01E07'],
+    ]);
+
+    $this->service->integrateRecording($recording);
+
+    $episode = Episode::where('dvr_recording_id', $recording->id)->firstOrFail();
+    expect($episode->episode_num)->toBe(7);
+});
+
+it('falls through to date-based episode number when episode_num is not parseable', function () {
+    $recording = makeCompletedRecording([
+        'title' => 'Live Sport',
+        'season' => 2025,
+        'episode' => null,
+        'metadata' => null,
+        'programme_start' => Carbon::parse('2025-09-03'),
+        'epg_programme_data' => ['episode_num' => ''],  // empty — no parseable data
+    ]);
+
+    $this->service->integrateRecording($recording);
+
+    $episode = Episode::where('dvr_recording_id', $recording->id)->firstOrFail();
+    // Sep 3 → 9 * 100 + 3 = 903
+    expect($episode->episode_num)->toBe(903);
+});
+
+// ── Gap 3: episode-level metadata used in episode info block ─────────────────
+
+it('uses tmdb_episode still_url and overview in episode info when present', function () {
+    $recording = makeCompletedRecording([
+        'title' => 'Breaking Bad',
+        'season' => 1,
+        'episode' => 3,
+        'metadata' => [
+            'tmdb' => ['id' => 1396, 'type' => 'tv', 'name' => 'Breaking Bad', 'overview' => 'Show overview.'],
+            'tmdb_episode' => [
+                'id' => 62085,
+                'name' => 'Pilot',
+                'overview' => 'Episode-specific overview.',
+                'still_url' => 'https://image.tmdb.org/t/p/w300/still.jpg',
+                'air_date' => '2008-02-10',
+            ],
+        ],
+    ]);
+
+    $this->service->integrateRecording($recording);
+
+    $episode = Episode::where('dvr_recording_id', $recording->id)->firstOrFail();
+    expect($episode->info['plot'])->toBe('Episode-specific overview.')
+        ->and($episode->info['movie_image'])->toBe('https://image.tmdb.org/t/p/w300/still.jpg')
+        ->and($episode->info['release_date'])->toBe('2008-02-10');
+});
+
+it('falls back to show-level TMDB data in episode info when tmdb_episode is absent', function () {
+    $recording = makeCompletedRecording([
+        'title' => 'Breaking Bad',
+        'season' => 1,
+        'episode' => 3,
+        'programme_start' => Carbon::parse('2008-02-10'),
+        'metadata' => [
+            'tmdb' => [
+                'id' => 1396,
+                'type' => 'tv',
+                'name' => 'Breaking Bad',
+                'overview' => 'Show-level overview.',
+                'poster_url' => 'https://image.tmdb.org/t/p/w500/poster.jpg',
+            ],
+        ],
+    ]);
+
+    $this->service->integrateRecording($recording);
+
+    $episode = Episode::where('dvr_recording_id', $recording->id)->firstOrFail();
+    expect($episode->info['plot'])->toBe('Show-level overview.')
+        ->and($episode->info['movie_image'])->toBe('https://image.tmdb.org/t/p/w500/poster.jpg')
+        ->and($episode->info['release_date'])->toBe('2008-02-10');
+});

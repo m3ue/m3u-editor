@@ -1685,53 +1685,6 @@ class EpgCacheService
      */
     protected function parseEpisodeNumbers(array $programme): array
     {
-        $season = null;
-        $episode = null;
-
-        // Priority 1: explicit xmltv_ns system (0-indexed dot notation)
-        foreach ($programme['episode_nums'] as $en) {
-            if (strtolower($en['system']) === 'xmltv_ns') {
-                $parts = explode('.', $en['value']);
-                if (isset($parts[0]) && is_numeric(trim($parts[0]))) {
-                    $season = min(32767, (int) trim($parts[0]) + 1);
-                }
-                if (isset($parts[1]) && is_numeric(trim($parts[1]))) {
-                    $episode = min(32767, (int) trim($parts[1]) + 1);
-                }
-                break; // xmltv_ns is authoritative
-            }
-        }
-
-        // Priority 2: explicit onscreen system (1-indexed SxxExx)
-        if ($season === null && $episode === null) {
-            foreach ($programme['episode_nums'] as $en) {
-                if (strtolower($en['system']) === 'onscreen' && preg_match('/S(\d+)E(\d+)/i', $en['value'], $m)) {
-                    $season = min(32767, (int) $m[1]);
-                    $episode = min(32767, (int) $m[2]);
-                    break;
-                }
-            }
-        }
-
-        // Priority 3: heuristic on raw episode_num string (no explicit system tag)
-        if ($season === null && $episode === null && ! empty($programme['episode_num'])) {
-            $raw = $programme['episode_num'];
-            if (str_contains($raw, '.')) {
-                // Looks like xmltv_ns dots format (0-indexed)
-                $parts = explode('.', $raw);
-                if (isset($parts[0]) && is_numeric(trim($parts[0]))) {
-                    $season = min(32767, (int) trim($parts[0]) + 1);
-                }
-                if (isset($parts[1]) && is_numeric(trim($parts[1]))) {
-                    $episode = min(32767, (int) trim($parts[1]) + 1);
-                }
-            } elseif (preg_match('/S(\d+)E(\d+)/i', $raw, $m)) {
-                // Looks like onscreen SxxExx format (1-indexed)
-                $season = min(32767, (int) $m[1]);
-                $episode = min(32767, (int) $m[2]);
-            }
-        }
-
-        return [$season, $episode];
+        return EpisodeNumberParser::fromProgramme($programme);
     }
 }

@@ -9,6 +9,7 @@ use App\Models\Episode;
 use App\Models\Group;
 use App\Models\Season;
 use App\Models\Series;
+use App\Support\EpisodeNumberParser;
 use Exception;
 use Illuminate\Support\Facades\Log;
 
@@ -68,6 +69,12 @@ class DvrVodIntegrationService
 
     /**
      * Determine whether the recording should be treated as TV series content.
+     *
+     * Decision order:
+     *   1. TMDB type field (authoritative when enrichment ran)
+     *   2. recording.season column (set from EPG at schedule time)
+     *   3. epg_programme_data.episode_num (raw XMLTV string — present even when
+     *      the EPG import predated our season/episode column parsing fix)
      */
     private function isTvContent(DvrRecording $recording, ?array $tmdb): bool
     {
@@ -75,8 +82,13 @@ class DvrVodIntegrationService
             return $tmdb['type'] === 'tv';
         }
 
-        // Fall back to structural cues when metadata is absent
-        return $recording->season !== null;
+        if ($recording->season !== null) {
+            return true;
+        }
+
+        // episode_num present in stored EPG data is a reliable TV signal even
+        // when season/episode columns were not populated (pre-parseEpisodeNumbers fix).
+        return ! empty($recording->epg_programme_data['episode_num']);
     }
 
     /**
@@ -209,10 +221,16 @@ class DvrVodIntegrationService
         // When EPG provides a season but no episode number (common for daily shows),
         // derive a unique episode number from the air date (compact MMDD: Apr 21 → 421)
         // so multiple recordings of the same show never collide at E01.
-        $episodeNumber = $recording->episode ?? $this->deriveDateEpisodeNumber($recording);
+        // Also fall back to episode_num heuristic parsing when recording.episode is null
+        // but epg_programme_data.episode_num holds an unparsed string (pre-fix recordings).
+        $episodeNumber = $recording->episode ?? $this->resolveEpisodeNumber($recording);
         $streamUrl = $this->buildStreamUrl($recording);
         $containerExt = $recording->dvrSetting?->dvr_output_format ?? 'ts';
         $sourceLogo = $this->resolveSourceChannelLogo($recording);
+
+        // Episode-level metadata (populated by DvrMetadataEnricherService when available)
+        $tmdbEpisode = is_array($recording->metadata) ? ($recording->metadata['tmdb_episode'] ?? null) : null;
+        $tvmazeEpisode = is_array($recording->metadata) ? ($recording->metadata['tvmaze_episode'] ?? null) : null;
 
         // Find-or-create the DVR category for this playlist
         $category = $this->findOrCreateDvrCategory($playlistId, $userId);
@@ -242,14 +260,19 @@ class DvrVodIntegrationService
             $episode->dvr_recording_id = $recording->id;
         }
 
-        // Always update title, URL, and info (URL may have been created with wrong base)
+        // Always update title, URL, and info (URL may have been created with wrong base).
+        // Prefer episode-level art/plot from TMDB/TVMaze when available, falling back to
+        // show-level poster and the recording's own description.
         $episode->title = $this->buildEpisodeTitle($recording);
         $episode->url = $streamUrl;
         $episode->info = [
-            'plot' => $tmdb['overview'] ?? $recording->description ?? null,
-            'release_date' => $recording->programme_start?->toDateString(),
+            'plot' => $tmdbEpisode['overview'] ?? $tvmazeEpisode['summary']
+                ?? $tmdb['overview'] ?? $recording->description ?? null,
+            'release_date' => $tmdbEpisode['air_date'] ?? $tvmazeEpisode['airdate']
+                ?? $recording->programme_start?->toDateString(),
             'duration_secs' => $recording->duration_seconds,
-            'movie_image' => $tmdb['poster_url'] ?? $sourceLogo ?? null,
+            'movie_image' => $tmdbEpisode['still_url'] ?? $tvmazeEpisode['image']
+                ?? $tmdb['poster_url'] ?? $sourceLogo ?? null,
             'tmdb_id' => $tmdb['id'] ?? null,
             'season' => $seasonNumber,
         ];
@@ -266,6 +289,26 @@ class DvrVodIntegrationService
             'episode' => $episodeNumber,
             'playlist_id' => $playlistId,
         ]);
+    }
+
+    /**
+     * Resolve the episode number for a recording that has no explicit episode column.
+     *
+     * Tries to parse the stored epg_programme_data.episode_num string first
+     * (covers recordings created before the EpgCacheService season-parse fix).
+     * Falls back to a date-derived MMDD number to avoid S01E01 collisions for daily shows.
+     */
+    private function resolveEpisodeNumber(DvrRecording $recording): int
+    {
+        $raw = $recording->epg_programme_data['episode_num'] ?? null;
+        if ($raw) {
+            [, $parsed] = EpisodeNumberParser::fromRaw($raw);
+            if ($parsed !== null) {
+                return $parsed;
+            }
+        }
+
+        return $this->deriveDateEpisodeNumber($recording);
     }
 
     /**
