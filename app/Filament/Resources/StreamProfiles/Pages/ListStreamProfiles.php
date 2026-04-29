@@ -46,6 +46,14 @@ class ListStreamProfiles extends ListRecords
                         ],
                         [
                             'user_id' => $userId,
+                            'name' => 'Default HLS fMP4 Profile',
+                            'description' => 'HLS with fragmented MP4 (CMAF) segments — required for Apple AVKit on tvOS to play HEVC/H.265 streams.',
+                            'backend' => 'ffmpeg',
+                            'format' => 'm3u8',
+                            'args' => '-fflags +genpts+discardcorrupt+igndts -i {input_url} -c:v libx264 -preset faster -b:v {bitrate|2000k} -maxrate {maxrate|2500k} -bufsize {bufsize|2500k} -c:a aac -b:a {audio_bitrate|128k} -hls_time 2 -hls_list_size 30 -hls_flags program_date_time -hls_segment_type fmp4 -f hls {output_args|index.m3u8}',
+                        ],
+                        [
+                            'user_id' => $userId,
                             'name' => 'Default Streamlink Profile',
                             'description' => 'For platforms like Twitch and YouTube — extracts the stream directly without re-encoding.',
                             'backend' => 'streamlink',
