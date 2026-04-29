@@ -1513,7 +1513,13 @@ class EpgCacheService
      * upserts rows into epg_programmes so the DVR scheduler can query them without
      * touching the filesystem.
      */
-    private function populateDvrProgrammes(Epg $epg): void
+    /**
+     * Populate the epg_programmes DB table from the JSONL cache for DVR-enabled playlists.
+     *
+     * Public so it can be called directly (e.g. from an artisan command) when a DVR
+     * mapping is added after an EPG was last cached.
+     */
+    public function populateDvrProgrammes(Epg $epg): void
     {
         // Find all DVR-enabled playlists whose EpgMap references this EPG
         $playlistIds = DvrSetting::where('enabled', true)
@@ -1537,7 +1543,6 @@ class EpgCacheService
         // Delete stale rows for this EPG so we do a clean refresh
         EpgProgramme::where('epg_id', $epg->id)->delete();
 
-        $cacheDir = $this->getCacheDir($epg);
         $now = now();
         $from = $now->copy()->subDay()->startOfDay();
         $to = $now->copy()->addDays(7)->endOfDay();
@@ -1547,11 +1552,12 @@ class EpgCacheService
         $inserted = 0;
         $skipped = 0;
 
-        // Iterate over date files within the window
         $current = $from->copy();
         while ($current->lte($to)) {
             $date = $current->format('Y-m-d');
-            $filePath = $this->getCacheFilePath($epg, "programmes-{$date}.jsonl");
+
+            // Use the active cache path so legacy v1/root caches are found too
+            $filePath = $this->getActiveCacheFilePath($epg, "programmes-{$date}.jsonl");
 
             if (! Storage::disk('local')->exists($filePath)) {
                 $current->addDay();
@@ -1589,48 +1595,55 @@ class EpgCacheService
                         continue;
                     }
 
-                    // Parse episode info from xmltv episode-num (e.g. "1.2.0/1" → S2E3)
+                    // Parse 0-indexed xmltv_ns episode-num (e.g. "1.2." → S2E3)
                     $season = null;
                     $episode = null;
                     if (! empty($p['episode_num'])) {
                         $parts = explode('.', $p['episode_num']);
                         if (isset($parts[0]) && is_numeric(trim($parts[0]))) {
-                            $season = (int) trim($parts[0]) + 1;
+                            $season = min(32767, (int) trim($parts[0]) + 1);
                         }
                         if (isset($parts[1]) && is_numeric(trim($parts[1]))) {
-                            $episode = (int) trim($parts[1]) + 1;
+                            $episode = min(32767, (int) trim($parts[1]) + 1);
                         }
                     }
 
                     $batch[] = [
                         'epg_id' => $epg->id,
-                        'epg_channel_id' => $record['channel'],
-                        'title' => $p['title'] ?? '',
-                        'subtitle' => $p['subtitle'] ?? null,
-                        'description' => $p['desc'] ?? null,
-                        'category' => $p['category'] ?? null,
+                        'epg_channel_id' => mb_substr((string) $record['channel'], 0, 500),
+                        'title' => mb_substr((string) ($p['title'] ?? ''), 0, 500),
+                        'subtitle' => $this->nullableString($p['subtitle'] ?? null, 500),
+                        'description' => $this->nullableString($p['desc'] ?? null),
+                        'category' => $this->nullableString($p['category'] ?? null, 255),
                         'start_time' => $startTime->toDateTimeString(),
                         'end_time' => $endTime->toDateTimeString(),
-                        'episode_num' => $p['episode_num'] ?? null,
+                        'episode_num' => $this->nullableString($p['episode_num'] ?? null, 255),
                         'season' => $season,
                         'episode' => $episode,
                         'is_new' => (bool) ($p['new'] ?? false),
                         'previously_shown' => (bool) ($p['previously_shown'] ?? false),
                         'premiere' => (bool) ($p['premiere'] ?? false),
-                        'icon' => $p['icon'] ?? null,
-                        'rating' => $p['rating'] ?? null,
+                        'icon' => $this->nullableString($p['icon'] ?? null, 500),
+                        'rating' => $this->nullableString($p['rating'] ?? null, 50),
                         'created_at' => now()->toDateTimeString(),
                         'updated_at' => now()->toDateTimeString(),
                     ];
+                } catch (Exception $e) {
+                    Log::warning("DVR programme parse error (EPG {$epg->id}): {$e->getMessage()}");
+                    $skipped++;
+                }
 
-                    if (count($batch) >= $batchSize) {
+                // Flush batch outside the per-line try-catch so a failed insert
+                // doesn't leave the batch in a dirty state and cascade failures.
+                if (count($batch) >= $batchSize) {
+                    try {
                         EpgProgramme::insert($batch);
                         $inserted += count($batch);
-                        $batch = [];
+                    } catch (Exception $e) {
+                        Log::error("DVR programme batch insert failed (EPG {$epg->id}): {$e->getMessage()}");
+                        $skipped += count($batch);
                     }
-                } catch (Exception $e) {
-                    Log::warning("Failed to parse programme line for DVR: {$e->getMessage()}");
-                    $skipped++;
+                    $batch = [];
                 }
             }
 
@@ -1640,13 +1653,30 @@ class EpgCacheService
 
         // Flush remaining
         if (! empty($batch)) {
-            EpgProgramme::insert($batch);
-            $inserted += count($batch);
+            try {
+                EpgProgramme::insert($batch);
+                $inserted += count($batch);
+            } catch (Exception $e) {
+                Log::error("DVR programme final batch insert failed (EPG {$epg->id}): {$e->getMessage()}");
+                $skipped += count($batch);
+            }
         }
 
         Log::debug("EPG programmes populated for DVR: {$inserted} inserted, {$skipped} skipped", [
             'epg_id' => $epg->id,
             'epg_name' => $epg->name,
         ]);
+    }
+
+    /**
+     * Return null for blank/empty strings, otherwise truncate to the column limit.
+     */
+    private function nullableString(?string $value, ?int $maxLength = null): ?string
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        return $maxLength !== null ? mb_substr($value, 0, $maxLength) : $value;
     }
 }

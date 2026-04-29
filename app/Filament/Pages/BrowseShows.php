@@ -15,6 +15,7 @@ use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Livewire\Attributes\On;
 
@@ -580,43 +581,64 @@ class BrowseShows extends Page
     }
 
     /**
+     * Resolve the set of XMLTV channel IDs that are in scope for the given playlist.
+     *
+     * Matches via two paths so that both EPG-channel-mapped channels and tvg-id
+     * (stream_id) channels return results:
+     *   1. channels.epg_channel_id → epg_channels.channel_id  (SchedulesDirect-style numeric IDs)
+     *   2. channels.stream_id                                  (XMLTV tvg-id that matches directly)
+     *
+     * Returns null when the playlist has no EPG-linked channels at all (i.e. no
+     * filtering should be applied — all programmes are fair game). Returns an empty
+     * array when a channel/group filter is active but nothing matched (0 results).
+     *
      * @return list<string>|null
      */
     private function resolveEpgChannelScope(int $playlistId): ?array
     {
-        $base = Channel::whereNotNull('channels.epg_channel_id')
-            ->join('epg_channels', 'epg_channels.id', '=', 'channels.epg_channel_id');
+        $epgMapBase = DB::table('channels')
+            ->join('epg_channels', 'epg_channels.id', '=', 'channels.epg_channel_id')
+            ->where('channels.playlist_id', $playlistId)
+            ->whereNotNull('channels.epg_channel_id');
+
+        $streamIdBase = DB::table('channels')
+            ->where('channels.playlist_id', $playlistId)
+            ->whereNotNull('channels.stream_id')
+            ->where('channels.stream_id', '!=', '');
 
         if ($this->channel_name) {
             $channelKw = mb_strtolower($this->channel_name);
-            $ids = (clone $base)
-                ->where('channels.playlist_id', $playlistId)
+            $ids = (clone $epgMapBase)
                 ->whereRaw('LOWER(channels.title) LIKE ?', ["%{$channelKw}%"])
                 ->pluck('epg_channels.channel_id')
-                ->unique()
-                ->values()
-                ->all();
+                ->merge(
+                    (clone $streamIdBase)
+                        ->whereRaw('LOWER(channels.title) LIKE ?', ["%{$channelKw}%"])
+                        ->pluck('channels.stream_id')
+                )
+                ->unique()->values()->all();
 
-            return ! empty($ids) ? $ids : null;
+            return $ids;
         }
 
         if ($this->group_id) {
-            $ids = (clone $base)
+            $ids = (clone $epgMapBase)
                 ->where('channels.group_id', $this->group_id)
                 ->pluck('epg_channels.channel_id')
-                ->unique()
-                ->values()
-                ->all();
+                ->merge(
+                    (clone $streamIdBase)
+                        ->where('channels.group_id', $this->group_id)
+                        ->pluck('channels.stream_id')
+                )
+                ->unique()->values()->all();
 
-            return ! empty($ids) ? $ids : null;
+            return $ids;
         }
 
-        $ids = (clone $base)
-            ->where('channels.playlist_id', $playlistId)
+        $ids = (clone $epgMapBase)
             ->pluck('epg_channels.channel_id')
-            ->unique()
-            ->values()
-            ->all();
+            ->merge($streamIdBase->pluck('channels.stream_id'))
+            ->unique()->values()->all();
 
         return ! empty($ids) ? $ids : null;
     }
