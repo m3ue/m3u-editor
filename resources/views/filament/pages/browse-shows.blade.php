@@ -19,7 +19,7 @@
     @endif
 
     {{-- Filter Form --}}
-    <div class="rounded-xl border border-gray-200 dark:border-white/10 bg-white dark:bg-gray-900 p-4 mb-6 space-y-4">
+    <form wire:submit="search" class="rounded-xl border border-gray-200 dark:border-white/10 bg-white dark:bg-gray-900 p-4 mb-6 space-y-4">
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {{-- DVR Setting --}}
             <div class="flex flex-col gap-1">
@@ -112,11 +112,11 @@
         </div>
 
         <div class="flex justify-end">
-            <x-filament::button wire:click="search" icon="heroicon-m-magnifying-glass">
+            <x-filament::button type="submit" icon="heroicon-m-magnifying-glass">
                 {{ __('Search') }}
             </x-filament::button>
         </div>
-    </div>
+    </form>
 
     {{-- Results --}}
     @if($searched)
