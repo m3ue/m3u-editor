@@ -328,6 +328,7 @@
     <div
         x-data="{ open: $wire.selectedShowTitle !== '' }"
         x-init="$watch('$wire.selectedShowTitle', v => { open = v !== '' })"
+        x-effect="document.body.classList.toggle('overflow-hidden', open)"
         @keydown.escape.window="if (open) $wire.call('closeShowDetail')"
         class="fixed inset-0 z-50 pointer-events-none"
         x-cloak
