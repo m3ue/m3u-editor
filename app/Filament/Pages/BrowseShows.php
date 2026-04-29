@@ -17,6 +17,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Livewire\Attributes\On;
 
 class BrowseShows extends Page
@@ -146,6 +147,27 @@ class BrowseShows extends Page
             $this->dvr_setting_id = $settings->first()->id;
         }
     }
+
+    public function getSeriesHintProperty(): string
+    {
+        $channelName = $this->seriesChannelName
+            ? Str::limit($this->seriesChannelName, 18)
+            : __('any channel');
+
+        $parts = array_filter([
+            $channelName,
+            $this->seriesNewOnly ? __('new only') : null,
+            $this->seriesPriority !== 50 ? 'P:'.$this->seriesPriority : null,
+            ($this->seriesStartEarly || $this->seriesEndLate)
+                ? '+'.$this->seriesStartEarly.'s/+'.$this->seriesEndLate.'s'
+                : null,
+            $this->seriesKeepLast ? __('keep').' '.$this->seriesKeepLast : null,
+        ]);
+
+        return implode(' · ', $parts);
+    }
+
+    // --- Slide-over actions ---
 
     public function updatedDvrSettingId(): void
     {

@@ -16,6 +16,7 @@ use Filament\Pages\Page;
 use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Livewire\Attributes\On;
 
 class GuestBrowseShows extends Page
@@ -131,6 +132,26 @@ class GuestBrowseShows extends Page
             ->orderBy('title')
             ->pluck('title', 'id')
             ->all();
+    }
+
+    public function getSeriesHintProperty(): string
+    {
+        $channelOptions = $this->channelOptions;
+        $channelName = ($this->seriesChannelId && isset($channelOptions[$this->seriesChannelId]))
+            ? Str::limit($channelOptions[$this->seriesChannelId], 18)
+            : __('any channel');
+
+        $parts = array_filter([
+            $channelName,
+            $this->seriesNewOnly ? __('new only') : null,
+            $this->seriesPriority !== 50 ? 'P:'.$this->seriesPriority : null,
+            ($this->seriesStartEarly || $this->seriesEndLate)
+                ? '+'.$this->seriesStartEarly.'s/+'.$this->seriesEndLate.'s'
+                : null,
+            $this->seriesKeepLast ? __('keep').' '.$this->seriesKeepLast : null,
+        ]);
+
+        return implode(' · ', $parts);
     }
 
     // --- Slide-over actions ---

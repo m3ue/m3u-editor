@@ -128,7 +128,7 @@
                 </svg>
                 {{ __('Advanced options') }}
                 <span x-show="!showOptions" class="ml-1 text-gray-400 dark:text-gray-500 font-normal">
-                    &mdash; {{ __('channel, new-only, priority, padding, keep last') }}
+                    &mdash; {{ $seriesHint }}
                 </span>
             </button>
 
@@ -136,8 +136,8 @@
                 <div class="mt-3 space-y-3">
                     <x-filament::input.wrapper label="{{ __('New episodes only') }}">
                         <x-filament::input.select wire:model.live="seriesNewOnly">
-                            <option value="0">{{ __('No') }}</option>
-                            <option value="1">{{ __('Yes') }}</option>
+                            <option value="0" @selected(! $seriesNewOnly)>{{ __('No') }}</option>
+                            <option value="1" @selected($seriesNewOnly)>{{ __('Yes') }}</option>
                         </x-filament::input.select>
                     </x-filament::input.wrapper>
 
