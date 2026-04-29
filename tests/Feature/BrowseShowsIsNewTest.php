@@ -20,9 +20,8 @@ beforeEach(function () {
 });
 
 it('marks show as is_new when any airing has is_new=true', function () {
-    Http::fake(); // no TVMaze enrichment needed for this assertion
-    // S15E19 (E19, not E01) - not flagged by SD, not E01 → not new
-    // S15E20 (E20, not E01) - SD is_new=true → new
+    Http::fake();
+
     EpgProgramme::factory()->create([
         'title' => 'Real Housewives of Beverly Hills',
         'subtitle' => 'Reunion Part 1',
@@ -48,13 +47,13 @@ it('marks show as is_new when any airing has is_new=true', function () {
         ->set('dvr_setting_id', $this->setting->id)
         ->set('keyword', 'Real Housewives')
         ->call('search')
-        ->assertViewHas('groupedShows', fn (array $shows) => count($shows) === 1
+        ->assertSet('shows', fn (array $shows) => count($shows) === 1
             && $shows[0]['flags']['is_new'] === true);
 });
 
 it('does not mark season premiere (E01) as new when TVMaze has no data', function () {
-    Http::fake(); // TVMaze returns empty → no enrichment → is_new stays false
-    // E01 without SD is_new flag and no TVMaze confirmation → not new
+    Http::fake();
+
     EpgProgramme::factory()->create([
         'title' => 'The Great British Bake Off',
         'subtitle' => 'Episode 1',
@@ -69,12 +68,10 @@ it('does not mark season premiere (E01) as new when TVMaze has no data', functio
     $component = Livewire::test(BrowseShows::class)
         ->set('dvr_setting_id', $this->setting->id)
         ->set('keyword', 'Great British')
-        ->call('search');
+        ->call('search')
+        ->call('openShowDetail', 'The Great British Bake Off');
 
-    $shows = cache()->get($component->get('showsCacheKey'), []);
-    $airing = $shows[0]['airings'][0];
-
-    expect($airing['is_new'])->toBeFalse();
+    expect($component->get('selectedShowDetail')['airings'][0]['is_new'])->toBeFalse();
 });
 
 it('marks season premiere (E01) as new when TVMaze reports a recent airdate', function () {
@@ -104,16 +101,15 @@ it('marks season premiere (E01) as new when TVMaze reports a recent airdate', fu
     $component = Livewire::test(BrowseShows::class)
         ->set('dvr_setting_id', $this->setting->id)
         ->set('keyword', 'Great British')
-        ->call('search');
+        ->call('search')
+        ->call('openShowDetail', 'The Great British Bake Off');
 
-    $shows = cache()->get($component->get('showsCacheKey'), []);
-    $airing = $shows[0]['airings'][0];
-
-    expect($airing['is_new'])->toBeTrue();
+    expect($component->get('selectedShowDetail')['airings'][0]['is_new'])->toBeTrue();
 });
 
 it('does not mark regular episode (non-E01) as new without SD flag', function () {
-    Http::fake(); // TVMaze returns empty → no enrichment → is_new stays false
+    Http::fake();
+
     EpgProgramme::factory()->create([
         'title' => 'Breaking Bad',
         'subtitle' => 'Felina',
@@ -127,17 +123,11 @@ it('does not mark regular episode (non-E01) as new without SD flag', function ()
     $component = Livewire::test(BrowseShows::class)
         ->set('dvr_setting_id', $this->setting->id)
         ->set('keyword', 'Breaking Bad')
-        ->call('search');
+        ->call('search')
+        ->call('openShowDetail', 'Breaking Bad');
 
-    $shows = cache()->get($component->get('showsCacheKey'), []);
-    $airing = $shows[0]['airings'][0];
-
-    expect($airing['is_new'])->toBeFalse();
+    expect($component->get('selectedShowDetail')['airings'][0]['is_new'])->toBeFalse();
 });
-
-// ---------------------------------------------------------------------------
-// TVMaze air-date based is_new
-// ---------------------------------------------------------------------------
 
 it('marks airing as is_new when TVMaze reports a recent airdate', function () {
     Http::fake([
@@ -166,12 +156,11 @@ it('marks airing as is_new when TVMaze reports a recent airdate', function () {
     $component = Livewire::test(BrowseShows::class)
         ->set('dvr_setting_id', $this->setting->id)
         ->set('keyword', 'Breaking Bad')
-        ->call('search');
+        ->call('search')
+        ->call('openShowDetail', 'Breaking Bad');
 
-    $shows = cache()->get($component->get('showsCacheKey'), []);
-
-    expect($shows[0]['airings'][0]['is_new'])->toBeTrue();
-    expect($shows[0]['flags']['is_new'])->toBeTrue();
+    expect($component->get('selectedShowDetail')['airings'][0]['is_new'])->toBeTrue();
+    expect($component->get('shows')[0]['flags']['is_new'])->toBeTrue();
 });
 
 it('does not mark airing as is_new when TVMaze reports an old airdate', function () {
@@ -201,11 +190,10 @@ it('does not mark airing as is_new when TVMaze reports an old airdate', function
     $component = Livewire::test(BrowseShows::class)
         ->set('dvr_setting_id', $this->setting->id)
         ->set('keyword', 'Breaking Bad')
-        ->call('search');
+        ->call('search')
+        ->call('openShowDetail', 'Breaking Bad');
 
-    $shows = cache()->get($component->get('showsCacheKey'), []);
-
-    expect($shows[0]['airings'][0]['is_new'])->toBeFalse();
+    expect($component->get('selectedShowDetail')['airings'][0]['is_new'])->toBeFalse();
 });
 
 it('marks description-embedded episode as is_new when TVMaze reports a recent airdate', function () {
@@ -221,7 +209,6 @@ it('marks description-embedded episode as is_new when TVMaze reports a recent ai
         ], 200),
     ]);
 
-    // season/episode are null in DB; embedded in description instead
     EpgProgramme::factory()->create([
         'title' => 'Real Housewives of Beverly Hills',
         'subtitle' => null,
@@ -237,12 +224,11 @@ it('marks description-embedded episode as is_new when TVMaze reports a recent ai
     $component = Livewire::test(BrowseShows::class)
         ->set('dvr_setting_id', $this->setting->id)
         ->set('keyword', 'Real Housewives')
-        ->call('search');
+        ->call('search')
+        ->call('openShowDetail', 'Real Housewives of Beverly Hills');
 
-    $shows = cache()->get($component->get('showsCacheKey'), []);
-
-    expect($shows[0]['airings'][0]['is_new'])->toBeTrue();
-    expect($shows[0]['flags']['is_new'])->toBeTrue();
+    expect($component->get('selectedShowDetail')['airings'][0]['is_new'])->toBeTrue();
+    expect($component->get('shows')[0]['flags']['is_new'])->toBeTrue();
 });
 
 it('makes only one TVMaze request per show title when multiple episodes are present', function () {

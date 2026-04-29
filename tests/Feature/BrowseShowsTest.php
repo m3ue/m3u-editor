@@ -42,7 +42,7 @@ it('returns grouped shows after calling search', function () {
         ->set('keyword', 'The Wire')
         ->call('search')
         ->assertSet('searched', true)
-        ->assertViewHas('groupedShows', fn (array $shows) => count($shows) === 1
+        ->assertSet('shows', fn (array $shows) => count($shows) === 1
             && $shows[0]['title'] === 'The Wire');
 });
 
@@ -61,18 +61,18 @@ it('filters search results by keyword', function () {
     Livewire::test(BrowseShows::class)
         ->set('keyword', 'Wire')
         ->call('search')
-        ->assertViewHas('groupedShows', fn (array $shows) => count($shows) === 1);
+        ->assertSet('shows', fn (array $shows) => count($shows) === 1);
 });
 
-it('returns empty grouped shows when no programmes match', function () {
+it('returns empty shows when no programmes match', function () {
     Livewire::test(BrowseShows::class)
         ->set('keyword', 'Nonexistent Show XYZ')
         ->call('search')
         ->assertSet('searched', true)
-        ->assertViewHas('groupedShows', []);
+        ->assertSet('shows', []);
 });
 
-it('groups multiple airings of the same title into one card', function () {
+it('counts multiple airings of the same title as one card with correct airing_count', function () {
     EpgProgramme::factory()->create([
         'title' => 'The Wire',
         'start_time' => now()->addHours(2),
@@ -87,11 +87,11 @@ it('groups multiple airings of the same title into one card', function () {
     Livewire::test(BrowseShows::class)
         ->set('keyword', 'The Wire')
         ->call('search')
-        ->assertViewHas('groupedShows', fn (array $shows) => count($shows) === 1
-            && count($shows[0]['airings']) === 2);
+        ->assertSet('shows', fn (array $shows) => count($shows) === 1
+            && $shows[0]['airing_count'] === 2);
 });
 
-it('grouped show card contains expected keys', function () {
+it('show card contains expected keys', function () {
     EpgProgramme::factory()->create([
         'title' => 'Breaking Bad',
         'start_time' => now()->addHours(2),
@@ -102,13 +102,12 @@ it('grouped show card contains expected keys', function () {
         ->set('keyword', 'Breaking Bad')
         ->call('search');
 
-    $shows = cache()->get($component->get('showsCacheKey'), []);
-    $show = $shows[0];
+    $show = $component->get('shows')[0];
 
     expect($show)->toHaveKeys([
-        'title', 'next_air_date', 'next_air_date_human', 'flags',
+        'title', 'next_air_date_human', 'flags',
         'epg_icon', 'poster_url', 'has_series_rule', 'has_once_rule',
-        'airing_count', 'category', 'description', 'airings',
+        'airing_count', 'category',
     ]);
 });
 
@@ -133,7 +132,7 @@ it('sets postersLoaded to true after loadPosters', function () {
         ->assertSet('postersLoaded', true);
 });
 
-it('populates poster_url on grouped shows after loadPosters', function () {
+it('populates poster_url on shows after loadPosters', function () {
     $this->mock(ShowMetadataService::class)
         ->shouldReceive('resolvePosters')
         ->once()
@@ -151,26 +150,58 @@ it('populates poster_url on grouped shows after loadPosters', function () {
         ->set('keyword', 'The Wire')
         ->call('search')
         ->call('loadPosters')
-        ->assertViewHas('groupedShows', fn (array $shows) => $shows[0]['poster_url'] === 'https://example.com/poster.jpg');
+        ->assertSet('shows', fn (array $shows) => $shows[0]['poster_url'] === 'https://example.com/poster.jpg');
 });
 
-it('sets postersLoaded true immediately when groupedShows is empty', function () {
+it('sets postersLoaded true immediately when shows is empty', function () {
     Livewire::test(BrowseShows::class)
         ->call('loadPosters')
         ->assertSet('postersLoaded', true);
 });
 
-it('openShowDetail sets selectedShowTitle', function () {
+it('openShowDetail sets selectedShowTitle and loads detail', function () {
+    EpgProgramme::factory()->create([
+        'title' => 'Breaking Bad',
+        'start_time' => now()->addHours(2),
+        'end_time' => now()->addHours(3),
+    ]);
+
     Livewire::test(BrowseShows::class)
+        ->set('keyword', 'Breaking Bad')
+        ->call('search')
         ->call('openShowDetail', 'Breaking Bad')
-        ->assertSet('selectedShowTitle', 'Breaking Bad');
+        ->assertSet('selectedShowTitle', 'Breaking Bad')
+        ->assertSet('selectedShowDetail', fn (?array $detail) => $detail !== null
+            && $detail['title'] === 'Breaking Bad'
+            && count($detail['airings']) === 1);
 });
 
-it('closeShowDetail clears selectedShowTitle', function () {
+it('openShowDetail loads airings in selected show detail', function () {
+    EpgProgramme::factory()->create([
+        'title' => 'The Wire',
+        'start_time' => now()->addHours(2),
+        'end_time' => now()->addHours(3),
+    ]);
+    EpgProgramme::factory()->create([
+        'title' => 'The Wire',
+        'start_time' => now()->addHours(5),
+        'end_time' => now()->addHours(6),
+    ]);
+
+    Livewire::test(BrowseShows::class)
+        ->set('keyword', 'The Wire')
+        ->call('search')
+        ->call('openShowDetail', 'The Wire')
+        ->assertSet('selectedShowDetail', fn (?array $detail) => $detail !== null
+            && count($detail['airings']) === 2);
+});
+
+it('closeShowDetail clears selectedShowTitle and selectedShowDetail', function () {
     Livewire::test(BrowseShows::class)
         ->call('openShowDetail', 'Breaking Bad')
         ->call('closeShowDetail')
-        ->assertSet('selectedShowTitle', '');
+        ->assertSet('selectedShowTitle', '')
+        ->assertSet('selectedShowDetail', null);
 });
 
 it('quickRecordNextAiring records the first upcoming airing for a title', function () {
@@ -307,4 +338,26 @@ it('warns when recordSeriesWithOptions is called without a dvr setting selected'
         ->call('recordSeriesWithOptions', 'Breaking Bad');
 
     expect(DvrRecordingRule::where('user_id', $this->user->id)->count())->toBe(0);
+});
+
+it('paginates results and gotoPage loads a different page', function () {
+    // Create 25 programmes with distinct titles to exceed the 20-per-page limit
+    foreach (range(1, 25) as $i) {
+        EpgProgramme::factory()->create([
+            'title' => "Show {$i}",
+            'start_time' => now()->addHours($i),
+            'end_time' => now()->addHours($i + 1),
+        ]);
+    }
+
+    $component = Livewire::test(BrowseShows::class)
+        ->call('search');
+
+    expect($component->get('totalShows'))->toBe(25);
+    expect(count($component->get('shows')))->toBe(20);
+
+    $component->call('gotoPage', 2);
+
+    expect($component->get('currentPage'))->toBe(2);
+    expect(count($component->get('shows')))->toBe(5);
 });
