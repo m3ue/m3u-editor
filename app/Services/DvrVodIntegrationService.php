@@ -97,12 +97,22 @@ class DvrVodIntegrationService
         if ($playlist && $user) {
             $ext = $setting->dvr_output_format ?? 'ts';
 
-            return route('dvr.recording.stream', [
+            $params = [
                 'username' => $user->name,
                 'password' => $playlist->uuid,
                 'uuid' => $recording->uuid,
                 'format' => $ext,
-            ]);
+            ];
+
+            // DVR_STREAM_BASE_URL lets operators override APP_URL so that
+            // proxies running in separate containers can reach the editor
+            // using the internal Docker hostname rather than localhost.
+            $streamBase = config('dvr.stream_base_url');
+            if ($streamBase) {
+                return rtrim($streamBase, '/').route('dvr.recording.stream', $params, absolute: false);
+            }
+
+            return route('dvr.recording.stream', $params);
         }
 
         // Fallback: path-only URL (playlist or user not resolvable)
