@@ -125,7 +125,7 @@ class BrowseShows extends Page
             return [];
         }
 
-        $playlistId = DvrSetting::find($this->dvr_setting_id)?->playlist_id;
+        $playlistId = $this->resolvedDvrSetting()?->playlist_id;
 
         if (! $playlistId) {
             return [];
@@ -209,7 +209,9 @@ class BrowseShows extends Page
 
     public function recordOnce(int $programmeId): void
     {
-        if (! $this->dvr_setting_id) {
+        $dvrSetting = $this->resolvedDvrSetting();
+
+        if (! $dvrSetting) {
             Notification::make()->title(__('Select a DVR Setting first.'))->warning()->send();
 
             return;
@@ -298,7 +300,7 @@ class BrowseShows extends Page
         $channelId = null;
 
         if ($this->seriesChannelName && $this->dvr_setting_id) {
-            $playlistId = DvrSetting::find($this->dvr_setting_id)?->playlist_id;
+            $playlistId = $this->resolvedDvrSetting()?->playlist_id;
             if ($playlistId) {
                 $seriesChannelKw = mb_strtolower($this->seriesChannelName);
                 $channelId = Channel::where('playlist_id', $playlistId)
@@ -320,11 +322,27 @@ class BrowseShows extends Page
     // --- Internal ---
 
     /**
+     * Find the selected DvrSetting scoped to the authenticated user.
+     * Returns null if none is selected or the setting doesn't belong to this user,
+     * preventing cross-user data access via a manipulated dvr_setting_id.
+     */
+    private function resolvedDvrSetting(): ?DvrSetting
+    {
+        if (! $this->dvr_setting_id) {
+            return null;
+        }
+
+        return DvrSetting::where('user_id', Auth::id())->find($this->dvr_setting_id);
+    }
+
+    /**
      * @param  array<string, mixed>  $options
      */
     private function createSeriesRule(string $title, array $options): void
     {
-        if (! $this->dvr_setting_id) {
+        $dvrSetting = $this->resolvedDvrSetting();
+
+        if (! $dvrSetting) {
             Notification::make()->title(__('Select a DVR Setting first.'))->warning()->send();
 
             return;
@@ -428,7 +446,10 @@ class BrowseShows extends Page
      */
     private function buildBaseQuery(): Builder
     {
+        $userId = Auth::id();
+
         $query = EpgProgramme::query()
+            ->whereHas('epg', fn (Builder $q) => $q->where('user_id', $userId))
             ->where('start_time', '>=', now())
             ->where('start_time', '<=', now()->addDays($this->days));
 
@@ -451,7 +472,7 @@ class BrowseShows extends Page
         }
 
         if ($this->dvr_setting_id) {
-            $playlistId = DvrSetting::find($this->dvr_setting_id)?->playlist_id;
+            $playlistId = $this->resolvedDvrSetting()?->playlist_id;
 
             if ($playlistId) {
                 $epgChannelIds = $this->resolveEpgChannelScope($playlistId);

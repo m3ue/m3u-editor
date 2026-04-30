@@ -2,11 +2,13 @@
 
 use App\Filament\Pages\BrowseShows;
 use App\Models\DvrSetting;
+use App\Models\Epg;
 use App\Models\EpgProgramme;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Livewire\Livewire;
 
 uses(RefreshDatabase::class);
@@ -16,13 +18,14 @@ beforeEach(function () {
     Cache::flush();
     $this->user = User::factory()->create();
     $this->setting = DvrSetting::factory()->enabled()->for($this->user)->create();
+    $this->epg = Epg::factory()->for($this->user)->create();
     $this->actingAs($this->user);
 });
 
 it('marks show as is_new when any airing has is_new=true', function () {
     Http::fake();
 
-    EpgProgramme::factory()->create([
+    EpgProgramme::factory()->for($this->epg)->create([
         'title' => 'Real Housewives of Beverly Hills',
         'subtitle' => 'Reunion Part 1',
         'season' => 15,
@@ -33,7 +36,7 @@ it('marks show as is_new when any airing has is_new=true', function () {
         'previously_shown' => false,
     ]);
 
-    EpgProgramme::factory()->create([
+    EpgProgramme::factory()->for($this->epg)->create([
         'title' => 'Real Housewives of Beverly Hills',
         'subtitle' => 'Reunion Part 2',
         'season' => 15,
@@ -54,7 +57,7 @@ it('marks show as is_new when any airing has is_new=true', function () {
 it('does not mark season premiere (E01) as new when TVMaze has no data', function () {
     Http::fake();
 
-    EpgProgramme::factory()->create([
+    EpgProgramme::factory()->for($this->epg)->create([
         'title' => 'The Great British Bake Off',
         'subtitle' => 'Episode 1',
         'season' => 10,
@@ -87,7 +90,7 @@ it('marks season premiere (E01) as new when TVMaze reports a recent airdate', fu
         ], 200),
     ]);
 
-    EpgProgramme::factory()->create([
+    EpgProgramme::factory()->for($this->epg)->create([
         'title' => 'The Great British Bake Off',
         'subtitle' => 'Cake Week',
         'season' => 10,
@@ -110,7 +113,7 @@ it('marks season premiere (E01) as new when TVMaze reports a recent airdate', fu
 it('does not mark regular episode (non-E01) as new without SD flag', function () {
     Http::fake();
 
-    EpgProgramme::factory()->create([
+    EpgProgramme::factory()->for($this->epg)->create([
         'title' => 'Breaking Bad',
         'subtitle' => 'Felina',
         'season' => 5,
@@ -142,7 +145,7 @@ it('marks airing as is_new when TVMaze reports a recent airdate', function () {
         ], 200),
     ]);
 
-    EpgProgramme::factory()->create([
+    EpgProgramme::factory()->for($this->epg)->create([
         'title' => 'Breaking Bad',
         'subtitle' => 'Felina',
         'season' => 5,
@@ -176,7 +179,7 @@ it('does not mark airing as is_new when TVMaze reports an old airdate', function
         ], 200),
     ]);
 
-    EpgProgramme::factory()->create([
+    EpgProgramme::factory()->for($this->epg)->create([
         'title' => 'Breaking Bad',
         'subtitle' => 'Felina',
         'season' => 5,
@@ -209,7 +212,7 @@ it('marks description-embedded episode as is_new when TVMaze reports a recent ai
         ], 200),
     ]);
 
-    EpgProgramme::factory()->create([
+    EpgProgramme::factory()->for($this->epg)->create([
         'title' => 'Real Housewives of Beverly Hills',
         'subtitle' => null,
         'season' => null,
@@ -245,7 +248,7 @@ it('makes only one TVMaze request per show title when multiple episodes are pres
         ], 200),
     ]);
 
-    EpgProgramme::factory()->create([
+    EpgProgramme::factory()->for($this->epg)->create([
         'title' => 'Some Show',
         'season' => 1,
         'episode' => 1,
@@ -254,7 +257,7 @@ it('makes only one TVMaze request per show title when multiple episodes are pres
         'is_new' => false,
     ]);
 
-    EpgProgramme::factory()->create([
+    EpgProgramme::factory()->for($this->epg)->create([
         'title' => 'Some Show',
         'season' => 1,
         'episode' => 2,

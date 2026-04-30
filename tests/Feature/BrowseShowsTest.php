@@ -4,6 +4,7 @@ use App\Enums\DvrRuleType;
 use App\Filament\Pages\BrowseShows;
 use App\Models\DvrRecordingRule;
 use App\Models\DvrSetting;
+use App\Models\Epg;
 use App\Models\EpgProgramme;
 use App\Models\User;
 use App\Services\ShowMetadataService;
@@ -17,6 +18,7 @@ beforeEach(function () {
     Queue::fake();
     $this->user = User::factory()->create();
     $this->setting = DvrSetting::factory()->enabled()->for($this->user)->create();
+    $this->epg = Epg::factory()->for($this->user)->create();
     $this->actingAs($this->user);
 });
 
@@ -32,7 +34,7 @@ it('pre-selects the dvr setting when the user has only one', function () {
 });
 
 it('returns grouped shows after calling search', function () {
-    EpgProgramme::factory()->create([
+    EpgProgramme::factory()->for($this->epg)->create([
         'title' => 'The Wire',
         'start_time' => now()->addHours(2),
         'end_time' => now()->addHours(3),
@@ -47,12 +49,12 @@ it('returns grouped shows after calling search', function () {
 });
 
 it('filters search results by keyword', function () {
-    EpgProgramme::factory()->create([
+    EpgProgramme::factory()->for($this->epg)->create([
         'title' => 'The Wire',
         'start_time' => now()->addHours(2),
         'end_time' => now()->addHours(3),
     ]);
-    EpgProgramme::factory()->create([
+    EpgProgramme::factory()->for($this->epg)->create([
         'title' => 'Breaking Bad',
         'start_time' => now()->addHours(2),
         'end_time' => now()->addHours(3),
@@ -73,12 +75,12 @@ it('returns empty shows when no programmes match', function () {
 });
 
 it('counts multiple airings of the same title as one card with correct airing_count', function () {
-    EpgProgramme::factory()->create([
+    EpgProgramme::factory()->for($this->epg)->create([
         'title' => 'The Wire',
         'start_time' => now()->addHours(2),
         'end_time' => now()->addHours(3),
     ]);
-    EpgProgramme::factory()->create([
+    EpgProgramme::factory()->for($this->epg)->create([
         'title' => 'The Wire',
         'start_time' => now()->addHours(5),
         'end_time' => now()->addHours(6),
@@ -92,7 +94,7 @@ it('counts multiple airings of the same title as one card with correct airing_co
 });
 
 it('show card contains expected keys', function () {
-    EpgProgramme::factory()->create([
+    EpgProgramme::factory()->for($this->epg)->create([
         'title' => 'Breaking Bad',
         'start_time' => now()->addHours(2),
         'end_time' => now()->addHours(3),
@@ -118,7 +120,7 @@ it('sets postersLoaded to true after loadPosters', function () {
         ->shouldReceive('resolveEpisodeIsNew')
         ->andReturn([]);
 
-    EpgProgramme::factory()->create([
+    EpgProgramme::factory()->for($this->epg)->create([
         'title' => 'The Wire',
         'start_time' => now()->addHours(2),
         'end_time' => now()->addHours(3),
@@ -140,7 +142,7 @@ it('populates poster_url on shows after loadPosters', function () {
         ->shouldReceive('resolveEpisodeIsNew')
         ->andReturn([]);
 
-    EpgProgramme::factory()->create([
+    EpgProgramme::factory()->for($this->epg)->create([
         'title' => 'The Wire',
         'start_time' => now()->addHours(2),
         'end_time' => now()->addHours(3),
@@ -160,7 +162,7 @@ it('sets postersLoaded true immediately when shows is empty', function () {
 });
 
 it('openShowDetail sets selectedShowTitle and loads detail', function () {
-    EpgProgramme::factory()->create([
+    EpgProgramme::factory()->for($this->epg)->create([
         'title' => 'Breaking Bad',
         'start_time' => now()->addHours(2),
         'end_time' => now()->addHours(3),
@@ -177,12 +179,12 @@ it('openShowDetail sets selectedShowTitle and loads detail', function () {
 });
 
 it('openShowDetail loads airings in selected show detail', function () {
-    EpgProgramme::factory()->create([
+    EpgProgramme::factory()->for($this->epg)->create([
         'title' => 'The Wire',
         'start_time' => now()->addHours(2),
         'end_time' => now()->addHours(3),
     ]);
-    EpgProgramme::factory()->create([
+    EpgProgramme::factory()->for($this->epg)->create([
         'title' => 'The Wire',
         'start_time' => now()->addHours(5),
         'end_time' => now()->addHours(6),
@@ -205,7 +207,7 @@ it('closeShowDetail clears selectedShowTitle and selectedShowDetail', function (
 });
 
 it('quickRecordNextAiring records the first upcoming airing for a title', function () {
-    $programme = EpgProgramme::factory()->create([
+    $programme = EpgProgramme::factory()->for($this->epg)->create([
         'title' => 'Breaking Bad',
         'start_time' => now()->addHours(2),
         'end_time' => now()->addHours(3),
@@ -232,7 +234,7 @@ it('warns when quickRecordNextAiring is called for a title with no airings', fun
 });
 
 it('creates a once rule from a programme', function () {
-    $programme = EpgProgramme::factory()->create([
+    $programme = EpgProgramme::factory()->for($this->epg)->create([
         'title' => 'Special Event',
         'start_time' => now()->addHours(2),
         'end_time' => now()->addHours(3),
@@ -249,7 +251,7 @@ it('creates a once rule from a programme', function () {
 });
 
 it('warns with a notification when a duplicate once rule exists', function () {
-    $programme = EpgProgramme::factory()->create(['title' => 'Special Event']);
+    $programme = EpgProgramme::factory()->for($this->epg)->create(['title' => 'Special Event']);
 
     DvrRecordingRule::factory()->for($this->setting, 'dvrSetting')->for($this->user)->create([
         'type' => DvrRuleType::Once,
@@ -267,7 +269,7 @@ it('warns with a notification when a duplicate once rule exists', function () {
 });
 
 it('warns when recordOnce is called without a dvr setting selected', function () {
-    $programme = EpgProgramme::factory()->create(['title' => 'Special Event']);
+    $programme = EpgProgramme::factory()->for($this->epg)->create(['title' => 'Special Event']);
 
     Livewire::test(BrowseShows::class)
         ->set('dvr_setting_id', null)
@@ -343,7 +345,7 @@ it('warns when recordSeriesWithOptions is called without a dvr setting selected'
 it('paginates results and gotoPage loads a different page', function () {
     // Create 25 programmes with distinct titles to exceed the 20-per-page limit
     foreach (range(1, 25) as $i) {
-        EpgProgramme::factory()->create([
+        EpgProgramme::factory()->for($this->epg)->create([
             'title' => "Show {$i}",
             'start_time' => now()->addHours($i),
             'end_time' => now()->addHours($i + 1),
@@ -360,4 +362,40 @@ it('paginates results and gotoPage loads a different page', function () {
 
     expect($component->get('currentPage'))->toBe(2);
     expect(count($component->get('shows')))->toBe(5);
+});
+
+it('does not return programmes belonging to another user', function () {
+    $otherUser = User::factory()->create();
+    $otherEpg = Epg::factory()->for($otherUser)->create();
+
+    // Programme belonging to another user's EPG
+    EpgProgramme::factory()->for($otherEpg)->create([
+        'title' => 'Other User Show',
+        'start_time' => now()->addHours(2),
+        'end_time' => now()->addHours(3),
+    ]);
+
+    // Programme belonging to the authenticated user's EPG
+    EpgProgramme::factory()->for($this->epg)->create([
+        'title' => 'My Show',
+        'start_time' => now()->addHours(2),
+        'end_time' => now()->addHours(3),
+    ]);
+
+    Livewire::test(BrowseShows::class)
+        ->call('search')
+        ->assertSet('shows', fn (array $shows) => count($shows) === 1
+            && $shows[0]['title'] === 'My Show');
+});
+
+it('ignores another user dvr_setting_id injected into the component', function () {
+    $otherUser = User::factory()->create();
+    $otherSetting = DvrSetting::factory()->enabled()->for($otherUser)->create();
+
+    Livewire::test(BrowseShows::class)
+        ->set('dvr_setting_id', $otherSetting->id)
+        ->call('recordSeriesDefaults', 'Breaking Bad');
+
+    // Rule must not be created because the setting doesn't belong to the auth user
+    expect(DvrRecordingRule::count())->toBe(0);
 });
