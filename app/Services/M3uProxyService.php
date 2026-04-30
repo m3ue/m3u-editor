@@ -152,6 +152,32 @@ class M3uProxyService
     }
 
     /**
+     * Ask the proxy whether a cookies file path exists and is readable on the proxy host.
+     *
+     * @return array{valid: bool, message: string}
+     */
+    public function validateCookiesFilePath(string $path): array
+    {
+        if (empty($this->apiBaseUrl)) {
+            return ['valid' => false, 'message' => 'M3U Proxy base URL is not configured.'];
+        }
+
+        try {
+            $response = Http::timeout(10)->acceptJson()
+                ->withHeaders($this->apiToken ? ['X-API-Token' => $this->apiToken] : [])
+                ->get($this->apiBaseUrl.'/validate-cookies-file', ['path' => $path]);
+
+            if ($response->successful()) {
+                return $response->json();
+            }
+
+            return ['valid' => false, 'message' => 'Proxy returned an unexpected response.'];
+        } catch (Exception $e) {
+            return ['valid' => false, 'message' => 'Unable to reach proxy: '.$e->getMessage()];
+        }
+    }
+
+    /**
      * Get active streams count for a specific playlist using metadata filtering
      */
     public static function getPlaylistActiveStreamsCount($playlist): int
@@ -1911,7 +1937,7 @@ class M3uProxyService
                     'url' => $url,
                     'resolver' => $profile->backend,
                     'resolver_args' => $profile->args ?? '',
-                    'cookies' => $profile->cookies ?: null,
+                    'cookies_path' => $profile->cookies_path ?: null,
                     'metadata' => $metadata,
                 ];
             } else {
