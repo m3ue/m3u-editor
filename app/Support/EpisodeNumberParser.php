@@ -15,7 +15,7 @@ namespace App\Support;
  *                     Used during EPG import where the episode_nums array
  *                     (with system="xmltv_ns" / system="onscreen" tags) is present.
  */
-class EpisodeNumberParser
+final class EpisodeNumberParser
 {
     /**
      * Heuristic parse from a plain episode_num string.

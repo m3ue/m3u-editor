@@ -8,6 +8,7 @@ use Illuminate\Http\Client\Pool;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Throwable;
 
 /**
  * DvrHlsDownloaderService — Downloads HLS manifest + segments from m3u-proxy via HTTP.
@@ -140,7 +141,7 @@ class DvrHlsDownloaderService
             foreach ($batch as $segment) {
                 $response = $responses[$segment];
 
-                if ($response instanceof \Throwable) {
+                if ($response instanceof Throwable) {
                     throw new Exception("Failed to download segment {$segment}: {$response->getMessage()}");
                 }
 

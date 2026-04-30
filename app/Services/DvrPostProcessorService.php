@@ -209,8 +209,13 @@ class DvrPostProcessorService
 
         // ── Step 4: Cleanup local temp dir + proxy broadcast + mark COMPLETED ─
         try {
-            // $livePath is always relative (live/{uuid}) for HTTP-downloaded recordings.
-            Storage::disk($disk)->deleteDirectory($livePath);
+            // HTTP-downloaded recordings use a relative live/{uuid} path; legacy
+            // shared-volume recordings may have an absolute filesystem path.
+            if (str_starts_with($livePath, '/')) {
+                File::deleteDirectory($livePath);
+            } else {
+                Storage::disk($disk)->deleteDirectory($livePath);
+            }
 
             Log::debug('DVR post-processing step 4: local temp directory cleaned up', [
                 'recording_id' => $recording->id,
