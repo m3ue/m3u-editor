@@ -12,7 +12,17 @@ class SerieFileNameService
 {
     public function generateEpisodeFileName(Episode $episode, StreamFileSetting $setting): string
     {
-        $episode->loadMissing(['season.series', 'series']);
+        if (! $episode->relationLoaded('season')) {
+            $episode->load('season');
+        }
+
+        if ($episode->relationLoaded('season') && $episode->getRelation('season') !== null && ! $episode->getRelation('season')->relationLoaded('series')) {
+            $episode->getRelation('season')->load('series');
+        }
+
+        if (! $episode->relationLoaded('series')) {
+            $episode->load('series');
+        }
 
         $format = $setting->episode_format ?: '{title} - S{season}E{episode} - {ep_title}';
         $stats = $this->normaliseStreamStats($episode->stream_stats ?? []);
@@ -52,7 +62,17 @@ class SerieFileNameService
 
     public function generateFullPath(Episode $episode, StreamFileSetting $setting): string
     {
-        $episode->loadMissing(['season.series', 'series']);
+        if (! $episode->relationLoaded('season')) {
+            $episode->load('season');
+        }
+
+        if ($episode->relationLoaded('season') && $episode->getRelation('season') !== null && ! $episode->getRelation('season')->relationLoaded('series')) {
+            $episode->getRelation('season')->load('series');
+        }
+
+        if (! $episode->relationLoaded('series')) {
+            $episode->load('series');
+        }
 
         $serie = $episode->season?->series ?? $episode->series;
 

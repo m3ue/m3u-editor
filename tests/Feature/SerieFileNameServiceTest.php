@@ -5,8 +5,10 @@ use App\Models\Season;
 use App\Models\Series;
 use App\Models\StreamFileSetting;
 use App\Services\SerieFileNameService;
+use Illuminate\Support\Facades\Queue;
 
 beforeEach(function () {
+    Queue::fake();
     $this->service = new SerieFileNameService;
 });
 
@@ -27,12 +29,12 @@ it('generates trash guide episode filenames from the configured format', functio
             'release_group' => 'GROUP',
         ]);
     $setting = new StreamFileSetting([
-        'episode_format' => '{title} - S{season}E{episode} - {ep_title}{quality}{audio}{video}{-group}',
+        'episode_format' => '{title} - S{season}E{episode} - {ep_title} {quality} {audio} {video}{-group}',
     ]);
 
     $fileName = $this->service->generateEpisodeFileName($episode, $setting);
 
-    expect($fileName)->toBe('Show Name Special - S01E01 - Pilot Part One 1080p EAC3 5.1 x265-GROUP');
+    expect($fileName)->toBe('Show Name Special - S01E01 - Pilot Part One 1080p E-AC-3 5.1 H.265-GROUP');
 });
 
 it('generates season and serie folder names', function () {
