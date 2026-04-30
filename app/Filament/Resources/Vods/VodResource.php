@@ -1571,8 +1571,8 @@ class VodResource extends Resource implements CopilotResource
                         ->hint(fn (Get $get, $record): string => ($get('enable_proxy') || $record?->playlist?->enable_proxy) ? 'Proxied' : 'Not proxied')
                         ->hintIcon(fn (Get $get, $record): string => ($get('enable_proxy') || $record?->playlist?->enable_proxy) ? 'heroicon-m-lock-closed' : 'heroicon-m-lock-open')
                         ->helperText(fn ($record): string => $record?->playlist?->enable_proxy
-                            ? 'Proxy is enabled on the parent playlist. All channels in this playlist are already proxied. You can still select a stream profile override below.'
-                            : 'When enabled, all streams will be proxied through the application. This allows for better compatibility with various clients and enables features such as stream limiting and output format selection.')
+                            ? __('Proxy is enabled on the parent playlist. All channels in this playlist are already proxied. You can still select a stream profile override below.')
+                            : __('When enabled, this stream will be proxied through the application. This allows for better compatibility with various clients and enables features such as output format selection.'))
                         ->disabled(fn ($record): bool => (bool) ($record?->playlist?->enable_proxy ?? false))
                         ->dehydrated()
                         ->inline(false)
