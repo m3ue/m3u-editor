@@ -10,6 +10,7 @@ use App\Models\StrmFileMapping;
 use App\Models\User;
 use App\Services\NfoService;
 use App\Services\PlaylistService;
+use App\Services\SportsPathBuilder;
 use App\Settings\GeneralSettings;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -435,6 +436,7 @@ class SyncSeriesStrmFiles implements ShouldQueue
         }
 
         $playlist = $series->playlist;
+        $sportsPathBuilder = app(SportsPathBuilder::class);
         try {
             // Resolve settings with priority chain: Series > Category > Global Profile > Legacy Settings
             $sync_settings = $this->resolveSeriesSyncSettings($series, $settings);
@@ -509,6 +511,7 @@ class SyncSeriesStrmFiles implements ShouldQueue
             $replaceChar = $sync_settings['replace_char'] ?? 'space';
             $cleanSpecialChars = $sync_settings['clean_special_chars'] ?? false;
             $tmdbIdFormat = $sync_settings['tmdb_id_format'] ?? 'square';
+            $isSportsSchema = ($sync_settings['type'] ?? null) === 'sports';
 
             // Get filename metadata settings early so folder/episode naming can respect TMDB target settings
             $filenameMetadata = $sync_settings['filename_metadata'] ?? [];
@@ -533,77 +536,93 @@ class SyncSeriesStrmFiles implements ShouldQueue
                 return trim($name);
             };
 
-            // See if the category is enabled, if not, skip, else create the folder
-            if (in_array('category', $pathStructure)) {
-                // Create the category folder
-                // Remove any special characters from the category name
-                $category = $series->category;
-                $catName = $category?->name ?? $category?->name_internal ?? 'Uncategorized';
-                // Apply name filtering
-                $catName = $applyNameFilter($catName);
-                $cleanName = $cleanSpecialChars
-                    ? PlaylistService::makeFilesystemSafe($catName, $replaceChar)
-                    : PlaylistService::makeFilesystemSafe($catName);
-                $path .= '/'.$cleanName;
-            }
+            $category = $series->category;
+            if ($isSportsSchema) {
+                $leagueName = $applyNameFilter($sportsPathBuilder->resolveLeagueForSeries($series, $sync_settings));
 
-            // See if the series is enabled, if not, skip, else create the folder
-            if (in_array('series', $pathStructure)) {
-                // Create the series folder with Trash Guides format support
-                // Remove any special characters from the series name
-                $seriesName = $applyNameFilter($series->name);
-                $seriesFolder = $seriesName;
-
-                // Add year to folder name if available
-                if (! empty($series->release_date)) {
-                    $year = substr($series->release_date, 0, 4);
-                    if (strpos($seriesFolder, "({$year})") === false) {
-                        $seriesFolder .= " ({$year})";
-                    }
+                if (in_array('league', $pathStructure, true)) {
+                    $cleanLeagueName = $cleanSpecialChars
+                        ? PlaylistService::makeFilesystemSafe($leagueName, $replaceChar)
+                        : PlaylistService::makeFilesystemSafe($leagueName);
+                    $path .= '/'.$cleanLeagueName;
                 }
 
-                // Add TVDB/TMDB/IMDB ID to folder name for Trash Guides compatibility.
-                // TMDB is only included in series folder names when explicitly enabled via tmdb_id_apply_to.
-                // Check dedicated columns first, then fall back to metadata JSON for legacy support
-                $ids = $series->getMovieDbIds();
-                $tvdbId = $ids['tvdb'] ?? null;
-                $tmdbId = $ids['tmdb'] ?? null;
-                $imdbId = $ids['imdb'] ?? null;
-
-                // Ensure IDs are scalar values (not arrays)
-                $tvdbId = is_scalar($tvdbId) ? $tvdbId : null;
-                $tmdbId = is_scalar($tmdbId) ? $tmdbId : null;
-                $imdbId = is_scalar($imdbId) ? $imdbId : null;
-
-                // Determine bracket style based on settings
-                $bracket = $tmdbIdFormat === 'curly' ? ['{', '}'] : ['[', ']'];
-
-                // When applying TMDB ID to the series folder and the series has no IDs,
-                // fall back to the first episode's TMDB ID
-                if ($applyTmdbToSeriesFolder && empty($tvdbId) && empty($tmdbId) && empty($imdbId)) {
-                    $firstEpisode = $episodes->first();
-                    if ($firstEpisode) {
-                        $epInfo = $firstEpisode->info ?? [];
-                        $fallbackTmdb = $firstEpisode->tmdb_id ?? $epInfo['tmdb_id'] ?? $epInfo['tmdb'] ?? null;
-                        $tmdbId = \is_scalar($fallbackTmdb) ? $fallbackTmdb : null;
-                    }
+                $sportsSeasonYear = $sportsPathBuilder->resolveSeasonYearForEpisode($episodes->first(), $series, $sync_settings);
+                if (in_array('season', $pathStructure, true)) {
+                    $path .= '/Season '.$sportsSeasonYear;
+                }
+            } else {
+                // See if the category is enabled, if not, skip, else create the folder
+                if (in_array('category', $pathStructure)) {
+                    // Create the category folder
+                    // Remove any special characters from the category name
+                    $catName = $category?->name ?? $category?->name_internal ?? 'Uncategorized';
+                    // Apply name filtering
+                    $catName = $applyNameFilter($catName);
+                    $cleanName = $cleanSpecialChars
+                        ? PlaylistService::makeFilesystemSafe($catName, $replaceChar)
+                        : PlaylistService::makeFilesystemSafe($catName);
+                    $path .= '/'.$cleanName;
                 }
 
-                // Add TMDB/TVDB/IMDB ID to series folder name if enabled and available (TMDB only if tmdb_id_apply_to includes series)
-                if ($applyTmdbToSeriesFolder) {
-                    if (! empty($tmdbId)) {
-                        $seriesFolder .= " {$bracket[0]}tmdb-{$tmdbId}{$bracket[1]}";
-                    } elseif (! empty($tvdbId)) {
-                        $seriesFolder .= " {$bracket[0]}tvdb-{$tvdbId}{$bracket[1]}";
-                    } elseif (! empty($imdbId)) {
-                        $seriesFolder .= " {$bracket[0]}imdb-{$imdbId}{$bracket[1]}";
-                    }
-                }
+                // See if the series is enabled, if not, skip, else create the folder
+                if (in_array('series', $pathStructure)) {
+                    // Create the series folder with Trash Guides format support
+                    // Remove any special characters from the series name
+                    $seriesName = $applyNameFilter($series->name);
+                    $seriesFolder = $seriesName;
 
-                $cleanName = $cleanSpecialChars
-                    ? PlaylistService::makeFilesystemSafe($seriesFolder, $replaceChar)
-                    : PlaylistService::makeFilesystemSafe($seriesFolder);
-                $path .= '/'.$cleanName;
+                    // Add year to folder name if available
+                    if (! empty($series->release_date)) {
+                        $year = substr($series->release_date, 0, 4);
+                        if (strpos($seriesFolder, "({$year})") === false) {
+                            $seriesFolder .= " ({$year})";
+                        }
+                    }
+
+                    // Add TVDB/TMDB/IMDB ID to folder name for Trash Guides compatibility.
+                    // TMDB is only included in series folder names when explicitly enabled via tmdb_id_apply_to.
+                    // Check dedicated columns first, then fall back to metadata JSON for legacy support
+                    $ids = $series->getMovieDbIds();
+                    $tvdbId = $ids['tvdb'] ?? null;
+                    $tmdbId = $ids['tmdb'] ?? null;
+                    $imdbId = $ids['imdb'] ?? null;
+
+                    // Ensure IDs are scalar values (not arrays)
+                    $tvdbId = is_scalar($tvdbId) ? $tvdbId : null;
+                    $tmdbId = is_scalar($tmdbId) ? $tmdbId : null;
+                    $imdbId = is_scalar($imdbId) ? $imdbId : null;
+
+                    // Determine bracket style based on settings
+                    $bracket = $tmdbIdFormat === 'curly' ? ['{', '}'] : ['[', ']'];
+
+                    // When applying TMDB ID to the series folder and the series has no IDs,
+                    // fall back to the first episode's TMDB ID
+                    if ($applyTmdbToSeriesFolder && empty($tvdbId) && empty($tmdbId) && empty($imdbId)) {
+                        $firstEpisode = $episodes->first();
+                        if ($firstEpisode) {
+                            $epInfo = $firstEpisode->info ?? [];
+                            $fallbackTmdb = $firstEpisode->tmdb_id ?? $epInfo['tmdb_id'] ?? $epInfo['tmdb'] ?? null;
+                            $tmdbId = \is_scalar($fallbackTmdb) ? $fallbackTmdb : null;
+                        }
+                    }
+
+                    // Add TMDB/TVDB/IMDB ID to series folder name if enabled and available (TMDB only if tmdb_id_apply_to includes series)
+                    if ($applyTmdbToSeriesFolder) {
+                        if (! empty($tmdbId)) {
+                            $seriesFolder .= " {$bracket[0]}tmdb-{$tmdbId}{$bracket[1]}";
+                        } elseif (! empty($tvdbId)) {
+                            $seriesFolder .= " {$bracket[0]}tvdb-{$tvdbId}{$bracket[1]}";
+                        } elseif (! empty($imdbId)) {
+                            $seriesFolder .= " {$bracket[0]}imdb-{$imdbId}{$bracket[1]}";
+                        }
+                    }
+
+                    $cleanName = $cleanSpecialChars
+                        ? PlaylistService::makeFilesystemSafe($seriesFolder, $replaceChar)
+                        : PlaylistService::makeFilesystemSafe($seriesFolder);
+                    $path .= '/'.$cleanName;
+                }
             }
 
             // Track the series folder path for tvshow.nfo generation
@@ -614,11 +633,10 @@ class SyncSeriesStrmFiles implements ShouldQueue
 
             // NFO generation setting - instantiate service once if needed
             $generateNfo = $sync_settings['generate_nfo'] ?? false;
-            $nfoService = null;
+            $nfoService = $generateNfo ? app(NfoService::class) : null;
 
             // Early NFO generation for series-level tvshow.nfo
-            if ($generateNfo) {
-                $nfoService = app(NfoService::class);
+            if ($nfoService && ! $isSportsSchema) {
                 // Generate tvshow.nfo for the series if NFO generation is enabled
                 // This should be at the series folder level (or base path if no series folder)
                 // Pass name filter settings for consistent title filtering
@@ -630,6 +648,7 @@ class SyncSeriesStrmFiles implements ShouldQueue
             $seriesMetadata = $series->metadata ?? [];
             $playlistUser = $playlist?->user;
             $playlistUuid = $playlist?->uuid;
+            $sportsEpisodeCounters = [];
 
             if (! $playlistUser || ! $playlistUuid) {
                 Log::warning('STRM Sync: Series has no associated playlist user, skipping episode URL generation', [
@@ -642,6 +661,96 @@ class SyncSeriesStrmFiles implements ShouldQueue
 
             // Loop through each episode
             foreach ($episodes as $ep) {
+                if ($isSportsSchema) {
+                    $sportsLeagueName = $applyNameFilter($sportsPathBuilder->resolveLeagueForSeries($series, $sync_settings));
+                    $sportsSeasonYear = $sportsPathBuilder->resolveSeasonYearForEpisode($ep, $series, $sync_settings);
+                    $sportsEventDate = $sportsPathBuilder->resolveEventDateForEpisode($ep);
+
+                    $counterKey = mb_strtolower(trim($sportsLeagueName)).':'.$sportsSeasonYear;
+                    $sportsEpisodeCounters[$counterKey] = ($sportsEpisodeCounters[$counterKey] ?? 0) + 1;
+
+                    $episodeCode = $sportsPathBuilder->buildEpisodeCode(
+                        $sportsSeasonYear,
+                        $sportsEpisodeCounters[$counterKey],
+                        $sync_settings['sports_episode_strategy'] ?? 'sequential_per_season',
+                        $sportsEventDate,
+                        $ep->episode_num,
+                    );
+
+                    $eventTitle = $applyNameFilter((string) ($ep->title ?? 'Event'));
+                    $fileName = ($sync_settings['sports_repeat_league_in_filename'] ?? true)
+                        ? "{$sportsLeagueName} {$episodeCode}"
+                        : $episodeCode;
+
+                    if (($sync_settings['sports_include_event_title'] ?? true) && $eventTitle !== '') {
+                        $fileName .= ' '.$eventTitle;
+                    }
+
+                    $fileName = $cleanSpecialChars
+                        ? PlaylistService::makeFilesystemSafe($fileName, $replaceChar)
+                        : PlaylistService::makeFilesystemSafe($fileName);
+
+                    if ($removeConsecutiveChars && $replaceChar !== 'remove') {
+                        $char = $replaceChar === 'space' ? ' ' : ($replaceChar === 'dash' ? '-' : ($replaceChar === 'underscore' ? '_' : '.'));
+                        $fileName = preg_replace('/'.preg_quote($char, '/').'{2,}/', $char, $fileName);
+                    }
+
+                    $fileName = "{$fileName}.strm";
+                    $filePath = $path.'/'.$fileName;
+
+                    $useOriginalUrl = ($sync_settings['url_type'] ?? 'proxy') === 'original';
+                    if ($useOriginalUrl) {
+                        $url = $ep->url;
+                    } else {
+                        $containerExtension = $ep->container_extension ?? 'mp4';
+                        $url = rtrim("/series/{$playlistUser->name}/{$playlistUuid}/".$ep->id.'.'.$containerExtension, '.');
+                        $url = PlaylistService::getBaseUrl($url);
+                    }
+
+                    $pathOptions = [
+                        'path_structure' => $pathStructure,
+                        'sports_league_source' => $sync_settings['sports_league_source'] ?? 'series_name',
+                        'sports_season_source' => $sync_settings['sports_season_source'] ?? 'title_year',
+                        'sports_episode_strategy' => $sync_settings['sports_episode_strategy'] ?? 'sequential_per_season',
+                        'sports_repeat_league_in_filename' => $sync_settings['sports_repeat_league_in_filename'] ?? true,
+                        'sports_include_event_title' => $sync_settings['sports_include_event_title'] ?? true,
+                        'clean_special_chars' => $cleanSpecialChars,
+                        'replace_char' => $replaceChar,
+                        'remove_consecutive_chars' => $removeConsecutiveChars,
+                        'name_filter_enabled' => $nameFilterEnabled,
+                        'name_filter_patterns' => $nameFilterPatterns,
+                    ];
+
+                    $episodeMapping = StrmFileMapping::syncFileWithCache(
+                        $ep,
+                        $syncLocation,
+                        $filePath,
+                        $url,
+                        $pathOptions,
+                        $mappingCache
+                    );
+
+                    if ($nfoService) {
+                        $leagueFolderPath = $path;
+                        if (in_array('season', $pathStructure, true)) {
+                            $leagueFolderPath = dirname($path);
+                        }
+
+                        $nfoService->generateSportsLeagueNfo($sportsLeagueName, $sportsSeasonYear, $leagueFolderPath);
+                        $nfoService->generateSportsEventNfoFromEpisode(
+                            $ep,
+                            $series,
+                            $filePath,
+                            $sportsLeagueName,
+                            $sportsSeasonYear,
+                            $sportsEpisodeCounters[$counterKey],
+                            $episodeMapping,
+                        );
+                    }
+
+                    continue;
+                }
+
                 // Setup episode prefix
                 $season = $ep->season;
                 $num = str_pad($ep->episode_num, 2, '0', STR_PAD_LEFT);

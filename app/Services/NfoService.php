@@ -10,6 +10,112 @@ use Illuminate\Support\Facades\Log;
 
 class NfoService
 {
+    public function generateSportsLeagueNfo(string $league, int $seasonYear, string $path, ?StrmFileMapping $mapping = null): bool
+    {
+        try {
+            $xml = $this->startXml('tvshow');
+            $xml .= $this->xmlElement('title', $league);
+            $xml .= $this->xmlElement('originaltitle', $league);
+            $xml .= $this->xmlElement('sorttitle', $league);
+            $xml .= $this->xmlElement('genre', 'Sport');
+            $xml .= $this->xmlElement('studio', $league);
+            $xml .= $this->xmlElement('year', $seasonYear);
+            $xml .= $this->xmlElement('premiered', sprintf('%d-01-01', $seasonYear));
+            $xml .= $this->endXml('tvshow');
+
+            $filePath = rtrim($path, '/').'/tvshow.nfo';
+
+            return $this->writeFileWithHash($filePath, $xml, $mapping);
+        } catch (\Throwable $e) {
+            Log::error("NfoService: Error generating sports league NFO for {$league}: {$e->getMessage()}");
+
+            return false;
+        }
+    }
+
+    public function generateSportsEventNfoFromChannel(Channel $channel, string $filePath, string $league, int $seasonYear, int $episodeNumber, ?StrmFileMapping $mapping = null): bool
+    {
+        try {
+            $info = $channel->info ?? [];
+            $title = (string) ($channel->title_custom ?? $channel->title ?? 'Event');
+            $aired = $info['air_date'] ?? $info['releasedate'] ?? $info['release_date'] ?? null;
+
+            $xml = $this->startXml('episodedetails');
+            $xml .= $this->xmlElement('title', $title);
+            $xml .= $this->xmlElement('showtitle', $league);
+            $xml .= $this->xmlElement('genre', 'Sport');
+            $xml .= $this->xmlElement('studio', $league);
+            $xml .= $this->xmlElement('season', $seasonYear);
+            $xml .= $this->xmlElement('episode', $episodeNumber);
+
+            if (is_string($aired) && $aired !== '') {
+                $xml .= $this->xmlElement('aired', $aired);
+                $xml .= $this->xmlElement('premiered', $aired);
+            }
+
+            if (! empty($info['plot']) && is_string($info['plot'])) {
+                $xml .= $this->xmlElement('plot', $info['plot']);
+            }
+
+            if (! empty($info['thumb']) && is_string($info['thumb'])) {
+                $xml .= $this->xmlElement('thumb', $info['thumb']);
+            }
+
+            $xml .= $this->endXml('episodedetails');
+
+            $nfoPath = preg_replace('/\.strm$/i', '.nfo', $filePath);
+
+            return $this->writeFileWithHash($nfoPath, $xml, $mapping);
+        } catch (\Throwable $e) {
+            Log::error("NfoService: Error generating sports event NFO for {$channel->title}: {$e->getMessage()}");
+
+            return false;
+        }
+    }
+
+    public function generateSportsEventNfoFromEpisode(Episode $episode, Series $series, string $filePath, string $league, int $seasonYear, int $episodeNumber, ?StrmFileMapping $mapping = null): bool
+    {
+        try {
+            $info = $episode->info ?? [];
+            $title = (string) ($episode->title ?? 'Event');
+            $aired = $info['air_date'] ?? $info['releasedate'] ?? null;
+
+            $xml = $this->startXml('episodedetails');
+            $xml .= $this->xmlElement('title', $title);
+            $xml .= $this->xmlElement('showtitle', $league);
+            $xml .= $this->xmlElement('genre', 'Sport');
+            $xml .= $this->xmlElement('studio', $league);
+            $xml .= $this->xmlElement('season', $seasonYear);
+            $xml .= $this->xmlElement('episode', $episodeNumber);
+
+            if (is_string($aired) && $aired !== '') {
+                $xml .= $this->xmlElement('aired', $aired);
+                $xml .= $this->xmlElement('premiered', $aired);
+            }
+
+            if (! empty($info['plot']) && is_string($info['plot'])) {
+                $xml .= $this->xmlElement('plot', $info['plot']);
+            }
+
+            if (! empty($info['still_path']) && is_string($info['still_path'])) {
+                $thumbUrl = str_starts_with($info['still_path'], 'http')
+                    ? $info['still_path']
+                    : 'https://image.tmdb.org/t/p/original'.$info['still_path'];
+                $xml .= $this->xmlElement('thumb', $thumbUrl);
+            }
+
+            $xml .= $this->endXml('episodedetails');
+
+            $nfoPath = preg_replace('/\.strm$/i', '.nfo', $filePath);
+
+            return $this->writeFileWithHash($nfoPath, $xml, $mapping);
+        } catch (\Throwable $e) {
+            Log::error("NfoService: Error generating sports event NFO for {$series->name}/{$episode->title}: {$e->getMessage()}");
+
+            return false;
+        }
+    }
+
     /**
      * Generate a tvshow.nfo file for a series (Kodi/Emby/Jellyfin format)
      *

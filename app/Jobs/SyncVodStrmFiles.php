@@ -10,6 +10,7 @@ use App\Models\StrmFileMapping;
 use App\Models\User;
 use App\Services\NfoService;
 use App\Services\PlaylistService;
+use App\Services\SportsPathBuilder;
 use App\Settings\GeneralSettings;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -31,6 +32,11 @@ class SyncVodStrmFiles implements ShouldQueue
      * Track sync locations that were processed for deferred cleanup
      */
     protected array $processedSyncLocations = [];
+
+    /**
+     * Sequence counters for sports filenames keyed by league + season.
+     */
+    protected array $sportsEpisodeCounters = [];
 
     /**
      * Batch size for processing VOD STRM files.
@@ -235,6 +241,8 @@ class SyncVodStrmFiles implements ShouldQueue
         // Get the default sync location for bulk mapping cache
         $defaultSyncLocation = $globalStreamFileSetting?->location ?? $settings->vod_stream_file_sync_location ?? '';
 
+        $sportsPathBuilder = app(SportsPathBuilder::class);
+
         // PERFORMANCE OPTIMIZATION: Bulk load all existing mappings for these channels
         // This reduces N queries (one per channel) to 1 query for all channels
         $syncLocation = rtrim($defaultSyncLocation, '/');
@@ -297,6 +305,7 @@ class SyncVodStrmFiles implements ShouldQueue
             $folderMetadata = $sync_settings['folder_metadata'] ?? [];
             $tmdbIdFormat = $sync_settings['tmdb_id_format'] ?? 'square';
             $removeConsecutiveChars = $sync_settings['remove_consecutive_chars'] ?? false;
+            $isSportsSchema = ($sync_settings['type'] ?? null) === 'sports';
 
             // Get name filtering settings
             $nameFilterEnabled = $sync_settings['name_filter_enabled'] ?? false;
@@ -313,6 +322,111 @@ class SyncVodStrmFiles implements ShouldQueue
 
                 return trim($name);
             };
+
+            if ($isSportsSchema) {
+                $leagueName = $applyNameFilter($sportsPathBuilder->resolveLeagueForChannel($channel, $sync_settings));
+                $seasonYear = $sportsPathBuilder->resolveSeasonYearForChannel($channel, $sync_settings);
+                $eventDate = $sportsPathBuilder->resolveEventDateForChannel($channel);
+                $counterKey = mb_strtolower(trim($leagueName)).':'.$seasonYear;
+                $this->sportsEpisodeCounters[$counterKey] = ($this->sportsEpisodeCounters[$counterKey] ?? 0) + 1;
+
+                $episodeCode = $sportsPathBuilder->buildEpisodeCode(
+                    $seasonYear,
+                    $this->sportsEpisodeCounters[$counterKey],
+                    $sync_settings['sports_episode_strategy'] ?? 'sequential_per_season',
+                    $eventDate,
+                );
+
+                $path = $syncLocation;
+                $pathStructure = $sync_settings['path_structure'] ?? ['league', 'season'];
+
+                if (in_array('league', $pathStructure, true)) {
+                    $leagueFolder = $cleanSpecialChars
+                        ? PlaylistService::makeFilesystemSafe($leagueName, $replaceChar)
+                        : PlaylistService::makeFilesystemSafe($leagueName);
+                    $path .= '/'.$leagueFolder;
+                }
+
+                if (in_array('season', $pathStructure, true)) {
+                    $path .= '/Season '.$seasonYear;
+                }
+
+                $eventTitle = $applyNameFilter((string) ($channel->title_custom ?? $channel->title ?? 'Event'));
+                $fileName = ($sync_settings['sports_repeat_league_in_filename'] ?? true)
+                    ? "{$leagueName} {$episodeCode}"
+                    : $episodeCode;
+
+                if (($sync_settings['sports_include_event_title'] ?? true) && $eventTitle !== '') {
+                    $fileName .= ' '.$eventTitle;
+                }
+
+                $fileName = $cleanSpecialChars
+                    ? PlaylistService::makeFilesystemSafe($fileName, $replaceChar)
+                    : PlaylistService::makeFilesystemSafe($fileName);
+
+                if ($removeConsecutiveChars && $replaceChar !== 'remove') {
+                    $char = $replaceChar === 'space' ? ' ' : ($replaceChar === 'dash' ? '-' : ($replaceChar === 'underscore' ? '_' : '.'));
+                    $fileName = preg_replace('/'.preg_quote($char, '/').'{2,}/', $char, $fileName);
+                }
+
+                $filePath = $path.'/'.$fileName.'.strm';
+
+                $useOriginalUrl = ($sync_settings['url_type'] ?? 'proxy') === 'original';
+                if ($useOriginalUrl) {
+                    $url = $channel->url_custom ?? $channel->url;
+                } else {
+                    $playlist = $this->playlist ?? $channel->getEffectivePlaylist();
+                    $extension = $channel->container_extension ?? 'mkv';
+                    $url = rtrim("/movie/{$playlist->user->name}/{$playlist->uuid}/".$channel->id.'.'.$extension, '.');
+                    $url = PlaylistService::getBaseUrl($url);
+                }
+
+                $pathOptions = [
+                    'path_structure' => $pathStructure,
+                    'sports_league_source' => $sync_settings['sports_league_source'] ?? 'group',
+                    'sports_season_source' => $sync_settings['sports_season_source'] ?? 'title_year',
+                    'sports_episode_strategy' => $sync_settings['sports_episode_strategy'] ?? 'sequential_per_season',
+                    'sports_repeat_league_in_filename' => $sync_settings['sports_repeat_league_in_filename'] ?? true,
+                    'sports_include_event_title' => $sync_settings['sports_include_event_title'] ?? true,
+                    'clean_special_chars' => $cleanSpecialChars,
+                    'replace_char' => $replaceChar,
+                    'remove_consecutive_chars' => $removeConsecutiveChars,
+                    'name_filter_enabled' => $nameFilterEnabled,
+                    'name_filter_patterns' => $nameFilterPatterns,
+                ];
+
+                $channelMapping = StrmFileMapping::syncFileWithCache(
+                    $channel,
+                    $syncLocation,
+                    $filePath,
+                    $url,
+                    $pathOptions,
+                    $mappingCache
+                );
+
+                if ($nfoService) {
+                    $leagueFolderPath = $path;
+                    if (in_array('season', $pathStructure, true)) {
+                        $leagueFolderPath = dirname($path);
+                    }
+
+                    $nfoService->generateSportsLeagueNfo($leagueName, $seasonYear, $leagueFolderPath);
+                    $nfoService->generateSportsEventNfoFromChannel(
+                        $channel,
+                        $filePath,
+                        $leagueName,
+                        $seasonYear,
+                        $this->sportsEpisodeCounters[$counterKey],
+                        $channelMapping,
+                    );
+                }
+
+                if (! in_array($syncLocation, $this->processedSyncLocations, true)) {
+                    $this->processedSyncLocations[] = $syncLocation;
+                }
+
+                continue;
+            }
 
             // Create the group folder if enabled
             $groupModel = $channel->relationLoaded('group')
