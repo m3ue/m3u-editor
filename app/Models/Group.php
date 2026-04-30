@@ -21,6 +21,7 @@ class Group extends Model
         'id' => 'integer',
         'user_id' => 'integer',
         'playlist_id' => 'integer',
+        'stream_profile_id' => 'integer',
     ];
 
     public function user(): BelongsTo
@@ -36,6 +37,11 @@ class Group extends Model
     public function streamFileSetting(): BelongsTo
     {
         return $this->belongsTo(StreamFileSetting::class);
+    }
+
+    public function streamProfile(): BelongsTo
+    {
+        return $this->belongsTo(StreamProfile::class);
     }
 
     public function channels(): HasMany
