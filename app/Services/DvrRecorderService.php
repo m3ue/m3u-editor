@@ -190,7 +190,9 @@ class DvrRecorderService
         $update = [
             'status' => DvrRecordingStatus::PostProcessing->value,
             'actual_end' => now(),
-            'proxy_network_id' => null,
+            // proxy_network_id is intentionally preserved here — DvrPostProcessorService
+            // uses it to download HLS segments from the proxy via HTTP and clears it
+            // itself once the download and cleanup are complete.
         ];
 
         if ($hlsDir) {

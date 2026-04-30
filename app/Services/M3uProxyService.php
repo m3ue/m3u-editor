@@ -2714,4 +2714,39 @@ class M3uProxyService
 
         return null;
     }
+
+    /**
+     * Delete a completed DVR broadcast from the proxy, freeing its HLS segment storage.
+     *
+     * Called by DvrPostProcessorService after segments have been downloaded and concatenated.
+     * Failures are logged and swallowed — the recording is already complete at this point.
+     */
+    public function cleanupDvrBroadcast(string $networkId): bool
+    {
+        if (empty($this->apiBaseUrl)) {
+            return false;
+        }
+
+        try {
+            $endpoint = $this->apiBaseUrl.'/broadcast/'.rawurlencode($networkId);
+            $response = Http::timeout(10)
+                ->acceptJson()
+                ->withHeaders($this->apiToken ? ['X-API-Token' => $this->apiToken] : [])
+                ->delete($endpoint);
+
+            if ($response->successful()) {
+                Log::debug("DVR broadcast {$networkId} cleaned up on proxy");
+
+                return true;
+            }
+
+            Log::warning("Failed to cleanup DVR broadcast {$networkId} on proxy: HTTP {$response->status()}");
+
+            return false;
+        } catch (Exception $e) {
+            Log::warning("DVR: Could not cleanup broadcast {$networkId} on proxy: {$e->getMessage()}");
+
+            return false;
+        }
+    }
 }

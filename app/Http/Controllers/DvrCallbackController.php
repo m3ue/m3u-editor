@@ -88,7 +88,9 @@ class DvrCallbackController extends Controller
 
         $updateData = [
             'status' => DvrRecordingStatus::PostProcessing->value,
-            'proxy_network_id' => null,
+            // proxy_network_id is intentionally preserved here — DvrPostProcessorService
+            // uses it to download HLS segments from the proxy via HTTP and clears it
+            // itself once the download and cleanup are complete.
         ];
 
         // Preserve actual_end if already set by finalizeStop(); set it now if not.
@@ -96,8 +98,9 @@ class DvrCallbackController extends Controller
             $updateData['actual_end'] = now();
         }
 
-        // Always store hls_dir from the callback — finalizeStop() doesn't know the path.
-        if ($hlsDir) {
+        // Store hls_dir from the callback for legacy shared-volume deployments that
+        // don't use the HTTP-download path (i.e. when proxy_network_id is absent).
+        if ($hlsDir && ! $recording->proxy_network_id) {
             $updateData['temp_path'] = $hlsDir;
         }
 

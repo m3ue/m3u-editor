@@ -8,6 +8,7 @@ use App\Jobs\EnrichDvrMetadata;
 use App\Jobs\IntegrateDvrRecordingToVod;
 use App\Models\DvrRecording;
 use Exception;
+use Filament\Notifications\Notification;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -16,13 +17,19 @@ use Illuminate\Support\Facades\Storage;
  * DvrPostProcessorService — Runs after ffmpeg stops.
  *
  * Pipeline:
- *   Step 1 (FATAL)     — Concatenate HLS segments → single .mp4 file via ffmpeg
- *   Step 2 (non-fatal) — Move file to final library path, update DB
+ *   Step 0 (FATAL)     — Download HLS manifest + segments from proxy via HTTP (if proxy_network_id set)
+ *   Step 1 (FATAL)     — Concatenate HLS segments → single output file via ffmpeg
+ *   Step 2 (non-fatal) — Update DB with file location + size
  *   Step 3 (non-fatal) — Dispatch EnrichDvrMetadata or IntegrateDvrRecordingToVod
- *   Step 4             — Cleanup live/ temp dir, update DB to COMPLETED
+ *   Step 4             — Cleanup local temp dir + proxy broadcast, update DB to COMPLETED
  */
 class DvrPostProcessorService
 {
+    public function __construct(
+        protected DvrHlsDownloaderService $downloader,
+        protected M3uProxyService $proxy,
+    ) {}
+
     /**
      * Run the full post-processing pipeline for a recording.
      */
@@ -51,18 +58,38 @@ class DvrPostProcessorService
         }
 
         $disk = $setting->storage_disk ?: config('dvr.storage_disk');
-        $livePath = $recording->temp_path ?? 'live/'.$recording->uuid;
+        $livePath = 'live/'.$recording->uuid;
 
-        // The proxy callback sends temp_path as an absolute filesystem path.
-        // Resolve the manifest path appropriately: absolute paths are used directly,
-        // relative paths are resolved through the storage disk.
-        if ($recording->temp_manifest_path) {
-            $m3u8FullPath = $recording->temp_manifest_path;
-        } elseif (str_starts_with($livePath, '/')) {
-            // Absolute path from proxy callback — the broadcast manager uses live.m3u8
-            $m3u8FullPath = rtrim($livePath, '/').'/'.'live.m3u8';
+        // ── Step 0: Download HLS files from proxy via HTTP ───────────────────
+        // The proxy stores HLS segments inside its own container; we fetch them
+        // over HTTP rather than relying on a shared filesystem.
+        if ($recording->proxy_network_id) {
+            $this->setStep($recording, 'Downloading HLS segments from proxy');
+
+            try {
+                $m3u8FullPath = $this->downloader->download($recording, $disk);
+
+                Log::info('DVR post-processing step 0 complete: HLS downloaded', [
+                    'recording_id' => $recording->id,
+                    'manifest_path' => $m3u8FullPath,
+                ]);
+            } catch (Exception $e) {
+                $this->markFailed($recording, "HLS download failed: {$e->getMessage()}");
+
+                return;
+            }
         } else {
-            $m3u8FullPath = Storage::disk($disk)->path($livePath.'/live.m3u8');
+            // No proxy_network_id — recording predates the HTTP-download flow,
+            // or stop() was called without a known broadcast. Fall back to
+            // looking for files already on the local disk.
+            if ($recording->temp_manifest_path) {
+                $m3u8FullPath = $recording->temp_manifest_path;
+            } elseif ($recording->temp_path && str_starts_with($recording->temp_path, '/')) {
+                // Absolute path from proxy callback (shared-volume deployment)
+                $m3u8FullPath = rtrim($recording->temp_path, '/').'/live.m3u8';
+            } else {
+                $m3u8FullPath = Storage::disk($disk)->path($livePath.'/live.m3u8');
+            }
         }
 
         Log::debug('DVR post-processing: locating HLS manifest', [
@@ -87,7 +114,7 @@ class DvrPostProcessorService
             }
         }
 
-        // ── Step 1: Concatenate HLS → single .mp4 ───────────────────────────
+        // ── Step 1: Concatenate HLS → single output file ────────────────────
         $outputRelPath = $this->buildOutputPath($recording);
         $outputFullPath = Storage::disk($disk)->path($outputRelPath);
         $outputDir = dirname($outputFullPath);
@@ -174,30 +201,30 @@ class DvrPostProcessorService
             ]);
         }
 
-        // ── Step 4: Cleanup temp dir + mark COMPLETED ───────────────────────
+        // ── Step 4: Cleanup local temp dir + proxy broadcast + mark COMPLETED ─
         try {
-            // $livePath may be an absolute filesystem path (from the proxy callback)
-            // or a relative path. Storage::disk()->deleteDirectory() silently fails
-            // on absolute paths, so we must use File::deleteDirectory() in that case.
-            if (str_starts_with($livePath, '/')) {
-                File::deleteDirectory($livePath);
-            } else {
-                Storage::disk($disk)->deleteDirectory($livePath);
-            }
+            // $livePath is always relative (live/{uuid}) for HTTP-downloaded recordings.
+            Storage::disk($disk)->deleteDirectory($livePath);
 
-            Log::debug('DVR post-processing step 4: temp directory cleaned up', [
+            Log::debug('DVR post-processing step 4: local temp directory cleaned up', [
                 'recording_id' => $recording->id,
                 'live_path' => $livePath,
             ]);
         } catch (Exception $e) {
-            Log::warning("DVR post-processing step 4: could not delete temp dir {$livePath}: {$e->getMessage()}", [
+            Log::warning("DVR post-processing step 4: could not delete temp dir: {$e->getMessage()}", [
                 'recording_id' => $recording->id,
             ]);
+        }
+
+        // Notify the proxy to delete its own HLS segment storage now that we have the output.
+        if ($recording->proxy_network_id) {
+            $this->proxy->cleanupDvrBroadcast($recording->proxy_network_id);
         }
 
         $recording->update([
             'status' => DvrRecordingStatus::Completed->value,
             'post_processing_step' => null,
+            'proxy_network_id' => null,
         ]);
 
         // Disable "once" rules after a successful recording so they don't re-schedule
@@ -218,6 +245,15 @@ class DvrPostProcessorService
             'file_size_mb' => $fileSize ? round($fileSize / 1024 / 1024, 1) : null,
             'duration_seconds' => $duration,
         ]);
+
+        if ($user = $recording->user) {
+            Notification::make()
+                ->success()
+                ->title('Recording Complete')
+                ->body($recording->title)
+                ->broadcast($user)
+                ->sendToDatabase($user);
+        }
     }
 
     /**
@@ -416,6 +452,15 @@ class DvrPostProcessorService
             'error_message' => $reason,
             'post_processing_step' => null,
         ]);
+
+        if ($user = $recording->user) {
+            Notification::make()
+                ->danger()
+                ->title('Recording Failed')
+                ->body($recording->title)
+                ->broadcast($user)
+                ->sendToDatabase($user);
+        }
     }
 
     /**
