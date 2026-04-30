@@ -138,7 +138,8 @@ it('calls proxy stop and transitions to PostProcessing', function () {
 
     $fresh = $recording->fresh();
     expect($fresh->status)->toBe(DvrRecordingStatus::PostProcessing);
-    expect($fresh->proxy_network_id)->toBeNull();
+    // proxy_network_id is preserved so DvrPostProcessorService can download via HTTP
+    expect($fresh->proxy_network_id)->toBe($networkId);
     expect($fresh->actual_end)->not->toBeNull();
 });
 

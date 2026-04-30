@@ -84,9 +84,15 @@ class DvrPostProcessorService
             // looking for files already on the local disk.
             if ($recording->temp_manifest_path) {
                 $m3u8FullPath = $recording->temp_manifest_path;
+                $livePath = dirname($m3u8FullPath);
             } elseif ($recording->temp_path && str_starts_with($recording->temp_path, '/')) {
                 // Absolute path from proxy callback (shared-volume deployment)
-                $m3u8FullPath = rtrim($recording->temp_path, '/').'/live.m3u8';
+                $livePath = rtrim($recording->temp_path, '/');
+                $m3u8FullPath = $livePath.'/live.m3u8';
+            } elseif ($recording->temp_path) {
+                // Relative path stored at start/stop time (e.g. "live/test-uuid")
+                $livePath = rtrim($recording->temp_path, '/');
+                $m3u8FullPath = Storage::disk($disk)->path($livePath.'/live.m3u8');
             } else {
                 $m3u8FullPath = Storage::disk($disk)->path($livePath.'/live.m3u8');
             }

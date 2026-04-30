@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\DvrRecording;
 use App\Settings\GeneralSettings;
+use App\Support\EpisodeNumberParser;
 use Exception;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
@@ -11,6 +12,22 @@ use Illuminate\Support\Facades\Log;
 
 /**
  * DvrMetadataEnricherService — Enriches DvrRecording rows with TMDB/TVMaze data.
+ *
+ * Enrichment happens in three passes for TV content:
+ *
+ *   Pass 1 — Show-level metadata (TMDB → TVMaze fallback).
+ *            Identifies the show, retrieves poster/overview/first_air_date.
+ *
+ *   Pass 2 — Season/episode backfill.
+ *            If recording.season or recording.episode is null but
+ *            epg_programme_data.episode_num holds an un-parsed string,
+ *            parse it now and write back to the recording row so that
+ *            episode-level fetch (Pass 3) and VOD integration have correct numbers.
+ *
+ *   Pass 3 — Episode-level metadata (TMDB → TVMaze fallback).
+ *            Requires show ID + season + episode from Passes 1–2.
+ *            Retrieves episode-specific: plot, still image, air date.
+ *            Stored under metadata.tmdb_episode / metadata.tvmaze_episode.
  *
  * Sources (in priority order):
  *   1. TMDB — requires an API key (per-DvrSetting or global config)
@@ -22,6 +39,8 @@ class DvrMetadataEnricherService
 
     private const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
 
+    private const TMDB_STILL_BASE = 'https://image.tmdb.org/t/p/w300';
+
     private const TVMAZE_BASE_URL = 'https://api.tvmaze.com';
 
     private const CACHE_TTL_SECONDS = 86400; // 24 hours — positive results
@@ -32,14 +51,17 @@ class DvrMetadataEnricherService
 
     /**
      * Enrich a recording with metadata.
-     * Tries TMDB first, falls back to TVMaze.
+     *
+     * Pass 1: show-level (TMDB → TVMaze).
+     * Pass 2: season/episode backfill from epg_programme_data.episode_num.
+     * Pass 3: episode-level (TMDB → TVMaze) when season + episode are known.
      */
     public function enrich(DvrRecording $recording): void
     {
         $tmdbKey = $this->resolveTmdbApiKey($recording);
         $enriched = false;
 
-        // Attempt TMDB
+        // ── Pass 1: show-level metadata ────────────────────────────────────────
         if ($tmdbKey) {
             $recording->update(['post_processing_step' => 'Fetching TMDB metadata']);
 
@@ -53,7 +75,6 @@ class DvrMetadataEnricherService
             }
         }
 
-        // Fallback to TVMaze
         if (! $enriched) {
             $recording->update(['post_processing_step' => 'Fetching TVMaze metadata']);
 
@@ -68,12 +89,147 @@ class DvrMetadataEnricherService
         }
 
         if (! $enriched) {
-            Log::info("DVR metadata: no metadata found for recording {$recording->id} — proceeding without enrichment", [
+            Log::info("DVR metadata: no show-level metadata found for recording {$recording->id} — proceeding without enrichment", [
                 'recording_id' => $recording->id,
                 'title' => $recording->title,
             ]);
         }
+
+        // ── Pass 2: season/episode backfill ────────────────────────────────────
+        // Re-read the recording to pick up any metadata saved in Pass 1.
+        $recording->refresh();
+        $this->backfillSeasonEpisode($recording);
+
+        // ── Pass 3: episode-level metadata ─────────────────────────────────────
+        // Only meaningful when we know both season and episode numbers.
+        if ($recording->season !== null && $recording->episode !== null) {
+            $recording->refresh();
+            $this->enrichEpisodeLevel($recording, $tmdbKey);
+        }
     }
+
+    // ── Pass 2: season/episode backfill ───────────────────────────────────────
+
+    /**
+     * If recording.season or recording.episode is null, attempt to parse them from
+     * epg_programme_data.episode_num (stored raw XMLTV string at schedule time).
+     *
+     * This covers recordings created before EpgCacheService gained multi-format
+     * episode_num parsing, where EPG columns were left null even though the raw
+     * string contained parseable S/E info.
+     */
+    private function backfillSeasonEpisode(DvrRecording $recording): void
+    {
+        if ($recording->season !== null && $recording->episode !== null) {
+            return; // nothing to backfill
+        }
+
+        $raw = $recording->epg_programme_data['episode_num'] ?? null;
+
+        if (empty($raw)) {
+            return;
+        }
+
+        [$season, $episode] = EpisodeNumberParser::fromRaw($raw);
+
+        if ($season === null && $episode === null) {
+            return;
+        }
+
+        $updates = [];
+
+        if ($recording->season === null && $season !== null) {
+            $updates['season'] = $season;
+        }
+
+        if ($recording->episode === null && $episode !== null) {
+            $updates['episode'] = $episode;
+        }
+
+        if (! empty($updates)) {
+            $recording->update($updates);
+
+            Log::info("DVR metadata: backfilled season/episode for recording {$recording->id} from episode_num '{$raw}'", [
+                'recording_id' => $recording->id,
+                'season' => $updates['season'] ?? $recording->season,
+                'episode' => $updates['episode'] ?? $recording->episode,
+            ]);
+        }
+    }
+
+    // ── Pass 3: episode-level metadata ────────────────────────────────────────
+
+    /**
+     * Fetch episode-specific metadata (plot, still image, air date) from TMDB or TVMaze.
+     * Requires that the recording already has season + episode numbers.
+     */
+    private function enrichEpisodeLevel(DvrRecording $recording, ?string $tmdbKey): void
+    {
+        $metadata = $recording->metadata ?? [];
+        $episodeEnriched = false;
+
+        // TMDB episode lookup — needs show TMDB ID from Pass 1
+        $tmdbShowId = $metadata['tmdb']['id'] ?? null;
+
+        if ($tmdbKey && $tmdbShowId && ($metadata['tmdb']['type'] ?? null) === 'tv') {
+            $recording->update(['post_processing_step' => 'Fetching TMDB episode metadata']);
+
+            try {
+                $episodeData = $this->fetchTmdbEpisode(
+                    (int) $tmdbShowId,
+                    (int) $recording->season,
+                    (int) $recording->episode,
+                    $tmdbKey
+                );
+
+                if ($episodeData) {
+                    $metadata['tmdb_episode'] = $episodeData;
+                    $recording->update(['metadata' => $metadata]);
+                    $episodeEnriched = true;
+
+                    Log::debug("DVR metadata: TMDB episode metadata applied for recording {$recording->id}", [
+                        'tmdb_show_id' => $tmdbShowId,
+                        'season' => $recording->season,
+                        'episode' => $recording->episode,
+                    ]);
+                }
+            } catch (Exception $e) {
+                Log::warning("DVR metadata: TMDB episode fetch failed for recording {$recording->id}: {$e->getMessage()}");
+            }
+        }
+
+        // TVMaze episode lookup — needs TVMaze show ID from Pass 1
+        if (! $episodeEnriched) {
+            $tvmazeShowId = $metadata['tvmaze']['id'] ?? null;
+
+            if ($tvmazeShowId) {
+                $recording->update(['post_processing_step' => 'Fetching TVMaze episode metadata']);
+
+                try {
+                    $episodeData = $this->fetchTvMazeEpisode(
+                        (int) $tvmazeShowId,
+                        (int) $recording->season,
+                        (int) $recording->episode
+                    );
+
+                    if ($episodeData) {
+                        $metadata['tvmaze_episode'] = $episodeData;
+                        $recording->update(['metadata' => $metadata]);
+
+                        Log::debug("DVR metadata: TVMaze episode metadata applied for recording {$recording->id}", [
+                            'tvmaze_show_id' => $tvmazeShowId,
+                            'season' => $recording->season,
+                            'episode' => $recording->episode,
+                        ]);
+                    }
+                } catch (Exception $e) {
+                    Log::warning("DVR metadata: TVMaze episode fetch failed for recording {$recording->id}: {$e->getMessage()}");
+                }
+            }
+        }
+    }
+
+    // ── Pass 1 helpers ────────────────────────────────────────────────────────
 
     /**
      * Normalize a title for use as a search query.
@@ -134,7 +290,8 @@ class DvrMetadataEnricherService
     }
 
     /**
-     * Fetch metadata from TMDB for a title (TV show or movie).
+     * Fetch show-level metadata from TMDB.
+     * Searches TV first (most DVR content is TV), falls back to movies.
      *
      * @return array<string, mixed>|null
      */
@@ -241,7 +398,7 @@ class DvrMetadataEnricherService
     }
 
     /**
-     * Fetch show metadata from TVMaze.
+     * Fetch show-level metadata from TVMaze.
      *
      * @return array<string, mixed>|null
      */
@@ -271,6 +428,108 @@ class DvrMetadataEnricherService
             'network' => $show['network']['name'] ?? null,
         ];
     }
+
+    // ── Pass 3 helpers ────────────────────────────────────────────────────────
+
+    /**
+     * Fetch episode-specific metadata from TMDB.
+     * Endpoint: GET /tv/{show_id}/season/{season}/episode/{episode}
+     *
+     * @return array<string, mixed>|null
+     */
+    private function fetchTmdbEpisode(int $showId, int $season, int $episode, string $apiKey): ?array
+    {
+        $cacheKey = "dvr.tmdb.episode.{$showId}.{$season}.{$episode}";
+
+        if (Cache::has($cacheKey)) {
+            $data = Cache::get($cacheKey);
+
+            return $data ?: null;
+        }
+
+        $url = self::TMDB_BASE_URL."/tv/{$showId}/season/{$season}/episode/{$episode}";
+        $response = Http::timeout(10)->get($url, ['api_key' => $apiKey]);
+
+        if (! $response->successful()) {
+            Cache::put($cacheKey, false, self::CACHE_MISS_TTL_SECONDS);
+
+            return null;
+        }
+
+        $ep = $response->json();
+
+        if (empty($ep)) {
+            Cache::put($cacheKey, false, self::CACHE_MISS_TTL_SECONDS);
+
+            return null;
+        }
+
+        $data = [
+            'id' => $ep['id'] ?? null,
+            'name' => $ep['name'] ?? null,
+            'overview' => $ep['overview'] ?? null,
+            'still_url' => isset($ep['still_path'])
+                ? self::TMDB_STILL_BASE.$ep['still_path']
+                : null,
+            'air_date' => $ep['air_date'] ?? null,
+            'episode_number' => $ep['episode_number'] ?? $episode,
+            'season_number' => $ep['season_number'] ?? $season,
+        ];
+
+        Cache::put($cacheKey, $data, self::CACHE_TTL_SECONDS);
+
+        return $data;
+    }
+
+    /**
+     * Fetch episode-specific metadata from TVMaze.
+     * Endpoint: GET /shows/{show_id}/episodebynumber?season={s}&number={e}
+     *
+     * @return array<string, mixed>|null
+     */
+    private function fetchTvMazeEpisode(int $showId, int $season, int $episode): ?array
+    {
+        $cacheKey = "dvr.tvmaze.episode.{$showId}.{$season}.{$episode}";
+
+        if (Cache::has($cacheKey)) {
+            $data = Cache::get($cacheKey);
+
+            return $data ?: null;
+        }
+
+        $response = Http::timeout(10)->get(self::TVMAZE_BASE_URL."/shows/{$showId}/episodebynumber", [
+            'season' => $season,
+            'number' => $episode,
+        ]);
+
+        if (! $response->successful()) {
+            Cache::put($cacheKey, false, self::CACHE_MISS_TTL_SECONDS);
+
+            return null;
+        }
+
+        $ep = $response->json();
+
+        if (empty($ep)) {
+            Cache::put($cacheKey, false, self::CACHE_MISS_TTL_SECONDS);
+
+            return null;
+        }
+
+        $data = [
+            'id' => $ep['id'] ?? null,
+            'name' => $ep['name'] ?? null,
+            'summary' => $ep['summary'] ? html_entity_decode(strip_tags($ep['summary'])) : null,
+            'image' => $ep['image']['original'] ?? $ep['image']['medium'] ?? null,
+            'airdate' => $ep['airdate'] ?? null,
+        ];
+
+        Cache::put($cacheKey, $data, self::CACHE_TTL_SECONDS);
+
+        return $data;
+    }
+
+    // ── Shared helpers ────────────────────────────────────────────────────────
 
     /**
      * Resolve the TMDB API key: per-DvrSetting first, then global GeneralSettings, then env fallback.

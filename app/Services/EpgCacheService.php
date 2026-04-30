@@ -13,6 +13,7 @@ use App\Models\EpgProgramme;
 use App\Models\MergedPlaylist;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
+use App\Support\EpisodeNumberParser;
 use Carbon\Carbon;
 use Exception;
 use Filament\Actions\Action;
@@ -1579,8 +1580,9 @@ class EpgCacheService
                     }
 
                     $p = $record['programme'];
-                    $startTime = isset($p['start']) ? Carbon::parse($p['start']) : null;
-                    $endTime = isset($p['stop']) ? Carbon::parse($p['stop']) : null;
+                    $appTz = config('app.timezone', 'UTC');
+                    $startTime = isset($p['start']) ? Carbon::parse($p['start'])->setTimezone($appTz) : null;
+                    $endTime = isset($p['stop']) ? Carbon::parse($p['stop'])->setTimezone($appTz) : null;
 
                     if (! $startTime || ! $endTime) {
                         $skipped++;
@@ -1588,18 +1590,9 @@ class EpgCacheService
                         continue;
                     }
 
-                    // Parse 0-indexed xmltv_ns episode-num (e.g. "1.2." → S2E3)
-                    $season = null;
-                    $episode = null;
-                    if (! empty($p['episode_num'])) {
-                        $parts = explode('.', $p['episode_num']);
-                        if (isset($parts[0]) && is_numeric(trim($parts[0]))) {
-                            $season = min(32767, (int) trim($parts[0]) + 1);
-                        }
-                        if (isset($parts[1]) && is_numeric(trim($parts[1]))) {
-                            $episode = min(32767, (int) trim($parts[1]) + 1);
-                        }
-                    }
+                    // Parse episode_num — honours xmltv_ns (0-indexed dot notation),
+                    // onscreen (SxxExx), and falls back to heuristic on the raw string.
+                    [$season, $episode] = EpisodeNumberParser::fromProgramme($p);
 
                     $batch[] = [
                         'epg_id' => $epg->id,
