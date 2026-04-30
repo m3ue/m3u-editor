@@ -12,6 +12,35 @@ class StreamFileSetting extends Model
 {
     use HasFactory;
 
+    protected $fillable = [
+        'user_id',
+        'name',
+        'description',
+        'type',
+        'enabled',
+        'location',
+        'path_structure',
+        'filename_metadata',
+        'folder_metadata',
+        'tmdb_id_format',
+        'tmdb_id_apply_to',
+        'clean_special_chars',
+        'remove_consecutive_chars',
+        'replace_char',
+        'name_filter_enabled',
+        'name_filter_patterns',
+        'generate_nfo',
+        'refresh_media_server',
+        'media_server_integration_id',
+        'refresh_delay_seconds',
+        'url_type',
+        'movie_format',
+        'episode_format',
+        'version_detection_pattern',
+        'group_versions',
+        'use_stream_stats',
+    ];
+
     protected $casts = [
         'enabled' => 'boolean',
         'path_structure' => 'array',
@@ -24,6 +53,11 @@ class StreamFileSetting extends Model
         'generate_nfo' => 'boolean',
         'refresh_media_server' => 'boolean',
         'refresh_delay_seconds' => 'integer',
+        'movie_format' => 'string',
+        'episode_format' => 'string',
+        'version_detection_pattern' => 'string',
+        'group_versions' => 'boolean',
+        'use_stream_stats' => 'boolean',
     ];
 
     public function user(): BelongsTo
@@ -89,6 +123,11 @@ class StreamFileSetting extends Model
             'refresh_media_server' => $this->refresh_media_server,
             'media_server_integration_id' => $this->media_server_integration_id,
             'refresh_delay_seconds' => $this->refresh_delay_seconds ?? 5,
+            'movie_format' => $this->movie_format,
+            'episode_format' => $this->episode_format,
+            'version_detection_pattern' => $this->version_detection_pattern,
+            'group_versions' => $this->group_versions ?? true,
+            'use_stream_stats' => $this->use_stream_stats ?? true,
         ];
     }
 }

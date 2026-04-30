@@ -10,6 +10,7 @@ use App\Models\StrmFileMapping;
 use App\Models\User;
 use App\Services\NfoService;
 use App\Services\PlaylistService;
+use App\Services\StrmPathBuilder;
 use App\Settings\GeneralSettings;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -606,59 +607,70 @@ class SyncSeriesStrmFiles implements ShouldQueue
                 return;
             }
 
+            // Resolve StreamFileSetting model for Trash Guide naming
+            $streamFileSetting = $series->streamFileSetting
+                ?? $series->category?->streamFileSetting
+                ?? ($settings->default_series_stream_file_setting_id ? StreamFileSetting::find($settings->default_series_stream_file_setting_id) : null);
+
             // Loop through each episode
             foreach ($episodes as $ep) {
-                // Setup episode prefix
-                $season = $ep->season;
-                $num = str_pad($ep->episode_num, 2, '0', STR_PAD_LEFT);
-                $prefx = 'S'.str_pad($season, 2, '0', STR_PAD_LEFT)."E{$num}";
-
-                // Build the base filename (apply name filtering to episode title)
-                $episodeTitle = $applyNameFilter($ep->title);
-                $fileName = "{$prefx} - {$episodeTitle}";
-
-                // Add metadata to filename
-                if (in_array('year', $filenameMetadata) && ! empty($seriesReleaseDate)) {
-                    $year = substr($seriesReleaseDate, 0, 4);
-                    $fileName .= " ({$year})";
-                }
-
-                if ($applyTmdbToEpisodes) {
-                    $tmdbId = $ep->info['tmdb_id'] ?? $seriesMetadata['tmdb_id'] ?? null;
-                    // Ensure ID is a scalar value (not an array)
-                    $tmdbId = is_scalar($tmdbId) ? $tmdbId : null;
-                    if (! empty($tmdbId)) {
-                        $bracket = $tmdbIdFormat === 'curly' ? ['{', '}'] : ['[', ']'];
-                        $fileName .= " {$bracket[0]}tmdb-{$tmdbId}{$bracket[1]}";
-                    }
-                }
-
-                // Add category suffix to filename if enabled
-                if (in_array('category', $filenameMetadata)) {
-                    $catSuffix = $category?->name ?? $category?->name_internal ?? 'Uncategorized';
-                    $catSuffix = $applyNameFilter($catSuffix);
-                    $fileName .= " - {$catSuffix}";
-                }
-
-                // Clean the filename
-                $fileName = $cleanSpecialChars
-                    ? PlaylistService::makeFilesystemSafe($fileName, $replaceChar)
-                    : PlaylistService::makeFilesystemSafe($fileName);
-
-                // Remove consecutive replacement characters if enabled
-                if ($removeConsecutiveChars && $replaceChar !== 'remove') {
-                    $char = $replaceChar === 'space' ? ' ' : ($replaceChar === 'dash' ? '-' : ($replaceChar === 'underscore' ? '_' : '.'));
-                    $fileName = preg_replace('/'.preg_quote($char, '/').'{2,}/', $char, $fileName);
-                }
-
-                $fileName = "{$fileName}.strm";
-
-                // Build the season folder path
-                if (in_array('season', $pathStructure)) {
-                    $seasonPath = $path.'/Season '.str_pad($season, 2, '0', STR_PAD_LEFT);
-                    $filePath = $seasonPath.'/'.$fileName;
+                if ($streamFileSetting?->episode_format) {
+                    // Use Trash Guide naming via StrmPathBuilder
+                    $filePath = app(StrmPathBuilder::class)->buildEpisodePath($ep, $streamFileSetting, $sync_settings);
                 } else {
-                    $filePath = $path.'/'.$fileName;
+                    // Legacy filename generation
+                    // Setup episode prefix
+                    $season = $ep->season;
+                    $num = str_pad($ep->episode_num, 2, '0', STR_PAD_LEFT);
+                    $prefx = 'S'.str_pad($season, 2, '0', STR_PAD_LEFT)."E{$num}";
+
+                    // Build the base filename (apply name filtering to episode title)
+                    $episodeTitle = $applyNameFilter($ep->title);
+                    $fileName = "{$prefx} - {$episodeTitle}";
+
+                    // Add metadata to filename
+                    if (in_array('year', $filenameMetadata) && ! empty($seriesReleaseDate)) {
+                        $year = substr($seriesReleaseDate, 0, 4);
+                        $fileName .= " ({$year})";
+                    }
+
+                    if ($applyTmdbToEpisodes) {
+                        $tmdbId = $ep->info['tmdb_id'] ?? $seriesMetadata['tmdb_id'] ?? null;
+                        // Ensure ID is a scalar value (not an array)
+                        $tmdbId = is_scalar($tmdbId) ? $tmdbId : null;
+                        if (! empty($tmdbId)) {
+                            $bracket = $tmdbIdFormat === 'curly' ? ['{', '}'] : ['[', ']'];
+                            $fileName .= " {$bracket[0]}tmdb-{$tmdbId}{$bracket[1]}";
+                        }
+                    }
+
+                    // Add category suffix to filename if enabled
+                    if (in_array('category', $filenameMetadata)) {
+                        $catSuffix = $category?->name ?? $category?->name_internal ?? 'Uncategorized';
+                        $catSuffix = $applyNameFilter($catSuffix);
+                        $fileName .= " - {$catSuffix}";
+                    }
+
+                    // Clean the filename
+                    $fileName = $cleanSpecialChars
+                        ? PlaylistService::makeFilesystemSafe($fileName, $replaceChar)
+                        : PlaylistService::makeFilesystemSafe($fileName);
+
+                    // Remove consecutive replacement characters if enabled
+                    if ($removeConsecutiveChars && $replaceChar !== 'remove') {
+                        $char = $replaceChar === 'space' ? ' ' : ($replaceChar === 'dash' ? '-' : ($replaceChar === 'underscore' ? '_' : '.'));
+                        $fileName = preg_replace('/'.preg_quote($char, '/').'{2,}/', $char, $fileName);
+                    }
+
+                    $fileName = "{$fileName}.strm";
+
+                    // Build the season folder path
+                    if (in_array('season', $pathStructure)) {
+                        $seasonPath = $path.'/Season '.str_pad($season, 2, '0', STR_PAD_LEFT);
+                        $filePath = $seasonPath.'/'.$fileName;
+                    } else {
+                        $filePath = $path.'/'.$fileName;
+                    }
                 }
 
                 // Generate the url (use cached playlist properties to avoid object access in loop)

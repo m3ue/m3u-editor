@@ -10,6 +10,7 @@ use App\Models\StrmFileMapping;
 use App\Models\User;
 use App\Services\NfoService;
 use App\Services\PlaylistService;
+use App\Services\VodFileNameService;
 use App\Settings\GeneralSettings;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -326,100 +327,63 @@ class SyncVodStrmFiles implements ShouldQueue
                 $path = $groupPath;
             }
 
-            // Build the filename (apply name filtering to title)
-            $title = $channel->title_custom ?? $channel->title;
-            $title = $applyNameFilter($title);
-            $fileName = $title;
+            // Resolve the actual StreamFileSetting model for Trash Guide naming
+            $streamFileSetting = $channel->streamFileSetting
+                ?? ($groupModel?->streamFileSetting ?? null)
+                ?? $globalStreamFileSetting;
 
-            // Track if title folder is created (for TMDB ID placement logic)
-            $titleFolderCreated = in_array('title', $pathStructure);
+            $trashGuideEnabled = filled($streamFileSetting?->movie_format ?? null);
 
-            // Create the VOD Title folder if enabled (with Trash Guides format support)
-            if ($titleFolderCreated) {
-                $titleFolder = $title;
+            if ($trashGuideEnabled) {
+                $vodFileNameService = app(VodFileNameService::class);
+                $fileName = $vodFileNameService->generateMovieFileName($channel, $streamFileSetting);
+            } else {
+                $title = $channel->title_custom ?? $channel->title;
+                $title = $applyNameFilter($title);
+                $fileName = $title;
 
-                // Add year to folder name if configured in folder_metadata
-                if (in_array('year', $folderMetadata) && ! empty($channel->year) && strpos($titleFolder, "({$channel->year})") === false) {
-                    $titleFolder .= " ({$channel->year})";
+                if (in_array('year', $filenameMetadata) && ! empty($channel->year)) {
+                    if (strpos($fileName, "({$channel->year})") === false) {
+                        $fileName .= " ({$channel->year})";
+                    }
                 }
 
-                // Add TMDB/IMDB ID to folder name if configured in folder_metadata
-                if (in_array('tmdb_id', $folderMetadata)) {
-                    $tmdbId = $channel->getTmdbId();
-                    $imdbId = $channel->getImdbId();
-
+                if (in_array('tmdb_id', $filenameMetadata)) {
+                    $tmdbId = $channel->info['tmdb_id']
+                        ?? $channel->info['tmdb']
+                        ?? $channel->movie_data['tmdb_id']
+                        ?? $channel->movie_data['tmdb']
+                        ?? null;
+                    $imdbId = $channel->info['imdb_id']
+                        ?? $channel->info['imdb']
+                        ?? $channel->movie_data['imdb_id']
+                        ?? $channel->movie_data['imdb']
+                        ?? null;
                     $tmdbId = is_scalar($tmdbId) ? $tmdbId : null;
                     $imdbId = is_scalar($imdbId) ? $imdbId : null;
 
                     $bracket = $tmdbIdFormat === 'curly' ? ['{', '}'] : ['[', ']'];
                     if (! empty($tmdbId)) {
-                        $titleFolder .= " {$bracket[0]}tmdb-{$tmdbId}{$bracket[1]}";
+                        $fileName .= " {$bracket[0]}tmdb-{$tmdbId}{$bracket[1]}";
                     } elseif (! empty($imdbId)) {
-                        $titleFolder .= " {$bracket[0]}imdb-{$imdbId}{$bracket[1]}";
+                        $fileName .= " {$bracket[0]}imdb-{$imdbId}{$bracket[1]}";
                     }
                 }
 
-                $titleFolder = $cleanSpecialChars
-                    ? PlaylistService::makeFilesystemSafe($titleFolder, $replaceChar)
-                    : PlaylistService::makeFilesystemSafe($titleFolder);
-                $titlePath = $path.'/'.$titleFolder;
-                if (! is_dir($titlePath)) {
-                    mkdir($titlePath, 0777, true);
+                if (in_array('group', $filenameMetadata)) {
+                    $groupSuffix = $channel->group ?? $groupModel?->name ?? $groupModel?->name_internal ?? 'Uncategorized';
+                    $groupSuffix = $applyNameFilter($groupSuffix);
+                    $fileName .= " - {$groupSuffix}";
                 }
 
-                $path = $titlePath;
-            }
+                $fileName = $cleanSpecialChars
+                    ? PlaylistService::makeFilesystemSafe($fileName, $replaceChar)
+                    : PlaylistService::makeFilesystemSafe($fileName);
 
-            // Add year to filename if configured in filename_metadata
-            if (in_array('year', $filenameMetadata) && ! empty($channel->year)) {
-                // Only add year if it's not already in the title
-                if (strpos($fileName, "({$channel->year})") === false) {
-                    $fileName .= " ({$channel->year})";
+                if ($removeConsecutiveChars && $replaceChar !== 'remove') {
+                    $char = $replaceChar === 'space' ? ' ' : ($replaceChar === 'dash' ? '-' : ($replaceChar === 'underscore' ? '_' : '.'));
+                    $fileName = preg_replace('/'.preg_quote($char, '/').'{2,}/', $char, $fileName);
                 }
-            }
-
-            // Add TMDB/IMDB ID to filename if configured in filename_metadata
-            // (When a title folder exists, TMDB ID belongs in folder_metadata instead)
-            if (in_array('tmdb_id', $filenameMetadata)) {
-                // Check multiple possible locations for IDs (priority: TMDB > IMDB)
-                $tmdbId = $channel->info['tmdb_id']
-                    ?? $channel->info['tmdb']
-                    ?? $channel->movie_data['tmdb_id']
-                    ?? $channel->movie_data['tmdb']
-                    ?? null;
-                $imdbId = $channel->info['imdb_id']
-                    ?? $channel->info['imdb']
-                    ?? $channel->movie_data['imdb_id']
-                    ?? $channel->movie_data['imdb']
-                    ?? null;
-                // Ensure IDs are scalar values (not arrays)
-                $tmdbId = is_scalar($tmdbId) ? $tmdbId : null;
-                $imdbId = is_scalar($imdbId) ? $imdbId : null;
-
-                $bracket = $tmdbIdFormat === 'curly' ? ['{', '}'] : ['[', ']'];
-                if (! empty($tmdbId)) {
-                    $fileName .= " {$bracket[0]}tmdb-{$tmdbId}{$bracket[1]}";
-                } elseif (! empty($imdbId)) {
-                    $fileName .= " {$bracket[0]}imdb-{$imdbId}{$bracket[1]}";
-                }
-            }
-
-            // Add group suffix to filename if enabled
-            if (in_array('group', $filenameMetadata)) {
-                $groupSuffix = $channel->group ?? $groupModel?->name ?? $groupModel?->name_internal ?? 'Uncategorized';
-                $groupSuffix = $applyNameFilter($groupSuffix);
-                $fileName .= " - {$groupSuffix}";
-            }
-
-            // Clean the filename
-            $fileName = $cleanSpecialChars
-                ? PlaylistService::makeFilesystemSafe($fileName, $replaceChar)
-                : PlaylistService::makeFilesystemSafe($fileName);
-
-            // Remove consecutive replacement characters if enabled
-            if ($removeConsecutiveChars && $replaceChar !== 'remove') {
-                $char = $replaceChar === 'space' ? ' ' : ($replaceChar === 'dash' ? '-' : ($replaceChar === 'underscore' ? '_' : '.'));
-                $fileName = preg_replace('/'.preg_quote($char, '/').'{2,}/', $char, $fileName);
             }
 
             $fileName = "{$fileName}.strm";

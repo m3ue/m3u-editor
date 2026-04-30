@@ -323,6 +323,41 @@ class StreamFileSettingResource extends Resource implements CopilotResource
                     })
                     ->hidden(fn ($get) => ! $get('enabled')),
 
+                Fieldset::make(__('Trash Guide Naming'))
+                    ->columnSpanFull()
+                    ->schema([
+                        Textarea::make('movie_format')
+                            ->label(__('Movie filename format'))
+                            ->default('{title} ({year}){edition}{quality}{audio}{video}{-group}')
+                            ->helperText(__('Available placeholders: {title}, {year}, {edition}, {quality}, {audio}, {video}, {hdr}, {group}'))
+                            ->visible(fn (Get $get): bool => $get('type') === 'vod')
+                            ->columnSpanFull(),
+                        Textarea::make('episode_format')
+                            ->label(__('Episode filename format'))
+                            ->default('{title} - S{season}E{episode}{-ep_title}{quality}{audio}{video}{-group}')
+                            ->helperText(__('Available placeholders: {title}, {season}, {episode}, {-ep_title}, {quality}, {audio}, {video}, {hdr}, {group}'))
+                            ->visible(fn (Get $get): bool => $get('type') === 'series')
+                            ->columnSpanFull(),
+                        Toggle::make('use_stream_stats')
+                            ->label(__('Use stream stats for quality/audio/video detection'))
+                            ->default(true)
+                            ->inline(false)
+                            ->live(),
+                        TextInput::make('version_detection_pattern')
+                            ->label(__('Version detection pattern (regex)'))
+                            ->placeholder('/\\b(EXTENDED|REMASTERED|UNRATED|DIRECTORS\\sCUT)\\b/i')
+                            ->helperText(__('Regex pattern to detect edition/version tags in titles. Leave empty to disable auto-detection.'))
+                            ->visible(fn (Get $get): bool => $get('type') === 'vod')
+                            ->columnSpanFull(),
+                        Toggle::make('group_versions')
+                            ->label(__('Group multiple versions in same folder'))
+                            ->default(true)
+                            ->inline(false)
+                            ->helperText(__('When enabled, multiple versions of the same movie are placed in the same folder with edition tags'))
+                            ->visible(fn (Get $get): bool => $get('type') === 'vod'),
+                    ])
+                    ->hidden(fn ($get) => ! $get('enabled')),
+
                 Fieldset::make(__('Include Metadata'))
                     ->columnSpanFull()
                     ->columns(2)
