@@ -14,13 +14,11 @@ class VodFileNameService
     {
         $format = filled($setting->movie_format ?? null)
             ? (string) $setting->movie_format
-            : '{title} ({year}) {edition} [{quality} {video} {audio} {hdr}] {group}';
+            : '{title} ({year}) {edition} [{quality} {video} {audio} {hdr}]';
 
         $streamStats = (bool) ($setting->use_stream_stats ?? true)
             ? StreamStatsService::normalize($channel->stream_stats ?? [])
             : [];
-
-        $group = $this->scalarAttribute($channel, 'release_group');
 
         $replacements = [
             '{title}' => PlaylistService::makeFilesystemSafe($this->movieTitle($channel), $setting->replace_char ?? 'space'),
@@ -30,8 +28,8 @@ class VodFileNameService
             '{audio}' => (bool) ($setting->use_stream_stats ?? true) ? StreamStatsService::detectAudio($streamStats) : $this->manualValue($channel, $setting, ['audio', 'audio_format', 'audio_codec']),
             '{video}' => (bool) ($setting->use_stream_stats ?? true) ? StreamStatsService::detectVideoCodec($streamStats) : $this->manualValue($channel, $setting, ['video', 'video_format', 'video_codec']),
             '{hdr}' => (bool) ($setting->use_stream_stats ?? true) ? StreamStatsService::detectHdr($streamStats) : $this->manualValue($channel, $setting, ['hdr', 'hdr_format']),
-            '{group}' => $group,
-            '{-group}' => $group === '' ? '' : '-'.$group,
+            '{group}' => '',
+            '{-group}' => '',
         ];
 
         $fileName = strtr($format, $replacements);

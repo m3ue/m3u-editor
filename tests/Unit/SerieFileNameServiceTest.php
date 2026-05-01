@@ -20,19 +20,19 @@ it('generates a trash guide conform episode filename', function () {
             'audio_codec' => 'aac',
             'audio_channels' => 2,
         ],
-        'release_group' => 'NTb',
     ]);
+
     $episode->setRelation('season', $season);
     $episode->setRelation('series', $series);
 
     $setting = new StreamFileSetting([
-        'episode_format' => '{title} - S{season}E{episode}{-title} [{quality} {video} {audio}]-{group}',
+        'episode_format' => '{title} - S{season}E{episode}{-title} [{quality} {video} {audio}]',
         'use_stream_stats' => true,
     ]);
 
     $fileName = (new SerieFileNameService)->generateEpisodeFileName($episode, $setting);
 
-    expect($fileName)->toBe('Breaking Bad - S01E01 - Pilot [1080p H.264 AAC 2.0]-NTb');
+    expect($fileName)->toBe('Breaking Bad - S01E01 - Pilot [1080p H.264 AAC 2.0]');
 });
 
 it('generates episode filename without optional parts when empty', function () {

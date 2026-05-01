@@ -25,7 +25,6 @@ test('series season and episode relations are wired correctly', function () {
         'season_id' => $season->id,
         'season' => 1,
         'episode_num' => 1,
-        'info' => ['release_group' => 'TEAM'],
     ]);
 
     expect($series->seasons)->toHaveCount(1)
@@ -35,7 +34,6 @@ test('series season and episode relations are wired correctly', function () {
         ->and($episode->season()->getResults()?->is($season))->toBeTrue()
         ->and($episode->serie()->getResults()?->is($series))->toBeTrue()
         ->and($episode->episode_number)->toBe(1)
-        ->and($episode->release_group)->toBe('TEAM')
         ->and($episode->formatted_episode_number)->toBe('S01E01');
 });
 

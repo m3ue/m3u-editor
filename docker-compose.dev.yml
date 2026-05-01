@@ -63,6 +63,8 @@ services:
       # Plugin scaffolding templates are excluded from the image build context.
       - ./stubs:/var/www/html/stubs:ro
 
+      - ./sport-data:/sport
+
       # PostgreSQL data
       - pgdata_dev:/var/lib/postgresql/data
 

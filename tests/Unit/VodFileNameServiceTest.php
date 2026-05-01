@@ -14,7 +14,6 @@ it('generates a filesystem safe movie filename from stream stats', function () {
         'name' => 'Blade: Runner / Final Cut',
         'year' => 1982,
         'edition' => 'Final Cut',
-        'release_group' => 'NTb',
         'stream_stats' => [
             'resolution' => '1920x1080',
             'video_codec' => 'h264',
@@ -24,14 +23,14 @@ it('generates a filesystem safe movie filename from stream stats', function () {
         ],
     ]);
     $setting = new StreamFileSetting([
-        'movie_format' => '{title} ({year}){edition} [{quality} {video} {audio} {hdr}]-{group}',
+        'movie_format' => '{title} ({year}){edition} [{quality} {video} {audio} {hdr}]',
         'use_stream_stats' => true,
         'replace_char' => 'dash',
     ]);
 
     $fileName = (new VodFileNameService)->generateMovieFileName($channel, $setting);
 
-    expect($fileName)->toBe('Blade- Runner - Final Cut (1982) Final Cut [1080p H.264 AAC 2.0 HDR10+]-NTb');
+    expect($fileName)->toBe('Blade- Runner - Final Cut (1982) Final Cut [1080p H.264 AAC 2.0 HDR10+]');
 });
 
 it('falls back to movie data year and manual fields when stream stats are disabled', function () {

@@ -26,15 +26,14 @@ it('generates trash guide episode filenames from the configured format', functio
                 ['stream' => ['codec_type' => 'video', 'codec_name' => 'hevc', 'height' => 1080]],
                 ['stream' => ['codec_type' => 'audio', 'codec_name' => 'eac3', 'channels' => 6]],
             ],
-            'release_group' => 'GROUP',
         ]);
     $setting = new StreamFileSetting([
-        'episode_format' => '{title} - S{season}E{episode} - {ep_title} {quality} {audio} {video}{-group}',
+        'episode_format' => '{title} - S{season}E{episode} - {ep_title} {quality} {audio} {video}',
     ]);
 
     $fileName = $this->service->generateEpisodeFileName($episode, $setting);
 
-    expect($fileName)->toBe('Show Name Special - S01E01 - Pilot Part One 1080p E-AC-3 5.1 H.265-GROUP');
+    expect($fileName)->toBe('Show Name Special - S01E01 - Pilot Part One 1080p E-AC-3 5.1 H.265');
 });
 
 it('generates season and serie folder names', function () {
@@ -56,7 +55,6 @@ it('generates full strm paths', function () {
             'season' => 3,
             'episode_num' => 4,
             'stream_stats' => [],
-            'release_group' => null,
         ]);
     $setting = new StreamFileSetting([
         'episode_format' => '{title} - S{season}E{episode} - {ep_title}',

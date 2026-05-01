@@ -10,11 +10,11 @@ test('trash guide naming columns exist on the relevant tables', function () {
         expect(Schema::hasColumn('stream_file_settings', $column))->toBeTrue();
     }
 
-    foreach (['release_group', 'edition', 'year'] as $column) {
+    foreach (['edition', 'year'] as $column) {
         expect(Schema::hasColumn('channels', $column))->toBeTrue();
     }
 
-    foreach (['title', 'stream_stats', 'release_group'] as $column) {
+    foreach (['title', 'stream_stats'] as $column) {
         expect(Schema::hasColumn('episodes', $column))->toBeTrue();
     }
 });

@@ -30,8 +30,6 @@ class SerieFileNameService
         $audio = $this->safeName(StreamStatsService::detectAudio($stats));
         $video = $this->safeName(StreamStatsService::detectVideoCodec($stats));
         $hdr = $this->safeName(StreamStatsService::detectHdr($stats));
-        $group = $this->safeName($episode->release_group);
-
         $fileName = strtr($format, [
             '{title}' => $this->safeName($this->serieName($episode)),
             '{season}' => $this->padNumber($episode->season ?? $episode->season_number ?? $episode->season?->season_number),
@@ -42,8 +40,8 @@ class SerieFileNameService
             '{audio}' => $audio,
             '{video}' => $video,
             '{hdr}' => $hdr,
-            '{group}' => $group,
-            '{-group}' => $group === '' ? '' : '-'.$group,
+            '{group}' => '',
+            '{-group}' => '',
         ]);
 
         return $this->cleanGeneratedName($fileName);
