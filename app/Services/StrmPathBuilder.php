@@ -79,7 +79,21 @@ class StrmPathBuilder
 
     public function buildEpisodePath(Episode $episode, StreamFileSetting $setting, array $syncSettings): string
     {
-        $episode->loadMissing(['season.series', 'series']);
+        // NOTE: cannot use $episode->loadMissing(['season.series', 'series'])
+        // because Episode has BOTH a `season` integer column (cast) AND a `season()` BelongsTo relation.
+        // Laravel's loadMissing traverses via __get('season') which returns the integer cast,
+        // then calls relationLoaded() on the int and crashes.
+        // Load each relation explicitly via the relation method instead.
+        if (! $episode->relationLoaded('season')) {
+            $episode->setRelation('season', $episode->season()->first());
+        }
+        $seasonRel = $episode->getRelation('season');
+        if ($seasonRel instanceof Season && ! $seasonRel->relationLoaded('series')) {
+            $seasonRel->setRelation('series', $seasonRel->series()->first());
+        }
+        if (! $episode->relationLoaded('series')) {
+            $episode->setRelation('series', $episode->series()->first());
+        }
 
         $syncLocation = rtrim($syncSettings['sync_location'] ?? '', '/');
         $pathStructure = $syncSettings['path_structure'] ?? ['category', 'series', 'season'];

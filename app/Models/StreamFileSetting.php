@@ -40,6 +40,8 @@ class StreamFileSetting extends Model
         'version_detection_pattern',
         'group_versions',
         'use_stream_stats',
+        'trash_movie_components',
+        'trash_episode_components',
     ];
 
     protected $casts = [
@@ -57,6 +59,8 @@ class StreamFileSetting extends Model
         'trash_guide_naming_enabled' => 'boolean',
         'group_versions' => 'boolean',
         'use_stream_stats' => 'boolean',
+        'trash_movie_components' => 'array',
+        'trash_episode_components' => 'array',
     ];
 
     public function user(): BelongsTo
@@ -128,6 +132,8 @@ class StreamFileSetting extends Model
             'version_detection_pattern' => $this->version_detection_pattern,
             'group_versions' => $this->group_versions ?? true,
             'use_stream_stats' => $this->use_stream_stats ?? true,
+            'trash_movie_components' => $this->trash_movie_components ?? [],
+            'trash_episode_components' => $this->trash_episode_components ?? [],
         ];
     }
 }

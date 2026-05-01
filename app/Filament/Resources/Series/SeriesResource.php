@@ -14,10 +14,12 @@ use App\Filament\Resources\Series\Pages\ViewSeries;
 use App\Filament\Resources\Series\RelationManagers\EpisodesRelationManager;
 use App\Forms\Components\TmdbSearchResults;
 use App\Jobs\FetchTmdbIds;
+use App\Jobs\ProbeVodStreamsChunk;
 use App\Jobs\ProcessM3uImportSeriesEpisodes;
 use App\Jobs\SeriesFindAndReplace;
 use App\Jobs\SyncSeriesStrmFiles;
 use App\Models\Category;
+use App\Models\Episode;
 use App\Models\Playlist;
 use App\Models\Series;
 use App\Rules\CheckIfUrlOrLocalPath;
@@ -201,6 +203,22 @@ class SeriesResource extends Resource implements CopilotResource
                 ->badge()
                 ->toggleable()
                 ->sortable(),
+            TextColumn::make('probe_enabled_episodes_count')
+                ->label(__('Probe Enabled'))
+                ->counts(['episodes as probe_enabled_episodes_count' => fn ($q) => $q->where('probe_enabled', true)])
+                ->badge()
+                ->color(fn ($state) => $state > 0 ? 'success' : 'gray')
+                ->tooltip(__('Episodes with probing enabled'))
+                ->toggleable()
+                ->sortable(),
+            TextColumn::make('probed_episodes_count')
+                ->label(__('Probed'))
+                ->counts(['episodes as probed_episodes_count' => fn ($q) => $q->whereNotNull('stream_stats_probed_at')])
+                ->badge()
+                ->color(fn ($state) => $state > 0 ? 'success' : 'gray')
+                ->tooltip(__('Episodes already probed'))
+                ->toggleable()
+                ->sortable(),
             TextColumn::make('category.name')
                 ->hidden(fn () => ! $showCategory)
                 ->badge()
@@ -252,6 +270,18 @@ class SeriesResource extends Resource implements CopilotResource
                 ->label(__('Missing TMDB/TVDB/IMDB ID'))
                 ->toggle()
                 ->query(fn ($query) => $query->missingSeriesId()),
+            Filter::make('probe_enabled')
+                ->label(__('Probe enabled'))
+                ->toggle()
+                ->query(fn ($query) => $query->whereHas('episodes', fn ($q) => $q->where('probe_enabled', true))),
+            Filter::make('probed')
+                ->label(__('Probed'))
+                ->toggle()
+                ->query(fn ($query) => $query->whereHas('episodes', fn ($q) => $q->whereNotNull('stream_stats_probed_at'))),
+            Filter::make('not_probed')
+                ->label(__('Not probed'))
+                ->toggle()
+                ->query(fn ($query) => $query->whereDoesntHave('episodes', fn ($q) => $q->whereNotNull('stream_stats_probed_at'))),
         ];
     }
 
@@ -463,6 +493,40 @@ class SeriesResource extends Resource implements CopilotResource
                     ->modalIcon('heroicon-o-document-arrow-down')
                     ->modalDescription(__('Sync series .strm files now? This will generate .strm files for this series at the path set for this series.'))
                     ->modalSubmitActionLabel(__('Yes, sync now')),
+                Action::make('probe')
+                    ->label(__('Probe Episode Streams'))
+                    ->icon('heroicon-o-signal')
+                    ->action(function ($record): void {
+                        $episodeIds = Episode::where('series_id', $record->id)
+                            ->where('probe_enabled', true)
+                            ->pluck('id')
+                            ->all();
+                        if (! empty($episodeIds)) {
+                            $total = count($episodeIds);
+                            $chunks = array_chunk($episodeIds, 50);
+                            $last = count($chunks) - 1;
+                            foreach ($chunks as $i => $chunk) {
+                                dispatch(new ProbeVodStreamsChunk(
+                                    episodeIds: $chunk,
+                                    probeTimeout: 15,
+                                    notifyUserId: $i === $last ? auth()->id() : null,
+                                    notifyLabel: $i === $last ? __('Series stream probing') : null,
+                                    notifyTotal: $i === $last ? $total : null,
+                                ));
+                            }
+                        }
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title(__('Stream probing started'))
+                            ->body(__('Stream probing is running in the background. You will be notified once the process is complete.'))
+                            ->duration(10000)
+                            ->send();
+                    })
+                    ->requiresConfirmation()
+                    ->modalIcon('heroicon-o-signal')
+                    ->modalDescription(__('Probe all episodes of this series with ffprobe to collect stream metadata (codec, resolution, bitrate, HDR). This data enables Trash Guide naming with stream-stat-based detection.'))
+                    ->modalSubmitActionLabel(__('Start probing')),
                 DeleteAction::make()
                     ->modalIcon('heroicon-o-trash')
                     ->modalDescription(__('Are you sure you want to delete this series? This will delete all episodes and seasons for this series. This action cannot be undone.'))
@@ -810,6 +874,82 @@ class SeriesResource extends Resource implements CopilotResource
                     ->modalIcon('heroicon-o-magnifying-glass')
                     ->modalDescription(__('Select what you would like to find and replace in the selected epg channels.'))
                     ->modalSubmitActionLabel(__('Replace now')),
+            ]),
+
+            // -- Probing --
+            BulkModalActionGroup::section('Probing', [
+                BulkAction::make('enable-probing')
+                    ->label(__('Enable Probing'))
+                    ->action(function (Collection $records): void {
+                        $seriesIds = $records->pluck('id')->all();
+                        Episode::whereIn('series_id', $seriesIds)->update(['probe_enabled' => true]);
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title(__('Stream probing enabled'))
+                            ->body(__('Stream probing has been enabled for all episodes of the selected series.'))
+                            ->send();
+                    })
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-signal')
+                    ->modalIcon('heroicon-o-signal')
+                    ->modalDescription(__('Enable stream probing for all episodes of the selected series. They will be included in stream probing jobs.'))
+                    ->modalSubmitActionLabel(__('Enable now')),
+                BulkAction::make('disable-probing')
+                    ->label(__('Disable Probing'))
+                    ->color('warning')
+                    ->action(function (Collection $records): void {
+                        $seriesIds = $records->pluck('id')->all();
+                        Episode::whereIn('series_id', $seriesIds)->update(['probe_enabled' => false]);
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title(__('Stream probing disabled'))
+                            ->body(__('Stream probing has been disabled for all episodes of the selected series.'))
+                            ->send();
+                    })
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-signal-slash')
+                    ->modalIcon('heroicon-o-signal-slash')
+                    ->modalDescription(__('Disable stream probing for all episodes of the selected series. They will be excluded from stream probing jobs.'))
+                    ->modalSubmitActionLabel(__('Disable now')),
+                BulkAction::make('probe-streams')
+                    ->label(__('Probe Streams'))
+                    ->action(function (Collection $records): void {
+                        $seriesIds = $records->pluck('id')->all();
+                        $episodeIds = Episode::whereIn('series_id', $seriesIds)
+                            ->where('probe_enabled', true)
+                            ->pluck('id')
+                            ->all();
+                        if (! empty($episodeIds)) {
+                            $total = count($episodeIds);
+                            $chunks = array_chunk($episodeIds, 50);
+                            $last = count($chunks) - 1;
+                            foreach ($chunks as $i => $chunk) {
+                                dispatch(new ProbeVodStreamsChunk(
+                                    episodeIds: $chunk,
+                                    probeTimeout: 15,
+                                    notifyUserId: $i === $last ? auth()->id() : null,
+                                    notifyLabel: $i === $last ? __('Series stream probing') : null,
+                                    notifyTotal: $i === $last ? $total : null,
+                                ));
+                            }
+                        }
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title(__('Stream probing started'))
+                            ->body(__('Stream probing is running in the background. You will be notified once the process is complete.'))
+                            ->send();
+                    })
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-signal')
+                    ->modalIcon('heroicon-o-signal')
+                    ->modalDescription(__('Probe the episodes of the selected series with ffprobe to collect stream metadata (codec, resolution, bitrate, HDR). This data enables Trash Guide naming with stream-stat-based detection.'))
+                    ->modalSubmitActionLabel(__('Start probing')),
             ]),
 
             // -- Enable / Disable --

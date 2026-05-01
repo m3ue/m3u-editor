@@ -26,10 +26,12 @@ class SerieFileNameService
         $format = $setting->episode_format ?: '{title} - S{season}E{episode}{-title}';
         $stats = StreamStatsService::normalize($episode->stream_stats ?? []);
         $episodeTitle = $this->safeName($episode->title);
-        $quality = $this->safeName(StreamStatsService::detectQuality($stats));
-        $audio = $this->safeName(StreamStatsService::detectAudio($stats));
+
+        $titleHaystack = trim((string) ($episode->title ?? '').' '.($episode->name ?? ''));
+        $quality = $this->safeName(StreamStatsService::detectQuality($stats)) ?: $this->safeName(TitleMetadataParser::detectQuality($titleHaystack));
+        $audio = $this->safeName(StreamStatsService::detectAudio($stats)) ?: $this->safeName(TitleMetadataParser::detectAudio($titleHaystack));
         $video = $this->safeName(StreamStatsService::detectVideoCodec($stats));
-        $hdr = $this->safeName(StreamStatsService::detectHdr($stats));
+        $hdr = $this->safeName(StreamStatsService::detectHdr($stats)) ?: $this->safeName(TitleMetadataParser::detectHdr($titleHaystack));
         $fileName = strtr($format, [
             '{title}' => $this->safeName($this->serieName($episode)),
             '{season}' => $this->padNumber($episode->season ?? $episode->season_number ?? $episode->season?->season_number),
@@ -43,6 +45,21 @@ class SerieFileNameService
             '{group}' => '',
             '{-group}' => '',
         ]);
+
+        // Trash Guide naming: append components bracket (mirrors UI preview)
+        if ($setting->trash_guide_naming_enabled) {
+            $components = $setting->trash_episode_components ?: ['quality', 'video', 'audio', 'hdr'];
+            $map = ['quality' => $quality, 'video' => $video, 'audio' => $audio, 'hdr' => $hdr];
+            $parts = [];
+            foreach (['quality', 'video', 'audio', 'hdr'] as $key) {
+                if (in_array($key, $components, true) && ! empty($map[$key])) {
+                    $parts[] = $map[$key];
+                }
+            }
+            if ($parts) {
+                $fileName .= ' ['.implode(' ', $parts).']';
+            }
+        }
 
         return $this->cleanGeneratedName($fileName);
     }

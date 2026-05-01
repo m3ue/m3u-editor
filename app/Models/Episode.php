@@ -15,6 +15,7 @@ use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
+use Symfony\Component\Process\Process as SymfonyProcess;
 
 class Episode extends Model
 {
@@ -40,6 +41,7 @@ class Episode extends Model
         'info' => 'array',
         'stream_stats' => 'array',
         'stream_stats_probed_at' => 'datetime',
+        'probe_enabled' => 'boolean',
     ];
 
     public function user(): BelongsTo

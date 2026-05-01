@@ -18,6 +18,10 @@ return new class extends Migration
             if (! Schema::hasColumn('episodes', 'stream_stats_probed_at')) {
                 $table->timestamp('stream_stats_probed_at')->nullable()->after('stream_stats');
             }
+
+            if (! Schema::hasColumn('episodes', 'probe_enabled')) {
+                $table->boolean('probe_enabled')->default(false)->after('stream_stats_probed_at');
+            }
         });
     }
 
@@ -25,7 +29,7 @@ return new class extends Migration
     {
         Schema::table('episodes', function (Blueprint $table) {
             $table->string('title')->nullable(false)->change();
-            $table->dropColumn(['stream_stats', 'stream_stats_probed_at']);
+            $table->dropColumn(['stream_stats', 'stream_stats_probed_at', 'probe_enabled']);
         });
     }
 };

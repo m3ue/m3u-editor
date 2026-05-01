@@ -641,17 +641,32 @@ class SyncSeriesStrmFiles implements ShouldQueue
                 return;
             }
 
-            // Resolve StreamFileSetting model for Trash Guide naming
+            // Resolve StreamFileSetting for Trash Guide naming (series → category → global default)
             $streamFileSetting = $series->streamFileSetting
                 ?? $series->category?->streamFileSetting
-                ?? ($settings->default_series_stream_file_setting_id ? StreamFileSetting::find($settings->default_series_stream_file_setting_id) : null);
+                ?? ($settings->default_series_stream_file_setting_id
+                    ? StreamFileSetting::find($settings->default_series_stream_file_setting_id)
+                    : null);
 
             // Loop through each episode
             foreach ($episodes as $ep) {
-                if ($streamFileSetting?->episode_format) {
-                    // Use Trash Guide naming via StrmPathBuilder
-                    $filePath = app(StrmPathBuilder::class)->buildEpisodePath($ep, $streamFileSetting, $sync_settings);
+                // Trash Guide naming takes precedence when configured
+                if ($streamFileSetting?->trash_guide_naming_enabled) {
+                    try {
+                        $filePath = app(StrmPathBuilder::class)
+                            ->buildEpisodePath($ep, $streamFileSetting, $sync_settings);
+                    } catch (\Throwable $e) {
+                        Log::warning('STRM Sync: Trash Guide path build failed, falling back to legacy naming', [
+                            'episode_id' => $ep->id,
+                            'error' => $e->getMessage(),
+                        ]);
+                        $filePath = null;
+                    }
                 } else {
+                    $filePath = null;
+                }
+
+                if ($filePath === null) {
                     // Legacy filename generation
                     // Setup episode prefix
                     $season = $ep->season;

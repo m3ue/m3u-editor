@@ -1717,8 +1717,8 @@ class PlaylistResource extends Resource implements CopilotResource
                         ->default(false),
 
                     Toggle::make('auto_probe_vod_streams')
-                        ->label(__('Probe VOD streams after sync'))
-                        ->helperText(__('When enabled, VOD channels and episodes will be probed with ffprobe after sync to collect stream metadata for Trash Guide naming.'))
+                        ->label(__('Probe VOD & series streams after sync'))
+                        ->helperText(__('When enabled, both VOD movies and series episodes are automatically probed after each sync. This significantly increases sync time but enables Trash Guide naming with stream-stat-based quality/codec/HDR detection — and falls back to existing TMDB metadata where probing is not possible.'))
                         ->live()
                         ->columnSpanFull()
                         ->inline(true)

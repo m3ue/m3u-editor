@@ -32,6 +32,14 @@ return new class extends Migration
             if (! Schema::hasColumn('stream_file_settings', 'trash_guide_naming_enabled')) {
                 $table->boolean('trash_guide_naming_enabled')->default(false)->after('use_stream_stats');
             }
+
+            if (! Schema::hasColumn('stream_file_settings', 'trash_movie_components')) {
+                $table->json('trash_movie_components')->nullable()->after('trash_guide_naming_enabled');
+            }
+
+            if (! Schema::hasColumn('stream_file_settings', 'trash_episode_components')) {
+                $table->json('trash_episode_components')->nullable()->after('trash_movie_components');
+            }
         });
     }
 
@@ -45,6 +53,8 @@ return new class extends Migration
                 'group_versions',
                 'use_stream_stats',
                 'trash_guide_naming_enabled',
+                'trash_movie_components',
+                'trash_episode_components',
             ]);
         });
     }

@@ -11,6 +11,7 @@ use App\Traits\HasUserFiltering;
 use EslamRedaDiv\FilamentCopilot\Contracts\CopilotResource;
 use Filament\Actions;
 use Filament\Forms;
+use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
@@ -211,6 +212,35 @@ class StreamFileSettingResource extends Resource implements CopilotResource
                                 $filename .= " - {$groupName}";
                             }
 
+                            // Trash Guide naming appends extra components (edition + quality bracket)
+                            // to the standard filename above — it does NOT replace title/year/tmdb/group.
+                            if ((bool) $get('trash_guide_naming_enabled')) {
+                                $components = $get('trash_movie_components') ?: ['quality', 'video', 'audio', 'hdr'];
+                                $usePlexMarker = (bool) ($get('group_versions') ?? true);
+                                $sample = [
+                                    'edition' => 'Directors Cut',
+                                    'quality' => '1080p',
+                                    'video' => 'x264',
+                                    'audio' => 'DTS',
+                                    'hdr' => 'HDR10',
+                                ];
+                                if (in_array('edition', $components)) {
+                                    $filename .= $usePlexMarker
+                                        ? ' {edition-'.str_replace(' ', '.', $sample['edition']).'}'
+                                        : ' '.$sample['edition'];
+                                }
+                                $bracketParts = [];
+                                foreach (['quality', 'video', 'audio', 'hdr'] as $b) {
+                                    if (in_array($b, $components) && $sample[$b] !== '') {
+                                        $bracketParts[] = $sample[$b];
+                                    }
+                                }
+                                if ($bracketParts) {
+                                    $filename .= ' ['.implode(' ', $bracketParts).']';
+                                }
+                                $filename = trim(preg_replace('/\s+/', ' ', $filename));
+                            }
+
                             $preview .= '/'.$filename.'.strm';
 
                             return $preview;
@@ -289,6 +319,27 @@ class StreamFileSettingResource extends Resource implements CopilotResource
                             $filename .= " - {$catName}";
                         }
 
+                        // Trash Guide naming appends quality bracket to the standard episode filename
+                        if ((bool) $get('trash_guide_naming_enabled')) {
+                            $components = $get('trash_episode_components') ?: ['quality', 'video', 'audio', 'hdr'];
+                            $sample = [
+                                'quality' => '1080p',
+                                'video' => 'x264',
+                                'audio' => 'DDP5.1',
+                                'hdr' => '',
+                            ];
+                            $bracketParts = [];
+                            foreach (['quality', 'video', 'audio', 'hdr'] as $b) {
+                                if (in_array($b, $components) && $sample[$b] !== '') {
+                                    $bracketParts[] = $sample[$b];
+                                }
+                            }
+                            if ($bracketParts) {
+                                $filename .= ' ['.implode(' ', $bracketParts).']';
+                            }
+                            $filename = trim(preg_replace('/\s+/', ' ', $filename));
+                        }
+
                         $preview .= '/'.$filename.'.strm';
 
                         return $preview;
@@ -321,48 +372,6 @@ class StreamFileSettingResource extends Resource implements CopilotResource
                             $set('folder_metadata', []);
                         }
                     })
-                    ->hidden(fn ($get) => ! $get('enabled')),
-
-                Fieldset::make(__('Trash Guide Naming'))
-                    ->columnSpanFull()
-                    ->schema([
-                        Toggle::make('trash_guide_naming_enabled')
-                            ->label(__('Enable Trash Guide naming'))
-                            ->default(false)
-                            ->inline(false)
-                            ->live()
-                            ->helperText(__('When enabled, generates filenames using the Trash Guide format with quality, codec, and group info. When disabled, uses standard naming.')),
-                        Textarea::make('movie_format')
-                            ->label(__('Movie filename format'))
-                            ->default('{title} ({year}) {edition} [{quality} {video} {audio} {hdr}] {group}')
-                            ->helperText(__('Available placeholders: {title}, {year}, {edition}, {quality}, {audio}, {video}, {hdr}, {group}, {-group}'))
-                            ->visible(fn (Get $get): bool => $get('type') === 'vod' && $get('trash_guide_naming_enabled'))
-                            ->columnSpanFull(),
-                        Textarea::make('episode_format')
-                            ->label(__('Episode filename format'))
-                            ->default('{title} - S{season}E{episode}{-title} [{quality} {video} {audio} {hdr}] {group}')
-                            ->helperText(__('Available placeholders: {title}, {season}, {episode}, {ep_title}, {-title}, {quality}, {audio}, {video}, {hdr}, {group}, {-group}'))
-                            ->visible(fn (Get $get): bool => $get('type') === 'series' && $get('trash_guide_naming_enabled'))
-                            ->columnSpanFull(),
-                        Toggle::make('use_stream_stats')
-                            ->label(__('Use stream stats for quality/audio/video detection'))
-                            ->default(true)
-                            ->inline(false)
-                            ->live()
-                            ->visible(fn (Get $get): bool => $get('trash_guide_naming_enabled')),
-                        TextInput::make('version_detection_pattern')
-                            ->label(__('Version detection pattern (regex)'))
-                            ->placeholder('/\\b(EXTENDED|REMASTERED|UNRATED|DIRECTORS\\sCUT)\\b/i')
-                            ->helperText(__('Regex pattern to detect edition/version tags in titles. Leave empty to disable auto-detection.'))
-                            ->visible(fn (Get $get): bool => $get('type') === 'vod' && $get('trash_guide_naming_enabled'))
-                            ->columnSpanFull(),
-                        Toggle::make('group_versions')
-                            ->label(__('Group multiple versions in same folder'))
-                            ->default(true)
-                            ->inline(false)
-                            ->helperText(__('When enabled, multiple versions of the same movie are placed in the same folder with edition tags'))
-                            ->visible(fn (Get $get): bool => $get('type') === 'vod' && $get('trash_guide_naming_enabled')),
-                    ])
                     ->hidden(fn ($get) => ! $get('enabled')),
 
                 Fieldset::make(__('Include Metadata'))
@@ -424,6 +433,58 @@ class StreamFileSettingResource extends Resource implements CopilotResource
                             ->default('episodes')
                             ->helperText(__('How should the TMDB ID be used.'))
                             ->hidden(fn (Get $get): bool => $get('type') !== 'series' || ! in_array('tmdb_id', $get('filename_metadata') ?? [])),
+
+                        // ── Trash Guide naming (extra components appended to the standard filename) ──
+                        Toggle::make('trash_guide_naming_enabled')
+                            ->label(__('Enable Trash Guide naming (extra components)'))
+                            ->default(false)
+                            ->inline(false)
+                            ->live()
+                            ->columnSpanFull()
+                            ->helperText(__('When enabled, appends edition + a quality/codec/audio/HDR bracket to the filename built from "Filename metadata" above. Both work together.')),
+                        Placeholder::make('trash_probe_hint')
+                            ->hiddenLabel()
+                            ->columnSpanFull()
+                            ->visible(fn (Get $get): bool => (bool) $get('trash_guide_naming_enabled'))
+                            ->content(__('Note: Quality, video codec, audio and HDR placeholders require stream probing. Channels/episodes that have not been probed will fall back to manual values from the playlist source — some placeholders may render empty.')),
+                        ToggleButtons::make('trash_movie_components')
+                            ->label(__('Movie extra components'))
+                            ->helperText(__('Appended to the standard filename. Title/Year/TMDB/Group come from "Filename metadata" above.'))
+                            ->live()
+                            ->inline()
+                            ->multiple()
+                            ->columnSpanFull()
+                            ->options([
+                                'edition' => 'Edition',
+                                'quality' => 'Quality',
+                                'video' => 'Video',
+                                'audio' => 'Audio',
+                                'hdr' => 'HDR',
+                            ])
+                            ->default(['quality', 'video', 'audio', 'hdr'])
+                            ->visible(fn (Get $get): bool => $get('type') === 'vod' && (bool) $get('trash_guide_naming_enabled')),
+                        ToggleButtons::make('trash_episode_components')
+                            ->label(__('Episode extra components'))
+                            ->helperText(__('Appended to the standard episode filename (Series, Season/Episode, Episode title come from the standard naming).'))
+                            ->live()
+                            ->inline()
+                            ->multiple()
+                            ->columnSpanFull()
+                            ->options([
+                                'quality' => 'Quality',
+                                'video' => 'Video',
+                                'audio' => 'Audio',
+                                'hdr' => 'HDR',
+                            ])
+                            ->default(['quality', 'video', 'audio', 'hdr'])
+                            ->visible(fn (Get $get): bool => $get('type') === 'series' && (bool) $get('trash_guide_naming_enabled')),
+                        Toggle::make('group_versions')
+                            ->label(__('Use Plex/Jellyfin/Emby multi-version markers'))
+                            ->default(true)
+                            ->inline(false)
+                            ->columnSpanFull()
+                            ->helperText(__('When enabled, the edition is written as {edition-Name} (Plex marker). All versions of a movie land in the same folder so media servers offer a version switch (e.g. 1080p / 4K / Director\'s Cut). When disabled, the edition is written as a plain suffix.'))
+                            ->visible(fn (Get $get): bool => $get('type') === 'vod' && (bool) $get('trash_guide_naming_enabled')),
                     ])
                     ->hidden(fn ($get) => ! $get('enabled')),
 
