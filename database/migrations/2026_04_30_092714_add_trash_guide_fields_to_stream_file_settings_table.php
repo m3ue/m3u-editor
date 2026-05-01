@@ -6,47 +6,35 @@ use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
-    /**
-     * Run the migrations.
-     */
     public function up(): void
     {
         Schema::table('stream_file_settings', function (Blueprint $table) {
             if (! Schema::hasColumn('stream_file_settings', 'movie_format')) {
-                $table->string('movie_format')
-                    ->default('{title} ({year}){edition}{quality}{audio}{video}{-group}')
-                    ->after('generate_nfo');
+                $table->string('movie_format')->nullable()->default(null)->after('generate_nfo');
             }
 
             if (! Schema::hasColumn('stream_file_settings', 'episode_format')) {
-                $table->string('episode_format')
-                    ->default('{title} - S{season}E{episode}{-title}{quality}{audio}{video}{-group}')
-                    ->after('movie_format');
+                $table->string('episode_format')->nullable()->default(null)->after('movie_format');
             }
 
             if (! Schema::hasColumn('stream_file_settings', 'version_detection_pattern')) {
-                $table->string('version_detection_pattern')
-                    ->nullable()
-                    ->after('episode_format');
+                $table->string('version_detection_pattern')->nullable()->after('episode_format');
             }
 
             if (! Schema::hasColumn('stream_file_settings', 'group_versions')) {
-                $table->boolean('group_versions')
-                    ->default(true)
-                    ->after('version_detection_pattern');
+                $table->boolean('group_versions')->default(true)->after('version_detection_pattern');
             }
 
             if (! Schema::hasColumn('stream_file_settings', 'use_stream_stats')) {
-                $table->boolean('use_stream_stats')
-                    ->default(true)
-                    ->after('group_versions');
+                $table->boolean('use_stream_stats')->default(true)->after('group_versions');
+            }
+
+            if (! Schema::hasColumn('stream_file_settings', 'trash_guide_naming_enabled')) {
+                $table->boolean('trash_guide_naming_enabled')->default(false)->after('use_stream_stats');
             }
         });
     }
 
-    /**
-     * Reverse the migrations.
-     */
     public function down(): void
     {
         Schema::table('stream_file_settings', function (Blueprint $table) {
@@ -56,6 +44,7 @@ return new class extends Migration
                 'version_detection_pattern',
                 'group_versions',
                 'use_stream_stats',
+                'trash_guide_naming_enabled',
             ]);
         });
     }

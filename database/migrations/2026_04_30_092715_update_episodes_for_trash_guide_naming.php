@@ -6,26 +6,26 @@ use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
-    /**
-     * Run the migrations.
-     */
     public function up(): void
     {
         Schema::table('episodes', function (Blueprint $table) {
             $table->string('title')->nullable()->change();
-            $table->json('stream_stats')->nullable()->after('season');
-            $table->string('release_group')->nullable()->after('stream_stats');
+
+            if (! Schema::hasColumn('episodes', 'stream_stats')) {
+                $table->json('stream_stats')->nullable()->after('info');
+            }
+
+            if (! Schema::hasColumn('episodes', 'stream_stats_probed_at')) {
+                $table->timestamp('stream_stats_probed_at')->nullable()->after('stream_stats');
+            }
         });
     }
 
-    /**
-     * Reverse the migrations.
-     */
     public function down(): void
     {
         Schema::table('episodes', function (Blueprint $table) {
             $table->string('title')->nullable(false)->change();
-            $table->dropColumn(['stream_stats', 'release_group']);
+            $table->dropColumn(['stream_stats', 'stream_stats_probed_at']);
         });
     }
 };
