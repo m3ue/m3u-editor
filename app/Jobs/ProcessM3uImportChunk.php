@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Models\Channel;
+use App\Models\Group;
 use App\Models\Job;
 use App\Models\Playlist;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -49,6 +50,12 @@ class ProcessM3uImportChunk implements ShouldQueue
             // Add the channel for insert/update
             $groupId = $job->variables['groupId'];
             $groupName = $job->variables['groupName'];
+            // Inherit the group's saved stream_profile_id for newly inserted rows.
+            // The upsert below excludes stream_profile_id from its update list, so
+            // existing channel profile assignments survive re-imports.
+            $groupProfileId = $groupId
+                ? Group::query()->whereKey($groupId)->value('stream_profile_id')
+                : null;
             foreach ($job->payload as $channel) {
                 // Make sure name is set
                 if (! isset($channel['name'])) {
@@ -56,11 +63,15 @@ class ProcessM3uImportChunk implements ShouldQueue
                 }
 
                 // Add the channel for insert/update
-                $bulk[] = [
+                $row = [
                     ...$channel,
                     'group' => $groupName ?? null,
                     'group_id' => $groupId ?? null,
                 ];
+                if ($groupProfileId !== null && empty($row['stream_profile_id'])) {
+                    $row['stream_profile_id'] = $groupProfileId;
+                }
+                $bulk[] = $row;
             }
 
             // Assign source_id via collision-relative hashing.
