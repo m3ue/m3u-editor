@@ -213,10 +213,29 @@ class SeriesResource extends Resource implements CopilotResource
                 ->sortable(),
             TextColumn::make('probed_episodes_count')
                 ->label(__('Probed'))
-                ->counts(['episodes as probed_episodes_count' => fn ($q) => $q->whereNotNull('stream_stats_probed_at')])
+                ->counts([
+                    'episodes as probed_episodes_count' => fn ($q) => $q
+                        ->whereNotNull('stream_stats_probed_at')
+                        ->whereNotNull('stream_stats')
+                        ->whereRaw("CAST(stream_stats AS TEXT) != '[]'"),
+                ])
                 ->badge()
-                ->color(fn ($state) => $state > 0 ? 'success' : 'gray')
-                ->tooltip(__('Episodes already probed'))
+                ->color(fn ($state, $record) => $state === 0
+                    ? 'gray'
+                    : ($state >= ($record->probe_enabled_episodes_count ?? 0) ? 'success' : 'warning'))
+                ->tooltip(__('Episodes successfully probed (with stream info)'))
+                ->toggleable()
+                ->sortable(),
+            TextColumn::make('probe_failed_episodes_count')
+                ->label(__('Probe Failed'))
+                ->counts([
+                    'episodes as probe_failed_episodes_count' => fn ($q) => $q
+                        ->whereNotNull('stream_stats_probed_at')
+                        ->where(fn ($q) => $q->whereNull('stream_stats')->orWhereRaw("CAST(stream_stats AS TEXT) = '[]'")),
+                ])
+                ->badge()
+                ->color(fn ($state) => $state > 0 ? 'warning' : 'gray')
+                ->tooltip(__('Episodes where probe ran but returned no stream info'))
                 ->toggleable()
                 ->sortable(),
             TextColumn::make('category.name')
@@ -277,7 +296,13 @@ class SeriesResource extends Resource implements CopilotResource
             Filter::make('probed')
                 ->label(__('Probed'))
                 ->toggle()
-                ->query(fn ($query) => $query->whereHas('episodes', fn ($q) => $q->whereNotNull('stream_stats_probed_at'))),
+                ->query(fn ($query) => $query->whereHas('episodes', fn ($q) => $q->whereNotNull('stream_stats_probed_at')
+                    ->whereNotNull('stream_stats')->whereRaw("CAST(stream_stats AS TEXT) != '[]'"))),
+            Filter::make('probe_failed')
+                ->label(__('Probe failed'))
+                ->toggle()
+                ->query(fn ($query) => $query->whereHas('episodes', fn ($q) => $q->whereNotNull('stream_stats_probed_at')
+                    ->where(fn ($qq) => $qq->whereNull('stream_stats')->orWhereRaw("CAST(stream_stats AS TEXT) = '[]'")))),
             Filter::make('not_probed')
                 ->label(__('Not probed'))
                 ->toggle()

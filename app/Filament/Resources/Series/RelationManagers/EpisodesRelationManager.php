@@ -13,6 +13,7 @@ use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
+use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\ImageColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Columns\ToggleColumn;
@@ -132,6 +133,38 @@ class EpisodesRelationManager extends RelationManager
                         return $info['release_date'] ?? null;
                     })
                     ->placeholder(''),
+
+                IconColumn::make('stream_stats_probed_at')
+                    ->label(__('Probed'))
+                    ->getStateUsing(function ($record): string {
+                        if ($record->stream_stats_probed_at === null) {
+                            return 'never';
+                        }
+
+                        return empty($record->stream_stats) ? 'failed' : 'ok';
+                    })
+                    ->icon(fn (string $state): string => match ($state) {
+                        'ok' => 'heroicon-o-check-circle',
+                        'failed' => 'heroicon-o-exclamation-triangle',
+                        default => 'heroicon-o-x-circle',
+                    })
+                    ->color(fn (string $state): string => match ($state) {
+                        'ok' => 'success',
+                        'failed' => 'warning',
+                        default => 'gray',
+                    })
+                    ->tooltip(function ($record): string {
+                        if ($record->stream_stats_probed_at === null) {
+                            return __('Not probed yet');
+                        }
+                        if (empty($record->stream_stats)) {
+                            return __('Probe ran but returned no stream info').' ('.$record->stream_stats_probed_at->diffForHumans().')';
+                        }
+
+                        return __('Probed').' '.$record->stream_stats_probed_at->diffForHumans();
+                    })
+                    ->toggleable()
+                    ->sortable(),
             ])
             ->filters([
                 //

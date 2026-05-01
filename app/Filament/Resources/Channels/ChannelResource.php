@@ -326,13 +326,33 @@ class ChannelResource extends Resource implements CopilotResource
                 ->hidden(fn () => ! auth()->user()->canUseProxy()),
             IconColumn::make('stream_stats_probed_at')
                 ->label(__('Probed'))
-                ->getStateUsing(fn ($record): bool => $record->stream_stats_probed_at !== null)
-                ->boolean()
-                ->trueIcon('heroicon-o-check-circle')
-                ->falseIcon('heroicon-o-x-circle')
-                ->trueColor('success')
-                ->falseColor('gray')
-                ->tooltip(fn ($record): ?string => $record->stream_stats_probed_at?->diffForHumans())
+                ->getStateUsing(function ($record): string {
+                    if ($record->stream_stats_probed_at === null) {
+                        return 'never';
+                    }
+
+                    return empty($record->stream_stats) ? 'failed' : 'ok';
+                })
+                ->icon(fn (string $state): string => match ($state) {
+                    'ok' => 'heroicon-o-check-circle',
+                    'failed' => 'heroicon-o-exclamation-triangle',
+                    default => 'heroicon-o-x-circle',
+                })
+                ->color(fn (string $state): string => match ($state) {
+                    'ok' => 'success',
+                    'failed' => 'warning',
+                    default => 'gray',
+                })
+                ->tooltip(function ($record): string {
+                    if ($record->stream_stats_probed_at === null) {
+                        return __('Not probed yet');
+                    }
+                    if (empty($record->stream_stats)) {
+                        return __('Probe ran but returned no stream info').' ('.$record->stream_stats_probed_at->diffForHumans().')';
+                    }
+
+                    return __('Probed').' '.$record->stream_stats_probed_at->diffForHumans();
+                })
                 ->toggleable()
                 ->sortable(),
             ToggleColumn::make('epg_map_enabled')
@@ -430,13 +450,21 @@ class ChannelResource extends Resource implements CopilotResource
                     return $query->where('epg_channel_id', '=', null);
                 }),
             Filter::make('probed')
-                ->label(__('Stream probed'))
+                ->label(__('Probed'))
                 ->toggle()
                 ->query(function ($query) {
-                    return $query->whereNotNull('stream_stats_probed_at');
+                    return $query->whereNotNull('stream_stats_probed_at')
+                        ->whereNotNull('stream_stats')->whereRaw("CAST(stream_stats AS TEXT) != '[]'");
+                }),
+            Filter::make('probe_failed')
+                ->label(__('Probe failed'))
+                ->toggle()
+                ->query(function ($query) {
+                    return $query->whereNotNull('stream_stats_probed_at')
+                        ->where(fn ($q) => $q->whereNull('stream_stats')->orWhereRaw("CAST(stream_stats AS TEXT) = '[]'"));
                 }),
             Filter::make('not_probed')
-                ->label(__('Stream not probed'))
+                ->label(__('Not probed'))
                 ->toggle()
                 ->query(function ($query) {
                     return $query->whereNull('stream_stats_probed_at');
