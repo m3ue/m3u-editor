@@ -326,35 +326,42 @@ class StreamFileSettingResource extends Resource implements CopilotResource
                 Fieldset::make(__('Trash Guide Naming'))
                     ->columnSpanFull()
                     ->schema([
+                        Toggle::make('trash_guide_naming_enabled')
+                            ->label(__('Enable Trash Guide naming'))
+                            ->default(false)
+                            ->inline(false)
+                            ->live()
+                            ->helperText(__('When enabled, generates filenames using the Trash Guide format with quality, codec, and group info. When disabled, uses standard naming.')),
                         Textarea::make('movie_format')
                             ->label(__('Movie filename format'))
-                            ->default('{title} ({year}){edition}{quality}{audio}{video}{-group}')
-                            ->helperText(__('Available placeholders: {title}, {year}, {edition}, {quality}, {audio}, {video}, {hdr}, {group}'))
-                            ->visible(fn (Get $get): bool => $get('type') === 'vod')
+                            ->default('{title} ({year}) {edition} [{quality} {video} {audio} {hdr}] {group}')
+                            ->helperText(__('Available placeholders: {title}, {year}, {edition}, {quality}, {audio}, {video}, {hdr}, {group}, {-group}'))
+                            ->visible(fn (Get $get): bool => $get('type') === 'vod' && $get('trash_guide_naming_enabled'))
                             ->columnSpanFull(),
                         Textarea::make('episode_format')
                             ->label(__('Episode filename format'))
-                            ->default('{title} - S{season}E{episode}{-ep_title}{quality}{audio}{video}{-group}')
-                            ->helperText(__('Available placeholders: {title}, {season}, {episode}, {-ep_title}, {quality}, {audio}, {video}, {hdr}, {group}'))
-                            ->visible(fn (Get $get): bool => $get('type') === 'series')
+                            ->default('{title} - S{season}E{episode}{-title} [{quality} {video} {audio} {hdr}] {group}')
+                            ->helperText(__('Available placeholders: {title}, {season}, {episode}, {ep_title}, {-title}, {quality}, {audio}, {video}, {hdr}, {group}, {-group}'))
+                            ->visible(fn (Get $get): bool => $get('type') === 'series' && $get('trash_guide_naming_enabled'))
                             ->columnSpanFull(),
                         Toggle::make('use_stream_stats')
                             ->label(__('Use stream stats for quality/audio/video detection'))
                             ->default(true)
                             ->inline(false)
-                            ->live(),
+                            ->live()
+                            ->visible(fn (Get $get): bool => $get('trash_guide_naming_enabled')),
                         TextInput::make('version_detection_pattern')
                             ->label(__('Version detection pattern (regex)'))
                             ->placeholder('/\\b(EXTENDED|REMASTERED|UNRATED|DIRECTORS\\sCUT)\\b/i')
                             ->helperText(__('Regex pattern to detect edition/version tags in titles. Leave empty to disable auto-detection.'))
-                            ->visible(fn (Get $get): bool => $get('type') === 'vod')
+                            ->visible(fn (Get $get): bool => $get('type') === 'vod' && $get('trash_guide_naming_enabled'))
                             ->columnSpanFull(),
                         Toggle::make('group_versions')
                             ->label(__('Group multiple versions in same folder'))
                             ->default(true)
                             ->inline(false)
                             ->helperText(__('When enabled, multiple versions of the same movie are placed in the same folder with edition tags'))
-                            ->visible(fn (Get $get): bool => $get('type') === 'vod'),
+                            ->visible(fn (Get $get): bool => $get('type') === 'vod' && $get('trash_guide_naming_enabled')),
                     ])
                     ->hidden(fn ($get) => ! $get('enabled')),
 

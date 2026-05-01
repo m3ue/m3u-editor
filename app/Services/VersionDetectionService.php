@@ -46,8 +46,12 @@ class VersionDetectionService
             return null;
         }
 
-        if (preg_match($pattern, $title, $matches) === 1) {
-            return trim($matches[1] ?? $matches[0]);
+        try {
+            if (preg_match($pattern, $title, $matches) === 1) {
+                return trim($matches[1] ?? $matches[0]);
+            }
+        } catch (\Exception $e) {
+            return null;
         }
 
         return null;

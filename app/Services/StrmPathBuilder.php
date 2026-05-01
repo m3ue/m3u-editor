@@ -35,13 +35,12 @@ class StrmPathBuilder
             $path .= '/'.$groupFolder;
         }
 
+        $fileName = $this->vodFileNameService->generateMovieFileName($channel, $setting);
+
         if (in_array('title', $pathStructure)) {
-            $fileName = $this->vodFileNameService->generateMovieFileName($channel, $setting);
             $folderName = $this->buildVodTitleFolder($channel, $fileName, $syncSettings);
             $path .= '/'.$folderName;
         }
-
-        $fileName = $this->vodFileNameService->generateMovieFileName($channel, $setting);
 
         return $path.'/'.$fileName.'.strm';
     }

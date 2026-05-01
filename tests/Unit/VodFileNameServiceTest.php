@@ -2,6 +2,7 @@
 
 use App\Models\Channel;
 use App\Models\StreamFileSetting;
+use App\Services\StreamStatsService;
 use App\Services\VodFileNameService;
 
 beforeEach(function () {
@@ -53,7 +54,7 @@ it('falls back to movie data year and manual fields when stream stats are disabl
 });
 
 it('detects quality from common resolution shapes', function (array $streamStats, string $quality) {
-    expect((new VodFileNameService)->detectQuality($streamStats))->toBe($quality);
+    expect(StreamStatsService::detectQuality($streamStats))->toBe($quality);
 })->with([
     '720p height' => [['resolution' => '1280x720'], '720p'],
     '1080p height' => [['resolution' => '1920x1080'], '1080p'],
@@ -62,14 +63,14 @@ it('detects quality from common resolution shapes', function (array $streamStats
 ]);
 
 it('detects display friendly audio codec and channels', function () {
-    expect((new VodFileNameService)->detectAudio([
+    expect(StreamStatsService::detectAudio([
         'audio_codec' => 'aac',
         'audio_channels' => 'stereo',
     ]))->toBe('AAC 2.0');
 });
 
 it('detects display friendly video codecs', function (string $codec, string $expected) {
-    expect((new VodFileNameService)->detectVideoCodec(['video_codec' => $codec]))->toBe($expected);
+    expect(StreamStatsService::detectVideoCodec(['video_codec' => $codec]))->toBe($expected);
 })->with([
     'h264' => ['h264', 'H.264'],
     'hevc' => ['hevc', 'H.265'],
@@ -77,7 +78,7 @@ it('detects display friendly video codecs', function (string $codec, string $exp
 ]);
 
 it('detects hdr formats', function (array $streamStats, string $expected) {
-    expect((new VodFileNameService)->detectHdr($streamStats))->toBe($expected);
+    expect(StreamStatsService::detectHdr($streamStats))->toBe($expected);
 })->with([
     'generic hdr' => [['hdr' => 'HDR'], 'HDR'],
     'hdr10 plus' => [['hdr' => 'HDR10+'], 'HDR10+'],

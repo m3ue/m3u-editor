@@ -79,6 +79,7 @@ class SyncVodStrmFiles implements ShouldQueue
                 $channels = collect([$this->channel]);
                 $this->syncChannels($channels, $settings, $globalStreamFileSetting, skipCleanup: false);
                 $this->dispatchMediaServerRefresh($globalStreamFileSetting, $channels);
+                $this->dispatchVodProbe($this->channel->playlist_id);
 
                 return;
             }
@@ -95,6 +96,7 @@ class SyncVodStrmFiles implements ShouldQueue
 
                 $this->syncChannels($channels, $settings, $globalStreamFileSetting, skipCleanup: false);
                 $this->dispatchMediaServerRefresh($globalStreamFileSetting, $channels);
+                $this->dispatchVodProbe($channels->first()?->playlist_id);
 
                 return;
             }
@@ -332,7 +334,7 @@ class SyncVodStrmFiles implements ShouldQueue
                 ?? ($groupModel?->streamFileSetting ?? null)
                 ?? $globalStreamFileSetting;
 
-            $trashGuideEnabled = filled($streamFileSetting?->movie_format ?? null);
+            $trashGuideEnabled = (bool) ($streamFileSetting?->trash_guide_naming_enabled ?? false);
 
             if ($trashGuideEnabled) {
                 $vodFileNameService = app(VodFileNameService::class);
@@ -384,6 +386,57 @@ class SyncVodStrmFiles implements ShouldQueue
                     $char = $replaceChar === 'space' ? ' ' : ($replaceChar === 'dash' ? '-' : ($replaceChar === 'underscore' ? '_' : '.'));
                     $fileName = preg_replace('/'.preg_quote($char, '/').'{2,}/', $char, $fileName);
                 }
+            }
+
+            // Create title folder if enabled in path structure
+            if (in_array('title', $pathStructure)) {
+                if ($trashGuideEnabled) {
+                    $titleFolder = $fileName;
+                } else {
+                    $titleFolder = $channel->title_custom ?? $channel->title ?? 'Untitled';
+                    $titleFolder = $applyNameFilter($titleFolder);
+                    $titleFolder = $cleanSpecialChars
+                        ? PlaylistService::makeFilesystemSafe($titleFolder, $replaceChar)
+                        : PlaylistService::makeFilesystemSafe($titleFolder);
+                }
+
+                if (in_array('year', $folderMetadata) && ! empty($channel->year)) {
+                    if (strpos($titleFolder, "({$channel->year})") === false) {
+                        $titleFolder .= " ({$channel->year})";
+                    }
+                }
+
+                if (in_array('tmdb_id', $folderMetadata)) {
+                    $tmdbId = $channel->info['tmdb_id']
+                        ?? $channel->info['tmdb']
+                        ?? $channel->movie_data['tmdb_id']
+                        ?? $channel->movie_data['tmdb']
+                        ?? null;
+                    $imdbId = $channel->info['imdb_id']
+                        ?? $channel->info['imdb']
+                        ?? $channel->movie_data['imdb_id']
+                        ?? $channel->movie_data['imdb']
+                        ?? null;
+                    $tmdbId = is_scalar($tmdbId) ? $tmdbId : null;
+                    $imdbId = is_scalar($imdbId) ? $imdbId : null;
+
+                    $bracket = $tmdbIdFormat === 'curly' ? ['{', '}'] : ['[', ']'];
+                    if (! empty($tmdbId)) {
+                        $titleFolder .= " {$bracket[0]}tmdb-{$tmdbId}{$bracket[1]}";
+                    } elseif (! empty($imdbId)) {
+                        $titleFolder .= " {$bracket[0]}imdb-{$imdbId}{$bracket[1]}";
+                    }
+                }
+
+                $titleFolder = $cleanSpecialChars
+                    ? PlaylistService::makeFilesystemSafe($titleFolder, $replaceChar)
+                    : PlaylistService::makeFilesystemSafe($titleFolder);
+
+                $titlePath = $path.'/'.$titleFolder;
+                if (! is_dir($titlePath)) {
+                    mkdir($titlePath, 0777, true);
+                }
+                $path = $titlePath;
             }
 
             $fileName = "{$fileName}.strm";
@@ -646,9 +699,21 @@ class SyncVodStrmFiles implements ShouldQueue
         }
     }
 
-    /**
-     * Resolve sync settings with priority chain: Channel > Group > Global Profile > Legacy Settings
-     */
+    protected function dispatchVodProbe(?int $playlistId): void
+    {
+        if (! $playlistId) {
+            return;
+        }
+
+        $playlist = Playlist::find($playlistId);
+        if (! $playlist?->auto_probe_vod_streams) {
+            return;
+        }
+
+        Log::info("STRM Sync: Dispatching VOD probe for playlist {$playlistId}");
+        dispatch(new ProbeVodStreams($playlistId));
+    }
+
     protected function resolveVodSyncSettings(Channel $channel, GeneralSettings $settings, ?StreamFileSetting $globalStreamFileSetting): array
     {
         // Priority 1: Channel-level StreamFileSetting

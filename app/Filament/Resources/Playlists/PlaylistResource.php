@@ -1705,12 +1705,20 @@ class PlaylistResource extends Resource implements CopilotResource
                 ->columns(2)
                 ->schema([
                     Toggle::make('auto_probe_streams')
-                        ->label(__('Probe streams after sync'))
+                        ->label(__('Probe Live streams after sync'))
                         ->hintIcon(
                             'heroicon-m-question-mark-circle',
                             tooltip: 'Required for fast channel switching when using the emby-xtream plugin.'
                         )
-                        ->helperText(__('When enabled, channels will be probed with ffprobe after sync to collect stream metadata (codec, resolution, bitrate) and store it to the database for fast retrieval.'))
+                        ->helperText(__('When enabled, live channels will be probed with ffprobe after sync to collect stream metadata (codec, resolution, bitrate) and store it to the database for fast retrieval.'))
+                        ->live()
+                        ->columnSpanFull()
+                        ->inline(true)
+                        ->default(false),
+
+                    Toggle::make('auto_probe_vod_streams')
+                        ->label(__('Probe VOD streams after sync'))
+                        ->helperText(__('When enabled, VOD channels and episodes will be probed with ffprobe after sync to collect stream metadata for Trash Guide naming.'))
                         ->live()
                         ->columnSpanFull()
                         ->inline(true)

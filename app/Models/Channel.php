@@ -65,7 +65,6 @@ class Channel extends Model
         'stream_stats_probed_at' => 'datetime',
         'probe_enabled' => 'boolean',
         'year' => 'integer',
-        'release_group' => 'string',
         'edition' => 'string',
     ];
 

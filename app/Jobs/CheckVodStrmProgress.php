@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Models\Playlist;
 use App\Models\User;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -73,6 +74,8 @@ class CheckVodStrmProgress implements ShouldQueue
                 }
             }
 
+            $this->dispatchVodProbe();
+
             return;
         }
 
@@ -112,5 +115,29 @@ class CheckVodStrmProgress implements ShouldQueue
         ]);
 
         Bus::chain($jobs)->dispatch();
+    }
+
+    private function dispatchVodProbe(): void
+    {
+        if ($this->playlist_id) {
+            $playlist = Playlist::find($this->playlist_id);
+            if ($playlist?->auto_probe_vod_streams) {
+                Log::info("STRM Sync: Dispatching VOD probe for playlist {$this->playlist_id}");
+                dispatch(new ProbeVodStreams($this->playlist_id));
+            }
+
+            return;
+        }
+
+        if ($this->all_playlists && $this->user_id) {
+            $playlistIds = Playlist::where('user_id', $this->user_id)
+                ->where('auto_probe_vod_streams', true)
+                ->pluck('id');
+
+            foreach ($playlistIds as $playlistId) {
+                Log::info("STRM Sync: Dispatching VOD probe for playlist {$playlistId}");
+                dispatch(new ProbeVodStreams($playlistId));
+            }
+        }
     }
 }

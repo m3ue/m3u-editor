@@ -38,7 +38,7 @@ class Episode extends Model
         'tmdb_id' => 'integer',
         'info' => 'array',
         'stream_stats' => 'array',
-        'release_group' => 'string',
+        'stream_stats_probed_at' => 'datetime',
     ];
 
     public function user(): BelongsTo
@@ -95,13 +95,6 @@ class Episode extends Model
     public function getEpisodeNumberAttribute(): int
     {
         return (int) ($this->episode_num ?? 0);
-    }
-
-    public function getReleaseGroupAttribute(): ?string
-    {
-        return $this->getAttributes()['release_group']
-            ?? data_get($this->info, 'release_group')
-            ?? null;
     }
 
     public function getFormattedEpisodeNumberAttribute(): string
@@ -242,5 +235,109 @@ class Episode extends Model
             // If parsing fails, return null
             return null;
         }
+    }
+
+    /**
+     * Ensure stream stats are available, probing if necessary.
+     */
+    public function ensureStreamStats(): array
+    {
+        if (! empty($this->stream_stats) && ! empty($this->stream_stats['probed'])) {
+            return $this->stream_stats;
+        }
+
+        $stats = $this->probeStreamStats();
+
+        if (! empty($stats)) {
+            $this->stream_stats = $stats;
+            $this->stream_stats_probed_at = now();
+            $this->saveQuietly();
+        }
+
+        return $stats;
+    }
+
+    /**
+     * Probe the episode stream URL with ffprobe and return structured stats.
+     */
+    public function probeStreamStats(int $timeout = 15): array
+    {
+        $url = $this->url;
+
+        if (empty($url)) {
+            return [];
+        }
+
+        $ffprobePath = config('services.ffprobe.path', 'ffprobe');
+
+        $command = sprintf(
+            '%s -v quiet -print_format json -show_format -show_streams -timeout %d %s 2>&1',
+            escapeshellcmd($ffprobePath),
+            $timeout * 1000000, // ffprobe timeout is in microseconds
+            escapeshellarg($url)
+        );
+
+        $output = shell_exec($command);
+        $data = json_decode($output, true);
+
+        if (! is_array($data)) {
+            return [];
+        }
+
+        $stats = [
+            'probed' => true,
+            'probed_at' => now()->toIso8601String(),
+            'url' => $url,
+        ];
+
+        $videoStream = null;
+        $audioStream = null;
+
+        foreach ($data['streams'] ?? [] as $stream) {
+            if ($stream['codec_type'] === 'video' && $videoStream === null) {
+                $videoStream = $stream;
+            }
+            if ($stream['codec_type'] === 'audio' && $audioStream === null) {
+                $audioStream = $stream;
+            }
+        }
+
+        if ($videoStream) {
+            $width = $videoStream['width'] ?? 0;
+            $height = $videoStream['height'] ?? 0;
+            $stats['video'] = [
+                'codec' => $videoStream['codec_name'] ?? null,
+                'width' => $width,
+                'height' => $height,
+                'bitrate' => isset($videoStream['bit_rate']) ? (int) $videoStream['bit_rate'] : null,
+                'framerate' => $videoStream['r_frame_rate'] ?? null,
+                'profile' => $videoStream['profile'] ?? null,
+                'pix_fmt' => $videoStream['pix_fmt'] ?? null,
+            ];
+
+            $stats['flat'] = array_filter([
+                $videoStream['codec_name'] ?? null,
+                $width && $height ? "{$width}x{$height}" : null,
+                isset($videoStream['bit_rate']) ? round((int) $videoStream['bit_rate'] / 1000).'k' : null,
+            ]);
+        }
+
+        if ($audioStream) {
+            $stats['audio'] = [
+                'codec' => $audioStream['codec_name'] ?? null,
+                'channels' => $audioStream['channels'] ?? null,
+                'sample_rate' => $audioStream['sample_rate'] ?? null,
+                'bitrate' => isset($audioStream['bit_rate']) ? (int) $audioStream['bit_rate'] : null,
+                'language' => $audioStream['tags']['language'] ?? null,
+            ];
+        }
+
+        $stats['format'] = [
+            'duration' => $data['format']['duration'] ?? null,
+            'bitrate' => isset($data['format']['bit_rate']) ? (int) $data['format']['bit_rate'] : null,
+            'format_name' => $data['format']['format_name'] ?? null,
+        ];
+
+        return $stats;
     }
 }

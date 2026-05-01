@@ -15,7 +15,6 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -82,9 +81,9 @@ class Series extends Model
         return $this->hasMany(Season::class);
     }
 
-    public function episodes(): HasManyThrough
+    public function episodes(): HasMany
     {
-        return $this->hasManyThrough(Episode::class, Season::class);
+        return $this->hasMany(Episode::class);
     }
 
     public function enabled_episodes(): HasMany
