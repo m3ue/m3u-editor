@@ -12,8 +12,9 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
-use Illuminate\Support\Facades\URL;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Symfony\Component\Process\Process as SymfonyProcess;
 
 class Episode extends Model
 {
@@ -238,106 +239,85 @@ class Episode extends Model
     }
 
     /**
-     * Ensure stream stats are available, probing if necessary.
+     * Return stream_stats, probing via ffprobe and persisting if not yet populated.
+     *
+     * @return array<int, array{stream: array<string, mixed>}>
      */
     public function ensureStreamStats(): array
     {
-        if (! empty($this->stream_stats) && ! empty($this->stream_stats['probed'])) {
-            return $this->stream_stats;
+        $stats = $this->stream_stats;
+
+        if (! empty($stats)) {
+            return $stats;
         }
 
         $stats = $this->probeStreamStats();
 
         if (! empty($stats)) {
-            $this->stream_stats = $stats;
-            $this->stream_stats_probed_at = now();
-            $this->saveQuietly();
+            $this->updateQuietly([
+                'stream_stats' => $stats,
+                'stream_stats_probed_at' => now(),
+            ]);
         }
 
         return $stats;
     }
 
     /**
-     * Probe the episode stream URL with ffprobe and return structured stats.
+     * Run ffprobe against this episode's URL and return parsed stats.
+     *
+     * @return array<int, array{stream: array<string, mixed>}>
      */
     public function probeStreamStats(int $timeout = 15): array
     {
-        $url = $this->url;
-
-        if (empty($url)) {
-            return [];
-        }
-
-        $ffprobePath = config('services.ffprobe.path', 'ffprobe');
-
-        $command = sprintf(
-            '%s -v quiet -print_format json -show_format -show_streams -timeout %d %s 2>&1',
-            escapeshellcmd($ffprobePath),
-            $timeout * 1000000, // ffprobe timeout is in microseconds
-            escapeshellarg($url)
-        );
-
-        $output = shell_exec($command);
-        $data = json_decode($output, true);
-
-        if (! is_array($data)) {
-            return [];
-        }
-
-        $stats = [
-            'probed' => true,
-            'probed_at' => now()->toIso8601String(),
-            'url' => $url,
-        ];
-
-        $videoStream = null;
-        $audioStream = null;
-
-        foreach ($data['streams'] ?? [] as $stream) {
-            if ($stream['codec_type'] === 'video' && $videoStream === null) {
-                $videoStream = $stream;
+        try {
+            $url = $this->url;
+            if (empty($url)) {
+                return [];
             }
-            if ($stream['codec_type'] === 'audio' && $audioStream === null) {
-                $audioStream = $stream;
+
+            $process = new SymfonyProcess(['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_streams', $url]);
+            $process->setTimeout($timeout);
+            $process->run();
+
+            if ($process->getExitCode() !== 0) {
+                Log::error("Error running ffprobe for episode \"{$this->title}\": {$process->getErrorOutput()}");
+
+                return [];
             }
+
+            $json = json_decode($process->getOutput(), true);
+            if (isset($json['streams']) && is_array($json['streams'])) {
+                $streamStats = [];
+                foreach ($json['streams'] as $stream) {
+                    if (isset($stream['codec_name'])) {
+                        $streamStats[]['stream'] = [
+                            'codec_type' => $stream['codec_type'],
+                            'codec_name' => $stream['codec_name'],
+                            'codec_long_name' => $stream['codec_long_name'] ?? null,
+                            'profile' => $stream['profile'] ?? null,
+                            'level' => $stream['level'] ?? null,
+                            'width' => $stream['width'] ?? null,
+                            'height' => $stream['height'] ?? null,
+                            'bit_rate' => $stream['bit_rate'] ?? null,
+                            'avg_frame_rate' => $stream['avg_frame_rate'] ?? null,
+                            'display_aspect_ratio' => $stream['display_aspect_ratio'] ?? null,
+                            'sample_rate' => $stream['sample_rate'] ?? null,
+                            'channels' => $stream['channels'] ?? null,
+                            'channel_layout' => $stream['channel_layout'] ?? null,
+                            'bits_per_raw_sample' => $stream['bits_per_raw_sample'] ?? null,
+                            'refs' => $stream['refs'] ?? null,
+                            'tags' => $stream['tags'] ?? [],
+                        ];
+                    }
+                }
+
+                return $streamStats;
+            }
+        } catch (Exception $e) {
+            Log::error("Error running ffprobe for episode \"{$this->title}\": {$e->getMessage()}");
         }
 
-        if ($videoStream) {
-            $width = $videoStream['width'] ?? 0;
-            $height = $videoStream['height'] ?? 0;
-            $stats['video'] = [
-                'codec' => $videoStream['codec_name'] ?? null,
-                'width' => $width,
-                'height' => $height,
-                'bitrate' => isset($videoStream['bit_rate']) ? (int) $videoStream['bit_rate'] : null,
-                'framerate' => $videoStream['r_frame_rate'] ?? null,
-                'profile' => $videoStream['profile'] ?? null,
-                'pix_fmt' => $videoStream['pix_fmt'] ?? null,
-            ];
-
-            $stats['flat'] = array_filter([
-                $videoStream['codec_name'] ?? null,
-                $width && $height ? "{$width}x{$height}" : null,
-                isset($videoStream['bit_rate']) ? round((int) $videoStream['bit_rate'] / 1000).'k' : null,
-            ]);
-        }
-
-        if ($audioStream) {
-            $stats['audio'] = [
-                'codec' => $audioStream['codec_name'] ?? null,
-                'channels' => $audioStream['channels'] ?? null,
-                'sample_rate' => $audioStream['sample_rate'] ?? null,
-                'bitrate' => isset($audioStream['bit_rate']) ? (int) $audioStream['bit_rate'] : null,
-                'language' => $audioStream['tags']['language'] ?? null,
-            ];
-        }
-
-        $stats['format'] = [
-            'duration' => $data['format']['duration'] ?? null,
-            'bitrate' => isset($data['format']['bit_rate']) ? (int) $data['format']['bit_rate'] : null,
-            'format_name' => $data['format']['format_name'] ?? null,
-        ];
-
-        return $stats;
+        return [];
     }
 }
