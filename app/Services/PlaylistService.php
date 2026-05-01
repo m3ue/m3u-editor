@@ -326,6 +326,28 @@ class PlaylistService
         return "{$baseUrl}/series/{$username}/{$password}/{$seriesId}";
     }
 
+    /**
+     * Truncate a filename (without extension) to fit within the filesystem's
+     * 255-byte per-component limit. Uses mb_strcut() so multibyte UTF-8
+     * characters (e.g. accented French letters) are never split mid-sequence.
+     *
+     * @param  string  $name  The filename without extension.
+     * @param  string  $ext  The extension including its leading dot (e.g. '.strm').
+     * @param  int  $maxBytes  Maximum bytes for the full component (default 255).
+     */
+    public static function truncateFilename(string $name, string $ext = '', int $maxBytes = 255): string
+    {
+        $extBytes = strlen($ext);
+        $allowedBytes = $maxBytes - $extBytes;
+
+        if (strlen($name) <= $allowedBytes) {
+            return $name;
+        }
+
+        // mb_strcut trims at a byte boundary that does not split a multibyte char.
+        return rtrim(mb_strcut($name, 0, $allowedBytes, 'UTF-8'));
+    }
+
     public static function makeFilesystemSafe(string $name, $replaceWith = ' '): string
     {
         switch ($replaceWith) {
