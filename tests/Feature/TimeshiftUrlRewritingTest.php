@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\Channel;
+use App\Models\ChannelFailover;
 use App\Models\Playlist;
 use App\Models\PlaylistAuth;
 use App\Models\User;
@@ -91,6 +92,92 @@ it('redirects timeshift request with correct /timeshift/ URL when proxy is disab
     expect($redirectUrl)
         ->toContain('/timeshift/')
         ->not->toMatch('#/live/#');
+});
+
+it('uses failover channel URL when primary channel has no catchup support', function () {
+    $primaryChannel = Channel::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'enabled' => true,
+        'url' => 'https://provider.domain/live/user/pass/hd-stream.ts',
+        'catchup' => null,
+    ]);
+
+    $failoverChannel = Channel::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'enabled' => true,
+        'url' => 'https://provider.domain/live/user/pass/sd-stream.ts',
+        'catchup' => '1',
+    ]);
+
+    ChannelFailover::create([
+        'user_id' => $this->user->id,
+        'channel_id' => $primaryChannel->id,
+        'channel_failover_id' => $failoverChannel->id,
+        'sort' => 1,
+        'metadata' => '{}',
+    ]);
+
+    $response = $this->get(route('xtream.stream.timeshift.root', [
+        'username' => $this->username,
+        'password' => $this->password,
+        'duration' => 30,
+        'date' => '2024-12-01:15-30-00',
+        'streamId' => $primaryChannel->id,
+        'format' => 'ts',
+    ]));
+
+    $response->assertRedirect();
+    $redirectUrl = $response->headers->get('Location');
+
+    // Must redirect using the failover channel's URL, not the HD primary
+    expect($redirectUrl)
+        ->toContain('sd-stream')
+        ->not->toContain('hd-stream');
+});
+
+it('uses primary channel URL for timeshift when it has catchup support', function () {
+    $primaryChannel = Channel::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'enabled' => true,
+        'url' => 'https://provider.domain/live/user/pass/hd-stream.ts',
+        'catchup' => '1',
+    ]);
+
+    $failoverChannel = Channel::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'enabled' => true,
+        'url' => 'https://provider.domain/live/user/pass/sd-stream.ts',
+        'catchup' => '1',
+    ]);
+
+    ChannelFailover::create([
+        'user_id' => $this->user->id,
+        'channel_id' => $primaryChannel->id,
+        'channel_failover_id' => $failoverChannel->id,
+        'sort' => 1,
+        'metadata' => '{}',
+    ]);
+
+    $response = $this->get(route('xtream.stream.timeshift.root', [
+        'username' => $this->username,
+        'password' => $this->password,
+        'duration' => 30,
+        'date' => '2024-12-01:15-30-00',
+        'streamId' => $primaryChannel->id,
+        'format' => 'ts',
+    ]));
+
+    $response->assertRedirect();
+    $redirectUrl = $response->headers->get('Location');
+
+    // Primary has catchup, so must use the HD primary URL
+    expect($redirectUrl)
+        ->toContain('hd-stream')
+        ->not->toContain('sd-stream');
 });
 
 it('preserves original URL when timeshift parameters are absent', function () {

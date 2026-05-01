@@ -710,6 +710,39 @@ class XtreamApiControllerTest extends TestCase
         $response->assertJsonCount(1);
     }
 
+    public function test_get_series_categories_orders_by_sort_order_for_regular_playlist(): void
+    {
+        $third = Category::factory()->for($this->user)->for($this->playlist)->create([
+            'name' => 'Third',
+            'sort_order' => 30,
+        ]);
+        $first = Category::factory()->for($this->user)->for($this->playlist)->create([
+            'name' => 'First',
+            'sort_order' => 10,
+        ]);
+        $second = Category::factory()->for($this->user)->for($this->playlist)->create([
+            'name' => 'Second',
+            'sort_order' => 20,
+        ]);
+
+        foreach ([$first, $second, $third] as $category) {
+            Series::factory()->create([
+                'user_id' => $this->user->id,
+                'playlist_id' => $this->playlist->id,
+                'category_id' => $category->id,
+                'enabled' => true,
+            ]);
+        }
+
+        $response = $this->getJson($this->getXtreamApiUrl('get_series_categories'));
+
+        $response->assertOk();
+        $this->assertSame(
+            ['First', 'Second', 'Third'],
+            array_column($response->json(), 'category_name'),
+        );
+    }
+
     public function test_get_live_streams_tv_archive_enabled_when_shift_set()
     {
         $group = Group::factory()->for($this->user)->create();

@@ -220,9 +220,9 @@ describe('M3uProxyService::createTranscodedStream() resolver payload', function 
         Http::fake(['*' => Http::response(['stream_id' => 'abc123'], 200)]);
     });
 
-    test('streamlink profile sends resolver/resolver_args/cookies — not profile field', function () {
+    test('streamlink profile sends resolver/resolver_args/cookies_path — not profile field', function () {
         $profile = StreamProfile::factory()->for($this->user)->streamlink('best', 'ts')->create([
-            'cookies' => 'sessionid=abc; path=/',
+            'cookies_path' => '/app/cookies/cookies.txt',
         ]);
 
         callCreateTranscodedStream(
@@ -238,7 +238,7 @@ describe('M3uProxyService::createTranscodedStream() resolver payload', function 
             return str_contains($request->url(), '/transcode')
                 && ($body['resolver'] ?? null) === 'streamlink'
                 && ($body['resolver_args'] ?? null) === 'best'
-                && ($body['cookies'] ?? null) === 'sessionid=abc; path=/'
+                && ($body['cookies_path'] ?? null) === '/app/cookies/cookies.txt'
                 && ! array_key_exists('profile', $body);
         });
     });
@@ -263,8 +263,8 @@ describe('M3uProxyService::createTranscodedStream() resolver payload', function 
         });
     });
 
-    test('cookies field is null when profile has no cookies', function () {
-        $profile = StreamProfile::factory()->for($this->user)->streamlink()->create(['cookies' => null]);
+    test('cookies_path field is null when profile has no cookies_path', function () {
+        $profile = StreamProfile::factory()->for($this->user)->streamlink()->create(['cookies_path' => null]);
 
         callCreateTranscodedStream(
             app(M3uProxyService::class),
@@ -277,8 +277,8 @@ describe('M3uProxyService::createTranscodedStream() resolver payload', function 
             $body = $request->data();
 
             return str_contains($request->url(), '/transcode')
-                && array_key_exists('cookies', $body)
-                && $body['cookies'] === null;
+                && array_key_exists('cookies_path', $body)
+                && $body['cookies_path'] === null;
         });
     });
 
@@ -302,7 +302,7 @@ describe('M3uProxyService::createTranscodedStream() resolver payload', function 
                 && array_key_exists('profile', $body)
                 && ! array_key_exists('resolver', $body)
                 && ! array_key_exists('resolver_args', $body)
-                && ! array_key_exists('cookies', $body);
+                && ! array_key_exists('cookies_path', $body);
         });
     });
 

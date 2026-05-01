@@ -296,6 +296,29 @@ class CustomPlaylistResource extends Resource implements CopilotResource
                         ->type('number')
                         ->hidden(fn (Get $get): bool => ! $get('auto_channel_increment'))
                         ->required(),
+                    Grid::make()
+                        ->columns(2)
+                        ->columnSpanFull()
+                        ->schema([
+                            Toggle::make('include_series_in_m3u')
+                                ->label(__('Include series in M3U output'))
+                                ->inline(false)
+                                ->hintIcon(
+                                    'heroicon-m-question-mark-circle',
+                                    tooltip: 'Enable this to output your enabled series in the M3U file. It is recommended to enable the "Fetch metadata" option when enabled, otherwise you will need to manually fetch metadata for each series.'
+                                )
+                                ->default(false)
+                                ->helperText(__('When enabled, series will be included in the M3U output. It is recommended to enable the "Fetch metadata" option when enabled.')),
+                            Toggle::make('include_vod_in_m3u')
+                                ->label(__('Include VOD in M3U output'))
+                                ->inline(false)
+                                ->hintIcon(
+                                    'heroicon-m-question-mark-circle',
+                                    tooltip: 'Enable this to output your enabled VOD channels in the M3U file.'
+                                )
+                                ->default(false)
+                                ->helperText(__('When enabled, VOD channels will be included in the M3U output.')),
+                        ]),
                 ]),
             Section::make(__('EPG Output'))
                 ->description(__('EPG output options'))

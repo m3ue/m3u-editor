@@ -815,7 +815,7 @@ class XtreamApiController extends Controller
             // Custom playlists need tag-based ordering — materialise to sort, then stream.
             if ($isCustomPlaylist) {
                 $categoryTagType = $tagUuid.'-category';
-                $seriesIterable = $seriesIterable->sortBy(function ($a, $b) use ($categoryTagType) {
+                $seriesIterable = $seriesIterable->collect()->sort(function ($a, $b) use ($categoryTagType) {
                     $aTag = $a->tags->where('type', $categoryTagType)->first();
                     $bTag = $b->tags->where('type', $categoryTagType)->first();
 
@@ -1347,7 +1347,8 @@ class XtreamApiController extends Controller
                     ->get()
                     ->pluck('category')
                     ->filter()
-                    ->unique('id');
+                    ->unique('id')
+                    ->sortBy('sort_order');
 
                 foreach ($categories as $category) {
                     $seriesCategories[] = [

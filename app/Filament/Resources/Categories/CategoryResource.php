@@ -92,6 +92,12 @@ class CategoryResource extends Resource implements CopilotResource
                 ->label(__('Auto Enable New Channels'))
                 ->helperText(__('Automatically enable newly added channels to this group.'))
                 ->default(true),
+            TextInput::make('sort_order')
+                ->label(__('Sort Order'))
+                ->numeric()
+                ->default(9999)
+                ->helperText(__('Enter a number to define the sort order (e.g., 1, 2, 3). Lower numbers appear first.'))
+                ->rules(['integer', 'min:0']),
             Select::make('stream_file_setting_id')
                 ->label(__('Stream File Setting Profile'))
                 ->searchable()
@@ -145,6 +151,14 @@ class CategoryResource extends Resource implements CopilotResource
                             ->orderBy('name_internal', $direction)
                             ->orderBy('name', $direction);
                     })
+                    ->toggleable(),
+                TextInputColumn::make('sort_order')
+                    ->label(__('Sort Order'))
+                    ->rules(['min:0'])
+                    ->type('number')
+                    ->placeholder(__('Sort Order'))
+                    ->sortable()
+                    ->tooltip(__('Category sort order'))
                     ->toggleable(),
                 ToggleColumn::make('enabled')
                     ->label(__('Auto Enable'))
@@ -233,12 +247,15 @@ class CategoryResource extends Resource implements CopilotResource
                     Action::make('sync')
                         ->label(__('Sync Series .strm files'))
                         ->action(function ($record) {
-                            foreach ($record->enabled_series as $series) {
-                                app('Illuminate\Contracts\Bus\Dispatcher')
-                                    ->dispatch(new SyncSeriesStrmFiles(
-                                        series: $series,
-                                    ));
+                            $seriesIds = $record->enabled_series->pluck('id')->all();
+                            if (empty($seriesIds)) {
+                                return;
                             }
+                            app('Illuminate\Contracts\Bus\Dispatcher')
+                                ->dispatch(new SyncSeriesStrmFiles(
+                                    user_id: auth()->id(),
+                                    series_ids: $seriesIds,
+                                ));
                         })->after(function () {
                             Notification::make()
                                 ->success()
@@ -374,14 +391,19 @@ class CategoryResource extends Resource implements CopilotResource
                     BulkAction::make('sync')
                         ->label(__('Sync Series .strm files'))
                         ->action(function (Collection $records) {
-                            foreach ($records as $record) {
-                                foreach ($record->enabled_series as $series) {
-                                    app('Illuminate\Contracts\Bus\Dispatcher')
-                                        ->dispatch(new SyncSeriesStrmFiles(
-                                            series: $series,
-                                        ));
-                                }
+                            $seriesIds = $records
+                                ->flatMap(fn ($record) => $record->enabled_series->pluck('id'))
+                                ->unique()
+                                ->values()
+                                ->all();
+                            if (empty($seriesIds)) {
+                                return;
                             }
+                            app('Illuminate\Contracts\Bus\Dispatcher')
+                                ->dispatch(new SyncSeriesStrmFiles(
+                                    user_id: auth()->id(),
+                                    series_ids: $seriesIds,
+                                ));
                         })->after(function () {
                             Notification::make()
                                 ->success()

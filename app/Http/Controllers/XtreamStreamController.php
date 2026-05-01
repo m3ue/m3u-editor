@@ -361,6 +361,21 @@ class XtreamStreamController extends Controller
             return response()->json(['error' => 'Unauthorized or stream not found'], 403);
         }
 
+        // If the primary channel doesn't support catchup, defer to the first failover that does.
+        // This allows an HD primary (no catchup) to fall back to a lower-res failover for timeshift.
+        $timeshiftChannel = $channel;
+        if (! $channel->catchup || $channel->catchup == 0) {
+            $failoverWithCatchup = $channel->failoverChannels()
+                ->whereNotNull('catchup')
+                ->where('catchup', '!=', '0')
+                ->where('catchup', '!=', '')
+                ->first();
+
+            if ($failoverWithCatchup) {
+                $timeshiftChannel = $failoverWithCatchup;
+            }
+        }
+
         // Parse the date parameter and add timeshift parameters to the request
         // Date format from Xtream API: YYYY-MM-DD:HH-MM-SS
         // Also add username for proxy traceability
@@ -372,11 +387,11 @@ class XtreamStreamController extends Controller
 
         if ($playlist->enable_proxy) {
             return app()->call([app(M3uProxyApiController::class), 'channel'], [
-                'id' => $streamId,
+                'id' => $timeshiftChannel->id,
                 'uuid' => $playlist->uuid,
             ]);
         } else {
-            $streamUrl = PlaylistUrlService::getChannelUrl($channel, $playlist);
+            $streamUrl = PlaylistUrlService::getChannelUrl($timeshiftChannel, $playlist);
             $streamUrl = PlaylistService::generateTimeshiftUrl($request, $streamUrl, $playlist);
 
             return Redirect::to($streamUrl);

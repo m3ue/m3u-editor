@@ -978,6 +978,47 @@ class ChannelResource extends Resource implements CopilotResource
 
             // -- Streaming --
             BulkModalActionGroup::section('Streaming', [
+                BulkAction::make('set-stream-profile')
+                    ->label(__('Set Stream Profile'))
+                    ->schema([
+                        Select::make('stream_profile_id')
+                            ->label(__('Stream Profile'))
+                            ->options(fn () => StreamProfile::where('user_id', auth()->id())->pluck('name', 'id'))
+                            ->searchable()
+                            ->preload()
+                            ->nullable()
+                            ->placeholder(__('None (clear profile)'))
+                            ->helperText(__('The stored profile only takes effect when the channel (or its playlist) has proxy enabled.')),
+                        Toggle::make('overwrite_existing')
+                            ->label(__('Overwrite existing assignments'))
+                            ->helperText(__('When off, only channels without a stream profile will be updated. When on, all selected channels will be overwritten (including clearing back to none).'))
+                            ->default(false),
+                    ])
+                    ->action(function (Collection $records, array $data): void {
+                        $profileId = ! empty($data['stream_profile_id']) ? (int) $data['stream_profile_id'] : null;
+                        $overwrite = (bool) ($data['overwrite_existing'] ?? false);
+                        $updated = 0;
+
+                        foreach ($records->chunk(100) as $chunk) {
+                            $query = Channel::whereIn('id', $chunk->pluck('id'));
+                            if (! $overwrite) {
+                                $query->whereNull('stream_profile_id');
+                            }
+                            $updated += $query->update(['stream_profile_id' => $profileId]);
+                        }
+
+                        Notification::make()
+                            ->success()
+                            ->title(__('Stream profile updated'))
+                            ->body(trans_choice(':count channel updated|:count channels updated', $updated, ['count' => $updated]))
+                            ->send();
+                    })
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-cog-6-tooth')
+                    ->modalIcon('heroicon-o-cog-6-tooth')
+                    ->modalDescription(__('Assign (or clear) a stream profile for the selected channels.'))
+                    ->modalSubmitActionLabel(__('Apply')),
                 BulkAction::make('enable-merge')
                     ->label(__('Enable Merge'))
                     ->action(function (Collection $records, array $data): void {
@@ -1719,8 +1760,8 @@ class ChannelResource extends Resource implements CopilotResource
                         ->hint(fn (Get $get, $record): string => ($get('enable_proxy') || $record?->playlist?->enable_proxy) ? 'Proxied' : 'Not proxied')
                         ->hintIcon(fn (Get $get, $record): string => ($get('enable_proxy') || $record?->playlist?->enable_proxy) ? 'heroicon-m-lock-closed' : 'heroicon-m-lock-open')
                         ->helperText(fn ($record): string => $record?->playlist?->enable_proxy
-                            ? 'Proxy is enabled on the parent playlist. All channels in this playlist are already proxied. You can still select a stream profile override below.'
-                            : 'When enabled, all streams will be proxied through the application. This allows for better compatibility with various clients and enables features such as stream limiting and output format selection.')
+                            ? __('Proxy is enabled on the parent playlist. All channels in this playlist are already proxied. You can still select a stream profile override below.')
+                            : __('When enabled, this stream will be proxied through the application. This allows for better compatibility with various clients and enables features such as output format selection.'))
                         ->disabled(fn ($record): bool => (bool) ($record?->playlist?->enable_proxy ?? false))
                         ->dehydrated()
                         ->inline(false)

@@ -108,15 +108,20 @@ class EpgMappingApplyTool extends BaseTool
             return implode("\n", $lines);
         }
 
+        $groupedToApply = [];
+        foreach ($toApply as $mapping) {
+            $groupedToApply[$mapping['epg_channel_id']][] = $mapping['channel_id'];
+        }
+
         $applied = 0;
 
-        DB::transaction(function () use ($toApply, &$applied): void {
-            foreach ($toApply as $mapping) {
-                Channel::where('id', $mapping['channel_id'])
+        DB::transaction(function () use ($groupedToApply, &$applied): void {
+            foreach ($groupedToApply as $epgChannelId => $channelIds) {
+                Channel::whereIn('id', $channelIds)
                     ->where('user_id', auth()->id())
-                    ->update(['epg_channel_id' => $mapping['epg_channel_id']]);
+                    ->update(['epg_channel_id' => $epgChannelId]);
 
-                $applied++;
+                $applied += count($channelIds);
             }
         });
 

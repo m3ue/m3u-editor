@@ -4,12 +4,14 @@ namespace App\Filament\Resources\StreamProfiles;
 
 use App\Filament\Concerns\HasCopilotSupport;
 use App\Models\StreamProfile;
+use App\Services\M3uProxyService;
 use EslamRedaDiv\FilamentCopilot\Contracts\CopilotResource;
 use Filament\Actions;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
+use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
@@ -125,12 +127,44 @@ class StreamProfileResource extends Resource implements CopilotResource
                         default => __('FFmpeg arguments for transcoding. Use placeholders like {crf|23} for configurable parameters with defaults. Hardware acceleration will be applied automatically by the proxy server.'),
                     }),
 
-                Textarea::make('cookies')
-                    ->label(__('Cookies (Netscape format)'))
-                    ->placeholder("# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t0\tCOOKIE_NAME\tCOOKIE_VALUE")
-                    ->helperText(__('Paste cookies.txt content for authenticated streams (e.g. YouTube members-only, age-gated). Get cookies using a browser extension like "Get cookies.txt LOCALLY".'))
-                    ->rows(5)
+                TextInput::make('cookies_path')
+                    ->label(__('Cookies File Path'))
+                    ->placeholder('/app/cookies/cookies.txt')
+                    ->helperText(__('Absolute path to a Netscape-format cookies.txt file on the proxy host. Mount the file into the proxy container and enter its container path here.'))
                     ->columnSpanFull()
+                    ->hintAction(
+                        Action::make('verify_cookies_path')
+                            ->label(__('Verify'))
+                            ->icon('heroicon-o-check-circle')
+                            ->action(function (Get $get) {
+                                $path = $get('cookies_path');
+
+                                if (empty($path)) {
+                                    Notification::make()
+                                        ->title(__('No path entered'))
+                                        ->warning()
+                                        ->send();
+
+                                    return;
+                                }
+
+                                $result = app(M3uProxyService::class)->validateCookiesFilePath($path);
+
+                                if ($result['valid']) {
+                                    Notification::make()
+                                        ->title(__('File verified'))
+                                        ->body($result['message'])
+                                        ->success()
+                                        ->send();
+                                } else {
+                                    Notification::make()
+                                        ->title(__('Verification failed'))
+                                        ->body($result['message'])
+                                        ->danger()
+                                        ->send();
+                                }
+                            })
+                    )
                     ->visible(fn (Get $get): bool => in_array($get('backend'), ['streamlink', 'ytdlp'])),
 
                 Select::make('format')

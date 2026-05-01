@@ -29,6 +29,7 @@ class CheckSeriesStrmProgress implements ShouldQueue
         public ?int $playlist_id = null,
         public ?int $user_id = null,
         public bool $needsCleanup = false,
+        public ?array $series_ids = null,
     ) {
         $this->onQueue('file_sync');
     }
@@ -61,6 +62,7 @@ class CheckSeriesStrmProgress implements ShouldQueue
                     playlist_id: $this->playlist_id,
                     user_id: $this->user_id,
                     isCleanupJob: true,
+                    series_ids: $this->series_ids,
                 ));
             } else {
                 // Send completion notification
@@ -98,6 +100,7 @@ class CheckSeriesStrmProgress implements ShouldQueue
                 batchOffset: $offset,
                 totalBatches: $totalBatches,
                 currentBatch: $batchNumber,
+                series_ids: $this->series_ids,
             );
         }
 
@@ -111,6 +114,7 @@ class CheckSeriesStrmProgress implements ShouldQueue
             playlist_id: $this->playlist_id,
             user_id: $this->user_id,
             needsCleanup: $this->needsCleanup,
+            series_ids: $this->series_ids,
         );
 
         Log::info('STRM Sync: Dispatching next chain', [

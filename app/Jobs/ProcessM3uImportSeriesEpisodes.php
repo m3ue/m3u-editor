@@ -2,6 +2,8 @@
 
 namespace App\Jobs;
 
+use App\Enums\Status;
+use App\Models\Playlist;
 use App\Models\Series;
 use App\Models\User;
 use App\Settings\GeneralSettings;
@@ -99,6 +101,20 @@ class ProcessM3uImportSeriesEpisodes implements ShouldQueue
 
         if ($totalCount === 0) {
             Log::info('Series Sync: No series to process');
+
+            if ($this->playlist_id) {
+                $playlist = Playlist::find($this->playlist_id);
+                if ($playlist) {
+                    $playlist->update([
+                        'processing' => [
+                            ...$playlist->processing ?? [],
+                            'series_processing' => false,
+                        ],
+                        'status' => Status::Completed,
+                        'series_progress' => 100,
+                    ]);
+                }
+            }
 
             return;
         }
