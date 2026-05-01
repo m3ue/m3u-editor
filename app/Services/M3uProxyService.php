@@ -1685,12 +1685,9 @@ class M3uProxyService
                 $data = $response->json() ?: [];
 
                 // Only include broadcasts for networks owned by the current user
-                // Get networks for current user
                 $userNetworkUuids = Network::where('user_id', auth()->id())->pluck('uuid')->toArray();
 
-                $broadcasts = array_filter($data['broadcasts'] ?? [], function ($b) use ($userNetworkUuids) {
-                    return isset($b['network_id']) && in_array($b['network_id'], $userNetworkUuids);
-                });
+                $broadcasts = array_filter($data['broadcasts'] ?? [], fn ($b) => isset($b['network_id']) && in_array($b['network_id'], $userNetworkUuids));
 
                 return [
                     'success' => true,
