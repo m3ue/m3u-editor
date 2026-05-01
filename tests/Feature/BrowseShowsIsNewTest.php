@@ -16,7 +16,7 @@ uses(RefreshDatabase::class);
 beforeEach(function () {
     Queue::fake();
     Cache::flush();
-    $this->user = User::factory()->create();
+    $this->user = User::factory()->create(['permissions' => ['use_dvr']]);
     $this->setting = DvrSetting::factory()->enabled()->for($this->user)->create();
     $this->epg = Epg::factory()->for($this->user)->create();
     $this->actingAs($this->user);
