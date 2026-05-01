@@ -20,12 +20,15 @@ class ProcessVodChannelsComplete implements ShouldQueue
 
     /**
      * Create a new job instance.
+     *
+     * @param  ShouldQueue|null  $completionJob  Job to dispatch at the end of the full VOD
+     *                                           pipeline (after STRM sync). Null for UI-triggered
+     *                                           refreshes that don't need a downstream event.
      */
     public function __construct(
         public Playlist $playlist,
-    ) {
-        //
-    }
+        public ?ShouldQueue $completionJob = null,
+    ) {}
 
     /**
      * Execute the job.
@@ -81,8 +84,15 @@ class ProcessVodChannelsComplete implements ShouldQueue
             );
         }
 
+        // Append the completion job (FireSyncCompletedEvent or TriggerSeriesImport) as the
+        // very last step so post-processing and series import never start before STRM sync finishes.
         if (! empty($postJobs)) {
+            if ($this->completionJob) {
+                $postJobs[] = $this->completionJob;
+            }
             Bus::chain($postJobs)->dispatch();
+        } elseif ($this->completionJob) {
+            dispatch($this->completionJob);
         }
     }
 }
