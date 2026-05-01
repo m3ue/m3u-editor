@@ -40,6 +40,11 @@ class BrowseShows extends Page
 
     protected static ?int $navigationSort = 3;
 
+    public static function canAccess(): bool
+    {
+        return auth()->check() && auth()->user()->canUseDvr();
+    }
+
     private const PER_PAGE = 20;
 
     // --- Filter state ---
