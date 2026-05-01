@@ -34,8 +34,8 @@ class ProcessVodChannels implements ShouldQueue
     public function __construct(
         public ?Playlist $playlist = null,
         public ?Channel $channel = null,
-        public ?bool $force = false,
-        public ?bool $updateProgress = true,
+        public bool $force = false,
+        public bool $updateProgress = true,
         public ?ShouldQueue $completionJob = null,
     ) {
         //

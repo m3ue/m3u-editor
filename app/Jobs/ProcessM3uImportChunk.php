@@ -50,9 +50,8 @@ class ProcessM3uImportChunk implements ShouldQueue
             // Add the channel for insert/update
             $groupId = $job->variables['groupId'];
             $groupName = $job->variables['groupName'];
-            // Inherit the group's saved stream_profile_id for newly inserted rows.
-            // The upsert below excludes stream_profile_id from its update list, so
-            // existing channel profile assignments survive re-imports.
+            // Inherit the group's stream_profile_id for new channels; existing assignments
+            // are preserved because stream_profile_id is excluded from the upsert update list.
             $groupProfileId = $groupId
                 ? Group::query()->whereKey($groupId)->value('stream_profile_id')
                 : null;

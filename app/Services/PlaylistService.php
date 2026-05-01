@@ -337,8 +337,7 @@ class PlaylistService
      */
     public static function truncateFilename(string $name, string $ext = '', int $maxBytes = 255): string
     {
-        $extBytes = strlen($ext);
-        $allowedBytes = $maxBytes - $extBytes;
+        $allowedBytes = $maxBytes - strlen($ext);
 
         if (strlen($name) <= $allowedBytes) {
             return $name;

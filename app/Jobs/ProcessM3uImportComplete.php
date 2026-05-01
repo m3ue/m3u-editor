@@ -347,7 +347,6 @@ class ProcessM3uImportComplete implements ShouldQueue
                 ->delete();
         }
 
-        // Clean up orphaned series data from this import batch
         $this->seriesCleanup($playlist);
 
         $syncVod = ($playlist->auto_sync_vod_stream_files || $playlist->auto_fetch_vod_metadata)
