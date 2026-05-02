@@ -11,6 +11,7 @@ use App\Models\PlaylistAlias;
 use App\Models\PlaylistProfile;
 use App\Models\StreamProfile;
 use App\Services\M3uProxyService;
+use App\Services\PlaylistUrlService;
 use Carbon\Carbon;
 use Exception;
 use Filament\Actions\Action;
@@ -297,7 +298,10 @@ class M3uProxyStreamMonitor extends Page
                 ->values();
 
             $channelsById = $channelIds->isNotEmpty()
-                ? Channel::whereIn('id', $channelIds)->get()->keyBy('id')
+                ? Channel::whereIn('id', $channelIds)
+                    ->with('failoverChannels')
+                    ->get()
+                    ->keyBy('id')
                 : collect();
             $episodesById = $episodeIds->isNotEmpty()
                 ? Episode::whereIn('id', $episodeIds)->get()->keyBy('id')
@@ -330,6 +334,7 @@ class M3uProxyStreamMonitor extends Page
                 $model = [];
                 $title = null;
                 $logo = null;
+                $failoverChannel = null;
                 if (isset($stream['metadata']['type']) && isset($stream['metadata']['id'])) {
                     $modelType = $stream['metadata']['type'];
                     $modelId = $stream['metadata']['id'];
@@ -353,23 +358,78 @@ class M3uProxyStreamMonitor extends Page
                         ];
                     }
 
-                    // Enrich with media info (video/audio metadata) from stored stream stats
+                    // Enrich with media info. Live ffmpeg data from the proxy wins where
+                    // present; stored ffprobe stats fill in everything else (and act as
+                    // the sole source for plain HTTP-proxy streams that don't transcode).
                     if ($modelType === 'channel') {
                         $channel = $channelsById[$modelId] ?? null;
                         if ($channel) {
                             $emby = $channel->getEmbyStreamStats();
-                            if (! empty($emby)) {
-                                $model['media_info'] = [
-                                    'resolution' => $emby['resolution'] ?? null,
-                                    'video_codec' => $emby['video_codec'] ?? null,
-                                    'video_profile' => $emby['video_profile'] ?? null,
-                                    'source_fps' => $emby['source_fps'] ?? null,
-                                    'video_bitrate_kbps' => $emby['ffmpeg_output_bitrate'] ?? null,
-                                    'audio_codec' => $emby['audio_codec'] ?? null,
-                                    'audio_channels' => $emby['audio_channels'] ?? null,
-                                    'audio_bitrate_kbps' => $emby['audio_bitrate'] ?? null,
-                                    'audio_language' => $emby['audio_language'] ?? null,
-                                ];
+                            $probeMediaInfo = ! empty($emby) ? [
+                                'resolution' => $emby['resolution'] ?? null,
+                                'video_codec' => $emby['video_codec'] ?? null,
+                                'video_profile' => $emby['video_profile'] ?? null,
+                                'source_fps' => $emby['source_fps'] ?? null,
+                                'video_bitrate_kbps' => $emby['ffmpeg_output_bitrate'] ?? null,
+                                'audio_codec' => $emby['audio_codec'] ?? null,
+                                'audio_channels' => $emby['audio_channels'] ?? null,
+                                'audio_bitrate_kbps' => $emby['audio_bitrate'] ?? null,
+                                'audio_language' => $emby['audio_language'] ?? null,
+                            ] : [];
+
+                            $liveMediaInfo = $stream['media_info'] ?? [];
+                            if (! empty($liveMediaInfo)) {
+                                $live = array_filter([
+                                    'resolution' => $liveMediaInfo['resolution'] ?? null,
+                                    'video_codec' => $liveMediaInfo['video_codec'] ?? null,
+                                    'source_fps' => $liveMediaInfo['fps'] ?? null,
+                                    'video_bitrate_kbps' => $liveMediaInfo['bitrate_kbps'] ?? null,
+                                    'audio_codec' => $liveMediaInfo['audio_codec'] ?? null,
+                                    'audio_channels' => $liveMediaInfo['audio_channels'] ?? null,
+                                ], fn ($v) => $v !== null && $v !== '');
+                                $merged = array_merge($probeMediaInfo, $live);
+                            } else {
+                                $merged = $probeMediaInfo;
+                            }
+
+                            if (! empty($merged)) {
+                                $model['media_info'] = $merged;
+                            }
+
+                            // When the proxy is on a failover URL, identify which configured
+                            // failover channel is currently in use. URL match handles dynamic
+                            // resolver mode (where current_failover_index doesn't necessarily
+                            // line up with the candidate's slot in failoverChannels). We fall
+                            // back to index lookup for the static-list mode.
+                            $currentUrl = (string) ($stream['current_url'] ?? '');
+                            $originalUrl = (string) ($stream['original_url'] ?? '');
+                            $currentFailoverIndex = (int) ($stream['current_failover_index'] ?? 0);
+                            $failoverActive = $currentFailoverIndex > 0
+                                || ($stream['failover_attempts'] ?? 0) > 0;
+
+                            if ($failoverActive && $currentUrl !== '' && $currentUrl !== $originalUrl) {
+                                foreach ($channel->failoverChannels as $candidate) {
+                                    try {
+                                        $candidateUrl = PlaylistUrlService::getChannelUrl($candidate);
+                                    } catch (Exception $e) {
+                                        continue;
+                                    }
+                                    if ($candidateUrl !== '' && $candidateUrl === $currentUrl) {
+                                        $failoverChannel = [
+                                            'title' => $candidate->name_custom ?? $candidate->name ?? $candidate->title,
+                                        ];
+                                        break;
+                                    }
+                                }
+
+                                if (! $failoverChannel && $currentFailoverIndex > 0) {
+                                    $candidate = $channel->failoverChannels[$currentFailoverIndex - 1] ?? null;
+                                    if ($candidate) {
+                                        $failoverChannel = [
+                                            'title' => $candidate->name_custom ?? $candidate->name ?? $candidate->title,
+                                        ];
+                                    }
+                                }
                             }
                         }
                     }
@@ -489,6 +549,7 @@ class M3uProxyStreamMonitor extends Page
                         ? Carbon::parse($stream['last_failover_time'], 'UTC')->format('Y-m-d H:i:s')
                         : null,
                     'using_failover' => ($stream['current_failover_index'] ?? 0) > 0 || ($stream['failover_attempts'] ?? 0) > 0,
+                    'failover_channel' => $failoverChannel,
                 ];
             }
         }
@@ -533,6 +594,7 @@ class M3uProxyStreamMonitor extends Page
                     'transcoding' => false,
                     'transcoding_format' => null,
                     'using_failover' => false,
+                    'failover_channel' => null,
                     'broadcast' => true,
                     'alias_name' => null,
                 ];

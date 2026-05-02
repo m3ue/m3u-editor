@@ -183,7 +183,13 @@ echo $totalBandwidth > 1000 ? round($totalBandwidth / 1000, 1) . ' Mbps' : $tota
                                                                                 <h3 class="text-lg font-semibold text-gray-900 dark:text-white">
                                                                                     Stream {{ substr($stream['stream_id'], -8) }}
                                                                                 </h3>
-                                                                                <p class="text-sm text-gray-500 dark:text-gray-400 font-mono">{{ $stream['model']['title'] ?? 'N/A' }}</p>
+                                                                                <p class="text-sm text-gray-500 dark:text-gray-400 font-mono">
+                                                                                    {{ $stream['model']['title'] ?? 'N/A' }}
+                                                                                    @if(!empty($stream['failover_channel']['title']))
+                                                                                        <span class="text-gray-400 dark:text-gray-500 mx-1">&rarr;</span>
+                                                                                        <span class="text-orange-600 dark:text-orange-400 font-medium">{{ $stream['failover_channel']['title'] }}</span>
+                                                                                    @endif
+                                                                                </p>
                                                                                 <p class="text-sm text-gray-500 dark:text-gray-400 font-mono truncate">{{ $stream['source_url'] }}</p>
                                                                             </div>
                                                                         </div>
