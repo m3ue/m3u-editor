@@ -126,13 +126,16 @@ class DvrSchedulerService
             if (empty($rule->tmdb_id)) {
                 return;
             }
+
             $query->where('tmdb_id', $rule->tmdb_id);
-        } elseif ($matchMode === DvrMatchMode::Exact) {
-            $query->whereRaw('lower(title) = lower(?)', [$title]);
-        } elseif ($matchMode === DvrMatchMode::StartsWith) {
-            $query->whereRaw('lower(title) LIKE lower(?)', [$title.'%']);
         } else {
-            $query->whereRaw('lower(title) LIKE lower(?)', ['%'.$title.'%']);
+            [$sql, $binding] = match ($matchMode) {
+                DvrMatchMode::Exact => ['lower(title) = lower(?)', $title],
+                DvrMatchMode::StartsWith => ['lower(title) LIKE lower(?)', $title.'%'],
+                default => ['lower(title) LIKE lower(?)', '%'.$title.'%'],
+            };
+
+            $query->whereRaw($sql, [$binding]);
         }
 
         if ($rule->series_mode === DvrSeriesMode::NewFlag) {
@@ -520,43 +523,7 @@ class DvrSchedulerService
 
             // Also block if a user_cancelled recording exists for the same programme
             // (explicit user intent should be respected — do not auto-re-record).
-            if ($seriesKey !== null) {
-                $userCancelled = DvrRecording::query()
-                    ->where(function (Builder $q) use ($programmeUid, $programme): void {
-                        $q->where('programme_uid', $programmeUid)
-                            ->orWhere(function (Builder $q) use ($programme): void {
-                                $q->whereNull('programme_uid')
-                                    ->where('programme_start', $programme->start_time)
-                                    ->where('epg_programme_data->epg_channel_id', $programme->epg_channel_id);
-                            });
-                    })
-                    ->where('user_cancelled', true)
-                    ->where('epg_programme_data->epg_channel_id', $programme->epg_channel_id)
-                    ->where('user_cancelled', true)
-                    ->where(function ($q) use ($seriesKey, $rule): void {
-                        $q->where('series_key', $seriesKey)
-                            ->orWhere(function ($q) use ($rule): void {
-                                $q->whereNull('series_key')
-                                    ->where('dvr_recording_rule_id', $rule->id);
-                            });
-                    })
-                    ->exists();
-            } else {
-                $userCancelled = DvrRecording::query()
-                    ->where(function (Builder $q) use ($programmeUid, $programme): void {
-                        $q->where('programme_uid', $programmeUid)
-                            ->orWhere(function (Builder $q) use ($programme): void {
-                                $q->whereNull('programme_uid')
-                                    ->where('programme_start', $programme->start_time)
-                                    ->where('epg_programme_data->epg_channel_id', $programme->epg_channel_id);
-                            });
-                    })
-                    ->where('user_cancelled', true)
-                    ->where('dvr_setting_id', $setting->id)
-                    ->exists();
-            }
-
-            if ($userCancelled) {
+            if ($this->isProgrammeUserCancelled($programme, $programmeUid, $seriesKey, $rule, $setting)) {
                 Log::debug("DVR: Skipping {$programme->title} — user cancelled this airing");
 
                 return;
@@ -859,5 +826,47 @@ class DvrSchedulerService
         }
 
         return $query->first();
+    }
+
+    /**
+     * Determine whether the user has explicitly cancelled a recording for this programme.
+     *
+     * A user-cancelled row means the user does not want this specific airing recorded
+     * — even if a series rule would otherwise match. This respects explicit user intent.
+     *
+     * Uses the same programme identity + series_key scoping pattern as
+     * findExhaustedFailedRecording so the two blocking checks are consistent.
+     */
+    private function isProgrammeUserCancelled(
+        EpgProgramme $programme,
+        string $programmeUid,
+        ?string $seriesKey,
+        DvrRecordingRule $rule,
+        DvrSetting $setting,
+    ): bool {
+        $query = DvrRecording::query()
+            ->where(function (Builder $q) use ($programmeUid, $programme): void {
+                $q->where('programme_uid', $programmeUid)
+                    ->orWhere(function (Builder $q) use ($programme): void {
+                        $q->whereNull('programme_uid')
+                            ->where('programme_start', $programme->start_time)
+                            ->where('epg_programme_data->epg_channel_id', $programme->epg_channel_id);
+                    });
+            })
+            ->where('user_cancelled', true);
+
+        if ($seriesKey !== null) {
+            $query->where(function (Builder $q) use ($seriesKey, $rule): void {
+                $q->where('series_key', $seriesKey)
+                    ->orWhere(function (Builder $q) use ($rule): void {
+                        $q->whereNull('series_key')
+                            ->where('dvr_recording_rule_id', $rule->id);
+                    });
+            });
+        } else {
+            $query->where('dvr_setting_id', $setting->id);
+        }
+
+        return $query->exists();
     }
 }

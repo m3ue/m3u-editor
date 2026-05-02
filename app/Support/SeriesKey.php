@@ -47,11 +47,7 @@ class SeriesKey
      */
     public static function normalize(?string $title): string
     {
-        if ($title === null) {
-            return '';
-        }
-
-        $s = trim($title);
+        $s = trim($title ?? '');
 
         if ($s === '') {
             return '';

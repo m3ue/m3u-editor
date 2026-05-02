@@ -45,6 +45,7 @@ class DvrCallbackController extends Controller
 
         // Use recording_db_id from metadata for unambiguous lookup if available
         $recordingDbId = $data['recording_db_id'] ?? null;
+        $recording = null;
         if ($recordingDbId) {
             $recording = DvrRecording::find($recordingDbId);
             if ($recording) {

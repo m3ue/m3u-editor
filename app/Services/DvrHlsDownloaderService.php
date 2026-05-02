@@ -156,10 +156,7 @@ class DvrHlsDownloaderService
             }
 
             // Extract segment filenames
-            $segments = array_values(array_filter(
-                array_map('trim', explode("\n", $body)),
-                fn (string $line) => $line !== '' && ! str_starts_with($line, '#')
-            ));
+            $segments = $this->parseSegmentLines($body);
 
             // Check if manifest has stabilized (same content twice in a row)
             if ($lastContent !== null && $body === $lastContent) {
@@ -200,10 +197,7 @@ class DvrHlsDownloaderService
 
         // If we ran out of retries, return the last content we got
         if ($lastContent !== null) {
-            return array_values(array_filter(
-                array_map('trim', explode("\n", $lastContent)),
-                fn (string $line) => $line !== '' && ! str_starts_with($line, '#')
-            ));
+            return $this->parseSegmentLines($lastContent);
         }
 
         return null;
@@ -240,5 +234,18 @@ class DvrHlsDownloaderService
         $token = $this->proxy->getApiToken();
 
         return $token ? ['X-API-Token' => $token] : [];
+    }
+
+    /**
+     * Parse non-comment, non-empty lines from an HLS manifest body into segment filenames.
+     *
+     * @return list<string>
+     */
+    private function parseSegmentLines(string $body): array
+    {
+        return array_values(array_filter(
+            array_map('trim', explode("\n", $body)),
+            fn (string $line) => $line !== '' && ! str_starts_with($line, '#')
+        ));
     }
 }

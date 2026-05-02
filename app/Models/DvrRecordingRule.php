@@ -177,16 +177,16 @@ class DvrRecordingRule extends Model
 
     public function scopeSeries(Builder $query): Builder
     {
-        return $query->where('type', DvrRuleType::Series->value);
+        return $query->where('type', DvrRuleType::Series);
     }
 
     public function scopeOnce(Builder $query): Builder
     {
-        return $query->where('type', DvrRuleType::Once->value);
+        return $query->where('type', DvrRuleType::Once);
     }
 
     public function scopeManual(Builder $query): Builder
     {
-        return $query->where('type', DvrRuleType::Manual->value);
+        return $query->where('type', DvrRuleType::Manual);
     }
 }
