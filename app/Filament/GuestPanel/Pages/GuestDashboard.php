@@ -25,7 +25,7 @@ class GuestDashboard extends Page implements HasSchemas
 
     public static function shouldRegisterNavigation(): bool
     {
-        return static::isSessionAuthenticated();
+        return true;
     }
 
     public function getTitle(): string|Htmlable

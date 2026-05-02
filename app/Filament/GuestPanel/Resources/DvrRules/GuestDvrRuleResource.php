@@ -50,6 +50,8 @@ class GuestDvrRuleResource extends Resource
         return __('Recording Rules');
     }
 
+    protected static ?int $navigationSort = 5;
+
     protected static string|\BackedEnum|null $navigationIcon = 'heroicon-s-calendar-days';
 
     public static function canAccess(): bool

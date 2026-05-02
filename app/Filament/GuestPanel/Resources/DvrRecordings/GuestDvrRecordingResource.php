@@ -34,6 +34,8 @@ class GuestDvrRecordingResource extends Resource
         return __('DVR');
     }
 
+    protected static ?int $navigationSort = 4;
+
     protected static string|\BackedEnum|null $navigationIcon = 'heroicon-s-video-camera';
 
     public static function canAccess(): bool

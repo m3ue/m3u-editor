@@ -29,12 +29,12 @@ class GuestBrowseShows extends Page
 
     protected static string|\BackedEnum|null $navigationIcon = 'heroicon-s-magnifying-glass';
 
-    protected static ?int $navigationSort = 10;
-
     public static function getNavigationLabel(): string
     {
         return __('Browse Shows');
     }
+
+    protected static ?int $navigationSort = 6;
 
     public function getTitle(): string|Htmlable
     {
