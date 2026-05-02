@@ -3,6 +3,7 @@
 namespace App\Filament\Pages;
 
 use App\Facades\LogoFacade;
+use App\Facades\PlaylistFacade;
 use App\Models\Channel;
 use App\Models\Episode;
 use App\Models\Network;
@@ -11,6 +12,7 @@ use App\Models\PlaylistAlias;
 use App\Models\PlaylistProfile;
 use App\Models\StreamProfile;
 use App\Services\M3uProxyService;
+use App\Services\PlaylistUrlService;
 use Carbon\Carbon;
 use Exception;
 use Filament\Actions\Action;
@@ -358,13 +360,48 @@ class M3uProxyStreamMonitor extends Page
                     }
                 }
 
-                // Resolve the active failover channel (1-based index → 0-based offset)
-                // so the UI can show "Primary → Failover" instead of just a raw URL.
+                // Resolve the active failover channel so the UI can show
+                // "Primary → Failover" instead of a raw URL. Match by URL —
+                // index-based mapping is unreliable in dynamic resolver mode
+                // because the resolver can skip candidates (capacity / fail
+                // conditions) so current_failover_index doesn't always equal
+                // the position in failoverChannels.
                 $failoverChannel = null;
                 $currentFailoverIndex = $stream['current_failover_index'] ?? 0;
-                if ($channel && $currentFailoverIndex > 0) {
-                    $failoverIdx = $currentFailoverIndex - 1;
-                    $failoverModel = $channel->failoverChannels[$failoverIdx] ?? null;
+                $currentUrl = $stream['current_url'] ?? null;
+                $isUsingFailover = $currentFailoverIndex > 0
+                    || ($stream['failover_attempts'] ?? 0) > 0;
+                if ($channel && $isUsingFailover && $currentUrl) {
+                    $contextPlaylist = ! empty($stream['metadata']['playlist_uuid'])
+                        ? PlaylistFacade::resolvePlaylistByUuid($stream['metadata']['playlist_uuid'])
+                        : null;
+                    $failoverModel = null;
+                    foreach ($channel->failoverChannels as $candidate) {
+                        $candidateContext = $contextPlaylist
+                            ?? $candidate->getEffectivePlaylist();
+                        if (! $candidateContext) {
+                            continue;
+                        }
+                        try {
+                            $candidateUrl = PlaylistUrlService::getChannelUrl(
+                                $candidate,
+                                $candidateContext
+                            );
+                        } catch (Exception $e) {
+                            continue;
+                        }
+                        if ($candidateUrl !== '' && $candidateUrl === $currentUrl) {
+                            $failoverModel = $candidate;
+                            break;
+                        }
+                    }
+                    // Fallback for the static failover-list path: the URLs are
+                    // built in the same order as failoverChannels, so the index
+                    // mapping is correct when no candidate URL matched above.
+                    if (! $failoverModel && $currentFailoverIndex > 0) {
+                        $failoverModel = $channel->failoverChannels[$currentFailoverIndex - 1]
+                            ?? null;
+                    }
                     if ($failoverModel) {
                         $failoverChannel = [
                             'title' => $failoverModel->name_custom
