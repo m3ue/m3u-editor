@@ -1,6 +1,6 @@
 <x-filament-panels::page>
     @php
-$intervalOptions = [0 => 'Off', 3 => '3s', 5 => '5s', 10 => '10s', 30 => '30s'];
+        $intervalOptions = [0 => 'Off', 3 => '3s', 5 => '5s', 10 => '10s', 30 => '30s'];
     @endphp
     <div x-data="{
         intervalSeconds: (() => { const s = Number(localStorage.getItem('streamMonitor.refreshInterval')); return [0, 3, 5, 10, 30].includes(s) ? s : {{ $refreshInterval }}; })(),
@@ -20,22 +20,19 @@ $intervalOptions = [0 => 'Off', 3 => '3s', 5 => '5s', 10 => '10s', 30 => '30s'];
                 this.intervalId = null;
             }
         }
-    }"
-    x-init="
+    }" x-init="startPolling();
+    $watch('intervalSeconds', value => {
+        localStorage.setItem('streamMonitor.refreshInterval', value);
         startPolling();
-        $watch('intervalSeconds', value => {
-            localStorage.setItem('streamMonitor.refreshInterval', value);
-            startPolling();
-        });
-        const onVisibilityChange = () => {
-            if (document.visibilityState === 'visible' && intervalSeconds > 0) {
-                $wire.refreshData();
-            }
-        };
-        document.addEventListener('visibilitychange', onVisibilityChange);
-        $cleanup(() => document.removeEventListener('visibilitychange', onVisibilityChange));
-    " x-on:beforeunload.window="stopPolling()">
-        
+    });
+    const onVisibilityChange = () => {
+        if (document.visibilityState === 'visible' && intervalSeconds > 0) {
+            $wire.refreshData();
+        }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    $el.addEventListener('alpine:destroy', () => document.removeEventListener('visibilitychange', onVisibilityChange));" x-on:beforeunload.window="stopPolling()">
+
         <!-- Global Statistics Cards -->
         <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
             <x-filament::card class="p-4">
@@ -45,7 +42,8 @@ $intervalOptions = [0 => 'Off', 3 => '3s', 5 => '5s', 10 => '10s', 30 => '30s'];
                     </div>
                     <div class="ml-4">
                         <p class="text-sm font-medium text-gray-600 dark:text-gray-400">Active Streams</p>
-                        <p class="text-2xl font-bold text-gray-900 dark:text-white">{{ $globalStats['active_streams'] ?? 0 }}</p>
+                        <p class="text-2xl font-bold text-gray-900 dark:text-white">
+                            {{ $globalStats['active_streams'] ?? 0 }}</p>
                     </div>
                 </div>
             </x-filament::card>
@@ -57,7 +55,8 @@ $intervalOptions = [0 => 'Off', 3 => '3s', 5 => '5s', 10 => '10s', 30 => '30s'];
                     </div>
                     <div class="ml-4">
                         <p class="text-sm font-medium text-gray-600 dark:text-gray-400">Total Clients</p>
-                        <p class="text-2xl font-bold text-gray-900 dark:text-white">{{ $globalStats['total_clients'] ?? 0 }}</p>
+                        <p class="text-2xl font-bold text-gray-900 dark:text-white">
+                            {{ $globalStats['total_clients'] ?? 0 }}</p>
                     </div>
                 </div>
             </x-filament::card>
@@ -71,8 +70,10 @@ $intervalOptions = [0 => 'Off', 3 => '3s', 5 => '5s', 10 => '10s', 30 => '30s'];
                         <p class="text-sm font-medium text-gray-600 dark:text-gray-400">Total Bandwidth</p>
                         <p class="text-2xl font-bold text-gray-900 dark:text-white">
                             @php
-$totalBandwidth = $globalStats['total_bandwidth_kbps'] ?? 0;
-echo $totalBandwidth > 1000 ? round($totalBandwidth / 1000, 1) . ' Mbps' : $totalBandwidth . ' kbps';
+                                $totalBandwidth = $globalStats['total_bandwidth_kbps'] ?? 0;
+                                echo $totalBandwidth > 1000
+                                    ? round($totalBandwidth / 1000, 1) . ' Mbps'
+                                    : $totalBandwidth . ' kbps';
                             @endphp
                         </p>
                     </div>
@@ -86,7 +87,8 @@ echo $totalBandwidth > 1000 ? round($totalBandwidth / 1000, 1) . ' Mbps' : $tota
                     </div>
                     <div class="ml-4">
                         <p class="text-sm font-medium text-gray-600 dark:text-gray-400">Avg Clients/Stream</p>
-                        <p class="text-2xl font-bold text-gray-900 dark:text-white">{{ $globalStats['avg_clients_per_stream'] ?? '0.00' }}</p>
+                        <p class="text-2xl font-bold text-gray-900 dark:text-white">
+                            {{ $globalStats['avg_clients_per_stream'] ?? '0.00' }}</p>
                     </div>
                 </div>
             </x-filament::card>
@@ -99,7 +101,7 @@ echo $totalBandwidth > 1000 ? round($totalBandwidth / 1000, 1) . ' Mbps' : $tota
                     <span>Auto-refresh</span>
                     <x-filament::input.wrapper>
                         <x-filament::input.select x-model.number="intervalSeconds" aria-label="Auto-refresh interval">
-                            @foreach($intervalOptions as $seconds => $label)
+                            @foreach ($intervalOptions as $seconds => $label)
                                 <option value="{{ $seconds }}">{{ $label }}</option>
                             @endforeach
                         </x-filament::input.select>
@@ -108,13 +110,14 @@ echo $totalBandwidth > 1000 ? round($totalBandwidth / 1000, 1) . ' Mbps' : $tota
 
                 <x-filament::badge size="sm">
                     Last updated:
-                    <span x-text="$wire.lastUpdatedAt ? new Date($wire.lastUpdatedAt).toLocaleTimeString() : '—'"></span>
+                    <span
+                        x-text="$wire.lastUpdatedAt ? new Date($wire.lastUpdatedAt).toLocaleTimeString() : '—'"></span>
                 </x-filament::badge>
             </div>
         </div>
 
         <!-- Streams List -->
-        @if($connectionError)
+        @if ($connectionError)
             <x-filament::card class="p-8">
                 <div class="flex items-start gap-4">
                     <div class="flex-shrink-0">
@@ -133,7 +136,9 @@ echo $totalBandwidth > 1000 ? round($totalBandwidth / 1000, 1) . ' Mbps' : $tota
                             <p class="font-medium mb-2">Please verify:</p>
                             <ul class="list-disc list-inside space-y-1 ml-2">
                                 <li>The m3u-proxy server is running</li>
-                                <li>The proxy URL is configured correctly: <code class="px-1 py-0.5 bg-red-200 dark:bg-red-800 rounded text-xs">{{ config('proxy.m3u_proxy_url') ?? url('/m3u-proxy') }}</code></li>
+                                <li>The proxy URL is configured correctly: <code
+                                        class="px-1 py-0.5 bg-red-200 dark:bg-red-800 rounded text-xs">{{ config('proxy.m3u_proxy_url') ?? url('/m3u-proxy') }}</code>
+                                </li>
                                 <li>There are no firewall or network issues blocking the connection</li>
                             </ul>
                         </div>
@@ -152,374 +157,432 @@ echo $totalBandwidth > 1000 ? round($totalBandwidth / 1000, 1) . ' Mbps' : $tota
             </x-filament::card>
         @else
             <div class="space-y-4">
-                @foreach($streams as $stream)
-                                                            <x-filament::card>
-                                                                <div class="p-6" x-data="{ showClients: false, showDetails: false }">
-                                                                    <!-- Stream Header -->
-                                                                    <div class="md:flex items-center justify-between mb-4">
-                                                                        <div class="md:flex items-center space-x-0 md:space-x-4 space-y-2 md:space-y-0">
-                                                                            <div class="flex-shrink-0">
-                                                                                <div class="h-10 w-10 rounded-full flex items-center justify-center {{ 
-                                                                                    $stream['status'] === 'active' ? 'bg-green-100 dark:bg-green-900 text-green-600 dark:text-green-300' :
-                    ($stream['status'] === 'idle' ? 'bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300' : 'bg-red-100 dark:bg-red-900 text-red-600 dark:text-red-300') 
-                                                                                }}">
-                                                                                    @if($stream['status'] === 'idle')
-                                                                                        <x-heroicon-s-pause class="w-5 h-5" />
-                                                                                    @elseif($stream['status'] === 'active')
-                                                                                        <x-heroicon-s-play class="w-5 h-5" />
-                                                                                    @else
-                                                                                        <x-heroicon-s-exclamation-triangle class="w-5 h-5" />
-                                                                                    @endif
-                                                                                </div>
-                                                                            </div>
-                                                                            @if($stream['model']['logo'] ?? false)
-                                                                                <div class="flex-1 shrink-0 min-w-0">
-                                                                                    <div>
-                                                                                        <img src="{{ $stream['model']['logo'] }}" alt="Stream Thumbnail" class="h-10 w-auto rounded-md object-cover">
-                                                                                    </div>
-                                                                                </div>
-                                                                            @endif
-                                                                            <div class="min-w-0">
-                                                                                <h3 class="text-lg font-semibold text-gray-900 dark:text-white">
-                                                                                    Stream {{ substr($stream['stream_id'], -8) }}
-                                                                                </h3>
-                                                                                <p class="text-sm text-gray-500 dark:text-gray-400 font-mono">
-                                                                                    {{ $stream['model']['title'] ?? 'N/A' }}
-                                                                                    @if(!empty($stream['failover_channel']['title']))
-                                                                                        <span class="text-gray-400 dark:text-gray-500 mx-1">&rarr;</span>
-                                                                                        <span class="text-orange-600 dark:text-orange-400 font-medium">{{ $stream['failover_channel']['title'] }}</span>
-                                                                                    @endif
-                                                                                </p>
-                                                                                <p class="text-sm text-gray-500 dark:text-gray-400 font-mono truncate">{{ $stream['source_url'] }}</p>
-                                                                            </div>
-                                                                        </div>
-                                                                    </div>
+                @foreach ($streams as $stream)
+                    <x-filament::card>
+                        <div class="p-6" x-data="{ showClients: false, showDetails: false }">
+                            <!-- Stream Header -->
+                            <div class="md:flex items-center justify-between mb-4">
+                                <div class="md:flex items-center space-x-0 md:space-x-4 space-y-2 md:space-y-0">
+                                    <div class="flex-shrink-0">
+                                        <div
+                                            class="h-10 w-10 rounded-full flex items-center justify-center {{ $stream['status'] === 'active'
+                                                ? 'bg-green-100 dark:bg-green-900 text-green-600 dark:text-green-300'
+                                                : ($stream['status'] === 'idle'
+                                                    ? 'bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300'
+                                                    : 'bg-red-100 dark:bg-red-900 text-red-600 dark:text-red-300') }}">
+                                            @if ($stream['status'] === 'idle')
+                                                <x-heroicon-s-pause class="w-5 h-5" />
+                                            @elseif($stream['status'] === 'active')
+                                                <x-heroicon-s-play class="w-5 h-5" />
+                                            @else
+                                                <x-heroicon-s-exclamation-triangle class="w-5 h-5" />
+                                            @endif
+                                        </div>
+                                    </div>
+                                    @if ($stream['model']['logo'] ?? false)
+                                        <div class="flex-1 shrink-0 min-w-0">
+                                            <div>
+                                                <img src="{{ $stream['model']['logo'] }}" alt="Stream Thumbnail"
+                                                    class="h-10 w-auto rounded-md object-cover">
+                                            </div>
+                                        </div>
+                                    @endif
+                                    <div class="min-w-0">
+                                        <h3 class="text-lg font-semibold text-gray-900 dark:text-white">
+                                            Stream {{ substr($stream['stream_id'], -8) }}
+                                        </h3>
+                                        <p class="text-sm text-gray-500 dark:text-gray-400 font-mono">
+                                            {{ $stream['model']['title'] ?? 'N/A' }}
+                                            @if (!empty($stream['failover_channel']['title']))
+                                                <span class="text-gray-400 dark:text-gray-500 mx-1">&rarr;</span>
+                                                <span
+                                                    class="text-orange-600 dark:text-orange-400 font-medium">{{ $stream['failover_channel']['title'] }}</span>
+                                            @endif
+                                        </p>
+                                        <p class="text-sm text-gray-500 dark:text-gray-400 font-mono truncate">
+                                            {{ $stream['source_url'] }}</p>
+                                    </div>
+                                </div>
+                            </div>
 
-                                                                    <!-- Stream Badges -->
-                                                                    <div class="flex flex-wrap items-center gap-2 mb-4">
-                                                                        @if($stream['alias_name'] ?? false)
-                                                                            <x-filament::badge color="primary" size="sm">
-                                                                                Alias: {{ $stream['alias_name'] }}
-                                                                            </x-filament::badge>
-                                                                        @endif
-                                                                        @if($stream['playlist_name'] ?? false)
-                                                                            <x-filament::badge color="primary" size="sm">
-                                                                                @if($stream['profiles_enabled'] && ($stream['provider_profile'] ?? false))
-                                                                                    {{ $stream['playlist_name'] }}: {{ $stream['provider_profile'] }}
-                                                                                @else
-                                                                                    {{ $stream['playlist_name'] }}
-                                                                                @endif
-                                                                            </x-filament::badge>
-                                                                        @elseif($stream['provider_profile'] ?? false)
-                                                                            <x-filament::badge color="primary" size="sm">
-                                                                                {{ $stream['provider_profile'] }}
-                                                                            </x-filament::badge>
-                                                                        @endif
-                                                                        <x-filament::badge color="info" size="sm">
-                                                                            {{ $stream['format'] }}
-                                                                        </x-filament::badge>
-                                                                        @if($stream['broadcast'] ?? false)
-                                                                            <x-filament::badge color="info" size="sm" icon="heroicon-s-signal">
-                                                                                Broadcast
-                                                                            </x-filament::badge>
-                                                                        @endif
-                                                                        @if($stream['transcoding'])
-                                                                            <x-filament::badge color="info" size="sm">
-                                                                                {{ $stream['transcoding_format'] ?? 'N/A' }}
-                                                                            </x-filament::badge>
-                                                                        @endif
-                                                                        @if($stream['transcoding_backend'] ?? false)
-                                                                            <x-filament::badge color="success" size="sm">
-                                                                                {{ $stream['transcoding_backend'] }}
-                                                                            </x-filament::badge>
-                                                                        @endif
-                                                                        @if($stream['using_failover'])
-                                                                            <x-filament::badge color="warning" size="sm" icon="heroicon-s-arrow-path">
-                                                                                Failover Active
-                                                                            </x-filament::badge>
-                                                                        @elseif($stream['has_failover'])
-                                                                            <x-filament::badge color="gray" size="sm" icon="heroicon-s-shield-check">
-                                                                                Failover Ready
-                                                                            </x-filament::badge>
-                                                                        @endif
-                                                                        <x-filament::badge
-                                                                            :color="$stream['status'] === 'active' ? 'success' : ($stream['status'] === 'idle' ? 'info' : 'danger')"
-                                                                            size="sm"
-                                                                        >
-                                                                            {{ ucfirst($stream['status']) }}
-                                                                        </x-filament::badge>
-                                                                    </div>
+                            <!-- Stream Badges -->
+                            <div class="flex flex-wrap items-center gap-2 mb-4">
+                                @if ($stream['alias_name'] ?? false)
+                                    <x-filament::badge color="primary" size="sm">
+                                        Alias: {{ $stream['alias_name'] }}
+                                    </x-filament::badge>
+                                @endif
+                                @if ($stream['playlist_name'] ?? false)
+                                    <x-filament::badge color="primary" size="sm">
+                                        @if ($stream['profiles_enabled'] && ($stream['provider_profile'] ?? false))
+                                            {{ $stream['playlist_name'] }}: {{ $stream['provider_profile'] }}
+                                        @else
+                                            {{ $stream['playlist_name'] }}
+                                        @endif
+                                    </x-filament::badge>
+                                @elseif($stream['provider_profile'] ?? false)
+                                    <x-filament::badge color="primary" size="sm">
+                                        {{ $stream['provider_profile'] }}
+                                    </x-filament::badge>
+                                @endif
+                                <x-filament::badge color="info" size="sm">
+                                    {{ $stream['format'] }}
+                                </x-filament::badge>
+                                @if ($stream['broadcast'] ?? false)
+                                    <x-filament::badge color="info" size="sm" icon="heroicon-s-signal">
+                                        Broadcast
+                                    </x-filament::badge>
+                                @endif
+                                @if ($stream['transcoding'])
+                                    <x-filament::badge color="info" size="sm">
+                                        {{ $stream['transcoding_format'] ?? 'N/A' }}
+                                    </x-filament::badge>
+                                @endif
+                                @if ($stream['transcoding_backend'] ?? false)
+                                    <x-filament::badge color="success" size="sm">
+                                        {{ $stream['transcoding_backend'] }}
+                                    </x-filament::badge>
+                                @endif
+                                @if ($stream['using_failover'])
+                                    <x-filament::badge color="warning" size="sm" icon="heroicon-s-arrow-path">
+                                        Failover Active
+                                    </x-filament::badge>
+                                @elseif($stream['has_failover'])
+                                    <x-filament::badge color="gray" size="sm" icon="heroicon-s-shield-check">
+                                        Failover Ready
+                                    </x-filament::badge>
+                                @endif
+                                <x-filament::badge :color="$stream['status'] === 'active' ? 'success' : ($stream['status'] === 'idle' ? 'info' : 'danger')" size="sm">
+                                    {{ ucfirst($stream['status']) }}
+                                </x-filament::badge>
+                            </div>
 
-                                                                    <!-- Stream Stats Grid -->
-                                                                    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-                                                                        <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-3">
-                                                                            <div class="text-xs text-gray-500 dark:text-gray-400">Clients</div>
-                                                                            <div class="text-lg font-semibold text-gray-900 dark:text-white">{{ $stream['client_count'] }}</div>
-                                                                        </div>
-                                                                        <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-3">
-                                                                            <div class="text-xs text-gray-500 dark:text-gray-400">Bandwidth</div>
-                                                                            <div class="text-lg font-semibold text-gray-900 dark:text-white">
-                                                                                {{ $stream['bandwidth_kbps'] > 1000 ? round($stream['bandwidth_kbps'] / 1000, 1) . ' Mbps' : $stream['bandwidth_kbps'] . ' kbps' }}
-                                                                            </div>
-                                                                        </div>
-                                                                        <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-3">
-                                                                            <div class="text-xs text-gray-500 dark:text-gray-400">Data Transferred</div>
-                                                                            <div class="text-lg font-semibold text-gray-900 dark:text-white">{{ $stream['bytes_transferred'] }}</div>
-                                                                        </div>
-                                                                        <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-3">
-                                                                            <div class="text-xs text-gray-500 dark:text-gray-400">Uptime</div>
-                                                                            <div class="text-lg font-semibold text-gray-900 dark:text-white">{{ $stream['uptime'] }}</div>
-                                                                        </div>
-                                                                    </div>
+                            <!-- Stream Stats Grid -->
+                            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                                <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-3">
+                                    <div class="text-xs text-gray-500 dark:text-gray-400">Clients</div>
+                                    <div class="text-lg font-semibold text-gray-900 dark:text-white">
+                                        {{ $stream['client_count'] }}</div>
+                                </div>
+                                <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-3">
+                                    <div class="text-xs text-gray-500 dark:text-gray-400">Bandwidth</div>
+                                    <div class="text-lg font-semibold text-gray-900 dark:text-white">
+                                        {{ $stream['bandwidth_kbps'] > 1000 ? round($stream['bandwidth_kbps'] / 1000, 1) . ' Mbps' : $stream['bandwidth_kbps'] . ' kbps' }}
+                                    </div>
+                                </div>
+                                <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-3">
+                                    <div class="text-xs text-gray-500 dark:text-gray-400">Data Transferred</div>
+                                    <div class="text-lg font-semibold text-gray-900 dark:text-white">
+                                        {{ $stream['bytes_transferred'] }}</div>
+                                </div>
+                                <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-3">
+                                    <div class="text-xs text-gray-500 dark:text-gray-400">Uptime</div>
+                                    <div class="text-lg font-semibold text-gray-900 dark:text-white">
+                                        {{ $stream['uptime'] }}</div>
+                                </div>
+                            </div>
 
-                                                                    @php $mediaInfo = $stream['model']['media_info'] ?? null; @endphp
-                                                                    @if($mediaInfo)
-                                                                    <!-- Media Info Row -->
-                                                                    <div class="flex flex-wrap gap-2 mb-4 p-3 bg-gray-50 dark:bg-gray-800/60 rounded-lg border border-gray-200 dark:border-gray-700">
-                                                                        <div class="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 mr-1">
-                                                                            <x-heroicon-s-film class="w-3.5 h-3.5" />
-                                                                            <span class="font-medium uppercase tracking-wide">Stream Info</span>
-                                                                            @if($mediaInfo['is_live'] ?? false)
-                                                                                <span class="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse" title="Live data from active ffmpeg"></span>
-                                                                            @endif
-                                                                        </div>
-                                                                        @if($mediaInfo['resolution'] ?? false)
-                                                                            <x-filament::badge color="info" size="sm" icon="heroicon-s-squares-2x2">
-                                                                                {{ $mediaInfo['resolution'] }}
-                                                                            </x-filament::badge>
-                                                                        @endif
-                                                                        @if($mediaInfo['video_codec'] ?? false)
-                                                                            @php
-                                                                                $codecDisplay = strtoupper($mediaInfo['video_codec']);
-                                                                                if ($mediaInfo['video_profile'] ?? false) {
-                                                                                    $codecDisplay .= ' · ' . $mediaInfo['video_profile'];
-                                                                                }
-                                                                            @endphp
-                                                                            <x-filament::badge color="primary" size="sm" icon="heroicon-s-cpu-chip">
-                                                                                {{ $codecDisplay }}
-                                                                            </x-filament::badge>
-                                                                        @endif
-                                                                        @if($mediaInfo['source_fps'] ?? false)
-                                                                            <x-filament::badge color="gray" size="sm">
-                                                                                {{ $mediaInfo['source_fps'] }} fps
-                                                                            </x-filament::badge>
-                                                                        @endif
-                                                                        @if($mediaInfo['video_bitrate_kbps'] ?? false)
-                                                                            <x-filament::badge color="gray" size="sm">
-                                                                                {{ $mediaInfo['video_bitrate_kbps'] >= 1000 ? round($mediaInfo['video_bitrate_kbps'] / 1000, 1) . ' Mbps' : $mediaInfo['video_bitrate_kbps'] . ' kbps' }}
-                                                                            </x-filament::badge>
-                                                                        @endif
-                                                                        @if($mediaInfo['audio_codec'] ?? false)
-                                                                            @php
-                                                                                $audioDisplay = strtoupper($mediaInfo['audio_codec']);
-                                                                                if ($mediaInfo['audio_channels'] ?? false) {
-                                                                                    $audioDisplay .= ' · ' . $mediaInfo['audio_channels'];
-                                                                                }
-                                                                                if ($mediaInfo['audio_language'] ?? false) {
-                                                                                    $audioDisplay .= ' [' . strtoupper($mediaInfo['audio_language']) . ']';
-                                                                                }
-                                                                            @endphp
-                                                                            <x-filament::badge color="success" size="sm" icon="heroicon-s-speaker-wave">
-                                                                                {{ $audioDisplay }}
-                                                                            </x-filament::badge>
-                                                                        @endif
-                                                                        @if($mediaInfo['audio_bitrate_kbps'] ?? false)
-                                                                            <x-filament::badge color="gray" size="sm">
-                                                                                {{ $mediaInfo['audio_bitrate_kbps'] }} kbps audio
-                                                                            </x-filament::badge>
-                                                                        @endif
-                                                                    </div>
-                                                                    @endif
+                            @php $mediaInfo = $stream['model']['media_info'] ?? null; @endphp
+                            @if ($mediaInfo)
+                                <!-- Media Info Row -->
+                                <div
+                                    class="flex flex-wrap gap-2 mb-4 p-3 bg-gray-50 dark:bg-gray-800/60 rounded-lg border border-gray-200 dark:border-gray-700">
+                                    <div class="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 mr-1">
+                                        <x-heroicon-s-film class="w-3.5 h-3.5" />
+                                        <span class="font-medium uppercase tracking-wide">Stream Info</span>
+                                        @if ($mediaInfo['is_live'] ?? false)
+                                            <span
+                                                class="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse"
+                                                title="Live data from active ffmpeg"></span>
+                                        @endif
+                                    </div>
+                                    @if ($mediaInfo['resolution'] ?? false)
+                                        <x-filament::badge color="info" size="sm"
+                                            icon="heroicon-s-squares-2x2">
+                                            {{ $mediaInfo['resolution'] }}
+                                        </x-filament::badge>
+                                    @endif
+                                    @if ($mediaInfo['video_codec'] ?? false)
+                                        @php
+                                            $codecDisplay = strtoupper($mediaInfo['video_codec']);
+                                            if ($mediaInfo['video_profile'] ?? false) {
+                                                $codecDisplay .= ' · ' . $mediaInfo['video_profile'];
+                                            }
+                                        @endphp
+                                        <x-filament::badge color="primary" size="sm" icon="heroicon-s-cpu-chip">
+                                            {{ $codecDisplay }}
+                                        </x-filament::badge>
+                                    @endif
+                                    @if ($mediaInfo['source_fps'] ?? false)
+                                        <x-filament::badge color="gray" size="sm">
+                                            {{ $mediaInfo['source_fps'] }} fps
+                                        </x-filament::badge>
+                                    @endif
+                                    @if ($mediaInfo['video_bitrate_kbps'] ?? false)
+                                        <x-filament::badge color="gray" size="sm">
+                                            {{ $mediaInfo['video_bitrate_kbps'] >= 1000 ? round($mediaInfo['video_bitrate_kbps'] / 1000, 1) . ' Mbps' : $mediaInfo['video_bitrate_kbps'] . ' kbps' }}
+                                        </x-filament::badge>
+                                    @endif
+                                    @if ($mediaInfo['audio_codec'] ?? false)
+                                        @php
+                                            $audioDisplay = strtoupper($mediaInfo['audio_codec']);
+                                            if ($mediaInfo['audio_channels'] ?? false) {
+                                                $audioDisplay .= ' · ' . $mediaInfo['audio_channels'];
+                                            }
+                                            if ($mediaInfo['audio_language'] ?? false) {
+                                                $audioDisplay .= ' [' . strtoupper($mediaInfo['audio_language']) . ']';
+                                            }
+                                        @endphp
+                                        <x-filament::badge color="success" size="sm"
+                                            icon="heroicon-s-speaker-wave">
+                                            {{ $audioDisplay }}
+                                        </x-filament::badge>
+                                    @endif
+                                    @if ($mediaInfo['audio_bitrate_kbps'] ?? false)
+                                        <x-filament::badge color="gray" size="sm">
+                                            {{ $mediaInfo['audio_bitrate_kbps'] }} kbps audio
+                                        </x-filament::badge>
+                                    @endif
+                                </div>
+                            @endif
 
-                                                                    <!-- Action Buttons -->
-                                                                    <div class="flex items-center justify-between">
-                                                                        <div class="flex items-center space-x-2">
-                                                                            <button @click="showClients = !showClients" 
-                                                                                    class="inline-flex items-center px-3 py-1.5 border border-gray-300 dark:border-gray-600 shadow-sm text-xs font-medium rounded-md text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-gray-800 focus:ring-indigo-500 dark:focus:ring-indigo-400">
-                                                                                <span x-text="showClients ? 'Hide Clients' : 'Show Clients ({{ $stream['client_count'] }})'"></span>
-                                                                            </button>
-                                                                            <button @click="showDetails = !showDetails"
-                                                                                    class="inline-flex items-center px-3 py-1.5 border border-gray-300 dark:border-gray-600 shadow-sm text-xs font-medium rounded-md text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-gray-800 focus:ring-indigo-500 dark:focus:ring-indigo-400">
-                                                                                <span x-text="showDetails ? 'Hide Details' : 'Show Details'"></span>
-                                                                            </button>
-                                                                        </div>
+                            <!-- Action Buttons -->
+                            <div class="md:flex space-y-2 md:space-y-0 items-center justify-between">
+                                <div class="flex items-center space-x-2">
+                                    <x-filament::button color="gray" size="sm"
+                                        @click="showClients = !showClients">
+                                        <span
+                                            x-text="showClients ? 'Hide Clients' : 'Show Clients ({{ $stream['client_count'] }})'"></span>
+                                    </x-filament::button>
+                                    <x-filament::button color="gray" size="sm"
+                                        @click="showDetails = !showDetails">
+                                        <span x-text="showDetails ? 'Hide Details' : 'Show Details'"></span>
+                                    </x-filament::button>
+                                </div>
 
-                                                                        <div class="flex items-center space-x-2">
-                                                                            @unless($stream['broadcast'] ?? false)
-                                                                            <button wire:click="triggerFailover('{{ $stream['stream_id'] }}')" 
-                                                                                    wire:loading.attr="disabled"
-                                                                                    class="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md text-white bg-yellow-600 hover:bg-yellow-700 focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-gray-800 focus:ring-yellow-500">
-                                                                                Trigger Failover
-                                                                            </button>
-                                                                            @endunless
-                                                                            <button wire:click="stopStream('{{ $stream['stream_id'] }}')" 
-                                                                                    wire:loading.attr="disabled"
-                                                                                    class="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-gray-800 focus:ring-red-500">
-                                                                                Remove Stream
-                                                                            </button>
-                                                                        </div>
-                                                                    </div>
+                                <div class="flex items-center space-x-2">
+                                    @unless ($stream['broadcast'] ?? false)
+                                        <x-filament::button color="warning" size="sm"
+                                            icon="heroicon-o-exclamation-triangle"
+                                            wire:click="triggerFailover('{{ $stream['stream_id'] }}')"
+                                            wire:loading.attr="disabled">
+                                            Trigger Failover
+                                        </x-filament::button>
+                                    @endunless
+                                    <x-filament::button color="danger" size="sm" icon="heroicon-o-trash"
+                                        wire:click="stopStream('{{ $stream['stream_id'] }}')"
+                                        wire:loading.attr="disabled">
+                                        Remove Stream
+                                    </x-filament::button>
+                                </div>
+                            </div>
 
-                                                                    <!-- Clients List -->
-                                                                    <div x-show="showClients" x-transition class="mt-4 border-t dark:border-gray-700 pt-4" style="display: none;">
-                                                                        @if(empty($stream['clients']))
-                                                                            <p class="text-sm text-gray-500 dark:text-gray-400">No active clients</p>
-                                                                        @else
-                                                                            <div class="overflow-x-auto">
-                                                                                <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                                                                                    <thead class="bg-gray-50 dark:bg-gray-800">
-                                                                                        <tr>
-                                                                                            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Client IP</th>
-                                                                                            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Username</th>
-                                                                                            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">User Agent</th>
-                                                                                            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Connected</th>
-                                                                                            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Duration</th>
-                                                                                            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Data</th>
-                                                                                            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Status</th>
-                                                                                        </tr>
-                                                                                    </thead>
-                                                                                    <tbody class="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
-                                                                                        @foreach($stream['clients'] as $client)
-                                                                                            <tr>
-                                                                                                <td class="px-3 py-2 whitespace-nowrap text-sm font-mono text-gray-900 dark:text-white">{{ $client['ip'] }}</td>
-                                                                                                <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white">{{ $client['username'] ?? '—' }}</td>
-                                                                                                <td class="px-3 py-2 text-xs text-gray-500 dark:text-gray-400 max-w-xs truncate" title="{{ $client['user_agent'] ?? '' }}">
-                                                                                                    {{ $client['user_agent'] ? (strlen($client['user_agent']) > 40 ? substr($client['user_agent'], 0, 40) . '…' : $client['user_agent']) : '—' }}
-                                                                                                </td>
-                                                                                                <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">{{ $client['connected_at'] }}</td>
-                                                                                                <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">{{ $client['duration'] }}</td>
-                                                                                                <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">{{ $client['bytes_received'] }}</td>
-                                                                                                <td class="px-3 py-2 whitespace-nowrap">
-                                                                                                    <x-filament::badge :color="$client['is_active'] ? 'success' : 'danger'" size="sm">
-                                                                                                        {{ $client['is_active'] ? 'Active' : 'Inactive' }}
-                                                                                                    </x-filament::badge>
-                                                                                                </td>
-                                                                                            </tr>
-                                                                                        @endforeach
-                                                                                    </tbody>
-                                                                                </table>
-                                                                            </div>
-                                                                        @endif
-                                                                    </div>
+                            <!-- Clients List -->
+                            <div x-show="showClients" x-transition class="mt-4 border-t dark:border-gray-700 pt-4"
+                                style="display: none;">
+                                @if (empty($stream['clients']))
+                                    <p class="text-sm text-gray-500 dark:text-gray-400">No active clients</p>
+                                @else
+                                    <div class="overflow-x-auto">
+                                        <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                                            <thead class="bg-gray-50 dark:bg-gray-800">
+                                                <tr>
+                                                    <th
+                                                        class="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                                                        Client IP</th>
+                                                    <th
+                                                        class="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                                                        Username</th>
+                                                    <th
+                                                        class="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                                                        User Agent</th>
+                                                    <th
+                                                        class="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                                                        Connected</th>
+                                                    <th
+                                                        class="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                                                        Duration</th>
+                                                    <th
+                                                        class="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                                                        Data</th>
+                                                    <th
+                                                        class="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                                                        Status</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody
+                                                class="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
+                                                @foreach ($stream['clients'] as $client)
+                                                    <tr>
+                                                        <td
+                                                            class="px-3 py-2 whitespace-nowrap text-sm font-mono text-gray-900 dark:text-white">
+                                                            {{ $client['ip'] }}</td>
+                                                        <td
+                                                            class="px-3 py-2 whitespace-nowrap text-sm text-gray-900 dark:text-white">
+                                                            {{ $client['username'] ?? '—' }}</td>
+                                                        <td class="px-3 py-2 text-xs text-gray-500 dark:text-gray-400 max-w-xs truncate"
+                                                            title="{{ $client['user_agent'] ?? '' }}">
+                                                            {{ $client['user_agent'] ? (strlen($client['user_agent']) > 40 ? substr($client['user_agent'], 0, 40) . '…' : $client['user_agent']) : '—' }}
+                                                        </td>
+                                                        <td
+                                                            class="px-3 py-2 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                                                            {{ $client['connected_at'] }}</td>
+                                                        <td
+                                                            class="px-3 py-2 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                                                            {{ $client['duration'] }}</td>
+                                                        <td
+                                                            class="px-3 py-2 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                                                            {{ $client['bytes_received'] }}</td>
+                                                        <td class="px-3 py-2 whitespace-nowrap">
+                                                            <x-filament::badge :color="$client['is_active'] ? 'success' : 'danger'" size="sm">
+                                                                {{ $client['is_active'] ? 'Active' : 'Inactive' }}
+                                                            </x-filament::badge>
+                                                        </td>
+                                                    </tr>
+                                                @endforeach
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                @endif
+                            </div>
 
-                                                                    <!-- Stream Details -->
-                                                                    <div x-show="showDetails" x-transition class="mt-4 border-t dark:border-gray-700 pt-4" style="display: none;">
-                                                                        <div class="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
-                                                                            <div>
-                                                                                <span class="text-gray-500 dark:text-gray-400">Stream ID:</span>
-                                                                                <div class="font-mono text-xs break-all text-gray-900 dark:text-gray-100">{{ $stream['stream_id'] }}</div>
-                                                                            </div>
-                                                                            <div>
-                                                                                <span class="text-gray-500 dark:text-gray-400">Started At:</span>
-                                                                                <div class="font-medium text-gray-900 dark:text-gray-100">{{ $stream['started_at'] ?? 'N/A' }}</div>
-                                                                            </div>
-                                                                            <div>
-                                                                                <span class="text-gray-500 dark:text-gray-400">Process Status:</span>
-                                                                                <div class="font-medium mt-1">
-                                                                                    <x-filament::badge :color="$stream['process_running'] ? 'success' : 'gray'" size="sm">
-                                                                                        {{ $stream['process_running'] ? 'Running' : 'Idle' }}
-                                                                                    </x-filament::badge>
-                                                                                </div>
-                                                                            </div>
-                                                                        </div>
+                            <!-- Stream Details -->
+                            <div x-show="showDetails" x-transition class="mt-4 border-t dark:border-gray-700 pt-4"
+                                style="display: none;">
+                                <div class="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+                                    <div>
+                                        <span class="text-gray-500 dark:text-gray-400">Stream ID:</span>
+                                        <div class="font-mono text-xs break-all text-gray-900 dark:text-gray-100">
+                                            {{ $stream['stream_id'] }}</div>
+                                    </div>
+                                    <div>
+                                        <span class="text-gray-500 dark:text-gray-400">Started At:</span>
+                                        <div class="font-medium text-gray-900 dark:text-gray-100">
+                                            {{ $stream['started_at'] ?? 'N/A' }}</div>
+                                    </div>
+                                    <div>
+                                        <span class="text-gray-500 dark:text-gray-400">Process Status:</span>
+                                        <div class="font-medium mt-1">
+                                            <x-filament::badge :color="$stream['process_running'] ? 'success' : 'gray'" size="sm">
+                                                {{ $stream['process_running'] ? 'Running' : 'Idle' }}
+                                            </x-filament::badge>
+                                        </div>
+                                    </div>
+                                </div>
 
-                                                                        @if($stream['has_failover'])
-                                                                            <!-- Failover Information Section -->
-                                                                            <div class="mt-4 pt-4 border-t dark:border-gray-700">
-                                                                                <h4 class="text-sm font-semibold text-gray-900 dark:text-white mb-3 flex items-center">
-                                                                                    <x-heroicon-s-arrow-path class="w-4 h-4 mr-2 {{ $stream['using_failover'] ? 'text-orange-500' : 'text-gray-400' }}" />
-                                                                                    Failover Status
-                                                                                </h4>
-                                                                                <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-                                                                                    <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-3">
-                                                                                        <div class="text-xs text-gray-500 dark:text-gray-400">Failover Attempts</div>
-                                                                                        <div class="text-lg font-semibold {{ $stream['failover_attempts'] > 0 ? 'text-orange-600 dark:text-orange-400' : 'text-gray-900 dark:text-white' }}">
-                                                                                            {{ $stream['failover_attempts'] }}
-                                                                                        </div>
-                                                                                    </div>
-                                                                                    <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-3">
-                                                                                        <div class="text-xs text-gray-500 dark:text-gray-400">Current Source</div>
-                                                                                        <div class="text-lg font-semibold text-gray-900 dark:text-white">
-                                                                                            @if($stream['failover_resolver_url'])
-                                                                                                Dynamic
-                                                                                            @elseif($stream['current_failover_index'] > 0)
-                                                                                                Backup #{{ $stream['current_failover_index'] }}
-                                                                                            @else
-                                                                                                Primary
-                                                                                            @endif
-                                                                                        </div>
-                                                                                    </div>
-                                                                                    <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-3">
-                                                                                        <div class="text-xs text-gray-500 dark:text-gray-400">Available Backups</div>
-                                                                                        <div class="text-lg font-semibold text-gray-900 dark:text-white">
-                                                                                            @if($stream['failover_resolver_url'])
-                                                                                                <span class="text-sm">Dynamic Resolver</span>
-                                                                                            @else
-                                                                                                {{ count($stream['failover_urls']) }}
-                                                                                            @endif
-                                                                                        </div>
-                                                                                    </div>
-                                                                                    <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-3">
-                                                                                        <div class="text-xs text-gray-500 dark:text-gray-400">Last Failover</div>
-                                                                                        <div class="text-sm font-semibold text-gray-900 dark:text-white">
-                                                                                            {{ $stream['last_failover_time'] ?? 'Never' }}
-                                                                                        </div>
-                                                                                    </div>
-                                                                                </div>
+                                @if ($stream['has_failover'])
+                                    <!-- Failover Information Section -->
+                                    <div class="mt-4 pt-4 border-t dark:border-gray-700">
+                                        <h4
+                                            class="text-sm font-semibold text-gray-900 dark:text-white mb-3 flex items-center">
+                                            <x-heroicon-s-arrow-path
+                                                class="w-4 h-4 mr-2 {{ $stream['using_failover'] ? 'text-orange-500' : 'text-gray-400' }}" />
+                                            Failover Status
+                                        </h4>
+                                        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                            <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-3">
+                                                <div class="text-xs text-gray-500 dark:text-gray-400">Failover Attempts
+                                                </div>
+                                                <div
+                                                    class="text-lg font-semibold {{ $stream['failover_attempts'] > 0 ? 'text-orange-600 dark:text-orange-400' : 'text-gray-900 dark:text-white' }}">
+                                                    {{ $stream['failover_attempts'] }}
+                                                </div>
+                                            </div>
+                                            <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-3">
+                                                <div class="text-xs text-gray-500 dark:text-gray-400">Current Source
+                                                </div>
+                                                <div class="text-lg font-semibold text-gray-900 dark:text-white">
+                                                    @if ($stream['failover_resolver_url'])
+                                                        Dynamic
+                                                    @elseif($stream['current_failover_index'] > 0)
+                                                        Backup #{{ $stream['current_failover_index'] }}
+                                                    @else
+                                                        Primary
+                                                    @endif
+                                                </div>
+                                            </div>
+                                            <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-3">
+                                                <div class="text-xs text-gray-500 dark:text-gray-400">Available Backups
+                                                </div>
+                                                <div class="text-lg font-semibold text-gray-900 dark:text-white">
+                                                    @if ($stream['failover_resolver_url'])
+                                                        <span class="text-sm">Dynamic Resolver</span>
+                                                    @else
+                                                        {{ count($stream['failover_urls']) }}
+                                                    @endif
+                                                </div>
+                                            </div>
+                                            <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-3">
+                                                <div class="text-xs text-gray-500 dark:text-gray-400">Last Failover
+                                                </div>
+                                                <div class="text-sm font-semibold text-gray-900 dark:text-white">
+                                                    {{ $stream['last_failover_time'] ?? 'Never' }}
+                                                </div>
+                                            </div>
+                                        </div>
 
-                                                                                @if($stream['using_failover'])
-                                                                                    <div class="mt-3 p-3 bg-orange-50 dark:bg-orange-900/20 rounded-lg border border-orange-200 dark:border-orange-800">
-                                                                                        <div class="flex items-start">
-                                                                                            <x-heroicon-s-exclamation-triangle class="w-5 h-5 text-orange-500 mt-0.5 mr-2 flex-shrink-0" />
-                                                                                            <div>
-                                                                                                <p class="text-sm font-medium text-orange-800 dark:text-orange-200">
-                                                                                                    Stream is using a failover source
-                                                                                                </p>
-                                                                                                <p class="text-xs text-orange-600 dark:text-orange-300 mt-1">
-                                                                                                    Original URL: <span class="font-mono break-all">{{ $stream['source_url'] }}</span>
-                                                                                                </p>
-                                                                                                @if($stream['current_url'] && $stream['current_url'] !== $stream['source_url'])
-                                                                                                    <p class="text-xs text-orange-600 dark:text-orange-300">
-                                                                                                        Current URL: <span class="font-mono break-all">{{ $stream['current_url'] }}</span>
-                                                                                                    </p>
-                                                                                                @endif
-                                                                                            </div>
-                                                                                        </div>
-                                                                                    </div>
-                                                                                @endif
+                                        @if ($stream['using_failover'])
+                                            <div
+                                                class="mt-3 p-3 bg-orange-50 dark:bg-orange-900/20 rounded-lg border border-orange-200 dark:border-orange-800">
+                                                <div class="flex items-start">
+                                                    <x-heroicon-s-exclamation-triangle
+                                                        class="w-5 h-5 text-orange-500 mt-0.5 mr-2 flex-shrink-0" />
+                                                    <div>
+                                                        <p
+                                                            class="text-sm font-medium text-orange-800 dark:text-orange-200">
+                                                            Stream is using a failover source
+                                                        </p>
+                                                        <p class="text-xs text-orange-600 dark:text-orange-300 mt-1">
+                                                            Original URL: <span
+                                                                class="font-mono break-all">{{ $stream['source_url'] }}</span>
+                                                        </p>
+                                                        @if ($stream['current_url'] && $stream['current_url'] !== $stream['source_url'])
+                                                            <p class="text-xs text-orange-600 dark:text-orange-300">
+                                                                Current URL: <span
+                                                                    class="font-mono break-all">{{ $stream['current_url'] }}</span>
+                                                            </p>
+                                                        @endif
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        @endif
 
-                                                                                @if(!empty($stream['failover_urls']))
-                                                                                    <div class="mt-3">
-                                                                                        <details class="text-sm">
-                                                                                            <summary class="cursor-pointer text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white">
-                                                                                                Show failover URLs ({{ count($stream['failover_urls']) }})
-                                                                                            </summary>
-                                                                                            <ul class="mt-2 space-y-1 ml-4">
-                                                                                                @foreach($stream['failover_urls'] as $index => $url)
-                                                                                                    <li class="font-mono text-xs text-gray-500 dark:text-gray-400 flex items-center gap-2">
-                                                                                                        <x-filament::badge
-                                                                                                            :color="$stream['current_failover_index'] === $index + 1 ? 'warning' : 'gray'"
-                                                                                                            size="sm"
-                                                                                                        >
-                                                                                                            {{ $index + 1 }}
-                                                                                                        </x-filament::badge>
-                                                                                                        <span class="{{ $stream['current_failover_index'] === $index + 1 ? 'text-orange-600 dark:text-orange-400 font-medium' : '' }}">
-                                                                                                            {{ $url }}
-                                                                                                        </span>
-                                                                                                        @if($stream['current_failover_index'] === $index + 1)
-                                                                                                            <x-filament::badge color="warning" size="sm">active</x-filament::badge>
-                                                                                                        @endif
-                                                                                                    </li>
-                                                                                                @endforeach
-                                                                                            </ul>
-                                                                                        </details>
-                                                                                    </div>
-                                                                                @endif
-                                                                            </div>
-                                                                        @endif
-                                                                    </div>
-                                                                </div>
-                                                            </x-filament::card>
+                                        @if (!empty($stream['failover_urls']))
+                                            <div class="mt-3">
+                                                <details class="text-sm">
+                                                    <summary
+                                                        class="cursor-pointer text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white">
+                                                        Show failover URLs ({{ count($stream['failover_urls']) }})
+                                                    </summary>
+                                                    <ul class="mt-2 space-y-1 ml-4">
+                                                        @foreach ($stream['failover_urls'] as $index => $url)
+                                                            <li
+                                                                class="font-mono text-xs text-gray-500 dark:text-gray-400 flex items-center gap-2">
+                                                                <x-filament::badge :color="$stream['current_failover_index'] ===
+                                                                $index + 1
+                                                                    ? 'warning'
+                                                                    : 'gray'" size="sm">
+                                                                    {{ $index + 1 }}
+                                                                </x-filament::badge>
+                                                                <span
+                                                                    class="{{ $stream['current_failover_index'] === $index + 1 ? 'text-orange-600 dark:text-orange-400 font-medium' : '' }}">
+                                                                    {{ $url }}
+                                                                </span>
+                                                                @if ($stream['current_failover_index'] === $index + 1)
+                                                                    <x-filament::badge color="warning"
+                                                                        size="sm">active</x-filament::badge>
+                                                                @endif
+                                                            </li>
+                                                        @endforeach
+                                                    </ul>
+                                                </details>
+                                            </div>
+                                        @endif
+                                    </div>
+                                @endif
+                            </div>
+                        </div>
+                    </x-filament::card>
                 @endforeach
             </div>
         @endif
