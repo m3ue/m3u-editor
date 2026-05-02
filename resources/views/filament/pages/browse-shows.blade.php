@@ -18,6 +18,16 @@
         </div>
     @endif
 
+    {{-- Page description --}}
+    <div class="rounded-lg border border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-white/5 px-4 py-3 mb-6 flex items-start gap-3">
+        <svg class="w-5 h-5 text-primary-500 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
+        </svg>
+        <p class="text-sm text-gray-600 dark:text-gray-400">
+            {{ __('Search your EPG guide to find shows and movies, then create recording rules to capture them automatically. Schedule a single airing or set up a series rule to record every episode as it airs.') }}
+        </p>
+    </div>
+
     {{-- Filter Form --}}
     <form wire:submit="search" class="rounded-xl border border-gray-200 dark:border-white/10 bg-white dark:bg-gray-900 p-4 mb-6 space-y-4">
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -371,7 +381,10 @@
 
             {{-- Content --}}
             <div class="p-4 flex-1 overflow-y-auto">
-                @include('filament.pages.browse-show-detail', ['show' => $selectedShowDetail])
+                @include('filament.pages.browse-show-detail', [
+                    'show' => $selectedShowDetail,
+                    'seriesHint' => $this->seriesHint,
+                ])
             </div>
         </div>
     </div>

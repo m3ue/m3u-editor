@@ -30,6 +30,7 @@ class EpgProgramme extends Model
         'is_new',
         'previously_shown',
         'premiere',
+        'tmdb_id',
         'icon',
         'rating',
     ];

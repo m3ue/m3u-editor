@@ -5,8 +5,9 @@
  *
  * Covers:
  * - Recording uses the raw source URL (url_custom ?? url) — no double-proxying
- * - start() stores proxy_network_id and sets status to Recording
- * - stop() clears proxy_network_id and transitions to PostProcessing
+ * - start() stores proxy_network_id, sets status to Recording, and sends a bell notification
+ * - stop() preserves proxy_network_id (downloader needs it) and transitions to PostProcessing
+ * - cancel() calls proxy stop AND cleanup (no post-processing for cancelled)
  * - DvrSetting use_proxy defaults to false
  */
 
@@ -18,7 +19,9 @@ use App\Models\Playlist;
 use App\Models\User;
 use App\Services\DvrRecorderService;
 use App\Services\M3uProxyService;
+use Filament\Notifications\DatabaseNotification;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Queue;
 
 uses(RefreshDatabase::class);
@@ -70,7 +73,7 @@ function mockProxy(string $networkId = 'test-network-id')
     $mock = Mockery::mock(M3uProxyService::class);
     $mock->shouldReceive('startDvrBroadcast')->andReturn($networkId);
     $mock->shouldReceive('stopDvrBroadcast')->andReturn(true);
-    $mock->shouldReceive('getDvrBroadcastHlsDir')->andReturn('/tmp/m3u-proxy-dvr/broadcast_'.$networkId);
+    $mock->shouldReceive('cleanupDvrBroadcast')->andReturn(true);
     app()->instance(M3uProxyService::class, $mock);
 
     return $mock;
@@ -106,6 +109,16 @@ it('stores proxy_network_id and transitions to Recording on start', function () 
     expect($fresh->actual_start)->not->toBeNull();
 });
 
+it('sends a bell notification when recording starts', function () {
+    Notification::fake();
+    $recording = makeScheduledRecording();
+    mockProxy($recording->uuid);
+
+    app(DvrRecorderService::class)->start($recording);
+
+    Notification::assertSentTo($recording->user, DatabaseNotification::class);
+});
+
 it('skips start when recording is not in SCHEDULED state', function () {
     $recording = makeScheduledRecording();
     $recording->update(['status' => DvrRecordingStatus::Completed]);
@@ -121,7 +134,7 @@ it('skips start when recording is not in SCHEDULED state', function () {
 
 // ── stop() ────────────────────────────────────────────────────────────────────
 
-it('calls proxy stop and transitions to PostProcessing', function () {
+it('calls proxy stop and transitions to PostProcessing while preserving proxy_network_id', function () {
     $recording = makeScheduledRecording();
     $networkId = $recording->uuid;
     $recording->update([
@@ -131,16 +144,39 @@ it('calls proxy stop and transitions to PostProcessing', function () {
 
     $proxy = Mockery::mock(M3uProxyService::class);
     $proxy->shouldReceive('stopDvrBroadcast')->once()->with($networkId)->andReturn(true);
-    $proxy->shouldReceive('getDvrBroadcastHlsDir')->once()->with($networkId)->andReturn('/tmp/m3u-proxy-dvr/broadcast_'.$networkId);
+    // cleanupDvrBroadcast is NOT called by stop() — it runs after post-processing succeeds.
+    $proxy->shouldNotReceive('cleanupDvrBroadcast');
     app()->instance(M3uProxyService::class, $proxy);
 
     app(DvrRecorderService::class)->stop($recording);
 
     $fresh = $recording->fresh();
     expect($fresh->status)->toBe(DvrRecordingStatus::PostProcessing);
-    // proxy_network_id is preserved so DvrPostProcessorService can download via HTTP
+    // proxy_network_id is preserved through post-processing — the HLS downloader needs it.
     expect($fresh->proxy_network_id)->toBe($networkId);
-    expect($fresh->actual_end)->not->toBeNull();
+    // actual_end is NOT set here — it's set by the proxy callback when FFmpeg actually stops.
+    // This ensures we capture the true end time, not a premature one.
+    expect($fresh->actual_end)->toBeNull();
+});
+
+it('cancel() calls proxy stop but does NOT cleanup (let callback handle it)', function () {
+    $recording = makeScheduledRecording();
+    $networkId = $recording->uuid;
+    $recording->update([
+        'status' => DvrRecordingStatus::Recording,
+        'proxy_network_id' => $networkId,
+    ]);
+
+    $proxy = Mockery::mock(M3uProxyService::class);
+    $proxy->shouldReceive('stopDvrBroadcast')->once()->with($networkId)->andReturn(true);
+    $proxy->shouldNotReceive('cleanupDvrBroadcast');
+    app()->instance(M3uProxyService::class, $proxy);
+
+    app(DvrRecorderService::class)->cancel($recording);
+
+    $fresh = $recording->fresh();
+    expect($fresh->status)->toBe(DvrRecordingStatus::Cancelled);
+    expect($fresh->proxy_network_id)->toBeNull();
 });
 
 // ── use_proxy default ─────────────────────────────────────────────────────────

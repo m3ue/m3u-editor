@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Enums\DvrRecordingStatus;
 use App\Models\DvrRecording;
 use App\Services\DvrPostProcessorService;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -32,6 +33,15 @@ class PostProcessDvrRecording implements ShouldQueue
         if (! $recording) {
             Log::warning("PostProcessDvrRecording: recording {$this->recordingId} not found");
             $this->fail(new \Exception("PostProcessDvrRecording: recording {$this->recordingId} not found"));
+
+            return;
+        }
+
+        // Skip cancelled recordings — they should not be post-processed
+        if ($recording->status === DvrRecordingStatus::Cancelled) {
+            Log::info("PostProcessDvrRecording: recording {$this->recordingId} is Cancelled — skipping post-processing", [
+                'recording_id' => $this->recordingId,
+            ]);
 
             return;
         }

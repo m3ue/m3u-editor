@@ -7,9 +7,11 @@ use App\Jobs\MergeChannels;
 use App\Jobs\UnmergeChannels;
 use App\Models\Category;
 use App\Models\Channel;
+use App\Models\Episode;
 use App\Models\Group;
 use App\Models\Playlist;
 use App\Models\PlaylistAuth;
+use App\Models\Season;
 use App\Models\Series;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -787,5 +789,54 @@ class XtreamApiControllerTest extends TestCase
         $noArchiveData = collect($jsonResponse)->firstWhere('stream_id', $channelWithoutArchive->id);
         $this->assertEquals(0, $noArchiveData['tv_archive'], 'tv_archive should be 0 when no shift and no catchup');
         $this->assertEquals(0, $noArchiveData['tv_archive_duration']);
+    }
+
+    public function test_get_series_info_for_dvr_series_returns_valid_json_with_episode_count(): void
+    {
+        $category = Category::factory()->for($this->user)->for($this->playlist)->create();
+
+        $series = Series::factory()->create([
+            'user_id' => $this->user->id,
+            'playlist_id' => $this->playlist->id,
+            'category_id' => $category->id,
+            'enabled' => true,
+            'import_batch_no' => 'dvr',
+            'source_series_id' => null,
+            'name' => 'DVR Test Show',
+            'metadata' => null,
+            'last_metadata_fetch' => null,
+            'last_modified' => null,
+        ]);
+
+        $season = Season::factory()->create([
+            'user_id' => $this->user->id,
+            'playlist_id' => $this->playlist->id,
+            'category_id' => $category->id,
+            'series_id' => $series->id,
+            'season_number' => 1,
+            'episode_count' => 2,
+            'import_batch_no' => 'dvr',
+            'source_season_id' => null,
+        ]);
+
+        Episode::factory()->count(2)->create([
+            'user_id' => $this->user->id,
+            'playlist_id' => $this->playlist->id,
+            'series_id' => $series->id,
+            'season_id' => $season->id,
+            'season' => 1,
+            'import_batch_no' => 'dvr',
+            'source_episode_id' => null,
+            'enabled' => true,
+        ]);
+
+        $response = $this->getJson($this->getXtreamApiUrl('get_series_info', ['series_id' => $series->id]));
+
+        $response->assertOk();
+        $response->assertJsonStructure(['info', 'seasons', 'episodes']);
+
+        $seasons = $response->json('seasons');
+        $this->assertCount(1, $seasons);
+        $this->assertSame(2, $seasons[0]['episode_count']);
     }
 }

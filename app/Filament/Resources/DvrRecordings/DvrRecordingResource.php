@@ -111,6 +111,7 @@ class DvrRecordingResource extends Resource
     public static function table(Table $table): Table
     {
         return $table
+            ->poll('15s')
             ->filtersTriggerAction(function ($action) {
                 return $action->button()->label(__('Filters'));
             })
@@ -173,21 +174,32 @@ class DvrRecordingResource extends Resource
                             DvrRecordingStatus::Recording,
                             DvrRecordingStatus::Completed,
                         ]) && $record->dvrSetting?->playlist)
-                        ->url(function (DvrRecording $record): string {
+                        ->action(function (DvrRecording $record, $livewire): void {
                             $playlist = $record->dvrSetting->playlist;
                             $username = $record->user->name;
-                            $ext = $record->status === DvrRecordingStatus::Completed
+                            $format = $record->status === DvrRecordingStatus::Completed
                                 ? ($record->dvrSetting->dvr_output_format ?? 'mp4')
                                 : 'm3u8';
 
-                            return route('dvr.recording.stream', [
+                            $url = route('dvr.recording.stream', [
                                 'username' => $username,
                                 'password' => $playlist->uuid,
                                 'uuid' => $record->uuid,
-                                'format' => $ext,
+                                'format' => $format,
                             ]);
-                        })
-                        ->openUrlInNewTab(),
+
+                            $livewire->dispatch('openFloatingStream', [
+                                'id' => $record->id,
+                                'stream_id' => $record->id,
+                                'content_type' => 'dvr_recording',
+                                'playlist_id' => $playlist->id,
+                                'title' => $record->display_title ?? $record->title,
+                                'display_title' => $record->display_title ?? $record->title,
+                                'url' => $url,
+                                'format' => $format,
+                                'type' => 'channel',
+                            ]);
+                        }),
                     Action::make('retry')
                         ->label(__('Retry Post-Processing'))
                         ->icon('heroicon-o-arrow-path')

@@ -6,6 +6,7 @@ use App\Enums\DvrRecordingStatus;
 use App\Jobs\PostProcessDvrRecording;
 use App\Models\DvrRecording;
 use Exception;
+use Filament\Notifications\Notification;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -97,16 +98,11 @@ class DvrRecorderService
 
         $networkId = $this->proxy->startDvrBroadcast($recording, $setting, $streamUrl);
 
-        // Fetch hls_dir immediately — it's deterministic and available as soon as the
-        // broadcast registers. Storing it now means stop() can always find the segments
-        // even if the broadcast has already left the proxy registry by then.
-        $hlsDir = $this->proxy->getDvrBroadcastHlsDir($networkId);
-
         $recording->update([
             'status' => DvrRecordingStatus::Recording->value,
             'actual_start' => now(),
             'proxy_network_id' => $networkId,
-            'temp_path' => $hlsDir,
+            'attempt_count' => ($recording->attempt_count ?? 0) + 1,
         ]);
 
         Log::info('DVR: Proxy broadcast started', [
@@ -114,15 +110,23 @@ class DvrRecorderService
             'proxy_network_id' => $networkId,
             'title' => $recording->title,
         ]);
+
+        if ($user = $recording->user) {
+            Notification::make()
+                ->success()
+                ->title('Recording Started')
+                ->body($recording->title)
+                ->broadcast($user)
+                ->sendToDatabase($user);
+        }
     }
 
     /**
      * Stop recording by signalling the proxy to terminate the broadcast.
      *
-     * We query hls_dir from the proxy status endpoint BEFORE stopping so we know
-     * where to find the segments. The job is dispatched directly from here — we
-     * do not wait for the proxy callback, which may not arrive (e.g. if the proxy
-     * is restarting or the callback URL is unreachable).
+     * The proxy retains segment files after /stop, so post-processing can fetch
+     * them via HTTP afterward. We do NOT clear proxy_network_id here — the
+     * downloader needs it. It is cleared after successful cleanup in post-processing.
      */
     public function stop(DvrRecording $recording): void
     {
@@ -132,29 +136,27 @@ class DvrRecorderService
             Log::warning('DVR stop: no proxy_network_id on recording — assuming already stopped', [
                 'recording_id' => $recording->id,
             ]);
-            $this->finalizeStop($recording, hlsDir: null);
+            $this->finalizeStop($recording);
 
             return;
         }
 
-        // Try to fetch hls_dir from the proxy; fall back to what we stored at start time.
-        // The broadcast may have already ended naturally (duration limit) by the time
-        // the scheduler dispatches this stop, in which case the status endpoint returns null.
-        $hlsDir = $this->proxy->getDvrBroadcastHlsDir($networkId) ?? $recording->temp_path;
-
         Log::info('DVR: Stopping proxy broadcast', [
             'recording_id' => $recording->id,
             'proxy_network_id' => $networkId,
-            'hls_dir' => $hlsDir,
         ]);
 
         $this->proxy->stopDvrBroadcast($networkId);
 
-        $this->finalizeStop($recording, hlsDir: $hlsDir);
+        $this->finalizeStop($recording);
     }
 
     /**
      * Cancel a recording — stops the proxy broadcast and marks as cancelled.
+     *
+     * NOTE: We do NOT cleanup the proxy files here. The callback will fire when
+     * FFmpeg actually stops, and post-processing will handle cleanup. This ensures
+     * we don't delete segments that are still being written.
      */
     public function cancel(DvrRecording $recording): void
     {
@@ -162,6 +164,8 @@ class DvrRecorderService
 
         if ($networkId) {
             $this->proxy->stopDvrBroadcast($networkId);
+            // Do NOT cleanup here — let the callback and post-processing handle it
+            // so we don't delete segments that are still being written
         }
 
         $recording->update([
@@ -169,16 +173,23 @@ class DvrRecorderService
             'actual_end' => now(),
             'proxy_network_id' => null,
             'error_message' => 'Cancelled by user',
+            'user_cancelled' => true,
         ]);
     }
 
     /**
      * Transition a stopped recording to POST_PROCESSING and dispatch the concat job.
      *
-     * FFmpeg may still be flushing its final segment for a few seconds after the stop
-     * signal. We delay the job by 10 seconds to give it time to finish writing.
+     * proxy_network_id is intentionally preserved through post-processing so the
+     * HLS downloader can fetch segments from the proxy. It will be cleared after
+     * successful cleanup at the end of post-processing.
+     *
+     * The proxy sends a callback (programme_ended/recording_stopped) when FFmpeg
+     * actually stops — that callback is the authoritative signal to dispatch
+     * post-processing. This method's dispatch is a safety net: it only fires
+     * after a long delay (60s) in case the callback is never received.
      */
-    private function finalizeStop(DvrRecording $recording, ?string $hlsDir): void
+    private function finalizeStop(DvrRecording $recording): void
     {
         if (in_array($recording->status, [
             DvrRecordingStatus::Cancelled,
@@ -187,30 +198,20 @@ class DvrRecorderService
             return;
         }
 
-        $update = [
+        $recording->update([
             'status' => DvrRecordingStatus::PostProcessing->value,
-            'actual_end' => now(),
-            // proxy_network_id is intentionally preserved here — DvrPostProcessorService
-            // uses it to download HLS segments from the proxy via HTTP and clears it
-            // itself once the download and cleanup are complete.
-        ];
+        ]);
 
-        if ($hlsDir) {
-            $update['temp_path'] = $hlsDir;
-        }
-
-        $recording->update($update);
-
-        // Delay 10 s so FFmpeg finishes flushing the final HLS segment before we
-        // try to read the manifest. The proxy callback (if it arrives) will be a
-        // no-op because DvrCallbackController skips Completed/Failed recordings.
+        // Safety net: if the proxy callback never arrives, fall back to post-processing
+        // after 60s. By that point FFmpeg is definitely done flushing segments.
+        // The callback (if it arrives) will dispatch immediately and this will be a no-op.
         PostProcessDvrRecording::dispatch($recording->id)
             ->onQueue('dvr-post')
-            ->delay(now()->addSeconds(10));
+            ->delay(now()->addSeconds(60));
 
-        Log::info('DVR: Post-processing queued', [
+        Log::info('DVR: Post-processing queued (fallback)', [
             'recording_id' => $recording->id,
-            'hls_dir' => $hlsDir,
+            'proxy_network_id' => $recording->proxy_network_id,
         ]);
     }
 }

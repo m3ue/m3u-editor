@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\DvrRecordingStatus;
+use App\Enums\DvrRuleType;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -24,11 +25,16 @@ class DvrRecording extends Model
         'uuid',
         'proxy_network_id',
         'user_id',
+        'playlist_auth_id',
         'dvr_setting_id',
         'dvr_recording_rule_id',
         'channel_id',
         'status',
+        'user_cancelled',
+        'attempt_count',
         'title',
+        'series_key',
+        'normalized_title',
         'subtitle',
         'description',
         'season',
@@ -47,6 +53,7 @@ class DvrRecording extends Model
         'programme_start',
         'programme_end',
         'epg_programme_data',
+        'programme_uid',
         'pid',
         'temp_path',
         'temp_manifest_path',
@@ -59,6 +66,8 @@ class DvrRecording extends Model
     {
         return [
             'status' => DvrRecordingStatus::class,
+            'user_cancelled' => 'boolean',
+            'attempt_count' => 'integer',
             'season' => 'integer',
             'episode' => 'integer',
             'scheduled_start' => 'datetime',
@@ -117,12 +126,46 @@ class DvrRecording extends Model
                     $vodEpisode->delete();
                 }
             });
+
+            // Cascade to the recording rule that produced this recording.
+            // - Once / Manual rules: always remove (one-shot).
+            // - Series rules: remove only when this was the last sibling recording
+            //   so an in-progress season keeps its rule alive.
+            $rule = $recording->recordingRule;
+            if ($rule) {
+                $isOneShot = in_array($rule->type, [DvrRuleType::Once, DvrRuleType::Manual], true);
+                $hasSiblings = DvrRecording::where('dvr_recording_rule_id', $rule->id)
+                    ->where('id', '!=', $recording->id)
+                    ->exists();
+
+                if ($isOneShot || ! $hasSiblings) {
+                    try {
+                        $rule->delete();
+                    } catch (\Throwable $e) {
+                        Log::warning("DvrRecording deleting hook: could not delete rule {$rule->id}: {$e->getMessage()}", [
+                            'recording_id' => $recording->id,
+                        ]);
+                    }
+                }
+            }
+
+            // Best-effort: prune now-empty parent directories up to (but not including)
+            // the library root, so the storage tree doesn't accumulate empty Year/Title dirs.
+            if ($recording->file_path) {
+                $disk = $recording->dvrSetting?->storage_disk ?: config('dvr.storage_disk', 'local');
+                self::pruneEmptyParentDirs($disk, $recording->file_path, 'library');
+            }
         });
     }
 
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function playlistAuth(): BelongsTo
+    {
+        return $this->belongsTo(PlaylistAuth::class);
     }
 
     public function dvrSetting(): BelongsTo
@@ -204,5 +247,45 @@ class DvrRecording extends Model
         }
 
         return $title;
+    }
+
+    /**
+     * Walk up from $relativePath's directory and delete each directory that is
+     * empty after the file has been removed. Stops at $stopAt (exclusive) or
+     * at the disk root, whichever comes first.
+     *
+     * The file at $relativePath is assumed to already be deleted by the caller.
+     */
+    private static function pruneEmptyParentDirs(string $disk, string $relativePath, string $stopAt): void
+    {
+        try {
+            $storage = Storage::disk($disk);
+            $stopAt = trim($stopAt, '/');
+            $dir = trim((string) dirname($relativePath), '/');
+
+            // Walk up: library/2024/Show -> library/2024 -> library (stop)
+            while ($dir !== '' && $dir !== '.' && $dir !== $stopAt) {
+                if (! $storage->exists($dir)) {
+                    break;
+                }
+
+                $files = $storage->files($dir);
+                $subdirs = $storage->directories($dir);
+
+                if (! empty($files) || ! empty($subdirs)) {
+                    break;
+                }
+
+                $storage->deleteDirectory($dir);
+
+                $parent = trim((string) dirname($dir), '/');
+                if ($parent === $dir) {
+                    break;
+                }
+                $dir = $parent;
+            }
+        } catch (\Throwable $e) {
+            Log::warning("DvrRecording: pruneEmptyParentDirs failed for {$relativePath}: {$e->getMessage()}");
+        }
     }
 }

@@ -2828,11 +2828,6 @@ class PlaylistResource extends Resource implements CopilotResource
                             ->columnSpanFull()
                             ->hidden(fn (Get $get): bool => ! $get('dvr_enabled'))
                             ->schema([
-                                TextInput::make('dvr_storage_path')
-                                    ->label(__('Storage Path'))
-                                    ->helperText(__('Subdirectory within the DVR storage disk for this playlist\'s recordings.'))
-                                    ->placeholder('recordings')
-                                    ->maxLength(255),
                                 TextInput::make('dvr_max_concurrent_recordings')
                                     ->label(__('Max Concurrent Recordings'))
                                     ->helperText(__('Maximum number of recordings that can run simultaneously for this playlist.'))

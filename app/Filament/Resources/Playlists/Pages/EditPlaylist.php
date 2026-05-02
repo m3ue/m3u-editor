@@ -85,7 +85,6 @@ class EditPlaylist extends EditRecord
         if ($dvr) {
             $data['dvr_enabled'] = $dvr->enabled;
             $data['dvr_output_format'] = $dvr->dvr_output_format ?? 'ts';
-            $data['dvr_storage_path'] = $dvr->storage_path;
             $data['dvr_max_concurrent_recordings'] = $dvr->max_concurrent_recordings;
             $data['dvr_default_start_early_seconds'] = $dvr->default_start_early_seconds;
             $data['dvr_default_end_late_seconds'] = $dvr->default_end_late_seconds;
@@ -138,7 +137,6 @@ class EditPlaylist extends EditRecord
                 'enabled' => $data['dvr_enabled'] ?? false,
                 'use_proxy' => true,
                 'dvr_output_format' => $data['dvr_output_format'] ?? 'ts',
-                'storage_path' => $data['dvr_storage_path'] ?? null,
                 'max_concurrent_recordings' => $data['dvr_max_concurrent_recordings'] ?? 2,
                 'default_start_early_seconds' => $data['dvr_default_start_early_seconds'] ?? 30,
                 'default_end_late_seconds' => $data['dvr_default_end_late_seconds'] ?? 60,

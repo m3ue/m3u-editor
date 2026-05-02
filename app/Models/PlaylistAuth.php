@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\DvrRecordingStatus;
 use App\Pivots\PlaylistAuthPivot;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -23,6 +24,9 @@ class PlaylistAuth extends Model
     protected $casts = [
         'id' => 'integer',
         'enabled' => 'boolean',
+        'dvr_enabled' => 'boolean',
+        'dvr_max_concurrent_recordings' => 'integer',
+        'dvr_storage_quota_gb' => 'integer',
         'user_id' => 'integer',
         'expires_at' => 'datetime',
     ];
@@ -35,6 +39,62 @@ class PlaylistAuth extends Model
     public function viewer(): HasOne
     {
         return $this->hasOne(PlaylistViewer::class);
+    }
+
+    public function dvrRecordings(): HasMany
+    {
+        return $this->hasMany(DvrRecording::class);
+    }
+
+    public function dvrRules(): HasMany
+    {
+        return $this->hasMany(DvrRecordingRule::class);
+    }
+
+    /**
+     * Whether this auth has reached its per-guest concurrent recording cap.
+     * Returns false when no cap is configured (null = unlimited).
+     */
+    public function hasReachedConcurrentLimit(): bool
+    {
+        if ($this->dvr_max_concurrent_recordings === null) {
+            return false;
+        }
+
+        $active = $this->dvrRecordings()
+            ->whereIn('status', [DvrRecordingStatus::Recording, DvrRecordingStatus::PostProcessing])
+            ->count();
+
+        return $active >= $this->dvr_max_concurrent_recordings;
+    }
+
+    /**
+     * Whether this auth has exhausted its per-guest storage quota.
+     * Returns false when no quota is configured (null = unlimited).
+     */
+    public function hasReachedStorageQuota(): bool
+    {
+        if ($this->dvr_storage_quota_gb === null) {
+            return false;
+        }
+
+        $usedBytes = $this->dvrRecordings()
+            ->whereNotNull('file_size_bytes')
+            ->sum('file_size_bytes');
+
+        $quotaBytes = $this->dvr_storage_quota_gb * 1024 * 1024 * 1024;
+
+        return $usedBytes >= $quotaBytes;
+    }
+
+    /**
+     * Total storage used by recordings attributed to this auth, in bytes.
+     */
+    public function getStorageUsedBytesAttribute(): int
+    {
+        return (int) $this->dvrRecordings()
+            ->whereNotNull('file_size_bytes')
+            ->sum('file_size_bytes');
     }
 
     /**

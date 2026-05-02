@@ -22,7 +22,6 @@ class DvrSetting extends Model
         'use_proxy',
         'dvr_output_format',
         'storage_disk',
-        'storage_path',
         'max_concurrent_recordings',
         'default_start_early_seconds',
         'default_end_late_seconds',
@@ -93,11 +92,20 @@ class DvrSetting extends Model
      * ShouldBeUnique, ensuring only one tick executes at a time. The three
      * createScheduledRecording paths additionally wrap their check + insert in a
      * DB::transaction, giving row-level isolation there.
+     *
+     * @param  int  $pendingInTick  Recordings already scheduled to start in this tick
+     *                              but whose status flip to Recording has not yet
+     *                              happened (the StartDvrRecording job is queued but
+     *                              has not run). Counted toward the active total so
+     *                              a single tick cannot dispatch more starts than
+     *                              there are free slots.
      */
-    public function isAtCapacity(): bool
+    public function isAtCapacity(int $pendingInTick = 0): bool
     {
-        return $this->recordings()
+        $active = $this->recordings()
             ->whereIn('status', [DvrRecordingStatus::Recording, DvrRecordingStatus::PostProcessing])
-            ->count() >= $this->max_concurrent_recordings;
+            ->count();
+
+        return ($active + $pendingInTick) >= $this->max_concurrent_recordings;
     }
 }

@@ -26,6 +26,7 @@ use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Grid;
+use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 use Filament\Tables;
 use Filament\Tables\Columns\TextColumn;
@@ -180,6 +181,39 @@ class PlaylistAuthResource extends Resource implements CopilotResource
                 ->columnSpan(2),
         ];
 
+        $dvrSection = Section::make(__('DVR Access'))
+            ->description(__('Control whether this guest can schedule and manage DVR recordings.'))
+            ->schema([
+                Toggle::make('dvr_enabled')
+                    ->label(__('Enable DVR'))
+                    ->helperText(__('Allow this guest to view and schedule recordings via the public playlist viewer.'))
+                    ->default(false)
+                    ->live()
+                    ->columnSpan(2),
+                TextInput::make('dvr_max_concurrent_recordings')
+                    ->label(__('Max Concurrent Recordings'))
+                    ->numeric()
+                    ->minValue(1)
+                    ->maxValue(99)
+                    ->nullable()
+                    ->placeholder(__('Inherit from DVR settings'))
+                    ->helperText(__('Override the maximum number of simultaneous recordings for this guest. Leave empty to use the playlist\'s DVR setting.'))
+                    ->visible(fn ($get) => $get('dvr_enabled'))
+                    ->columnSpan(1),
+                TextInput::make('dvr_storage_quota_gb')
+                    ->label(__('Storage Quota (GB)'))
+                    ->numeric()
+                    ->minValue(1)
+                    ->nullable()
+                    ->placeholder(__('No quota'))
+                    ->helperText(__('Maximum total disk space this guest\'s recordings may use. Leave empty for unlimited.'))
+                    ->visible(fn ($get) => $get('dvr_enabled'))
+                    ->columnSpan(1),
+            ])
+            ->columns(2)
+            ->collapsible()
+            ->collapsed(fn ($record) => ! ($record?->dvr_enabled));
+
         return [
             Grid::make()
                 ->hiddenOn(['edit']) // hide this field on the edit form
@@ -296,6 +330,7 @@ class PlaylistAuthResource extends Resource implements CopilotResource
                         ->columnSpan(2),
                 ])
                 ->columns(2),
+            $dvrSection,
         ];
     }
 }

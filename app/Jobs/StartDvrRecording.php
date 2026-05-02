@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Enums\DvrRecordingStatus;
 use App\Models\DvrRecording;
 use App\Services\DvrRecorderService;
+use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -47,6 +48,16 @@ class StartDvrRecording implements ShouldBeUnique, ShouldQueue
             return;
         }
 
+        // Guard: If the recording was cancelled (or otherwise moved out of Scheduled)
+        // between when this job was dispatched and now, do not start it.
+        if ($recording->status !== DvrRecordingStatus::Scheduled) {
+            Log::info("StartDvrRecording: recording {$this->recordingId} is no longer Scheduled (status={$recording->status->value}) — skipping start", [
+                'recording_id' => $this->recordingId,
+            ]);
+
+            return;
+        }
+
         try {
             $recorder->start($recording);
         } catch (Throwable $e) {
@@ -56,6 +67,15 @@ class StartDvrRecording implements ShouldBeUnique, ShouldQueue
                 'status' => DvrRecordingStatus::Failed->value,
                 'error_message' => $e->getMessage(),
             ]);
+
+            if ($user = $recording->user) {
+                Notification::make()
+                    ->danger()
+                    ->title('Recording Failed to Start')
+                    ->body($recording->title)
+                    ->broadcast($user)
+                    ->sendToDatabase($user);
+            }
         }
     }
 }
