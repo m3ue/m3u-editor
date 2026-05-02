@@ -803,7 +803,7 @@ class Preferences extends SettingsPage
                                                     ->openUrlInNewTab(false)
                                             )
                                             ->columnSpan(2)
-                                            ->helperText(__('The default transcoding profile used for the in-app player for Live content. Leave empty to disable transcoding (some streams may not be playable in the player).')),
+                                            ->helperText(__('The default transcoding profile used by the in-app player for Live content. A per-channel stream profile (if set) takes priority over this. Leave empty to disable transcoding (some streams may not be playable in the player).')),
                                         Select::make('default_vod_stream_profile_id')
                                             ->label(__('VOD and Series Transcoding Profile'))
                                             ->searchable()
@@ -820,7 +820,7 @@ class Preferences extends SettingsPage
                                                     ->openUrlInNewTab(false)
                                             )
                                             ->columnSpan(2)
-                                            ->helperText(__('The default transcoding profile used for the in-app player for VOD/Series content. Leave empty to disable transcoding (some streams may not be playable in the player).')),
+                                            ->helperText(__('The default transcoding profile used by the in-app player for VOD/Series content. A per-channel stream profile (if set) takes priority over this. Leave empty to disable transcoding (some streams may not be playable in the player).')),
                                         TextInput::make('max_concurrent_floating_players')
                                             ->label(__('Max Concurrent Players'))
                                             ->hintIcon(
