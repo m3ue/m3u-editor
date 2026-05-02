@@ -34,8 +34,9 @@ class ProcessVodChannels implements ShouldQueue
     public function __construct(
         public ?Playlist $playlist = null,
         public ?Channel $channel = null,
-        public ?bool $force = false,
-        public ?bool $updateProgress = true
+        public bool $force = false,
+        public bool $updateProgress = true,
+        public ?ShouldQueue $completionJob = null,
     ) {
         //
     }
@@ -133,7 +134,7 @@ class ProcessVodChannels implements ShouldQueue
 
             // Still dispatch the completion job so TMDB fetch and stream file sync run
             // even when there are no new channels to fetch metadata for.
-            dispatch(new ProcessVodChannelsComplete(playlist: $playlist));
+            dispatch(new ProcessVodChannelsComplete(playlist: $playlist, completionJob: $this->completionJob));
 
             return;
         }
@@ -183,6 +184,7 @@ class ProcessVodChannels implements ShouldQueue
         // Add the completion job at the end
         $jobs[] = new ProcessVodChannelsComplete(
             playlist: $playlist,
+            completionJob: $this->completionJob,
         );
 
         // Dispatch the job chain

@@ -1690,14 +1690,7 @@ class M3uProxyService
                 $userNetworkUuids = Network::where('user_id', auth()->id())->pluck('uuid')->toArray();
                 $userDvrUuids = DvrRecording::where('user_id', auth()->id())->pluck('uuid')->toArray();
 
-                $broadcasts = array_filter($data['broadcasts'] ?? [], function ($b) use ($userNetworkUuids, $userDvrUuids) {
-                    if (isset($b['network_id'])) {
-                        return in_array($b['network_id'], $userNetworkUuids)
-                            || in_array($b['network_id'], $userDvrUuids);
-                    }
-
-                    return false;
-                });
+                $broadcasts = array_filter($data['broadcasts'] ?? [], fn ($b) => isset($b['network_id']) && (in_array($b['network_id'], $userNetworkUuids) || in_array($b['network_id'], $userDvrUuids)));
 
                 return [
                     'success' => true,

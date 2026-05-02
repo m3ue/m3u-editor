@@ -1106,6 +1106,47 @@ class VodResource extends Resource implements CopilotResource
 
             // -- Streaming --
             BulkModalActionGroup::section('Streaming', [
+                BulkAction::make('set-stream-profile')
+                    ->label(__('Set Stream Profile'))
+                    ->schema([
+                        Select::make('stream_profile_id')
+                            ->label(__('Stream Profile'))
+                            ->options(fn () => StreamProfile::where('user_id', auth()->id())->pluck('name', 'id'))
+                            ->searchable()
+                            ->preload()
+                            ->nullable()
+                            ->placeholder(__('None (clear profile)'))
+                            ->helperText(__('The stored profile only takes effect when the channel (or its playlist) has proxy enabled.')),
+                        Toggle::make('overwrite_existing')
+                            ->label(__('Overwrite existing assignments'))
+                            ->helperText(__('When off, only channels without a stream profile will be updated. When on, all selected channels will be overwritten (including clearing back to none).'))
+                            ->default(false),
+                    ])
+                    ->action(function (Collection $records, array $data): void {
+                        $profileId = ! empty($data['stream_profile_id']) ? (int) $data['stream_profile_id'] : null;
+                        $overwrite = (bool) ($data['overwrite_existing'] ?? false);
+                        $updated = 0;
+
+                        foreach ($records->chunk(100) as $chunk) {
+                            $query = Channel::whereIn('id', $chunk->pluck('id'));
+                            if (! $overwrite) {
+                                $query->whereNull('stream_profile_id');
+                            }
+                            $updated += $query->update(['stream_profile_id' => $profileId]);
+                        }
+
+                        Notification::make()
+                            ->success()
+                            ->title(__('Stream profile updated'))
+                            ->body(trans_choice(':count channel updated|:count channels updated', $updated, ['count' => $updated]))
+                            ->send();
+                    })
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-cog-6-tooth')
+                    ->modalIcon('heroicon-o-cog-6-tooth')
+                    ->modalDescription(__('Assign (or clear) a stream profile for the selected channels.'))
+                    ->modalSubmitActionLabel(__('Apply')),
                 BulkAction::make('enable-merge')
                     ->label(__('Enable Merge'))
                     ->action(function (Collection $records, array $data): void {

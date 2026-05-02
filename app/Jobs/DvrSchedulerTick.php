@@ -6,7 +6,6 @@ use App\Services\DvrSchedulerService;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
-use Illuminate\Support\Facades\Log;
 
 /**
  * DvrSchedulerTick — Runs every minute via the Laravel scheduler.
@@ -28,8 +27,6 @@ class DvrSchedulerTick implements ShouldBeUnique, ShouldQueue
 
     public function handle(DvrSchedulerService $scheduler): void
     {
-        Log::debug('DVR scheduler tick starting');
         $scheduler->tick();
-        Log::debug('DVR scheduler tick complete');
     }
 }

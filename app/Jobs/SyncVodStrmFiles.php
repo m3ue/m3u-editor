@@ -430,6 +430,9 @@ class SyncVodStrmFiles implements ShouldQueue
                 $fileName = preg_replace('/'.preg_quote($char, '/').'{2,}/', $char, $fileName);
             }
 
+            // Ensure the filename (with extension) does not exceed 255 bytes.
+            $fileName = PlaylistService::truncateFilename($fileName, '.strm');
+
             $fileName = "{$fileName}.strm";
             $filePath = $path.'/'.$fileName;
 
