@@ -353,6 +353,27 @@ class M3uProxyStreamMonitor extends Page
                             'logo' => $logo,
                         ];
                     }
+
+                    // Enrich with media info (video/audio metadata) from stored stream stats
+                    if ($modelType === 'channel') {
+                        $channel = $channelsById[$modelId] ?? null;
+                        if ($channel) {
+                            $emby = $channel->getEmbyStreamStats();
+                            if (! empty($emby)) {
+                                $model['media_info'] = [
+                                    'resolution' => $emby['resolution'] ?? null,
+                                    'video_codec' => $emby['video_codec'] ?? null,
+                                    'video_profile' => $emby['video_profile'] ?? null,
+                                    'source_fps' => $emby['source_fps'] ?? null,
+                                    'video_bitrate_kbps' => $emby['ffmpeg_output_bitrate'] ?? null,
+                                    'audio_codec' => $emby['audio_codec'] ?? null,
+                                    'audio_channels' => $emby['audio_channels'] ?? null,
+                                    'audio_bitrate_kbps' => $emby['audio_bitrate'] ?? null,
+                                    'audio_language' => $emby['audio_language'] ?? null,
+                                ];
+                            }
+                        }
+                    }
                 }
 
                 // Calculate uptime
@@ -381,10 +402,10 @@ class M3uProxyStreamMonitor extends Page
                     return [
                         'ip' => $client['ip_address'],
                         'username' => $client['username'] ?? null,
+                        'user_agent' => $client['user_agent'] ?? null,
                         'connected_at' => $connectedAt->format('Y-m-d H:i:s'),
                         'duration' => $connectedAt->diffForHumans(null, true),
                         'bytes_received' => $this->formatBytes($client['bytes_served']),
-                        'bandwidth' => 'N/A', // Can calculate if needed
                         'is_active' => $isActive,
                     ];
                 }, $streamClients);
