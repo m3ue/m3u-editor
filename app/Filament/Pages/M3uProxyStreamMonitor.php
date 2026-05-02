@@ -12,11 +12,14 @@ use App\Models\PlaylistAlias;
 use App\Models\PlaylistProfile;
 use App\Models\StreamProfile;
 use App\Services\M3uProxyService;
+use App\Services\PlaylistUrlService;
 use Carbon\Carbon;
 use Exception;
 use Filament\Actions\Action;
+use Filament\Actions\Contracts\HasActions;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
+use Filament\Schemas\Contracts\HasSchemas;
 use Filament\Support\Enums\Size;
 use Illuminate\Support\Facades\Log;
 
@@ -25,7 +28,7 @@ use Illuminate\Support\Facades\Log;
  *
  * Uses the external m3u-proxy server API to populate and manage streams.
  */
-class M3uProxyStreamMonitor extends Page
+class M3uProxyStreamMonitor extends Page implements HasActions, HasSchemas
 {
     public static function getNavigationLabel(): string
     {
@@ -126,86 +129,107 @@ class M3uProxyStreamMonitor extends Page
         ];
     }
 
-    public function triggerFailover(string $streamId): void
+    public function triggerFailoverAction(): Action
     {
-        if (! $this->authorizeStreamAction($streamId)) {
-            return;
-        }
+        return Action::make('triggerFailover')
+            ->label(__('Trigger Failover'))
+            ->color('warning')
+            ->icon('heroicon-o-exclamation-triangle')
+            ->requiresConfirmation()
+            ->modalHeading(__('Trigger Failover'))
+            ->modalDescription(__('Are you sure you want to trigger a failover for this stream?'))
+            ->action(function (array $arguments): void {
+                $streamId = $arguments['streamId'] ?? null;
 
-        try {
-            $success = $this->apiService->triggerFailover($streamId);
-            if ($success) {
-                Notification::make()
-                    ->title("Failover triggered for stream {$streamId}.")
-                    ->success()
-                    ->send();
-            } else {
-                Notification::make()
-                    ->title("Failed to trigger failover for stream {$streamId}.")
-                    ->danger()
-                    ->send();
-            }
-        } catch (Exception $e) {
-            Notification::make()
-                ->title(__('Error triggering failover.'))
-                ->body($e->getMessage())
-                ->danger()
-                ->send();
-        }
+                if (! $streamId || ! $this->authorizeStreamAction($streamId)) {
+                    return;
+                }
 
-        $this->refreshData();
-    }
-
-    public function stopStream(string $streamId): void
-    {
-        if (! $this->authorizeStreamAction($streamId)) {
-            return;
-        }
-
-        try {
-            // Support stopping broadcasts via a special stream ID prefix
-            if (str_starts_with($streamId, 'broadcast:')) {
-                $networkId = substr($streamId, 10);
-                $success = $this->apiService->stopBroadcast($networkId);
-
-                if ($success) {
+                try {
+                    $success = $this->apiService->triggerFailover($streamId);
+                    if ($success) {
+                        Notification::make()
+                            ->title("Failover triggered for stream {$streamId}.")
+                            ->success()
+                            ->send();
+                    } else {
+                        Notification::make()
+                            ->title("Failed to trigger failover for stream {$streamId}.")
+                            ->danger()
+                            ->send();
+                    }
+                } catch (Exception $e) {
                     Notification::make()
-                        ->title("Broadcast for network {$networkId} stopped successfully.")
-                        ->success()
-                        ->send();
-                } else {
-                    Notification::make()
-                        ->title("Failed to stop broadcast for network {$networkId}.")
+                        ->title(__('Error triggering failover.'))
+                        ->body($e->getMessage())
                         ->danger()
                         ->send();
                 }
 
                 $this->refreshData();
+            });
+    }
 
-                return;
-            }
+    public function stopStreamAction(): Action
+    {
+        return Action::make('stopStream')
+            ->label(__('Remove Stream'))
+            ->color('danger')
+            ->icon('heroicon-o-trash')
+            ->requiresConfirmation()
+            ->modalHeading(__('Remove Stream'))
+            ->modalDescription(__('Are you sure you want to remove this stream? This will disconnect all active clients.'))
+            ->action(function (array $arguments): void {
+                $streamId = $arguments['streamId'] ?? null;
 
-            $success = $this->apiService->stopStream($streamId);
-            if ($success) {
-                Notification::make()
-                    ->title("Stream {$streamId} stopped successfully.")
-                    ->success()
-                    ->send();
-            } else {
-                Notification::make()
-                    ->title("Failed to stop stream {$streamId}.")
-                    ->danger()
-                    ->send();
-            }
-        } catch (Exception $e) {
-            Notification::make()
-                ->title(__('Error stopping stream.'))
-                ->body($e->getMessage())
-                ->danger()
-                ->send();
-        }
+                if (! $streamId || ! $this->authorizeStreamAction($streamId)) {
+                    return;
+                }
 
-        $this->refreshData();
+                try {
+                    if (str_starts_with($streamId, 'broadcast:')) {
+                        $networkId = substr($streamId, 10);
+                        $success = $this->apiService->stopBroadcast($networkId);
+
+                        if ($success) {
+                            Notification::make()
+                                ->title("Broadcast for network {$networkId} stopped successfully.")
+                                ->success()
+                                ->send();
+                        } else {
+                            Notification::make()
+                                ->title("Failed to stop broadcast for network {$networkId}.")
+                                ->danger()
+                                ->send();
+                        }
+
+                        $this->refreshData();
+
+                        return;
+                    }
+
+                    $success = $this->apiService->stopStream($streamId);
+                    if ($success) {
+                        Notification::make()
+                            ->title("Stream {$streamId} stopped successfully.")
+                            ->success()
+                            ->send();
+                    } else {
+                        Notification::make()
+                            ->title("Failed to stop stream {$streamId}.")
+                            ->danger()
+                            ->send();
+                    }
+                } catch (Exception $e) {
+                    Notification::make()
+                        ->title(__('Error stopping stream.'))
+                        ->body($e->getMessage())
+                        ->danger()
+                        ->send();
+                }
+
+                $this->refreshData();
+            });
     }
 
     /**
@@ -298,7 +322,10 @@ class M3uProxyStreamMonitor extends Page
                 ->values();
 
             $channelsById = $channelIds->isNotEmpty()
-                ? Channel::whereIn('id', $channelIds)->get()->keyBy('id')
+                ? Channel::whereIn('id', $channelIds)
+                    ->with('failoverChannels')
+                    ->get()
+                    ->keyBy('id')
                 : collect();
             $episodesById = $episodeIds->isNotEmpty()
                 ? Episode::whereIn('id', $episodeIds)->get()->keyBy('id')
@@ -331,6 +358,7 @@ class M3uProxyStreamMonitor extends Page
                 $model = [];
                 $title = null;
                 $logo = null;
+                $failoverChannel = null;
                 if (isset($stream['metadata']['type']) && isset($stream['metadata']['id'])) {
                     $modelType = $stream['metadata']['type'];
                     $modelId = $stream['metadata']['id'];
@@ -354,23 +382,80 @@ class M3uProxyStreamMonitor extends Page
                         ];
                     }
 
-                    // Enrich with media info (video/audio metadata) from stored stream stats
+                    // Enrich with media info. Live ffmpeg data from the proxy wins where
+                    // present; stored ffprobe stats fill in everything else (and act as
+                    // the sole source for plain HTTP-proxy streams that don't transcode).
                     if ($modelType === 'channel') {
                         $channel = $channelsById[$modelId] ?? null;
                         if ($channel) {
                             $emby = $channel->getEmbyStreamStats();
-                            if (! empty($emby)) {
-                                $model['media_info'] = [
-                                    'resolution' => $emby['resolution'] ?? null,
-                                    'video_codec' => $emby['video_codec'] ?? null,
-                                    'video_profile' => $emby['video_profile'] ?? null,
-                                    'source_fps' => $emby['source_fps'] ?? null,
-                                    'video_bitrate_kbps' => $emby['ffmpeg_output_bitrate'] ?? null,
-                                    'audio_codec' => $emby['audio_codec'] ?? null,
-                                    'audio_channels' => $emby['audio_channels'] ?? null,
-                                    'audio_bitrate_kbps' => $emby['audio_bitrate'] ?? null,
-                                    'audio_language' => $emby['audio_language'] ?? null,
-                                ];
+                            $probeMediaInfo = ! empty($emby) ? [
+                                'resolution' => $emby['resolution'] ?? null,
+                                'video_codec' => $emby['video_codec'] ?? null,
+                                'video_profile' => $emby['video_profile'] ?? null,
+                                'source_fps' => $emby['source_fps'] ?? null,
+                                'video_bitrate_kbps' => $emby['ffmpeg_output_bitrate'] ?? null,
+                                'audio_codec' => $emby['audio_codec'] ?? null,
+                                'audio_channels' => $emby['audio_channels'] ?? null,
+                                'audio_bitrate_kbps' => $emby['audio_bitrate'] ?? null,
+                                'audio_language' => $emby['audio_language'] ?? null,
+                            ] : [];
+
+                            $liveMediaInfo = $stream['media_info'] ?? [];
+                            $live = [];
+                            if (! empty($liveMediaInfo)) {
+                                $live = array_filter([
+                                    'resolution' => $liveMediaInfo['resolution'] ?? null,
+                                    'video_codec' => $liveMediaInfo['video_codec'] ?? null,
+                                    'source_fps' => $liveMediaInfo['fps'] ?? null,
+                                    'video_bitrate_kbps' => $liveMediaInfo['bitrate_kbps'] ?? null,
+                                    'audio_codec' => $liveMediaInfo['audio_codec'] ?? null,
+                                    'audio_channels' => $liveMediaInfo['audio_channels'] ?? null,
+                                ], fn ($v) => $v !== null && $v !== '');
+                            }
+                            $merged = array_merge($probeMediaInfo, $live);
+
+                            if (! empty($merged)) {
+                                if (! empty($live)) {
+                                    $merged['is_live'] = true;
+                                }
+                                $model['media_info'] = $merged;
+                            }
+
+                            // When the proxy is on a failover URL, identify which configured
+                            // failover channel is currently in use. URL match handles dynamic
+                            // resolver mode (where current_failover_index doesn't necessarily
+                            // line up with the candidate's slot in failoverChannels). We fall
+                            // back to index lookup for the static-list mode.
+                            $currentUrl = (string) ($stream['current_url'] ?? '');
+                            $originalUrl = (string) ($stream['original_url'] ?? '');
+                            $currentFailoverIndex = (int) ($stream['current_failover_index'] ?? 0);
+                            $failoverActive = $currentFailoverIndex > 0
+                                || ($stream['failover_attempts'] ?? 0) > 0;
+
+                            if ($failoverActive && $currentUrl !== '' && $currentUrl !== $originalUrl) {
+                                foreach ($channel->failoverChannels as $candidate) {
+                                    try {
+                                        $candidateUrl = PlaylistUrlService::getChannelUrl($candidate);
+                                    } catch (Exception $e) {
+                                        continue;
+                                    }
+                                    if ($candidateUrl !== '' && $candidateUrl === $currentUrl) {
+                                        $failoverChannel = [
+                                            'title' => $candidate->name_custom ?? $candidate->name ?? $candidate->title,
+                                        ];
+                                        break;
+                                    }
+                                }
+
+                                if (! $failoverChannel && $currentFailoverIndex > 0) {
+                                    $candidate = $channel->failoverChannels[$currentFailoverIndex - 1] ?? null;
+                                    if ($candidate) {
+                                        $failoverChannel = [
+                                            'title' => $candidate->name_custom ?? $candidate->name ?? $candidate->title,
+                                        ];
+                                    }
+                                }
                             }
                         }
                     }
@@ -490,6 +575,7 @@ class M3uProxyStreamMonitor extends Page
                         ? Carbon::parse($stream['last_failover_time'], 'UTC')->format('Y-m-d H:i:s')
                         : null,
                     'using_failover' => ($stream['current_failover_index'] ?? 0) > 0 || ($stream['failover_attempts'] ?? 0) > 0,
+                    'failover_channel' => $failoverChannel,
                 ];
             }
         }
@@ -554,6 +640,7 @@ class M3uProxyStreamMonitor extends Page
                     'transcoding' => false,
                     'transcoding_format' => null,
                     'using_failover' => false,
+                    'failover_channel' => null,
                     'broadcast' => true,
                     'is_dvr' => $isDvr,
                     'alias_name' => null,
