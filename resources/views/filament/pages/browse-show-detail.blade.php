@@ -127,14 +127,17 @@
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
                 </svg>
                 {{ __('Advanced options') }}
+                <span x-show="!showOptions" class="ml-1 text-gray-400 dark:text-gray-500 font-normal">
+                    &mdash; {{ $seriesHint }}
+                </span>
             </button>
 
             <div x-show="showOptions" x-collapse>
                 <div class="mt-3 space-y-3">
                     <x-filament::input.wrapper label="{{ __('New episodes only') }}">
                         <x-filament::input.select wire:model.live="seriesNewOnly">
-                            <option :value="false">{{ __('No') }}</option>
-                            <option :value="true">{{ __('Yes') }}</option>
+                            <option value="0" @selected(! $seriesNewOnly)>{{ __('No') }}</option>
+                            <option value="1" @selected($seriesNewOnly)>{{ __('Yes') }}</option>
                         </x-filament::input.select>
                     </x-filament::input.wrapper>
 

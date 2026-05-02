@@ -150,7 +150,7 @@ class AdminPanelProvider extends PanelProvider
             ->favicon('/favicon.png')
             ->brandLogoHeight('2.5rem')
             ->databaseNotifications()
-            // ->databaseNotificationsPolling('10s')
+            ->databaseNotificationsPolling('30s')
             ->colors([
                 'primary' => Color::Indigo,
                 'info' => Color::Sky,

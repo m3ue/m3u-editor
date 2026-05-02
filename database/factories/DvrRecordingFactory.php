@@ -6,6 +6,7 @@ use App\Enums\DvrRecordingStatus;
 use App\Models\DvrRecording;
 use App\Models\DvrSetting;
 use App\Models\User;
+use App\Support\SeriesKey;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Support\Str;
 
@@ -32,6 +33,8 @@ class DvrRecordingFactory extends Factory
             'channel_id' => null,
             'status' => DvrRecordingStatus::Scheduled,
             'title' => fake()->words(3, true),
+            'series_key' => null,
+            'normalized_title' => null,
             'subtitle' => fake()->optional()->sentence(4),
             'description' => fake()->optional()->paragraph(),
             'season' => fake()->optional()->numberBetween(1, 20),
@@ -49,6 +52,7 @@ class DvrRecordingFactory extends Factory
             'programme_start' => $start,
             'programme_end' => $end,
             'epg_programme_data' => null,
+            'programme_uid' => null,
             'pid' => null,
         ];
     }
@@ -76,7 +80,13 @@ class DvrRecordingFactory extends Factory
             'file_size_bytes' => fake()->numberBetween(500_000_000, 5_000_000_000),
             'scheduled_start' => $start,
             'scheduled_end' => $end,
-        ]);
+        ])->afterCreating(function (DvrRecording $recording): void {
+            if ($recording->dvr_setting_id && $recording->title && $recording->series_key === null) {
+                $recording->series_key = SeriesKey::for($recording->dvr_setting_id, $recording->title);
+                $recording->normalized_title = SeriesKey::normalize($recording->title) ?: null;
+                $recording->saveQuietly();
+            }
+        });
     }
 
     public function failed(): static

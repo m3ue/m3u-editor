@@ -2615,6 +2615,7 @@ class M3uProxyService
             'stream_url' => $streamUrl,
             'duration_seconds' => $durationSeconds,
             'dvr_mode' => true,
+            'hls_list_size' => 0,
             'metadata' => [
                 'type' => 'dvr',
                 'recording_id' => $recording->uuid,
@@ -2677,35 +2678,6 @@ class M3uProxyService
     public function getDvrBroadcastLiveUrl(string $networkId): string
     {
         return $this->getPublicUrl().'/broadcast/'.rawurlencode($networkId).'/live.m3u8';
-    }
-
-    /**
-     * Fetch the filesystem path to the HLS segment directory for a DVR broadcast.
-     *
-     * Called before stopping a broadcast so we know where segments are stored.
-     * Returns null if the broadcast is not found or the proxy is unreachable.
-     */
-    public function getDvrBroadcastHlsDir(string $networkId): ?string
-    {
-        if (empty($this->apiBaseUrl)) {
-            return null;
-        }
-
-        try {
-            $endpoint = $this->apiBaseUrl.'/broadcast/'.rawurlencode($networkId).'/status';
-            $response = Http::timeout(5)
-                ->acceptJson()
-                ->withHeaders($this->apiToken ? ['X-API-Token' => $this->apiToken] : [])
-                ->get($endpoint);
-
-            if ($response->successful()) {
-                return $response->json('hls_dir') ?: null;
-            }
-        } catch (Exception $e) {
-            Log::warning("DVR: Could not fetch hls_dir for broadcast {$networkId}: {$e->getMessage()}");
-        }
-
-        return null;
     }
 
     /**

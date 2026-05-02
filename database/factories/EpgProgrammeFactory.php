@@ -36,6 +36,7 @@ class EpgProgrammeFactory extends Factory
             'is_new' => false,
             'previously_shown' => false,
             'premiere' => false,
+            'tmdb_id' => null,
             'icon' => null,
             'rating' => fake()->optional()->randomElement(['TV-G', 'TV-PG', 'TV-14', 'TV-MA']),
         ];

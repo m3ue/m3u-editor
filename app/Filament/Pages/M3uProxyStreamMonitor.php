@@ -19,6 +19,7 @@ use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Support\Enums\Size;
 use Illuminate\Support\Facades\Log;
+use Throwable;
 
 /**
  * Shared Stream Monitor (External API-backed)
@@ -81,7 +82,17 @@ class M3uProxyStreamMonitor extends Page
 
     public function refreshData(): void
     {
-        $this->streams = $this->getActiveStreams();
+        try {
+            $this->streams = $this->getActiveStreams();
+        } catch (Throwable $e) {
+            Log::error('Stream Monitor: failed to load streams', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            $this->connectionError = $this->connectionError ?? 'Unexpected error loading stream data: '.$e->getMessage();
+            $this->streams = [];
+        }
 
         $totalClients = array_sum(array_map(fn ($s) => $s['client_count'] ?? 0, $this->streams));
         $totalBandwidth = array_sum(array_map(fn ($s) => $s['bandwidth_kbps'] ?? 0, $this->streams));
@@ -97,7 +108,7 @@ class M3uProxyStreamMonitor extends Page
                 : '0.00',
         ];
 
-        $this->systemStats = []; // populate if external API provides system metrics
+        $this->systemStats = [];
 
         $this->lastUpdatedAt = now()->toIso8601String();
     }
@@ -246,7 +257,6 @@ class M3uProxyStreamMonitor extends Page
         $apiClients = $this->apiService->fetchActiveClients();
         $apiBroadcasts = $this->apiService->fetchBroadcasts();
 
-        // Check for connection errors
         if (! $apiStreams['success']) {
             $this->connectionError = $apiStreams['error'] ?? 'Unknown error connecting to m3u-proxy';
 
@@ -259,7 +269,7 @@ class M3uProxyStreamMonitor extends Page
             return [];
         }
 
-        // Clear any previous errors
+        $this->connectionError = null;
         $this->connectionError = null;
 
         $streams = [];

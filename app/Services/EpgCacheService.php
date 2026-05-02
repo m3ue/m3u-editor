@@ -13,6 +13,7 @@ use App\Models\EpgProgramme;
 use App\Models\MergedPlaylist;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
+use App\Support\EpgProgrammeNormalizer;
 use App\Support\EpisodeNumberParser;
 use Carbon\Carbon;
 use Exception;
@@ -1590,23 +1591,45 @@ class EpgCacheService
                         continue;
                     }
 
-                    // Parse episode_num — honours xmltv_ns (0-indexed dot notation),
-                    // onscreen (SxxExx), and falls back to heuristic on the raw string.
-                    [$season, $episode] = EpisodeNumberParser::fromProgramme($p);
+                    // Parse season/episode from all episode-num entries in the programme.
+                    [$season, $episode] = $this->parseEpisodeNumbers($p);
+
+                    // Normalize provider-quirky free-text fields. Some feeds smuggle a
+                    // "ᴺᵉʷ" superscript marker into the title and prefix descriptions
+                    // with "S## E### Subtitle\nDescription" instead of using proper
+                    // <new/> / <episode-num> / <subtitle> elements.
+                    $titleNorm = EpgProgrammeNormalizer::normalizeTitle($p['title'] ?? null);
+                    $subtitle = $this->nullableString($p['subtitle'] ?? null, 500);
+                    $description = $this->nullableString($p['desc'] ?? null);
+                    if ($subtitle === null || $season === null || $episode === null) {
+                        $extracted = EpgProgrammeNormalizer::extractSeasonEpisodeFromDescription($description);
+                        if ($extracted['season'] !== null || $extracted['episode'] !== null) {
+                            $season ??= $extracted['season'];
+                            $episode ??= $extracted['episode'];
+                            if ($subtitle === null && $extracted['subtitle'] !== null) {
+                                $subtitle = mb_substr($extracted['subtitle'], 0, 500);
+                            }
+                            $description = $extracted['description'];
+                        }
+                    }
 
                     $batch[] = [
                         'epg_id' => $epg->id,
                         'epg_channel_id' => mb_substr((string) $record['channel'], 0, 500),
-                        'title' => mb_substr((string) ($p['title'] ?? ''), 0, 500),
-                        'subtitle' => $this->nullableString($p['subtitle'] ?? null, 500),
-                        'description' => $this->nullableString($p['desc'] ?? null),
+                        'title' => mb_substr($titleNorm['title'], 0, 500),
+                        'subtitle' => $subtitle,
+                        'description' => $description,
                         'category' => $this->nullableString($p['category'] ?? null, 255),
-                        'start_time' => $startTime->toDateTimeString(),
-                        'end_time' => $endTime->toDateTimeString(),
+                        // Raw insert bypasses Eloquent casts. The `start_time`/`end_time`
+                        // columns are cast as `datetime` which Eloquent interprets in
+                        // `app.timezone`. We must therefore write the wall-clock of
+                        // `app.timezone` (NOT UTC) so round-tripping yields correct UTC.
+                        'start_time' => $startTime->copy()->tz(config('app.timezone'))->toDateTimeString(),
+                        'end_time' => $endTime->copy()->tz(config('app.timezone'))->toDateTimeString(),
                         'episode_num' => $this->nullableString($p['episode_num'] ?? null, 255),
                         'season' => $season,
                         'episode' => $episode,
-                        'is_new' => (bool) ($p['new'] ?? false),
+                        'is_new' => (bool) ($p['new'] ?? false) || $titleNorm['isNew'],
                         'previously_shown' => (bool) ($p['previously_shown'] ?? false),
                         'premiere' => (bool) ($p['premiere'] ?? false),
                         'icon' => $this->nullableString($p['icon'] ?? null, 500),
@@ -1664,5 +1687,24 @@ class EpgCacheService
         }
 
         return $maxLength !== null ? mb_substr($value, 0, $maxLength) : $value;
+    }
+
+    /**
+     * Parse season and episode integers from XMLTV episode-num data.
+     *
+     * Priority order:
+     *   1. Explicit `system="xmltv_ns"` entry — 0-indexed dot notation ("S.E.P"),
+     *      converted to 1-indexed integers (e.g. "1.2." → season 2, episode 3).
+     *   2. Explicit `system="onscreen"` entry — 1-indexed SxxExx literal
+     *      (e.g. "S02E05" → season 2, episode 5).
+     *   3. Heuristic on the raw `episode_num` string when no explicit system tag:
+     *      dots → treated as xmltv_ns (0-indexed); SxxExx → treated as onscreen (1-indexed).
+     *
+     * @param  array<string, mixed>  $programme  Parsed programme payload from parseProgrammesStream
+     * @return array{0: int|null, 1: int|null} [season, episode]
+     */
+    protected function parseEpisodeNumbers(array $programme): array
+    {
+        return EpisodeNumberParser::fromProgramme($programme);
     }
 }

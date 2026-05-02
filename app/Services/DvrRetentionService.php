@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\DvrRecordingStatus;
 use App\Models\DvrRecording;
 use App\Models\DvrSetting;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
@@ -54,7 +55,14 @@ class DvrRetentionService
     }
 
     /**
-     * For each recording rule with keep_last set, delete excess completed recordings.
+     * For each series_key with keep_last configured, delete excess completed recordings.
+     *
+     * Keep_last is configured per-rule but enforced per-series_key so overlapping
+     * rules targeting the same show don't multiply retention. When multiple rules
+     * share a series_key, the largest keep_last wins (the most generous policy).
+     *
+     * Recordings without a series_key (legacy, or empty title) fall back to
+     * grouping by dvr_recording_rule_id so behaviour is preserved for them.
      */
     private function enforceKeepLast(DvrSetting $setting): void
     {
@@ -63,22 +71,62 @@ class DvrRetentionService
             ->where('keep_last', '>', 0)
             ->get();
 
+        if ($rules->isEmpty()) {
+            return;
+        }
+
+        // Group rules by series_key (or fallback rule_id) and pick the most
+        // generous keep_last per group.
+        $keepByKey = [];
+        $rulesWithoutKey = [];
+
         foreach ($rules as $rule) {
-            $completed = DvrRecording::where('dvr_recording_rule_id', $rule->id)
-                ->where('status', DvrRecordingStatus::Completed->value)
-                ->orderByDesc('scheduled_start')
-                ->get();
-
-            if ($completed->count() <= $rule->keep_last) {
-                continue;
+            if (! empty($rule->series_key)) {
+                $key = $rule->series_key;
+                $keepByKey[$key] = max($keepByKey[$key] ?? 0, (int) $rule->keep_last);
+            } else {
+                $rulesWithoutKey[] = $rule;
             }
+        }
 
-            $toDelete = $completed->slice($rule->keep_last);
+        foreach ($keepByKey as $seriesKey => $keep) {
+            $this->trimGroup(
+                DvrRecording::where('dvr_setting_id', $setting->id)
+                    ->where('series_key', $seriesKey)
+                    ->where('status', DvrRecordingStatus::Completed->value),
+                $keep,
+                $setting,
+                "series_key={$seriesKey}"
+            );
+        }
 
-            foreach ($toDelete as $recording) {
-                $this->deleteRecordingFile($recording, $setting);
-                Log::info("DVR retention: keepLast deleted recording {$recording->id} ({$recording->title})");
-            }
+        foreach ($rulesWithoutKey as $rule) {
+            $this->trimGroup(
+                DvrRecording::where('dvr_recording_rule_id', $rule->id)
+                    ->where('status', DvrRecordingStatus::Completed->value),
+                (int) $rule->keep_last,
+                $setting,
+                "rule_id={$rule->id}"
+            );
+        }
+    }
+
+    /**
+     * Delete the file for any recording past position $keep when ordered by most-recent first.
+     */
+    private function trimGroup(Builder $query, int $keep, DvrSetting $setting, string $groupLabel): void
+    {
+        $completed = $query->orderByDesc('scheduled_start')->get();
+
+        if ($completed->count() <= $keep) {
+            return;
+        }
+
+        $toDelete = $completed->slice($keep);
+
+        foreach ($toDelete as $recording) {
+            $this->deleteRecordingFile($recording, $setting);
+            Log::info("DVR retention: keepLast deleted recording {$recording->id} ({$recording->title}) [group {$groupLabel}, keep={$keep}]");
         }
     }
 

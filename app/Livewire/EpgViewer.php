@@ -6,6 +6,7 @@ use App\Enums\ChannelLogoType;
 use App\Enums\DvrRuleType;
 use App\Filament\Resources\Channels\ChannelResource;
 use App\Filament\Resources\EpgChannels\EpgChannelResource;
+use App\Jobs\DvrSchedulerTick;
 use App\Models\Channel;
 use App\Models\DvrRecordingRule;
 use App\Models\DvrSetting;
@@ -267,8 +268,17 @@ class EpgViewer extends Component implements HasActions, HasForms
 
         $ruleType = DvrRuleType::from($data['rule_type']);
         $title = $this->programmeData['title'] ?? null;
-        $startTime = isset($this->programmeData['start']) ? Carbon::parse($this->programmeData['start']) : null;
-        $endTime = isset($this->programmeData['stop']) ? Carbon::parse($this->programmeData['stop']) : null;
+        // Carbon::parse honors the offset in the ISO string. We must convert to
+        // app.timezone wall-clock before persisting because the `datetime` cast
+        // on EpgProgramme stores raw wall-clock (no tz conversion on write) and
+        // reads it back as `app.timezone` — a tz mismatch would cause hour drift.
+        $appTz = config('app.timezone');
+        $startTime = isset($this->programmeData['start'])
+            ? Carbon::parse($this->programmeData['start'])->tz($appTz)
+            : null;
+        $endTime = isset($this->programmeData['stop'])
+            ? Carbon::parse($this->programmeData['stop'])->tz($appTz)
+            : null;
 
         // For 'once' rules, find or create the EpgProgramme record so the scheduler can match it
         $programmeId = null;
@@ -293,6 +303,31 @@ class EpgViewer extends Component implements HasActions, HasForms
         }
 
         try {
+            // Duplicate-rule guard — match BrowseShows behavior to prevent rapid double-clicks
+            // creating multiple identical rules.
+            $duplicateQuery = DvrRecordingRule::where('dvr_setting_id', $dvrSetting->id)
+                ->where('type', $ruleType);
+
+            if ($ruleType === DvrRuleType::Once) {
+                $duplicateQuery->where('programme_id', $programmeId);
+            } else {
+                $duplicateQuery->where('series_title', $title)
+                    ->where('channel_id', $channel->id);
+            }
+
+            if ($duplicateQuery->exists()) {
+                Notification::make()
+                    ->warning()
+                    ->title(__('Already scheduled'))
+                    ->body(__('A :type rule for ":title" already exists.', [
+                        'type' => $ruleType === DvrRuleType::Series ? 'series' : 'once',
+                        'title' => $title,
+                    ]))
+                    ->send();
+
+                return;
+            }
+
             DvrRecordingRule::create([
                 'user_id' => $dvrSetting->user_id,
                 'dvr_setting_id' => $dvrSetting->id,
@@ -302,9 +337,15 @@ class EpgViewer extends Component implements HasActions, HasForms
                 'channel_id' => $channel->id,
                 'epg_channel_id' => $channel->epgChannel?->id,
                 'new_only' => $data['new_only'] ?? false,
-                'priority' => 0,
+                'priority' => 50,
                 'enabled' => true,
             ]);
+
+            // Dispatch immediate scheduler tick so the recording materialises in the
+            // dvr-recordings list within seconds instead of waiting up to 60s for the
+            // next cron-driven tick. Padding (start_early_seconds / end_late_seconds)
+            // is unaffected — the scheduler still honors per-rule and DvrSetting defaults.
+            DvrSchedulerTick::dispatch();
 
             $typeLabel = $ruleType === DvrRuleType::Series
                 ? __('series rule created')

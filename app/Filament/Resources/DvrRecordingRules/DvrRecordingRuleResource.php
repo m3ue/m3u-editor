@@ -3,9 +3,11 @@
 namespace App\Filament\Resources\DvrRecordingRules;
 
 use App\Enums\DvrRuleType;
+use App\Enums\DvrSeriesMode;
 use App\Models\Channel;
 use App\Models\DvrRecordingRule;
 use App\Models\DvrSetting;
+use App\Settings\GeneralSettings;
 use App\Traits\HasUserFiltering;
 use BackedEnum;
 use Filament\Actions;
@@ -16,7 +18,6 @@ use Filament\Forms\Components\Toggle;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
-use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Columns\ToggleColumn;
 use Filament\Tables\Enums\RecordActionsPosition;
@@ -91,6 +92,8 @@ class DvrRecordingRuleResource extends Resource
                 DateTimePicker::make('manual_start')
                     ->label(__('Manual Start'))
                     ->native(false)
+                    ->seconds(false)
+                    ->timezone(app(GeneralSettings::class)->app_timezone ?: config('app.timezone'))
                     ->prefixIcon('heroicon-o-calendar')
                     ->visible(fn (Get $get): bool => self::isRuleType($get('type'), DvrRuleType::Manual))
                     ->requiredIf('type', DvrRuleType::Manual->value),
@@ -98,6 +101,8 @@ class DvrRecordingRuleResource extends Resource
                 DateTimePicker::make('manual_end')
                     ->label(__('Manual End'))
                     ->native(false)
+                    ->seconds(false)
+                    ->timezone(app(GeneralSettings::class)->app_timezone ?: config('app.timezone'))
                     ->prefixIcon('heroicon-o-calendar')
                     ->visible(fn (Get $get): bool => self::isRuleType($get('type'), DvrRuleType::Manual))
                     ->requiredIf('type', DvrRuleType::Manual->value)
@@ -118,10 +123,11 @@ class DvrRecordingRuleResource extends Resource
                     ->visible(fn (Get $get): bool => self::isRuleType($get('type'), DvrRuleType::Series))
                     ->requiredIf('type', DvrRuleType::Series->value),
 
-                Toggle::make('new_only')
-                    ->label(__('New Episodes Only'))
-                    ->visible(fn (Get $get): bool => self::isRuleType($get('type'), DvrRuleType::Series))
-                    ->default(false),
+                Select::make('series_mode')
+                    ->label(__('Record Episodes'))
+                    ->options(DvrSeriesMode::class)
+                    ->default(DvrSeriesMode::All->value)
+                    ->visible(fn (Get $get): bool => self::isRuleType($get('type'), DvrRuleType::Series)),
 
                 TextInput::make('start_early_seconds')
                     ->label(__('Start Early (seconds)'))
@@ -169,6 +175,8 @@ class DvrRecordingRuleResource extends Resource
 
                 TextColumn::make('series_title')
                     ->label(__('Title / Pattern'))
+                    ->state(fn (DvrRecordingRule $record): ?string => $record->series_title
+                        ?? ($record->type === DvrRuleType::Once ? $record->programme?->title : null))
                     ->description(fn (DvrRecordingRule $record): string => match ($record->type) {
                         DvrRuleType::Once => __('One-time recording'),
                         DvrRuleType::Manual => $record->manual_start?->format('d M Y H:i') ?? '—',
@@ -189,10 +197,13 @@ class DvrRecordingRuleResource extends Resource
                     ->sortable()
                     ->toggleable(),
 
-                IconColumn::make('new_only')
-                    ->label(__('New Only'))
-                    ->boolean()
-                    ->toggleable(),
+                TextColumn::make('series_mode')
+                    ->label(__('Mode'))
+                    ->badge()
+                    ->formatStateUsing(fn (DvrSeriesMode $state): string => $state->getLabel())
+                    ->color(fn (DvrSeriesMode $state): string => $state->getColor())
+                    ->toggleable()
+                    ->visible(fn (?DvrRecordingRule $record): bool => $record && $record->type === DvrRuleType::Series),
 
                 TextColumn::make('created_at')
                     ->dateTime()

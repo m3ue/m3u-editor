@@ -43,13 +43,30 @@ class DvrCallbackController extends Controller
             return response()->json(['error' => 'Missing network_id or event'], 422);
         }
 
-        $recording = DvrRecording::where('proxy_network_id', $networkId)
-            ->orWhere('uuid', $networkId)
-            ->first();
+        // Use recording_db_id from metadata for unambiguous lookup if available
+        $recordingDbId = $data['recording_db_id'] ?? null;
+        if ($recordingDbId) {
+            $recording = DvrRecording::find($recordingDbId);
+            if ($recording) {
+                Log::info('DVR callback: matched by recording_db_id', [
+                    'recording_id' => $recording->id,
+                    'network_id' => $networkId,
+                    'event' => $event,
+                ]);
+            }
+        }
+
+        // Fallback to proxy_network_id or uuid lookup
+        if (! $recording) {
+            $recording = DvrRecording::where('proxy_network_id', $networkId)
+                ->orWhere('uuid', $networkId)
+                ->first();
+        }
 
         if (! $recording) {
             Log::warning('DVR callback: recording not found', [
                 'network_id' => $networkId,
+                'recording_db_id' => $recordingDbId,
                 'event' => $event,
             ]);
 
@@ -86,23 +103,19 @@ class DvrCallbackController extends Controller
             return response()->json(['status' => 'ignored', 'reason' => 'not in recording state']);
         }
 
+        // Only update actual_end if not already set (e.g., by cancel() or finalizeStop()).
+        // Then atomically update status and dispatch job in a transaction.
         $updateData = [
             'status' => DvrRecordingStatus::PostProcessing->value,
-            // proxy_network_id is intentionally preserved here — DvrPostProcessorService
-            // uses it to download HLS segments from the proxy via HTTP and clears it
-            // itself once the download and cleanup are complete.
         ];
 
-        // Preserve actual_end if already set by finalizeStop(); set it now if not.
         if (! $recording->actual_end) {
             $updateData['actual_end'] = now();
         }
 
-        // Store hls_dir from the callback for legacy shared-volume deployments that
-        // don't use the HTTP-download path (i.e. when proxy_network_id is absent).
-        if ($hlsDir && ! $recording->proxy_network_id) {
-            $updateData['temp_path'] = $hlsDir;
-        }
+        // hls_dir from the callback is informational only — the downloader pulls
+        // files via HTTP from the proxy, not from a shared filesystem path. We
+        // intentionally do NOT write it to temp_path.
 
         DB::transaction(function () use ($recording, $updateData): void {
             $recording->update($updateData);
