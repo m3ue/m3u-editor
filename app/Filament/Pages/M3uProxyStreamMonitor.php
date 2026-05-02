@@ -297,7 +297,10 @@ class M3uProxyStreamMonitor extends Page
                 ->values();
 
             $channelsById = $channelIds->isNotEmpty()
-                ? Channel::whereIn('id', $channelIds)->get()->keyBy('id')
+                ? Channel::whereIn('id', $channelIds)
+                    ->with('failoverChannels')
+                    ->get()
+                    ->keyBy('id')
                 : collect();
             $episodesById = $episodeIds->isNotEmpty()
                 ? Episode::whereIn('id', $episodeIds)->get()->keyBy('id')
@@ -330,6 +333,7 @@ class M3uProxyStreamMonitor extends Page
                 $model = [];
                 $title = null;
                 $logo = null;
+                $channel = null;
                 if (isset($stream['metadata']['type']) && isset($stream['metadata']['id'])) {
                     $modelType = $stream['metadata']['type'];
                     $modelId = $stream['metadata']['id'];
@@ -350,6 +354,23 @@ class M3uProxyStreamMonitor extends Page
                         $model = [
                             'title' => $title ?? 'N/A',
                             'logo' => $logo,
+                        ];
+                    }
+                }
+
+                // Resolve the active failover channel (1-based index → 0-based offset)
+                // so the UI can show "Primary → Failover" instead of just a raw URL.
+                $failoverChannel = null;
+                $currentFailoverIndex = $stream['current_failover_index'] ?? 0;
+                if ($channel && $currentFailoverIndex > 0) {
+                    $failoverIdx = $currentFailoverIndex - 1;
+                    $failoverModel = $channel->failoverChannels[$failoverIdx] ?? null;
+                    if ($failoverModel) {
+                        $failoverChannel = [
+                            'title' => $failoverModel->name_custom
+                                ?? $failoverModel->name
+                                ?? $failoverModel->title,
+                            'logo' => LogoFacade::getChannelLogoUrl($failoverModel),
                         ];
                     }
                 }
@@ -462,12 +483,16 @@ class M3uProxyStreamMonitor extends Page
                     // Failover details
                     'failover_urls' => $stream['failover_urls'] ?? [],
                     'failover_resolver_url' => $stream['failover_resolver_url'] ?? null,
-                    'current_failover_index' => $stream['current_failover_index'] ?? 0,
+                    'current_failover_index' => $currentFailoverIndex,
                     'failover_attempts' => $stream['failover_attempts'] ?? 0,
                     'last_failover_time' => isset($stream['last_failover_time'])
                         ? Carbon::parse($stream['last_failover_time'], 'UTC')->format('Y-m-d H:i:s')
                         : null,
-                    'using_failover' => ($stream['current_failover_index'] ?? 0) > 0 || ($stream['failover_attempts'] ?? 0) > 0,
+                    'using_failover' => $currentFailoverIndex > 0 || ($stream['failover_attempts'] ?? 0) > 0,
+                    'failover_channel' => $failoverChannel,
+                    // Live media info from the proxy. Only populated for transcoded
+                    // (ffmpeg) streams — empty for plain HTTP-proxy streams.
+                    'media_info' => $stream['media_info'] ?? [],
                 ];
             }
         }
@@ -514,6 +539,8 @@ class M3uProxyStreamMonitor extends Page
                     'using_failover' => false,
                     'broadcast' => true,
                     'alias_name' => null,
+                    'failover_channel' => null,
+                    'media_info' => [],
                 ];
             }
         }

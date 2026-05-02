@@ -183,7 +183,13 @@ echo $totalBandwidth > 1000 ? round($totalBandwidth / 1000, 1) . ' Mbps' : $tota
                                         <h3 class="text-lg font-semibold text-gray-900 dark:text-white">
                                             Stream {{ substr($stream['stream_id'], -8) }}
                                         </h3>
-                                        <p class="text-sm text-gray-500 dark:text-gray-400 font-mono">{{ $stream['model']['title'] ?? 'N/A' }}</p>
+                                        <p class="text-sm text-gray-500 dark:text-gray-400 font-mono">
+                                            {{ $stream['model']['title'] ?? 'N/A' }}
+                                            @if(!empty($stream['failover_channel']['title']))
+                                                <span class="text-gray-400 dark:text-gray-500 mx-1">&rarr;</span>
+                                                <span class="text-orange-600 dark:text-orange-400 font-medium">{{ $stream['failover_channel']['title'] }}</span>
+                                            @endif
+                                        </p>
                                         <p class="text-sm text-gray-500 dark:text-gray-400 font-mono truncate">{{ $stream['source_url'] }}</p>
                                     </div>
                                 </div>
@@ -266,6 +272,56 @@ echo $totalBandwidth > 1000 ? round($totalBandwidth / 1000, 1) . ' Mbps' : $tota
                                     <div class="text-lg font-semibold text-gray-900 dark:text-white">{{ $stream['uptime'] }}</div>
                                 </div>
                             </div>
+
+                            @php
+                                $mediaInfo = $stream['media_info'] ?? [];
+                                $mediaBadges = [];
+                                if (!empty($mediaInfo['resolution'])) {
+                                    $mediaBadges[] = ['label' => strtoupper($mediaInfo['resolution']), 'color' => 'sky'];
+                                }
+                                if (!empty($mediaInfo['fps'])) {
+                                    $mediaBadges[] = ['label' => $mediaInfo['fps'] . ' FPS', 'color' => 'amber'];
+                                }
+                                if (!empty($mediaInfo['video_codec'])) {
+                                    $mediaBadges[] = ['label' => strtoupper($mediaInfo['video_codec']), 'color' => 'rose'];
+                                }
+                                if (!empty($mediaInfo['audio_codec'])) {
+                                    $mediaBadges[] = ['label' => strtoupper($mediaInfo['audio_codec']), 'color' => 'fuchsia'];
+                                }
+                                if (!empty($mediaInfo['audio_channels'])) {
+                                    $mediaBadges[] = ['label' => strtoupper($mediaInfo['audio_channels']), 'color' => 'fuchsia'];
+                                }
+                                if (!empty($mediaInfo['container'])) {
+                                    $mediaBadges[] = ['label' => $mediaInfo['container'], 'color' => 'cyan'];
+                                }
+                                if (!empty($mediaInfo['bitrate_kbps'])) {
+                                    $bitrate = $mediaInfo['bitrate_kbps'] > 1000
+                                        ? round($mediaInfo['bitrate_kbps'] / 1000, 2) . ' Mbps'
+                                        : round($mediaInfo['bitrate_kbps'], 0) . ' kbps';
+                                    $mediaBadges[] = ['label' => $bitrate, 'color' => 'emerald'];
+                                }
+                                if (!empty($mediaInfo['speed'])) {
+                                    $mediaBadges[] = ['label' => $mediaInfo['speed'] . 'X', 'color' => 'lime'];
+                                }
+                                $badgeColors = [
+                                    'sky' => 'bg-sky-100 dark:bg-sky-900 text-sky-800 dark:text-sky-200',
+                                    'amber' => 'bg-amber-100 dark:bg-amber-900 text-amber-800 dark:text-amber-200',
+                                    'rose' => 'bg-rose-100 dark:bg-rose-900 text-rose-800 dark:text-rose-200',
+                                    'fuchsia' => 'bg-fuchsia-100 dark:bg-fuchsia-900 text-fuchsia-800 dark:text-fuchsia-200',
+                                    'cyan' => 'bg-cyan-100 dark:bg-cyan-900 text-cyan-800 dark:text-cyan-200',
+                                    'emerald' => 'bg-emerald-100 dark:bg-emerald-900 text-emerald-800 dark:text-emerald-200',
+                                    'lime' => 'bg-lime-100 dark:bg-lime-900 text-lime-800 dark:text-lime-200',
+                                ];
+                            @endphp
+                            @if(!empty($mediaBadges))
+                                <div class="flex flex-wrap items-center gap-2 mb-4">
+                                    @foreach($mediaBadges as $badge)
+                                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-mono font-semibold {{ $badgeColors[$badge['color']] }}">
+                                            {{ $badge['label'] }}
+                                        </span>
+                                    @endforeach
+                                </div>
+                            @endif
 
                             <!-- Action Buttons -->
                             <div class="flex items-center justify-between">
