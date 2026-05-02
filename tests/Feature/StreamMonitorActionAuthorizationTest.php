@@ -43,7 +43,7 @@ it('blocks triggerFailover for a stream the user does not own', function () {
     $this->actingAs($this->attacker);
 
     Livewire::test(M3uProxyStreamMonitor::class)
-        ->call('triggerFailover', 'stream-owned-by-someone-else')
+        ->callAction('triggerFailover', arguments: ['streamId' => 'stream-owned-by-someone-else'])
         ->assertNotified();
 });
 
@@ -76,7 +76,7 @@ it('allows triggerFailover for a stream the user owns', function () {
     $this->actingAs($this->owner);
 
     Livewire::test(M3uProxyStreamMonitor::class)
-        ->call('triggerFailover', $streamId)
+        ->callAction('triggerFailover', arguments: ['streamId' => $streamId])
         ->assertNotified();
 });
 
@@ -92,7 +92,7 @@ it('blocks stopStream for a stream the user does not own', function () {
     $this->actingAs($this->attacker);
 
     Livewire::test(M3uProxyStreamMonitor::class)
-        ->call('stopStream', 'stream-owned-by-someone-else')
+        ->callAction('stopStream', arguments: ['streamId' => 'stream-owned-by-someone-else'])
         ->assertNotified();
 });
 
@@ -125,7 +125,7 @@ it('allows stopStream for a stream the user owns', function () {
     $this->actingAs($this->owner);
 
     Livewire::test(M3uProxyStreamMonitor::class)
-        ->call('stopStream', $streamId)
+        ->callAction('stopStream', arguments: ['streamId' => $streamId])
         ->assertNotified();
 });
 
@@ -143,6 +143,6 @@ it('allows stopStream for a broadcast the user owns', function () {
     $this->actingAs($this->owner);
 
     Livewire::test(M3uProxyStreamMonitor::class)
-        ->call('stopStream', 'broadcast:'.$myNetwork->uuid)
+        ->callAction('stopStream', arguments: ['streamId' => 'broadcast:'.$myNetwork->uuid])
         ->assertNotified();
 });
