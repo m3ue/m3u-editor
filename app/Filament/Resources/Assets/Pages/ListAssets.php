@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\Assets\Pages;
 
 use App\Filament\Resources\Assets\AssetResource;
+use App\Filament\Resources\Assets\Widgets\AssetStatsOverview;
 use App\Models\Asset;
 use App\Services\AssetInventoryService;
 use App\Services\LogoRepositoryService;
@@ -106,6 +107,13 @@ class ListAssets extends ListRecords
                             ->send();
                     }),
             ])->button()->color('gray')->label(__('Actions')),
+        ];
+    }
+
+    protected function getHeaderWidgets(): array
+    {
+        return [
+            AssetStatsOverview::class,
         ];
     }
 
