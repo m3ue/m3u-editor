@@ -64,6 +64,8 @@ class Channel extends Model
         'stream_stats' => 'array',
         'stream_stats_probed_at' => 'datetime',
         'probe_enabled' => 'boolean',
+        'year' => 'integer',
+        'edition' => 'string',
     ];
 
     public function user(): BelongsTo

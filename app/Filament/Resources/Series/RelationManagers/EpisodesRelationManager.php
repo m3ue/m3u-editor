@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Series\RelationManagers;
 
+use App\Jobs\ProbeVodStreamsChunk;
 use Filament\Actions;
 use Filament\Actions\Action;
 use Filament\Actions\ViewAction;
@@ -12,6 +13,7 @@ use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
+use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\ImageColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Columns\ToggleColumn;
@@ -131,6 +133,38 @@ class EpisodesRelationManager extends RelationManager
                         return $info['release_date'] ?? null;
                     })
                     ->placeholder(''),
+
+                IconColumn::make('stream_stats_probed_at')
+                    ->label(__('Probed'))
+                    ->getStateUsing(function ($record): string {
+                        if ($record->stream_stats_probed_at === null) {
+                            return 'never';
+                        }
+
+                        return empty($record->stream_stats) ? 'failed' : 'ok';
+                    })
+                    ->icon(fn (string $state): string => match ($state) {
+                        'ok' => 'heroicon-o-check-circle',
+                        'failed' => 'heroicon-o-exclamation-triangle',
+                        default => 'heroicon-o-x-circle',
+                    })
+                    ->color(fn (string $state): string => match ($state) {
+                        'ok' => 'success',
+                        'failed' => 'warning',
+                        default => 'gray',
+                    })
+                    ->tooltip(function ($record): string {
+                        if ($record->stream_stats_probed_at === null) {
+                            return __('Not probed yet');
+                        }
+                        if (empty($record->stream_stats)) {
+                            return __('Probe ran but returned no stream info').' ('.$record->stream_stats_probed_at->diffForHumans().')';
+                        }
+
+                        return __('Probed').' '.$record->stream_stats_probed_at->diffForHumans();
+                    })
+                    ->toggleable()
+                    ->sortable(),
             ])
             ->filters([
                 //
@@ -203,6 +237,74 @@ class EpisodesRelationManager extends RelationManager
                         ->modalIcon('heroicon-o-x-circle')
                         ->modalDescription(__('Disable the selected channel(s) now?'))
                         ->modalSubmitActionLabel(__('Yes, disable now')),
+                    Actions\BulkAction::make('enable-probing')
+                        ->label(__('Enable Probing'))
+                        ->action(function (Collection $records): void {
+                            foreach ($records as $record) {
+                                $record->update(['probe_enabled' => true]);
+                            }
+                        })->after(function () {
+                            Notification::make()
+                                ->success()
+                                ->title(__('Stream probing enabled'))
+                                ->body(__('Stream probing has been enabled for the selected episodes.'))
+                                ->send();
+                        })
+                        ->deselectRecordsAfterCompletion()
+                        ->requiresConfirmation()
+                        ->icon('heroicon-o-signal')
+                        ->modalIcon('heroicon-o-signal')
+                        ->modalDescription(__('Enable stream probing for the selected episodes. They will be included in stream probing jobs.'))
+                        ->modalSubmitActionLabel(__('Enable now')),
+                    Actions\BulkAction::make('disable-probing')
+                        ->label(__('Disable Probing'))
+                        ->color('warning')
+                        ->action(function (Collection $records): void {
+                            foreach ($records as $record) {
+                                $record->update(['probe_enabled' => false]);
+                            }
+                        })->after(function () {
+                            Notification::make()
+                                ->success()
+                                ->title(__('Stream probing disabled'))
+                                ->body(__('Stream probing has been disabled for the selected episodes.'))
+                                ->send();
+                        })
+                        ->deselectRecordsAfterCompletion()
+                        ->requiresConfirmation()
+                        ->icon('heroicon-o-signal-slash')
+                        ->modalIcon('heroicon-o-signal-slash')
+                        ->modalDescription(__('Disable stream probing for the selected episodes. They will be excluded from stream probing jobs.'))
+                        ->modalSubmitActionLabel(__('Disable now')),
+                    Actions\BulkAction::make('probe-streams')
+                        ->label(__('Probe Streams'))
+                        ->action(function (Collection $records): void {
+                            $ids = $records->pluck('id')->all();
+                            $total = count($ids);
+                            $chunks = array_chunk($ids, 50);
+                            $last = count($chunks) - 1;
+                            foreach ($chunks as $i => $chunk) {
+                                dispatch(new ProbeVodStreamsChunk(
+                                    episodeIds: $chunk,
+                                    probeTimeout: 15,
+                                    notifyUserId: $i === $last ? auth()->id() : null,
+                                    notifyLabel: $i === $last ? __('Episode stream probing') : null,
+                                    notifyTotal: $i === $last ? $total : null,
+                                ));
+                            }
+                        })->after(function () {
+                            Notification::make()
+                                ->success()
+                                ->title(__('Stream probing started'))
+                                ->body(__('Stream probing is running in the background. You will be notified once the process is complete.'))
+                                ->send();
+                        })
+                        ->deselectRecordsAfterCompletion()
+                        ->requiresConfirmation()
+                        ->icon('heroicon-o-signal')
+                        ->modalIcon('heroicon-o-signal')
+                        ->modalDescription(__('Probe the selected episodes with ffprobe to collect stream metadata (codec, resolution, bitrate, HDR). This data enables Trash Guide naming with stream-stat-based detection.'))
+                        ->modalSubmitActionLabel(__('Start probing')),
                 ]),
             ]);
     }

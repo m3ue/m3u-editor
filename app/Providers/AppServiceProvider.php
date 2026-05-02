@@ -75,6 +75,7 @@ use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Str;
 use Laravel\Ai\AiManager;
 use Livewire\Livewire;
+use PDO;
 use SocialiteProviders\Manager\SocialiteWasCalled;
 use SocialiteProviders\OIDC\OIDCExtendSocialite;
 use Spatie\Tags\Tag;
