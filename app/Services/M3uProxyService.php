@@ -2688,44 +2688,6 @@ class M3uProxyService
     }
 
     /**
-     * Cleanup HLS files for a DVR broadcast on the proxy.
-     *
-     * The proxy retains segment files after /stop so they remain available for
-     * post-processing download. Once we've successfully fetched everything we
-     * need, call this to free disk space on the proxy host.
-     */
-    public function cleanupDvrBroadcast(string $networkId): bool
-    {
-        if (empty($this->apiBaseUrl)) {
-            Log::warning('DVR cleanup: M3U Proxy base URL not configured');
-
-            return false;
-        }
-
-        try {
-            $endpoint = $this->apiBaseUrl.'/broadcast/'.rawurlencode($networkId);
-            $response = Http::timeout(10)
-                ->acceptJson()
-                ->withHeaders($this->apiToken ? ['X-API-Token' => $this->apiToken] : [])
-                ->delete($endpoint);
-
-            if ($response->successful()) {
-                Log::debug("DVR broadcast {$networkId} cleaned up on proxy");
-
-                return true;
-            }
-
-            Log::warning("Failed to cleanup DVR broadcast {$networkId}: ".$response->body());
-
-            return false;
-        } catch (Exception $e) {
-            Log::error("Error cleaning up DVR broadcast {$networkId}: ".$e->getMessage());
-
-            return false;
-        }
-    }
-
-    /**
      * Delete a completed DVR broadcast from the proxy, freeing its HLS segment storage.
      *
      * Called by DvrPostProcessorService after segments have been downloaded and concatenated.
