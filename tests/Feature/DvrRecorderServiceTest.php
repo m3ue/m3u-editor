@@ -154,10 +154,12 @@ it('calls proxy stop and transitions to PostProcessing while preserving proxy_ne
     expect($fresh->status)->toBe(DvrRecordingStatus::PostProcessing);
     // proxy_network_id is preserved through post-processing — the HLS downloader needs it.
     expect($fresh->proxy_network_id)->toBe($networkId);
-    expect($fresh->actual_end)->not->toBeNull();
+    // actual_end is NOT set here — it's set by the proxy callback when FFmpeg actually stops.
+    // This ensures we capture the true end time, not a premature one.
+    expect($fresh->actual_end)->toBeNull();
 });
 
-it('cancel() calls proxy stop AND cleanup, then clears proxy_network_id', function () {
+it('cancel() calls proxy stop but does NOT cleanup (let callback handle it)', function () {
     $recording = makeScheduledRecording();
     $networkId = $recording->uuid;
     $recording->update([
@@ -167,7 +169,7 @@ it('cancel() calls proxy stop AND cleanup, then clears proxy_network_id', functi
 
     $proxy = Mockery::mock(M3uProxyService::class);
     $proxy->shouldReceive('stopDvrBroadcast')->once()->with($networkId)->andReturn(true);
-    $proxy->shouldReceive('cleanupDvrBroadcast')->once()->with($networkId)->andReturn(true);
+    $proxy->shouldNotReceive('cleanupDvrBroadcast');
     app()->instance(M3uProxyService::class, $proxy);
 
     app(DvrRecorderService::class)->cancel($recording);

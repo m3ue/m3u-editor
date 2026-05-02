@@ -86,12 +86,13 @@ it('throws when the recording has no proxy_network_id', function () {
 it('throws when the manifest request fails', function () {
     Http::fake([
         'http://proxy.test:38085/broadcast/net-abc/live.m3u8' => Http::response('Not found', 404),
+        'http://proxy.test:38085/broadcast/net-abc/live.m3u8.tmp' => Http::response('Not found', 404),
     ]);
 
     $recording = makeRecording();
 
     expect(fn () => app(DvrHlsDownloaderService::class)->download($recording, 'dvr'))
-        ->toThrow(Exception::class, 'HTTP 404');
+        ->toThrow(Exception::class, 'could not be fetched after retries');
 });
 
 it('throws when the manifest contains no segments', function () {

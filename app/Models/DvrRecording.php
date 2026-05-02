@@ -29,7 +29,11 @@ class DvrRecording extends Model
         'dvr_recording_rule_id',
         'channel_id',
         'status',
+        'user_cancelled',
+        'attempt_count',
         'title',
+        'series_key',
+        'normalized_title',
         'subtitle',
         'description',
         'season',
@@ -48,6 +52,7 @@ class DvrRecording extends Model
         'programme_start',
         'programme_end',
         'epg_programme_data',
+        'programme_uid',
         'pid',
         'temp_path',
         'temp_manifest_path',
@@ -60,6 +65,8 @@ class DvrRecording extends Model
     {
         return [
             'status' => DvrRecordingStatus::class,
+            'user_cancelled' => 'boolean',
+            'attempt_count' => 'integer',
             'season' => 'integer',
             'episode' => 'integer',
             'scheduled_start' => 'datetime',

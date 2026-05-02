@@ -381,7 +381,10 @@
 
             {{-- Content --}}
             <div class="p-4 flex-1 overflow-y-auto">
-                @include('filament.pages.browse-show-detail', ['show' => $selectedShowDetail])
+                @include('filament.pages.browse-show-detail', [
+                    'show' => $selectedShowDetail,
+                    'seriesHint' => $this->seriesHint,
+                ])
             </div>
         </div>
     </div>

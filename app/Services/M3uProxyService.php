@@ -2622,6 +2622,7 @@ class M3uProxyService
             'stream_url' => $streamUrl,
             'duration_seconds' => $durationSeconds,
             'dvr_mode' => true,
+            'hls_list_size' => 0,
             'metadata' => [
                 'type' => 'dvr',
                 'recording_id' => $recording->uuid,

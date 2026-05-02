@@ -47,14 +47,19 @@ it('deletes excess completed recordings beyond keep_last', function () {
         ->series()
         ->for($this->setting, 'dvrSetting')
         ->for($this->user)
-        ->create(['keep_last' => 2]);
+        ->create(['keep_last' => 2, 'series_title' => 'Test Show']);
 
-    // Create 4 completed recordings ordered newest → oldest (subHours(1) … subHours(4))
+    // Create 4 completed recordings ordered newest → oldest (subHours(1) … subHours(4)).
+    // Title must match rule's series_title so afterCreating derives the same series_key
+    // for all recordings, correctly grouping them under keep_last enforcement.
+    // Real EPG programmes use title="Show Name" without episode suffixes.
     $recordings = collect(range(1, 4))->map(fn ($i) => DvrRecording::factory()
         ->completed()
         ->for($this->setting, 'dvrSetting')
         ->for($this->user)
+        ->for($rule, 'recordingRule')
         ->create([
+            'title' => 'Test Show',
             'dvr_recording_rule_id' => $rule->id,
             'scheduled_start' => now()->subHours($i),
             'actual_end' => now()->subHours($i),
@@ -93,13 +98,15 @@ it('keeps only the most recent N recordings for a rule with keep_last', function
         ->series()
         ->for($this->setting, 'dvrSetting')
         ->for($this->user)
-        ->create(['keep_last' => 2]);
+        ->create(['keep_last' => 2, 'series_title' => 'Test Show']);
 
     $recordings = collect(range(1, 4))->map(fn ($i) => DvrRecording::factory()
         ->completed()
         ->for($this->setting, 'dvrSetting')
         ->for($this->user)
+        ->for($rule, 'recordingRule')
         ->create([
+            'title' => 'Test Show',
             'dvr_recording_rule_id' => $rule->id,
             'scheduled_start' => now()->subHours($i),
             'actual_end' => now()->subHours($i),

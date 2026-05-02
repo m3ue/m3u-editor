@@ -13,6 +13,7 @@ use App\Models\EpgProgramme;
 use App\Models\MergedPlaylist;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
+use App\Support\EpgProgrammeNormalizer;
 use App\Support\EpisodeNumberParser;
 use Carbon\Carbon;
 use Exception;
@@ -1593,12 +1594,31 @@ class EpgCacheService
                     // Parse season/episode from all episode-num entries in the programme.
                     [$season, $episode] = $this->parseEpisodeNumbers($p);
 
+                    // Normalize provider-quirky free-text fields. Some feeds smuggle a
+                    // "ᴺᵉʷ" superscript marker into the title and prefix descriptions
+                    // with "S## E### Subtitle\nDescription" instead of using proper
+                    // <new/> / <episode-num> / <subtitle> elements.
+                    $titleNorm = EpgProgrammeNormalizer::normalizeTitle($p['title'] ?? null);
+                    $subtitle = $this->nullableString($p['subtitle'] ?? null, 500);
+                    $description = $this->nullableString($p['desc'] ?? null);
+                    if ($subtitle === null || $season === null || $episode === null) {
+                        $extracted = EpgProgrammeNormalizer::extractSeasonEpisodeFromDescription($description);
+                        if ($extracted['season'] !== null || $extracted['episode'] !== null) {
+                            $season ??= $extracted['season'];
+                            $episode ??= $extracted['episode'];
+                            if ($subtitle === null && $extracted['subtitle'] !== null) {
+                                $subtitle = mb_substr($extracted['subtitle'], 0, 500);
+                            }
+                            $description = $extracted['description'];
+                        }
+                    }
+
                     $batch[] = [
                         'epg_id' => $epg->id,
                         'epg_channel_id' => mb_substr((string) $record['channel'], 0, 500),
-                        'title' => mb_substr((string) ($p['title'] ?? ''), 0, 500),
-                        'subtitle' => $this->nullableString($p['subtitle'] ?? null, 500),
-                        'description' => $this->nullableString($p['desc'] ?? null),
+                        'title' => mb_substr($titleNorm['title'], 0, 500),
+                        'subtitle' => $subtitle,
+                        'description' => $description,
                         'category' => $this->nullableString($p['category'] ?? null, 255),
                         // Raw insert bypasses Eloquent casts. The `start_time`/`end_time`
                         // columns are cast as `datetime` which Eloquent interprets in
@@ -1609,7 +1629,7 @@ class EpgCacheService
                         'episode_num' => $this->nullableString($p['episode_num'] ?? null, 255),
                         'season' => $season,
                         'episode' => $episode,
-                        'is_new' => (bool) ($p['new'] ?? false),
+                        'is_new' => (bool) ($p['new'] ?? false) || $titleNorm['isNew'],
                         'previously_shown' => (bool) ($p['previously_shown'] ?? false),
                         'premiere' => (bool) ($p['premiere'] ?? false),
                         'icon' => $this->nullableString($p['icon'] ?? null, 500),

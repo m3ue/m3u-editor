@@ -3,6 +3,7 @@
 namespace App\Filament\GuestPanel\Resources\DvrRules;
 
 use App\Enums\DvrRuleType;
+use App\Enums\DvrSeriesMode;
 use App\Filament\GuestPanel\Pages\Concerns\HasGuestDvr;
 use App\Models\Channel;
 use App\Models\DvrRecordingRule;
@@ -168,10 +169,11 @@ class GuestDvrRuleResource extends Resource
                 ->visible(fn (Get $get): bool => self::isRuleType($get('type'), DvrRuleType::Series))
                 ->requiredIf('type', DvrRuleType::Series->value),
 
-            Toggle::make('new_only')
-                ->label(__('New Episodes Only'))
-                ->visible(fn (Get $get): bool => self::isRuleType($get('type'), DvrRuleType::Series))
-                ->default(false),
+            Select::make('series_mode')
+                ->label(__('Record Episodes'))
+                ->options(DvrSeriesMode::class)
+                ->default(DvrSeriesMode::All->value)
+                ->visible(fn (Get $get): bool => self::isRuleType($get('type'), DvrRuleType::Series)),
 
             TextInput::make('start_early_seconds')
                 ->label(__('Start Early (seconds)'))
@@ -234,9 +236,11 @@ class GuestDvrRuleResource extends Resource
                     ->sortable()
                     ->placeholder('—'),
 
-                IconColumn::make('new_only')
-                    ->label(__('New Only'))
-                    ->boolean()
+                TextColumn::make('series_mode')
+                    ->label(__('Mode'))
+                    ->badge()
+                    ->formatStateUsing(fn (DvrSeriesMode $state): string => $state->getLabel())
+                    ->color(fn (DvrSeriesMode $state): string => $state->getColor())
                     ->toggleable(),
 
                 TextColumn::make('playlistAuth.username')

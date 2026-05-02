@@ -340,7 +340,11 @@
             {{-- Content --}}
             <div class="p-4 flex-1 overflow-y-auto">
                 @php $selectedShow = collect($groupedShows)->firstWhere('title', $selectedShowTitle); @endphp
-                @include('filament.pages.browse-show-detail', ['show' => $selectedShow ?? null, 'channelOptions' => $this->channelOptions])
+                @include('filament.pages.browse-show-detail', [
+                    'show' => $selectedShow ?? null,
+                    'channelOptions' => $this->channelOptions,
+                    'seriesHint' => $this->seriesHint,
+                ])
             </div>
         </div>
     </div>

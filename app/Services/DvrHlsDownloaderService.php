@@ -81,30 +81,132 @@ class DvrHlsDownloaderService
      */
     protected function downloadManifest(string $networkId, string $localDir): array
     {
-        $url = rtrim($this->proxy->getApiBaseUrl(), '/')."/broadcast/{$networkId}/live.m3u8";
-
-        $response = Http::timeout(15)
-            ->withHeaders($this->authHeaders())
-            ->get($url);
-
-        if (! $response->successful()) {
-            throw new Exception("Failed to fetch HLS manifest from proxy: HTTP {$response->status()} at {$url}");
-        }
-
-        $body = $response->body();
-        if ($body === '') {
-            throw new Exception("HLS manifest from proxy is empty: {$url}");
-        }
+        $baseUrl = rtrim($this->proxy->getApiBaseUrl(), '/');
+        $manifestUrl = "{$baseUrl}/broadcast/{$networkId}/live.m3u8";
+        $tmpManifestUrl = "{$baseUrl}/broadcast/{$networkId}/live.m3u8.tmp";
 
         $manifestPath = $localDir.'/live.m3u8';
-        if (file_put_contents($manifestPath, $body) === false) {
-            throw new Exception("Could not write HLS manifest to: {$manifestPath}");
+        $tmpManifestPath = $localDir.'/live.m3u8.tmp';
+
+        $segments = $this->fetchManifestUntilStable($manifestUrl, $manifestPath, 30, 2000);
+
+        if ($segments === null) {
+            Log::warning('DVR HLS download: live.m3u8 not ready, trying .tmp variant', [
+                'network_id' => $networkId,
+            ]);
+
+            $segments = $this->fetchManifestUntilStable($tmpManifestUrl, $tmpManifestPath, 30, 2000);
         }
 
-        return array_values(array_filter(
-            array_map('trim', explode("\n", $body)),
-            fn (string $line) => $line !== '' && ! str_starts_with($line, '#')
-        ));
+        if ($segments === null) {
+            throw new Exception("HLS manifest for broadcast {$networkId} could not be fetched after retries");
+        }
+
+        return $segments;
+    }
+
+    /**
+     * Fetch the manifest until it stabilizes (same content twice in a row).
+     *
+     * This is more reliable than waiting for #EXT-X-ENDLIST which may never appear
+     * in DVR mode when the recording is manually stopped.
+     *
+     * @return array<int, string>|null Array of segment filenames, or null if manifest could not be fetched
+     */
+    protected function fetchManifestUntilStable(string $url, string $savePath, int $maxRetries, int $delayMs): ?array
+    {
+        $lastContent = null;
+        $consecutiveEmpty = 0;
+
+        for ($i = 0; $i < $maxRetries; $i++) {
+            $response = Http::timeout(15)
+                ->withHeaders($this->authHeaders())
+                ->get($url);
+
+            if (! $response->successful()) {
+                // For 404, only retry a few times - if broadcast doesn't exist, it won't magically appear
+                if ($response->status() === 404 && $i < 3) {
+                    usleep($delayMs * 1000);
+
+                    continue;
+                }
+
+                if ($i < $maxRetries - 1) {
+                    usleep($delayMs * 1000);
+
+                    continue;
+                }
+
+                return null;
+            }
+
+            $body = $response->body();
+            if ($body === '' || ! str_contains($body, "\n")) {
+                if ($i < $maxRetries - 1) {
+                    usleep($delayMs * 1000);
+
+                    continue;
+                }
+
+                return null;
+            }
+
+            if (file_put_contents($savePath, $body) === false) {
+                return null;
+            }
+
+            // Extract segment filenames
+            $segments = array_values(array_filter(
+                array_map('trim', explode("\n", $body)),
+                fn (string $line) => $line !== '' && ! str_starts_with($line, '#')
+            ));
+
+            // Check if manifest has stabilized (same content twice in a row)
+            if ($lastContent !== null && $body === $lastContent) {
+                Log::debug('DVR HLS download: manifest stabilized', [
+                    'url' => $url,
+                    'attempts' => $i + 1,
+                    'segment_count' => count($segments),
+                ]);
+
+                return $segments;
+            }
+
+            // Track consecutive empty manifests (no segments) - if we get several in a row, the broadcast may not exist
+            if (empty($segments)) {
+                $consecutiveEmpty++;
+                if ($consecutiveEmpty >= 5) {
+                    Log::debug('DVR HLS download: manifest consistently empty, continuing anyway', [
+                        'url' => $url,
+                        'attempts' => $i + 1,
+                    ]);
+                }
+            } else {
+                $consecutiveEmpty = 0;
+            }
+
+            $lastContent = $body;
+
+            Log::debug('DVR HLS download: manifest not yet stable, retrying', [
+                'url' => $url,
+                'attempt' => $i + 1,
+                'segment_count' => count($segments),
+            ]);
+
+            if ($i < $maxRetries - 1) {
+                usleep($delayMs * 1000);
+            }
+        }
+
+        // If we ran out of retries, return the last content we got
+        if ($lastContent !== null) {
+            return array_values(array_filter(
+                array_map('trim', explode("\n", $lastContent)),
+                fn (string $line) => $line !== '' && ! str_starts_with($line, '#')
+            ));
+        }
+
+        return null;
     }
 
     /**

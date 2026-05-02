@@ -3,6 +3,8 @@
 namespace App\Filament\Pages;
 
 use App\Enums\DvrRuleType;
+use App\Enums\DvrSeriesMode;
+use App\Jobs\DvrSchedulerTick;
 use App\Models\Channel;
 use App\Models\DvrRecordingRule;
 use App\Models\DvrSetting;
@@ -290,6 +292,9 @@ class BrowseShows extends Page
 
         $this->refreshRuleBadgeForProgramme($programmeId, 'once');
 
+        // Dispatch immediate scheduler tick so the recording materialises without waiting up to 60s.
+        DvrSchedulerTick::dispatch();
+
         Notification::make()
             ->title(__('Once rule created for ":title"', ['title' => $programme->title]))
             ->success()
@@ -332,7 +337,7 @@ class BrowseShows extends Page
     public function recordSeriesDefaults(string $title): void
     {
         $this->createSeriesRule($title, [
-            'new_only' => false,
+            'series_mode' => DvrSeriesMode::All,
             'priority' => 50,
         ]);
     }
@@ -352,7 +357,7 @@ class BrowseShows extends Page
         }
 
         $this->createSeriesRule($title, [
-            'new_only' => $this->seriesNewOnly,
+            'series_mode' => $this->seriesNewOnly ? DvrSeriesMode::NewFlag : DvrSeriesMode::All,
             'channel_id' => $channelId,
             'priority' => $this->seriesPriority,
             'start_early_seconds' => $this->seriesStartEarly,
@@ -414,6 +419,9 @@ class BrowseShows extends Page
         ], $options));
 
         $this->refreshRuleBadgeForTitle($title, 'series');
+
+        // Dispatch immediate scheduler tick so any in-window airings materialise without waiting up to 60s.
+        DvrSchedulerTick::dispatch();
 
         Notification::make()
             ->title(__('Series rule created for ":title"', ['title' => $title]))
@@ -589,7 +597,7 @@ class BrowseShows extends Page
 
             $shows[] = [
                 'title' => (string) $title,
-                'next_air_date_human' => $first->start_time?->shiftTimezone('UTC')->timezone($timezone)->format('D M j, g:ia'),
+                'next_air_date_human' => $first->start_time?->timezone($timezone)->format('D M j, g:ia'),
                 'flags' => [
                     'is_new' => $airings->contains('is_new', true) || $anyNewFromTvMaze,
                     'premiere' => $airings->contains('premiere', true),
@@ -641,7 +649,7 @@ class BrowseShows extends Page
         $episodeIsNewMap = app(ShowMetadataService::class)->resolveEpisodeIsNew($episodeLookups);
 
         $airings = $programmes->map(function (EpgProgramme $p) use ($channelNames, $timezone, $episodeIsNewMap) {
-            $startTime = $p->start_time?->shiftTimezone('UTC')->timezone($timezone);
+            $startTime = $p->start_time?->timezone($timezone);
 
             [$season, $episode, $subtitle, $description] = $this->parseSeasonEpisode($p);
 

@@ -43,13 +43,30 @@ class DvrCallbackController extends Controller
             return response()->json(['error' => 'Missing network_id or event'], 422);
         }
 
-        $recording = DvrRecording::where('proxy_network_id', $networkId)
-            ->orWhere('uuid', $networkId)
-            ->first();
+        // Use recording_db_id from metadata for unambiguous lookup if available
+        $recordingDbId = $data['recording_db_id'] ?? null;
+        if ($recordingDbId) {
+            $recording = DvrRecording::find($recordingDbId);
+            if ($recording) {
+                Log::info('DVR callback: matched by recording_db_id', [
+                    'recording_id' => $recording->id,
+                    'network_id' => $networkId,
+                    'event' => $event,
+                ]);
+            }
+        }
+
+        // Fallback to proxy_network_id or uuid lookup
+        if (! $recording) {
+            $recording = DvrRecording::where('proxy_network_id', $networkId)
+                ->orWhere('uuid', $networkId)
+                ->first();
+        }
 
         if (! $recording) {
             Log::warning('DVR callback: recording not found', [
                 'network_id' => $networkId,
+                'recording_db_id' => $recordingDbId,
                 'event' => $event,
             ]);
 
@@ -86,14 +103,12 @@ class DvrCallbackController extends Controller
             return response()->json(['status' => 'ignored', 'reason' => 'not in recording state']);
         }
 
-        // proxy_network_id is intentionally NOT cleared here — the post-processing
-        // pipeline needs it to download HLS segments from the proxy. It is cleared
-        // after successful cleanup at the end of DvrPostProcessorService::run().
+        // Only update actual_end if not already set (e.g., by cancel() or finalizeStop()).
+        // Then atomically update status and dispatch job in a transaction.
         $updateData = [
             'status' => DvrRecordingStatus::PostProcessing->value,
         ];
 
-        // Preserve actual_end if already set by finalizeStop(); set it now if not.
         if (! $recording->actual_end) {
             $updateData['actual_end'] = now();
         }

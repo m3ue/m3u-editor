@@ -51,6 +51,19 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | DVR — Retry cap per airing
+    |--------------------------------------------------------------------------
+    |
+    | Maximum number of StartDvrRecording attempts for a single recording row
+    | before the scheduler refuses to re-schedule it within its airing window.
+    | Set to 0 to disable retries entirely; null for unlimited retries.
+    |
+    */
+
+    'max_attempts_per_airing' => (int) env('DVR_MAX_ATTEMPTS_PER_AIRING', 3),
+
+    /*
+    |--------------------------------------------------------------------------
     | DVR — HLS segment settings
     |--------------------------------------------------------------------------
     */

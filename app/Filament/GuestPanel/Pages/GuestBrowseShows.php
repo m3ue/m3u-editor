@@ -3,7 +3,9 @@
 namespace App\Filament\GuestPanel\Pages;
 
 use App\Enums\DvrRuleType;
+use App\Enums\DvrSeriesMode;
 use App\Filament\GuestPanel\Pages\Concerns\HasGuestDvr;
+use App\Jobs\DvrSchedulerTick;
 use App\Models\Channel;
 use App\Models\DvrRecordingRule;
 use App\Models\EpgChannel;
@@ -270,6 +272,9 @@ class GuestBrowseShows extends Page
 
         $this->refreshRuleBadgeForProgramme($programmeId, 'once');
 
+        // Dispatch immediate scheduler tick so the recording materialises without waiting up to 60s.
+        DvrSchedulerTick::dispatch();
+
         Notification::make()
             ->title(__('Once rule created for ":title"', ['title' => $programme->title]))
             ->success()
@@ -295,7 +300,7 @@ class GuestBrowseShows extends Page
     public function recordSeriesDefaults(string $title): void
     {
         $this->createSeriesRule($title, [
-            'new_only' => false,
+            'series_mode' => DvrSeriesMode::All,
             'priority' => 50,
         ]);
     }
@@ -303,7 +308,7 @@ class GuestBrowseShows extends Page
     public function recordSeriesWithOptions(string $title): void
     {
         $this->createSeriesRule($title, [
-            'new_only' => $this->seriesNewOnly,
+            'series_mode' => $this->seriesNewOnly ? DvrSeriesMode::NewFlag : DvrSeriesMode::All,
             'channel_id' => $this->seriesChannelId ?: null,
             'priority' => $this->seriesPriority,
             'start_early_seconds' => $this->seriesStartEarly,
@@ -352,6 +357,9 @@ class GuestBrowseShows extends Page
         ], $options));
 
         $this->refreshRuleBadgeForTitle($title, 'series');
+
+        // Dispatch immediate scheduler tick so any in-window airings materialise without waiting up to 60s.
+        DvrSchedulerTick::dispatch();
 
         Notification::make()
             ->title(__('Series rule created for ":title"', ['title' => $title]))

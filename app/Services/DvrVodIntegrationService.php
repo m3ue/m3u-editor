@@ -27,6 +27,10 @@ class DvrVodIntegrationService
 {
     private const DVR_CATEGORY_NAME = 'DVR Recordings';
 
+    public function __construct(
+        private readonly TmdbService $tmdbService,
+    ) {}
+
     /**
      * Integrate a completed recording into the VOD library.
      */
@@ -68,13 +72,24 @@ class DvrVodIntegrationService
     }
 
     /**
-     * Determine whether the recording should be treated as TV series content.
+     * Decide whether a completed recording should be classified as TV (Series/
+     * Episode) or as a movie (single Channel row).
      *
-     * Decision order:
-     *   1. TMDB type field (authoritative when enrichment ran)
+     * Priority order (first match wins):
+     *
+     *   1. TMDB metadata type (definitive when present)
      *   2. recording.season column (set from EPG at schedule time)
      *   3. epg_programme_data.episode_num (raw XMLTV string — present even when
      *      the EPG import predated our season/episode column parsing fix)
+     *   4. epg_programme_data.category — explicit "movie"/"film" → false
+     *   5. epg_programme_data.category — TV-ish keywords (series / episode /
+     *      tv / show / news / documentary / talk) → true
+     *   6. recording.subtitle non-empty AND a category was supplied (any
+     *      non-empty value other than the movie keywords above) → true.
+     *      Subtitle alone is not enough because some providers tag movies
+     *      with subtitles for director's cuts / extended editions; pairing
+     *      with the presence of any EPG category lets us trust it as a
+     *      "this aired with episodic context" hint.
      */
     private function isTvContent(DvrRecording $recording, ?array $tmdb): bool
     {
@@ -88,7 +103,35 @@ class DvrVodIntegrationService
 
         // episode_num present in stored EPG data is a reliable TV signal even
         // when season/episode columns were not populated (pre-parseEpisodeNumbers fix).
-        return ! empty($recording->epg_programme_data['episode_num']);
+        if (! empty($recording->epg_programme_data['episode_num'])) {
+            return true;
+        }
+
+        $category = mb_strtolower(trim((string) ($recording->epg_programme_data['category'] ?? '')));
+
+        if ($category !== '') {
+            // Explicit movie/film category short-circuits to movie path.
+            if (str_contains($category, 'movie') || str_contains($category, 'film')) {
+                return false;
+            }
+
+            // TV-ish category keywords.
+            foreach (['series', 'episode', 'tv', 'show', 'news', 'documentary', 'talk'] as $needle) {
+                if (str_contains($category, $needle)) {
+                    return true;
+                }
+            }
+
+            // A non-movie EPG category was supplied (e.g. "sports",
+            // "entertainment").  If the recording also has a subtitle, treat
+            // it as TV — the EPG explicitly classified it as a programme,
+            // not a film, and the subtitle gives us per-episode context.
+            if (! empty(trim((string) $recording->subtitle))) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -267,7 +310,7 @@ class DvrVodIntegrationService
         $episode->url = $streamUrl;
         $episode->info = [
             'plot' => $tmdbEpisode['overview'] ?? $tvmazeEpisode['summary']
-                ?? $tmdb['overview'] ?? $recording->description ?? null,
+                ?? $recording->description ?? $tmdb['overview'] ?? null,
             'release_date' => $tmdbEpisode['air_date'] ?? $tvmazeEpisode['airdate']
                 ?? $recording->programme_start?->toDateString(),
             'duration_secs' => $recording->duration_seconds,
@@ -488,17 +531,49 @@ class DvrVodIntegrationService
             $defaults['cover'] = $tvmaze['poster_url'] ?? $sourceLogo;
             $defaults['plot'] = $tvmaze['overview'] ?? null;
             $defaults['release_date'] = $tvmaze['premiered'] ?? null;
+            // Persist the TVMaze blob so that a later upgrade (or de-dup) can
+            // see we already have a TVMaze identity for this series.  Stored
+            // under a wrapper key to leave room for future TMDB enrichment to
+            // merge in alongside without overwriting.
+            $defaults['metadata'] = ['tvmaze' => $tvmaze];
         } elseif ($sourceLogo) {
             $defaults['cover'] = $sourceLogo;
         }
 
-        // Case-insensitive lookup so "breaking bad" and "Breaking Bad" don't
-        // create duplicate series when metadata arrives at different times.
+        // Prefer matching by tmdb_id when available — this is stable across
+        // title renames, locale variations, and "The X" vs "X" differences.
+        // Fall back to TVMaze id (stored in metadata.tvmaze.id) for series
+        // that were enriched from TVMaze only.  Final fallback is a
+        // case-insensitive name match so series created before metadata
+        // arrived can still be found and upgraded.
+        $tmdbId = ! empty($tmdb['id']) ? (string) $tmdb['id'] : null;
+        $tvmazeId = ! empty($tvmaze['id']) ? (int) $tvmaze['id'] : null;
         $normalizedName = mb_strtolower(trim($name));
-        $series = Series::where('playlist_id', $playlistId)
-            ->whereNull('source_series_id')
-            ->whereRaw('LOWER(TRIM(name)) = ?', [$normalizedName])
-            ->first();
+
+        $series = null;
+        if ($tmdbId !== null) {
+            $series = Series::where('playlist_id', $playlistId)
+                ->whereNull('source_series_id')
+                ->where('tmdb_id', $tmdbId)
+                ->first();
+        }
+
+        if (! $series && $tvmazeId !== null) {
+            // Match on stored TVMaze id inside the metadata JSON column.  We
+            // store it under metadata.tvmaze.id (see create + update branches
+            // below).  Use a JSON path query so the index lookup is exact.
+            $series = Series::where('playlist_id', $playlistId)
+                ->whereNull('source_series_id')
+                ->where('metadata->tvmaze->id', $tvmazeId)
+                ->first();
+        }
+
+        if (! $series) {
+            $series = Series::where('playlist_id', $playlistId)
+                ->whereNull('source_series_id')
+                ->whereRaw('LOWER(TRIM(name)) = ?', [$normalizedName])
+                ->first();
+        }
 
         if (! $series) {
             $series = Series::create(array_merge(
@@ -522,12 +597,51 @@ class DvrVodIntegrationService
                 }
 
                 $series->save();
-            } elseif ($tvmaze && empty($series->cover) && empty($series->plot)) {
-                // Backfill TVMaze metadata if series still has nothing
-                $series->cover = $tvmaze['poster_url'] ?? $sourceLogo ?? $series->cover;
-                $series->plot = $tvmaze['overview'] ?? $series->plot;
-                $series->release_date = $tvmaze['premiered'] ?? $series->release_date;
-                $series->save();
+            } elseif ($tvmaze && empty($series->tmdb_id)) {
+                // TVMaze data arrived for a series that has no TMDB identity.
+                // Upgrade the canonical name to TVMaze's (passed in via $name,
+                // since the caller prefers tmdb.name -> tvmaze.name -> title)
+                // and merge the TVMaze blob into series.metadata so we have a
+                // stable identifier for future re-runs.  Skip if we already
+                // stored TVMaze data with the same id (idempotent re-runs).
+                $existingMeta = is_array($series->metadata) ? $series->metadata : [];
+                $existingTvmazeId = $existingMeta['tvmaze']['id'] ?? null;
+                $newTvmazeId = $tvmaze['id'] ?? null;
+
+                $changed = false;
+
+                if ($existingTvmazeId !== $newTvmazeId) {
+                    $existingMeta['tvmaze'] = $tvmaze;
+                    $series->metadata = $existingMeta;
+                    $changed = true;
+                }
+
+                // Only upgrade the name when the current row is still using
+                // the stripped recording title (i.e. no canonical name has
+                // ever been written).  Detect this by comparing against
+                // TVMaze's name — if they differ and the row has no tmdb_id,
+                // we presume the existing name is the un-enriched fallback.
+                if (! empty($tvmaze['name']) && $series->name !== $tvmaze['name']) {
+                    $series->name = $tvmaze['name'];
+                    $changed = true;
+                }
+
+                if (empty($series->cover)) {
+                    $series->cover = $tvmaze['poster_url'] ?? $sourceLogo ?? $series->cover;
+                    $changed = true;
+                }
+                if (empty($series->plot)) {
+                    $series->plot = $tvmaze['overview'] ?? $series->plot;
+                    $changed = true;
+                }
+                if (empty($series->release_date)) {
+                    $series->release_date = $tvmaze['premiered'] ?? $series->release_date;
+                    $changed = true;
+                }
+
+                if ($changed) {
+                    $series->save();
+                }
             } elseif ($sourceLogo && empty($series->cover)) {
                 // Backfill the source channel logo if the series has no cover yet
                 $series->cover = $sourceLogo;
@@ -543,7 +657,7 @@ class DvrVodIntegrationService
      */
     private function findOrCreateSeason(Series $series, int $seasonNumber, int $playlistId, int $userId, int $categoryId): Season
     {
-        return Season::firstOrCreate(
+        $season = Season::firstOrCreate(
             ['series_id' => $series->id, 'season_number' => $seasonNumber],
             [
                 'playlist_id' => $playlistId,
@@ -554,5 +668,20 @@ class DvrVodIntegrationService
                 'import_batch_no' => 'dvr',
             ]
         );
+
+        // Backfill season poster from TMDB when missing and series has a TMDB id.
+        if (empty($season->cover) && ! empty($series->tmdb_id) && $this->tmdbService->isConfigured()) {
+            $details = $this->tmdbService->getSeasonDetails((int) $series->tmdb_id, $seasonNumber);
+            if ($details && ($details['poster_url'] ?? false)) {
+                $season->cover = $details['poster_url'];
+                $rawPath = $details['poster_path'] ?? null;
+                $season->cover_big = $rawPath
+                    ? "https://image.tmdb.org/t/p/original{$rawPath}"
+                    : null;
+                $season->save();
+            }
+        }
+
+        return $season;
     }
 }
