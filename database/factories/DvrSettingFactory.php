@@ -25,7 +25,6 @@ class DvrSettingFactory extends Factory
             'enabled' => false,
             'use_proxy' => false,
             'storage_disk' => 'dvr',
-            'storage_path' => 'recordings',
             'max_concurrent_recordings' => 2,
             'default_start_early_seconds' => 30,
             'default_end_late_seconds' => 30,
