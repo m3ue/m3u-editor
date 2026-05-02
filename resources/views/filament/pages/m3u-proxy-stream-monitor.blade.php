@@ -164,12 +164,17 @@
                             <div class="md:flex items-center justify-between mb-4">
                                 <div class="md:flex items-center space-x-0 md:space-x-4 space-y-2 md:space-y-0">
                                     <div class="flex-shrink-0">
+                                        @php
+                                            $statusIconClass = match ($stream['status']) {
+                                                'active'
+                                                    => 'bg-green-100 dark:bg-green-900 text-green-600 dark:text-green-300',
+                                                'idle'
+                                                    => 'bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300',
+                                                default => 'bg-red-100 dark:bg-red-900 text-red-600 dark:text-red-300',
+                                            };
+                                        @endphp
                                         <div
-                                            class="h-10 w-10 rounded-full flex items-center justify-center {{ $stream['status'] === 'active'
-                                                ? 'bg-green-100 dark:bg-green-900 text-green-600 dark:text-green-300'
-                                                : ($stream['status'] === 'idle'
-                                                    ? 'bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300'
-                                                    : 'bg-red-100 dark:bg-red-900 text-red-600 dark:text-red-300') }}">
+                                            class="h-10 w-10 rounded-full flex items-center justify-center {{ $statusIconClass }}">
                                             @if ($stream['status'] === 'idle')
                                                 <x-heroicon-s-pause class="w-5 h-5" />
                                             @elseif($stream['status'] === 'active')
@@ -258,7 +263,14 @@
                                         Failover Ready
                                     </x-filament::badge>
                                 @endif
-                                <x-filament::badge :color="$stream['status'] === 'active' ? 'success' : ($stream['status'] === 'idle' ? 'info' : 'danger')" size="sm">
+                                @php
+                                    $statusBadgeColor = match ($stream['status']) {
+                                        'active' => 'success',
+                                        'idle' => 'info',
+                                        default => 'danger',
+                                    };
+                                @endphp
+                                <x-filament::badge :color="$statusBadgeColor" size="sm">
                                     {{ ucfirst($stream['status']) }}
                                 </x-filament::badge>
                             </div>
@@ -428,7 +440,7 @@
                                                             {{ $client['username'] ?? '—' }}</td>
                                                         <td class="px-3 py-2 text-xs text-gray-500 dark:text-gray-400 max-w-xs truncate"
                                                             title="{{ $client['user_agent'] ?? '' }}">
-                                                            {{ $client['user_agent'] ? (strlen($client['user_agent']) > 40 ? substr($client['user_agent'], 0, 40) . '…' : $client['user_agent']) : '—' }}
+                                                            {{ $client['user_agent'] ? \Illuminate\Support\Str::limit($client['user_agent'], 40, '…') : '—' }}
                                                         </td>
                                                         <td
                                                             class="px-3 py-2 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
