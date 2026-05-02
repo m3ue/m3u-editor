@@ -1034,6 +1034,8 @@ class PlaylistService
                                     'group_priority' => '📁 Group Priority (from weights above)',
                                     'catchup_support' => '⏪ Catch-up/Replay Support',
                                     'resolution' => '📺 Resolution (requires stream analysis)',
+                                    'fps' => '🎞️ Frame Rate (requires stream analysis)',
+                                    'bitrate' => '📊 Bitrate (requires stream analysis)',
                                     'codec' => '🎬 Codec Preference (HEVC/H264)',
                                     'keyword_match' => '🏷️ Keyword Match',
                                 ])

@@ -14,6 +14,7 @@ use App\Jobs\ChannelFindAndReplace;
 use App\Jobs\ChannelFindAndReplaceReset;
 use App\Jobs\MapPlaylistChannelsToEpg;
 use App\Jobs\ProbeChannelStreams;
+use App\Jobs\RescoreChannelFailovers;
 use App\Jobs\SyncPlexDvrJob;
 use App\Models\Channel;
 use App\Models\ChannelFailover;
@@ -21,6 +22,7 @@ use App\Models\CustomPlaylist;
 use App\Models\Group;
 use App\Models\Playlist;
 use App\Models\StreamProfile;
+use App\Services\Channels\SmartChannelCreator;
 use App\Services\DateFormatService;
 use App\Services\EpgCacheService;
 use App\Services\LogoCacheService;
@@ -35,6 +37,7 @@ use Filament\Actions\DeleteAction;
 use Filament\Actions\EditAction;
 use Filament\Actions\ViewAction;
 use Filament\Forms\Components\Hidden;
+use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
@@ -232,6 +235,13 @@ class ChannelResource extends Resource implements CopilotResource
                 ->badge()
                 ->toggleable()
                 ->sortable(),
+            IconColumn::make('is_smart_channel')
+                ->label(__('Smart'))
+                ->icon(fn ($record): ?string => $record?->is_smart_channel ? 'heroicon-o-sparkles' : null)
+                ->color('info')
+                ->tooltip(fn ($record): ?string => $record?->is_smart_channel ? __('Smart channel — streams the highest-ranked failover automatically') : null)
+                ->sortable()
+                ->toggleable(),
             TextInputColumn::make('stream_id_custom')
                 ->label(__('ID'))
                 ->rules(['min:0', 'max:255'])
@@ -1137,11 +1147,22 @@ class ChannelResource extends Resource implements CopilotResource
                             return (int) $record->id !== (int) $masterRecordId;
                         });
 
+                        $smartChannelCount = $failoverRecords->filter(fn ($r) => (bool) $r->is_smart_channel)->count();
+                        $failoverRecords = $failoverRecords->filter(fn ($r) => ! $r->is_smart_channel);
+
                         foreach ($failoverRecords as $record) {
                             ChannelFailover::updateOrCreate([
                                 'channel_id' => $masterRecordId,
                                 'channel_failover_id' => $record->id,
                             ]);
+                        }
+
+                        if ($smartChannelCount > 0) {
+                            Notification::make()
+                                ->warning()
+                                ->title(__('Some channels were skipped'))
+                                ->body(__(':count smart channel(s) were skipped — smart channels can\'t be used as failovers themselves.', ['count' => $smartChannelCount]))
+                                ->send();
                         }
                     })->after(function () {
                         Notification::make()
@@ -1156,6 +1177,110 @@ class ChannelResource extends Resource implements CopilotResource
                     ->modalIcon('heroicon-o-arrow-path-rounded-square')
                     ->modalDescription(__('Add the selected channel(s) to the chosen channel as failover sources.'))
                     ->modalSubmitActionLabel(__('Add failovers now')),
+                BulkAction::make('make_smart_channel')
+                    ->label(__('Make smart channel'))
+                    ->schema(function (Collection $records) {
+                        $playlists = $records->pluck('playlist_id')->unique();
+                        $playlistForScoring = $playlists->count() === 1
+                            ? Playlist::find($playlists->first())
+                            : null;
+
+                        $creator = SmartChannelCreator::fromPlaylist($playlistForScoring);
+                        $ranking = $creator->rank($records);
+
+                        $rows = $ranking->map(function ($row, int $index) {
+                            $channel = $row['channel'];
+                            $playlistName = $channel->getEffectivePlaylist()->name ?? 'Unknown';
+                            $displayTitle = e($channel->title_custom ?: $channel->title ?: $channel->name);
+                            $rankBadge = '<span class="font-mono text-xs text-gray-500 dark:text-gray-400">#'.($index + 1).'</span>';
+                            $titleCell = "<div class=\"font-medium\">{$displayTitle}</div><div class=\"text-xs text-gray-500 dark:text-gray-400\">".e($playlistName).'</div>';
+                            $totalScore = '<span class="font-mono text-sm">'.number_format($row['score']).'</span>';
+
+                            $breakdownParts = [];
+                            foreach ($row['breakdown'] as $attribute => $score) {
+                                $label = e(str_replace('_', ' ', $attribute));
+                                $breakdownParts[] = "<span class=\"inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-xs mr-1 mb-1\"><span class=\"text-gray-500 dark:text-gray-400\">{$label}</span><span class=\"font-mono\">{$score}</span></span>";
+                            }
+                            $breakdownCell = '<div class="flex flex-wrap">'.implode('', $breakdownParts).'</div>';
+
+                            return "<tr class=\"border-t border-gray-200 dark:border-gray-700\"><td class=\"py-2 pr-2 align-top\">{$rankBadge}</td><td class=\"py-2 pr-2 align-top\">{$titleCell}</td><td class=\"py-2 pr-2 align-top\">{$totalScore}</td><td class=\"py-2 align-top\">{$breakdownCell}</td></tr>";
+                        })->implode('');
+
+                        $headerRow = '<thead><tr class="text-left text-xs uppercase text-gray-500 dark:text-gray-400"><th class="py-1 pr-2">Rank</th><th class="py-1 pr-2">Channel</th><th class="py-1 pr-2">Score</th><th class="py-1">Breakdown (per attribute, 0-100)</th></tr></thead>';
+                        $tableHtml = "<table class=\"w-full text-sm\">{$headerRow}<tbody>{$rows}</tbody></table>";
+
+                        return [
+                            Placeholder::make('ranking_preview')
+                                ->label(__('Ranked sources'))
+                                ->content(new HtmlString($tableHtml))
+                                ->columnSpanFull(),
+                            TextInput::make('title')
+                                ->label(__('Virtual channel title'))
+                                ->helperText(__('Leave empty to copy the highest-scoring source\'s title.'))
+                                ->maxLength(255),
+                            Toggle::make('disable_sources')
+                                ->label(__('Disable source channels'))
+                                ->helperText(__('When enabled, the selected source channels will be disabled after being attached as failovers. They\'ll only be reachable via the new smart channel.'))
+                                ->default(false)
+                                ->inline(false),
+                        ];
+                    })
+                    ->action(function (Collection $records, array $data): void {
+                        if ($records->isEmpty()) {
+                            return;
+                        }
+
+                        $playlists = $records->pluck('playlist_id')->unique();
+                        if ($playlists->count() > 1) {
+                            Notification::make()
+                                ->warning()
+                                ->title(__('Mixed playlists not supported'))
+                                ->body(__('Smart channels must be created from sources within a single playlist. Narrow your selection and try again.'))
+                                ->send();
+
+                            return;
+                        }
+
+                        if ($records->contains(fn (Channel $channel) => (bool) $channel->is_smart_channel)) {
+                            Notification::make()
+                                ->warning()
+                                ->title(__('Smart channels cannot be sources'))
+                                ->body(__('Your selection includes one or more existing smart channels — pick raw provider channels instead, or remove the smart-channel flag first.'))
+                                ->send();
+
+                            return;
+                        }
+
+                        $playlistForScoring = Playlist::find($playlists->first());
+
+                        try {
+                            SmartChannelCreator::fromPlaylist($playlistForScoring)->create(
+                                channels: $records,
+                                title: $data['title'] ?? null,
+                                disableSources: (bool) ($data['disable_sources'] ?? false),
+                            );
+                        } catch (\InvalidArgumentException $e) {
+                            Notification::make()
+                                ->warning()
+                                ->title(__('Could not create smart channel'))
+                                ->body($e->getMessage())
+                                ->send();
+
+                            return;
+                        }
+
+                        Notification::make()
+                            ->success()
+                            ->title(__('Smart channel created'))
+                            ->body(__('A custom channel was created with the selected sources attached as failovers, ranked by quality.'))
+                            ->send();
+                    })
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-arrow-trending-up')
+                    ->modalIcon('heroicon-o-arrow-trending-up')
+                    ->modalDescription(__('Create a custom "smart channel" from the selected channels. The highest-scoring source\'s title, logo, and EPG mapping will be copied. All selected channels become failovers, sorted by score, and the playlist will stream the top failover automatically.'))
+                    ->modalSubmitActionLabel(__('Create smart channel')),
             ]),
 
             // -- Probing --
@@ -1316,7 +1441,7 @@ class ChannelResource extends Resource implements CopilotResource
                     ]),
                 Section::make(__('Technical Details'))
                     ->collapsible()
-                    ->visible(fn ($record) => $record && ! $record->is_vod)
+                    ->visible(fn ($record) => $record && ! $record->is_vod && ! $record->isSmartChannel())
                     ->headerActions([
                         Action::make('probe')
                             ->label(fn ($record) => match (self::resolveTechnicalDetailsState($record)) {
@@ -1492,6 +1617,40 @@ class ChannelResource extends Resource implements CopilotResource
                             ->state(fn () => __("Probing is disabled for this channel. Enable it in the channel's edit form to allow probe data collection."))
                             ->visible(fn ($record) => self::resolveTechnicalDetailsState($record) === 'disabled'),
                     ]),
+                Section::make(__('Failover Ranking'))
+                    ->description(__('Failovers ranked by score. Stored from the last merge or rescore — click "Rescore now" to recalculate against current stream stats.'))
+                    ->collapsible()
+                    ->visible(fn ($record) => $record && $record->failovers()->exists())
+                    ->headerActions([
+                        Action::make('rescore_failovers_inline')
+                            ->label(__('Rescore now'))
+                            ->icon('heroicon-o-arrow-path')
+                            ->color('info')
+                            ->action(function ($record) {
+                                dispatch(new RescoreChannelFailovers(
+                                    playlistId: $record->playlist_id,
+                                    channelIds: [$record->id],
+                                ));
+
+                                Notification::make()
+                                    ->success()
+                                    ->title(__('Rescoring queued'))
+                                    ->body(__('Failovers will be re-scored in the background. Refresh this page in a moment to see the updated ranking.'))
+                                    ->duration(6000)
+                                    ->send();
+                            })
+                            ->requiresConfirmation()
+                            ->modalIcon('heroicon-o-arrow-path')
+                            ->modalDescription(__('Re-score this channel\'s failovers against current stream stats. Stale channels may be re-probed (subject to the playlist\'s staleness window). The master channel is never altered — only the failover order changes.'))
+                            ->modalSubmitActionLabel(__('Rescore')),
+                    ])
+                    ->schema([
+                        TextEntry::make('failover_ranking_html')
+                            ->hiddenLabel()
+                            ->columnSpanFull()
+                            ->state(fn ($record) => self::renderFailoverRankingHtml($record))
+                            ->html(),
+                    ]),
             ]);
     }
 
@@ -1513,6 +1672,139 @@ class ChannelResource extends Resource implements CopilotResource
         return 'ok';
     }
 
+    /**
+     * Render the channel's failover ranking as a stack of expandable cards.
+     *
+     * Each card's summary row shows rank + title + score; expanding reveals
+     * the per-attribute breakdown plus the failover's probed technical
+     * details (resolution, fps, bitrate, codec, audio info, last probed).
+     * Returns null when the channel has no failovers attached so the section
+     * can hide itself.
+     */
+    private static function renderFailoverRankingHtml(?Channel $record): ?HtmlString
+    {
+        if (! $record) {
+            return null;
+        }
+
+        $failovers = $record->failovers()
+            ->with('channelFailover')
+            ->orderBy('sort')
+            ->get();
+
+        if ($failovers->isEmpty()) {
+            return null;
+        }
+
+        $cards = $failovers->map(function ($failover, int $index) {
+            $channel = $failover->channelFailover;
+            if (! $channel) {
+                return '';
+            }
+
+            $metadata = $failover->metadata ?? [];
+            $score = $metadata['score'] ?? null;
+            $breakdown = $metadata['attribute_scores'] ?? [];
+
+            $displayTitle = e($channel->title_custom ?: $channel->title ?: $channel->name);
+            $playlistName = e($channel->getEffectivePlaylist()->name ?? 'Unknown');
+
+            $scoreBadge = $score !== null
+                ? '<span class="font-mono text-sm whitespace-nowrap px-2 py-1 rounded bg-primary-50 text-primary-700 dark:bg-primary-950 dark:text-primary-300">Score '.(int) $score.'</span>'
+                : '<span class="text-xs text-gray-400 italic whitespace-nowrap">not scored</span>';
+
+            $summary = '<summary class="cursor-pointer flex items-center gap-3 list-none select-none">
+                <span class="text-gray-400 group-open:rotate-90 transition-transform inline-block w-3">▸</span>
+                <span class="font-mono text-xs text-gray-500 dark:text-gray-400 w-8">#'.($index + 1).'</span>
+                <div class="flex-1 min-w-0">
+                    <div class="font-medium truncate">'.$displayTitle.'</div>
+                    <div class="text-xs text-gray-500 dark:text-gray-400 truncate">'.$playlistName.'</div>
+                </div>
+                '.$scoreBadge.'
+            </summary>';
+
+            $expanded = '<div class="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700 space-y-3">';
+
+            if (! empty($breakdown)) {
+                $breakdownParts = [];
+                foreach ($breakdown as $attribute => $value) {
+                    $label = e(str_replace('_', ' ', $attribute));
+                    $breakdownParts[] = '<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-xs"><span class="text-gray-500 dark:text-gray-400">'.$label.'</span><span class="font-mono">'.(int) $value.'</span></span>';
+                }
+                $expanded .= '<div>
+                    <div class="text-xs uppercase text-gray-500 dark:text-gray-400 mb-1.5">Score breakdown (per attribute, 0-100)</div>
+                    <div class="flex flex-wrap gap-1.5">'.implode('', $breakdownParts).'</div>
+                </div>';
+            }
+
+            $expanded .= self::renderFailoverTechDetails($channel);
+            $expanded .= '</div>';
+
+            return '<details class="group rounded border border-gray-200 dark:border-gray-700 p-3 hover:bg-gray-50 dark:hover:bg-gray-900/50">'.$summary.$expanded.'</details>';
+        })->implode('');
+
+        return new HtmlString('<div class="space-y-2">'.$cards.'</div>');
+    }
+
+    /**
+     * Render a single failover channel's technical details for the expandable
+     * ranking card. Returns a "not yet probed" hint when no stream stats are
+     * available so users know whether re-probing might help.
+     */
+    private static function renderFailoverTechDetails(Channel $channel): string
+    {
+        if (empty($channel->stream_stats)) {
+            $hint = $channel->probe_enabled
+                ? __('Not yet probed — run a probe on this channel to capture stream details.')
+                : __('Probing is disabled for this channel.');
+
+            return '<div>
+                <div class="text-xs uppercase text-gray-500 dark:text-gray-400 mb-1.5">Technical details</div>
+                <div class="text-sm text-gray-500 italic">'.e($hint).'</div>
+            </div>';
+        }
+
+        $compact = $channel->getStreamStatsForDisplay()['compact'] ?? [];
+        $rows = [];
+
+        $append = function (string $label, $value, ?string $suffix = null) use (&$rows) {
+            if ($value === null || $value === '') {
+                return;
+            }
+            $formatted = is_numeric($value) && $suffix === ' kbps'
+                ? number_format((float) $value, 0).$suffix
+                : ($suffix ? $value.$suffix : $value);
+            $rows[] = '<div class="text-xs text-gray-500 dark:text-gray-400">'.e($label).'</div><div class="text-sm font-mono">'.e((string) $formatted).'</div>';
+        };
+
+        $append('Resolution', $compact['resolution'] ?? null);
+        $append('Frame rate', isset($compact['source_fps']) ? $compact['source_fps'] : null, ' fps');
+        $append('Video codec', $compact['video_codec_display'] ?? null);
+        $append('Video bitrate', $compact['ffmpeg_output_bitrate'] ?? null, ' kbps');
+        $append('Audio codec', $compact['audio_codec'] ?? null);
+        $append('Audio channels', $compact['audio_channels'] ?? null);
+        $append('Audio bitrate', $compact['audio_bitrate'] ?? null, ' kbps');
+        $append('Audio language', $compact['audio_language'] ?? null);
+
+        if (empty($rows)) {
+            return '<div>
+                <div class="text-xs uppercase text-gray-500 dark:text-gray-400 mb-1.5">Technical details</div>
+                <div class="text-sm text-gray-500 italic">'.e(__('Probe ran but returned no usable details.')).'</div>
+            </div>';
+        }
+
+        $probedAt = $channel->stream_stats_probed_at?->diffForHumans();
+        $footer = $probedAt
+            ? '<div class="text-xs text-gray-400 dark:text-gray-500 mt-2">'.e(__('Last probed').': '.$probedAt).'</div>'
+            : '';
+
+        return '<div>
+            <div class="text-xs uppercase text-gray-500 dark:text-gray-400 mb-1.5">Technical details</div>
+            <div class="grid grid-cols-2 gap-x-4 gap-y-1">'.implode('', $rows).'</div>
+            '.$footer.'
+        </div>';
+    }
+
     public static function getForm($customPlaylist = null, $edit = false): array
     {
         return [
@@ -1532,6 +1824,12 @@ class ChannelResource extends Resource implements CopilotResource
                     Toggle::make('probe_enabled')
                         ->default(true)
                         ->helperText(__('Allow probing this channel when running playlist channel probe jobs.')),
+                    Toggle::make('is_smart_channel')
+                        ->label(__('Smart channel'))
+                        ->default(false)
+                        ->live()
+                        ->helperText(__('Auto-streams the highest-ranked failover. URL field is locked while on. Custom channels only.'))
+                        ->visible(fn (Get $get) => (bool) $get('is_custom')),
                 ]),
             Fieldset::make(__('Playlist Type (choose one)'))
                 ->schema([
@@ -1667,12 +1965,16 @@ class ChannelResource extends Resource implements CopilotResource
                         ->columnSpan(1)
                         ->prefixIcon('heroicon-m-globe-alt')
                         ->hintIcon(
-                            icon: fn (Get $get) => $get('is_custom') ? null : 'heroicon-m-question-mark-circle',
-                            tooltip: fn (Get $get) => $get('is_custom') ? null : 'The original URL from the playlist provider. This is read-only and cannot be modified. This URL is automatically updated on Playlist sync.'
+                            icon: fn (Get $get) => $get('is_smart_channel')
+                                ? 'heroicon-m-sparkles'
+                                : ($get('is_custom') ? null : 'heroicon-m-question-mark-circle'),
+                            tooltip: fn (Get $get) => $get('is_smart_channel')
+                                ? 'This is a smart channel. The streamed URL is taken from the highest-ranked failover automatically — set the URL on a failover channel instead, or remove the smart-channel flag to manage the URL directly.'
+                                : ($get('is_custom') ? null : 'The original URL from the playlist provider. This is read-only and cannot be modified. This URL is automatically updated on Playlist sync.')
                         )
                         ->formatStateUsing(fn ($record) => $record?->url)
-                        ->disabled(fn (Get $get) => ! $get('is_custom')) // make it read-only but copyable for non-custom channels
-                        ->dehydrated(fn (Get $get) => $get('is_custom')) // don't save the value in the database for custom channels
+                        ->disabled(fn (Get $get) => $get('is_smart_channel') || ! $get('is_custom'))
+                        ->dehydrated(fn (Get $get) => ! $get('is_smart_channel') && $get('is_custom'))
                         ->type('url'),
                     TextInput::make('url_custom')
                         ->label(__('URL Override'))
@@ -1831,6 +2133,19 @@ class ChannelResource extends Resource implements CopilotResource
                 ]),
             Fieldset::make(__('Failover Channels'))
                 ->schema([
+                    Placeholder::make('smart_channel_no_failovers_warning')
+                        ->hiddenLabel()
+                        ->columnSpanFull()
+                        ->visible(fn (Get $get): bool => (bool) $get('is_smart_channel') && empty($get('failovers')))
+                        ->content(new HtmlString(
+                            '<div class="flex items-start gap-3 p-3 rounded-lg bg-warning-50 dark:bg-warning-950/50 border border-warning-200 dark:border-warning-800">
+                                <svg class="w-5 h-5 flex-shrink-0 text-warning-600 dark:text-warning-400 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                                <div class="text-sm text-warning-700 dark:text-warning-300">
+                                    <strong>'.e(__('Smart channel without failovers won\'t stream.')).'</strong> '
+                                    .e(__('Add at least one failover channel below — the smart channel takes its stream URL from the highest-ranked failover at stream time.')).'
+                                </div>
+                            </div>'
+                        )),
                     Repeater::make('failovers')
                         ->relationship()
                         ->label('')
@@ -1875,6 +2190,7 @@ class ChannelResource extends Resource implements CopilotResource
                                         ->withoutEagerLoads()
                                         ->with('playlist')
                                         ->whereNotIn('id', $existingFailoverIds)
+                                        ->where('is_smart_channel', false)
                                         ->where(function ($query) use ($searchLower) {
                                             $query->whereRaw('LOWER(title) LIKE ?', ["%{$searchLower}%"])
                                                 ->orWhereRaw('LOWER(title_custom) LIKE ?', ["%{$searchLower}%"])

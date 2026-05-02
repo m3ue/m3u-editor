@@ -49,6 +49,7 @@ class Channel extends Model
         'extvlcopt' => 'array',
         'kodidrop' => 'array',
         'is_custom' => 'boolean',
+        'is_smart_channel' => 'boolean',
         'is_vod' => 'boolean',
         'enable_proxy' => 'boolean',
         'tmdb_id' => 'integer',
@@ -357,7 +358,16 @@ class Channel extends Model
     /**
      * Run ffprobe against this channel's stream URL and return parsed stats.
      *
-     * @return array{streams: array<int, array{codec_type: string, codec_name: string, codec_long_name: ?string, profile: ?string, width: ?int, height: ?int, bit_rate: ?string, avg_frame_rate: ?string, display_aspect_ratio: ?string, sample_rate: ?string, channels: ?int, channel_layout: ?string, level: ?int, bits_per_raw_sample: ?string}>}
+     * Returns a list of entries. Per-stream entries are keyed under `stream` and
+     * carry a `codec_type`. A trailing entry keyed under `format` carries
+     * container-level metadata (bit_rate, duration, format_name).
+     *
+     * For live MPEG-TS / HLS streams, neither the per-stream video `bit_rate`
+     * nor the format-level `bit_rate` is typically populated (no known
+     * duration). In that case a short packet-sampling probe measures the actual
+     * throughput and back-fills the video stream's `bit_rate` field.
+     *
+     * @return array<int, array{stream?: array<string, mixed>, format?: array{bit_rate: ?string, duration: ?string, format_name: ?string}}>
      */
     public function probeStreamStats(int $timeout = 15): array
     {
@@ -367,7 +377,7 @@ class Channel extends Model
                 return [];
             }
 
-            $process = new SymfonyProcess(['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_streams', $url]);
+            $process = new SymfonyProcess(['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_streams', '-show_format', $url]);
             $process->setTimeout($timeout);
             $process->run();
 
@@ -381,8 +391,12 @@ class Channel extends Model
             $json = json_decode($output, true);
             if (isset($json['streams']) && is_array($json['streams'])) {
                 $streamStats = [];
+                $videoBitRateMissing = false;
                 foreach ($json['streams'] as $stream) {
                     if (isset($stream['codec_name'])) {
+                        if (($stream['codec_type'] ?? '') === 'video' && empty($stream['bit_rate'])) {
+                            $videoBitRateMissing = true;
+                        }
                         $streamStats[]['stream'] = [
                             'codec_type' => $stream['codec_type'],
                             'codec_name' => $stream['codec_name'],
@@ -404,6 +418,29 @@ class Channel extends Model
                     }
                 }
 
+                if ($videoBitRateMissing) {
+                    $sampledBps = $this->sampleVideoBitrate($url, $timeout);
+                    if ($sampledBps !== null) {
+                        foreach ($streamStats as &$entry) {
+                            if (isset($entry['stream']) && ($entry['stream']['codec_type'] ?? '') === 'video') {
+                                $entry['stream']['bit_rate'] = (string) $sampledBps;
+                                break;
+                            }
+                        }
+                        unset($entry);
+                    }
+                }
+
+                if (isset($json['format']) && is_array($json['format'])) {
+                    $streamStats[] = [
+                        'format' => [
+                            'bit_rate' => $json['format']['bit_rate'] ?? null,
+                            'duration' => $json['format']['duration'] ?? null,
+                            'format_name' => $json['format']['format_name'] ?? null,
+                        ],
+                    ];
+                }
+
                 return $streamStats;
             }
         } catch (Exception $e) {
@@ -411,6 +448,79 @@ class Channel extends Model
         }
 
         return [];
+    }
+
+    /**
+     * Measure video bitrate by sampling packets from the live stream.
+     *
+     * Used when ffprobe's metadata pass leaves both per-stream and format-level
+     * `bit_rate` null (common for live MPEG-TS / HLS). Reads ~5 seconds of
+     * video packets and computes (bytes * 8 / duration). Returns bps as an
+     * integer, or null if no usable packets were captured.
+     *
+     * Caps its timeout at 10 seconds regardless of the metadata-pass timeout —
+     * `-read_intervals "%+5"` only reads 5 seconds of stream, so longer is
+     * pointless and would compound with the metadata-pass budget for jobs
+     * that probe many channels.
+     */
+    protected function sampleVideoBitrate(string $url, int $timeout): ?int
+    {
+        try {
+            $process = new SymfonyProcess([
+                'ffprobe',
+                '-v', 'quiet',
+                '-print_format', 'json',
+                '-read_intervals', '%+5',
+                '-select_streams', 'v:0',
+                '-show_entries', 'packet=size,pts_time',
+                $url,
+            ]);
+            $process->setTimeout(min($timeout, 10));
+            $process->run();
+
+            if ($process->getExitCode() !== 0) {
+                return null;
+            }
+
+            $json = json_decode($process->getOutput(), true);
+
+            return self::computeBitrateFromPackets($json['packets'] ?? []);
+        } catch (Exception $e) {
+            Log::error("Error sampling video bitrate for channel \"{$this->title}\": {$e->getMessage()}");
+
+            return null;
+        }
+    }
+
+    /**
+     * Compute bitrate (bps) from a sequence of ffprobe `-show_packets` entries.
+     *
+     * Returns null when there are too few packets, the time span is non-positive,
+     * or the total byte count is zero — i.e. when no meaningful measurement can
+     * be derived.
+     *
+     * @param  array<int, array{size?: string|int, pts_time?: string|float}>  $packets
+     */
+    public static function computeBitrateFromPackets(array $packets): ?int
+    {
+        if (count($packets) < 2) {
+            return null;
+        }
+
+        $totalBytes = 0;
+        foreach ($packets as $packet) {
+            $totalBytes += (int) ($packet['size'] ?? 0);
+        }
+
+        $firstPts = (float) ($packets[0]['pts_time'] ?? 0);
+        $lastPts = (float) ($packets[count($packets) - 1]['pts_time'] ?? 0);
+        $duration = $lastPts - $firstPts;
+
+        if ($duration <= 0 || $totalBytes <= 0) {
+            return null;
+        }
+
+        return (int) round($totalBytes * 8 / $duration);
     }
 
     /**
@@ -427,7 +537,13 @@ class Channel extends Model
 
         $video = null;
         $audio = null;
+        $format = null;
         foreach ($stats as $entry) {
+            if (isset($entry['format']) && is_array($entry['format'])) {
+                $format = $entry['format'];
+
+                continue;
+            }
             $stream = $entry['stream'] ?? $entry;
             if (($stream['codec_type'] ?? '') === 'video' && ! $video) {
                 $video = $stream;
@@ -462,8 +578,15 @@ class Channel extends Model
                 $result['source_fps'] = $fps ? (float) $fps : null;
             }
 
-            // Convert bps to kbps
+            // Per-stream video bit_rate is often null for MPEG-TS / HLS containers.
+            // Fall back to (format.bit_rate − audio.bit_rate). Includes muxing overhead
+            // (~3-5% inflation) but is good enough for ranking and Technical Details display.
             $bitRate = $video['bit_rate'] ?? null;
+            if ($bitRate === null && $format !== null && isset($format['bit_rate'])) {
+                $audioBps = isset($audio['bit_rate']) ? (float) $audio['bit_rate'] : 0.0;
+                $videoBps = max(0.0, (float) $format['bit_rate'] - $audioBps);
+                $bitRate = $videoBps > 0 ? $videoBps : null;
+            }
             $result['ffmpeg_output_bitrate'] = $bitRate ? round((float) $bitRate / 1000, 1) : null;
         }
 
@@ -530,6 +653,9 @@ class Channel extends Model
             $allStreams = [];
 
             foreach ($stats as $index => $entry) {
+                if (isset($entry['format']) && ! isset($entry['stream'])) {
+                    continue;
+                }
                 $stream = $entry['stream'] ?? $entry;
                 $type = $stream['codec_type'] ?? null;
 
@@ -699,6 +825,29 @@ class Channel extends Model
     public function hasMovieId(): bool
     {
         return $this->getTmdbId() !== null || $this->getImdbId() !== null;
+    }
+
+    /**
+     * Convenience helper: same as reading $this->is_smart_channel, but cast-safe
+     * for code that wants a boolean expression in templates / closures.
+     */
+    public function isSmartChannel(): bool
+    {
+        return (bool) $this->is_smart_channel;
+    }
+
+    /**
+     * Filter to only channels that have been classified as smart channels.
+     *
+     * Smart channels are custom wrappers with no URL of their own; the
+     * effective stream URL comes from the highest-ranked attached failover
+     * via PlaylistUrlService::getChannelUrl(). The flag is set explicitly
+     * (e.g. by SmartChannelCreator) — composite "looks like one" configs
+     * don't auto-classify.
+     */
+    public function scopeSmartChannels(Builder $query): Builder
+    {
+        return $query->where('is_smart_channel', true);
     }
 
     public function scopeHasMovieId(Builder $query): Builder

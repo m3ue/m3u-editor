@@ -159,9 +159,9 @@ echo $totalBandwidth > 1000 ? round($totalBandwidth / 1000, 1) . ' Mbps' : $tota
                                                                     <div class="md:flex items-center justify-between mb-4">
                                                                         <div class="md:flex items-center space-x-0 md:space-x-4 space-y-2 md:space-y-0">
                                                                             <div class="flex-shrink-0">
-                                                                                <div class="h-10 w-10 rounded-full flex items-center justify-center {{ 
+                                                                                <div class="h-10 w-10 rounded-full flex items-center justify-center {{
                                                                                     $stream['status'] === 'active' ? 'bg-green-100 dark:bg-green-900 text-green-600 dark:text-green-300' :
-                    ($stream['status'] === 'idle' ? 'bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300' : 'bg-red-100 dark:bg-red-900 text-red-600 dark:text-red-300') 
+                    ($stream['status'] === 'idle' ? 'bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300' : 'bg-red-100 dark:bg-red-900 text-red-600 dark:text-red-300')
                                                                                 }}">
                                                                                     @if($stream['status'] === 'idle')
                                                                                         <x-heroicon-s-pause class="w-5 h-5" />
@@ -197,6 +197,11 @@ echo $totalBandwidth > 1000 ? round($totalBandwidth / 1000, 1) . ' Mbps' : $tota
 
                                                                     <!-- Stream Badges -->
                                                                     <div class="flex flex-wrap items-center gap-2 mb-4">
+                                                                        @if($stream['model']['is_smart_channel'] ?? false)
+                                                                            <x-filament::badge color="info" size="sm" icon="heroicon-s-sparkles" tooltip="Smart channel — streams the highest-ranked failover automatically">
+                                                                                Smart Channel
+                                                                            </x-filament::badge>
+                                                                        @endif
                                                                         @if($stream['alias_name'] ?? false)
                                                                             <x-filament::badge color="primary" size="sm">
                                                                                 Alias: {{ $stream['alias_name'] }}

@@ -78,6 +78,8 @@ class Playlist extends Model
         'enable_series' => 'boolean',
         'auto_retry_503_count' => 'integer',
         'auto_retry_503_last_at' => 'datetime',
+        'last_failover_rescore_at' => 'datetime',
+        'failover_rescore_staleness_days' => 'integer',
     ];
 
     public function getFolderPathAttribute(): string

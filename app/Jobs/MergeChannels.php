@@ -6,6 +6,7 @@ use App\Models\Channel;
 use App\Models\ChannelFailover;
 use App\Models\Group;
 use App\Models\Playlist;
+use App\Services\Channels\ChannelMergeScorer;
 use Filament\Notifications\Notification;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -19,16 +20,11 @@ class MergeChannels implements ShouldQueue
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     /**
-     * Default priority attributes order (first = highest priority)
+     * Default priority attributes order (first = highest priority).
+     *
+     * @deprecated Use {@see ChannelMergeScorer::DEFAULT_PRIORITY_ORDER}. Kept here for legacy callers.
      */
-    protected const DEFAULT_PRIORITY_ORDER = [
-        'playlist_priority',
-        'group_priority',
-        'catchup_support',
-        'resolution',
-        'codec',
-        'keyword_match',
-    ];
+    protected const DEFAULT_PRIORITY_ORDER = ChannelMergeScorer::DEFAULT_PRIORITY_ORDER;
 
     /**
      * Cached group priorities for performance
@@ -374,41 +370,29 @@ class MergeChannels implements ShouldQueue
     }
 
     /**
+     * Build a fresh scorer using this job's weighted config and the supplied playlist priority lookup.
+     */
+    protected function buildScorer(array $playlistPriority): ChannelMergeScorer
+    {
+        return new ChannelMergeScorer(
+            priorityOrder: $this->getPriorityOrder(),
+            playlistPriority: $playlistPriority,
+            groupPriorityCache: $this->groupPriorityCache,
+            preferredCodec: $this->weightedConfig['prefer_codec'] ?? null,
+            priorityKeywords: $this->weightedConfig['priority_keywords'] ?? [],
+        );
+    }
+
+    /**
      * Calculate weighted score for a channel.
      */
     protected function calculateChannelScore(Channel $channel, array $playlistPriority): int
     {
-        $score = 0;
-        $priorityOrder = $this->getPriorityOrder();
-
-        // Base multiplier decreases for each priority level
-        $multiplier = count($priorityOrder) * 1000;
-
-        foreach ($priorityOrder as $attribute) {
-            $attributeScore = match ($attribute) {
-                'playlist_priority' => $this->getPlaylistPriorityScore($channel, $playlistPriority),
-                'group_priority' => $this->getGroupPriorityScore($channel),
-                'catchup_support' => $this->getCatchupScore($channel),
-                'resolution' => $this->getResolutionScore($channel),
-                'codec' => $this->getCodecScore($channel),
-                'keyword_match' => $this->getKeywordScore($channel),
-                default => 0,
-            };
-
-            $score += $attributeScore * $multiplier;
-            $multiplier = max(1, $multiplier - 1000);
-        }
-
-        return $score;
+        return $this->buildScorer($playlistPriority)->score($channel);
     }
 
     /**
      * Get normalized priority order from config.
-     *
-     * Supports both string array format:
-     * ['playlist_priority', 'resolution']
-     * and object array format:
-     * [['attribute' => 'playlist_priority'], ['attribute' => 'resolution']]
      *
      * @return array<int, string>
      */
@@ -418,142 +402,11 @@ class MergeChannels implements ShouldQueue
             return $this->normalizedPriorityOrder;
         }
 
-        $allowed = array_flip(self::DEFAULT_PRIORITY_ORDER);
-        $raw = $this->weightedConfig['priority_attributes'] ?? self::DEFAULT_PRIORITY_ORDER;
-
-        if (! is_array($raw) || empty($raw)) {
-            $this->normalizedPriorityOrder = self::DEFAULT_PRIORITY_ORDER;
-
-            return $this->normalizedPriorityOrder;
-        }
-
-        $normalized = [];
-        foreach ($raw as $item) {
-            $attribute = is_array($item) ? ($item['attribute'] ?? null) : $item;
-            if (! is_string($attribute)) {
-                continue;
-            }
-
-            $attribute = trim($attribute);
-            if ($attribute === '' || ! isset($allowed[$attribute])) {
-                continue;
-            }
-
-            $normalized[] = $attribute;
-        }
-
-        $normalized = array_values(array_unique($normalized));
-        $this->normalizedPriorityOrder = ! empty($normalized) ? $normalized : self::DEFAULT_PRIORITY_ORDER;
+        $this->normalizedPriorityOrder = ChannelMergeScorer::normalizePriorityOrder(
+            $this->weightedConfig['priority_attributes'] ?? null
+        );
 
         return $this->normalizedPriorityOrder;
-    }
-
-    /**
-     * Get playlist priority score (higher = better).
-     */
-    protected function getPlaylistPriorityScore(Channel $channel, array $playlistPriority): int
-    {
-        // Invert priority so lower index = higher score
-        $priority = $playlistPriority[$channel->playlist_id] ?? 999;
-
-        return max(0, 100 - $priority);
-    }
-
-    /**
-     * Get group priority score from config (higher = better).
-     */
-    protected function getGroupPriorityScore(Channel $channel): int
-    {
-        return $this->groupPriorityCache[$channel->group_id] ?? 0;
-    }
-
-    /**
-     * Get catchup support score.
-     */
-    protected function getCatchupScore(Channel $channel): int
-    {
-        return ! empty($channel->catchup) ? 100 : 0;
-    }
-
-    /**
-     * Get resolution score (normalized 0-100).
-     */
-    protected function getResolutionScore(Channel $channel): int
-    {
-        $resolution = $this->getResolution($channel);
-
-        // Normalize: 4K (3840x2160 = 8294400) = 100, 1080p = ~25, 720p = ~11
-        return min(100, (int) ($resolution / 82944));
-    }
-
-    /**
-     * Get codec preference score.
-     */
-    protected function getCodecScore(Channel $channel): int
-    {
-        $preferredCodec = $this->weightedConfig['prefer_codec'] ?? null;
-        if (! $preferredCodec) {
-            return 0;
-        }
-
-        $channelCodec = $this->getCodec($channel);
-        if (! $channelCodec) {
-            return 0;
-        }
-
-        $preferredCodec = strtolower($preferredCodec);
-        $channelCodec = strtolower($channelCodec);
-
-        $isHevc = str_contains($channelCodec, 'hevc') || str_contains($channelCodec, 'h265') || str_contains($channelCodec, '265');
-        $isH264 = str_contains($channelCodec, 'h264') || str_contains($channelCodec, 'avc') || str_contains($channelCodec, '264');
-
-        if ($preferredCodec === 'hevc' || $preferredCodec === 'h265') {
-            return $isHevc ? 100 : 0;
-        }
-
-        if ($preferredCodec === 'h264' || $preferredCodec === 'avc') {
-            return $isH264 ? 100 : 0;
-        }
-
-        return 0;
-    }
-
-    /**
-     * Get keyword match score.
-     */
-    protected function getKeywordScore(Channel $channel): int
-    {
-        $keywords = $this->weightedConfig['priority_keywords'] ?? [];
-        if (empty($keywords)) {
-            return 0;
-        }
-
-        $channelName = strtolower($channel->title ?? $channel->name ?? '');
-        $matchCount = 0;
-
-        foreach ($keywords as $keyword) {
-            if (str_contains($channelName, strtolower($keyword))) {
-                $matchCount++;
-            }
-        }
-
-        // More matches = higher score (cap at 100)
-        return min(100, $matchCount * 25);
-    }
-
-    /**
-     * Get codec from channel stream stats.
-     */
-    protected function getCodec(Channel $channel): ?string
-    {
-        $streamStats = $channel->ensureStreamStats();
-        foreach ($streamStats as $stream) {
-            if (isset($stream['stream']['codec_type']) && $stream['stream']['codec_type'] === 'video') {
-                return $stream['stream']['codec_name'] ?? null;
-            }
-        }
-
-        return null;
     }
 
     /**
@@ -572,7 +425,7 @@ class MergeChannels implements ShouldQueue
         if ($this->checkResolution) {
             return $channels->sortBy(fn ($channel) => [
                 $this->preferCatchupAsPrimary && empty($channel->catchup) ? 1 : 0,
-                -(int) $this->getResolution($channel),
+                -(int) ChannelMergeScorer::getResolution($channel),
                 (int) ($playlistPriority[$channel->playlist_id] ?? 999),
                 $channel->sort ?? 999999,
             ]);
@@ -600,7 +453,7 @@ class MergeChannels implements ShouldQueue
             $channelsWithResolution = $selectionGroup->map(function ($channel) {
                 return [
                     'channel' => $channel,
-                    'resolution' => $this->getResolution($channel),
+                    'resolution' => ChannelMergeScorer::getResolution($channel),
                 ];
             });
 
@@ -628,21 +481,6 @@ class MergeChannels implements ShouldQueue
             (int) ($playlistPriority[$channel->playlist_id] ?? 999),
             $channel->sort ?? 999999,
         ])->first();
-    }
-
-    /**
-     * Get resolution from channel stream stats.
-     */
-    protected function getResolution(Channel $channel): int
-    {
-        $streamStats = $channel->ensureStreamStats();
-        foreach ($streamStats as $stream) {
-            if (isset($stream['stream']['codec_type']) && $stream['stream']['codec_type'] === 'video') {
-                return ($stream['stream']['width'] ?? 0) * ($stream['stream']['height'] ?? 0);
-            }
-        }
-
-        return 0;
     }
 
     protected function sendCompletionNotification(int $processed, int $deactivatedCount = 0): void
