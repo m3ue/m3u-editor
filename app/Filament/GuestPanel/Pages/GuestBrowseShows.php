@@ -308,6 +308,7 @@ class GuestBrowseShows extends Page
     public function recordSeriesWithOptions(string $title): void
     {
         $this->createSeriesRule($title, [
+            'new_only' => $this->seriesNewOnly,
             'series_mode' => $this->seriesNewOnly ? DvrSeriesMode::NewFlag : DvrSeriesMode::All,
             'channel_id' => $this->seriesChannelId ?: null,
             'priority' => $this->seriesPriority,

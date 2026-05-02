@@ -357,6 +357,7 @@ class BrowseShows extends Page
         }
 
         $this->createSeriesRule($title, [
+            'new_only' => $this->seriesNewOnly,
             'series_mode' => $this->seriesNewOnly ? DvrSeriesMode::NewFlag : DvrSeriesMode::All,
             'channel_id' => $channelId,
             'priority' => $this->seriesPriority,

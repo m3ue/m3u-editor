@@ -1022,7 +1022,7 @@ class XtreamApiController extends Controller
                                 'episode_num' => $episode->episode_num,
                                 'title' => $episode->title ?? "Episode {$episode->episode_num}",
                                 'container_extension' => $containerExtension,
-                                'info' => array_merge($episode->info, [
+                                'info' => array_merge($episode->info ?? [], [
                                     'movie_image' => $movieImage ?? null,
                                     'cover_big' => $coverBig ?? null,
                                 ]),
