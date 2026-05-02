@@ -67,6 +67,8 @@ class MapPlaylistChannelsToEpgChunk implements ShouldQueue
         // Process each channel
         $patterns = $this->settings['exclude_prefixes'] ?? [];
         $useRegex = $this->settings['use_regex'] ?? false;
+        $regexExtractMode = $this->settings['regex_extract_mode'] ?? false;
+        $appendSuffix = $this->settings['append_suffix'] ?? '';
         $skipMissing = $this->settings['skip_missing'] ?? false;
         $setEpgIcon = $this->settings['set_epg_icon'] ?? false;
         $mappedChannels = [];
@@ -92,15 +94,22 @@ class MapPlaylistChannelsToEpgChunk implements ShouldQueue
                         $escapedPattern = str_replace($delimiter, '\\'.$delimiter, $pattern);
                         $finalPattern = $delimiter.$escapedPattern.$delimiter.'u';
 
-                        // Use regex to remove the prefix
-                        if (preg_match($finalPattern, $streamId, $matches)) {
-                            $streamId = preg_replace($finalPattern, '', $streamId);
-                        }
-                        if (preg_match($finalPattern, $name, $matches)) {
-                            $name = preg_replace($finalPattern, '', $name);
-                        }
-                        if (preg_match($finalPattern, $title, $matches)) {
-                            $title = preg_replace($finalPattern, '', $title);
+                        if ($regexExtractMode) {
+                            // Extract mode: use the first capture group (or full match) as the value
+                            $streamId = $this->regexExtract($finalPattern, $streamId);
+                            $name = $this->regexExtract($finalPattern, $name);
+                            $title = $this->regexExtract($finalPattern, $title);
+                        } else {
+                            // Default: remove the matched pattern
+                            if (preg_match($finalPattern, $streamId, $matches)) {
+                                $streamId = preg_replace($finalPattern, '', $streamId);
+                            }
+                            if (preg_match($finalPattern, $name, $matches)) {
+                                $name = preg_replace($finalPattern, '', $name);
+                            }
+                            if (preg_match($finalPattern, $title, $matches)) {
+                                $title = preg_replace($finalPattern, '', $title);
+                            }
                         }
                     } else {
                         // Use simple string prefix matching
@@ -115,6 +124,13 @@ class MapPlaylistChannelsToEpgChunk implements ShouldQueue
                         }
                     }
                 }
+            }
+
+            // Append suffix to cleaned values (applied after all pattern processing)
+            if ($appendSuffix !== '') {
+                $streamId = trim($streamId).$appendSuffix;
+                $name = trim($name).$appendSuffix;
+                $title = trim($title).$appendSuffix;
             }
 
             // Get the EPG channel (check for direct match first with improved logic)
@@ -269,6 +285,20 @@ class MapPlaylistChannelsToEpgChunk implements ShouldQueue
         // Update progress
         $progressIncrement = (count($this->channelIds) / $this->totalChannels) * 95; // Reserve 5% for completion
         $map->update(['progress' => min(99, $map->progress + $progressIncrement)]);
+    }
+
+    /**
+     * Extract the first capture group (or full match) from a regex pattern.
+     * Returns the original value unchanged if the pattern does not match.
+     */
+    private function regexExtract(string $pattern, string $value): string
+    {
+        if (preg_match($pattern, $value, $matches)) {
+            // Prefer the first capture group ($1), fall back to full match ($0)
+            return $matches[1] ?? $matches[0];
+        }
+
+        return $value;
     }
 
     /**
