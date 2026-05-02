@@ -138,7 +138,9 @@ class DvrPostProcessorService
         }
 
         $fileSize = file_exists($outputFullPath) ? filesize($outputFullPath) : null;
-        $duration = $this->estimateDuration($recording);
+        // Prefer the actual segment-derived duration so cancelled recordings reflect
+        // what was really captured, not the originally scheduled programme length.
+        $duration = $this->durationFromManifest($m3u8FullPath) ?? $this->estimateDuration($recording);
 
         Log::info('DVR post-processing step 1 complete: '.strtoupper($outputFormat).' concatenated', [
             'recording_id' => $recording->id,
@@ -426,6 +428,50 @@ class DvrPostProcessorService
         }
 
         return null;
+    }
+
+    /**
+     * Sum the #EXTINF durations from an HLS manifest.
+     *
+     * This is the authoritative source for the actually-captured duration,
+     * which matters for cancelled recordings where wall-clock time
+     * (actual_end - actual_start) over-reports if cleanup was slow.
+     */
+    private function durationFromManifest(string $m3u8Path): ?int
+    {
+        if (! file_exists($m3u8Path)) {
+            return null;
+        }
+
+        $lines = @file($m3u8Path);
+        if ($lines === false) {
+            return null;
+        }
+
+        $total = 0.0;
+        $found = false;
+
+        foreach ($lines as $line) {
+            $line = trim($line);
+            if (! str_starts_with($line, '#EXTINF:')) {
+                continue;
+            }
+
+            // Format: #EXTINF:<duration>,<title>
+            $value = substr($line, strlen('#EXTINF:'));
+            $comma = strpos($value, ',');
+            if ($comma !== false) {
+                $value = substr($value, 0, $comma);
+            }
+
+            $duration = (float) $value;
+            if ($duration > 0) {
+                $total += $duration;
+                $found = true;
+            }
+        }
+
+        return $found ? (int) round($total) : null;
     }
 
     /**
