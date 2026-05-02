@@ -104,7 +104,8 @@ it('lets live proxy media_info win over stored probe data per-field', function (
                 && $info['audio_codec'] === 'opus'             // live wins
                 && $info['video_profile'] === 'High'           // probe-only, kept
                 && $info['audio_language'] === 'eng'           // probe-only, kept
-                && $info['audio_bitrate_kbps'] === 192.0;      // probe-only, kept
+                && $info['audio_bitrate_kbps'] === 192.0       // probe-only, kept
+                && $info['is_live'] === true;                  // flagged for the live indicator dot
         });
 });
 
@@ -155,7 +156,8 @@ it('falls back to stored probe data when the proxy reports no live media_info', 
 
             return $info['resolution'] === '1920x1080'
                 && $info['video_codec'] === 'h264'
-                && $info['source_fps'] === 25.0;
+                && $info['source_fps'] === 25.0
+                && ! isset($info['is_live']);                  // probe-only must not show the live dot
         });
 });
 

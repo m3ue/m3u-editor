@@ -279,6 +279,9 @@ echo $totalBandwidth > 1000 ? round($totalBandwidth / 1000, 1) . ' Mbps' : $tota
                                                                         <div class="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 mr-1">
                                                                             <x-heroicon-s-film class="w-3.5 h-3.5" />
                                                                             <span class="font-medium uppercase tracking-wide">Stream Info</span>
+                                                                            @if($mediaInfo['is_live'] ?? false)
+                                                                                <span class="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse" title="Live data from active ffmpeg"></span>
+                                                                            @endif
                                                                         </div>
                                                                         @if($mediaInfo['resolution'] ?? false)
                                                                             <x-filament::badge color="info" size="sm" icon="heroicon-s-squares-2x2">

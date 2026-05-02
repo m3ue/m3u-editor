@@ -378,6 +378,7 @@ class M3uProxyStreamMonitor extends Page
                             ] : [];
 
                             $liveMediaInfo = $stream['media_info'] ?? [];
+                            $live = [];
                             if (! empty($liveMediaInfo)) {
                                 $live = array_filter([
                                     'resolution' => $liveMediaInfo['resolution'] ?? null,
@@ -387,12 +388,13 @@ class M3uProxyStreamMonitor extends Page
                                     'audio_codec' => $liveMediaInfo['audio_codec'] ?? null,
                                     'audio_channels' => $liveMediaInfo['audio_channels'] ?? null,
                                 ], fn ($v) => $v !== null && $v !== '');
-                                $merged = array_merge($probeMediaInfo, $live);
-                            } else {
-                                $merged = $probeMediaInfo;
                             }
+                            $merged = array_merge($probeMediaInfo, $live);
 
                             if (! empty($merged)) {
+                                if (! empty($live)) {
+                                    $merged['is_live'] = true;
+                                }
                                 $model['media_info'] = $merged;
                             }
 
