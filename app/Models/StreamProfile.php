@@ -11,9 +11,19 @@ class StreamProfile extends Model
 {
     use HasFactory;
 
+    protected $casts = [
+        'rules' => 'array',
+        'else_stream_profile_id' => 'integer',
+    ];
+
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function elseStreamProfile(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'else_stream_profile_id');
     }
 
     public function playlists(): HasMany
@@ -48,6 +58,17 @@ class StreamProfile extends Model
     public function isResolver(): bool
     {
         return in_array($this->backend, ['streamlink', 'ytdlp'], strict: true);
+    }
+
+    /**
+     * Whether this profile is adaptive (rule-based) — it delegates to
+     * another profile based on probed channel metadata. Adaptive profiles
+     * carry no transcoder args of their own; they resolve to a concrete
+     * transcoding profile at stream-start time via StreamProfileRuleEvaluator.
+     */
+    public function isAdaptive(): bool
+    {
+        return $this->backend === 'adaptive';
     }
 
     /**
