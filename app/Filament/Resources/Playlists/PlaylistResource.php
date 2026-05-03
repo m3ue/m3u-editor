@@ -2893,6 +2893,12 @@ class PlaylistResource extends Resource implements CopilotResource
                                         );
                                     })
                                     ->hidden(fn (Get $get): bool => ! $get('dvr_enable_metadata_enrichment')),
+                                Toggle::make('dvr_generate_nfo_files')
+                                    ->label(__('Generate NFO Files'))
+                                    ->helperText(__('Write Kodi/Jellyfin/Plex compatible .nfo metadata files alongside each recording (uses enriched TMDB/TVMaze metadata).'))
+                                    ->default(false)
+                                    ->inline(false)
+                                    ->columnSpanFull(),
                             ]),
                     ]),
             ])

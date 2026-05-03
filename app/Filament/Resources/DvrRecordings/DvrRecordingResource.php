@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\DvrRecordings;
 
 use App\Enums\DvrRecordingStatus;
+use App\Jobs\GenerateDvrNfo;
 use App\Jobs\PostProcessDvrRecording;
 use App\Jobs\StopDvrRecording;
 use App\Models\DvrRecording;
@@ -10,6 +11,7 @@ use App\Traits\HasUserFiltering;
 use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
+use Filament\Actions\BulkAction;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
@@ -238,6 +240,33 @@ class DvrRecordingResource extends Resource
             ], position: RecordActionsPosition::BeforeCells)
             ->toolbarActions([
                 BulkActionGroup::make([
+                    BulkAction::make('generateNfo')
+                        ->label(__('Generate NFO files'))
+                        ->icon('heroicon-o-document-text')
+                        ->requiresConfirmation()
+                        ->modalDescription(__('Queue NFO sidecar generation for the selected recordings. Existing NFO files with identical content are skipped.'))
+                        ->action(function ($records) {
+                            $dispatched = 0;
+                            $skipped = 0;
+                            foreach ($records as $record) {
+                                if (empty($record->file_path)) {
+                                    $skipped++;
+
+                                    continue;
+                                }
+                                GenerateDvrNfo::dispatch($record->id)->onQueue('dvr-meta');
+                                $dispatched++;
+                            }
+
+                            Notification::make()
+                                ->title(__('NFO generation queued'))
+                                ->body(__(':dispatched dispatched, :skipped skipped (no file_path).', [
+                                    'dispatched' => $dispatched,
+                                    'skipped' => $skipped,
+                                ]))
+                                ->success()
+                                ->send();
+                        }),
                     DeleteBulkAction::make(),
                 ]),
             ]);
