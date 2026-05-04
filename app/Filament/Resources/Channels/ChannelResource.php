@@ -10,6 +10,7 @@ use App\Filament\Concerns\HasCopilotSupport;
 use App\Filament\Resources\ChannelResource\Pages;
 use App\Filament\Resources\Channels\Pages\ListChannels;
 use App\Filament\Resources\EpgMaps\EpgMapResource;
+use App\Filament\Tables\ProbeStatusColumn;
 use App\Jobs\ChannelFindAndReplace;
 use App\Jobs\ChannelFindAndReplaceReset;
 use App\Jobs\MapPlaylistChannelsToEpg;
@@ -324,37 +325,7 @@ class ChannelResource extends Resource implements CopilotResource
                 ->toggleable(isToggledHiddenByDefault: false)
                 ->sortable(false)
                 ->hidden(fn () => ! auth()->user()->canUseProxy()),
-            IconColumn::make('stream_stats_probed_at')
-                ->label(__('Probed'))
-                ->getStateUsing(function ($record): string {
-                    if ($record->stream_stats_probed_at === null) {
-                        return 'never';
-                    }
-
-                    return empty($record->stream_stats) ? 'failed' : 'ok';
-                })
-                ->icon(fn (string $state): string => match ($state) {
-                    'ok' => 'heroicon-o-check-circle',
-                    'failed' => 'heroicon-o-exclamation-triangle',
-                    default => 'heroicon-o-x-circle',
-                })
-                ->color(fn (string $state): string => match ($state) {
-                    'ok' => 'success',
-                    'failed' => 'warning',
-                    default => 'gray',
-                })
-                ->tooltip(function ($record): string {
-                    if ($record->stream_stats_probed_at === null) {
-                        return __('Not probed yet');
-                    }
-                    if (empty($record->stream_stats)) {
-                        return __('Probe ran but returned no stream info').' ('.$record->stream_stats_probed_at->diffForHumans().')';
-                    }
-
-                    return __('Probed').' '.$record->stream_stats_probed_at->diffForHumans();
-                })
-                ->toggleable()
-                ->sortable(),
+            ProbeStatusColumn::make(),
             ToggleColumn::make('epg_map_enabled')
                 ->label(__('Mapping Enabled'))
                 ->sortable(),

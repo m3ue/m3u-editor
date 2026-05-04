@@ -220,9 +220,13 @@ class SeriesResource extends Resource implements CopilotResource
                         ->whereRaw("CAST(stream_stats AS TEXT) != '[]'"),
                 ])
                 ->badge()
-                ->color(fn ($state, $record) => $state === 0
-                    ? 'gray'
-                    : ($state >= ($record->probe_enabled_episodes_count ?? 0) ? 'success' : 'warning'))
+                ->color(function ($state, $record): string {
+                    if ($state === 0) {
+                        return 'gray';
+                    }
+
+                    return $state >= ($record->probe_enabled_episodes_count ?? 0) ? 'success' : 'warning';
+                })
                 ->tooltip(__('Episodes successfully probed (with stream info)'))
                 ->toggleable()
                 ->sortable(),

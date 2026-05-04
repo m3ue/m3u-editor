@@ -109,7 +109,7 @@ class VodFileNameService
      */
     public function generateMovieExtras(Channel $channel, StreamFileSetting $setting): string
     {
-        $components = $setting->trash_movie_components ?: ['quality', 'video', 'audio', 'hdr'];
+        $components = $setting->trash_movie_components ?? ['quality', 'video', 'audio', 'hdr'];
         $usePlexMarker = (bool) ($setting->group_versions ?? true);
 
         $streamStats = StreamStatsService::normalize($channel->stream_stats ?? []);

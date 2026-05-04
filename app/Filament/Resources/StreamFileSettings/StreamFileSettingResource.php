@@ -215,7 +215,7 @@ class StreamFileSettingResource extends Resource implements CopilotResource
                             // Trash Guide naming appends extra components (edition + quality bracket)
                             // to the standard filename above — it does NOT replace title/year/tmdb/group.
                             if ((bool) $get('trash_guide_naming_enabled')) {
-                                $components = $get('trash_movie_components') ?: ['quality', 'video', 'audio', 'hdr'];
+                                $components = $get('trash_movie_components') ?? ['quality', 'video', 'audio', 'hdr'];
                                 $usePlexMarker = (bool) ($get('group_versions') ?? true);
                                 $sample = [
                                     'edition' => 'Directors Cut',
@@ -321,7 +321,7 @@ class StreamFileSettingResource extends Resource implements CopilotResource
 
                         // Trash Guide naming appends quality bracket to the standard episode filename
                         if ((bool) $get('trash_guide_naming_enabled')) {
-                            $components = $get('trash_episode_components') ?: ['quality', 'video', 'audio', 'hdr'];
+                            $components = $get('trash_episode_components') ?? ['quality', 'video', 'audio', 'hdr'];
                             $sample = [
                                 'quality' => '1080p',
                                 'video' => 'x264',
@@ -482,9 +482,12 @@ class StreamFileSettingResource extends Resource implements CopilotResource
                             ->label(__('Use Plex/Jellyfin/Emby multi-version markers'))
                             ->default(true)
                             ->inline(false)
+                            ->live()
                             ->columnSpanFull()
                             ->helperText(__('When enabled, the edition is written as {edition-Name} (Plex marker). All versions of a movie land in the same folder so media servers offer a version switch (e.g. 1080p / 4K / Director\'s Cut). When disabled, the edition is written as a plain suffix.'))
-                            ->visible(fn (Get $get): bool => $get('type') === 'vod' && (bool) $get('trash_guide_naming_enabled')),
+                            ->visible(fn (Get $get): bool => $get('type') === 'vod'
+                                && (bool) $get('trash_guide_naming_enabled')
+                                && in_array('edition', $get('trash_movie_components') ?? [], true)),
                     ])
                     ->hidden(fn ($get) => ! $get('enabled')),
 

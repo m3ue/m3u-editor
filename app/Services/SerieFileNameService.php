@@ -48,7 +48,7 @@ class SerieFileNameService
 
         // Trash Guide naming: append components bracket (mirrors UI preview)
         if ($setting->trash_guide_naming_enabled) {
-            $components = $setting->trash_episode_components ?: ['quality', 'video', 'audio', 'hdr'];
+            $components = $setting->trash_episode_components ?? ['quality', 'video', 'audio', 'hdr'];
             $map = ['quality' => $quality, 'video' => $video, 'audio' => $audio, 'hdr' => $hdr];
             $parts = [];
             foreach (['quality', 'video', 'audio', 'hdr'] as $key) {
