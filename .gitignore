@@ -72,7 +72,3 @@ compose.dev.yaml
 compose.services.yaml
 mediaserver.env
 .env.testing
-
-# Local sync output (dev)
-/serien/
-/vod/
