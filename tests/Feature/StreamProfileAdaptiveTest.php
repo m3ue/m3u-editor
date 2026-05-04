@@ -321,3 +321,36 @@ it('isAdaptive helper returns true only for backend = adaptive', function () {
     $adaptive = makeAdaptiveProfile($this->user, []);
     expect($adaptive->isAdaptive())->toBeTrue();
 });
+
+// ── Delete guard: getReferencingAdaptiveProfiles() ───────────────────────────
+
+it('getReferencingAdaptiveProfiles returns profiles that use this profile as a rule target', function () {
+    $adaptive = makeAdaptiveProfile($this->user, [
+        ['conditions' => [['field' => 'video.codec_name', 'op' => '=', 'value' => 'hevc']], 'stream_profile_id' => $this->target->id],
+    ], elseProfileId: $this->fallback->id);
+
+    expect($this->target->getReferencingAdaptiveProfiles()->pluck('id')->all())->toBe([$adaptive->id]);
+});
+
+it('getReferencingAdaptiveProfiles returns profiles that use this profile as the else fallback', function () {
+    $adaptive = makeAdaptiveProfile($this->user, [
+        ['conditions' => [['field' => 'video.codec_name', 'op' => '=', 'value' => 'hevc']], 'stream_profile_id' => $this->target->id],
+    ], elseProfileId: $this->fallback->id);
+
+    expect($this->fallback->getReferencingAdaptiveProfiles()->pluck('id')->all())->toBe([$adaptive->id]);
+});
+
+it('getReferencingAdaptiveProfiles returns empty collection when profile is not referenced', function () {
+    $unreferenced = StreamProfile::factory()->for($this->user)->create(['backend' => 'ffmpeg']);
+
+    expect($unreferenced->getReferencingAdaptiveProfiles())->toBeEmpty();
+});
+
+it('getReferencingAdaptiveProfiles does not include profiles belonging to other users', function () {
+    $otherUser = User::factory()->create();
+    makeAdaptiveProfile($otherUser, [
+        ['conditions' => [['field' => 'video.codec_name', 'op' => '=', 'value' => 'hevc']], 'stream_profile_id' => $this->target->id],
+    ]);
+
+    expect($this->target->getReferencingAdaptiveProfiles())->toBeEmpty();
+});

@@ -426,6 +426,21 @@ class StreamProfileResource extends Resource implements CopilotResource
             ])
             ->recordActions([
                 Actions\DeleteAction::make()
+                    ->before(function (StreamProfile $record, Actions\DeleteAction $action): void {
+                        $referencing = $record->getReferencingAdaptiveProfiles();
+                        if ($referencing->isEmpty()) {
+                            return;
+                        }
+
+                        Notification::make()
+                            ->danger()
+                            ->title(__('Profile in use'))
+                            ->body(__('This profile is referenced by the following adaptive profiles: ').$referencing->pluck('name')->join(', ').'. '.__('Remove the references before deleting.'))
+                            ->persistent()
+                            ->send();
+
+                        $action->halt();
+                    })
                     ->button()->hiddenLabel()->size('sm'),
                 Actions\EditAction::make()
                     ->slideOver()
@@ -433,7 +448,25 @@ class StreamProfileResource extends Resource implements CopilotResource
             ], position: RecordActionsPosition::BeforeCells)
             ->toolbarActions([
                 Actions\BulkActionGroup::make([
-                    Actions\DeleteBulkAction::make(),
+                    Actions\DeleteBulkAction::make()
+                        ->before(function ($records, Actions\DeleteBulkAction $action): void {
+                            $blocked = $records->filter(
+                                fn (StreamProfile $record) => $record->getReferencingAdaptiveProfiles()->isNotEmpty()
+                            );
+
+                            if ($blocked->isEmpty()) {
+                                return;
+                            }
+
+                            Notification::make()
+                                ->danger()
+                                ->title(__('Some profiles could not be deleted'))
+                                ->body(__('The following profiles are referenced by adaptive profiles and cannot be deleted: ').$blocked->pluck('name')->join(', ').'. '.__('Remove the references before deleting.'))
+                                ->persistent()
+                                ->send();
+
+                            $action->halt();
+                        }),
                 ]),
             ]);
     }
