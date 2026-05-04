@@ -5,8 +5,8 @@ namespace App\Console\Commands;
 use App\Enums\DvrRecordingStatus;
 use App\Jobs\GenerateDvrNfo;
 use App\Models\DvrRecording;
-use App\Services\NfoService;
 use Illuminate\Console\Command;
+use Throwable;
 
 /**
  * dvr:generate-nfos — Backfill NFO sidecar files for existing DVR recordings.
@@ -62,10 +62,9 @@ class GenerateDvrNfos extends Command
 
             if ($sync) {
                 try {
-                    set_time_limit(30); // match job timeout to prevent indefinite blocking
-                    (new GenerateDvrNfo($recording->id))->handle(app(NfoService::class));
+                    GenerateDvrNfo::dispatchSync($recording->id);
                     $this->line("  ✓ {$label}");
-                } catch (\Throwable $e) {
+                } catch (Throwable $e) {
                     $this->error("  ✗ {$label}: {$e->getMessage()}");
                 }
             } else {

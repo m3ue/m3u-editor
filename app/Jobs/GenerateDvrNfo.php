@@ -7,6 +7,7 @@ use App\Services\NfoService;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Log;
+use Throwable;
 
 /**
  * GenerateDvrNfo — Write Kodi/Jellyfin/Plex compatible .nfo sidecar files
@@ -82,7 +83,7 @@ class GenerateDvrNfo implements ShouldQueue
 
                 $nfo->generateDvrMovieNfo($recording, $disk);
             }
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             Log::error("GenerateDvrNfo: unexpected error for recording {$recording->id}: {$e->getMessage()}", [
                 'exception' => $e,
             ]);
