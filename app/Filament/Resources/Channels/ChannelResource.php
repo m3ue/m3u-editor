@@ -1773,7 +1773,7 @@ class ChannelResource extends Resource implements CopilotResource
                         ->nullable()
                         ->columnSpanFull()
                         ->visible(fn (Get $get, $record): bool => (bool) $get('enable_proxy') || (bool) ($record?->playlist?->enable_proxy ?? false))
-                        ->helperText(__('Transcode this channel using the selected profile. Overrides the playlist-level stream profile for this channel. Leave empty for direct stream proxying.')),
+                        ->helperText(__('Transcode this channel using the selected profile. Takes priority over both the playlist-level stream profile (used by external clients) and the in-app player default (Settings → Proxy → In-App Player Transcoding). Leave empty to fall back to those defaults.')),
                 ]),
             Fieldset::make(__('EPG Settings'))
                 ->schema([
