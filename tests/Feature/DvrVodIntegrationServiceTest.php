@@ -188,7 +188,7 @@ it('uses tvmaze metadata when tmdb metadata is unavailable on movie integration'
 
     expect($channel)->not->toBeNull()
         ->and($channel->logo)->toBe('https://tvmaze.test/poster.jpg')
-        ->and($channel->year)->toBe('2025')
+        ->and($channel->year)->toBe(2025)
         ->and($channel->info['plot'])->toBe('TVMaze plot')
         ->and($channel->info['movie_image'])->toBe('https://tvmaze.test/poster.jpg')
         ->and($channel->info['release_date'])->toBe('2025-01-02')
