@@ -75,6 +75,7 @@ use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Str;
 use Laravel\Ai\AiManager;
 use Livewire\Livewire;
+use PDO;
 use SocialiteProviders\Manager\SocialiteWasCalled;
 use SocialiteProviders\OIDC\OIDCExtendSocialite;
 use Spatie\Tags\Tag;
@@ -335,16 +336,32 @@ class AppServiceProvider extends ServiceProvider
      */
     private function configureSqliteOpenFlags(): void
     {
-        $openFlagsAttr = defined('Pdo\\Sqlite::ATTR_OPEN_FLAGS')
-            ? constant('Pdo\\Sqlite::ATTR_OPEN_FLAGS')
-            : PDO::SQLITE_ATTR_OPEN_FLAGS;
+        $openFlagsAttr = null;
+        if (defined('Pdo\\Sqlite::ATTR_OPEN_FLAGS')) {
+            $openFlagsAttr = constant('Pdo\\Sqlite::ATTR_OPEN_FLAGS');
+        } elseif (defined('PDO::SQLITE_ATTR_OPEN_FLAGS')) {
+            $openFlagsAttr = constant('PDO::SQLITE_ATTR_OPEN_FLAGS');
+        }
 
-        $openMode = (defined('Pdo\\Sqlite::OPEN_READWRITE')
-            ? constant('Pdo\\Sqlite::OPEN_READWRITE')
-            : PDO::SQLITE_OPEN_READWRITE)
-            | (defined('Pdo\\Sqlite::OPEN_CREATE')
-                ? constant('Pdo\\Sqlite::OPEN_CREATE')
-                : PDO::SQLITE_OPEN_CREATE);
+        $openReadWrite = null;
+        if (defined('Pdo\\Sqlite::OPEN_READWRITE')) {
+            $openReadWrite = constant('Pdo\\Sqlite::OPEN_READWRITE');
+        } elseif (defined('PDO::SQLITE_OPEN_READWRITE')) {
+            $openReadWrite = constant('PDO::SQLITE_OPEN_READWRITE');
+        }
+
+        $openCreate = null;
+        if (defined('Pdo\\Sqlite::OPEN_CREATE')) {
+            $openCreate = constant('Pdo\\Sqlite::OPEN_CREATE');
+        } elseif (defined('PDO::SQLITE_OPEN_CREATE')) {
+            $openCreate = constant('PDO::SQLITE_OPEN_CREATE');
+        }
+
+        if ($openFlagsAttr === null || $openReadWrite === null || $openCreate === null) {
+            return;
+        }
+
+        $openMode = $openReadWrite | $openCreate;
 
         foreach (['sqlite', 'jobs'] as $connection) {
             $options = config("database.connections.{$connection}.options", []);

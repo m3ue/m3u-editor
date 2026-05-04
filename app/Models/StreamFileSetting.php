@@ -24,6 +24,8 @@ class StreamFileSetting extends Model
         'generate_nfo' => 'boolean',
         'refresh_media_server' => 'boolean',
         'refresh_delay_seconds' => 'integer',
+        'sports_repeat_league_in_filename' => 'boolean',
+        'sports_include_event_title' => 'boolean',
     ];
 
     public function user(): BelongsTo
@@ -58,12 +60,17 @@ class StreamFileSetting extends Model
 
     public function scopeForSeries(Builder $query): Builder
     {
-        return $query->where('type', 'series');
+        return $query->whereIn('type', ['series', 'sports']);
     }
 
     public function scopeForVod(Builder $query): Builder
     {
-        return $query->where('type', 'vod');
+        return $query->whereIn('type', ['vod', 'sports']);
+    }
+
+    public function scopeForSports(Builder $query): Builder
+    {
+        return $query->where('type', 'sports');
     }
 
     /**
@@ -72,6 +79,7 @@ class StreamFileSetting extends Model
     public function toSyncSettings(): array
     {
         return [
+            'type' => $this->type,
             'enabled' => $this->enabled,
             'url_type' => $this->url_type ?? 'proxy',
             'sync_location' => $this->location,
@@ -80,6 +88,12 @@ class StreamFileSetting extends Model
             'folder_metadata' => $this->folder_metadata ?? [],
             'tmdb_id_format' => $this->tmdb_id_format,
             'tmdb_id_apply_to' => $this->tmdb_id_apply_to ?? 'episodes',
+            'sports_league_source' => $this->sports_league_source ?? 'group',
+            'sports_static_league' => $this->sports_static_league,
+            'sports_season_source' => $this->sports_season_source ?? 'title_year',
+            'sports_episode_strategy' => $this->sports_episode_strategy ?? 'sequential_per_season',
+            'sports_repeat_league_in_filename' => $this->sports_repeat_league_in_filename ?? true,
+            'sports_include_event_title' => $this->sports_include_event_title ?? true,
             'clean_special_chars' => $this->clean_special_chars,
             'remove_consecutive_chars' => $this->remove_consecutive_chars,
             'replace_char' => $this->replace_char,
