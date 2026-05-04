@@ -167,6 +167,17 @@ it('evaluates the in operator against a list', function () {
     expect($this->evaluator->resolve($adaptive, probe(['codec_name' => 'h264'])))->toBe($this->fallback->id);
 });
 
+it('evaluates in operator case-insensitively', function () {
+    $adaptive = makeAdaptiveProfile($this->user, [
+        ['conditions' => [['field' => 'video.codec_name', 'op' => 'in', 'value' => ['HEVC', 'AV1']]], 'stream_profile_id' => $this->target->id],
+    ], elseProfileId: $this->fallback->id);
+
+    // lowercase probe value should match uppercase list entries
+    expect($this->evaluator->resolve($adaptive, probe(['codec_name' => 'hevc'])))->toBe($this->target->id);
+    expect($this->evaluator->resolve($adaptive, probe(['codec_name' => 'av1'])))->toBe($this->target->id);
+    expect($this->evaluator->resolve($adaptive, probe(['codec_name' => 'h264'])))->toBe($this->fallback->id);
+});
+
 it('evaluates the not_in operator against a list', function () {
     $adaptive = makeAdaptiveProfile($this->user, [
         ['conditions' => [['field' => 'audio.codec_name', 'op' => 'not_in', 'value' => ['aac', 'mp3']]], 'stream_profile_id' => $this->target->id],

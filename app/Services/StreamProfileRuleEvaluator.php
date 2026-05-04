@@ -44,8 +44,13 @@ class StreamProfileRuleEvaluator
         }
 
         $resolvedId = $this->resolve($profile, $streamStats);
+        if (! $resolvedId) {
+            return null;
+        }
 
-        return $resolvedId ? StreamProfile::find($resolvedId) : null;
+        static $cache = [];
+
+        return $cache[$resolvedId] ??= StreamProfile::find($resolvedId);
     }
 
     /**
@@ -141,6 +146,18 @@ class StreamProfileRuleEvaluator
             return false;
         }
 
+        // Normalise for list operators: wrap stray strings defensively and
+        // apply case-insensitive comparison to match the behaviour of scalarEquals.
+        $normaliseList = function (mixed $list, mixed $value): array {
+            $list = is_array($list) ? $list : (array) $list;
+            if (is_string($value)) {
+                return array_map('strtolower', $list);
+            }
+
+            return $list;
+        };
+        $normalisedActual = is_string($actual) ? strtolower($actual) : $actual;
+
         return match ($op) {
             '=' => $this->scalarEquals($actual, $expected),
             '!=' => ! $this->scalarEquals($actual, $expected),
@@ -148,8 +165,8 @@ class StreamProfileRuleEvaluator
             '>=' => is_numeric($actual) && is_numeric($expected) && $actual >= $expected,
             '<' => is_numeric($actual) && is_numeric($expected) && $actual < $expected,
             '<=' => is_numeric($actual) && is_numeric($expected) && $actual <= $expected,
-            'in' => is_array($expected) && in_array($actual, $expected, strict: false),
-            'not_in' => is_array($expected) && ! in_array($actual, $expected, strict: false),
+            'in' => in_array($normalisedActual, $normaliseList($expected, $actual), strict: false),
+            'not_in' => ! in_array($normalisedActual, $normaliseList($expected, $actual), strict: false),
             default => false,
         };
     }
@@ -180,7 +197,7 @@ class StreamProfileRuleEvaluator
             return $value;
         }
         if (is_numeric($value)) {
-            return (int) $value;
+            return (float) $value;
         }
 
         return null;

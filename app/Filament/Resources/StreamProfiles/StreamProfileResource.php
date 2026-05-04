@@ -227,7 +227,8 @@ class StreamProfileResource extends Resource implements CopilotResource
                                             ->label(__('Operator'))
                                             ->options(fn (Get $get): array => self::operatorsForField($get('field')))
                                             ->required()
-                                            ->live(),
+                                            ->live()
+                                            ->afterStateUpdated(fn (?string $state, Set $set) => $set('value', in_array($state, ['in', 'not_in'], true) ? [] : null)),
                                         TextInput::make('value')
                                             ->label(__('Value'))
                                             ->required()
@@ -236,8 +237,9 @@ class StreamProfileResource extends Resource implements CopilotResource
                                         TagsInput::make('value')
                                             ->label(__('Values'))
                                             ->required()
+                                            ->splitKeys([',', 'Tab'])
                                             ->visible(fn (Get $get): bool => in_array($get('op'), ['in', 'not_in'], true))
-                                            ->helperText(__('Press Enter after each value.')),
+                                            ->helperText(__('Press Enter, comma, or Tab after each value.')),
                                     ]),
                                 Select::make('stream_profile_id')
                                     ->label(__('Use this profile'))

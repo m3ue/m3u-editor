@@ -99,9 +99,13 @@ class ListStreamProfiles extends ListRecords
 
     public function getTabs(): array
     {
-        $userId = auth()->id();
-        $totalCount = StreamProfile::where('user_id', $userId)->count();
-        $adaptiveCount = StreamProfile::where('user_id', $userId)->where('backend', 'adaptive')->count();
+        $counts = StreamProfile::where('user_id', auth()->id())
+            ->selectRaw('backend, COUNT(*) as cnt')
+            ->groupBy('backend')
+            ->pluck('cnt', 'backend');
+
+        $adaptiveCount = (int) $counts->get('adaptive', 0);
+        $totalCount = (int) $counts->sum();
         $transcodingCount = $totalCount - $adaptiveCount;
 
         return [
