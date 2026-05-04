@@ -94,6 +94,7 @@ class SimilaritySearchService
      * @param  int  $similarityThreshold  Minimum similarity percentage (0-100)
      * @param  int  $fuzzyMaxDistance  Maximum Levenshtein distance for fuzzy matching
      * @param  int  $exactMatchDistance  Maximum distance for exact matches
+     * @param  array|null  $customQualityIndicators  Override the default quality indicators list
      */
     public function findMatchingEpgChannel(
         $channel,
@@ -101,12 +102,17 @@ class SimilaritySearchService
         $removeQualityIndicators = false,
         $similarityThreshold = 70,
         $fuzzyMaxDistance = 25,
-        $exactMatchDistance = 8
+        $exactMatchDistance = 8,
+        ?array $customQualityIndicators = null,
     ): ?EpgChannel {
         // Set the instance variables
         $this->removeQualityIndicators = $removeQualityIndicators;
         $this->upperFuzzyThreshold = $fuzzyMaxDistance;
         $this->bestFuzzyThreshold = $exactMatchDistance;
+
+        if ($customQualityIndicators !== null) {
+            $this->qualityIndicators = array_map('mb_strtolower', $customQualityIndicators);
+        }
 
         $debug = false; // config('app.debug');
         $regionCode = $epg->preferred_local ? mb_strtolower($epg->preferred_local, 'UTF-8') : null;
@@ -340,6 +346,13 @@ class SimilaritySearchService
         if (! $name) {
             return '';
         }
+
+        // Normalize Unicode compatibility characters (e.g. "ʀᴀᴡ" → "raw", "ＨＤ" → "HD")
+        $normalized = \Normalizer::normalize($name, \Normalizer::NFKC);
+        if ($normalized !== false) {
+            $name = $normalized;
+        }
+
         $name = mb_strtolower($name, 'UTF-8');
 
         // Remove brackets and parentheses CONTENT but keep the channel name intact
