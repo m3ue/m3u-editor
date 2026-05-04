@@ -91,10 +91,12 @@ class EditPlaylist extends EditRecord
             $data['dvr_retention_days'] = $dvr->retention_days;
             $data['dvr_global_disk_quota_gb'] = $dvr->global_disk_quota_gb;
             $data['dvr_enable_metadata_enrichment'] = $dvr->enable_metadata_enrichment;
+            $data['dvr_generate_nfo_files'] = $dvr->generate_nfo_files;
         } else {
             $data['dvr_enabled'] = false;
             $data['dvr_output_format'] = 'ts';
             $data['dvr_enable_metadata_enrichment'] = true;
+            $data['dvr_generate_nfo_files'] = false;
         }
 
         return $data;
@@ -143,6 +145,7 @@ class EditPlaylist extends EditRecord
                 'retention_days' => $data['dvr_retention_days'] ?? 0,
                 'global_disk_quota_gb' => $data['dvr_global_disk_quota_gb'] ?? 0,
                 'enable_metadata_enrichment' => $data['dvr_enable_metadata_enrichment'] ?? true,
+                'generate_nfo_files' => $data['dvr_generate_nfo_files'] ?? false,
             ]
         );
     }

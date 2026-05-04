@@ -50,6 +50,17 @@ class EnrichDvrMetadata implements ShouldQueue
 
         $enricher->enrich($recording);
 
+        // Refresh dvrSetting in case enrichment touched it.
+        $recording->refresh()->load('dvrSetting');
+
+        if ($recording->dvrSetting?->generate_nfo_files) {
+            Log::info("DVR metadata enrichment complete for recording {$recording->id} — dispatching NFO generation", [
+                'recording_id' => $recording->id,
+            ]);
+
+            GenerateDvrNfo::dispatch($recording->id)->onQueue('dvr-meta');
+        }
+
         Log::info("DVR metadata enrichment complete for recording {$recording->id} — dispatching VOD integration", [
             'recording_id' => $recording->id,
         ]);

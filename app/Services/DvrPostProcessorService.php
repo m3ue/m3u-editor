@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\DvrRecordingStatus;
 use App\Enums\DvrRuleType;
 use App\Jobs\EnrichDvrMetadata;
+use App\Jobs\GenerateDvrNfo;
 use App\Jobs\IntegrateDvrRecordingToVod;
 use App\Models\DvrRecording;
 use Exception;
@@ -186,6 +187,14 @@ class DvrPostProcessorService
                 Log::info('DVR post-processing step 3: metadata enrichment disabled — dispatching VOD integration directly', [
                     'recording_id' => $recording->id,
                 ]);
+
+                if ($setting->generate_nfo_files) {
+                    Log::info('DVR post-processing step 3: dispatching NFO generation (no enrichment)', [
+                        'recording_id' => $recording->id,
+                    ]);
+
+                    GenerateDvrNfo::dispatch($recording->id)->onQueue('dvr-meta');
+                }
 
                 IntegrateDvrRecordingToVod::dispatch($recording->id)->onQueue('dvr-post');
             }

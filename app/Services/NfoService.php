@@ -2,11 +2,14 @@
 
 namespace App\Services;
 
+use App\Http\Controllers\LogoProxyController;
 use App\Models\Channel;
+use App\Models\DvrRecording;
 use App\Models\Episode;
 use App\Models\Series;
 use App\Models\StrmFileMapping;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 
 class NfoService
 {
@@ -654,5 +657,334 @@ class NfoService
         }
 
         return trim($name);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // DVR NFO generation
+    //
+    // The DVR pipeline stores enriched metadata on DvrRecording.metadata as:
+    //   - metadata.tmdb           (id, type [movie|tv], name, overview,
+    //                              poster_url, backdrop_url, release_date|first_air_date,
+    //                              vote_average, vote_count, genres[], runtime, ...)
+    //   - metadata.tmdb_episode   (name, overview, still_path, air_date, vote_average, ...)
+    //   - metadata.tvmaze         (fallback when TMDB unavailable)
+    //   - metadata.tvmaze_episode (fallback episode payload)
+    //
+    // NFO files are written via the Storage facade onto the same disk that
+    // holds the recording (alongside file_path), which keeps remote disks
+    // (s3/sftp/etc.) working transparently.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Generate a movie.nfo (next to the recording file) for a VOD-style DvrRecording.
+     */
+    public function generateDvrMovieNfo(DvrRecording $recording, string $disk): bool
+    {
+        try {
+            if (empty($recording->file_path)) {
+                return false;
+            }
+
+            $metadata = $recording->metadata ?? [];
+            $tmdb = is_array($metadata['tmdb'] ?? null) ? $metadata['tmdb'] : [];
+            $useProxy = (bool) ($recording->dvrSetting?->use_proxy);
+
+            $title = $this->getScalarValue($tmdb['name'] ?? $tmdb['title'] ?? $recording->title) ?? $recording->title;
+            $plot = $this->getScalarValue($tmdb['overview'] ?? $recording->description ?? null);
+            $releaseDate = $this->getScalarValue($tmdb['release_date'] ?? $tmdb['first_air_date'] ?? null);
+
+            $xml = $this->startXml('movie');
+            $xml .= $this->xmlElement('title', $title);
+            $xml .= $this->xmlElement('originaltitle', $title);
+            $xml .= $this->xmlElement('sorttitle', $title);
+
+            if (! empty($plot)) {
+                $xml .= $this->xmlElement('plot', $plot);
+                $xml .= $this->xmlElement('outline', mb_substr((string) $plot, 0, 300));
+            }
+
+            if (! empty($releaseDate) && is_string($releaseDate)) {
+                $xml .= $this->xmlElement('year', substr($releaseDate, 0, 4));
+                $xml .= $this->xmlElement('premiered', $releaseDate);
+            }
+
+            if (! empty($tmdb['vote_average']) && is_scalar($tmdb['vote_average'])) {
+                $xml .= $this->xmlElement('rating', $tmdb['vote_average']);
+            }
+            if (! empty($tmdb['vote_count']) && is_scalar($tmdb['vote_count'])) {
+                $xml .= $this->xmlElement('votes', $tmdb['vote_count']);
+            }
+
+            if (! empty($tmdb['runtime']) && is_scalar($tmdb['runtime'])) {
+                $xml .= $this->xmlElement('runtime', $tmdb['runtime']);
+            } elseif (! empty($recording->duration_seconds)) {
+                $xml .= $this->xmlElement('runtime', (int) round($recording->duration_seconds / 60));
+            }
+
+            if (! empty($tmdb['genres']) && is_array($tmdb['genres'])) {
+                foreach ($tmdb['genres'] as $genre) {
+                    $genreName = is_array($genre) ? ($genre['name'] ?? '') : $genre;
+                    if (! empty($genreName)) {
+                        $xml .= $this->xmlElement('genre', $genreName);
+                    }
+                }
+            }
+
+            $poster = $this->getScalarValue($tmdb['poster_url'] ?? $tmdb['poster_path'] ?? null);
+            if (! empty($poster) && is_string($poster)) {
+                $xml .= $this->xmlElement('thumb', $this->dvrImageUrl($poster, $useProxy), ['aspect' => 'poster']);
+            }
+
+            $backdrop = $this->getScalarValue($tmdb['backdrop_url'] ?? $tmdb['backdrop_path'] ?? null);
+            if (! empty($backdrop) && is_string($backdrop)) {
+                $xml .= $this->xmlElement('fanart', $this->dvrImageUrl($backdrop, $useProxy));
+            }
+
+            $tmdbId = $this->getScalarValue($tmdb['id'] ?? null);
+            if (! empty($tmdbId)) {
+                $xml .= $this->xmlElement('uniqueid', $tmdbId, ['type' => 'tmdb', 'default' => 'true']);
+                $xml .= $this->xmlElement('tmdbid', $tmdbId);
+            }
+
+            $xml .= $this->endXml('movie');
+
+            $nfoRelPath = $this->dvrNfoPath($recording->file_path);
+
+            return $this->writeDvrFile($disk, $nfoRelPath, $xml);
+        } catch (\Throwable $e) {
+            Log::error("NfoService: Error generating DVR movie NFO for recording {$recording->id}: {$e->getMessage()}");
+
+            return false;
+        }
+    }
+
+    /**
+     * Generate an episodedetails NFO (next to the recording file) for a series-style DvrRecording.
+     */
+    public function generateDvrEpisodeNfo(DvrRecording $recording, string $disk): bool
+    {
+        try {
+            if (empty($recording->file_path)) {
+                return false;
+            }
+
+            $metadata = $recording->metadata ?? [];
+            $tmdbShow = is_array($metadata['tmdb'] ?? null) ? $metadata['tmdb'] : [];
+            $tmdbEp = is_array($metadata['tmdb_episode'] ?? null) ? $metadata['tmdb_episode'] : [];
+            $tvmazeEp = is_array($metadata['tvmaze_episode'] ?? null) ? $metadata['tvmaze_episode'] : [];
+            $useProxy = (bool) ($recording->dvrSetting?->use_proxy);
+
+            $episodeTitle = $this->getScalarValue(
+                $tmdbEp['name'] ?? $tvmazeEp['name'] ?? $recording->subtitle ?? $recording->title
+            ) ?? $recording->title;
+
+            $showTitle = $this->getScalarValue($tmdbShow['name'] ?? $recording->title) ?? $recording->title;
+            $plot = $this->getScalarValue($tmdbEp['overview'] ?? $tvmazeEp['summary'] ?? $recording->description ?? null);
+            $airDate = $this->getScalarValue($tmdbEp['air_date'] ?? $tvmazeEp['airdate'] ?? null);
+
+            $xml = $this->startXml('episodedetails');
+            $xml .= $this->xmlElement('title', $episodeTitle);
+            $xml .= $this->xmlElement('showtitle', $showTitle);
+
+            if (! empty($recording->season)) {
+                $xml .= $this->xmlElement('season', $recording->season);
+            }
+            if (! empty($recording->episode)) {
+                $xml .= $this->xmlElement('episode', $recording->episode);
+            }
+
+            if (! empty($plot)) {
+                $xml .= $this->xmlElement('plot', strip_tags((string) $plot));
+            }
+
+            if (! empty($airDate) && is_string($airDate)) {
+                $xml .= $this->xmlElement('aired', $airDate);
+            }
+
+            if (! empty($tmdbEp['vote_average']) && is_scalar($tmdbEp['vote_average'])) {
+                $xml .= $this->xmlElement('rating', $tmdbEp['vote_average']);
+            }
+
+            if (! empty($recording->duration_seconds)) {
+                $xml .= $this->xmlElement('runtime', (int) round($recording->duration_seconds / 60));
+            }
+
+            $still = $this->getScalarValue($tmdbEp['still_path'] ?? $tmdbEp['still_url'] ?? null);
+            if (! empty($still) && is_string($still)) {
+                $xml .= $this->xmlElement('thumb', $this->dvrImageUrl($still, $useProxy));
+            }
+
+            $tmdbEpId = $this->getScalarValue($tmdbEp['id'] ?? null);
+            $tmdbShowId = $this->getScalarValue($tmdbShow['id'] ?? null);
+            if (! empty($tmdbEpId)) {
+                $xml .= $this->xmlElement('uniqueid', $tmdbEpId, ['type' => 'tmdb', 'default' => 'true']);
+            } elseif (! empty($tmdbShowId)) {
+                $xml .= $this->xmlElement('uniqueid', $tmdbShowId, ['type' => 'tmdb', 'default' => 'true']);
+            }
+
+            $xml .= $this->endXml('episodedetails');
+
+            $nfoRelPath = $this->dvrNfoPath($recording->file_path);
+
+            return $this->writeDvrFile($disk, $nfoRelPath, $xml);
+        } catch (\Throwable $e) {
+            Log::error("NfoService: Error generating DVR episode NFO for recording {$recording->id}: {$e->getMessage()}");
+
+            return false;
+        }
+    }
+
+    /**
+     * Generate a tvshow.nfo in the series folder containing the given DVR episode recording.
+     * Idempotent — safe to call once per episode; rewrites only when content changed.
+     */
+    public function generateDvrShowNfo(DvrRecording $recording, string $disk): bool
+    {
+        try {
+            if (empty($recording->file_path)) {
+                return false;
+            }
+
+            $metadata = $recording->metadata ?? [];
+            $tmdbShow = is_array($metadata['tmdb'] ?? null) ? $metadata['tmdb'] : [];
+            $tvmazeShow = is_array($metadata['tvmaze'] ?? null) ? $metadata['tvmaze'] : [];
+            $useProxy = (bool) ($recording->dvrSetting?->use_proxy);
+
+            $showTitle = $this->getScalarValue(
+                $tmdbShow['name'] ?? $tvmazeShow['name'] ?? $recording->title
+            ) ?? $recording->title;
+
+            $plot = $this->getScalarValue($tmdbShow['overview'] ?? $tvmazeShow['summary'] ?? null);
+            $premiered = $this->getScalarValue($tmdbShow['first_air_date'] ?? $tvmazeShow['premiered'] ?? null);
+
+            $xml = $this->startXml('tvshow');
+            $xml .= $this->xmlElement('title', $showTitle);
+            $xml .= $this->xmlElement('originaltitle', $showTitle);
+            $xml .= $this->xmlElement('sorttitle', $showTitle);
+
+            if (! empty($plot)) {
+                $xml .= $this->xmlElement('plot', strip_tags((string) $plot));
+                $xml .= $this->xmlElement('outline', mb_substr(strip_tags((string) $plot), 0, 300));
+            }
+
+            if (! empty($premiered) && is_string($premiered)) {
+                $xml .= $this->xmlElement('year', substr($premiered, 0, 4));
+                $xml .= $this->xmlElement('premiered', $premiered);
+            }
+
+            if (! empty($tmdbShow['vote_average']) && is_scalar($tmdbShow['vote_average'])) {
+                $xml .= $this->xmlElement('rating', $tmdbShow['vote_average']);
+            }
+
+            if (! empty($tmdbShow['genres']) && is_array($tmdbShow['genres'])) {
+                foreach ($tmdbShow['genres'] as $genre) {
+                    $genreName = is_array($genre) ? ($genre['name'] ?? '') : $genre;
+                    if (! empty($genreName)) {
+                        $xml .= $this->xmlElement('genre', $genreName);
+                    }
+                }
+            }
+
+            $poster = $this->getScalarValue($tmdbShow['poster_url'] ?? $tmdbShow['poster_path'] ?? null);
+            if (! empty($poster) && is_string($poster)) {
+                $xml .= $this->xmlElement('thumb', $this->dvrImageUrl($poster, $useProxy), ['aspect' => 'poster']);
+            }
+
+            $backdrop = $this->getScalarValue($tmdbShow['backdrop_url'] ?? $tmdbShow['backdrop_path'] ?? null);
+            if (! empty($backdrop) && is_string($backdrop)) {
+                $xml .= $this->xmlElement('fanart', $this->dvrImageUrl($backdrop, $useProxy));
+            }
+
+            $tmdbId = $this->getScalarValue($tmdbShow['id'] ?? null);
+            if (! empty($tmdbId)) {
+                $xml .= $this->xmlElement('uniqueid', $tmdbId, ['type' => 'tmdb', 'default' => 'true']);
+                $xml .= $this->xmlElement('tmdbid', $tmdbId);
+            }
+
+            $xml .= $this->endXml('tvshow');
+
+            // tvshow.nfo lives in the series folder (the parent dir of the recording file).
+            $nfoRelPath = rtrim(dirname($recording->file_path), '/').'/tvshow.nfo';
+
+            return $this->writeDvrFile($disk, $nfoRelPath, $xml);
+        } catch (\Throwable $e) {
+            Log::error("NfoService: Error generating DVR tvshow NFO for recording {$recording->id}: {$e->getMessage()}");
+
+            return false;
+        }
+    }
+
+    /**
+     * Decide whether a DVR recording is series-shaped (has season/episode info or series_key).
+     */
+    public function isDvrRecordingSeries(DvrRecording $recording): bool
+    {
+        if (! empty($recording->series_key)) {
+            return true;
+        }
+        if (! empty($recording->season) || ! empty($recording->episode)) {
+            return true;
+        }
+        $type = $recording->metadata['tmdb']['type'] ?? null;
+
+        return $type === 'tv';
+    }
+
+    /**
+     * Convert a recording file_path (e.g. library/2025/Title/Title - S01E01.mp4) to its NFO sibling path.
+     */
+    private function dvrNfoPath(string $filePath): string
+    {
+        // Replace the file extension with .nfo regardless of container (mp4/mkv/ts).
+        return preg_replace('/\.[A-Za-z0-9]+$/', '.nfo', $filePath) ?? ($filePath.'.nfo');
+    }
+
+    /**
+     * Build the URL written into NFO image fields. When the playlist's DVR setting
+     * has use_proxy enabled we route through LogoProxyController so Kodi/Jellyfin
+     * pull through this app instead of TMDB directly.
+     */
+    private function dvrImageUrl(string $url, bool $useProxy): string
+    {
+        // Normalise bare TMDB paths to absolute URLs first.
+        if (! str_starts_with($url, 'http')) {
+            $url = 'https://image.tmdb.org/t/p/original'.$url;
+        }
+
+        if (! $useProxy) {
+            return $url;
+        }
+
+        try {
+            return LogoProxyController::generateProxyUrl($url);
+        } catch (\Throwable $e) {
+            Log::warning("NfoService: proxy URL generation failed, falling back to direct URL: {$e->getMessage()}");
+
+            return $url;
+        }
+    }
+
+    /**
+     * Write an NFO file via the Storage facade so it lands on the same disk as the recording.
+     * Skips the write when the destination already contains identical bytes.
+     */
+    private function writeDvrFile(string $disk, string $relPath, string $content): bool
+    {
+        try {
+            $fs = Storage::disk($disk);
+
+            if ($fs->exists($relPath)) {
+                $existing = $fs->get($relPath);
+                if ($existing === $content) {
+                    return true;
+                }
+            }
+
+            return $fs->put($relPath, $content);
+        } catch (\Throwable $e) {
+            Log::error("NfoService: Failed to write DVR NFO {$relPath} on disk {$disk}: {$e->getMessage()}");
+
+            return false;
+        }
     }
 }
