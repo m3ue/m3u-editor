@@ -134,6 +134,11 @@ class EpisodesRelationManager extends RelationManager
                     })
                     ->placeholder(''),
 
+                ToggleColumn::make('probe_enabled')
+                    ->label(__('Probe Enabled'))
+                    ->toggleable()
+                    ->sortable(),
+
                 ProbeStatusColumn::make(),
             ])
             ->filters([
