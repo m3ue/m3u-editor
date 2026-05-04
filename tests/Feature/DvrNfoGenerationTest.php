@@ -10,11 +10,13 @@
  *  - GenerateDvrNfo job picks the right NFO type via isDvrRecordingSeries
  */
 
+use App\Jobs\EnrichDvrMetadata;
 use App\Jobs\GenerateDvrNfo;
 use App\Models\DvrRecording;
 use App\Models\DvrSetting;
 use App\Models\Playlist;
 use App\Models\User;
+use App\Services\DvrMetadataEnricherService;
 use App\Services\NfoService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Event;
@@ -199,4 +201,38 @@ it('queues the job on the dvr-meta queue when dispatched', function () {
     GenerateDvrNfo::dispatch(42);
 
     Queue::assertPushedOn('dvr-meta', GenerateDvrNfo::class);
+});
+
+// ── EnrichDvrMetadata → GenerateDvrNfo dispatch chain ───────────────────────
+
+it('dispatches GenerateDvrNfo after enrichment when generate_nfo_files is enabled', function () {
+    Queue::fake();
+
+    $recording = makeNfoRecording(
+        recordingOverrides: ['file_path' => 'library/2025/Test/Test.mp4'],
+        settingOverrides: ['generate_nfo_files' => true],
+    );
+
+    $mock = $this->mock(DvrMetadataEnricherService::class);
+    $mock->shouldReceive('enrich')->once();
+
+    (new EnrichDvrMetadata($recording->id))->handle(app(DvrMetadataEnricherService::class));
+
+    Queue::assertPushedOn('dvr-meta', GenerateDvrNfo::class);
+});
+
+it('does not dispatch GenerateDvrNfo after enrichment when generate_nfo_files is disabled', function () {
+    Queue::fake();
+
+    $recording = makeNfoRecording(
+        recordingOverrides: ['file_path' => 'library/2025/Test/Test.mp4'],
+        settingOverrides: ['generate_nfo_files' => false],
+    );
+
+    $mock = $this->mock(DvrMetadataEnricherService::class);
+    $mock->shouldReceive('enrich')->once();
+
+    (new EnrichDvrMetadata($recording->id))->handle(app(DvrMetadataEnricherService::class));
+
+    Queue::assertNotPushed(GenerateDvrNfo::class);
 });

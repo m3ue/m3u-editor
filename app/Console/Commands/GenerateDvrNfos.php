@@ -11,21 +11,19 @@ use Illuminate\Console\Command;
 /**
  * dvr:generate-nfos — Backfill NFO sidecar files for existing DVR recordings.
  *
+ * Only processes recordings whose playlist has generate_nfo_files=true.
+ *
  * Filters:
  *   --recording=ID    only one recording
  *   --playlist=ID     all recordings whose dvr_setting belongs to this playlist
- *   --all             every completed recording with a file_path (ignores
- *                     the per-playlist generate_nfo_files toggle)
- *
- * Without --all, only recordings whose playlist has generate_nfo_files=true
- * are queued. Use --all to force a one-shot bulk regen across the library.
+ *   --all             all eligible recordings across every playlist
  */
 class GenerateDvrNfos extends Command
 {
     protected $signature = 'dvr:generate-nfos
                             {--recording= : Generate NFO for a single recording ID}
                             {--playlist= : Limit to recordings on this playlist ID}
-                            {--all : Include recordings whose playlist has generate_nfo_files disabled}
+                            {--all : Process all recordings across every playlist (generate_nfo_files must still be enabled)}
                             {--sync : Run the job synchronously instead of dispatching to the queue}';
 
     protected $description = 'Backfill .nfo sidecar files for existing DVR recordings';
@@ -35,6 +33,7 @@ class GenerateDvrNfos extends Command
         $query = DvrRecording::query()
             ->where('status', DvrRecordingStatus::Completed)
             ->whereNotNull('file_path')
+            ->whereHas('dvrSetting', fn ($q) => $q->where('generate_nfo_files', true))
             ->with('dvrSetting');
 
         if ($id = $this->option('recording')) {
@@ -48,12 +47,6 @@ class GenerateDvrNfos extends Command
         }
 
         $recordings = $query->get();
-
-        if (! $this->option('all')) {
-            $recordings = $recordings->filter(
-                fn (DvrRecording $r) => (bool) ($r->dvrSetting?->generate_nfo_files)
-            );
-        }
 
         if ($recordings->isEmpty()) {
             $this->info('No recordings match — nothing to do.');
@@ -69,6 +62,7 @@ class GenerateDvrNfos extends Command
 
             if ($sync) {
                 try {
+                    set_time_limit(30); // match job timeout to prevent indefinite blocking
                     (new GenerateDvrNfo($recording->id))->handle(app(NfoService::class));
                     $this->line("  ✓ {$label}");
                 } catch (\Throwable $e) {
