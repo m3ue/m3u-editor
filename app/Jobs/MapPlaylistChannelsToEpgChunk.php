@@ -220,6 +220,7 @@ class MapPlaylistChannelsToEpgChunk implements ShouldQueue
                     $similarityThreshold = $this->settings['similarity_threshold'] ?? 70;
                     $fuzzyMaxDistance = $this->settings['fuzzy_max_distance'] ?? 25;
                     $exactMatchDistance = $this->settings['exact_match_distance'] ?? 8;
+                    $customQualityIndicators = $this->settings['quality_indicators'] ?? null;
 
                     $epgChannel = $this->similaritySearch->findMatchingEpgChannel(
                         $channel,
@@ -227,7 +228,8 @@ class MapPlaylistChannelsToEpgChunk implements ShouldQueue
                         $removeQualityIndicators,
                         $similarityThreshold,
                         $fuzzyMaxDistance,
-                        $exactMatchDistance
+                        $exactMatchDistance,
+                        $customQualityIndicators ?: null,
                     );
                 }
             }

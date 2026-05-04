@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -39,9 +40,14 @@ class Season extends Model
         return $this->belongsTo(Playlist::class);
     }
 
+    public function serie(): BelongsTo
+    {
+        return $this->belongsTo(Series::class, 'series_id');
+    }
+
     public function series(): BelongsTo
     {
-        return $this->belongsTo(Series::class);
+        return $this->serie();
     }
 
     public function category(): BelongsTo
@@ -52,5 +58,10 @@ class Season extends Model
     public function episodes(): HasMany
     {
         return $this->hasMany(Episode::class);
+    }
+
+    public function scopeForSerie(Builder $query, int $serieId): Builder
+    {
+        return $query->where('series_id', $serieId);
     }
 }

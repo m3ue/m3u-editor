@@ -7,6 +7,7 @@ use App\Enums\PlaylistSourceType;
 use App\Jobs\FetchTmdbIds;
 use App\Observers\ChannelObserver;
 use App\Services\PlaylistService;
+use App\Services\StreamProfileRuleEvaluator;
 use App\Services\XtreamService;
 use App\Settings\GeneralSettings;
 use Exception;
@@ -64,6 +65,8 @@ class Channel extends Model
         'stream_stats' => 'array',
         'stream_stats_probed_at' => 'datetime',
         'probe_enabled' => 'boolean',
+        'year' => 'integer',
+        'edition' => 'string',
     ];
 
     public function user(): BelongsTo
@@ -74,6 +77,23 @@ class Channel extends Model
     public function streamProfile(): BelongsTo
     {
         return $this->belongsTo(StreamProfile::class);
+    }
+
+    /**
+     * Resolve the channel's stream profile to a concrete transcoding profile,
+     * unwrapping an adaptive profile (backend === 'adaptive') by evaluating
+     * its rules against the channel's cached probe data. Use this anywhere
+     * the profile is consumed for actual streaming; use $channel->streamProfile
+     * when showing the user-assigned value (it may itself be adaptive).
+     */
+    public function getEffectiveStreamProfile(): ?StreamProfile
+    {
+        $profile = $this->relationLoaded('streamProfile')
+            ? $this->streamProfile
+            : $this->streamProfile()->first();
+
+        return app(StreamProfileRuleEvaluator::class)
+            ->unwrap($profile, $this->stream_stats);
     }
 
     /**
@@ -201,6 +221,7 @@ class Channel extends Model
             ? $this->streamProfile
             : $this->streamProfile()->first();
         $profile ??= ($globalProfileId ? StreamProfile::find($globalProfileId) : null);
+        $profile = app(StreamProfileRuleEvaluator::class)->unwrap($profile, $this->stream_stats);
 
         // When no transcoding profile is set, the proxy delivers raw bytes (direct proxy),
         // not an HLS manifest. For VOD channels, use the actual container extension for both
@@ -357,7 +378,15 @@ class Channel extends Model
     /**
      * Run ffprobe against this channel's stream URL and return parsed stats.
      *
-     * @return array{streams: array<int, array{codec_type: string, codec_name: string, codec_long_name: ?string, profile: ?string, width: ?int, height: ?int, bit_rate: ?string, avg_frame_rate: ?string, display_aspect_ratio: ?string, sample_rate: ?string, channels: ?int, channel_layout: ?string, level: ?int, bits_per_raw_sample: ?string}>}
+     * Returns a flat list of entries, each with one of two shapes:
+     *   - Stream entry:  ['stream' => ['codec_type' => string, 'codec_name' => string, ...]]
+     *   - Format entry:  ['format' => ['bit_rate' => string]]  (appended once when available)
+     *
+     * The format entry carries the container-level bit_rate from `-show_format`. It is used
+     * as a fallback video bitrate for live MPEG-TS streams where ffprobe cannot determine
+     * a per-stream bit_rate. See getEmbyStreamStats() for the derivation logic.
+     *
+     * @return list<array{stream: array{codec_type: string, codec_name: string, codec_long_name: ?string, profile: ?string, width: ?int, height: ?int, bit_rate: ?string, avg_frame_rate: ?string, display_aspect_ratio: ?string, sample_rate: ?string, channels: ?int, channel_layout: ?string, level: ?int, bits_per_raw_sample: ?string, refs: ?int, tags: array<string, string>}}|array{format: array{bit_rate: string}}>
      */
     public function probeStreamStats(int $timeout = 15): array
     {
@@ -367,7 +396,7 @@ class Channel extends Model
                 return [];
             }
 
-            $process = new SymfonyProcess(['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_streams', $url]);
+            $process = new SymfonyProcess(['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_streams', '-show_format', $url]);
             $process->setTimeout($timeout);
             $process->run();
 
@@ -404,6 +433,15 @@ class Channel extends Model
                     }
                 }
 
+                // MPEG-TS live streams typically don't expose a per-stream video
+                // bit_rate (no CBR container, unknown duration). Capture the
+                // container-level bit_rate from -show_format so we can derive a
+                // sensible video bitrate fallback in getEmbyStreamStats().
+                $formatBitRate = $json['format']['bit_rate'] ?? null;
+                if ($formatBitRate !== null) {
+                    $streamStats[] = ['format' => ['bit_rate' => $formatBitRate]];
+                }
+
                 return $streamStats;
             }
         } catch (Exception $e) {
@@ -427,7 +465,13 @@ class Channel extends Model
 
         $video = null;
         $audio = null;
+        $formatBitRate = null;
         foreach ($stats as $entry) {
+            if (isset($entry['format']['bit_rate'])) {
+                $formatBitRate = $entry['format']['bit_rate'];
+
+                continue;
+            }
             $stream = $entry['stream'] ?? $entry;
             if (($stream['codec_type'] ?? '') === 'video' && ! $video) {
                 $video = $stream;
@@ -462,8 +506,21 @@ class Channel extends Model
                 $result['source_fps'] = $fps ? (float) $fps : null;
             }
 
-            // Convert bps to kbps
+            // Convert bps to kbps. For MPEG-TS live streams ffprobe usually
+            // reports no per-stream bit_rate on the video elementary stream
+            // (no CBR container, unknown duration). Fall back to
+            // container_bitrate - audio_bitrate, which is a tight upper bound
+            // for the video bitrate on a typical 1 video + 1 audio TS mux.
+            // NOTE: only the first audio track's bitrate is subtracted, so streams
+            // with multiple audio tracks will produce a slightly overstated value.
             $bitRate = $video['bit_rate'] ?? null;
+            if ($bitRate === null && $formatBitRate !== null) {
+                $audioBps = isset($audio['bit_rate']) ? (float) $audio['bit_rate'] : 0.0;
+                $derived = (float) $formatBitRate - $audioBps;
+                if ($derived > 0) {
+                    $bitRate = $derived;
+                }
+            }
             $result['ffmpeg_output_bitrate'] = $bitRate ? round((float) $bitRate / 1000, 1) : null;
         }
 

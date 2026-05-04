@@ -10,6 +10,13 @@ return [
 
     'install_mode' => env('PLUGIN_INSTALL_MODE', 'normal'),
 
+    /**
+     * Automatically trust and enable installs from trusted orgs (see trusted_orgs below)
+     * without requiring a separate manual Trust step. Set to false to enforce manual trust
+     * for every install, even from official sources.
+     */
+    'auto_trust_official' => (bool) env('PLUGIN_AUTO_TRUST_OFFICIAL', true),
+
     'run_retention_days' => (int) env('PLUGIN_RUN_RETENTION_DAYS', 7),
 
     'directories' => [

@@ -10,6 +10,7 @@ use App\Models\StrmFileMapping;
 use App\Models\User;
 use App\Services\NfoService;
 use App\Services\PlaylistService;
+use App\Services\StrmPathBuilder;
 use App\Settings\GeneralSettings;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -90,16 +91,12 @@ class SyncVodStrmFiles implements ShouldQueue
 
             // Explicit channels mode
             if ($this->channels) {
-                $channels = $this->channels instanceof Collection
-                    ? $this->channels
-                    : collect($this->channels);
-
-                if ($channels->isEmpty()) {
+                if ($this->channels->isEmpty()) {
                     return;
                 }
 
-                $this->syncChannels($channels, $settings, $globalStreamFileSetting, skipCleanup: false);
-                $this->dispatchMediaServerRefresh($globalStreamFileSetting, $channels);
+                $this->syncChannels($this->channels, $settings, $globalStreamFileSetting, skipCleanup: false);
+                $this->dispatchMediaServerRefresh($globalStreamFileSetting, $this->channels);
 
                 return;
             }
@@ -319,6 +316,11 @@ class SyncVodStrmFiles implements ShouldQueue
                 ? $channel->getRelation('group')
                 : $channel->group()->first();
 
+            // Resolve StreamFileSetting for Trash Guide naming (channel → group → global default)
+            $streamFileSetting = $channel->streamFileSetting
+                ?? $groupModel?->streamFileSetting
+                ?? $globalStreamFileSetting;
+
             if (in_array('group', $pathStructure)) {
                 // Note: $channel->group is a string column (not a relation) containing the group name
                 // Use the group column value directly, or fall back to the related Group model
@@ -426,7 +428,12 @@ class SyncVodStrmFiles implements ShouldQueue
 
             // Remove consecutive replacement characters if enabled
             if ($removeConsecutiveChars && $replaceChar !== 'remove') {
-                $char = $replaceChar === 'space' ? ' ' : ($replaceChar === 'dash' ? '-' : ($replaceChar === 'underscore' ? '_' : '.'));
+                $char = match ($replaceChar) {
+                    'space' => ' ',
+                    'dash' => '-',
+                    'underscore' => '_',
+                    default => '.',
+                };
                 $fileName = preg_replace('/'.preg_quote($char, '/').'{2,}/', $char, $fileName);
             }
 
@@ -435,6 +442,22 @@ class SyncVodStrmFiles implements ShouldQueue
 
             $fileName = "{$fileName}.strm";
             $filePath = $path.'/'.$fileName;
+
+            // Trash Guide naming override: if a StreamFileSetting with vod_format is configured,
+            // delegate the full path/filename construction to StrmPathBuilder.
+            if ($streamFileSetting && $streamFileSetting->trash_guide_naming_enabled) {
+                try {
+                    $trashPath = app(StrmPathBuilder::class)->buildVodPath($channel, $streamFileSetting, $sync_settings);
+                    $trashDir = dirname($trashPath);
+                    if (! is_dir($trashDir)) {
+                        @mkdir($trashDir, 0777, true);
+                    }
+                    $filePath = $trashPath;
+                    $fileName = basename($trashPath);
+                } catch (\Throwable $e) {
+                    Log::warning("Trash Guide VOD path build failed for channel {$channel->id}: ".$e->getMessage());
+                }
+            }
 
             // Generate the url
             $useOriginalUrl = ($sync_settings['url_type'] ?? 'proxy') === 'original';
@@ -556,6 +579,15 @@ class SyncVodStrmFiles implements ShouldQueue
                     ->body('All VOD STRM files have been synced.')
                     ->broadcast($user)
                     ->sendToDatabase($user);
+            }
+        }
+
+        // Fire vod_stream_files_synced post-processes for the specific playlist
+        $playlistId = $this->resolvePlaylistId();
+        if (! $this->all_playlists && $playlistId) {
+            $playlist = $this->playlist ?? Playlist::find($playlistId);
+            if ($playlist) {
+                dispatch(new FireStreamFilesSyncedEvent($playlist, 'vod_stream_files_synced'));
             }
         }
     }
