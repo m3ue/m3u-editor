@@ -10,10 +10,12 @@ use App\Filament\Concerns\HasCopilotSupport;
 use App\Filament\Resources\VodResource\Pages;
 use App\Filament\Resources\Vods\Pages\ListVod;
 use App\Filament\Resources\Vods\Pages\ViewVod;
+use App\Filament\Tables\ProbeStatusColumn;
 use App\Forms\Components\TmdbSearchResults;
 use App\Jobs\ChannelFindAndReplace;
 use App\Jobs\ChannelFindAndReplaceReset;
 use App\Jobs\FetchTmdbIds;
+use App\Jobs\ProbeVodStreamsChunk;
 use App\Jobs\ProcessVodChannels;
 use App\Jobs\SyncPlexDvrJob;
 use App\Jobs\SyncVodStrmFiles;
@@ -241,6 +243,11 @@ class VodResource extends Resource implements CopilotResource
                 ->label(__('Metadata'))
                 ->icon(fn ($record): string => $record->has_metadata ? 'heroicon-o-check-circle' : 'heroicon-o-minus')
                 ->color(fn ($record): string => $record->has_metadata ? 'success' : 'gray'),
+            ToggleColumn::make('probe_enabled')
+                ->label(__('Probe Enabled'))
+                ->toggleable()
+                ->sortable(),
+            ProbeStatusColumn::make(),
             IconColumn::make('is_proxy_enabled')
                 ->label(__('Proxy'))
                 ->getStateUsing(fn ($record): bool => $record->isProxyEnabled())
@@ -464,6 +471,24 @@ class VodResource extends Resource implements CopilotResource
                 ->query(function ($query) {
                     return $query->where('epg_channel_id', '=', null);
                 }),
+            Filter::make('probe_enabled')
+                ->label(__('Probe enabled'))
+                ->toggle()
+                ->query(fn ($query) => $query->where('probe_enabled', true)),
+            Filter::make('probed')
+                ->label(__('Probed'))
+                ->toggle()
+                ->query(fn ($query) => $query->whereNotNull('stream_stats_probed_at')
+                    ->whereNotNull('stream_stats')->whereRaw("CAST(stream_stats AS TEXT) != '[]'")),
+            Filter::make('probe_failed')
+                ->label(__('Probe failed'))
+                ->toggle()
+                ->query(fn ($query) => $query->whereNotNull('stream_stats_probed_at')
+                    ->where(fn ($q) => $q->whereNull('stream_stats')->orWhereRaw("CAST(stream_stats AS TEXT) = '[]'"))),
+            Filter::make('not_probed')
+                ->label(__('Not probed'))
+                ->toggle()
+                ->query(fn ($query) => $query->whereNull('stream_stats_probed_at')),
         ];
     }
 
@@ -642,6 +667,29 @@ class VodResource extends Resource implements CopilotResource
                     ->modalIcon('heroicon-o-document-arrow-down')
                     ->modalDescription(__('Sync VOD .strm files now? This will generate .strm files for this VOD channel at the path set for this channel.'))
                     ->modalSubmitActionLabel(__('Yes, sync now')),
+                Action::make('probe')
+                    ->label(__('Probe Stream'))
+                    ->icon('heroicon-o-signal')
+                    ->visible(fn ($record) => $record && $record->probe_enabled)
+                    ->action(function ($record): void {
+                        dispatch(new ProbeVodStreamsChunk(
+                            channelIds: [$record->id],
+                            probeTimeout: 15,
+                            notifyUserId: auth()->id(),
+                            notifyLabel: __('VOD stream probing'),
+                        ));
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title(__('Stream probing started'))
+                            ->body(__('You will be notified once complete.'))
+                            ->duration(10000)
+                            ->send();
+                    })
+                    ->requiresConfirmation()
+                    ->modalIcon('heroicon-o-signal')
+                    ->modalDescription(__('Probe this VOD with ffprobe to collect stream metadata (codec, resolution, bitrate, HDR). This data enables Trash Guide naming with stream-stat-based detection.'))
+                    ->modalSubmitActionLabel(__('Start probing')),
                 DeleteAction::make()
                     ->modalIcon('heroicon-o-trash')
                     ->modalDescription(__('Are you sure you want to delete this VOD channel? This action cannot be undone.'))
@@ -1284,6 +1332,78 @@ class VodResource extends Resource implements CopilotResource
                     ->modalIcon('heroicon-o-arrow-path-rounded-square')
                     ->modalDescription(__('Add the selected channel(s) to the chosen channel as failover sources.'))
                     ->modalSubmitActionLabel(__('Add failovers now')),
+            ]),
+
+            // -- Probing --
+            BulkModalActionGroup::section('Probing', [
+                BulkAction::make('enable-probing')
+                    ->label(__('Enable Probing'))
+                    ->action(function (Collection $records): void {
+                        foreach ($records->chunk(100) as $chunk) {
+                            Channel::whereIn('id', $chunk->pluck('id'))->update(['probe_enabled' => true]);
+                        }
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title(__('Stream probing enabled'))
+                            ->body(__('Stream probing has been enabled for the selected VOD streams.'))
+                            ->send();
+                    })
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-signal')
+                    ->modalIcon('heroicon-o-signal')
+                    ->modalDescription(__('Enable stream probing for the selected VOD streams. They will be included in stream probing jobs.'))
+                    ->modalSubmitActionLabel(__('Enable now')),
+                BulkAction::make('disable-probing')
+                    ->label(__('Disable Probing'))
+                    ->color('warning')
+                    ->action(function (Collection $records): void {
+                        foreach ($records->chunk(100) as $chunk) {
+                            Channel::whereIn('id', $chunk->pluck('id'))->update(['probe_enabled' => false]);
+                        }
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title(__('Stream probing disabled'))
+                            ->body(__('Stream probing has been disabled for the selected VOD streams.'))
+                            ->send();
+                    })
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-signal-slash')
+                    ->modalIcon('heroicon-o-signal-slash')
+                    ->modalDescription(__('Disable stream probing for the selected VOD streams. They will be excluded from stream probing jobs.'))
+                    ->modalSubmitActionLabel(__('Disable now')),
+                BulkAction::make('probe-streams')
+                    ->label(__('Probe Streams'))
+                    ->action(function (Collection $records): void {
+                        $ids = $records->pluck('id')->all();
+                        $total = count($ids);
+                        $chunks = array_chunk($ids, 50);
+                        $last = count($chunks) - 1;
+                        foreach ($chunks as $i => $chunk) {
+                            dispatch(new ProbeVodStreamsChunk(
+                                channelIds: $chunk,
+                                probeTimeout: 15,
+                                notifyUserId: $i === $last ? auth()->id() : null,
+                                notifyLabel: $i === $last ? __('VOD stream probing') : null,
+                                notifyTotal: $i === $last ? $total : null,
+                            ));
+                        }
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title(__('Stream probing started'))
+                            ->body(__('Stream probing is running in the background. You will be notified once the process is complete.'))
+                            ->send();
+                    })
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-signal')
+                    ->modalIcon('heroicon-o-signal')
+                    ->modalDescription(__('Probe the selected VOD streams with ffprobe to collect stream metadata (codec, resolution, bitrate, HDR). This data enables Trash Guide naming with stream-stat-based detection.'))
+                    ->modalSubmitActionLabel(__('Start probing')),
             ]),
 
             // -- Enable / Disable --
