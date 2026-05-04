@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Models\Episode;
 use App\Models\MediaServerIntegration;
+use App\Models\Playlist;
 use App\Models\Series;
 use App\Models\StreamFileSetting;
 use App\Models\StrmFileMapping;
@@ -286,6 +287,14 @@ class SyncSeriesStrmFiles implements ShouldQueue
                     ->body('All series STRM files have been synced.')
                     ->broadcast($user)
                     ->sendToDatabase($user);
+            }
+        }
+
+        // Fire series_stream_files_synced post-processes for the specific playlist
+        if (! $this->all_playlists && $this->playlist_id) {
+            $playlist = Playlist::find($this->playlist_id);
+            if ($playlist) {
+                dispatch(new FireStreamFilesSyncedEvent($playlist, 'series_stream_files_synced'));
             }
         }
     }
@@ -681,7 +690,12 @@ class SyncSeriesStrmFiles implements ShouldQueue
 
                 // Remove consecutive replacement characters if enabled
                 if ($removeConsecutiveChars && $replaceChar !== 'remove') {
-                    $char = $replaceChar === 'space' ? ' ' : ($replaceChar === 'dash' ? '-' : ($replaceChar === 'underscore' ? '_' : '.'));
+                    $char = match ($replaceChar) {
+                        'space' => ' ',
+                        'dash' => '-',
+                        'underscore' => '_',
+                        default => '.',
+                    };
                     $fileName = preg_replace('/'.preg_quote($char, '/').'{2,}/', $char, $fileName);
                 }
 

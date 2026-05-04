@@ -90,16 +90,12 @@ class SyncVodStrmFiles implements ShouldQueue
 
             // Explicit channels mode
             if ($this->channels) {
-                $channels = $this->channels instanceof Collection
-                    ? $this->channels
-                    : collect($this->channels);
-
-                if ($channels->isEmpty()) {
+                if ($this->channels->isEmpty()) {
                     return;
                 }
 
-                $this->syncChannels($channels, $settings, $globalStreamFileSetting, skipCleanup: false);
-                $this->dispatchMediaServerRefresh($globalStreamFileSetting, $channels);
+                $this->syncChannels($this->channels, $settings, $globalStreamFileSetting, skipCleanup: false);
+                $this->dispatchMediaServerRefresh($globalStreamFileSetting, $this->channels);
 
                 return;
             }
@@ -426,7 +422,12 @@ class SyncVodStrmFiles implements ShouldQueue
 
             // Remove consecutive replacement characters if enabled
             if ($removeConsecutiveChars && $replaceChar !== 'remove') {
-                $char = $replaceChar === 'space' ? ' ' : ($replaceChar === 'dash' ? '-' : ($replaceChar === 'underscore' ? '_' : '.'));
+                $char = match ($replaceChar) {
+                    'space' => ' ',
+                    'dash' => '-',
+                    'underscore' => '_',
+                    default => '.',
+                };
                 $fileName = preg_replace('/'.preg_quote($char, '/').'{2,}/', $char, $fileName);
             }
 
@@ -556,6 +557,15 @@ class SyncVodStrmFiles implements ShouldQueue
                     ->body('All VOD STRM files have been synced.')
                     ->broadcast($user)
                     ->sendToDatabase($user);
+            }
+        }
+
+        // Fire vod_stream_files_synced post-processes for the specific playlist
+        $playlistId = $this->resolvePlaylistId();
+        if (! $this->all_playlists && $playlistId) {
+            $playlist = $this->playlist ?? Playlist::find($playlistId);
+            if ($playlist) {
+                dispatch(new FireStreamFilesSyncedEvent($playlist, 'vod_stream_files_synced'));
             }
         }
     }
