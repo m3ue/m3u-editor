@@ -19,6 +19,7 @@ use Filament\Forms\Components\Toggle;
 use Filament\Forms\Components\ToggleButtons;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Fieldset;
+use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
@@ -133,219 +134,226 @@ class StreamFileSettingResource extends Resource implements CopilotResource
                     ->rules([new CheckIfUrlOrLocalPath(localOnly: true, isDirectory: true)])
                     ->required()
                     ->columnSpanFull()
-                    ->helperText(function ($get) {
-                        $type = $get('type');
-
-                        // Map replace_char to actual character
-                        $map = function ($char) {
-                            return match ($char) {
-                                'space' => ' ',
-                                'dash' => '-',
-                                'underscore' => '_',
-                                'period' => '.',
-                                'remove' => '',
-                                default => $char,
-                            };
-                        };
-
-                        if ($type === 'vod') {
-                            $vod = PlaylistService::getVodExample();
-
-                            $path = $get('location') ?? '';
-                            $pathStructure = $get('path_structure') ?? [];
-                            $filenameMetadata = $get('filename_metadata') ?? [];
-                            $folderMetadata = $get('folder_metadata') ?? [];
-                            $tmdbIdFormat = $get('tmdb_id_format') ?? 'square';
-                            $replaceChar = $map($get('replace_char') ?? 'space');
-                            $titleFolderEnabled = in_array('title', $pathStructure);
-
-                            $preview = 'Preview: '.$path;
-
-                            if (in_array('group', $pathStructure)) {
-                                $groupName = $vod->group->name ?? $vod->group ?? 'Uncategorized';
-                                $preview .= '/'.PlaylistService::makeFilesystemSafe($groupName, $replaceChar);
-                            }
-
-                            if ($titleFolderEnabled) {
-                                $titleFolder = PlaylistService::makeFilesystemSafe($vod->title ?? '', $replaceChar);
-
-                                if (in_array('year', $folderMetadata) && ! empty($vod->year) && strpos($titleFolder, "({$vod->year})") === false) {
-                                    $titleFolder .= " ({$vod->year})";
-                                }
-
-                                if (in_array('tmdb_id', $folderMetadata)) {
-                                    $tmdbId = $vod->info['tmdb_id'] ?? $vod->info['tmdb'] ?? $vod->movie_data['tmdb_id'] ?? $vod->movie_data['tmdb'] ?? null;
-                                    $imdbId = $vod->info['imdb_id'] ?? $vod->info['imdb'] ?? $vod->movie_data['imdb_id'] ?? $vod->movie_data['imdb'] ?? null;
-                                    $bracket = $tmdbIdFormat === 'curly' ? ['{', '}'] : ['[', ']'];
-                                    if (! empty($tmdbId)) {
-                                        $titleFolder .= " {$bracket[0]}tmdb-{$tmdbId}{$bracket[1]}";
-                                    } elseif (! empty($imdbId)) {
-                                        $titleFolder .= " {$bracket[0]}imdb-{$imdbId}{$bracket[1]}";
-                                    }
-                                }
-
-                                $preview .= '/'.$titleFolder;
-                            }
-
-                            $filename = PlaylistService::makeFilesystemSafe($vod->title ?? '', $replaceChar);
-
-                            if (in_array('year', $filenameMetadata) && ! empty($vod->year)) {
-                                if (strpos($filename, "({$vod->year})") === false) {
-                                    $filename .= " ({$vod->year})";
-                                }
-                            }
-
-                            $tmdbId = $vod->info['tmdb_id'] ?? $vod->info['tmdb'] ?? $vod->movie_data['tmdb_id'] ?? $vod->movie_data['tmdb'] ?? null;
-                            $imdbId = $vod->info['imdb_id'] ?? $vod->info['imdb'] ?? $vod->movie_data['imdb_id'] ?? $vod->movie_data['imdb'] ?? null;
-                            if (in_array('tmdb_id', $filenameMetadata)) {
-                                $bracket = $tmdbIdFormat === 'curly' ? ['{', '}'] : ['[', ']'];
-                                if (! empty($tmdbId)) {
-                                    $filename .= " {$bracket[0]}tmdb-{$tmdbId}{$bracket[1]}";
-                                } elseif (! empty($imdbId)) {
-                                    $filename .= " {$bracket[0]}imdb-{$imdbId}{$bracket[1]}";
-                                }
-                            }
-
-                            if (in_array('group', $filenameMetadata)) {
-                                $groupName = $vod->group->name ?? $vod->group ?? 'Uncategorized';
-                                $groupName = PlaylistService::makeFilesystemSafe($groupName, $replaceChar);
-                                $filename .= " - {$groupName}";
-                            }
-
-                            // Trash Guide naming appends extra components (edition + quality bracket)
-                            // to the standard filename above — it does NOT replace title/year/tmdb/group.
-                            if ((bool) $get('trash_guide_naming_enabled')) {
-                                $components = $get('trash_movie_components') ?? ['quality', 'video', 'audio', 'hdr'];
-                                $usePlexMarker = (bool) ($get('group_versions') ?? true);
-                                $sample = [
-                                    'edition' => 'Directors Cut',
-                                    'quality' => '1080p',
-                                    'video' => 'x264',
-                                    'audio' => 'DTS',
-                                    'hdr' => 'HDR10',
-                                ];
-                                if (in_array('edition', $components)) {
-                                    $filename .= $usePlexMarker
-                                        ? ' {edition-'.str_replace(' ', '.', $sample['edition']).'}'
-                                        : ' '.$sample['edition'];
-                                }
-                                $bracketParts = [];
-                                foreach (['quality', 'video', 'audio', 'hdr'] as $b) {
-                                    if (in_array($b, $components) && $sample[$b] !== '') {
-                                        $bracketParts[] = $sample[$b];
-                                    }
-                                }
-                                if ($bracketParts) {
-                                    $filename .= ' ['.implode(' ', $bracketParts).']';
-                                }
-                                $filename = trim(preg_replace('/\s+/', ' ', $filename));
-                            }
-
-                            $preview .= '/'.$filename.'.strm';
-
-                            return $preview;
-                        }
-
-                        // Default to series preview
-                        $series = PlaylistService::getEpisodeExample();
-
-                        $path = $get('location') ?? '';
-                        $pathStructure = $get('path_structure') ?? [];
-                        $filenameMetadata = $get('filename_metadata') ?? [];
-                        $tmdbIdFormat = $get('tmdb_id_format') ?? 'square';
-                        $tmdbIdApplyTo = $get('tmdb_id_apply_to') ?? 'episodes';
-                        $replaceChar = $map($get('replace_char') ?? 'space');
-
-                        $preview = 'Preview: '.$path;
-
-                        if (in_array('category', $pathStructure)) {
-                            $preview .= '/'.($series->category ?? 'Uncategorized');
-                        }
-                        if (in_array('series', $pathStructure)) {
-                            $seriesFolder = $series->series->metadata['name'] ?? $series->series->name ?? 'Series';
-
-                            if (! empty($series->series->release_date ?? null)) {
-                                $year = substr($series->series->release_date, 0, 4);
-                                if (strpos($seriesFolder, "({$year})") === false) {
-                                    $seriesFolder .= " ({$year})";
-                                }
-                            }
-
-                            $tvdbId = $series->series->tvdb_id ?? $series->series->metadata['tvdb_id'] ?? $series->series->metadata['tvdb'] ?? null;
-                            $tmdbId = $series->series->tmdb_id ?? $series->series->metadata['tmdb_id'] ?? $series->series->metadata['tmdb'] ?? null;
-                            $imdbId = $series->series->imdb_id ?? $series->series->metadata['imdb_id'] ?? $series->series->metadata['imdb'] ?? null;
-                            $tmdbEnabled = in_array('tmdb_id', $filenameMetadata, true);
-                            $applyTmdbToSeriesFolder = $tmdbEnabled && in_array($tmdbIdApplyTo, ['series', 'both'], true);
-                            $bracket = $tmdbIdFormat === 'curly' ? ['{', '}'] : ['[', ']'];
-
-                            if ($applyTmdbToSeriesFolder) {
-                                if (! empty($tmdbId)) {
-                                    $seriesFolder .= " {$bracket[0]}tmdb-{$tmdbId}{$bracket[1]}";
-                                } elseif (! empty($tvdbId)) {
-                                    $seriesFolder .= " {$bracket[0]}tvdb-{$tvdbId}{$bracket[1]}";
-                                } elseif (! empty($imdbId)) {
-                                    $seriesFolder .= " {$bracket[0]}imdb-{$imdbId}{$bracket[1]}";
-                                }
-                            } elseif (! empty($tvdbId)) {
-                                $seriesFolder .= " {$bracket[0]}tvdb-{$tvdbId}{$bracket[1]}";
-                            } elseif (! empty($imdbId)) {
-                                $seriesFolder .= " {$bracket[0]}imdb-{$imdbId}{$bracket[1]}";
-                            }
-
-                            $preview .= '/'.$seriesFolder;
-                        }
-                        if (in_array('season', $pathStructure)) {
-                            $preview .= '/Season '.str_pad($series->info->season ?? 0, 2, '0', STR_PAD_LEFT);
-                        }
-
-                        $season = str_pad($series->info->season ?? 0, 2, '0', STR_PAD_LEFT);
-                        $episode = str_pad($series->episode_num ?? 0, 2, '0', STR_PAD_LEFT);
-                        $filename = PlaylistService::makeFilesystemSafe("S{$season}E{$episode} - ".($series->title ?? ''), $replaceChar);
-
-                        if (in_array('year', $filenameMetadata) && ! empty($series->series->release_date ?? null)) {
-                            $year = substr($series->series->release_date, 0, 4);
-                            $filename .= " ({$year})";
-                        }
-                        $tmdbEnabled = in_array('tmdb_id', $filenameMetadata, true);
-                        $applyTmdbToEpisodes = $tmdbEnabled && in_array($tmdbIdApplyTo, ['episodes', 'both'], true);
-                        if ($applyTmdbToEpisodes && ! empty($series->info->tmdb_id ?? null)) {
-                            $bracket = $tmdbIdFormat === 'curly' ? ['{', '}'] : ['[', ']'];
-                            $filename .= " {$bracket[0]}tmdb-{$series->info->tmdb_id}{$bracket[1]}";
-                        }
-
-                        if (in_array('category', $filenameMetadata)) {
-                            $catName = $series->category ?? 'Uncategorized';
-                            $catName = PlaylistService::makeFilesystemSafe($catName, $replaceChar);
-                            $filename .= " - {$catName}";
-                        }
-
-                        // Trash Guide naming appends quality bracket to the standard episode filename
-                        if ((bool) $get('trash_guide_naming_enabled')) {
-                            $components = $get('trash_episode_components') ?? ['quality', 'video', 'audio', 'hdr'];
-                            $sample = [
-                                'quality' => '1080p',
-                                'video' => 'x264',
-                                'audio' => 'DDP5.1',
-                                'hdr' => '',
-                            ];
-                            $bracketParts = [];
-                            foreach (['quality', 'video', 'audio', 'hdr'] as $b) {
-                                if (in_array($b, $components) && $sample[$b] !== '') {
-                                    $bracketParts[] = $sample[$b];
-                                }
-                            }
-                            if ($bracketParts) {
-                                $filename .= ' ['.implode(' ', $bracketParts).']';
-                            }
-                            $filename = trim(preg_replace('/\s+/', ' ', $filename));
-                        }
-
-                        $preview .= '/'.$filename.'.strm';
-
-                        return $preview;
-                    })
+                    ->helperText(__('Local directory path where .strm files will be written.'))
                     ->hidden(fn ($get) => ! $get('enabled'))
                     ->placeholder(fn ($get) => $get('type') === 'series' ? '/Series' : '/Movies'),
+
+                // Preview section with dynamic content based on form state
+                Section::make(__('Path Preview'))
+                    ->compact()
+                    ->columnSpanFull()
+                    ->schema([
+                        Placeholder::make('path_preview')
+                            ->hiddenLabel()
+                            ->columnSpanFull()
+                            ->extraAttributes(['class' => 'font-mono'])
+                            ->content(function (Get $get): string {
+                                $type = $get('type');
+
+                                $map = fn ($char) => match ($char) {
+                                    'space' => ' ',
+                                    'dash' => '-',
+                                    'underscore' => '_',
+                                    'period' => '.',
+                                    'remove' => '',
+                                    default => $char,
+                                };
+
+                                if ($type === 'vod') {
+                                    $vod = PlaylistService::getVodExample();
+
+                                    $path = $get('location') ?? '';
+                                    $pathStructure = $get('path_structure') ?? [];
+                                    $filenameMetadata = $get('filename_metadata') ?? [];
+                                    $folderMetadata = $get('folder_metadata') ?? [];
+                                    $tmdbIdFormat = $get('tmdb_id_format') ?? 'square';
+                                    $replaceChar = $map($get('replace_char') ?? 'space');
+                                    $titleFolderEnabled = in_array('title', $pathStructure);
+
+                                    $preview = $path;
+
+                                    if (in_array('group', $pathStructure)) {
+                                        $groupName = $vod->group->name ?? $vod->group ?? 'Uncategorized';
+                                        $preview .= '/'.PlaylistService::makeFilesystemSafe($groupName, $replaceChar);
+                                    }
+
+                                    if ($titleFolderEnabled) {
+                                        $titleFolder = PlaylistService::makeFilesystemSafe($vod->title ?? '', $replaceChar);
+
+                                        if (in_array('year', $folderMetadata) && ! empty($vod->year) && strpos($titleFolder, "({$vod->year})") === false) {
+                                            $titleFolder .= " ({$vod->year})";
+                                        }
+
+                                        if (in_array('tmdb_id', $folderMetadata)) {
+                                            $tmdbId = $vod->info['tmdb_id'] ?? $vod->info['tmdb'] ?? $vod->movie_data['tmdb_id'] ?? $vod->movie_data['tmdb'] ?? null;
+                                            $imdbId = $vod->info['imdb_id'] ?? $vod->info['imdb'] ?? $vod->movie_data['imdb_id'] ?? $vod->movie_data['imdb'] ?? null;
+                                            $bracket = $tmdbIdFormat === 'curly' ? ['{', '}'] : ['[', ']'];
+                                            if (! empty($tmdbId)) {
+                                                $titleFolder .= " {$bracket[0]}tmdb-{$tmdbId}{$bracket[1]}";
+                                            } elseif (! empty($imdbId)) {
+                                                $titleFolder .= " {$bracket[0]}imdb-{$imdbId}{$bracket[1]}";
+                                            }
+                                        }
+
+                                        $preview .= '/'.$titleFolder;
+                                    }
+
+                                    $filename = PlaylistService::makeFilesystemSafe($vod->title ?? '', $replaceChar);
+
+                                    if (in_array('year', $filenameMetadata) && ! empty($vod->year)) {
+                                        if (strpos($filename, "({$vod->year})") === false) {
+                                            $filename .= " ({$vod->year})";
+                                        }
+                                    }
+
+                                    $tmdbId = $vod->info['tmdb_id'] ?? $vod->info['tmdb'] ?? $vod->movie_data['tmdb_id'] ?? $vod->movie_data['tmdb'] ?? null;
+                                    $imdbId = $vod->info['imdb_id'] ?? $vod->info['imdb'] ?? $vod->movie_data['imdb_id'] ?? $vod->movie_data['imdb'] ?? null;
+                                    if (in_array('tmdb_id', $filenameMetadata)) {
+                                        $bracket = $tmdbIdFormat === 'curly' ? ['{', '}'] : ['[', ']'];
+                                        if (! empty($tmdbId)) {
+                                            $filename .= " {$bracket[0]}tmdb-{$tmdbId}{$bracket[1]}";
+                                        } elseif (! empty($imdbId)) {
+                                            $filename .= " {$bracket[0]}imdb-{$imdbId}{$bracket[1]}";
+                                        }
+                                    }
+
+                                    if (in_array('group', $filenameMetadata)) {
+                                        $groupName = $vod->group->name ?? $vod->group ?? 'Uncategorized';
+                                        $groupName = PlaylistService::makeFilesystemSafe($groupName, $replaceChar);
+                                        $filename .= " - {$groupName}";
+                                    }
+
+                                    if ((bool) $get('trash_guide_naming_enabled')) {
+                                        $components = $get('trash_movie_components') ?? ['quality', 'video', 'audio', 'hdr'];
+                                        $usePlexMarker = (bool) ($get('group_versions') ?? true);
+                                        $sample = [
+                                            'edition' => 'Directors Cut',
+                                            'quality' => '1080p',
+                                            'video' => 'x264',
+                                            'audio' => 'DTS',
+                                            'hdr' => 'HDR10',
+                                        ];
+                                        if (in_array('edition', $components)) {
+                                            $filename .= $usePlexMarker
+                                                ? ' {edition-'.str_replace(' ', '.', $sample['edition']).'}'
+                                                : ' '.$sample['edition'];
+                                        }
+                                        $bracketParts = [];
+                                        foreach (['quality', 'video', 'audio', 'hdr'] as $b) {
+                                            if (in_array($b, $components) && $sample[$b] !== '') {
+                                                $bracketParts[] = $sample[$b];
+                                            }
+                                        }
+                                        if ($bracketParts) {
+                                            $filename .= ' ['.implode(' ', $bracketParts).']';
+                                        }
+                                        $filename = trim(preg_replace('/\s+/', ' ', $filename));
+                                    }
+
+                                    $preview .= '/'.$filename.'.strm';
+
+                                    return $preview;
+                                }
+
+                                // Default to series preview
+                                $series = PlaylistService::getEpisodeExample();
+
+                                $path = $get('location') ?? '';
+                                $pathStructure = $get('path_structure') ?? [];
+                                $filenameMetadata = $get('filename_metadata') ?? [];
+                                $tmdbIdFormat = $get('tmdb_id_format') ?? 'square';
+                                $tmdbIdApplyTo = $get('tmdb_id_apply_to') ?? 'episodes';
+                                $replaceChar = $map($get('replace_char') ?? 'space');
+
+                                $preview = $path;
+
+                                if (in_array('category', $pathStructure)) {
+                                    $preview .= '/'.($series->category ?? 'Uncategorized');
+                                }
+                                if (in_array('series', $pathStructure)) {
+                                    $seriesFolder = $series->series->metadata['name'] ?? $series->series->name ?? 'Series';
+
+                                    if (! empty($series->series->release_date ?? null)) {
+                                        $year = substr($series->series->release_date, 0, 4);
+                                        if (strpos($seriesFolder, "({$year})") === false) {
+                                            $seriesFolder .= " ({$year})";
+                                        }
+                                    }
+
+                                    $tvdbId = $series->series->tvdb_id ?? $series->series->metadata['tvdb_id'] ?? $series->series->metadata['tvdb'] ?? null;
+                                    $tmdbId = $series->series->tmdb_id ?? $series->series->metadata['tmdb_id'] ?? $series->series->metadata['tmdb'] ?? null;
+                                    $imdbId = $series->series->imdb_id ?? $series->series->metadata['imdb_id'] ?? $series->series->metadata['imdb'] ?? null;
+                                    $tmdbEnabled = in_array('tmdb_id', $filenameMetadata, true);
+                                    $applyTmdbToSeriesFolder = $tmdbEnabled && in_array($tmdbIdApplyTo, ['series', 'both'], true);
+                                    $bracket = $tmdbIdFormat === 'curly' ? ['{', '}'] : ['[', ']'];
+
+                                    if ($applyTmdbToSeriesFolder) {
+                                        if (! empty($tmdbId)) {
+                                            $seriesFolder .= " {$bracket[0]}tmdb-{$tmdbId}{$bracket[1]}";
+                                        } elseif (! empty($tvdbId)) {
+                                            $seriesFolder .= " {$bracket[0]}tvdb-{$tvdbId}{$bracket[1]}";
+                                        } elseif (! empty($imdbId)) {
+                                            $seriesFolder .= " {$bracket[0]}imdb-{$imdbId}{$bracket[1]}";
+                                        }
+                                    } elseif (! empty($tvdbId)) {
+                                        $seriesFolder .= " {$bracket[0]}tvdb-{$tvdbId}{$bracket[1]}";
+                                    } elseif (! empty($imdbId)) {
+                                        $seriesFolder .= " {$bracket[0]}imdb-{$imdbId}{$bracket[1]}";
+                                    }
+
+                                    $preview .= '/'.$seriesFolder;
+                                }
+                                if (in_array('season', $pathStructure)) {
+                                    $preview .= '/Season '.str_pad($series->info->season ?? 0, 2, '0', STR_PAD_LEFT);
+                                }
+
+                                $season = str_pad($series->info->season ?? 0, 2, '0', STR_PAD_LEFT);
+                                $episode = str_pad($series->episode_num ?? 0, 2, '0', STR_PAD_LEFT);
+                                $filename = PlaylistService::makeFilesystemSafe("S{$season}E{$episode} - ".($series->title ?? ''), $replaceChar);
+
+                                if (in_array('year', $filenameMetadata) && ! empty($series->series->release_date ?? null)) {
+                                    $year = substr($series->series->release_date, 0, 4);
+                                    $filename .= " ({$year})";
+                                }
+                                $tmdbEnabled = in_array('tmdb_id', $filenameMetadata, true);
+                                $applyTmdbToEpisodes = $tmdbEnabled && in_array($tmdbIdApplyTo, ['episodes', 'both'], true);
+                                if ($applyTmdbToEpisodes && ! empty($series->info->tmdb_id ?? null)) {
+                                    $bracket = $tmdbIdFormat === 'curly' ? ['{', '}'] : ['[', ']'];
+                                    $filename .= " {$bracket[0]}tmdb-{$series->info->tmdb_id}{$bracket[1]}";
+                                }
+
+                                if (in_array('category', $filenameMetadata)) {
+                                    $catName = $series->category ?? 'Uncategorized';
+                                    $catName = PlaylistService::makeFilesystemSafe($catName, $replaceChar);
+                                    $filename .= " - {$catName}";
+                                }
+
+                                if ((bool) $get('trash_guide_naming_enabled')) {
+                                    $components = $get('trash_episode_components') ?? ['quality', 'video', 'audio', 'hdr'];
+                                    $sample = [
+                                        'quality' => '1080p',
+                                        'video' => 'x264',
+                                        'audio' => 'DDP5.1',
+                                        'hdr' => '',
+                                    ];
+                                    $bracketParts = [];
+                                    foreach (['quality', 'video', 'audio', 'hdr'] as $b) {
+                                        if (in_array($b, $components) && $sample[$b] !== '') {
+                                            $bracketParts[] = $sample[$b];
+                                        }
+                                    }
+                                    if ($bracketParts) {
+                                        $filename .= ' ['.implode(' ', $bracketParts).']';
+                                    }
+                                    $filename = trim(preg_replace('/\s+/', ' ', $filename));
+                                }
+
+                                $preview .= '/'.$filename.'.strm';
+
+                                return $preview;
+                            }),
+                    ])
+                    ->hidden(fn ($get) => ! $get('enabled')),
 
                 ToggleButtons::make('path_structure')
                     ->label(__('Path structure (folders)'))
