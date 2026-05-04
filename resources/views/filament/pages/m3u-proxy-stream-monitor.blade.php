@@ -362,9 +362,9 @@
                             @if ($outputMediaInfo)
                                 <!-- Output Info Row (encoder/muxer side, transcoded streams only) -->
                                 <div
-                                    class="flex flex-wrap gap-2 mb-4 p-3 bg-amber-50 dark:bg-amber-900/10 rounded-lg border border-amber-200 dark:border-amber-900/40">
+                                    class="flex flex-wrap gap-2 mb-4 p-3 bg-violet-50 dark:bg-violet-950/30 rounded-lg border border-violet-200 dark:border-violet-900/50">
                                     <div
-                                        class="flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400 mr-1">
+                                        class="flex items-center gap-1 text-xs text-violet-700 dark:text-violet-300 mr-1">
                                         <x-heroicon-s-arrow-up-tray class="w-3.5 h-3.5" />
                                         <span class="font-medium uppercase tracking-wide">Output</span>
                                         <span
@@ -372,12 +372,12 @@
                                             title="Live data from active ffmpeg encoder"></span>
                                     </div>
                                     @if ($outputMediaInfo['resolution'] ?? false)
-                                        <x-filament::badge color="warning" size="sm" icon="heroicon-s-squares-2x2">
+                                        <x-filament::badge color="info" size="sm" icon="heroicon-s-squares-2x2">
                                             {{ $outputMediaInfo['resolution'] }}
                                         </x-filament::badge>
                                     @endif
                                     @if ($outputMediaInfo['video_codec'] ?? false)
-                                        <x-filament::badge color="warning" size="sm" icon="heroicon-s-cpu-chip">
+                                        <x-filament::badge color="primary" size="sm" icon="heroicon-s-cpu-chip">
                                             {{ strtoupper($outputMediaInfo['video_codec']) }}
                                         </x-filament::badge>
                                     @endif
@@ -398,7 +398,7 @@
                                                 $outAudioDisplay .= ' · ' . $outputMediaInfo['audio_channels'];
                                             }
                                         @endphp
-                                        <x-filament::badge color="warning" size="sm" icon="heroicon-s-speaker-wave">
+                                        <x-filament::badge color="success" size="sm" icon="heroicon-s-speaker-wave">
                                             {{ $outAudioDisplay }}
                                         </x-filament::badge>
                                     @endif
