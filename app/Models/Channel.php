@@ -357,7 +357,15 @@ class Channel extends Model
     /**
      * Run ffprobe against this channel's stream URL and return parsed stats.
      *
-     * @return array{streams: array<int, array{codec_type: string, codec_name: string, codec_long_name: ?string, profile: ?string, width: ?int, height: ?int, bit_rate: ?string, avg_frame_rate: ?string, display_aspect_ratio: ?string, sample_rate: ?string, channels: ?int, channel_layout: ?string, level: ?int, bits_per_raw_sample: ?string}>}
+     * Returns a flat list of entries, each with one of two shapes:
+     *   - Stream entry:  ['stream' => ['codec_type' => string, 'codec_name' => string, ...]]
+     *   - Format entry:  ['format' => ['bit_rate' => string]]  (appended once when available)
+     *
+     * The format entry carries the container-level bit_rate from `-show_format`. It is used
+     * as a fallback video bitrate for live MPEG-TS streams where ffprobe cannot determine
+     * a per-stream bit_rate. See getEmbyStreamStats() for the derivation logic.
+     *
+     * @return list<array{stream: array{codec_type: string, codec_name: string, codec_long_name: ?string, profile: ?string, width: ?int, height: ?int, bit_rate: ?string, avg_frame_rate: ?string, display_aspect_ratio: ?string, sample_rate: ?string, channels: ?int, channel_layout: ?string, level: ?int, bits_per_raw_sample: ?string, refs: ?int, tags: array<string, string>}}|array{format: array{bit_rate: string}}>
      */
     public function probeStreamStats(int $timeout = 15): array
     {
@@ -482,6 +490,8 @@ class Channel extends Model
             // (no CBR container, unknown duration). Fall back to
             // container_bitrate - audio_bitrate, which is a tight upper bound
             // for the video bitrate on a typical 1 video + 1 audio TS mux.
+            // NOTE: only the first audio track's bitrate is subtracted, so streams
+            // with multiple audio tracks will produce a slightly overstated value.
             $bitRate = $video['bit_rate'] ?? null;
             if ($bitRate === null && $formatBitRate !== null) {
                 $audioBps = isset($audio['bit_rate']) ? (float) $audio['bit_rate'] : 0.0;
