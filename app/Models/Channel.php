@@ -7,6 +7,7 @@ use App\Enums\PlaylistSourceType;
 use App\Jobs\FetchTmdbIds;
 use App\Observers\ChannelObserver;
 use App\Services\PlaylistService;
+use App\Services\StreamProfileRuleEvaluator;
 use App\Services\XtreamService;
 use App\Settings\GeneralSettings;
 use Exception;
@@ -76,6 +77,23 @@ class Channel extends Model
     public function streamProfile(): BelongsTo
     {
         return $this->belongsTo(StreamProfile::class);
+    }
+
+    /**
+     * Resolve the channel's stream profile to a concrete transcoding profile,
+     * unwrapping an adaptive profile (backend === 'adaptive') by evaluating
+     * its rules against the channel's cached probe data. Use this anywhere
+     * the profile is consumed for actual streaming; use $channel->streamProfile
+     * when showing the user-assigned value (it may itself be adaptive).
+     */
+    public function getEffectiveStreamProfile(): ?StreamProfile
+    {
+        $profile = $this->relationLoaded('streamProfile')
+            ? $this->streamProfile
+            : $this->streamProfile()->first();
+
+        return app(StreamProfileRuleEvaluator::class)
+            ->unwrap($profile, $this->stream_stats);
     }
 
     /**
@@ -203,6 +221,7 @@ class Channel extends Model
             ? $this->streamProfile
             : $this->streamProfile()->first();
         $profile ??= ($globalProfileId ? StreamProfile::find($globalProfileId) : null);
+        $profile = app(StreamProfileRuleEvaluator::class)->unwrap($profile, $this->stream_stats);
 
         // When no transcoding profile is set, the proxy delivers raw bytes (direct proxy),
         // not an HLS manifest. For VOD channels, use the actual container extension for both

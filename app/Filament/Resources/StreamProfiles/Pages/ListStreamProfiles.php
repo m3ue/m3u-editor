@@ -7,6 +7,7 @@ use App\Models\StreamProfile;
 use Filament\Actions;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ListRecords;
+use Filament\Schemas\Components\Tabs\Tab;
 use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Database\Eloquent\Builder;
 
@@ -94,5 +95,29 @@ class ListStreamProfiles extends ListRecords
     {
         return static::getResource()::getEloquentQuery()
             ->where('user_id', auth()->id());
+    }
+
+    public function getTabs(): array
+    {
+        $counts = StreamProfile::where('user_id', auth()->id())
+            ->selectRaw('backend, COUNT(*) as cnt')
+            ->groupBy('backend')
+            ->pluck('cnt', 'backend');
+
+        $adaptiveCount = (int) $counts->get('adaptive', 0);
+        $totalCount = (int) $counts->sum();
+        $transcodingCount = $totalCount - $adaptiveCount;
+
+        return [
+            'all' => Tab::make(__('All'))
+                ->badge($totalCount),
+            'transcoding' => Tab::make(__('Transcoding'))
+                ->modifyQueryUsing(fn (Builder $query) => $query->where('backend', '!=', 'adaptive'))
+                ->badge($transcodingCount),
+            'adaptive' => Tab::make(__('Adaptive'))
+                ->modifyQueryUsing(fn (Builder $query) => $query->where('backend', 'adaptive'))
+                ->badge($adaptiveCount)
+                ->badgeColor('success'),
+        ];
     }
 }

@@ -13,6 +13,7 @@ use App\Models\StreamProfile;
 use App\Services\M3uProxyService;
 use App\Services\NetworkBroadcastService;
 use App\Services\ProfileService;
+use App\Services\StreamProfileRuleEvaluator;
 use App\Settings\GeneralSettings;
 use Exception;
 use Illuminate\Http\JsonResponse;
@@ -59,8 +60,11 @@ class M3uProxyApiController extends Controller
 
         // Channel-level profile takes priority over the playlist-level profile.
         // If neither is set, the stream is proxied directly without transcoding.
+        // An adaptive profile (backend === 'adaptive') is unwrapped to its
+        // concrete target via the channel's cached probe data.
         $profile = $channel->streamProfile
             ?? ($channel->is_vod ? $playlist->vodStreamProfile : $playlist->streamProfile);
+        $profile = app(StreamProfileRuleEvaluator::class)->unwrap($profile, $channel->stream_stats);
 
         $url = app(M3uProxyService::class)
             ->getChannelUrl(
@@ -153,6 +157,7 @@ class M3uProxyApiController extends Controller
             : ($settings->default_stream_profile_id ?? null);
         $profile = $channel->streamProfile
             ?? ($globalProfileId ? StreamProfile::find($globalProfileId) : null);
+        $profile = app(StreamProfileRuleEvaluator::class)->unwrap($profile, $channel->stream_stats);
 
         $url = app(M3uProxyService::class)
             ->getChannelUrl(
