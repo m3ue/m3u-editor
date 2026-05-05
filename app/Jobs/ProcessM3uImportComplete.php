@@ -81,12 +81,14 @@ class ProcessM3uImportComplete implements ShouldQueue
         $user = User::find($this->userId);
         $playlist = $user->playlists()->find($this->playlistId);
 
-        // Get the removed groups
-        $removedGroups = Group::where([
-            ['custom', false],
-            ['playlist_id', $playlist->id],
-            ['import_batch_no', '!=', $this->batchNo],
-        ]);
+        // Get the removed groups (also catches groups created without a batch number, e.g. by CopyAttributesToPlaylist,
+        // since NULL != $batchNo evaluates to NULL in SQL and would otherwise escape cleanup)
+        $removedGroups = Group::where('custom', false)
+            ->where('playlist_id', $playlist->id)
+            ->where(function ($q) {
+                $q->whereNull('import_batch_no')
+                    ->orWhere('import_batch_no', '!=', $this->batchNo);
+            });
 
         // Get the newly added groups
         $newGroups = $playlist->groups()->where([

@@ -21,6 +21,7 @@ use Filament\Pages\Page;
 use Filament\Schemas\Contracts\HasSchemas;
 use Filament\Support\Enums\Size;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 /**
  * Shared Stream Monitor (External API-backed)
@@ -85,17 +86,18 @@ class M3uProxyStreamMonitor extends Page implements HasActions, HasSchemas
     {
         $this->streams = $this->getActiveStreams();
 
+        $streamCount = count($this->streams);
         $totalClients = array_sum(array_map(fn ($s) => $s['client_count'] ?? 0, $this->streams));
         $totalBandwidth = array_sum(array_map(fn ($s) => $s['bandwidth_kbps'] ?? 0, $this->streams));
         $activeStreams = count(array_filter($this->streams, fn ($s) => $s['status'] === 'active'));
 
         $this->globalStats = [
-            'total_streams' => count($this->streams),
+            'total_streams' => $streamCount,
             'active_streams' => $activeStreams,
             'total_clients' => $totalClients,
             'total_bandwidth_kbps' => round($totalBandwidth, 2),
-            'avg_clients_per_stream' => count($this->streams) > 0
-                ? number_format($totalClients / count($this->streams), 2)
+            'avg_clients_per_stream' => $streamCount > 0
+                ? number_format($totalClients / $streamCount, 2)
                 : '0.00',
         ];
 
@@ -112,19 +114,6 @@ class M3uProxyStreamMonitor extends Page implements HasActions, HasSchemas
                 ->icon('heroicon-o-arrow-path')
                 ->size(Size::Small)
                 ->action('refreshData'),
-
-            // Action::make('cleanup')
-            //     ->label(__('Cleanup Streams'))
-            //     ->icon('heroicon-o-trash')
-            //     ->size(Size::Small)
-            //     ->color('danger')
-            //     ->requiresConfirmation()
-            //     ->modalDescription(__('This will stop all inactive streams via external API.'))
-            //     ->action(function (): void {
-            //         // If external API exposes a cleanup endpoint add call here
-            //         Notification::make()->title(__('Cleanup requested.'))->success()->send();
-            //         $this->refreshData();
-            //     }),
         ];
     }
 
@@ -146,23 +135,14 @@ class M3uProxyStreamMonitor extends Page implements HasActions, HasSchemas
 
                 try {
                     $success = $this->apiService->triggerFailover($streamId);
-                    if ($success) {
-                        Notification::make()
-                            ->title("Failover triggered for stream {$streamId}.")
-                            ->success()
-                            ->send();
-                    } else {
-                        Notification::make()
-                            ->title("Failed to trigger failover for stream {$streamId}.")
-                            ->danger()
-                            ->send();
-                    }
+                    $this->sendStreamNotification(
+                        $success
+                            ? "Failover triggered for stream {$streamId}."
+                            : "Failed to trigger failover for stream {$streamId}.",
+                        $success,
+                    );
                 } catch (Exception $e) {
-                    Notification::make()
-                        ->title(__('Error triggering failover.'))
-                        ->body($e->getMessage())
-                        ->danger()
-                        ->send();
+                    $this->sendStreamNotification(__('Error triggering failover.'), false, $e->getMessage());
                 }
 
                 $this->refreshData();
@@ -187,44 +167,28 @@ class M3uProxyStreamMonitor extends Page implements HasActions, HasSchemas
 
                 try {
                     if (str_starts_with($streamId, 'broadcast:')) {
-                        $networkId = substr($streamId, 10);
+                        $networkId = Str::after($streamId, 'broadcast:');
                         $success = $this->apiService->stopBroadcast($networkId);
-
-                        if ($success) {
-                            Notification::make()
-                                ->title("Broadcast for network {$networkId} stopped successfully.")
-                                ->success()
-                                ->send();
-                        } else {
-                            Notification::make()
-                                ->title("Failed to stop broadcast for network {$networkId}.")
-                                ->danger()
-                                ->send();
-                        }
-
+                        $this->sendStreamNotification(
+                            $success
+                                ? "Broadcast for network {$networkId} stopped successfully."
+                                : "Failed to stop broadcast for network {$networkId}.",
+                            $success,
+                        );
                         $this->refreshData();
 
                         return;
                     }
 
                     $success = $this->apiService->stopStream($streamId);
-                    if ($success) {
-                        Notification::make()
-                            ->title("Stream {$streamId} stopped successfully.")
-                            ->success()
-                            ->send();
-                    } else {
-                        Notification::make()
-                            ->title("Failed to stop stream {$streamId}.")
-                            ->danger()
-                            ->send();
-                    }
+                    $this->sendStreamNotification(
+                        $success
+                            ? "Stream {$streamId} stopped successfully."
+                            : "Failed to stop stream {$streamId}.",
+                        $success,
+                    );
                 } catch (Exception $e) {
-                    Notification::make()
-                        ->title(__('Error stopping stream.'))
-                        ->body($e->getMessage())
-                        ->danger()
-                        ->send();
+                    $this->sendStreamNotification(__('Error stopping stream.'), false, $e->getMessage());
                 }
 
                 $this->refreshData();
@@ -238,7 +202,7 @@ class M3uProxyStreamMonitor extends Page implements HasActions, HasSchemas
     private function authorizeStreamAction(string $streamId): bool
     {
         if (str_starts_with($streamId, 'broadcast:')) {
-            $networkUuid = substr($streamId, strlen('broadcast:'));
+            $networkUuid = Str::after($streamId, 'broadcast:');
             $owned = Network::where('uuid', $networkUuid)
                 ->where('user_id', auth()->id())
                 ->exists();
@@ -261,6 +225,19 @@ class M3uProxyStreamMonitor extends Page implements HasActions, HasSchemas
         }
 
         return $owned;
+    }
+
+    private function sendStreamNotification(string $title, bool $success, ?string $body = null): void
+    {
+        $notification = Notification::make()->title($title);
+
+        if ($body !== null) {
+            $notification->body($body);
+        }
+
+        $success ? $notification->success() : $notification->danger();
+
+        $notification->send();
     }
 
     protected function getActiveStreams(): array

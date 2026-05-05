@@ -7,7 +7,6 @@ use App\Filament\Resources\PostProcesses\Pages\EditPostProcess;
 use App\Filament\Resources\PostProcesses\Pages\ListPostProcesses;
 use App\Filament\Resources\PostProcesses\RelationManagers\LogsRelationManager;
 use App\Filament\Resources\PostProcesses\RelationManagers\ProcessesRelationManager;
-use App\Filament\Resources\PostProcessResource\Pages;
 use App\Models\PostProcess;
 use App\Rules\CheckIfUrlOrLocalPath;
 use App\Services\DateFormatService;
@@ -30,7 +29,6 @@ use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
-use Filament\Tables;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Columns\ToggleColumn;
 use Filament\Tables\Enums\RecordActionsPosition;
@@ -90,12 +88,6 @@ class PostProcessResource extends Resource implements CopilotResource
     {
         return $table
             ->columns([
-                // Tables\Columns\TextInputColumn::make('name')
-                //     ->label(__('Name'))
-                //     ->rules(['min:0', 'max:255'])
-                //     ->required()
-                //     ->searchable()
-                //     ->toggleable(),
                 TextColumn::make('name')
                     ->label(__('Name'))
                     ->searchable()
@@ -148,7 +140,6 @@ class PostProcessResource extends Resource implements CopilotResource
     {
         return [
             'index' => ListPostProcesses::route('/'),
-            // 'create' => Pages\CreatePostProcess::route('/create'),
             'edit' => EditPostProcess::route('/{record}/edit'),
         ];
     }
@@ -167,14 +158,17 @@ class PostProcessResource extends Resource implements CopilotResource
                 ->helperText(__('A descriptive name for this post process.')),
             Select::make('event')
                 ->required()
+                ->native(false)
                 ->options([
                     'synced' => 'Synced',
+                    'vod_stream_files_synced' => 'VOD Stream Files Synced',
+                    'series_stream_files_synced' => 'Series Stream Files Synced',
                     'created' => 'Created',
                     // 'updated' => 'Updated', // Can lead to a lot of calls! Updates are called during the sync process.
                     'deleted' => 'Deleted',
                 ])
                 ->default('synced')
-                ->helperText(__('The event that will trigger this post process.')),
+                ->helperText(__('The event that will trigger this post process. "VOD/Series Stream Files Synced" fires after the respective .strm file sync completes (requires .strm sync to be enabled on the playlist).')),
             ToggleButtons::make('metadata.local')
                 ->label(__('Type'))
                 ->grouped()
@@ -196,36 +190,23 @@ class PostProcessResource extends Resource implements CopilotResource
             TextInput::make('metadata.path')
                 ->label(fn (Get $get) => ucfirst($get('metadata.local') ?? 'url'))
                 ->columnSpan(2)
-                ->prefixIcon(function (Get $get) {
-                    if ($get('metadata.local') === 'url') {
-                        return 'heroicon-o-globe-alt';
-                    } elseif ($get('metadata.local') === 'path') {
-                        return 'heroicon-o-document';
-                    } elseif ($get('metadata.local') === 'email') {
-                        return 'heroicon-o-envelope';
-                    }
-
-                    return 'heroicon-o-question-mark-circle';
+                ->prefixIcon(fn (Get $get) => match ($get('metadata.local')) {
+                    'url' => 'heroicon-o-globe-alt',
+                    'path' => 'heroicon-o-document',
+                    'email' => 'heroicon-o-envelope',
+                    default => 'heroicon-o-question-mark-circle',
                 })
-                ->placeholder(function (Get $get) {
-                    if ($get('metadata.local') === 'url') {
-                        return route('webhook.test.get');
-                    } elseif ($get('metadata.local') === 'path') {
-                        return '/var/www/html/custom_script';
-                    } elseif ($get('metadata.local') === 'email') {
-                        return 'user@example.com';
-                    }
+                ->placeholder(fn (Get $get) => match ($get('metadata.local')) {
+                    'url' => route('webhook.test.get'),
+                    'path' => '/var/www/html/custom_script',
+                    'email' => 'user@example.com',
+                    default => null,
                 })
-                ->helperText(function (Get $get) {
-                    if ($get('metadata.local') === 'url') {
-                        return 'The URL to your webhook endpoint.';
-                    } elseif ($get('metadata.local') === 'path') {
-                        return 'The path to your local script.';
-                    } elseif ($get('metadata.local') === 'email') {
-                        return 'The email address to send notifications to.';
-                    }
-
-                    return 'The URL or path to your webhook endpoint.';
+                ->helperText(fn (Get $get) => match ($get('metadata.local')) {
+                    'url' => 'The URL to your webhook endpoint.',
+                    'path' => 'The path to your local script.',
+                    'email' => 'The email address to send notifications to.',
+                    default => 'The URL or path to your webhook endpoint.',
                 })
                 ->required()
                 ->rules(fn (Get $get) => $get('metadata.local') === 'email' ? [
@@ -323,25 +304,8 @@ class PostProcessResource extends Resource implements CopilotResource
                                     Select::make('value')
                                         ->label(__('Value'))
                                         ->required()
-                                        ->options([
-                                            // Shared fields
-                                            'id' => 'ID',
-                                            'uuid' => 'UUID',
-                                            'name' => 'Name',
-                                            'url' => 'URL',
-                                            'status' => 'Status',
-
-                                            // Playlist sync fields
-                                            'time' => 'Sync time',
-                                            'added_groups' => '# Groups added (Playlist only)',
-                                            'removed_groups' => '# Groups removed (Playlist only)',
-                                            'added_channels' => '# Channels added (Playlist only)',
-                                            'removed_channels' => '# Channels removed (Playlist only)',
-                                            'added_group_names' => 'Group names added (Playlist only)',
-                                            'removed_group_names' => 'Group names removed (Playlist only)',
-                                            'added_channel_names' => 'Channel names added (Playlist only)',
-                                            'removed_channel_names' => 'Channel names removed (Playlist only)',
-                                        ])->helperText(__('Value to use for this variable.')),
+                                        ->options(self::variableOptions())
+                                        ->helperText(__('Value to use for this variable.')),
                                 ])
                                 ->columns(2)
                                 ->columnSpanFull()
@@ -372,25 +336,8 @@ class PostProcessResource extends Resource implements CopilotResource
                             Select::make('value')
                                 ->label(__('Value'))
                                 ->required()
-                                ->options([
-                                    // Shared fields
-                                    'id' => 'ID',
-                                    'uuid' => 'UUID',
-                                    'name' => 'Name',
-                                    'url' => 'URL',
-                                    'status' => 'Status',
-
-                                    // Playlist sync fields
-                                    'time' => 'Sync time',
-                                    'added_groups' => '# Groups added (Playlist only)',
-                                    'removed_groups' => '# Groups removed (Playlist only)',
-                                    'added_channels' => '# Channels added (Playlist only)',
-                                    'removed_channels' => '# Channels removed (Playlist only)',
-                                    'added_group_names' => 'Group names added (Playlist only)',
-                                    'removed_group_names' => 'Group names removed (Playlist only)',
-                                    'added_channel_names' => 'Channel names added (Playlist only)',
-                                    'removed_channel_names' => 'Channel names removed (Playlist only)',
-                                ])->helperText(__('Value to use for this variable.')),
+                                ->options(self::variableOptions())
+                                ->helperText(__('Value to use for this variable.')),
                         ])
                         ->columns(2)
                         ->columnSpanFull()
@@ -415,25 +362,8 @@ class PostProcessResource extends Resource implements CopilotResource
                                 ->label(__('Value'))
                                 ->required()
                                 ->columnSpanFull()
-                                ->options([
-                                    // Shared fields
-                                    'id' => 'ID',
-                                    'uuid' => 'UUID',
-                                    'name' => 'Name',
-                                    'url' => 'URL',
-                                    'status' => 'Status',
-
-                                    // Playlist sync fields
-                                    'time' => 'Sync time',
-                                    'added_groups' => '# Groups added (Playlist only)',
-                                    'removed_groups' => '# Groups removed (Playlist only)',
-                                    'added_channels' => '# Channels added (Playlist only)',
-                                    'removed_channels' => '# Channels removed (Playlist only)',
-                                    'added_group_names' => 'Group names added (Playlist only)',
-                                    'removed_group_names' => 'Group names removed (Playlist only)',
-                                    'added_channel_names' => 'Channel names added (Playlist only)',
-                                    'removed_channel_names' => 'Channel names removed (Playlist only)',
-                                ])->helperText(__('Value to include in the email.')),
+                                ->options(self::variableOptions())
+                                ->helperText(__('Value to include in the email.')),
                         ])
                         ->columns(2)
                         ->columnSpanFull()
@@ -447,25 +377,7 @@ class PostProcessResource extends Resource implements CopilotResource
                             Select::make('field')
                                 ->label(__('Field'))
                                 ->required()
-                                ->options([
-                                    // Shared fields
-                                    'id' => 'ID',
-                                    'uuid' => 'UUID',
-                                    'name' => 'Name',
-                                    'url' => 'URL',
-                                    'status' => 'Status',
-
-                                    // Playlist sync fields
-                                    'time' => 'Sync time',
-                                    'added_groups' => '# Groups added (Playlist only)',
-                                    'removed_groups' => '# Groups removed (Playlist only)',
-                                    'added_channels' => '# Channels added (Playlist only)',
-                                    'removed_channels' => '# Channels removed (Playlist only)',
-                                    'added_group_names' => 'Group names added (Playlist only)',
-                                    'removed_group_names' => 'Group names removed (Playlist only)',
-                                    'added_channel_names' => 'Channel names added (Playlist only)',
-                                    'removed_channel_names' => 'Channel names removed (Playlist only)',
-                                ])
+                                ->options(self::variableOptions())
                                 ->helperText(__('Field to check condition against.')),
                             Select::make('operator')
                                 ->label(__('Condition'))
@@ -510,6 +422,31 @@ class PostProcessResource extends Resource implements CopilotResource
                     ->collapsed(true)
                     ->compact()
                     ->schema($schema)->columns(2),
+        ];
+    }
+
+    /**
+     * Shared variable/field options used across GET/POST vars, script vars, email vars, and conditions.
+     *
+     * @return array<string, string>
+     */
+    private static function variableOptions(): array
+    {
+        return [
+            'id' => 'ID',
+            'uuid' => 'UUID',
+            'name' => 'Name',
+            'url' => 'URL',
+            'status' => 'Status',
+            'time' => 'Sync time',
+            'added_groups' => '# Groups added (Playlist only)',
+            'removed_groups' => '# Groups removed (Playlist only)',
+            'added_channels' => '# Channels added (Playlist only)',
+            'removed_channels' => '# Channels removed (Playlist only)',
+            'added_group_names' => 'Group names added (Playlist only)',
+            'removed_group_names' => 'Group names removed (Playlist only)',
+            'added_channel_names' => 'Channel names added (Playlist only)',
+            'removed_channel_names' => 'Channel names removed (Playlist only)',
         ];
     }
 }

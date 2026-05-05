@@ -7,6 +7,7 @@ use App\Enums\PlaylistSourceType;
 use App\Jobs\FetchTmdbIds;
 use App\Observers\ChannelObserver;
 use App\Services\PlaylistService;
+use App\Services\StreamProfileRuleEvaluator;
 use App\Services\XtreamService;
 use App\Settings\GeneralSettings;
 use Exception;
@@ -65,6 +66,8 @@ class Channel extends Model
         'stream_stats' => 'array',
         'stream_stats_probed_at' => 'datetime',
         'probe_enabled' => 'boolean',
+        'year' => 'integer',
+        'edition' => 'string',
     ];
 
     public function user(): BelongsTo
@@ -75,6 +78,23 @@ class Channel extends Model
     public function streamProfile(): BelongsTo
     {
         return $this->belongsTo(StreamProfile::class);
+    }
+
+    /**
+     * Resolve the channel's stream profile to a concrete transcoding profile,
+     * unwrapping an adaptive profile (backend === 'adaptive') by evaluating
+     * its rules against the channel's cached probe data. Use this anywhere
+     * the profile is consumed for actual streaming; use $channel->streamProfile
+     * when showing the user-assigned value (it may itself be adaptive).
+     */
+    public function getEffectiveStreamProfile(): ?StreamProfile
+    {
+        $profile = $this->relationLoaded('streamProfile')
+            ? $this->streamProfile
+            : $this->streamProfile()->first();
+
+        return app(StreamProfileRuleEvaluator::class)
+            ->unwrap($profile, $this->stream_stats);
     }
 
     /**
@@ -202,6 +222,7 @@ class Channel extends Model
             ? $this->streamProfile
             : $this->streamProfile()->first();
         $profile ??= ($globalProfileId ? StreamProfile::find($globalProfileId) : null);
+        $profile = app(StreamProfileRuleEvaluator::class)->unwrap($profile, $this->stream_stats);
 
         // When no transcoding profile is set, the proxy delivers raw bytes (direct proxy),
         // not an HLS manifest. For VOD channels, use the actual container extension for both
@@ -581,6 +602,8 @@ class Channel extends Model
             // Per-stream video bit_rate is often null for MPEG-TS / HLS containers.
             // Fall back to (format.bit_rate − audio.bit_rate). Includes muxing overhead
             // (~3-5% inflation) but is good enough for ranking and Technical Details display.
+            // NOTE: only the first audio track's bitrate is subtracted, so streams
+            // with multiple audio tracks will produce a slightly overstated value.
             $bitRate = $video['bit_rate'] ?? null;
             if ($bitRate === null && $format !== null && isset($format['bit_rate'])) {
                 $audioBps = isset($audio['bit_rate']) ? (float) $audio['bit_rate'] : 0.0;

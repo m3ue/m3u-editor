@@ -125,6 +125,18 @@ class PluginManager
 
     public function validate(Plugin $plugin): Plugin
     {
+        // Official stubs and other pathless records have no files to validate.
+        // Calling validatePath("") on them rewrites their trust state — guard early.
+        if (! $plugin->path) {
+            $plugin->update([
+                'available' => false,
+                'enabled' => false,
+                'last_validated_at' => now(),
+            ]);
+
+            return $plugin->fresh();
+        }
+
         $result = $this->validator->validatePath((string) $plugin->path);
         $securityState = $this->determineSecurityState($plugin, $result, file_exists((string) $plugin->path));
 
@@ -532,6 +544,11 @@ class PluginManager
             'repository' => $plugin->repository ?? $this->repositoryFromReview($review),
         ]);
         $plugin = $this->validate($plugin->fresh());
+
+        // Auto-trust installs from trusted orgs/official sources when configured to do so.
+        if (! $trust && config('plugins.auto_trust_official', true)) {
+            $trust = $this->reviewAutoTrustAllowed($review);
+        }
 
         $review->update([
             'status' => $trust ? 'approved' : 'installed',
@@ -1384,6 +1401,24 @@ class PluginManager
 
         return config('plugins.install_mode') === 'dev'
             && $plugin->source_type === 'local_dev';
+    }
+
+    /**
+     * Check whether an install review qualifies for automatic trust when
+     * PLUGIN_AUTO_TRUST_OFFICIAL is enabled. Only GitHub releases from a
+     * trusted org are eligible — the repo slug is read from the download
+     * metadata recorded at staging time, not from plugin.json, so a
+     * malicious manifest cannot spoof the org.
+     */
+    private function reviewAutoTrustAllowed(PluginInstallReview $review): bool
+    {
+        if ($review->source_type === 'github_release') {
+            $repoSlug = data_get($review->source_metadata ?? [], 'repository');
+
+            return $this->isFromTrustedOrg($repoSlug);
+        }
+
+        return $review->source_type === 'bundled';
     }
 
     public function isFromTrustedOrg(?string $repository): bool

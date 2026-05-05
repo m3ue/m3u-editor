@@ -3,8 +3,10 @@
 use App\Models\Channel;
 use App\Models\Playlist;
 use App\Models\User;
+use Illuminate\Support\Facades\Event;
 
 beforeEach(function () {
+    Event::fake();
     $this->user = User::factory()->create();
     $this->playlist = Playlist::factory()->for($this->user)->createQuietly();
 });
@@ -110,6 +112,78 @@ it('defaults video_bit_depth to 8 when bits_per_raw_sample is not set', function
     ]);
 
     expect($channel->getEmbyStreamStats()['video_bit_depth'])->toBe(8);
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Live MPEG-TS bitrate fallback – derive video bitrate from container bitrate
+// ──────────────────────────────────────────────────────────────────────────────
+
+it('derives video bitrate from container bit_rate when video stream has none (live MPEG-TS)', function () {
+    $channel = Channel::factory()->for($this->playlist)->create([
+        'stream_stats' => [
+            ['stream' => [
+                'codec_type' => 'video',
+                'codec_name' => 'h264',
+                'width' => 1920,
+                'height' => 1080,
+                // Live TS: no per-stream video bit_rate
+                'bit_rate' => null,
+            ]],
+            ['stream' => [
+                'codec_type' => 'audio',
+                'codec_name' => 'ac3',
+                'channels' => 6,
+                'sample_rate' => '48000',
+                'bit_rate' => '448000',
+            ]],
+            // ffprobe -show_format container bitrate (e.g. 5 Mbit/s mux)
+            ['format' => ['bit_rate' => '5000000']],
+        ],
+    ]);
+
+    $result = $channel->getEmbyStreamStats();
+
+    // 5 000 000 - 448 000 = 4 552 000 bps -> 4552.0 kbps
+    expect($result['ffmpeg_output_bitrate'])->toBe(4552.0)
+        ->and($result['audio_bitrate'])->toBe(448.0);
+});
+
+it('prefers per-stream video bit_rate over container fallback when both exist', function () {
+    $channel = Channel::factory()->for($this->playlist)->create([
+        'stream_stats' => [
+            ['stream' => [
+                'codec_type' => 'video',
+                'codec_name' => 'h264',
+                'width' => 1920,
+                'height' => 1080,
+                'bit_rate' => '3000000',
+            ]],
+            ['stream' => [
+                'codec_type' => 'audio',
+                'codec_name' => 'aac',
+                'channels' => 2,
+                'bit_rate' => '128000',
+            ]],
+            ['format' => ['bit_rate' => '9999999']],
+        ],
+    ]);
+
+    expect($channel->getEmbyStreamStats()['ffmpeg_output_bitrate'])->toBe(3000.0);
+});
+
+it('leaves video bitrate null when container bitrate is missing and stream has none', function () {
+    $channel = Channel::factory()->for($this->playlist)->create([
+        'stream_stats' => [
+            ['stream' => [
+                'codec_type' => 'video',
+                'codec_name' => 'h264',
+                'width' => 1920,
+                'height' => 1080,
+            ]],
+        ],
+    ]);
+
+    expect($channel->getEmbyStreamStats()['ffmpeg_output_bitrate'])->toBeNull();
 });
 
 it('handles 10-bit video correctly', function () {
