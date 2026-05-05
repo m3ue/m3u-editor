@@ -2,9 +2,9 @@
 
 return [
     'author' => 'Shaun Parkison',
-    'version' => '0.10.35',
-    'dev_version' => '0.11.33-dev',
-    'experimental_version' => '0.12.4-exp',
+    'version' => '0.11.34',
+    'dev_version' => '0.11.34-dev',
+    'experimental_version' => '0.12.5-exp',
     'repo' => 'm3ue/m3u-editor',
     'docs_url' => 'https://m3ue.sparkison.dev',
     'donate' => 'https://buymeacoffee.com/shparkison',
