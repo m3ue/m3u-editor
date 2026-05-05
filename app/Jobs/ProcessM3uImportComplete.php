@@ -81,12 +81,14 @@ class ProcessM3uImportComplete implements ShouldQueue
         $user = User::find($this->userId);
         $playlist = $user->playlists()->find($this->playlistId);
 
-        // Get the removed groups
-        $removedGroups = Group::where([
-            ['custom', false],
-            ['playlist_id', $playlist->id],
-            ['import_batch_no', '!=', $this->batchNo],
-        ]);
+        // Get the removed groups (also catches groups created without a batch number, e.g. by CopyAttributesToPlaylist,
+        // since NULL != $batchNo evaluates to NULL in SQL and would otherwise escape cleanup)
+        $removedGroups = Group::where('custom', false)
+            ->where('playlist_id', $playlist->id)
+            ->where(function ($q) {
+                $q->whereNull('import_batch_no')
+                    ->orWhere('import_batch_no', '!=', $this->batchNo);
+            });
 
         // Get the newly added groups
         $newGroups = $playlist->groups()->where([
@@ -355,23 +357,35 @@ class ProcessM3uImportComplete implements ShouldQueue
                 ['is_vod', true],
             ])->exists();
 
+        // Check whether a series metadata sync should follow — evaluated here so we can
+        // decide whether to chain it after VOD or dispatch it independently.
+        $syncSeriesMetadata = $playlist->auto_fetch_series_metadata
+            && $playlist->series()->where('enabled', true)->exists();
+
         if ($syncVod) {
-            // Check if syncing stream files too
+            // VOD runs first. When series is also needed it is chained after VOD completes
+            // (via TriggerSeriesImport) so both pipelines run sequentially and respect the
+            // provider's rate-limiting / concurrency settings. SyncCompleted fires only after
+            // the last pipeline in the sequence finishes.
+            $completionJob = $syncSeriesMetadata
+                ? new TriggerSeriesImport($playlist, $this->isNew, $this->batchNo)
+                : new FireSyncCompletedEvent($playlist);
+
             $syncStreamFiles = $playlist->auto_sync_vod_stream_files;
             $syncMetaData = $playlist->auto_fetch_vod_metadata;
             if ($syncStreamFiles && $syncMetaData) {
                 $message = 'Syncing VOD stream files and fetching VOD metadata now. Please check back later.';
             } elseif ($syncStreamFiles) {
                 $message = 'Syncing VOD stream files now. Please check back later.';
-            } elseif ($syncMetaData) {
+            } else {
                 $message = 'Fetching VOD metadata now. Please check back later.';
             }
 
-            // Process VOD import
             dispatch(new ProcessM3uImportVod(
                 playlist: $playlist,
                 isNew: $this->isNew,
                 batchNo: $this->batchNo,
+                completionJob: $completionJob,
             ));
             Notification::make()
                 ->info()
@@ -379,33 +393,12 @@ class ProcessM3uImportComplete implements ShouldQueue
                 ->body($message)
                 ->broadcast($playlist->user)
                 ->sendToDatabase($playlist->user);
+
+            return; // VOD pipeline (and series if needed) will fire SyncCompleted when done
         }
-
-        if ($this->runningSeriesImport) {
-            return; // Exit early if series import is enabled, sync complete event will be fired after series import completes
-        }
-
-        // Fire the playlist synced event with new channel IDs for auto-merge
-        event(new SyncCompleted($playlist, 'playlist'));
-    }
-
-    /**
-     * Handle series cleanup and importing after playlist import completes.
-     */
-    private function seriesCleanup($playlist)
-    {
-        // First, we need to remove any invalid categories/series/episodes
-        foreach ($playlist->categories()->where('import_batch_no', '!=', $this->batchNo)->cursor() as $category) {
-            $category->series()->delete(); // will cascade to episodes
-            $category->delete();
-        }
-
-        // Determine if syncing series metadata
-        $syncSeriesMetadata = $playlist->auto_fetch_series_metadata
-            && $playlist->series()->where('enabled', true)->exists();
 
         if ($syncSeriesMetadata) {
-            // Process series import
+            // No VOD to run — dispatch series directly and let it fire SyncCompleted.
             dispatch(new ProcessM3uImportSeries(
                 playlist: $playlist,
                 force: true,
@@ -418,6 +411,23 @@ class ProcessM3uImportComplete implements ShouldQueue
                 ->body('Fetching series metadata now. This may take a while depending on how many series you have enabled. If stream file syncing is enabled, it will also be ran. Please check back later.')
                 ->broadcast($playlist->user)
                 ->sendToDatabase($playlist->user);
+
+            return;
+        }
+
+        // Neither VOD nor series — fire immediately.
+        event(new SyncCompleted($playlist, 'playlist'));
+    }
+
+    /**
+     * Remove orphaned series categories/series/episodes from a previous import batch.
+     * Series dispatch is handled in handle() so the VOD→Series ordering can be enforced.
+     */
+    private function seriesCleanup($playlist): void
+    {
+        foreach ($playlist->categories()->where('import_batch_no', '!=', $this->batchNo)->cursor() as $category) {
+            $category->series()->delete(); // will cascade to episodes
+            $category->delete();
         }
     }
 

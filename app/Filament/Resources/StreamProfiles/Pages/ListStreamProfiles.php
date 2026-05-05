@@ -7,6 +7,7 @@ use App\Models\StreamProfile;
 use Filament\Actions;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ListRecords;
+use Filament\Schemas\Components\Tabs\Tab;
 use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Database\Eloquent\Builder;
 
@@ -26,24 +27,50 @@ class ListStreamProfiles extends ListRecords
                 ->label(__('Generate Default Profiles'))
                 ->requiresConfirmation()
                 ->action(function () {
+                    $userId = auth()->id();
                     $defaultProfiles = [
                         [
-                            'user_id' => auth()->id(),
+                            'user_id' => $userId,
                             'name' => 'Default Live Profile',
                             'description' => 'Optimized for live streaming content with CBR encoding.',
-                            'args' => '-fflags +genpts+discardcorrupt+igndts -i {input_url} -c:v libx264 -preset faster -b:v {bitrate|2000k} -maxrate {maxrate|2500k} -bufsize {bufsize|2500k} -c:a aac -b:a {audio_bitrate|128k} -f mpegts {output_args|pipe:1}',
+                            'backend' => 'ffmpeg',
                             'format' => 'ts',
+                            'args' => '-fflags +genpts+discardcorrupt+igndts -i {input_url} -c:v libx264 -preset faster -b:v {bitrate|2000k} -maxrate {maxrate|2500k} -bufsize {bufsize|2500k} -c:a aac -b:a {audio_bitrate|128k} -f mpegts {output_args|pipe:1}',
                         ],
                         [
-                            'user_id' => auth()->id(),
+                            'user_id' => $userId,
                             'name' => 'Default HLS Profile',
                             'description' => 'Optimized for live streaming with low latency, better buffering, and CBR encoding.',
-                            'args' => '-fflags +genpts+discardcorrupt+igndts -i {input_url} -c:v libx264 -preset faster -b:v {bitrate|2000k} -maxrate {maxrate|2500k} -bufsize {bufsize|2500k} -c:a aac -b:a {audio_bitrate|128k} -hls_time 2 -hls_list_size 30 -hls_flags program_date_time -f hls {output_args|index.m3u8}',
+                            'backend' => 'ffmpeg',
                             'format' => 'm3u8',
+                            'args' => '-fflags +genpts+discardcorrupt+igndts -i {input_url} -c:v libx264 -preset faster -b:v {bitrate|2000k} -maxrate {maxrate|2500k} -bufsize {bufsize|2500k} -c:a aac -b:a {audio_bitrate|128k} -hls_time 2 -hls_list_size 30 -hls_flags program_date_time -f hls {output_args|index.m3u8}',
                         ],
-
+                        [
+                            'user_id' => $userId,
+                            'name' => 'Default HLS fMP4 Profile',
+                            'description' => 'HLS with fragmented MP4 (CMAF) segments — required for Apple AVKit on tvOS to play HEVC/H.265 streams.',
+                            'backend' => 'ffmpeg',
+                            'format' => 'm3u8',
+                            'args' => '-fflags +genpts+discardcorrupt+igndts -i {input_url} -c:v libx264 -preset faster -b:v {bitrate|2000k} -maxrate {maxrate|2500k} -bufsize {bufsize|2500k} -c:a aac -b:a {audio_bitrate|128k} -hls_time 2 -hls_list_size 30 -hls_flags program_date_time -hls_segment_type fmp4 -f hls {output_args|index.m3u8}',
+                        ],
+                        [
+                            'user_id' => $userId,
+                            'name' => 'Default Streamlink Profile',
+                            'description' => 'For platforms like Twitch and YouTube — extracts the stream directly without re-encoding.',
+                            'backend' => 'streamlink',
+                            'format' => 'ts',
+                            'args' => 'best --hls-live-edge 3',
+                        ],
+                        [
+                            'user_id' => $userId,
+                            'name' => 'Default yt-dlp Profile',
+                            'description' => 'For platforms supported by yt-dlp — extracts the best available quality without re-encoding.',
+                            'backend' => 'ytdlp',
+                            'format' => 'ts',
+                            'args' => 'bestvideo+bestaudio/best --no-playlist',
+                        ],
                     ];
-                    foreach ($defaultProfiles as $index => $defaultProfile) {
+                    foreach ($defaultProfiles as $defaultProfile) {
                         StreamProfile::query()->create($defaultProfile);
                     }
                 })
@@ -68,5 +95,29 @@ class ListStreamProfiles extends ListRecords
     {
         return static::getResource()::getEloquentQuery()
             ->where('user_id', auth()->id());
+    }
+
+    public function getTabs(): array
+    {
+        $counts = StreamProfile::where('user_id', auth()->id())
+            ->selectRaw('backend, COUNT(*) as cnt')
+            ->groupBy('backend')
+            ->pluck('cnt', 'backend');
+
+        $adaptiveCount = (int) $counts->get('adaptive', 0);
+        $totalCount = (int) $counts->sum();
+        $transcodingCount = $totalCount - $adaptiveCount;
+
+        return [
+            'all' => Tab::make(__('All'))
+                ->badge($totalCount),
+            'transcoding' => Tab::make(__('Transcoding'))
+                ->modifyQueryUsing(fn (Builder $query) => $query->where('backend', '!=', 'adaptive'))
+                ->badge($transcodingCount),
+            'adaptive' => Tab::make(__('Adaptive'))
+                ->modifyQueryUsing(fn (Builder $query) => $query->where('backend', 'adaptive'))
+                ->badge($adaptiveCount)
+                ->badgeColor('success'),
+        ];
     }
 }

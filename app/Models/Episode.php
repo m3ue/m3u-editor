@@ -6,6 +6,8 @@ use App\Services\PlaylistService;
 use App\Settings\GeneralSettings;
 use Carbon\Carbon;
 use Exception;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -37,6 +39,9 @@ class Episode extends Model
         'season' => 'integer',
         'tmdb_id' => 'integer',
         'info' => 'array',
+        'stream_stats' => 'array',
+        'stream_stats_probed_at' => 'datetime',
+        'probe_enabled' => 'boolean',
     ];
 
     public function user(): BelongsTo
@@ -68,6 +73,11 @@ class Episode extends Model
         return $this->belongsTo(Season::class);
     }
 
+    public function serie(): BelongsTo
+    {
+        return $this->belongsTo(Series::class, 'series_id');
+    }
+
     /**
      * Get all STRM file mappings for this episode
      */
@@ -83,6 +93,21 @@ class Episode extends Model
     public function getDisplayTitleAttribute(): string
     {
         return $this->title ?? '';
+    }
+
+    public function getEpisodeNumberAttribute(): int
+    {
+        return (int) ($this->episode_num ?? 0);
+    }
+
+    public function getFormattedEpisodeNumberAttribute(): string
+    {
+        return sprintf('S%02dE%02d', (int) ($this->season ?? 0), (int) ($this->episode_num ?? 0));
+    }
+
+    public function scopeForSeason(Builder $query, int $seasonId): Builder
+    {
+        return $query->where('season_id', $seasonId);
     }
 
     public function getFloatingPlayerAttributes(?string $username = null, ?string $password = null): array
@@ -193,67 +218,6 @@ class Episode extends Model
     }
 
     /**
-     * Get the stream attributes.
-     *
-     * @var array
-     */
-    public function getStreamStatsAttribute(): array
-    {
-        try {
-            $url = $this->url;
-            $process = new SymfonyProcess(['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_streams', $url]);
-            $process->setTimeout(10);
-            $output = '';
-            $errors = '';
-            $hasErrors = false;
-            $process->run(
-                function ($type, $buffer) use (&$output, &$hasErrors, &$errors) {
-                    if ($type === SymfonyProcess::OUT) {
-                        $output .= $buffer;
-                    }
-                    if ($type === SymfonyProcess::ERR) {
-                        $hasErrors = true;
-                        $errors .= $buffer;
-                    }
-                }
-            );
-            if ($hasErrors) {
-                Log::error("Error running ffprobe for episode \"{$this->title}\": {$errors}");
-
-                return [];
-            }
-            $json = json_decode($output, true);
-            if (isset($json['streams']) && is_array($json['streams'])) {
-                $streamStats = [];
-                foreach ($json['streams'] as $stream) {
-                    if (isset($stream['codec_name'])) {
-                        $streamStats[]['stream'] = [
-                            'codec_type' => $stream['codec_type'],
-                            'codec_name' => $stream['codec_name'],
-                            'codec_long_name' => $stream['codec_long_name'] ?? null,
-                            'profile' => $stream['profile'] ?? null,
-                            'width' => $stream['width'] ?? null,
-                            'height' => $stream['height'] ?? null,
-                            'bit_rate' => $stream['bit_rate'] ?? null,
-                            'avg_frame_rate' => $stream['avg_frame_rate'] ?? null,
-                            'display_aspect_ratio' => $stream['display_aspect_ratio'] ?? null,
-                            'sample_rate' => $stream['sample_rate'] ?? null,
-                            'channels' => $stream['channels'] ?? null,
-                            'channel_layout' => $stream['channel_layout'] ?? null,
-                        ];
-                    }
-                }
-
-                return $streamStats;
-            }
-        } catch (Exception $e) {
-            Log::error("Error running ffprobe for episode \"{$this->title}\": {$e->getMessage()}");
-        }
-
-        return [];
-    }
-
-    /**
      * Get the added attribute with safe parsing
      */
     public function getAddedAttribute($value)
@@ -274,5 +238,88 @@ class Episode extends Model
             // If parsing fails, return null
             return null;
         }
+    }
+
+    /**
+     * Return stream_stats, probing via ffprobe and persisting if not yet populated.
+     *
+     * @return array<int, array{stream: array<string, mixed>}>
+     */
+    public function ensureStreamStats(): array
+    {
+        $stats = $this->stream_stats;
+
+        if (! empty($stats)) {
+            return $stats;
+        }
+
+        $stats = $this->probeStreamStats();
+
+        if (! empty($stats)) {
+            $this->updateQuietly([
+                'stream_stats' => $stats,
+                'stream_stats_probed_at' => now(),
+            ]);
+        }
+
+        return $stats;
+    }
+
+    /**
+     * Run ffprobe against this episode's URL and return parsed stats.
+     *
+     * @return array<int, array{stream: array<string, mixed>}>
+     */
+    public function probeStreamStats(int $timeout = 15): array
+    {
+        try {
+            $url = $this->url;
+            if (empty($url)) {
+                return [];
+            }
+
+            $process = new SymfonyProcess(['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_streams', $url]);
+            $process->setTimeout($timeout);
+            $process->run();
+
+            if ($process->getExitCode() !== 0) {
+                Log::error("Error running ffprobe for episode \"{$this->title}\": {$process->getErrorOutput()}");
+
+                return [];
+            }
+
+            $json = json_decode($process->getOutput(), true);
+            if (isset($json['streams']) && is_array($json['streams'])) {
+                $streamStats = [];
+                foreach ($json['streams'] as $stream) {
+                    if (isset($stream['codec_name'])) {
+                        $streamStats[]['stream'] = [
+                            'codec_type' => $stream['codec_type'],
+                            'codec_name' => $stream['codec_name'],
+                            'codec_long_name' => $stream['codec_long_name'] ?? null,
+                            'profile' => $stream['profile'] ?? null,
+                            'level' => $stream['level'] ?? null,
+                            'width' => $stream['width'] ?? null,
+                            'height' => $stream['height'] ?? null,
+                            'bit_rate' => $stream['bit_rate'] ?? null,
+                            'avg_frame_rate' => $stream['avg_frame_rate'] ?? null,
+                            'display_aspect_ratio' => $stream['display_aspect_ratio'] ?? null,
+                            'sample_rate' => $stream['sample_rate'] ?? null,
+                            'channels' => $stream['channels'] ?? null,
+                            'channel_layout' => $stream['channel_layout'] ?? null,
+                            'bits_per_raw_sample' => $stream['bits_per_raw_sample'] ?? null,
+                            'refs' => $stream['refs'] ?? null,
+                            'tags' => $stream['tags'] ?? [],
+                        ];
+                    }
+                }
+
+                return $streamStats;
+            }
+        } catch (Exception $e) {
+            Log::error("Error running ffprobe for episode \"{$this->title}\": {$e->getMessage()}");
+        }
+
+        return [];
     }
 }

@@ -4,6 +4,7 @@ namespace App\Filament\Resources\Assets;
 
 use App\Filament\Concerns\HasCopilotSupport;
 use App\Filament\Resources\Assets\Pages\ListAssets;
+use App\Filament\Resources\Assets\Widgets\AssetStatsOverview;
 use App\Models\Asset;
 use App\Models\User;
 use App\Services\AssetInventoryService;
@@ -174,6 +175,13 @@ class AssetResource extends Resource implements CopilotResource
                         }),
                 ]),
             ]);
+    }
+
+    public static function getWidgets(): array
+    {
+        return [
+            AssetStatsOverview::class,
+        ];
     }
 
     public static function getPages(): array

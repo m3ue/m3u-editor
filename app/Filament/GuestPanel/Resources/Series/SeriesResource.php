@@ -7,7 +7,9 @@ use App\Facades\PlaylistFacade;
 use App\Filament\GuestPanel\Pages\Concerns\HasPlaylist;
 use App\Models\CustomPlaylist;
 use App\Models\Playlist;
+use App\Models\PlaylistAlias;
 use App\Models\Series;
+use App\Models\SourceCategory;
 use App\Services\DateFormatService;
 use Filament\Actions;
 use Filament\Resources\Resource;
@@ -72,6 +74,37 @@ class SeriesResource extends Resource
                     $query->where('custom_playlists.id', $playlist->id);
                 })
                 ->where('enabled', true); // Only show enabled series
+        }
+        if ($playlist instanceof PlaylistAlias) {
+            // Alias backed by a standard playlist
+            if ($playlist->playlist_id) {
+                $query = parent::getEloquentQuery()
+                    ->with('playlist')
+                    ->where('enabled', true)
+                    ->where('playlist_id', $playlist->playlist_id);
+
+                // Apply series category filter if configured on the alias
+                $allowedCategoryNames = $playlist->getAllowedCategoryNames();
+                if (! empty($allowedCategoryNames)) {
+                    $allowedSourceCategoryIds = SourceCategory::where('playlist_id', $playlist->playlist_id)
+                        ->whereIn('name', $allowedCategoryNames)
+                        ->pluck('source_category_id')
+                        ->all();
+                    $query->whereIn('source_category_id', $allowedSourceCategoryIds);
+                }
+
+                return $query;
+            }
+
+            // Alias backed by a custom playlist
+            if ($playlist->custom_playlist_id) {
+                return parent::getEloquentQuery()
+                    ->with('customPlaylists')
+                    ->whereHas('customPlaylists', function ($query) use ($playlist) {
+                        $query->where('custom_playlists.id', $playlist->custom_playlist_id);
+                    })
+                    ->where('enabled', true);
+            }
         }
 
         return parent::getEloquentQuery();

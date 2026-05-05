@@ -20,8 +20,12 @@ class PlaylistAlias extends Model
     use HasFactory;
     use ShortUrlTrait;
 
+    /** @var array<int>|null Memoised source_category_id list for the series() filter. */
+    public ?array $resolvedCategoryIds = null;
+
     protected $casts = [
         'xtream_config' => 'array',
+        'group_filter' => 'array',
         'proxy_options' => 'array',
         'enable_proxy' => 'boolean',
         'priority' => 'integer',
@@ -64,6 +68,46 @@ class PlaylistAlias extends Model
                 return [];
             },
         );
+    }
+
+    /**
+     * Get the allowed live group names for this alias (empty = no restriction).
+     *
+     * @return array<string>
+     */
+    public function getAllowedLiveGroupNames(): array
+    {
+        return $this->group_filter['selected_groups'] ?? [];
+    }
+
+    /**
+     * Get the allowed VOD group names for this alias (empty = no restriction).
+     *
+     * @return array<string>
+     */
+    public function getAllowedVodGroupNames(): array
+    {
+        return $this->group_filter['selected_vod_groups'] ?? [];
+    }
+
+    /**
+     * Get the allowed series category names for this alias (empty = no restriction).
+     *
+     * @return array<string>
+     */
+    public function getAllowedCategoryNames(): array
+    {
+        return $this->group_filter['selected_categories'] ?? [];
+    }
+
+    /**
+     * Whether this alias has any group/category filter applied.
+     */
+    public function hasGroupFilter(): bool
+    {
+        return ! empty($this->group_filter['selected_groups'])
+            || ! empty($this->group_filter['selected_vod_groups'])
+            || ! empty($this->group_filter['selected_categories']);
     }
 
     public function getPrimaryXtreamConfig(): ?array
@@ -269,7 +313,7 @@ class PlaylistAlias extends Model
                 ->withPivot(['channel_number']);
         }
 
-        return $this->hasManyThrough(
+        $relation = $this->hasManyThrough(
             Channel::class,
             Playlist::class,
             'id', // Foreign key on Playlist table
@@ -277,6 +321,29 @@ class PlaylistAlias extends Model
             'playlist_id', // Local key on PlaylistAlias table
             'id'  // Local key on Playlist table
         );
+
+        // Apply group filter at the relationship level so it propagates to every caller
+        // (Xtream API, M3U generation, EPG, counts, etc.) without duplication.
+        // group_internal is the provider-supplied name updated on every sync and is never
+        // overridden by the user, unlike the user-facing group name.
+        $liveGroups = $this->getAllowedLiveGroupNames();
+        $vodGroups = $this->getAllowedVodGroupNames();
+
+        if (! empty($liveGroups)) {
+            $relation->where(function ($q) use ($liveGroups): void {
+                $q->where('channels.is_vod', true)
+                    ->orWhereIn('channels.group_internal', $liveGroups);
+            });
+        }
+
+        if (! empty($vodGroups)) {
+            $relation->where(function ($q) use ($vodGroups): void {
+                $q->where('channels.is_vod', false)
+                    ->orWhereIn('channels.group_internal', $vodGroups);
+            });
+        }
+
+        return $relation;
     }
 
     public function series(): BelongsToMany|HasManyThrough
@@ -285,7 +352,7 @@ class PlaylistAlias extends Model
             return $this->belongsToMany(Series::class, 'series_custom_playlist', 'custom_playlist_id', 'series_id', 'custom_playlist_id', 'id');
         }
 
-        return $this->hasManyThrough(
+        $relation = $this->hasManyThrough(
             Series::class,
             Playlist::class,
             'id', // Foreign key on Playlist table
@@ -293,6 +360,20 @@ class PlaylistAlias extends Model
             'playlist_id', // Local key on PlaylistAlias table
             'id'  // Local key on Playlist table
         );
+
+        // Apply category filter via source_category_id which is the provider-stable integer ID.
+        // SourceCategory.name matches what the user selected; we resolve it to the raw ID so
+        // the filter survives any user renames of the Category record.
+        $allowedCategoryNames = $this->getAllowedCategoryNames();
+        if (! empty($allowedCategoryNames)) {
+            $this->resolvedCategoryIds ??= SourceCategory::where('playlist_id', $this->playlist_id)
+                ->whereIn('name', $allowedCategoryNames)
+                ->pluck('source_category_id')
+                ->all();
+            $relation->whereIn('series.source_category_id', $this->resolvedCategoryIds);
+        }
+
+        return $relation;
     }
 
     public function enabled_channels(): BelongsToMany|HasManyThrough

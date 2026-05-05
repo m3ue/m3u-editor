@@ -65,6 +65,12 @@ class ScrubberLogsRelationManager extends RelationManager
                     ->color(fn ($state) => $state > 0 ? 'warning' : 'success')
                     ->sortable()
                     ->toggleable(),
+                TextColumn::make('live_count')
+                    ->label(__('Live Channels'))
+                    ->badge()
+                    ->color(fn ($state) => $state > 0 ? 'success' : 'gray')
+                    ->sortable()
+                    ->toggleable(),
                 TextColumn::make('runtime')
                     ->label(__('Runtime'))
                     ->formatStateUsing(fn ($state): string => $state ? gmdate('H:i:s', (int) $state) : '-')

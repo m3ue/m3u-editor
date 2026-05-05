@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Controllers\Api\M3uProxyApiController;
 use App\Models\Channel;
 use App\Models\CustomPlaylist;
 use App\Models\Episode;
@@ -226,7 +227,7 @@ class XtreamStreamController extends Controller
                 // so the in-app transcoding profile is applied instead of the playlist profile
                 $method = $request->input('player') === 'true' ? 'channelPlayer' : 'channel';
 
-                return app()->call("App\\Http\\Controllers\\Api\\M3uProxyApiController@{$method}", [
+                return app()->call([app(M3uProxyApiController::class), $method], [
                     'id' => $streamId,
                     'uuid' => $playlist->uuid,
                 ]);
@@ -273,7 +274,7 @@ class XtreamStreamController extends Controller
                 // player=true signals an in-app player request — apply in-app transcoding profile
                 $method = $request->input('player') === 'true' ? 'channelPlayer' : 'channel';
 
-                return app()->call("App\\Http\\Controllers\\Api\\M3uProxyApiController@{$method}", [
+                return app()->call([app(M3uProxyApiController::class), $method], [
                     'id' => $streamId,
                     'uuid' => $playlist->uuid,
                 ]);
@@ -305,7 +306,7 @@ class XtreamStreamController extends Controller
                 // player=true signals an in-app player request — apply in-app transcoding profile
                 $method = $request->input('player') === 'true' ? 'episodePlayer' : 'episode';
 
-                return app()->call("App\\Http\\Controllers\\Api\\M3uProxyApiController@{$method}", [
+                return app()->call([app(M3uProxyApiController::class), $method], [
                     'id' => $streamId,
                     'uuid' => $playlist->uuid,
                 ]);
@@ -360,6 +361,21 @@ class XtreamStreamController extends Controller
             return response()->json(['error' => 'Unauthorized or stream not found'], 403);
         }
 
+        // If the primary channel doesn't support catchup, defer to the first failover that does.
+        // This allows an HD primary (no catchup) to fall back to a lower-res failover for timeshift.
+        $timeshiftChannel = $channel;
+        if (! $channel->catchup || $channel->catchup == 0) {
+            $failoverWithCatchup = $channel->failoverChannels()
+                ->whereNotNull('catchup')
+                ->where('catchup', '!=', '0')
+                ->where('catchup', '!=', '')
+                ->first();
+
+            if ($failoverWithCatchup) {
+                $timeshiftChannel = $failoverWithCatchup;
+            }
+        }
+
         // Parse the date parameter and add timeshift parameters to the request
         // Date format from Xtream API: YYYY-MM-DD:HH-MM-SS
         // Also add username for proxy traceability
@@ -370,12 +386,12 @@ class XtreamStreamController extends Controller
         ]);
 
         if ($playlist->enable_proxy) {
-            return app()->call('App\\Http\\Controllers\\Api\\M3uProxyApiController@channel', [
-                'id' => $streamId,
+            return app()->call([app(M3uProxyApiController::class), 'channel'], [
+                'id' => $timeshiftChannel->id,
                 'uuid' => $playlist->uuid,
             ]);
         } else {
-            $streamUrl = PlaylistUrlService::getChannelUrl($channel, $playlist);
+            $streamUrl = PlaylistUrlService::getChannelUrl($timeshiftChannel, $playlist);
             $streamUrl = PlaylistService::generateTimeshiftUrl($request, $streamUrl, $playlist);
 
             return Redirect::to($streamUrl);

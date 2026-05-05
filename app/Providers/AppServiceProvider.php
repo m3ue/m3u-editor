@@ -75,6 +75,7 @@ use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Str;
 use Laravel\Ai\AiManager;
 use Livewire\Livewire;
+use PDO;
 use SocialiteProviders\Manager\SocialiteWasCalled;
 use SocialiteProviders\OIDC\OIDCExtendSocialite;
 use Spatie\Tags\Tag;
@@ -139,6 +140,9 @@ class AppServiceProvider extends ServiceProvider
 
         // Setup the middleware
         $this->setupMiddleware();
+
+        // Configure PDO open flags for SQLite connections (PHP 8.4 compat)
+        $this->configureSqliteOpenFlags();
 
         // Set WAL mode on SQLite connections
         $this->setWalModeOnSqlite();
@@ -320,6 +324,34 @@ class AppServiceProvider extends ServiceProvider
             $route = app('router')->getRoutes()->getByName('filament-copilot.stream');
             $route?->middleware(EnsureUserCanUseCopilot::class);
         });
+    }
+
+    /**
+     * Apply the correct PDO open-flag constants for SQLite connections.
+     *
+     * PHP 8.4 moved the SQLite-specific PDO constants from the global PDO class
+     * into the Pdo\Sqlite sub-class. This method detects which set is available
+     * and writes the resolved values into the runtime config so that database.php
+     * can remain a clean, expression-free array.
+     */
+    private function configureSqliteOpenFlags(): void
+    {
+        $openFlagsAttr = defined('Pdo\\Sqlite::ATTR_OPEN_FLAGS')
+            ? constant('Pdo\\Sqlite::ATTR_OPEN_FLAGS')
+            : PDO::SQLITE_ATTR_OPEN_FLAGS;
+
+        $openMode = (defined('Pdo\\Sqlite::OPEN_READWRITE')
+            ? constant('Pdo\\Sqlite::OPEN_READWRITE')
+            : PDO::SQLITE_OPEN_READWRITE)
+            | (defined('Pdo\\Sqlite::OPEN_CREATE')
+                ? constant('Pdo\\Sqlite::OPEN_CREATE')
+                : PDO::SQLITE_OPEN_CREATE);
+
+        foreach (['sqlite', 'jobs'] as $connection) {
+            $options = config("database.connections.{$connection}.options", []);
+            $options[$openFlagsAttr] = $openMode;
+            config(["database.connections.{$connection}.options" => $options]);
+        }
     }
 
     /**

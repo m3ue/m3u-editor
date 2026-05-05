@@ -5,6 +5,8 @@ namespace App\Filament\Pages;
 use App\Filament\CopilotTools\EpgChannelMatcherTool;
 use App\Filament\CopilotTools\EpgMappingApplyTool;
 use App\Filament\CopilotTools\EpgMappingStateTool;
+use App\Filament\CopilotTools\ExecuteDatabaseQueryTool;
+use App\Filament\CopilotTools\GetDatabaseSchemaTool;
 use App\Filament\CopilotTools\SearchDocsTool;
 use App\Filament\Resources\Assets\AssetResource;
 use App\Jobs\RestartQueue;
@@ -420,13 +422,23 @@ class Preferences extends SettingsPage
                                                         }
                                                         $details .= "\n";
 
+                                                        // Transcoding is available in all modes
+                                                        $details .= "**Transcoding:** ✅ Available\n";
+                                                        $details .= "\n";
+
                                                         // FFmpeg Version
                                                         $ffmpegVersion = $info['ffmpeg_version'] ?? 'Unknown';
                                                         $details .= "**FFmpeg Version:** \n\n{$ffmpegVersion}\n\n";
 
-                                                        // Transcoding is available in all modes
-                                                        $details .= "**Transcoding:** ✅ Available\n";
-                                                        $details .= "\n";
+                                                        // Streamlink
+                                                        $streamlinkVersion = $info['streamlink_version'] ?? null;
+                                                        $streamlinkStatus = $streamlinkVersion ? "✅ {$streamlinkVersion}" : '❌ Not installed';
+                                                        $details .= "**Streamlink:** {$streamlinkStatus}\n\n";
+
+                                                        // yt-dlp
+                                                        $ytdlpVersion = $info['ytdlp_version'] ?? null;
+                                                        $ytdlpStatus = $ytdlpVersion ? "✅ {$ytdlpVersion}" : '❌ Not installed';
+                                                        $details .= "**yt-dlp:** {$ytdlpStatus}\n\n";
 
                                                         // Redis Pooling
                                                         $poolingEnabled = $info['redis']['pooling_enabled'];
@@ -791,7 +803,7 @@ class Preferences extends SettingsPage
                                                     ->openUrlInNewTab(false)
                                             )
                                             ->columnSpan(2)
-                                            ->helperText(__('The default transcoding profile used for the in-app player for Live content. Leave empty to disable transcoding (some streams may not be playable in the player).')),
+                                            ->helperText(__('The default transcoding profile used by the in-app player for Live content. A per-channel stream profile (if set) takes priority over this. Leave empty to disable transcoding (some streams may not be playable in the player).')),
                                         Select::make('default_vod_stream_profile_id')
                                             ->label(__('VOD and Series Transcoding Profile'))
                                             ->searchable()
@@ -808,7 +820,7 @@ class Preferences extends SettingsPage
                                                     ->openUrlInNewTab(false)
                                             )
                                             ->columnSpan(2)
-                                            ->helperText(__('The default transcoding profile used for the in-app player for VOD/Series content. Leave empty to disable transcoding (some streams may not be playable in the player).')),
+                                            ->helperText(__('The default transcoding profile used by the in-app player for VOD/Series content. A per-channel stream profile (if set) takes priority over this. Leave empty to disable transcoding (some streams may not be playable in the player).')),
                                         TextInput::make('max_concurrent_floating_players')
                                             ->label(__('Max Concurrent Players'))
                                             ->hintIcon(
@@ -870,44 +882,46 @@ class Preferences extends SettingsPage
 
                         Tab::make(__('Sync Options'))
                             ->schema([
-                                Section::make(__('Provider Request Delay'))
-                                    ->description(__('Add a delay between requests to providers to avoid rate limiting.'))
+                                Section::make(__('Provider Rate Limiting & Concurrency'))
+                                    ->description(__('Control request concurrency for parallel processing and add delays between requests to avoid provider rate limiting.'))
                                     ->columnSpan('full')
-                                    ->columns(3)
+                                    ->columns(4)
                                     ->collapsible(false)
                                     ->schema([
                                         Toggle::make('enable_provider_request_delay')
                                             ->label(__('Enable request delay'))
                                             ->live()
-                                            ->helperText(__('When enabled, a delay will be added between requests to the provider during playlist and EPG syncs.')),
-                                        TextInput::make('provider_request_delay_ms')
-                                            ->label(__('Request delay (milliseconds)'))
-                                            ->integer()
-                                            ->required()
-                                            ->hintIcon(
-                                                'heroicon-m-question-mark-circle',
-                                                tooltip: 'Recommended: 500-2000ms. Higher values reduce load on provider but increase sync time.'
-                                            )
-                                            ->minValue(100)
-                                            ->maxValue(10000)
-                                            ->step(100)
-                                            ->default(500)
-                                            ->suffix('ms')
-                                            ->hidden(fn ($get) => ! $get('enable_provider_request_delay'))
-                                            ->helperText(__('Delay in milliseconds between requests.')),
+                                            ->inline(false)
+                                            ->columnSpan(2)
+                                            ->helperText(__('When enabled, a delay will be added between requests to the provider during playlist and EPG syncs and other stream processing tasks.')),
                                         TextInput::make('provider_max_concurrent_requests')
                                             ->label(__('Max concurrent requests'))
                                             ->integer()
+                                            ->columnSpan(2)
                                             ->required()
                                             ->hintIcon(
                                                 'heroicon-m-question-mark-circle',
                                                 tooltip: 'Lower values (1-2) are safer but slower. Set to 1 to process requests sequentially.'
                                             )
                                             ->minValue(1)
-                                            ->maxValue(10)
                                             ->default(2)
+                                            ->helperText(__('Maximum number of simultaneous requests allowed. Also controls the level of parallelism for batch operations such as stream probing and channel scrubbing.')),
+                                        TextInput::make('provider_request_delay_ms')
+                                            ->label(__('Request delay'))
+                                            ->integer()
+                                            ->required()
+                                            ->hintIcon(
+                                                'heroicon-m-question-mark-circle',
+                                                tooltip: 'Recommended: 500-2000ms. Higher values reduce load on provider but increase sync time.'
+                                            )
+                                            ->columnSpan(1)
+                                            ->minValue(100)
+                                            ->maxValue(10000)
+                                            ->step(100)
+                                            ->default(500)
+                                            ->suffix('ms')
                                             ->hidden(fn ($get) => ! $get('enable_provider_request_delay'))
-                                            ->helperText(__('Maximum number of simultaneous requests to the provider.')),
+                                            ->helperText(__('Minimum delay between provider requests, in milliseconds.')),
                                     ]),
                                 Section::make(__('Sync Invalidation'))
                                     ->description(__('Prevent sync from proceeding if conditions are met.'))
@@ -1294,20 +1308,7 @@ class Preferences extends SettingsPage
                                             ->placeholder(__('Enter your TMDB API Key (v3 auth)'))
                                             ->password()
                                             ->revealable()
-                                            ->columnSpanFull()
                                             ->helperText(__('Your TMDB API key (v3 auth). You can get one for free at themoviedb.org.')),
-                                        Toggle::make('tmdb_auto_lookup_on_import')
-                                            ->label(__('Auto-lookup on metadata fetch'))
-                                            ->helperText(__('Automatically lookup TMDB IDs when fetching metadata for VOD and Series. This may slow down imports and metadata fetching for large playlists. Will only be fetched for enabled items.'))
-                                            ->default(false),
-                                        TextInput::make('tmdb_rate_limit')
-                                            ->label(__('Rate Limit (requests/second)'))
-                                            ->placeholder(__('40'))
-                                            ->numeric()
-                                            ->minValue(1)
-                                            ->maxValue(50)
-                                            ->default(40)
-                                            ->helperText(__('Maximum TMDB API requests per second. TMDB allows ~40 req/s for free accounts.')),
                                         Select::make('tmdb_language')
                                             ->label(__('Search Language'))
                                             ->searchable()
@@ -1337,6 +1338,22 @@ class Preferences extends SettingsPage
                                             ])
                                             ->default('en-US')
                                             ->helperText(__('Preferred language for TMDB searches.')),
+                                        Toggle::make('tmdb_auto_lookup_on_import')
+                                            ->label(__('Auto-lookup on metadata fetch'))
+                                            ->helperText(__('Automatically lookup TMDB IDs when fetching metadata for VOD and Series. This may slow down imports and metadata fetching for large playlists. Will only be fetched for enabled items.'))
+                                            ->default(false),
+                                        Toggle::make('tmdb_auto_create_groups')
+                                            ->label(__('Auto-create groups/categories from TMDB genres'))
+                                            ->helperText(__('When enabled, TMDB metadata fetching will automatically create new groups (for VOD) and categories (for Series) based on TMDB genres. When disabled, only existing groups/categories will be used.'))
+                                            ->default(false),
+                                        TextInput::make('tmdb_rate_limit')
+                                            ->label(__('Rate Limit (requests/second)'))
+                                            ->placeholder(__('40'))
+                                            ->numeric()
+                                            ->minValue(1)
+                                            ->maxValue(50)
+                                            ->default(40)
+                                            ->helperText(__('Maximum TMDB API requests per second. TMDB allows ~40 req/s for free accounts.')),
                                         TextInput::make('tmdb_confidence_threshold')
                                             ->label(__('Match Confidence Threshold (%)'))
                                             ->placeholder(__('80'))
@@ -1466,6 +1483,8 @@ class Preferences extends SettingsPage
                                                 EpgMappingStateTool::class => __('EPG Mapper: Mapping State'),
                                                 EpgChannelMatcherTool::class => __('EPG Mapper: Channel Matcher'),
                                                 EpgMappingApplyTool::class => __('EPG Mapper: Apply Mappings'),
+                                                GetDatabaseSchemaTool::class => __('Database: Get Schema'),
+                                                ExecuteDatabaseQueryTool::class => __('Database: Execute Query'),
                                             ])
                                             ->afterStateHydrated(function ($component, $state) {
                                                 // Strip built-in tools that were saved by older versions.

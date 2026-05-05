@@ -33,6 +33,10 @@ class GuestPanelPanelProvider extends PanelProvider
             ])
             ->colors([
                 'primary' => Color::Indigo,
+                'info' => Color::Sky,
+                'warning' => Color::Amber,
+                'danger' => Color::Rose,
+                'success' => Color::Emerald,
             ])
             ->discoverResources(in: app_path('Filament/GuestPanel/Resources'), for: 'App\Filament\GuestPanel\Resources')
             ->discoverPages(in: app_path('Filament/GuestPanel/Pages'), for: 'App\Filament\GuestPanel\Pages')

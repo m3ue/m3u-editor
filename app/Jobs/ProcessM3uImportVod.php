@@ -13,14 +13,17 @@ class ProcessM3uImportVod implements ShouldQueue
 
     /**
      * Create a new job instance.
+     *
+     * @param  ShouldQueue|null  $completionJob  Job dispatched at the very end of the VOD
+     *                                           pipeline. Either FireSyncCompletedEvent (VOD-only)
+     *                                           or TriggerSeriesImport (VOD→Series sequential).
      */
     public function __construct(
         public Playlist $playlist,
         public bool $isNew,
-        public string $batchNo
-    ) {
-        //
-    }
+        public string $batchNo,
+        public ?ShouldQueue $completionJob = null,
+    ) {}
 
     /**
      * Execute the job.
@@ -35,24 +38,24 @@ class ProcessM3uImportVod implements ShouldQueue
             // fetch and SyncVodStrmFiles in sequence once all chunks are done — no race condition.
             dispatch(new ProcessVodChannels(
                 playlist: $playlist,
-                updateProgress: false
+                updateProgress: false,
+                completionJob: $this->completionJob,
             ));
         } elseif ($playlist->auto_sync_vod_stream_files) {
             // No metadata fetch, but stream file sync was requested. Dispatch directly since
             // ProcessVodChannelsComplete won't run (no metadata chain).
             $hasFindReplaceRules = collect($playlist->find_replace_rules ?? [])
                 ->contains(fn (array $rule): bool => $rule['enabled'] ?? false);
-            if ($hasFindReplaceRules) {
-                // Chain Find & Replace before STRM sync so filenames use processed titles.
-                // SyncListener also dispatches Find & Replace concurrently; the second run
-                // is a no-op since rules won't match already-processed title_custom values.
-                Bus::chain([
-                    new RunPlaylistFindReplaceRules($playlist),
-                    new SyncVodStrmFiles(playlist: $playlist),
-                ])->dispatch();
-            } else {
-                dispatch(new SyncVodStrmFiles(playlist: $playlist));
+
+            $strmJobs = $hasFindReplaceRules
+                ? [new RunPlaylistFindReplaceRules($playlist), new SyncVodStrmFiles(playlist: $playlist)]
+                : [new SyncVodStrmFiles(playlist: $playlist)];
+
+            if ($this->completionJob) {
+                $strmJobs[] = $this->completionJob;
             }
+
+            Bus::chain($strmJobs)->dispatch();
         }
 
         // All done! Nothing else to do ;)

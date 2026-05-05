@@ -53,7 +53,7 @@ class ChannelScrubberLogResource extends Resource implements CopilotResource
                 Section::make(__('Run Summary'))
                     ->columnSpanFull()
                     ->compact()
-                    ->columns(3)
+                    ->columns(4)
                     ->schema([
                         Infolists\Components\TextEntry::make('created_at')
                             ->label(__('Ran At'))
@@ -79,6 +79,10 @@ class ChannelScrubberLogResource extends Resource implements CopilotResource
                             ->label(__('Channels Disabled'))
                             ->badge()
                             ->color(fn ($state) => $state > 0 ? 'warning' : 'success'),
+                        Infolists\Components\TextEntry::make('live_count')
+                            ->label(__('Live Channels'))
+                            ->badge()
+                            ->color(fn ($state) => $state > 0 ? 'success' : 'gray'),
                     ]),
             ]);
     }
@@ -118,6 +122,12 @@ class ChannelScrubberLogResource extends Resource implements CopilotResource
                     ->label(__('Channels Disabled'))
                     ->badge()
                     ->color(fn ($state) => $state > 0 ? 'warning' : 'success')
+                    ->sortable()
+                    ->toggleable(),
+                TextColumn::make('live_count')
+                    ->label(__('Live Channels'))
+                    ->badge()
+                    ->color(fn ($state) => $state > 0 ? 'success' : 'gray')
                     ->sortable()
                     ->toggleable(),
                 TextColumn::make('runtime')

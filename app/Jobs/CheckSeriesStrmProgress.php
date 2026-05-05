@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Models\Playlist;
 use App\Models\Series;
 use App\Models\User;
 use Filament\Notifications\Notification;
@@ -29,6 +30,7 @@ class CheckSeriesStrmProgress implements ShouldQueue
         public ?int $playlist_id = null,
         public ?int $user_id = null,
         public bool $needsCleanup = false,
+        public ?array $series_ids = null,
     ) {
         $this->onQueue('file_sync');
     }
@@ -61,6 +63,7 @@ class CheckSeriesStrmProgress implements ShouldQueue
                     playlist_id: $this->playlist_id,
                     user_id: $this->user_id,
                     isCleanupJob: true,
+                    series_ids: $this->series_ids,
                 ));
             } else {
                 // Send completion notification
@@ -76,6 +79,8 @@ class CheckSeriesStrmProgress implements ShouldQueue
                     }
                 }
             }
+
+            $this->dispatchSeriesProbe();
 
             return;
         }
@@ -98,6 +103,7 @@ class CheckSeriesStrmProgress implements ShouldQueue
                 batchOffset: $offset,
                 totalBatches: $totalBatches,
                 currentBatch: $batchNumber,
+                series_ids: $this->series_ids,
             );
         }
 
@@ -111,6 +117,7 @@ class CheckSeriesStrmProgress implements ShouldQueue
             playlist_id: $this->playlist_id,
             user_id: $this->user_id,
             needsCleanup: $this->needsCleanup,
+            series_ids: $this->series_ids,
         );
 
         Log::info('STRM Sync: Dispatching next chain', [
@@ -119,5 +126,29 @@ class CheckSeriesStrmProgress implements ShouldQueue
         ]);
 
         Bus::chain($jobs)->dispatch();
+    }
+
+    private function dispatchSeriesProbe(): void
+    {
+        if ($this->playlist_id) {
+            $playlist = Playlist::find($this->playlist_id);
+            if ($playlist?->auto_probe_vod_streams) {
+                Log::info("STRM Sync: Dispatching series/VOD probe for playlist {$this->playlist_id}");
+                dispatch(new ProbeVodStreams($this->playlist_id));
+            }
+
+            return;
+        }
+
+        if ($this->all_playlists && $this->user_id) {
+            $playlistIds = Playlist::where('user_id', $this->user_id)
+                ->where('auto_probe_vod_streams', true)
+                ->pluck('id');
+
+            foreach ($playlistIds as $playlistId) {
+                Log::info("STRM Sync: Dispatching series/VOD probe for playlist {$playlistId}");
+                dispatch(new ProbeVodStreams($playlistId));
+            }
+        }
     }
 }

@@ -4,6 +4,7 @@ use App\Services\TmdbService;
 use App\Settings\GeneralSettings;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\RateLimiter;
 
 uses(RefreshDatabase::class);
 
@@ -14,6 +15,10 @@ beforeEach(function () {
     $this->settings->tmdb_language = 'en-US';
     $this->settings->tmdb_rate_limit = 40;
     $this->settings->tmdb_confidence_threshold = 80;
+
+    // Avoid Redis dependency from TmdbService::waitForRateLimit() in tests.
+    RateLimiter::shouldReceive('tooManyAttempts')->andReturnFalse();
+    RateLimiter::shouldReceive('hit')->andReturn(1);
 });
 
 it('returns null when API key is not configured', function () {
@@ -169,4 +174,307 @@ it('handles API errors gracefully', function () {
     $result = $service->searchMovie('The Matrix');
 
     expect($result)->toBeNull();
+});
+
+// ---------------------------------------------------------------------------
+// findByExternalId
+// ---------------------------------------------------------------------------
+
+it('can resolve an external imdb id via TMDB find', function () {
+    Http::fake([
+        'https://api.themoviedb.org/3/find/tt0090390*' => Http::response([
+            'tv_results' => [
+                [
+                    'id' => 4592,
+                    'name' => 'ALF',
+                    'original_name' => 'ALF',
+                    'first_air_date' => '1986-09-22',
+                    'poster_path' => '/alf-poster.jpg',
+                    'backdrop_path' => '/alf-backdrop.jpg',
+                    'popularity' => 45.2,
+                ],
+            ],
+            'movie_results' => [],
+        ], 200),
+    ]);
+
+    $service = new TmdbService($this->settings);
+    $result = $service->findByExternalId('tt0090390', 'imdb_id');
+
+    expect($result)->not->toBeNull()
+        ->and($result['tmdb_id'])->toBe(4592)
+        ->and($result['_media_type'])->toBe('tv');
+});
+
+it('can resolve an external tvdb id via TMDB find', function () {
+    Http::fake([
+        'https://api.themoviedb.org/3/find/78020*' => Http::response([
+            'tv_results' => [
+                [
+                    'id' => 4592,
+                    'name' => 'ALF',
+                    'original_name' => 'ALF',
+                    'first_air_date' => '1986-09-22',
+                    'poster_path' => '/alf-poster.jpg',
+                    'backdrop_path' => '/alf-backdrop.jpg',
+                    'popularity' => 45.2,
+                ],
+            ],
+            'movie_results' => [],
+        ], 200),
+    ]);
+
+    $service = new TmdbService($this->settings);
+    $result = $service->findByExternalId('78020', 'tvdb_id');
+
+    expect($result)->not->toBeNull()
+        ->and($result['tmdb_id'])->toBe(4592)
+        ->and($result['_media_type'])->toBe('tv');
+});
+
+it('returns null for an unsupported source', function () {
+    $service = new TmdbService($this->settings);
+    $result = $service->findByExternalId('12345', 'unknown_source');
+
+    expect($result)->toBeNull();
+});
+
+it('returns null when findByExternalId id is empty', function () {
+    $service = new TmdbService($this->settings);
+
+    expect($service->findByExternalId('', 'imdb_id'))->toBeNull();
+    expect($service->findByExternalId('   ', 'imdb_id'))->toBeNull();
+});
+
+it('picks higher popularity when find returns both tv and movie results', function () {
+    Http::fake([
+        'https://api.themoviedb.org/3/find/tt0090390*' => Http::response([
+            'tv_results' => [
+                [
+                    'id' => 4592,
+                    'name' => 'ALF',
+                    'original_name' => 'ALF',
+                    'first_air_date' => '1986-09-22',
+                    'poster_path' => '/alf-poster.jpg',
+                    'backdrop_path' => '/alf-backdrop.jpg',
+                    'popularity' => 45.2,
+                ],
+            ],
+            'movie_results' => [
+                [
+                    'id' => 9999,
+                    'title' => 'ALF The Movie',
+                    'original_title' => 'ALF The Movie',
+                    'release_date' => '1996-01-01',
+                    'poster_path' => '/alf-movie.jpg',
+                    'backdrop_path' => '/alf-movie-backdrop.jpg',
+                    'popularity' => 10.1,
+                ],
+            ],
+        ], 200),
+    ]);
+
+    $service = new TmdbService($this->settings);
+    $result = $service->findByExternalId('tt0090390', 'imdb_id');
+
+    // TV result has higher popularity (45.2 > 10.1) so it should win
+    expect($result)->not->toBeNull()
+        ->and($result['tmdb_id'])->toBe(4592)
+        ->and($result['_media_type'])->toBe('tv');
+});
+
+it('can resolve a raw tmdb id by probing TV details endpoint', function () {
+    Http::fake([
+        'https://api.themoviedb.org/3/tv/4592*' => Http::response([
+            'id' => 4592,
+            'name' => 'ALF',
+            'original_name' => 'ALF',
+            'overview' => 'Alien life form sitcom.',
+            'poster_path' => '/alf-poster.jpg',
+            'backdrop_path' => '/alf-backdrop.jpg',
+            'first_air_date' => '1986-09-22',
+            'genres' => [],
+            'external_ids' => [
+                'imdb_id' => 'tt0090390',
+                'tvdb_id' => 78020,
+            ],
+            'credits' => ['cast' => [], 'crew' => []],
+            'videos' => ['results' => []],
+        ], 200),
+    ]);
+
+    $service = new TmdbService($this->settings);
+    $result = $service->findByExternalId('4592', 'tmdb_id');
+
+    expect($result)->not->toBeNull()
+        ->and($result['tmdb_id'])->toBe(4592)
+        ->and($result['_media_type'])->toBe('tv')
+        ->and($result['name'])->toBe('ALF');
+});
+
+it('falls back to movie endpoint when tmdb_id does not match a TV series', function () {
+    Http::fake([
+        'https://api.themoviedb.org/3/tv/603*' => Http::response(['success' => false], 404),
+        'https://api.themoviedb.org/3/movie/603*' => Http::response([
+            'id' => 603,
+            'title' => 'The Matrix',
+            'original_title' => 'The Matrix',
+            'overview' => 'A computer hacker learns the truth.',
+            'poster_path' => '/matrix.jpg',
+            'backdrop_path' => '/matrix-backdrop.jpg',
+            'release_date' => '1999-03-30',
+            'genres' => [],
+            'external_ids' => ['imdb_id' => 'tt0133093'],
+            'credits' => ['cast' => [], 'crew' => []],
+            'videos' => ['results' => []],
+        ], 200),
+    ]);
+
+    $service = new TmdbService($this->settings);
+    $result = $service->findByExternalId('603', 'tmdb_id');
+
+    expect($result)->not->toBeNull()
+        ->and($result['tmdb_id'])->toBe(603)
+        ->and($result['_media_type'])->toBe('movie')
+        ->and($result['title'])->toBe('The Matrix');
+});
+
+it('skips tv probe when mediaType hint is movie', function () {
+    Http::fake([
+        'https://api.themoviedb.org/3/movie/603*' => Http::response([
+            'id' => 603,
+            'title' => 'The Matrix',
+            'original_title' => 'The Matrix',
+            'overview' => 'A computer hacker learns the truth.',
+            'poster_path' => '/matrix.jpg',
+            'backdrop_path' => '/matrix-backdrop.jpg',
+            'release_date' => '1999-03-30',
+            'genres' => [],
+            'external_ids' => ['imdb_id' => 'tt0133093'],
+            'credits' => ['cast' => [], 'crew' => []],
+            'videos' => ['results' => []],
+        ], 200),
+    ]);
+
+    $service = new TmdbService($this->settings);
+    $result = $service->findByExternalId('603', 'tmdb_id', 'movie');
+
+    expect($result)->not->toBeNull()
+        ->and($result['_media_type'])->toBe('movie');
+
+    // The TV endpoint must NOT have been called
+    Http::assertNotSent(fn ($request) => str_contains((string) $request->url(), '/tv/603'));
+});
+
+// ---------------------------------------------------------------------------
+// searchMulti
+// ---------------------------------------------------------------------------
+
+it('can search across multi endpoint and return media type', function () {
+    Http::fake([
+        'https://api.themoviedb.org/3/search/multi*' => Http::response([
+            'results' => [
+                [
+                    'id' => 4592,
+                    'media_type' => 'tv',
+                    'name' => 'ALF',
+                    'original_name' => 'ALF',
+                    'overview' => 'Alien life form sitcom.',
+                    'first_air_date' => '1986-09-22',
+                    'poster_path' => '/alf-poster.jpg',
+                    'backdrop_path' => '/alf-backdrop.jpg',
+                    'popularity' => 45.2,
+                ],
+                [
+                    'id' => 9999,
+                    'media_type' => 'movie',
+                    'title' => 'Different Movie',
+                    'original_title' => 'Different Movie',
+                    'release_date' => '2020-01-01',
+                    'poster_path' => '/movie-poster.jpg',
+                    'backdrop_path' => '/movie-backdrop.jpg',
+                    'popularity' => 20.0,
+                ],
+            ],
+        ], 200),
+    ]);
+
+    $service = new TmdbService($this->settings);
+    $result = $service->searchMulti('ALF');
+
+    expect($result)->not->toBeNull()
+        ->and($result['tmdb_id'])->toBe(4592)
+        ->and($result['_media_type'])->toBe('tv')
+        ->and($result['name'])->toBe('ALF');
+});
+
+it('returns null when searchMulti finds no tv or movie results', function () {
+    Http::fake([
+        'https://api.themoviedb.org/3/search/multi*' => Http::response([
+            'results' => [
+                // Only a person result — should be filtered out
+                ['id' => 1, 'media_type' => 'person', 'name' => 'Some Actor'],
+            ],
+        ], 200),
+    ]);
+
+    $service = new TmdbService($this->settings);
+    $result = $service->searchMulti('Some Actor');
+
+    expect($result)->toBeNull();
+});
+
+it('returns null when searchMulti query is empty', function () {
+    $service = new TmdbService($this->settings);
+
+    expect($service->searchMulti(''))->toBeNull();
+    expect($service->searchMulti('   '))->toBeNull();
+});
+
+it('breaks ties in searchMulti by popularity when confidence scores are equal', function () {
+    Http::fake([
+        'https://api.themoviedb.org/3/search/multi*' => Http::response([
+            'results' => [
+                [
+                    'id' => 100,
+                    'media_type' => 'tv',
+                    'name' => 'Test Show',
+                    'original_name' => 'Test Show',
+                    'overview' => 'A test show.',
+                    'first_air_date' => '2000-01-01',
+                    'poster_path' => null,
+                    'backdrop_path' => null,
+                    'popularity' => 5.0,
+                ],
+                [
+                    'id' => 200,
+                    'media_type' => 'movie',
+                    'title' => 'Test Show',
+                    'original_title' => 'Test Show',
+                    'overview' => 'A test movie.',
+                    'release_date' => '2000-06-01',
+                    'poster_path' => null,
+                    'backdrop_path' => null,
+                    'popularity' => 80.0,
+                ],
+            ],
+        ], 200),
+    ]);
+
+    $service = new TmdbService($this->settings);
+    $result = $service->searchMulti('Test Show');
+
+    // Both have the same title match → same confidence; movie wins on popularity (80 > 5)
+    expect($result)->not->toBeNull()
+        ->and($result['tmdb_id'])->toBe(200)
+        ->and($result['_media_type'])->toBe('movie');
+});
+
+it('returns null when searchMulti is not configured', function () {
+    $settings = new GeneralSettings;
+    $settings->tmdb_api_key = null;
+
+    $service = new TmdbService($settings);
+
+    expect($service->searchMulti('ALF'))->toBeNull();
 });

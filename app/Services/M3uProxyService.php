@@ -14,6 +14,7 @@ use App\Models\PlaylistAlias;
 use App\Models\StreamProfile;
 use App\Settings\GeneralSettings;
 use Exception;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
@@ -145,6 +146,32 @@ class M3uProxyService
                 'success' => false,
                 'message' => 'Unable to connect to proxy: '.$e->getMessage(),
             ];
+        }
+    }
+
+    /**
+     * Ask the proxy whether a cookies file path exists and is readable on the proxy host.
+     *
+     * @return array{valid: bool, message: string}
+     */
+    public function validateCookiesFilePath(string $path): array
+    {
+        if (empty($this->apiBaseUrl)) {
+            return ['valid' => false, 'message' => 'M3U Proxy base URL is not configured.'];
+        }
+
+        try {
+            $response = Http::timeout(10)->acceptJson()
+                ->withHeaders($this->apiToken ? ['X-API-Token' => $this->apiToken] : [])
+                ->get($this->apiBaseUrl.'/validate-cookies-file', ['path' => $path]);
+
+            if ($response->successful()) {
+                return $response->json();
+            }
+
+            return ['valid' => false, 'message' => 'Proxy returned an unexpected response.'];
+        } catch (Exception $e) {
+            return ['valid' => false, 'message' => 'Unable to reach proxy: '.$e->getMessage()];
         }
     }
 
@@ -455,9 +482,11 @@ class M3uProxyService
      * @param  string  $field  Metadata field to filter by (e.g., 'playlist_uuid', 'type')
      * @param  string  $value  Value to match
      * @param  int|null  $excludeChannelId  Optional channel ID to exclude (keep this stream)
+     * @param  bool  $force  When false, streams with active clients are preserved. Defaults to true (existing behaviour).
+     * @param  string|null  $clientId  ID of the disconnecting client. When provided with force=false, the proxy removes this client immediately before evaluating whether other clients remain.
      * @return array Result with deleted_count and success status
      */
-    public static function stopStreamsByMetadata(string $field, string $value, ?int $excludeChannelId = null): array
+    public static function stopStreamsByMetadata(string $field, string $value, ?int $excludeChannelId = null, bool $force = true, ?string $clientId = null): array
     {
         $service = new self;
 
@@ -474,10 +503,15 @@ class M3uProxyService
             $params = [
                 'field' => $field,
                 'value' => $value,
+                'force' => $force ? 'true' : 'false',
             ];
 
             if ($excludeChannelId !== null) {
                 $params['exclude_channel_id'] = (string) $excludeChannelId;
+            }
+
+            if ($clientId !== null) {
+                $params['client_id'] = $clientId;
             }
 
             $response = Http::timeout(5)->acceptJson()
@@ -1506,7 +1540,10 @@ class M3uProxyService
 
         try {
             $endpoint = $this->apiBaseUrl.'/streams';
-            $response = Http::timeout(5)->acceptJson()
+            $response = Http::connectTimeout(2)
+                ->timeout(3)
+                ->retry(2, 100, fn (Exception $e) => $e instanceof ConnectionException, throw: false)
+                ->acceptJson()
                 ->withHeaders($this->apiToken ? [
                     'X-API-Token' => $this->apiToken,
                 ] : [])
@@ -1531,15 +1568,26 @@ class M3uProxyService
 
             return [
                 'success' => false,
-                'error' => 'M3U Proxy returned status '.$response->status(),
+                'error_category' => 'http',
+                'error' => 'M3U Proxy returned HTTP '.$response->status(),
                 'streams' => [],
             ];
-        } catch (Exception $e) {
-            Log::warning('Failed to fetch active streams from m3u-proxy: '.$e->getMessage());
+        } catch (ConnectionException $e) {
+            Log::warning('m3u-proxy connection error on /streams: '.$e->getMessage());
 
             return [
                 'success' => false,
-                'error' => 'Unable to connect to m3u-proxy: '.$e->getMessage(),
+                'error_category' => 'connection',
+                'error' => 'M3U Proxy unreachable (timeout or connection refused)',
+                'streams' => [],
+            ];
+        } catch (Exception $e) {
+            Log::warning('Unexpected error fetching active streams from m3u-proxy: '.$e->getMessage());
+
+            return [
+                'success' => false,
+                'error_category' => 'unknown',
+                'error' => 'Unexpected error fetching streams: '.$e->getMessage(),
                 'streams' => [],
             ];
         }
@@ -1561,7 +1609,10 @@ class M3uProxyService
 
         try {
             $endpoint = $this->apiBaseUrl.'/clients';
-            $response = Http::timeout(5)->acceptJson()
+            $response = Http::connectTimeout(2)
+                ->timeout(3)
+                ->retry(2, 100, fn (Exception $e) => $e instanceof ConnectionException, throw: false)
+                ->acceptJson()
                 ->withHeaders($this->apiToken ? [
                     'X-API-Token' => $this->apiToken,
                 ] : [])
@@ -1580,15 +1631,26 @@ class M3uProxyService
 
             return [
                 'success' => false,
-                'error' => 'M3U Proxy returned status '.$response->status(),
+                'error_category' => 'http',
+                'error' => 'M3U Proxy returned HTTP '.$response->status(),
                 'clients' => [],
             ];
-        } catch (Exception $e) {
-            Log::warning('Failed to fetch active clients from m3u-proxy: '.$e->getMessage());
+        } catch (ConnectionException $e) {
+            Log::warning('m3u-proxy connection error on /clients: '.$e->getMessage());
 
             return [
                 'success' => false,
-                'error' => 'Unable to connect to m3u-proxy: '.$e->getMessage(),
+                'error_category' => 'connection',
+                'error' => 'M3U Proxy unreachable (timeout or connection refused)',
+                'clients' => [],
+            ];
+        } catch (Exception $e) {
+            Log::warning('Unexpected error fetching active clients from m3u-proxy: '.$e->getMessage());
+
+            return [
+                'success' => false,
+                'error_category' => 'unknown',
+                'error' => 'Unexpected error fetching clients: '.$e->getMessage(),
                 'clients' => [],
             ];
         }
@@ -1610,7 +1672,10 @@ class M3uProxyService
 
         try {
             $endpoint = $this->apiBaseUrl.'/broadcast';
-            $response = Http::timeout(5)->acceptJson()
+            $response = Http::connectTimeout(2)
+                ->timeout(3)
+                ->retry(2, 100, fn (Exception $e) => $e instanceof ConnectionException, throw: false)
+                ->acceptJson()
                 ->withHeaders($this->apiToken ? [
                     'X-API-Token' => $this->apiToken,
                 ] : [])
@@ -1620,12 +1685,9 @@ class M3uProxyService
                 $data = $response->json() ?: [];
 
                 // Only include broadcasts for networks owned by the current user
-                // Get networks for current user
                 $userNetworkUuids = Network::where('user_id', auth()->id())->pluck('uuid')->toArray();
 
-                $broadcasts = array_filter($data['broadcasts'] ?? [], function ($b) use ($userNetworkUuids) {
-                    return isset($b['network_id']) && in_array($b['network_id'], $userNetworkUuids);
-                });
+                $broadcasts = array_filter($data['broadcasts'] ?? [], fn ($b) => isset($b['network_id']) && in_array($b['network_id'], $userNetworkUuids));
 
                 return [
                     'success' => true,
@@ -1638,15 +1700,26 @@ class M3uProxyService
 
             return [
                 'success' => false,
-                'error' => 'M3U Proxy returned status '.$response->status(),
+                'error_category' => 'http',
+                'error' => 'M3U Proxy returned HTTP '.$response->status(),
                 'broadcasts' => [],
             ];
-        } catch (Exception $e) {
-            Log::warning('Failed to fetch broadcasts from m3u-proxy: '.$e->getMessage());
+        } catch (ConnectionException $e) {
+            Log::warning('m3u-proxy connection error on /broadcast: '.$e->getMessage());
 
             return [
                 'success' => false,
-                'error' => 'Unable to connect to m3u-proxy: '.$e->getMessage(),
+                'error_category' => 'connection',
+                'error' => 'M3U Proxy unreachable (timeout or connection refused)',
+                'broadcasts' => [],
+            ];
+        } catch (Exception $e) {
+            Log::warning('Unexpected error fetching broadcasts from m3u-proxy: '.$e->getMessage());
+
+            return [
+                'success' => false,
+                'error_category' => 'unknown',
+                'error' => 'Unexpected error fetching broadcasts: '.$e->getMessage(),
                 'broadcasts' => [],
             ];
         }
@@ -1848,11 +1921,23 @@ class M3uProxyService
             $endpoint = $this->apiBaseUrl.'/transcode';
 
             // Build the payload for transcoding
-            $payload = [
-                'url' => $url,
-                'profile' => $profile->getProfileIdentifier(),  // Custom args template or predefined profile name
-                'metadata' => $metadata,
-            ];
+            if ($profile->isResolver()) {
+                // Resolver backend (streamlink / yt-dlp) — pass resolver fields, not FFmpeg profile
+                $payload = [
+                    'url' => $url,
+                    'resolver' => $profile->backend,
+                    'resolver_args' => $profile->args ?? '',
+                    'cookies_path' => $profile->cookies_path ?: null,
+                    'metadata' => $metadata,
+                ];
+            } else {
+                // FFmpeg backend — pass profile template/name as before
+                $payload = [
+                    'url' => $url,
+                    'profile' => $profile->getProfileIdentifier(),
+                    'metadata' => $metadata,
+                ];
+            }
 
             // Handle strict_live_ts flag if set in metadata
             if ($metadata['strict_live_ts'] ?? false) {

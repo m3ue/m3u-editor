@@ -7,6 +7,7 @@ use App\Models\Category;
 use App\Models\Playlist;
 use App\Models\Series;
 use App\Traits\ProviderRequestDelay;
+use Carbon\Carbon;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -25,9 +26,8 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
     // Giving a timeout of 30 minutes to the Job to process the file
     public $timeout = 60 * 30;
 
-    // Default user agent to use for HTTP requests
-    // Used when user agent is not set in the playlist
-    public $userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36';
+    /** Default user agent used when the playlist has none configured. */
+    public string $userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36';
 
     /**
      * Create a new job instance.
@@ -47,21 +47,17 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
      */
     public function handle(): void
     {
-        // Get the job payload
-        $payload = $this->payload;
-
-        $playlistId = $payload['playlistId'] ?? null;
-        $sourceCategoryId = $payload['categoryId'] ?? null;
-        $sourceCategoryName = $payload['categoryName'] ?? null;
+        $playlistId = $this->payload['playlistId'] ?? null;
+        $sourceCategoryId = $this->payload['categoryId'] ?? null;
+        $sourceCategoryName = $this->payload['categoryName'] ?? null;
 
         if (! $sourceCategoryId || ! $playlistId) {
-            return; // skip if no category or playlist
+            return;
         }
 
-        // Get the playlist
         $playlist = Playlist::find($playlistId);
         if (! $playlist) {
-            return; // skip if no playlist found
+            return;
         }
 
         // If this is the first chunk, reset the series progress and notify the user
@@ -87,22 +83,18 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
 
         // Setup the user agent and SSL verification
         $verify = ! $playlist->disable_ssl_verification;
-        $userAgent = empty($playlist->user_agent)
-            ? $this->userAgent
-            : $playlist->user_agent;
+        $userAgent = $playlist->user_agent ?: $this->userAgent;
 
-        // Get the Xtream config
         $xtreamConfig = $playlist->xtream_config;
         if (! $xtreamConfig) {
-            return; // skip if no Xtream config
+            return;
         }
 
-        // Setup the base url and credentials
         $baseUrl = $xtreamConfig['url'] ?? '';
         $user = $xtreamConfig['username'] ?? '';
         $password = $xtreamConfig['password'] ?? '';
         if (! $baseUrl || ! $user || ! $password) {
-            return; // skip if no base url or credentials
+            return;
         }
 
         // Get the series streams for this category with provider throttling
@@ -118,29 +110,21 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
         $bulk = [];
         $seriesStreams = Items::fromString($seriesStreamsResponse->body());
 
-        // Get the category, or create it if it doesn't exist
-        $category = Category::where([
-            'playlist_id' => $playlist->id,
-            'source_category_id' => $sourceCategoryId,
-        ])->first();
-        if (! $category) {
-            $category = Category::create([
+        // Get the category for this import, creating it if it doesn't yet exist
+        $category = Category::firstOrCreate(
+            ['playlist_id' => $playlist->id, 'source_category_id' => $sourceCategoryId],
+            [
                 'name' => $sourceCategoryName,
                 'name_internal' => $sourceCategoryName,
-                'source_category_id' => $sourceCategoryId,
                 'user_id' => $playlist->user_id,
-                'playlist_id' => $playlist->id,
-            ]);
-        }
+            ]
+        );
 
         // Create the streams
         foreach ($seriesStreams as $item) {
-            // Normalize and validate the name — some providers omit it which violates the DB NOT NULL constraint
-            $itemName = $item->name ?? $item->title ?? null;
-            $itemName = $itemName !== null ? trim((string) $itemName) : null;
-
-            // We need a name to proceed, if still not set, skip this item
-            if (empty($itemName)) {
+            // Normalize the name — some providers omit it which violates the DB NOT NULL constraint
+            $itemName = trim((string) ($item->name ?? $item->title ?? ''));
+            if ($itemName === '') {
                 continue;
             }
 
@@ -150,12 +134,18 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
                 ->where('source_category_id', $sourceCategoryId)
                 ->first();
 
+            $lastModified = isset($item->last_modified) && $item->last_modified
+                ? Carbon::createFromTimestamp((int) $item->last_modified)->toDateTimeString()
+                : null;
+
             if ($existingSeries) {
-                // If the series already exists, skip it
+                if ($lastModified) {
+                    $existingSeries->update(['last_modified' => $lastModified]);
+                }
+
                 continue;
             }
 
-            // If we reach here, it means we need to create a new series
             $bulk[] = [
                 'enabled' => $this->autoEnable, // Disable the series by default
                 'name' => $itemName,
@@ -176,6 +166,7 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
                 'rating_5based' => (float) ($item->rating_5based ?? 0),
                 'backdrop_path' => json_encode($item->backdrop_path ?? []),
                 'youtube_trailer' => $item->youtube_trailer ?? null,
+                'last_modified' => $lastModified,
             ];
         }
 
@@ -194,7 +185,6 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
                     'chunk' => $chunk->toArray(),
                 ]);
 
-                // Re-throw so the job fails loudly if needed
                 throw $e;
             }
         });

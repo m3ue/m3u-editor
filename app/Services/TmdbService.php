@@ -152,6 +152,7 @@ class TmdbService
                     'tmdb_id' => $match['id'],
                     'imdb_id' => $externalIds['imdb_id'] ?? null,
                     'title' => $match['title'] ?? null,
+                    'original_title' => $match['original_title'] ?? null,
                     'release_date' => $match['release_date'] ?? null,
                     'confidence' => $match['_confidence'] ?? 0,
                 ];
@@ -292,6 +293,7 @@ class TmdbService
                 'tmdb_id' => $match['id'],
                 'imdb_id' => $externalIds['imdb_id'] ?? null,
                 'title' => $match['title'] ?? null,
+                'original_title' => $match['original_title'] ?? null,
                 'release_date' => $match['release_date'] ?? null,
                 'confidence' => 60, // Lower confidence for simple search
             ];
@@ -408,6 +410,7 @@ class TmdbService
                             'tvdb_id' => $externalIds['tvdb_id'] ?? null,
                             'imdb_id' => $externalIds['imdb_id'] ?? null,
                             'name' => $match['name'] ?? null,
+                            'original_name' => $match['original_name'] ?? null,
                             'first_air_date' => $match['first_air_date'] ?? null,
                             'confidence' => $match['_confidence'] ?? 0,
                         ];
@@ -493,6 +496,244 @@ class TmdbService
         }
 
         return [];
+    }
+
+    /**
+     * Resolve a TMDB entity by external ID.
+     *
+     * Supported sources: imdb_id, tvdb_id, tmdb_id.
+     * Returns a normalized payload with `_media_type` = tv|movie.
+     *
+     * @param  string|null  $mediaType  Optional hint ('tv' or 'movie') used only when
+     *                                  $source is 'tmdb_id' to skip probing the wrong
+     *                                  endpoint and avoid a wasted API call.
+     * @return array<string, mixed>|null
+     */
+    public function findByExternalId(string $id, string $source, ?string $mediaType = null): ?array
+    {
+        if (! $this->isConfigured()) {
+            return null;
+        }
+
+        $id = trim($id);
+        $source = trim($source);
+        if ($id === '') {
+            return null;
+        }
+
+        // Native TMDB IDs are not supported by /find — probe the details endpoints directly.
+        // getTvSeriesDetails() / getMovieDetails() each call waitForRateLimit() internally,
+        // so we intentionally skip the explicit waitForRateLimit() call here.
+        if ($source === 'tmdb_id') {
+            $tmdbId = (int) preg_replace('/\D+/', '', $id);
+            if ($tmdbId <= 0) {
+                return null;
+            }
+
+            if ($mediaType !== 'movie') {
+                $tvDetails = $this->getTvSeriesDetails($tmdbId);
+                if (is_array($tvDetails)) {
+                    $tvDetails['_media_type'] = 'tv';
+
+                    return $tvDetails;
+                }
+            }
+
+            if ($mediaType !== 'tv') {
+                $movieDetails = $this->getMovieDetails($tmdbId);
+                if (is_array($movieDetails)) {
+                    $movieDetails['_media_type'] = 'movie';
+
+                    return $movieDetails;
+                }
+            }
+
+            return null;
+        }
+
+        if (! in_array($source, ['imdb_id', 'tvdb_id'], true)) {
+            return null;
+        }
+
+        $this->waitForRateLimit();
+
+        try {
+            $response = Http::timeout(15)->get(
+                self::BASE_URL.'/find/'.urlencode($id),
+                [
+                    'api_key' => $this->apiKey,
+                    'external_source' => $source,
+                    'language' => $this->language,
+                ]
+            );
+
+            if (! $response->successful()) {
+                Log::warning('TMDB find by external id failed', [
+                    'id' => $id,
+                    'source' => $source,
+                    'status' => $response->status(),
+                ]);
+
+                return null;
+            }
+
+            $payload = $response->json();
+            $tvResults = $payload['tv_results'] ?? [];
+            $movieResults = $payload['movie_results'] ?? [];
+
+            $tvResult = $tvResults[0] ?? null;
+            $movieResult = $movieResults[0] ?? null;
+
+            if (! is_array($tvResult) && ! is_array($movieResult)) {
+                return null;
+            }
+
+            if (is_array($tvResult) && ! is_array($movieResult)) {
+                return $this->normalizeFindResult($tvResult, 'tv');
+            }
+
+            if (! is_array($tvResult) && is_array($movieResult)) {
+                return $this->normalizeFindResult($movieResult, 'movie');
+            }
+
+            // If both exist, pick the more popular entry.
+            $tvPopularity = (float) ($tvResult['popularity'] ?? 0);
+            $moviePopularity = (float) ($movieResult['popularity'] ?? 0);
+
+            return $tvPopularity >= $moviePopularity
+                ? $this->normalizeFindResult($tvResult, 'tv')
+                : $this->normalizeFindResult($movieResult, 'movie');
+        } catch (\Throwable $e) {
+            Log::error('TMDB find by external id error', [
+                'id' => $id,
+                'source' => $source,
+                'error' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
+    }
+
+    /**
+     * Search across movie + TV in one call and return the best normalized hit.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function searchMulti(string $query): ?array
+    {
+        if (! $this->isConfigured()) {
+            return null;
+        }
+
+        $query = trim($query);
+        if ($query === '') {
+            return null;
+        }
+
+        $this->waitForRateLimit();
+
+        try {
+            $response = Http::timeout(15)->get(self::BASE_URL.'/search/multi', [
+                'api_key' => $this->apiKey,
+                'query' => $this->normalizeTitle($query),
+                'language' => $this->language,
+                'include_adult' => 'false',
+            ]);
+
+            if (! $response->successful()) {
+                Log::warning('TMDB multi search failed', [
+                    'query' => $query,
+                    'status' => $response->status(),
+                ]);
+
+                return null;
+            }
+
+            $results = collect($response->json('results', []))
+                ->filter(fn (array $row): bool => in_array($row['media_type'] ?? '', ['tv', 'movie'], true))
+                ->values()
+                ->all();
+
+            if (empty($results)) {
+                return null;
+            }
+
+            $tvCandidates = array_values(array_filter($results, fn (array $row): bool => ($row['media_type'] ?? '') === 'tv'));
+            $movieCandidates = array_values(array_filter($results, fn (array $row): bool => ($row['media_type'] ?? '') === 'movie'));
+
+            $tvMatch = ! empty($tvCandidates)
+                ? $this->findBestMatch($tvCandidates, $query, null, 'name', 'first_air_date', 'tv')
+                : null;
+            $movieMatch = ! empty($movieCandidates)
+                ? $this->findBestMatch($movieCandidates, $query, null, 'title', 'release_date', 'movie')
+                : null;
+
+            $best = null;
+            if ($tvMatch && $movieMatch) {
+                $tvConfidence = (int) ($tvMatch['_confidence'] ?? 0);
+                $movieConfidence = (int) ($movieMatch['_confidence'] ?? 0);
+
+                if ($tvConfidence === $movieConfidence) {
+                    $tvPopularity = (float) ($tvMatch['popularity'] ?? 0);
+                    $moviePopularity = (float) ($movieMatch['popularity'] ?? 0);
+                    $best = $tvPopularity >= $moviePopularity ? $tvMatch : $movieMatch;
+                } else {
+                    $best = $tvConfidence > $movieConfidence ? $tvMatch : $movieMatch;
+                }
+            } else {
+                $best = $tvMatch ?? $movieMatch;
+            }
+
+            if (! is_array($best)) {
+                $best = $results[0];
+            }
+
+            $mediaType = $best['media_type'] ?? (isset($best['name']) ? 'tv' : 'movie');
+
+            return $this->normalizeFindResult($best, $mediaType);
+        } catch (\Throwable $e) {
+            Log::error('TMDB multi search error', [
+                'query' => $query,
+                'error' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
+    }
+
+    /**
+     * Normalize a TMDB result payload to the shape expected by plugin enrichers.
+     *
+     * @param  array<string, mixed>  $result
+     * @return array<string, mixed>
+     */
+    private function normalizeFindResult(array $result, string $mediaType): array
+    {
+        $posterUrl = null;
+        if (! empty($result['poster_path'])) {
+            $posterUrl = 'https://image.tmdb.org/t/p/w500'.$result['poster_path'];
+        }
+
+        $backdropUrl = null;
+        if (! empty($result['backdrop_path'])) {
+            $backdropUrl = 'https://image.tmdb.org/t/p/original'.$result['backdrop_path'];
+        }
+
+        return [
+            'tmdb_id' => $result['id'] ?? null,
+            'name' => $result['name'] ?? null,
+            'title' => $result['title'] ?? null,
+            'original_name' => $result['original_name'] ?? null,
+            'original_title' => $result['original_title'] ?? null,
+            'first_air_date' => $result['first_air_date'] ?? null,
+            'release_date' => $result['release_date'] ?? null,
+            'overview' => $result['overview'] ?? null,
+            'poster_url' => $posterUrl,
+            'backdrop_url' => $backdropUrl,
+            'popularity' => $result['popularity'] ?? null,
+            '_media_type' => $mediaType,
+            '_confidence' => $result['_confidence'] ?? null,
+        ];
     }
 
     /**

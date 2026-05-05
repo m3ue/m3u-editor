@@ -56,11 +56,11 @@ class ProcessChannelScrubberComplete implements ShouldQueue
         $deadCount = $scrubber->dead_count;
         $channelCount = $scrubber->channel_count;
 
+        // disabled_count and enabled_count are accumulated in-place by each chunk job — do not overwrite.
         ChannelScrubberLog::where('id', $this->logId)->update([
             'status' => 'completed',
             'channel_count' => $channelCount,
             'dead_count' => $deadCount,
-            'disabled_count' => $deadCount,
             'runtime' => $runtime,
         ]);
 

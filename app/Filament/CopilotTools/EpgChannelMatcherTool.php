@@ -273,10 +273,18 @@ class EpgChannelMatcherTool extends BaseTool
      */
     private function similarity(string $a, string $b): int
     {
-        similar_text($a, $b, $percent);
-        $score = (int) round($percent);
+        if ($a === '' || $b === '') {
+            return 0;
+        }
 
-        if ($a !== '' && $b !== '' && (str_contains($b, $a) || str_contains($a, $b))) {
+        $lenA = strlen($a);
+        $lenB = strlen($b);
+        $maxLen = max($lenA, $lenB);
+
+        $dist = levenshtein($a, $b);
+        $score = (int) round((1 - $dist / $maxLen) * 100);
+
+        if (str_contains($b, $a) || str_contains($a, $b)) {
             $score = max($score, 80);
         }
 

@@ -141,8 +141,10 @@ class MergeChannels implements ShouldQueue
                 continue; // Skip if no valid master found
             }
 
-            // Ensure master is enabled in case it was previously disabled
-            if (! $master->enabled) {
+            // Ensure master is enabled in case it was previously disabled,
+            // but never silently re-enable a master that lives in a disabled group
+            // when the user opted in to exclude_disabled_groups.
+            if (! $master->enabled && ! in_array($master->group_id, $this->disabledGroupIds, true)) {
                 $master->update(['enabled' => true]);
             }
 
@@ -304,12 +306,15 @@ class MergeChannels implements ShouldQueue
      */
     protected function selectMasterChannel(Collection $group, array $playlistPriority): ?Channel
     {
-        // Filter out channels from disabled groups if enabled
+        // Filter out channels from disabled groups if enabled.
+        // When the user opted in to exclude_disabled_groups, we must NOT fall back
+        // to the unfiltered group: that would silently pick (and later re-enable)
+        // a channel from a disabled group as master, which is exactly what the
+        // option is supposed to prevent.
         $eligibleGroup = $this->filterDisabledGroups($group);
 
         if ($eligibleGroup->isEmpty()) {
-            // Fallback to original group if all were filtered
-            $eligibleGroup = $group;
+            return null;
         }
 
         // Use weighted priority system if config provided

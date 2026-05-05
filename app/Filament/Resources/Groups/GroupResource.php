@@ -13,6 +13,7 @@ use App\Jobs\SyncPlexDvrJob;
 use App\Models\Channel;
 use App\Models\Group;
 use App\Models\Playlist;
+use App\Models\StreamProfile;
 use App\Services\DateFormatService;
 use App\Services\FindReplaceService;
 use App\Services\PlaylistService;
@@ -171,14 +172,7 @@ class GroupResource extends Resource implements CopilotResource
             ])
             ->recordActions([
                 ActionGroup::make([
-                    PlaylistService::getAddToPlaylistAction('add', 'channel', fn ($record) => $record->channels())
-                        ->after(function () {
-                            Notification::make()
-                                ->success()
-                                ->title(__('Group channels added to custom playlist'))
-                                ->body(__('The groups channels have been added to the chosen custom playlist.'))
-                                ->send();
-                        }),
+                    PlaylistService::getAddGroupsToPlaylistAction('add', 'channel'),
                     Action::make('move')
                         ->label(__('Move Channels to Group'))
                         ->schema([
@@ -212,6 +206,52 @@ class GroupResource extends Resource implements CopilotResource
                         ->modalIcon('heroicon-o-arrows-right-left')
                         ->modalDescription(__('Move the group channels to the another group.'))
                         ->modalSubmitActionLabel(__('Move now')),
+
+                    Action::make('set-stream-profile')
+                        ->label(__('Set Stream Profile'))
+                        ->schema([
+                            Select::make('stream_profile_id')
+                                ->label(__('Stream Profile'))
+                                ->options(fn () => StreamProfile::where('user_id', auth()->id())->pluck('name', 'id'))
+                                ->searchable()
+                                ->preload()
+                                ->nullable()
+                                ->placeholder(__('None (clear profile)')),
+                            Toggle::make('overwrite_existing')
+                                ->label(__('Overwrite existing channel assignments'))
+                                ->helperText(__('When off, only channels without a stream profile will be updated. When on, all live channels in this group will be overwritten.'))
+                                ->default(false),
+                            Toggle::make('apply_to_new_channels')
+                                ->label(__('Apply to channels added later'))
+                                ->helperText(__('Save this profile on the group so future channels added to it inherit the assignment automatically. Disable to leave the saved group default unchanged.'))
+                                ->default(false),
+                        ])
+                        ->action(function (Group $record, array $data): void {
+                            $profileId = ! empty($data['stream_profile_id']) ? (int) $data['stream_profile_id'] : null;
+                            $overwrite = (bool) ($data['overwrite_existing'] ?? false);
+                            $persist = (bool) ($data['apply_to_new_channels'] ?? false);
+
+                            $query = $record->live_channels();
+                            if (! $overwrite) {
+                                $query->whereNull('stream_profile_id');
+                            }
+                            $updated = $query->update(['stream_profile_id' => $profileId]);
+
+                            if ($persist) {
+                                $record->update(['stream_profile_id' => $profileId]);
+                            }
+
+                            Notification::make()
+                                ->success()
+                                ->title(__('Stream profile updated'))
+                                ->body(trans_choice(':count channel updated|:count channels updated', $updated, ['count' => $updated]))
+                                ->send();
+                        })
+                        ->requiresConfirmation()
+                        ->icon('heroicon-o-cog-6-tooth')
+                        ->modalIcon('heroicon-o-cog-6-tooth')
+                        ->modalDescription(__('Assign a stream profile to all live channels in this group.'))
+                        ->modalSubmitActionLabel(__('Apply')),
 
                     Action::make('recount')
                         ->label(__('Recount Channels'))
@@ -350,15 +390,7 @@ class GroupResource extends Resource implements CopilotResource
             ], position: RecordActionsPosition::BeforeCells)
             ->toolbarActions([
                 BulkActionGroup::make([
-                    PlaylistService::getAddToPlaylistBulkAction('add', 'channel', function (Collection $records) {
-                        return $records->flatMap->channels;
-                    })->after(function () {
-                        Notification::make()
-                            ->success()
-                            ->title(__('Group channels added to custom playlist'))
-                            ->body(__('The groups channels have been added to the chosen custom playlist.'))
-                            ->send();
-                    }),
+                    PlaylistService::getAddGroupsToPlaylistBulkAction('add', 'channel'),
                     BulkAction::make('move')
                         ->label(__('Move Channels to Group'))
                         ->schema([
@@ -411,6 +443,55 @@ class GroupResource extends Resource implements CopilotResource
                         ->modalIcon('heroicon-o-arrows-right-left')
                         ->modalDescription(__('Move the group channels to the another group.'))
                         ->modalSubmitActionLabel(__('Move now')),
+                    BulkAction::make('set-stream-profile')
+                        ->label(__('Set Stream Profile'))
+                        ->schema([
+                            Select::make('stream_profile_id')
+                                ->label(__('Stream Profile'))
+                                ->options(fn () => StreamProfile::where('user_id', auth()->id())->pluck('name', 'id'))
+                                ->searchable()
+                                ->preload()
+                                ->nullable()
+                                ->placeholder(__('None (clear profile)')),
+                            Toggle::make('overwrite_existing')
+                                ->label(__('Overwrite existing channel assignments'))
+                                ->helperText(__('When off, only channels without a stream profile will be updated. When on, all live channels in the selected groups will be overwritten.'))
+                                ->default(false),
+                            Toggle::make('apply_to_new_channels')
+                                ->label(__('Apply to channels added later'))
+                                ->helperText(__('Save this profile on the group so future channels added to it inherit the assignment automatically. Disable to leave the saved group default unchanged.'))
+                                ->default(false),
+                        ])
+                        ->action(function (Collection $records, array $data): void {
+                            $profileId = ! empty($data['stream_profile_id']) ? (int) $data['stream_profile_id'] : null;
+                            $overwrite = (bool) ($data['overwrite_existing'] ?? false);
+                            $persist = (bool) ($data['apply_to_new_channels'] ?? false);
+                            $updated = 0;
+
+                            foreach ($records as $group) {
+                                $query = $group->live_channels();
+                                if (! $overwrite) {
+                                    $query->whereNull('stream_profile_id');
+                                }
+                                $updated += $query->update(['stream_profile_id' => $profileId]);
+
+                                if ($persist) {
+                                    $group->update(['stream_profile_id' => $profileId]);
+                                }
+                            }
+
+                            Notification::make()
+                                ->success()
+                                ->title(__('Stream profile updated'))
+                                ->body(trans_choice(':count channel updated|:count channels updated', $updated, ['count' => $updated]))
+                                ->send();
+                        })
+                        ->deselectRecordsAfterCompletion()
+                        ->requiresConfirmation()
+                        ->icon('heroicon-o-cog-6-tooth')
+                        ->modalIcon('heroicon-o-cog-6-tooth')
+                        ->modalDescription(__('Assign a stream profile to all live channels in the selected group(s).'))
+                        ->modalSubmitActionLabel(__('Apply')),
                     BulkAction::make('enable')
                         ->label(__('Enable Group Channels'))
                         ->action(function (Collection $records): void {

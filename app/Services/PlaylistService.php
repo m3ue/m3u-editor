@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Jobs\AddGroupsToCustomPlaylist;
 use App\Jobs\MergeChannels;
 use App\Jobs\UnmergeChannels;
 use App\Models\CustomPlaylist;
@@ -325,6 +326,27 @@ class PlaylistService
         return "{$baseUrl}/series/{$username}/{$password}/{$seriesId}";
     }
 
+    /**
+     * Truncate a filename (without extension) to fit within the filesystem's
+     * 255-byte per-component limit. Uses mb_strcut() so multibyte UTF-8
+     * characters (e.g. accented French letters) are never split mid-sequence.
+     *
+     * @param  string  $name  The filename without extension.
+     * @param  string  $ext  The extension including its leading dot (e.g. '.strm').
+     * @param  int  $maxBytes  Maximum bytes for the full component (default 255).
+     */
+    public static function truncateFilename(string $name, string $ext = '', int $maxBytes = 255): string
+    {
+        $allowedBytes = $maxBytes - strlen($ext);
+
+        if (strlen($name) <= $allowedBytes) {
+            return $name;
+        }
+
+        // mb_strcut trims at a byte boundary that does not split a multibyte char.
+        return rtrim(mb_strcut($name, 0, $allowedBytes, 'UTF-8'));
+    }
+
     public static function makeFilesystemSafe(string $name, $replaceWith = ' '): string
     {
         switch ($replaceWith) {
@@ -370,17 +392,17 @@ class PlaylistService
             'container_extension' => 'mkv',
             'info' => (object) [
                 'season' => 1,
-                'tmdb_id' => '1176693',
+                'tmdb_id' => 1176693,
                 'movie_image' => 'http://m3ueditor.test/logo-proxy/aHR0cDovLzIzLjIyNy4xNDcuMTcyOjgwL2ltYWdlcy9mODQyYjlkYTA5YWFjODFlYWRlYzU0YzY0NWU1ZDE3OS5qcGc=',
             ],
             'category' => 'Anime',
             'series' => (object) [
                 'name' => 'My Hero Academia (2016)',
                 'release_date' => '2016-04-03',
-                'tmdb_id' => '65930',
+                'tmdb_id' => 65930,
                 'metadata' => [
                     'name' => 'My Hero Academia (2016)',
-                    'tmdb_id' => '65930',
+                    'tmdb_id' => 65930,
                 ],
             ],
         ];
@@ -1240,6 +1262,75 @@ class PlaylistService
                     ->success()
                     ->title('Items added to custom playlist')
                     ->body('The selected items have been added to the chosen custom playlist.')
+                    ->send();
+            })
+            ->requiresConfirmation()
+            ->icon('heroicon-o-play')
+            ->modalIcon('heroicon-o-play')
+            ->modalDescription('Add the items to the chosen custom playlist.')
+            ->modalSubmitActionLabel('Add now');
+    }
+
+    /**
+     * Get the BulkAction for adding entire groups/categories to a custom playlist via a background job.
+     *
+     * Use this instead of getAddToPlaylistBulkAction when records are Group or Category models,
+     * as it dispatches a queued job to avoid HTTP timeouts on large datasets and correctly
+     * resolves the group's display name for 'original' mode.
+     */
+    public static function getAddGroupsToPlaylistBulkAction(string $name = 'add', string $type = 'channel'): BulkAction
+    {
+        return BulkAction::make($name)
+            ->label('Add to Custom Playlist')
+            ->schema(self::getAddToPlaylistSchema($type))
+            ->action(function (Collection $records, array $data) use ($type): void {
+                AddGroupsToCustomPlaylist::dispatch(
+                    userId: auth()->id(),
+                    groupIds: $records->pluck('id')->all(),
+                    customPlaylistId: (int) $data['playlist'],
+                    data: $data,
+                    type: $type,
+                );
+
+                Notification::make()
+                    ->info()
+                    ->title(__('Adding items to custom playlist'))
+                    ->body(__('The selected items are being added to the chosen custom playlist in the background. You will be notified when complete.'))
+                    ->send();
+            })
+            ->deselectRecordsAfterCompletion()
+            ->requiresConfirmation()
+            ->icon('heroicon-o-play')
+            ->modalIcon('heroicon-o-play')
+            ->modalDescription('Add the selected item(s) to the chosen custom playlist.')
+            ->modalSubmitActionLabel('Add now');
+    }
+
+    /**
+     * Get the Action for adding an entire group/category to a custom playlist via a background job.
+     *
+     * Use this instead of getAddToPlaylistAction when the record is a Group or Category model,
+     * as it dispatches a queued job to avoid HTTP timeouts on large datasets and correctly
+     * resolves the group's display name for 'original' mode.
+     */
+    public static function getAddGroupsToPlaylistAction(string $name = 'add', string $type = 'channel'): Action
+    {
+        return Action::make($name)
+            ->label('Add to Custom Playlist')
+            ->schema(self::getAddToPlaylistSchema($type))
+            ->action(function ($record, array $data) use ($type): void {
+                AddGroupsToCustomPlaylist::dispatch(
+                    userId: auth()->id(),
+                    groupIds: [$record->id],
+                    customPlaylistId: (int) $data['playlist'],
+                    data: $data,
+                    type: $type,
+                );
+
+                Notification::make()
+                    ->info()
+                    ->title(__('Adding items to custom playlist'))
+                    ->body(__('The selected items are being added to the chosen custom playlist in the background. You will be notified when complete.'))
                     ->send();
             })
             ->requiresConfirmation()

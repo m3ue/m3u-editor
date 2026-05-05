@@ -10,6 +10,13 @@ return [
 
     'install_mode' => env('PLUGIN_INSTALL_MODE', 'normal'),
 
+    /**
+     * Automatically trust and enable installs from trusted orgs (see trusted_orgs below)
+     * without requiring a separate manual Trust step. Set to false to enforce manual trust
+     * for every install, even from official sources.
+     */
+    'auto_trust_official' => (bool) env('PLUGIN_AUTO_TRUST_OFFICIAL', true),
+
     'run_retention_days' => (int) env('PLUGIN_RUN_RETENTION_DAYS', 7),
 
     'directories' => [
@@ -47,6 +54,11 @@ return [
             'repository' => 'm3ue/channels-dvr-plugin',
             'name' => 'Channels DVR',
             'description' => 'Maps Gracenote station IDs from a local Channels DVR install to your playlist channels via the DVR guide stations API.',
+        ],
+        'youtubearr' => [
+            'repository' => 'm3ue/youtubearr-plugin',
+            'name' => 'YouTubearr',
+            'description' => 'Monitors YouTube channels for active livestreams and automatically creates or removes custom channels. Zero API quota — uses yt-dlp.',
         ],
     ],
 
@@ -177,10 +189,12 @@ return [
     ],
 
     'field_types' => [
+        'section',
         'boolean',
         'number',
         'text',
         'textarea',
+        'tags',
         'select',
         'model_select',
     ],

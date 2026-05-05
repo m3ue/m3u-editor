@@ -271,7 +271,7 @@ class PlaylistGenerateController extends Controller
                 // If the playlist includes series in M3U, include the series episodes
                 if ($playlist->include_series_in_m3u) {
                     // Get the seasons
-                    $series = $playlist->series()
+                    foreach ($playlist->series()
                         ->where('series.enabled', true)
                         ->with([
                             'category',
@@ -280,9 +280,11 @@ class PlaylistGenerateController extends Controller
                             },
                         ])
                         ->orderBy('sort')
-                        ->get();
+                        ->lazyById(50) as $s) {
+                        // Get series movie DB ID's as fallbacks for episode
+                        $movieDbIds = $s->getMovieDbIds() ?? [];
+                        $seriesTmdbId = $movieDbIds['tmdb'] ?? $movieDbIds['tvdb'] ?? $movieDbIds['imdb'] ?? null;
 
-                    foreach ($series as $s) {
                         // Append the episodes
                         foreach ($s->episodes as $episode) {
                             // Set channel variables
@@ -292,7 +294,7 @@ class PlaylistGenerateController extends Controller
                             $url = PlaylistUrlService::getEpisodeUrl($episode, $playlist);
                             $title = $episode->title;
                             $runtime = $episode->info['duration_secs'] ?? -1;
-                            $icon = $episode->info['movie_image'] ?? $streamId->info['cover'] ?? '';
+                            $icon = $episode->info['movie_image'] ?? $s->cover ?? '';
                             if (empty($icon)) {
                                 $icon = url('/placeholder.png');
                             }
@@ -332,9 +334,20 @@ class PlaylistGenerateController extends Controller
                             }
 
                             $extInf = "#EXTINF:$runtime";
-                            $episodeTmdbId = $episode->tmdb_id ?: ($episode->info['tmdb_id'] ?? null);
+                            // Fallback to series TMDB ID if episode not set
+                            $episodeTmdbId = $episode->tmdb_id ?: ($episode->info['tmdb_id'] ?? null) ?: $seriesTmdbId;
                             if ($episodeTmdbId) {
                                 $extInf .= " tmdb-id=\"{$episodeTmdbId}\"";
+                            }
+
+                            // Add season and episode information
+                            $seasonNum = $episode->season;
+                            $episodeNum = $episode->episode_num;
+                            if ($seasonNum !== null) {
+                                $extInf .= " tvg-season=\"{$seasonNum}\"";
+                            }
+                            if ($episodeNum !== null) {
+                                $extInf .= " tvg-episode=\"{$episodeNum}\"";
                             }
                             $extInf .= " tvg-chno=\"$channelNo\" tvg-id=\"$tvgId\" tvg-name=\"$name\" tvg-logo=\"$icon\" group-title=\"$group\"";
                             echo "$extInf,".$title."\n";
@@ -641,7 +654,7 @@ class PlaylistGenerateController extends Controller
     /**
      * Build the base query for channels for a playlist.
      */
-    public static function getChannelQuery($playlist): mixed
+    public static function getChannelQuery($playlist, ?bool $isVod = null): mixed
     {
         // Build the base query for channels. We'll use cursor() to stream
         // results rather than loading all channels into memory.
@@ -652,9 +665,9 @@ class PlaylistGenerateController extends Controller
         $query = $playlist->channels()
             ->leftJoin('groups', 'channels.group_id', '=', 'groups.id')
             ->where('channels.enabled', true)
-            ->when(! $playlist->include_vod_in_m3u, function ($q) {
-                $q->where('channels.is_vod', false);
-            })
+            ->when($isVod === true, fn ($q) => $q->where('channels.is_vod', true))
+            ->when($isVod === false, fn ($q) => $q->where('channels.is_vod', false))
+            ->when($isVod === null && ! $playlist->include_vod_in_m3u, fn ($q) => $q->where('channels.is_vod', false))
             // Select the channel columns and also pull through group name and (for custom)
             // the custom tag name/order so we can order in SQL and avoid a PHP-side resort.
             ->selectRaw('channels.*')
@@ -683,8 +696,8 @@ class PlaylistGenerateController extends Controller
                     [Channel::class, $playlistUuid]
                 )
                 ->orderByRaw("COALESCE({$orderSubquery}, groups.sort_order)", [Channel::class, $playlistUuid])
-                ->orderBy('channels.sort')
-                ->orderBy('channels.channel')
+                ->orderByRaw('COALESCE(channel_custom_playlist.sort, channels.sort)')
+                ->orderByRaw('COALESCE(channel_custom_playlist.channel_number, channels.channel)')
                 ->orderBy('channels.title');
         } else {
             // Standard ordering for non-custom playlists

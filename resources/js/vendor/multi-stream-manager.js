@@ -6,6 +6,7 @@ function multiStreamManager() {
         zIndexCounter: 1000,
         _initialized: false,
         _abortController: null,
+        _finalized: false,
         _lastClickPos: { x: 0, y: 0 },
         dragState: {
             isDragging: false,
@@ -29,6 +30,8 @@ function multiStreamManager() {
             if (this._initialized) {
                 return;
             }
+
+            this._finalized = false;
 
             // Read max players from container data attribute
             const container = document.querySelector('[data-max-players]');
@@ -105,7 +108,7 @@ function multiStreamManager() {
                 return;
             }
 
-            const playerId = 'floating-player-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+            const playerId = 'floating-player-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9);
 
             const player = {
                 id: playerId,
@@ -125,8 +128,7 @@ function multiStreamManager() {
                 position: this.getRandomPosition(),
                 size: { width: 480, height: 270 }, // 16:9 aspect ratio
                 isMinimized: false,
-                isPiP: false,
-                streamPlayer: null
+                isPiP: false
             };
 
             this.players.push(player);
@@ -141,14 +143,6 @@ function multiStreamManager() {
                 x: Math.max(padding, Math.random() * maxX),
                 y: Math.max(padding, Math.random() * maxY)
             };
-        },
-
-        initializePlayer(player) {
-            const videoElement = document.getElementById(player.id + '-video');
-            if (videoElement && window.streamPlayer) {
-                player.streamPlayer = window.streamPlayer();
-                player.streamPlayer.initPlayer(player.url, player.format, player.id + '-video');
-            }
         },
 
         closeStream(playerId, { notifyServer = true } = {}) {
@@ -166,13 +160,8 @@ function multiStreamManager() {
                 if (notifyServer) {
                     this.notifyServerStreamStop(player);
                 }
-                if (videoElement && videoElement._streamPlayer) {
+                if (videoElement?._streamPlayer) {
                     videoElement._streamPlayer.cleanup();
-                }
-
-                // Also cleanup via stored reference
-                if (player.streamPlayer && typeof player.streamPlayer.cleanup === 'function') {
-                    player.streamPlayer.cleanup();
                 }
 
                 // Remove from array
@@ -181,25 +170,19 @@ function multiStreamManager() {
         },
 
         cleanupAllStreams() {
+            if (this._finalized) return;
+            this._finalized = true;
+
             this.players.forEach(player => {
                 // Notify server to stop the proxy stream (best-effort via sendBeacon)
                 this.notifyServerStreamStop(player);
-                // Cleanup via video element
+                // Cleanup local media via video element
                 const videoElement = document.getElementById(player.id + '-video');
-                if (videoElement && videoElement._streamPlayer) {
+                if (videoElement?._streamPlayer) {
                     try {
                         videoElement._streamPlayer.cleanup();
                     } catch (e) {
-                        console.warn('Error cleaning up video element:', e);
-                    }
-                }
-
-                // Also cleanup via stored reference
-                if (player.streamPlayer && typeof player.streamPlayer.cleanup === 'function') {
-                    try {
-                        player.streamPlayer.cleanup();
-                    } catch (e) {
-                        console.warn('Error cleaning up player reference:', e);
+                        console.warn('Error cleaning up stream:', e);
                     }
                 }
             });
@@ -244,7 +227,7 @@ function multiStreamManager() {
          */
         notifyServerStreamStop(player) {
             if (window.notifyProxyStreamStop) {
-                window.notifyProxyStreamStop(player.channelId, player.channelType);
+                window.notifyProxyStreamStop(player.channelId, player.channelType, player.id);
             }
         },
 
@@ -319,8 +302,9 @@ function multiStreamManager() {
                 return;
             }
 
-            // Close the floating player locally without telling the proxy to stop —
-            // the pop-out window will pick up the same stream.
+            // Close the floating player locally without notifying the proxy —
+            // the pop-out window inherits the same client_id so the proxy sees
+            // an uninterrupted connection with no gap at 0 clients.
             this.closeStream(player.id, { notifyServer: false });
 
             const params = new URLSearchParams({
@@ -334,6 +318,7 @@ function multiStreamManager() {
                 playlist_id: player.playlist_id ?? '',
                 series_id: player.series_id ?? '',
                 season_number: player.season_number ?? '',
+                client_id: player.id,
             });
 
             window.open(popoutRoute + '?' + params.toString(), '_blank', 'noopener');

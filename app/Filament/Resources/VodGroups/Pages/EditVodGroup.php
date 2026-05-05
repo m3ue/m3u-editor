@@ -26,15 +26,7 @@ class EditVodGroup extends EditRecord
     {
         return [
             ActionGroup::make([
-                PlaylistService::getAddToPlaylistAction('add', 'channel', fn ($record) => $record->channels())
-                    ->after(function ($livewire) {
-                        $livewire->dispatch('refreshRelation');
-                        Notification::make()
-                            ->success()
-                            ->title(__('Group channels added to custom playlist'))
-                            ->body(__('The groups channels have been added to the chosen custom playlist.'))
-                            ->send();
-                    }),
+                PlaylistService::getAddGroupsToPlaylistAction('add', 'channel'),
                 Action::make('move')
                     ->label(__('Move to Group'))
                     ->schema([
@@ -169,12 +161,15 @@ class EditVodGroup extends EditRecord
                 Action::make('sync_vod')
                     ->label(__('Sync VOD .strm file'))
                     ->action(function ($record) {
-                        foreach ($record->enabled_channels as $channel) {
-                            app('Illuminate\Contracts\Bus\Dispatcher')
-                                ->dispatch(new SyncVodStrmFiles(
-                                    channel: $channel,
-                                ));
+                        $channelIds = $record->enabled_channels->pluck('id')->all();
+                        if (empty($channelIds)) {
+                            return;
                         }
+                        app('Illuminate\Contracts\Bus\Dispatcher')
+                            ->dispatch(new SyncVodStrmFiles(
+                                user_id: auth()->id(),
+                                channel_ids: $channelIds,
+                            ));
                     })->after(function () {
                         Notification::make()
                             ->success()

@@ -8,6 +8,7 @@ use App\Filament\GuestPanel\Pages\Concerns\HasPlaylist;
 use App\Models\Channel;
 use App\Models\CustomPlaylist;
 use App\Models\Playlist;
+use App\Models\PlaylistAlias;
 use App\Services\DateFormatService;
 use Filament\Actions\Action;
 use Filament\Actions\ViewAction;
@@ -87,6 +88,35 @@ class VodResource extends Resource
                     ['enabled', true], // Only show enabled channels
                     ['is_vod', true], // Only show VOD channels
                 ]);
+        }
+        if ($playlist instanceof PlaylistAlias) {
+            // Alias backed by a standard playlist
+            if ($playlist->playlist_id) {
+                $query = parent::getEloquentQuery()
+                    ->with(['epgChannel', 'playlist'])
+                    ->where('enabled', true)
+                    ->where('is_vod', true)
+                    ->where('playlist_id', $playlist->playlist_id);
+
+                // Apply VOD group filter if configured on the alias
+                $allowedVodGroups = $playlist->getAllowedVodGroupNames();
+                if (! empty($allowedVodGroups)) {
+                    $query->whereIn('group_internal', $allowedVodGroups);
+                }
+
+                return $query;
+            }
+
+            // Alias backed by a custom playlist
+            if ($playlist->custom_playlist_id) {
+                return parent::getEloquentQuery()
+                    ->with(['epgChannel', 'customPlaylists'])
+                    ->whereHas('customPlaylists', function ($query) use ($playlist) {
+                        $query->where('custom_playlists.id', $playlist->custom_playlist_id);
+                    })
+                    ->where('enabled', true)
+                    ->where('is_vod', true);
+            }
         }
 
         return parent::getEloquentQuery();

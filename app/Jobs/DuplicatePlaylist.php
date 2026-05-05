@@ -79,10 +79,12 @@ class DuplicatePlaylist implements ShouldQueue
                 foreach ($group->channels()->with('failovers')->get() as $channel) {
                     $newChannel = $channel->replicate(except: [
                         'id',
+                        'uuid',
                         'group_id',
                         'playlist_id',
                     ]);
                     $newChannel->group_id = $newGroup->id;
+                    $newChannel->uuid = Str::orderedUuid()->toString();
                     $newChannel->playlist_id = $newPlaylist->id;
                     $newChannel->created_at = $now;
                     $newChannel->updated_at = $now;

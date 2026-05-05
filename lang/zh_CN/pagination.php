@@ -1,6 +1,6 @@
 <?php
 
 return [
-    'previous' => '“ 以前的',
-    'next' => '下一个 ”',
+    'previous' => '&laquo; 上一页',
+    'next' => '下一页 &raquo;',
 ];

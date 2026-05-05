@@ -2,6 +2,8 @@
 
 namespace App\Jobs;
 
+use App\Enums\Status;
+use App\Models\Playlist;
 use App\Models\Series;
 use App\Models\User;
 use App\Settings\GeneralSettings;
@@ -99,6 +101,20 @@ class ProcessM3uImportSeriesEpisodes implements ShouldQueue
 
         if ($totalCount === 0) {
             Log::info('Series Sync: No series to process');
+
+            if ($this->playlist_id) {
+                $playlist = Playlist::find($this->playlist_id);
+                if ($playlist) {
+                    $playlist->update([
+                        'processing' => [
+                            ...$playlist->processing ?? [],
+                            'series_processing' => false,
+                        ],
+                        'status' => Status::Completed,
+                        'series_progress' => 100,
+                    ]);
+                }
+            }
 
             return;
         }
@@ -251,7 +267,8 @@ class ProcessM3uImportSeriesEpisodes implements ShouldQueue
             // Check if the playlist has .strm file sync enabled
             $sync_settings = $series->sync_settings;
             $syncStrmFiles = $settings['enabled'] ?? $sync_settings['enabled'] ?? false;
-            $body = "Series sync completed successfully for \"{$series->name}\". Imported {$results} episodes.";
+            $episodeCount = $series->episodes()->count();
+            $body = "Series sync completed successfully for \"{$series->name}\". Imported {$episodeCount} episodes.";
             if ($syncStrmFiles) {
                 $body .= ' .strm file sync is enabled, syncing now.';
             } else {

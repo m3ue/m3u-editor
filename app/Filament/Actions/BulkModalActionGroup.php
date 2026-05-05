@@ -4,6 +4,7 @@ namespace App\Filament\Actions;
 
 use Closure;
 use Filament\Actions\BulkAction;
+use Filament\Schemas\Components\Fieldset;
 use Filament\Schemas\Components\Grid;
 
 /**
@@ -51,7 +52,9 @@ class BulkModalActionGroup extends BulkAction
 
     public function schema(array|Closure|null $schema): static
     {
-        // Ensure child actions close the parent modal when they complete
+        // Ensure top-level child actions close the parent modal when they complete.
+        // When actions are nested inside layout components (Section, etc.),
+        // callers must call cancelParentActions() on each action themselves.
         if (is_array($schema)) {
             foreach ($schema as $component) {
                 if ($component instanceof BulkAction) {
@@ -60,13 +63,36 @@ class BulkModalActionGroup extends BulkAction
             }
         }
 
-        // Wrap the schema in our grid layout
-        $schema = [
-            Grid::make(columns: $this->gridColumns)
-                ->schema($schema),
-        ];
+        // When schema contains only flat BulkActions, wrap in a grid.
+        // When it contains Fieldset groups (from BulkModalActionGroup::group()), they manage their own layout.
+        $hasSections = is_array($schema) && collect($schema)->contains(fn ($c) => $c instanceof Fieldset);
+
+        if (! $hasSections) {
+            $schema = [
+                Grid::make(columns: $this->gridColumns)
+                    ->schema($schema),
+            ];
+        }
 
         return parent::schema($schema);
+    }
+
+    /**
+     * Create a labeled group for the bulk actions modal, ensuring each
+     * action closes the parent modal when it completes.
+     */
+    public static function section(string $heading, array $actions): Fieldset
+    {
+        foreach ($actions as $action) {
+            if ($action instanceof BulkAction) {
+                $action->cancelParentActions();
+            }
+        }
+
+        return Fieldset::make(__($heading))
+            ->columns(2)
+            ->columnSpanFull()
+            ->schema($actions);
     }
 
     public function actions(array $actions): static

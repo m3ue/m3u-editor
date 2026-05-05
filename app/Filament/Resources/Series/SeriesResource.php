@@ -14,10 +14,12 @@ use App\Filament\Resources\Series\Pages\ViewSeries;
 use App\Filament\Resources\Series\RelationManagers\EpisodesRelationManager;
 use App\Forms\Components\TmdbSearchResults;
 use App\Jobs\FetchTmdbIds;
+use App\Jobs\ProbeVodStreamsChunk;
 use App\Jobs\ProcessM3uImportSeriesEpisodes;
 use App\Jobs\SeriesFindAndReplace;
 use App\Jobs\SyncSeriesStrmFiles;
 use App\Models\Category;
+use App\Models\Episode;
 use App\Models\Playlist;
 use App\Models\Series;
 use App\Rules\CheckIfUrlOrLocalPath;
@@ -201,6 +203,45 @@ class SeriesResource extends Resource implements CopilotResource
                 ->badge()
                 ->toggleable()
                 ->sortable(),
+            TextColumn::make('probe_enabled_episodes_count')
+                ->label(__('Probe Enabled'))
+                ->counts(['episodes as probe_enabled_episodes_count' => fn ($q) => $q->where('probe_enabled', true)])
+                ->badge()
+                ->color(fn ($state) => $state > 0 ? 'success' : 'gray')
+                ->tooltip(__('Episodes with probing enabled'))
+                ->toggleable()
+                ->sortable(),
+            TextColumn::make('probed_episodes_count')
+                ->label(__('Probed'))
+                ->counts([
+                    'episodes as probed_episodes_count' => fn ($q) => $q
+                        ->whereNotNull('stream_stats_probed_at')
+                        ->whereNotNull('stream_stats')
+                        ->whereRaw("CAST(stream_stats AS TEXT) != '[]'"),
+                ])
+                ->badge()
+                ->color(function ($state, $record): string {
+                    if ($state === 0) {
+                        return 'gray';
+                    }
+
+                    return $state >= ($record->probe_enabled_episodes_count ?? 0) ? 'success' : 'warning';
+                })
+                ->tooltip(__('Episodes successfully probed (with stream info)'))
+                ->toggleable()
+                ->sortable(),
+            TextColumn::make('probe_failed_episodes_count')
+                ->label(__('Probe Failed'))
+                ->counts([
+                    'episodes as probe_failed_episodes_count' => fn ($q) => $q
+                        ->whereNotNull('stream_stats_probed_at')
+                        ->where(fn ($q) => $q->whereNull('stream_stats')->orWhereRaw("CAST(stream_stats AS TEXT) = '[]'")),
+                ])
+                ->badge()
+                ->color(fn ($state) => $state > 0 ? 'warning' : 'gray')
+                ->tooltip(__('Episodes where probe ran but returned no stream info'))
+                ->toggleable()
+                ->sortable(),
             TextColumn::make('category.name')
                 ->hidden(fn () => ! $showCategory)
                 ->badge()
@@ -247,38 +288,29 @@ class SeriesResource extends Resource implements CopilotResource
             Filter::make('has_metadata')
                 ->label(__('Has TMDB/TVDB/IMDB ID'))
                 ->toggle()
-                ->query(function ($query) {
-                    return $query->where(function ($q) {
-                        $q->whereNotNull('tmdb_id')
-                            ->orWhereNotNull('tvdb_id')
-                            ->orWhereNotNull('imdb_id')
-                            ->orWhereRaw("metadata::jsonb ?? 'tmdb_id'")
-                            ->orWhereRaw("metadata::jsonb ?? 'tmdb'")
-                            ->orWhereRaw("metadata::jsonb ?? 'tvdb_id'")
-                            ->orWhereRaw("metadata::jsonb ?? 'tvdb'")
-                            ->orWhereRaw("metadata::jsonb ?? 'imdb_id'")
-                            ->orWhereRaw("metadata::jsonb ?? 'imdb'");
-                    });
-                }),
+                ->query(fn ($query) => $query->hasSeriesId()),
             Filter::make('missing_metadata')
                 ->label(__('Missing TMDB/TVDB/IMDB ID'))
                 ->toggle()
-                ->query(function ($query) {
-                    return $query->whereNull('tmdb_id')
-                        ->whereNull('tvdb_id')
-                        ->whereNull('imdb_id')
-                        ->where(function ($q) {
-                            $q->whereNull('metadata')
-                                ->orWhere(function ($inner) {
-                                    $inner->whereRaw("NOT (metadata::jsonb ?? 'tmdb_id')")
-                                        ->whereRaw("NOT (metadata::jsonb ?? 'tmdb')")
-                                        ->whereRaw("NOT (metadata::jsonb ?? 'tvdb_id')")
-                                        ->whereRaw("NOT (metadata::jsonb ?? 'tvdb')")
-                                        ->whereRaw("NOT (metadata::jsonb ?? 'imdb_id')")
-                                        ->whereRaw("NOT (metadata::jsonb ?? 'imdb')");
-                                });
-                        });
-                }),
+                ->query(fn ($query) => $query->missingSeriesId()),
+            Filter::make('probe_enabled')
+                ->label(__('Probe enabled'))
+                ->toggle()
+                ->query(fn ($query) => $query->whereHas('episodes', fn ($q) => $q->where('probe_enabled', true))),
+            Filter::make('probed')
+                ->label(__('Probed'))
+                ->toggle()
+                ->query(fn ($query) => $query->whereHas('episodes', fn ($q) => $q->whereNotNull('stream_stats_probed_at')
+                    ->whereNotNull('stream_stats')->whereRaw("CAST(stream_stats AS TEXT) != '[]'"))),
+            Filter::make('probe_failed')
+                ->label(__('Probe failed'))
+                ->toggle()
+                ->query(fn ($query) => $query->whereHas('episodes', fn ($q) => $q->whereNotNull('stream_stats_probed_at')
+                    ->where(fn ($qq) => $qq->whereNull('stream_stats')->orWhereRaw("CAST(stream_stats AS TEXT) = '[]'")))),
+            Filter::make('not_probed')
+                ->label(__('Not probed'))
+                ->toggle()
+                ->query(fn ($query) => $query->whereDoesntHave('episodes', fn ($q) => $q->whereNotNull('stream_stats_probed_at'))),
         ];
     }
 
@@ -321,12 +353,25 @@ class SeriesResource extends Resource implements CopilotResource
                     ->modalDescription(__('Fetch TMDB, TVDB, and IMDB IDs for this series from The Movie Database.'))
                     ->modalSubmitActionLabel(__('Fetch IDs now'))
                     ->action(function ($record) {
+                        $settings = app(GeneralSettings::class);
+                        if (empty($settings->tmdb_api_key)) {
+                            Notification::make()
+                                ->danger()
+                                ->title(__('TMDB API Key Required'))
+                                ->body(__('Please configure your TMDB API key in Settings > TMDB before using this feature.'))
+                                ->duration(10000)
+                                ->send();
+
+                            return;
+                        }
+
                         app('Illuminate\Contracts\Bus\Dispatcher')
                             ->dispatch(new FetchTmdbIds(
-                                seriesIds: [$record->id]
+                                seriesIds: [$record->id],
+                                overwriteExisting: true,
+                                user: auth()->user(),
                             ));
-                    })
-                    ->after(function () {
+
                         Notification::make()
                             ->success()
                             ->title(__('TMDB Search Started'))
@@ -477,6 +522,40 @@ class SeriesResource extends Resource implements CopilotResource
                     ->modalIcon('heroicon-o-document-arrow-down')
                     ->modalDescription(__('Sync series .strm files now? This will generate .strm files for this series at the path set for this series.'))
                     ->modalSubmitActionLabel(__('Yes, sync now')),
+                Action::make('probe')
+                    ->label(__('Probe Episode Streams'))
+                    ->icon('heroicon-o-signal')
+                    ->action(function ($record): void {
+                        $episodeIds = Episode::where('series_id', $record->id)
+                            ->where('probe_enabled', true)
+                            ->pluck('id')
+                            ->all();
+                        if (! empty($episodeIds)) {
+                            $total = count($episodeIds);
+                            $chunks = array_chunk($episodeIds, 50);
+                            $last = count($chunks) - 1;
+                            foreach ($chunks as $i => $chunk) {
+                                dispatch(new ProbeVodStreamsChunk(
+                                    episodeIds: $chunk,
+                                    probeTimeout: 15,
+                                    notifyUserId: $i === $last ? auth()->id() : null,
+                                    notifyLabel: $i === $last ? __('Series stream probing') : null,
+                                    notifyTotal: $i === $last ? $total : null,
+                                ));
+                            }
+                        }
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title(__('Stream probing started'))
+                            ->body(__('Stream probing is running in the background. You will be notified once the process is complete.'))
+                            ->duration(10000)
+                            ->send();
+                    })
+                    ->requiresConfirmation()
+                    ->modalIcon('heroicon-o-signal')
+                    ->modalDescription(__('Probe all episodes of this series with ffprobe to collect stream metadata (codec, resolution, bitrate, HDR). This data enables Trash Guide naming with stream-stat-based detection.'))
+                    ->modalSubmitActionLabel(__('Start probing')),
                 DeleteAction::make()
                     ->modalIcon('heroicon-o-trash')
                     ->modalDescription(__('Are you sure you want to delete this series? This will delete all episodes and seasons for this series. This action cannot be undone.'))
@@ -501,347 +580,451 @@ class SeriesResource extends Resource implements CopilotResource
             BulkModalActionGroup::make('Bulk series actions')
                 ->modalHeading(__('Bulk series actions'))
                 ->gridColumns(2)
-                ->schema([
-                    PlaylistService::getAddToPlaylistBulkAction('add', 'series')
-                        ->hidden(fn () => ! $addToCustom),
-                    BulkAction::make('move')
-                        ->label(__('Move Series to Category'))
-                        ->schema([
-                            Select::make('category')
-                                ->required()
-                                ->live()
-                                ->label(__('Category'))
-                                ->helperText(__('Select the category you would like to move the series to.'))
-                                ->options(
-                                    fn () => Category::query()
-                                        ->with(['playlist'])
-                                        ->where(['user_id' => auth()->id()])
-                                        ->get(['name', 'id', 'playlist_id'])
-                                        ->transform(fn ($category) => [
-                                            'id' => $category->id,
-                                            'name' => $category->name.' ('.$category->playlist->name.')',
-                                        ])->pluck('name', 'id')
-                                )->searchable(),
-                        ])
-                        ->action(function (Collection $records, array $data): void {
-                            $category = Category::findOrFail($data['category']);
-                            foreach ($records as $record) {
-                                // Update the series to the new category
-                                // This will change the category_id for the series in the database
-                                // to reflect the new category
-                                if ($category->playlist_id !== $record->playlist_id) {
-                                    Notification::make()
-                                        ->warning()
-                                        ->title(__('Warning'))
-                                        ->body("Cannot move \"{$category->name}\" to \"{$record->name}\" as they belong to different playlists.")
-                                        ->persistent()
-                                        ->send();
+                ->schema(self::getBulkActionSchema($addToCustom)),
+        ];
+    }
 
-                                    continue;
-                                }
-                                $record->update([
-                                    'category_id' => $category->id,
-                                ]);
-                            }
-                        })->after(function () {
-                            Notification::make()
-                                ->success()
-                                ->title(__('Series moved to category'))
-                                ->body(__('The category series have been moved to the chosen category.'))
-                                ->send();
-                        })
-                        ->requiresConfirmation()
-                        ->icon('heroicon-o-arrows-right-left')
-                        ->modalIcon('heroicon-o-arrows-right-left')
-                        ->modalDescription(__('Move the category series to another category.'))
-                        ->modalSubmitActionLabel(__('Move now')),
-                    BulkAction::make('process')
-                        ->label(__('Fetch Series Metadata'))
-                        ->icon('heroicon-o-arrow-down-tray')
-                        ->schema([
-                            Toggle::make('overwrite_existing')
-                                ->label(__('Overwrite Existing Metadata'))
-                                ->helperText(__('Overwrite existing metadata? Episodes and seasons will always be fetched/updated.'))
-                                ->default(false),
-                        ])
-                        ->action(function ($records, array $data) {
-                            foreach ($records as $record) {
-                                app('Illuminate\Contracts\Bus\Dispatcher')
-                                    ->dispatch(new ProcessM3uImportSeriesEpisodes(
-                                        playlistSeries: $record,
-                                        overwrite_existing: $data['overwrite_existing'] ?? false,
-                                    ));
-                            }
-                        })->after(function () {
-                            Notification::make()
-                                ->success()
-                                ->title(__('Series are being processed'))
-                                ->body(__('You will be notified once complete.'))
-                                ->duration(10000)
-                                ->send();
-                        })
-                        ->requiresConfirmation()
-                        ->icon('heroicon-o-arrow-down-tray')
-                        ->modalIcon('heroicon-o-arrow-down-tray')
-                        ->modalDescription(__('Process selected series now? This will fetch all episodes and seasons for this series. This may take a while depending on the number of series selected.'))
-                        ->modalSubmitActionLabel(__('Yes, process now')),
-                    BulkAction::make('set_poster_url')
-                        ->label(__('Set poster URL'))
-                        ->schema([
-                            TextInput::make('cover')
-                                ->label(__('Series poster URL'))
-                                ->url()
-                                ->nullable()
-                                ->helperText(__('Leave empty to remove custom poster URL and use placeholder fallback.'))
-                                ->suffixActions([
-                                    AssetPickerAction::upload('cover'),
-                                    AssetPickerAction::browse('cover'),
-                                ]),
-                        ])
-                        ->action(function (Collection $records, array $data): void {
-                            Series::whereIn('id', $records->pluck('id')->toArray())
-                                ->update([
-                                    'cover' => empty($data['cover']) ? null : $data['cover'],
-                                ]);
-                        })->after(function () {
-                            Notification::make()
-                                ->success()
-                                ->title(__('Poster URL updated'))
-                                ->body(__('The poster URL has been updated for the selected series.'))
-                                ->send();
-                        })
-                        ->deselectRecordsAfterCompletion()
-                        ->requiresConfirmation()
-                        ->icon('heroicon-o-link')
-                        ->modalIcon('heroicon-o-link')
-                        ->modalDescription(__('Apply a single poster URL to all selected series. Leave empty to remove custom posters.'))
-                        ->modalSubmitActionLabel(__('Apply URL')),
-                    BulkAction::make('refresh_logo_cache')
-                        ->label(__('Refresh poster cache (selected)'))
-                        ->action(function (Collection $records): void {
-                            $urls = $records
-                                ->pluck('cover')
-                                ->filter()
-                                ->values()
-                                ->toArray();
-
-                            $cleared = LogoCacheService::clearByUrls($urls);
-
-                            Notification::make()
-                                ->success()
-                                ->title(__('Selected series cache refreshed'))
-                                ->body("Removed {$cleared} cache file(s) for selected series posters.")
-                                ->send();
-                        })
-                        ->deselectRecordsAfterCompletion()
-                        ->requiresConfirmation()
-                        ->icon('heroicon-o-arrow-path')
-                        ->modalIcon('heroicon-o-arrow-path')
-                        ->modalDescription(__('Clear cached poster images for selected series so they are fetched again on the next request.'))
-                        ->modalSubmitActionLabel(__('Refresh selected cache')),
-                    BulkAction::make('fetch_tmdb_ids')
-                        ->label(__('Fetch TMDB/TVDB IDs'))
-                        ->icon('heroicon-o-magnifying-glass')
-                        ->schema([
-                            Toggle::make('overwrite_existing')
-                                ->label(__('Overwrite Existing IDs'))
-                                ->helperText(__('Overwrite existing TMDB/TVDB/IMDB IDs? If disabled, it will only fetch IDs for series that don\\\'t already have them.'))
-                                ->default(false),
-                        ])
-                        ->action(function ($records, $data) {
-                            $settings = app(GeneralSettings::class);
-                            if (empty($settings->tmdb_api_key)) {
+    /**
+     * Build the sectioned schema for the bulk actions modal.
+     */
+    private static function getBulkActionSchema(bool $addToCustom): array
+    {
+        return [
+            // -- Playlist & Groups --
+            BulkModalActionGroup::section('Playlist & Groups', [
+                PlaylistService::getAddToPlaylistBulkAction('add', 'series')
+                    ->hidden(fn () => ! $addToCustom),
+                BulkAction::make('move')
+                    ->label(__('Move Series to Category'))
+                    ->schema([
+                        Select::make('category')
+                            ->required()
+                            ->live()
+                            ->label(__('Category'))
+                            ->helperText(__('Select the category you would like to move the series to.'))
+                            ->options(
+                                fn () => Category::query()
+                                    ->with(['playlist'])
+                                    ->where(['user_id' => auth()->id()])
+                                    ->get(['name', 'id', 'playlist_id'])
+                                    ->transform(fn ($category) => [
+                                        'id' => $category->id,
+                                        'name' => $category->name.' ('.$category->playlist->name.')',
+                                    ])->pluck('name', 'id')
+                            )->searchable(),
+                    ])
+                    ->action(function (Collection $records, array $data): void {
+                        $category = Category::findOrFail($data['category']);
+                        foreach ($records as $record) {
+                            // Update the series to the new category
+                            // This will change the category_id for the series in the database
+                            // to reflect the new category
+                            if ($category->playlist_id !== $record->playlist_id) {
                                 Notification::make()
-                                    ->danger()
-                                    ->title(__('TMDB API Key Required'))
-                                    ->body(__('Please configure your TMDB API key in Settings > TMDB before using this feature.'))
-                                    ->duration(10000)
+                                    ->warning()
+                                    ->title(__('Warning'))
+                                    ->body("Cannot move \"{$category->name}\" to \"{$record->name}\" as they belong to different playlists.")
+                                    ->persistent()
                                     ->send();
 
-                                return;
+                                continue;
                             }
+                            $record->update([
+                                'category_id' => $category->id,
+                            ]);
+                        }
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title(__('Series moved to category'))
+                            ->body(__('The category series have been moved to the chosen category.'))
+                            ->send();
+                    })
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-arrows-right-left')
+                    ->modalIcon('heroicon-o-arrows-right-left')
+                    ->modalDescription(__('Move the category series to another category.'))
+                    ->modalSubmitActionLabel(__('Move now')),
+            ]),
 
-                            $seriesIds = $records->pluck('id')->toArray();
+            // -- Poster --
+            BulkModalActionGroup::section('Poster', [
+                BulkAction::make('set_poster_url')
+                    ->label(__('Set poster URL'))
+                    ->schema([
+                        TextInput::make('cover')
+                            ->label(__('Series poster URL'))
+                            ->url()
+                            ->nullable()
+                            ->helperText(__('Leave empty to remove custom poster URL and use placeholder fallback.'))
+                            ->suffixActions([
+                                AssetPickerAction::upload('cover'),
+                                AssetPickerAction::browse('cover'),
+                            ]),
+                    ])
+                    ->action(function (Collection $records, array $data): void {
+                        Series::whereIn('id', $records->pluck('id')->toArray())
+                            ->update([
+                                'cover' => empty($data['cover']) ? null : $data['cover'],
+                            ]);
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title(__('Poster URL updated'))
+                            ->body(__('The poster URL has been updated for the selected series.'))
+                            ->send();
+                    })
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-link')
+                    ->modalIcon('heroicon-o-link')
+                    ->modalDescription(__('Apply a single poster URL to all selected series. Leave empty to remove custom posters.'))
+                    ->modalSubmitActionLabel(__('Apply URL')),
+                BulkAction::make('refresh_logo_cache')
+                    ->label(__('Refresh poster cache (selected)'))
+                    ->action(function (Collection $records): void {
+                        $urls = $records
+                            ->pluck('cover')
+                            ->filter()
+                            ->values()
+                            ->toArray();
 
+                        $cleared = LogoCacheService::clearByUrls($urls);
+
+                        Notification::make()
+                            ->success()
+                            ->title(__('Selected series cache refreshed'))
+                            ->body("Removed {$cleared} cache file(s) for selected series posters.")
+                            ->send();
+                    })
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-arrow-path')
+                    ->modalIcon('heroicon-o-arrow-path')
+                    ->modalDescription(__('Clear cached poster images for selected series so they are fetched again on the next request.'))
+                    ->modalSubmitActionLabel(__('Refresh selected cache')),
+            ]),
+
+            // -- Series Metadata --
+            BulkModalActionGroup::section('Series Metadata', [
+                BulkAction::make('process')
+                    ->label(__('Fetch Series Metadata'))
+                    ->icon('heroicon-o-arrow-down-tray')
+                    ->schema([
+                        Toggle::make('overwrite_existing')
+                            ->label(__('Overwrite Existing Metadata'))
+                            ->helperText(__('Overwrite existing metadata? Episodes and seasons will always be fetched/updated.'))
+                            ->default(false),
+                    ])
+                    ->action(function ($records, array $data) {
+                        foreach ($records as $record) {
                             app('Illuminate\Contracts\Bus\Dispatcher')
-                                ->dispatch(new FetchTmdbIds(
-                                    vodChannelIds: null,
-                                    seriesIds: $seriesIds,
-                                    overwriteExisting: $data['overwrite_existing'] ?? false,
-                                    user: auth()->user(),
+                                ->dispatch(new ProcessM3uImportSeriesEpisodes(
+                                    playlistSeries: $record,
+                                    overwrite_existing: $data['overwrite_existing'] ?? false,
                                 ));
-
+                        }
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title(__('Series are being processed'))
+                            ->body(__('You will be notified once complete.'))
+                            ->duration(10000)
+                            ->send();
+                    })
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-arrow-down-tray')
+                    ->modalIcon('heroicon-o-arrow-down-tray')
+                    ->modalDescription(__('Process selected series now? This will fetch all episodes and seasons for this series. This may take a while depending on the number of series selected.'))
+                    ->modalSubmitActionLabel(__('Yes, process now')),
+                BulkAction::make('fetch_tmdb_ids')
+                    ->label(__('Fetch TMDB/TVDB IDs'))
+                    ->icon('heroicon-o-magnifying-glass')
+                    ->schema([
+                        Toggle::make('overwrite_existing')
+                            ->label(__('Overwrite Existing IDs'))
+                            ->helperText(__('Overwrite existing TMDB/TVDB/IMDB IDs? If disabled, it will only fetch IDs for series that don\\\'t already have them.'))
+                            ->default(false),
+                    ])
+                    ->action(function ($records, $data) {
+                        $settings = app(GeneralSettings::class);
+                        if (empty($settings->tmdb_api_key)) {
                             Notification::make()
-                                ->success()
-                                ->title('Fetching TMDB/TVDB IDs for '.count($seriesIds).' series')
-                                ->body(__('The TMDB ID lookup has been started. You will be notified when it is complete.'))
+                                ->danger()
+                                ->title(__('TMDB API Key Required'))
+                                ->body(__('Please configure your TMDB API key in Settings > TMDB before using this feature.'))
                                 ->duration(10000)
                                 ->send();
-                        })
-                        ->deselectRecordsAfterCompletion()
-                        ->requiresConfirmation()
-                        ->modalIcon('heroicon-o-magnifying-glass')
-                        ->modalDescription(__('Search TMDB for matching TV series and populate TMDB/TVDB/IMDB IDs for the selected series? This enables Trash Guides compatibility for Sonarr.'))
-                        ->modalSubmitActionLabel(__('Yes, fetch IDs now')),
-                    BulkAction::make('sync')
-                        ->label(__('Sync Series .strm files'))
-                        ->action(function ($records) {
-                            foreach ($records as $record) {
-                                app('Illuminate\Contracts\Bus\Dispatcher')
-                                    ->dispatch(new SyncSeriesStrmFiles(
-                                        series: $record,
-                                    ));
-                            }
-                        })->after(function () {
-                            Notification::make()
-                                ->success()
-                                ->title(__('.strm files are being synced for selected series'))
-                                ->body(__('You will be notified once complete.'))
-                                ->duration(10000)
-                                ->send();
-                        })
-                        ->requiresConfirmation()
-                        ->icon('heroicon-o-document-arrow-down')
-                        ->modalIcon('heroicon-o-document-arrow-down')
-                        ->modalDescription(__('Sync selected series .strm files now? This will generate .strm files for the selected series at the path set for the series.'))
-                        ->modalSubmitActionLabel(__('Yes, sync now')),
 
-                    BulkAction::make('find-replace')
-                        ->label(__('Find & Replace'))
-                        ->schema(function (): array {
-                            $savedPatterns = [];
-                            $savedPatternRules = [];
-                            $counter = 0;
-                            foreach (Playlist::where('user_id', auth()->id())->get() as $playlist) {
-                                foreach ($playlist->find_replace_rules ?? [] as $rule) {
-                                    if (is_array($rule) && ($rule['target'] ?? 'channels') === 'series') {
-                                        $savedPatterns[$counter] = "{$playlist->name} - ".($rule['name'] ?? 'Unnamed');
-                                        $savedPatternRules[$counter] = $rule;
-                                        $counter++;
-                                    }
+                            return;
+                        }
+
+                        $seriesIds = $records->pluck('id')->toArray();
+
+                        app('Illuminate\Contracts\Bus\Dispatcher')
+                            ->dispatch(new FetchTmdbIds(
+                                vodChannelIds: null,
+                                seriesIds: $seriesIds,
+                                overwriteExisting: $data['overwrite_existing'] ?? false,
+                                user: auth()->user(),
+                            ));
+
+                        Notification::make()
+                            ->success()
+                            ->title('Fetching TMDB/TVDB IDs for '.count($seriesIds).' series')
+                            ->body(__('The TMDB ID lookup has been started. You will be notified when it is complete.'))
+                            ->duration(10000)
+                            ->send();
+                    })
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->modalIcon('heroicon-o-magnifying-glass')
+                    ->modalDescription(__('Search TMDB for matching TV series and populate TMDB/TVDB/IMDB IDs for the selected series? This enables Trash Guides compatibility for Sonarr.'))
+                    ->modalSubmitActionLabel(__('Yes, fetch IDs now')),
+                BulkAction::make('sync')
+                    ->label(__('Sync Series .strm files'))
+                    ->action(function ($records) {
+                        $seriesIds = $records->pluck('id')->all();
+                        if (empty($seriesIds)) {
+                            return;
+                        }
+                        app('Illuminate\Contracts\Bus\Dispatcher')
+                            ->dispatch(new SyncSeriesStrmFiles(
+                                user_id: auth()->id(),
+                                series_ids: $seriesIds,
+                            ));
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title(__('.strm files are being synced for selected series'))
+                            ->body(__('You will be notified once complete.'))
+                            ->duration(10000)
+                            ->send();
+                    })
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-document-arrow-down')
+                    ->modalIcon('heroicon-o-document-arrow-down')
+                    ->modalDescription(__('Sync selected series .strm files now? This will generate .strm files for the selected series at the path set for the series.'))
+                    ->modalSubmitActionLabel(__('Yes, sync now')),
+            ]),
+
+            // -- Find & Replace --
+            BulkModalActionGroup::section('Find & Replace', [
+                BulkAction::make('find-replace')
+                    ->label(__('Find & Replace'))
+                    ->schema(function (): array {
+                        $savedPatterns = [];
+                        $savedPatternRules = [];
+                        $counter = 0;
+                        foreach (Playlist::where('user_id', auth()->id())->get() as $playlist) {
+                            foreach ($playlist->find_replace_rules ?? [] as $rule) {
+                                if (is_array($rule) && ($rule['target'] ?? 'channels') === 'series') {
+                                    $savedPatterns[$counter] = "{$playlist->name} - ".($rule['name'] ?? 'Unnamed');
+                                    $savedPatternRules[$counter] = $rule;
+                                    $counter++;
                                 }
                             }
+                        }
 
-                            return [
-                                Select::make('saved_pattern')
-                                    ->label(__('Load saved pattern'))
-                                    ->searchable()
-                                    ->placeholder(__('Select a saved pattern...'))
-                                    ->options($savedPatterns)
-                                    ->hidden(empty($savedPatterns))
-                                    ->live()
-                                    ->afterStateUpdated(function (?string $state, Set $set) use ($savedPatternRules): void {
-                                        if ($state === null || $state === '') {
-                                            return;
-                                        }
-                                        $rule = $savedPatternRules[(int) $state] ?? null;
-                                        if (! $rule) {
-                                            return;
-                                        }
-                                        $set('use_regex', $rule['use_regex'] ?? true);
-                                        $set('column', $rule['column'] ?? 'name');
-                                        $set('find_replace', $rule['find_replace'] ?? '');
-                                        $set('replace_with', $rule['replace_with'] ?? '');
-                                    })
-                                    ->dehydrated(false),
-                                Toggle::make('use_regex')
-                                    ->label(__('Use Regex'))
-                                    ->live()
-                                    ->helperText(__('Use regex patterns to find and replace. If disabled, will use direct string comparison.'))
-                                    ->default(true),
-                                Select::make('column')
-                                    ->label(__('Column to modify'))
-                                    ->options([
-                                        'name' => 'Series Name',
-                                        'genre' => 'Genre',
-                                        'plot' => 'Plot',
-                                    ])
-                                    ->default('name')
-                                    ->required()
-                                    ->columnSpan(1),
-                                TextInput::make('find_replace')
-                                    ->label(fn (Get $get) => ! $get('use_regex') ? 'String to replace' : 'Pattern to replace')
-                                    ->required()
-                                    ->placeholder(
-                                        fn (Get $get) => $get('use_regex')
-                                            ? '^(US- |UK- |CA- )'
-                                            : 'US -'
-                                    )->helperText(
-                                        fn (Get $get) => ! $get('use_regex')
-                                            ? 'This is the string you want to find and replace.'
-                                            : 'This is the regex pattern you want to find. Make sure to use valid regex syntax.'
-                                    ),
-                                TextInput::make('replace_with')
-                                    ->label(__('Replace with (optional)'))
-                                    ->placeholder(__('Leave empty to remove')),
-                            ];
-                        })
-                        ->action(function (Collection $records, array $data): void {
-                            app('Illuminate\Contracts\Bus\Dispatcher')
-                                ->dispatch(new SeriesFindAndReplace(
-                                    user_id: auth()->id(), // The ID of the user who owns the content
-                                    use_regex: $data['use_regex'] ?? true,
-                                    column: $data['column'] ?? 'title',
-                                    find_replace: $data['find_replace'] ?? null,
-                                    replace_with: $data['replace_with'] ?? '',
-                                    series: $records
+                        return [
+                            Select::make('saved_pattern')
+                                ->label(__('Load saved pattern'))
+                                ->searchable()
+                                ->placeholder(__('Select a saved pattern...'))
+                                ->options($savedPatterns)
+                                ->hidden(empty($savedPatterns))
+                                ->live()
+                                ->afterStateUpdated(function (?string $state, Set $set) use ($savedPatternRules): void {
+                                    if ($state === null || $state === '') {
+                                        return;
+                                    }
+                                    $rule = $savedPatternRules[(int) $state] ?? null;
+                                    if (! $rule) {
+                                        return;
+                                    }
+                                    $set('use_regex', $rule['use_regex'] ?? true);
+                                    $set('column', $rule['column'] ?? 'name');
+                                    $set('find_replace', $rule['find_replace'] ?? '');
+                                    $set('replace_with', $rule['replace_with'] ?? '');
+                                })
+                                ->dehydrated(false),
+                            Toggle::make('use_regex')
+                                ->label(__('Use Regex'))
+                                ->live()
+                                ->helperText(__('Use regex patterns to find and replace. If disabled, will use direct string comparison.'))
+                                ->default(true),
+                            Select::make('column')
+                                ->label(__('Column to modify'))
+                                ->options([
+                                    'name' => 'Series Name',
+                                    'genre' => 'Genre',
+                                    'plot' => 'Plot',
+                                ])
+                                ->default('name')
+                                ->required()
+                                ->columnSpan(1),
+                            TextInput::make('find_replace')
+                                ->label(fn (Get $get) => ! $get('use_regex') ? 'String to replace' : 'Pattern to replace')
+                                ->required()
+                                ->placeholder(
+                                    fn (Get $get) => $get('use_regex')
+                                        ? '^(US- |UK- |CA- )'
+                                        : 'US -'
+                                )->helperText(
+                                    fn (Get $get) => ! $get('use_regex')
+                                        ? 'This is the string you want to find and replace.'
+                                        : 'This is the regex pattern you want to find. Make sure to use valid regex syntax.'
+                                ),
+                            TextInput::make('replace_with')
+                                ->label(__('Replace with (optional)'))
+                                ->placeholder(__('Leave empty to remove')),
+                        ];
+                    })
+                    ->action(function (Collection $records, array $data): void {
+                        app('Illuminate\Contracts\Bus\Dispatcher')
+                            ->dispatch(new SeriesFindAndReplace(
+                                user_id: auth()->id(), // The ID of the user who owns the content
+                                use_regex: $data['use_regex'] ?? true,
+                                column: $data['column'] ?? 'title',
+                                find_replace: $data['find_replace'] ?? null,
+                                replace_with: $data['replace_with'] ?? '',
+                                series: $records
+                            ));
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title(__('Find & Replace started'))
+                            ->body(__('Find & Replace working in the background. You will be notified once the process is complete.'))
+                            ->send();
+                    })
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-magnifying-glass')
+                    ->color('gray')
+                    ->modalIcon('heroicon-o-magnifying-glass')
+                    ->modalDescription(__('Select what you would like to find and replace in the selected epg channels.'))
+                    ->modalSubmitActionLabel(__('Replace now')),
+            ]),
+
+            // -- Probing --
+            BulkModalActionGroup::section('Probing', [
+                BulkAction::make('enable-probing')
+                    ->label(__('Enable Probing'))
+                    ->action(function (Collection $records): void {
+                        $seriesIds = $records->pluck('id')->all();
+                        Episode::whereIn('series_id', $seriesIds)->update(['probe_enabled' => true]);
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title(__('Stream probing enabled'))
+                            ->body(__('Stream probing has been enabled for all episodes of the selected series.'))
+                            ->send();
+                    })
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-signal')
+                    ->modalIcon('heroicon-o-signal')
+                    ->modalDescription(__('Enable stream probing for all episodes of the selected series. They will be included in stream probing jobs.'))
+                    ->modalSubmitActionLabel(__('Enable now')),
+                BulkAction::make('disable-probing')
+                    ->label(__('Disable Probing'))
+                    ->color('warning')
+                    ->action(function (Collection $records): void {
+                        $seriesIds = $records->pluck('id')->all();
+                        Episode::whereIn('series_id', $seriesIds)->update(['probe_enabled' => false]);
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title(__('Stream probing disabled'))
+                            ->body(__('Stream probing has been disabled for all episodes of the selected series.'))
+                            ->send();
+                    })
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-signal-slash')
+                    ->modalIcon('heroicon-o-signal-slash')
+                    ->modalDescription(__('Disable stream probing for all episodes of the selected series. They will be excluded from stream probing jobs.'))
+                    ->modalSubmitActionLabel(__('Disable now')),
+                BulkAction::make('probe-streams')
+                    ->label(__('Probe Streams'))
+                    ->action(function (Collection $records): void {
+                        $seriesIds = $records->pluck('id')->all();
+                        $episodeIds = Episode::whereIn('series_id', $seriesIds)
+                            ->where('probe_enabled', true)
+                            ->pluck('id')
+                            ->all();
+                        if (! empty($episodeIds)) {
+                            $total = count($episodeIds);
+                            $chunks = array_chunk($episodeIds, 50);
+                            $last = count($chunks) - 1;
+                            foreach ($chunks as $i => $chunk) {
+                                dispatch(new ProbeVodStreamsChunk(
+                                    episodeIds: $chunk,
+                                    probeTimeout: 15,
+                                    notifyUserId: $i === $last ? auth()->id() : null,
+                                    notifyLabel: $i === $last ? __('Series stream probing') : null,
+                                    notifyTotal: $i === $last ? $total : null,
                                 ));
-                        })->after(function () {
-                            Notification::make()
-                                ->success()
-                                ->title(__('Find & Replace started'))
-                                ->body(__('Find & Replace working in the background. You will be notified once the process is complete.'))
-                                ->send();
-                        })
-                        ->requiresConfirmation()
-                        ->icon('heroicon-o-magnifying-glass')
-                        ->color('gray')
-                        ->modalIcon('heroicon-o-magnifying-glass')
-                        ->modalDescription(__('Select what you would like to find and replace in the selected epg channels.'))
-                        ->modalSubmitActionLabel(__('Replace now')),
+                            }
+                        }
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title(__('Stream probing started'))
+                            ->body(__('Stream probing is running in the background. You will be notified once the process is complete.'))
+                            ->send();
+                    })
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-signal')
+                    ->modalIcon('heroicon-o-signal')
+                    ->modalDescription(__('Probe the episodes of the selected series with ffprobe to collect stream metadata (codec, resolution, bitrate, HDR). This data enables Trash Guide naming with stream-stat-based detection.'))
+                    ->modalSubmitActionLabel(__('Start probing')),
+            ]),
 
-                    BulkAction::make('enable')
-                        ->label(__('Enable selected'))
-                        ->action(function (Collection $records): void {
-                            foreach ($records->chunk(100) as $chunk) {
-                                Series::whereIn('id', $chunk->pluck('id'))->update(['enabled' => true]);
-                            }
-                        })->after(function () {
-                            Notification::make()
-                                ->success()
-                                ->title(__('Selected series enabled'))
-                                ->body(__('The selected series have been enabled.'))
-                                ->send();
-                        })
-                        ->color('success')
-                        ->deselectRecordsAfterCompletion()
-                        ->requiresConfirmation()
-                        ->icon('heroicon-o-check-circle')
-                        ->modalIcon('heroicon-o-check-circle')
-                        ->modalDescription(__('Enable the selected channel(s) now?'))
-                        ->modalSubmitActionLabel(__('Yes, enable now')),
-                    BulkAction::make('disable')
-                        ->label(__('Disable selected'))
-                        ->action(function (Collection $records): void {
-                            foreach ($records->chunk(100) as $chunk) {
-                                Series::whereIn('id', $chunk->pluck('id'))->update(['enabled' => false]);
-                            }
-                        })->after(function () {
-                            Notification::make()
-                                ->success()
-                                ->title(__('Selected series disabled'))
-                                ->body(__('The selected series have been disabled.'))
-                                ->send();
-                        })
-                        ->color('warning')
-                        ->deselectRecordsAfterCompletion()
-                        ->requiresConfirmation()
-                        ->icon('heroicon-o-x-circle')
-                        ->modalIcon('heroicon-o-x-circle')
-                        ->modalDescription(__('Disable the selected channel(s) now?'))
-                        ->modalSubmitActionLabel(__('Yes, disable now')),
-                    DeleteBulkAction::make(),
-                ]),
+            // -- Enable / Disable --
+            BulkModalActionGroup::section('Enable / Disable', [
+                BulkAction::make('enable')
+                    ->label(__('Enable selected'))
+                    ->action(function (Collection $records): void {
+                        foreach ($records->chunk(100) as $chunk) {
+                            Series::whereIn('id', $chunk->pluck('id'))->update(['enabled' => true]);
+                        }
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title(__('Selected series enabled'))
+                            ->body(__('The selected series have been enabled.'))
+                            ->send();
+                    })
+                    ->color('success')
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-check-circle')
+                    ->modalIcon('heroicon-o-check-circle')
+                    ->modalDescription(__('Enable the selected channel(s) now?'))
+                    ->modalSubmitActionLabel(__('Yes, enable now')),
+                BulkAction::make('disable')
+                    ->label(__('Disable selected'))
+                    ->action(function (Collection $records): void {
+                        foreach ($records->chunk(100) as $chunk) {
+                            Series::whereIn('id', $chunk->pluck('id'))->update(['enabled' => false]);
+                        }
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title(__('Selected series disabled'))
+                            ->body(__('The selected series have been disabled.'))
+                            ->send();
+                    })
+                    ->color('warning')
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-x-circle')
+                    ->modalIcon('heroicon-o-x-circle')
+                    ->modalDescription(__('Disable the selected channel(s) now?'))
+                    ->modalSubmitActionLabel(__('Yes, disable now')),
+                DeleteBulkAction::make(),
+            ]),
         ];
     }
 

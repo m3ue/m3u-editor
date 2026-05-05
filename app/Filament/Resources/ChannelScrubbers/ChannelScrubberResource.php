@@ -28,6 +28,7 @@ use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
+use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Columns\ToggleColumn;
@@ -118,11 +119,6 @@ class ChannelScrubberResource extends Resource implements CopilotResource
                     ->tooltip(__('Number of channels with dead links found in the last run.'))
                     ->badge()
                     ->color(fn ($state) => $state > 0 ? 'danger' : 'success')
-                    ->toggleable()
-                    ->sortable(),
-                ToggleColumn::make('include_vod')
-                    ->label(__('VOD'))
-                    ->tooltip(__('Include VOD channels in the scrub.'))
                     ->toggleable()
                     ->sortable(),
                 ToggleColumn::make('recurring')
@@ -319,6 +315,32 @@ class ChannelScrubberResource extends Resource implements CopilotResource
                         ->default('http')
                         ->required(),
                 ]),
+            Section::make(__('Performance'))
+                ->icon('heroicon-s-bolt')
+                ->compact()
+                ->columnSpanFull()
+                ->schema([
+                    Toggle::make('use_batching')
+                        ->label(__('Parallel processing'))
+                        ->hintIcon(
+                            'heroicon-s-information-circle',
+                            tooltip: 'Dispatches jobs simultaneously instead of sequentially. Leave off if you encounter issues or run into provider limitations.',
+                        )
+                        ->helperText(__('Process in parallel rather than one-at-a-time for significantly faster results.'))
+                        ->default(false),
+                    TextInput::make('probe_timeout')
+                        ->label(__('Probe timeout (seconds)'))
+                        ->numeric()
+                        ->minValue(3)
+                        ->maxValue(30)
+                        ->default(10)
+                        ->required()
+                        ->hintIcon(
+                            'heroicon-s-information-circle',
+                            tooltip: 'How long to wait for each stream to respond before marking it dead. Lower values are faster but may produce false positives on slow providers.',
+                        )
+                        ->helperText(__('Seconds to wait per stream (3–30). Streams that do not respond within this window are marked dead.')),
+                ]),
             Section::make(__('Scan Scope'))
                 ->icon('heroicon-s-exclamation-triangle')
                 ->compact()
@@ -335,11 +357,29 @@ class ChannelScrubberResource extends Resource implements CopilotResource
                                     tooltip: 'By default, only enabled channels are checked. Enabling this will also scan disabled channels. ',
                                 )
                                 ->helperText(__('Warning: this can result in a very large number of connections to the provider and significantly longer run times.'))
+                                ->live()
                                 ->default(false),
                             Toggle::make('include_vod')
                                 ->label(__('Include VOD'))
                                 ->helperText(__('Also check VOD channel links in addition to live channels.'))
                                 ->default(false),
+                            Toggle::make('disable_dead')
+                                ->label(__('Disable dead channels'))
+                                ->hintIcon(
+                                    'heroicon-s-information-circle',
+                                    tooltip: 'Channels that fail the probe will be disabled. Turn off to run the scrubber in read-only mode — dead links are logged but no channels are changed.',
+                                )
+                                ->helperText(__('Automatically disable channels whose stream URL is unreachable.'))
+                                ->default(true),
+                            Toggle::make('enable_live')
+                                ->label(__('Re-enable live channels'))
+                                ->hintIcon(
+                                    'heroicon-s-information-circle',
+                                    tooltip: 'Only useful when scanning all channels (including disabled). Channels that were previously disabled but are now responding will be re-enabled.',
+                                )
+                                ->helperText(__('Re-enable disabled channels that are found to be live. Requires "Scan all channels" to be on.'))
+                                ->default(false)
+                                ->visible(fn (Get $get): bool => (bool) $get('scan_all')),
                         ]),
                 ]),
         ];

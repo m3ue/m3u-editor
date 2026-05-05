@@ -2,6 +2,8 @@
 
 namespace App\Jobs;
 
+use App\Enums\Status;
+use App\Models\Playlist;
 use App\Models\Series;
 use App\Models\User;
 use App\Settings\GeneralSettings;
@@ -50,13 +52,23 @@ class CheckSeriesImportProgress implements ShouldQueue
         $batchSize = ProcessM3uImportSeriesEpisodes::BATCH_SIZE;
         $seriesProcessed = $this->currentOffset;
         $seriesRemaining = $this->totalSeries - $seriesProcessed;
+        $progressPct = round(($seriesProcessed / max(1, $this->totalSeries)) * 100, 1);
 
         Log::info('Series Import: Progress check', [
             'processed' => $seriesProcessed,
             'total' => $this->totalSeries,
             'remaining' => $seriesRemaining,
-            'progress_pct' => round(($seriesProcessed / $this->totalSeries) * 100, 1),
+            'progress_pct' => $progressPct,
         ]);
+
+        if ($this->playlist_id) {
+            $playlist = Playlist::find($this->playlist_id);
+            if ($playlist && $playlist->series_progress < 100) {
+                $playlist->update([
+                    'series_progress' => min(99, $progressPct),
+                ]);
+            }
+        }
 
         if ($seriesRemaining <= 0) {
             // All done! Trigger TMDB fetch and/or STRM sync if needed
@@ -110,6 +122,20 @@ class CheckSeriesImportProgress implements ShouldQueue
                         ->body("Successfully processed {$this->totalSeries} series in {$timeStr}.")
                         ->broadcast($user)
                         ->sendToDatabase($user);
+                }
+            }
+
+            if ($this->playlist_id) {
+                $playlist = Playlist::find($this->playlist_id);
+                if ($playlist) {
+                    $playlist->update([
+                        'processing' => [
+                            ...$playlist->processing ?? [],
+                            'series_processing' => false,
+                        ],
+                        'status' => Status::Completed,
+                        'series_progress' => 100,
+                    ]);
                 }
             }
 

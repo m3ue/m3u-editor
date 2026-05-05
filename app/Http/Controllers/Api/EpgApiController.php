@@ -771,17 +771,20 @@ class EpgApiController extends Controller
         }
 
         $vod = (bool) $request->get('vod', false);
+        $includeVod = $vod && $playlist->include_vod_in_m3u;
 
         $channelQuery = $playlist->channels();
         $g = $channelQuery->getQuery()->getGrammar();
         $coalesce = 'COALESCE('.$g->wrap('channels.group').', '.$g->wrap('channels.group_internal').')';
 
         $groups = $channelQuery
+            ->leftJoin('groups', 'channels.group_id', '=', 'groups.id')
             ->selectRaw("{$coalesce} as effective_group")
-            ->when(! $vod, function ($q) {
+            ->when(! $includeVod, function ($q) {
                 $q->where('channels.is_vod', false);
             })
             ->where('channels.enabled', true)
+            ->where(fn ($q) => $q->where('groups.enabled', true)->orWhereNull('channels.group_id'))
             ->whereRaw("{$coalesce} IS NOT NULL")
             ->whereRaw("{$coalesce} != ''")
             ->groupByRaw($coalesce)

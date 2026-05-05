@@ -289,6 +289,38 @@ class EpgMapResource extends Resource implements CopilotResource
                         ->helperText(__('Re-run this mapping everytime the EPG is synced?'))
                         ->default(false),
                 ]),
+            Toggle::make('settings.use_regex')
+                ->label(__('Use regex for filtering'))
+                ->columnSpanFull()
+                ->live()
+                ->default(false)
+                ->helperText(__('When enabled, channel attributes will be cleaned based on regex pattern instead of prefix before matching.')),
+            Toggle::make('settings.regex_extract_mode')
+                ->label(__('Regex extract mode'))
+                ->columnSpanFull()
+                ->live()
+                ->default(false)
+                ->visible(fn (Get $get): bool => (bool) $get('settings.use_regex'))
+                ->helperText(__('When enabled, the first capture group from the regex is used as the channel value instead of removing the match. For example, the pattern "(?<![A-Z])([A-Z]{4})(?![A-Z])" applied to "CBS 123 (OHIU) Local" extracts "OHIU".')),
+            TagsInput::make('settings.exclude_prefixes')
+                ->label(fn (Get $get) => ! $get('settings.use_regex') ? 'Channel prefixes to remove before matching' : ($get('settings.regex_extract_mode') ? 'Regex patterns to extract from channel values' : 'Regex patterns to remove before matching'))
+                ->helperText(__('Press [tab] or [return] to add item. Leave empty to disable.'))
+                ->columnSpanFull()
+                ->suggestions([
+                    'US: ',
+                    'UK: ',
+                    'CA: ',
+                    '^(US|UK|CA): ',
+                    '\s*(FHD|HD)\s*',
+                    '\s+(FHD|HD).*$',
+                    '\[.*\]',
+                ])
+                ->splitKeys(['Tab', 'Return']),
+            Forms\Components\TextInput::make('settings.append_suffix')
+                ->label(__('Append suffix after pattern processing'))
+                ->placeholder(__('e.g. -DT'))
+                ->columnSpanFull()
+                ->helperText(__('Text appended to channel values after regex/prefix processing and before EPG matching. For example, enter "-DT" to append a station suffix.')),
             Section::make(__('Advanced Settings'))
                 ->columns(2)
                 ->icon('heroicon-s-cog-6-tooth')
@@ -304,26 +336,6 @@ class EpgMapResource extends Resource implements CopilotResource
                         ->live()
                         ->default(false)
                         ->helperText(__('When enabled, channels that do not have "epg_channel_id" or "tvg-id" will be skipped during the mapping process. Disable this to attempt to match all channels, even those without an EPG ID.')),
-                    Toggle::make('settings.use_regex')
-                        ->label(__('Use regex for filtering'))
-                        ->columnSpanFull()
-                        ->inline(true)
-                        ->live()
-                        ->default(false)
-                        ->helperText(__('When enabled, channel attributes will be cleaned based on regex pattern instead of prefix before matching.')),
-                    Toggle::make('settings.regex_extract_mode')
-                        ->label(__('Regex extract mode'))
-                        ->columnSpanFull()
-                        ->inline(true)
-                        ->default(false)
-                        ->visible(fn (Get $get): bool => (bool) $get('settings.use_regex'))
-                        ->helperText(__('When enabled, the first capture group from the regex is used as the channel value instead of removing the match. For example, the pattern "(?<![A-Z])([A-Z]{4})(?![A-Z])" applied to "CBS 123 (OHIU) Local" extracts "OHIU".')),
-                    Toggle::make('settings.remove_quality_indicators')
-                        ->label(__('Remove quality indicators'))
-                        ->columnSpanFull()
-                        ->inline(true)
-                        ->default(false)
-                        ->helperText(__('When enabled, quality indicators (HD, FHD, UHD, 4K, 720p, 1080p, etc.) will be removed during fuzzy matching. Disable this if channels have similar names but different quality levels (e.g., "Sport HD" vs "Sport FHD").')),
 
                     Toggle::make('settings.prioritize_name_match')
                         ->label(__('Prioritize name/display name matching'))
@@ -338,6 +350,26 @@ class EpgMapResource extends Resource implements CopilotResource
                         ->inline(true)
                         ->default(false)
                         ->helperText(__('When enabled, matched channels will have their preferred icon set to "EPG" instead of "Channel". This uses the EPG channel icon as the preferred logo source.')),
+
+                    Fieldset::make(__('Quality Indicator Handling'))
+                        ->schema([
+                            Toggle::make('settings.remove_quality_indicators')
+                                ->label(__('Remove quality indicators'))
+                                ->columnSpanFull()
+                                ->inline(true)
+                                ->live()
+                                ->default(false)
+                                ->helperText(__('When enabled, quality indicators (HD, FHD, UHD, 4K, 720p, 1080p, etc.) will be removed during fuzzy matching. Disable this if channels have similar names but different quality levels (e.g., "Sport HD" vs "Sport FHD").')),
+
+                            TagsInput::make('settings.quality_indicators')
+                                ->label(__('Custom quality indicators'))
+                                ->columnSpanFull()
+                                ->helperText(__('Override the default quality indicator list. Press [tab] or [return] to add. Leave empty to use the built-in defaults (hd, fhd, uhd, 4k, 8k, sd, 720p, 1080p, etc.).'))
+                                ->placeholder(__('e.g. raw, hevc, h265'))
+                                ->suggestions(['hd', 'fhd', 'uhd', '4k', '8k', 'sd', '720p', '1080p', '1080i', '2160p', 'hdraw', 'sdraw', 'hevc', 'h264', 'h265'])
+                                ->splitKeys(['Tab', 'Return'])
+                                ->visible(fn (Get $get): bool => (bool) $get('settings.remove_quality_indicators')),
+                        ]),
 
                     Fieldset::make(__('Matching Thresholds'))
                         ->schema([
@@ -369,25 +401,6 @@ class EpgMapResource extends Resource implements CopilotResource
                         ->columns(3)
                         ->columnSpanFull(),
                 ]),
-            TagsInput::make('settings.exclude_prefixes')
-                ->label(fn (Get $get) => ! $get('settings.use_regex') ? 'Channel prefixes to remove before matching' : ($get('settings.regex_extract_mode') ? 'Regex patterns to extract from channel values' : 'Regex patterns to remove before matching'))
-                ->helperText(__('Press [tab] or [return] to add item. Leave empty to disable.'))
-                ->columnSpanFull()
-                ->suggestions([
-                    'US: ',
-                    'UK: ',
-                    'CA: ',
-                    '^(US|UK|CA): ',
-                    '\s*(FHD|HD)\s*',
-                    '\s+(FHD|HD).*$',
-                    '\[.*\]',
-                ])
-                ->splitKeys(['Tab', 'Return']),
-            Forms\Components\TextInput::make('settings.append_suffix')
-                ->label(__('Append suffix after pattern processing'))
-                ->placeholder(__('e.g. -DT'))
-                ->columnSpanFull()
-                ->helperText(__('Text appended to channel values after regex/prefix processing and before EPG matching. For example, enter "-DT" to append a station suffix.')),
         ];
     }
 }

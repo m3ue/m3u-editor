@@ -16,6 +16,79 @@
     }
 }
 
+/* ── Ambient light from above ─────────────────────────────── */
+:root {
+    --fi-ambient-glow: rgba(99, 102, 241, 0.13);
+}
+
+.dark {
+    --fi-ambient-glow: rgba(99, 102, 241, 0.15);
+}
+
+body::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 600px;
+    background: radial-gradient(ellipse 80% 50% at 50% -5%, var(--fi-ambient-glow) 0%, transparent 100%);
+    pointer-events: none;
+    z-index: 0;
+}
+
+/* ── Glass topbar ─────────────────────────────────────────── */
+/* backdrop-filter on the element itself creates a stacking context that traps
+   child dropdowns in Safari/Edge. Using a ::before pseudo-element keeps the
+   blur effect without scoping children's z-index to the topbar container.
+   Note: do NOT add transform here — it creates a containing block for
+   position:fixed descendants, which breaks Floating UI dropdown positioning.
+   Filament's default position:sticky already provides the containing block
+   needed for the ::before pseudo-element. */
+.fi-topbar-ctn {
+    background-color: rgba(255, 255, 255, 0.75) !important;
+
+    .fi-global-search {
+        transform: translateZ(0);
+        flex-shrink: 0;
+    }
+
+    .fi-topbar-end {
+        @media screen and (min-width: 1024px) {
+            min-width: 300px;
+        }
+    }
+
+    .fi-dropdown.fi-user-menu {
+        flex-shrink: 0;
+    }
+
+    &::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        -webkit-backdrop-filter: blur(14px) saturate(160%);
+        backdrop-filter: blur(14px) saturate(160%);
+        pointer-events: none;
+        z-index: -1;
+    }
+}
+
+.fi-topbar {
+    background-color: transparent !important;
+    box-shadow: none !important;
+}
+
+.dark .fi-topbar-ctn {
+    background-color: rgba(9, 9, 11, 0.65) !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.dark .fi-topbar {
+    background-color: transparent !important;
+    box-shadow: none !important;
+}
+
 /* Gradient backgrounds for dark mode */
 .dark {
 
@@ -30,4 +103,32 @@
         background-clip: padding-box, border-box;
         background-origin: border-box;
     }
+}
+
+/* ── OverlayScrollbars custom theme ─────────────────────────── */
+.os-theme-app {
+    --os-size: 12px;
+    --os-padding-perpendicular: 2px;
+    --os-padding-axis: 4px;
+    --os-track-bg: transparent;
+    --os-track-bg-hover: transparent;
+    --os-track-bg-active: transparent;
+    --os-track-border-radius: 10px;
+    --os-handle-bg: rgba(0, 0, 0, 0.18);
+    --os-handle-bg-hover: rgba(0, 0, 0, 0.32);
+    --os-handle-bg-active: rgba(0, 0, 0, 0.45);
+    --os-handle-border-radius: 10px;
+    --os-handle-interactive-area-offset: 4px;
+}
+
+.dark .os-theme-app {
+    --os-handle-bg: rgba(255, 255, 255, 0.2);
+    --os-handle-bg-hover: rgba(255, 255, 255, 0.35);
+    --os-handle-bg-active: rgba(255, 255, 255, 0.5);
+}
+
+.fi-sidebar-item-grouped-border-part-not-first:where(.dark, .dark *),
+.fi-sidebar-item-grouped-border-part-not-last:where(.dark, .dark *),
+.fi-sidebar-item-grouped-border-part:where(.dark, .dark *) {
+    background-color: var(--gray-900) !important;
 }

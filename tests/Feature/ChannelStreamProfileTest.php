@@ -8,21 +8,25 @@
  * - M3uProxyApiController::channel() uses channel-level stream profile over playlist profile
  * - M3uProxyApiController::channel() falls back to playlist profile when no channel profile
  * - M3uProxyApiController::channel() passes null profile when neither has one
- * - M3uProxyApiController::channelPlayer() uses GeneralSettings defaults, not channel-level profile
+ * - M3uProxyApiController::channelPlayer() uses channel-level stream profile over GeneralSettings defaults
+ * - M3uProxyApiController::channelPlayer() falls back to GeneralSettings defaults when no channel-level profile is set
  * - XtreamStreamController::handleLive() proxies when channel enable_proxy is true (playlist off)
  * - XtreamStreamController::handleLive() redirects directly when both channel and playlist proxy are off
  * - XtreamStreamController::handleVod() proxies when channel enable_proxy is true (playlist off)
  * - XtreamStreamController::handleVod() redirects directly when both channel and playlist proxy are off
  */
 
+use App\Http\Controllers\Api\M3uProxyApiController;
 use App\Models\Channel;
 use App\Models\CustomPlaylist;
+use App\Models\Episode;
 use App\Models\Playlist;
 use App\Models\StreamProfile;
 use App\Models\User;
 use App\Services\M3uProxyService;
 use App\Settings\GeneralSettings;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Queue;
 
 uses(RefreshDatabase::class);
@@ -232,9 +236,9 @@ test('channel() passes null profile when neither channel nor playlist has a stre
     expect($capturedProfile)->toBeNull();
 });
 
-// ── M3uProxyApiController::channelPlayer() uses GeneralSettings ───────────────
+// ── M3uProxyApiController::channelPlayer() profile resolution ─────────────────
 
-test('channelPlayer() uses GeneralSettings default stream profile, not the channel-level profile', function () {
+test('channelPlayer() uses channel-level stream profile over GeneralSettings default', function () {
     $this->playlist->update(['enable_proxy' => true]);
 
     $channelProfile = StreamProfile::factory()->for($this->user)->create(['name' => 'channel-profile']);
@@ -270,10 +274,48 @@ test('channelPlayer() uses GeneralSettings default stream profile, not the chann
         ->assertRedirect();
 
     expect($capturedProfile)->not->toBeNull()
+        ->and($capturedProfile->id)->toBe($channelProfile->id);
+});
+
+test('channelPlayer() falls back to GeneralSettings default when channel has no stream profile', function () {
+    $this->playlist->update(['enable_proxy' => true]);
+
+    $defaultProfile = StreamProfile::factory()->for($this->user)->create(['name' => 'default-profile']);
+
+    $channel = Channel::factory()->for($this->user)->for($this->playlist)->create([
+        'stream_profile_id' => null,
+        'url' => 'http://provider.test/stream/live.ts',
+        'is_vod' => false,
+        'enabled' => true,
+    ]);
+
+    $mockSettings = Mockery::mock(GeneralSettings::class);
+    $mockSettings->default_stream_profile_id = $defaultProfile->id;
+    $mockSettings->default_vod_stream_profile_id = null;
+    app()->instance(GeneralSettings::class, $mockSettings);
+
+    $capturedProfile = null;
+
+    $mock = Mockery::mock(M3uProxyService::class);
+    $mock->shouldReceive('getChannelUrl')
+        ->once()
+        ->withArgs(function ($playlist, $ch, $request, $profile, $username = null) use (&$capturedProfile) {
+            $capturedProfile = $profile;
+
+            return true;
+        })
+        ->andReturn('http://proxy.test/redirected');
+
+    app()->instance(M3uProxyService::class, $mock);
+
+    $this->get("/live/{$this->user->name}/{$this->playlist->uuid}/{$channel->id}.ts?player=true")
+        ->assertRedirect();
+
+    expect($capturedProfile)->not->toBeNull()
         ->and($capturedProfile->id)->toBe($defaultProfile->id);
 });
 
-test('channelPlayer() uses GeneralSettings default vod stream profile for VOD channels', function () {
+test('channelPlayer() uses channel-level profile over GeneralSettings default for VOD channels', function () {
     $this->playlist->update(['enable_proxy' => true]);
 
     $channelProfile = StreamProfile::factory()->for($this->user)->create(['name' => 'channel-profile']);
@@ -281,6 +323,45 @@ test('channelPlayer() uses GeneralSettings default vod stream profile for VOD ch
 
     $channel = Channel::factory()->for($this->user)->for($this->playlist)->create([
         'stream_profile_id' => $channelProfile->id,
+        'url' => 'http://provider.test/movie/123.mkv',
+        'is_vod' => true,
+        'container_extension' => 'mkv',
+        'enabled' => true,
+    ]);
+
+    $mockSettings = Mockery::mock(GeneralSettings::class);
+    $mockSettings->default_stream_profile_id = null;
+    $mockSettings->default_vod_stream_profile_id = $defaultVodProfile->id;
+    app()->instance(GeneralSettings::class, $mockSettings);
+
+    $capturedProfile = null;
+
+    $mock = Mockery::mock(M3uProxyService::class);
+    $mock->shouldReceive('getChannelUrl')
+        ->once()
+        ->withArgs(function ($playlist, $ch, $request, $profile, $username = null) use (&$capturedProfile) {
+            $capturedProfile = $profile;
+
+            return true;
+        })
+        ->andReturn('http://proxy.test/redirected');
+
+    app()->instance(M3uProxyService::class, $mock);
+
+    $this->get("/movie/{$this->user->name}/{$this->playlist->uuid}/{$channel->id}.mkv?player=true")
+        ->assertRedirect();
+
+    expect($capturedProfile)->not->toBeNull()
+        ->and($capturedProfile->id)->toBe($channelProfile->id);
+});
+
+test('channelPlayer() falls back to GeneralSettings default vod profile when channel has no stream profile', function () {
+    $this->playlist->update(['enable_proxy' => true]);
+
+    $defaultVodProfile = StreamProfile::factory()->for($this->user)->create(['name' => 'default-vod-profile']);
+
+    $channel = Channel::factory()->for($this->user)->for($this->playlist)->create([
+        'stream_profile_id' => null,
         'url' => 'http://provider.test/movie/123.mkv',
         'is_vod' => true,
         'container_extension' => 'mkv',
@@ -376,4 +457,111 @@ test('handleVod() redirects directly to stream URL when both channel and playlis
 
     $this->get("/movie/{$this->user->name}/{$this->playlist->uuid}/{$channel->id}.mkv")
         ->assertRedirect('http://provider.test/movie/123.mkv');
+});
+
+// ── client_id forwarding ──────────────────────────────────────────────────────
+
+test('channelPlayer() appends client_id to the redirect URL when provided', function () {
+    $this->playlist->update(['enable_proxy' => true]);
+
+    $channel = Channel::factory()->for($this->user)->for($this->playlist)->create([
+        'stream_profile_id' => null,
+        'url' => 'http://provider.test/stream/live.ts',
+        'is_vod' => false,
+        'enabled' => true,
+    ]);
+
+    $mockSettings = Mockery::mock(GeneralSettings::class);
+    $mockSettings->default_stream_profile_id = null;
+    $mockSettings->default_vod_stream_profile_id = null;
+    app()->instance(GeneralSettings::class, $mockSettings);
+
+    $mock = Mockery::mock(M3uProxyService::class);
+    $mock->shouldReceive('getChannelUrl')
+        ->once()
+        ->andReturn('http://proxy.test/stream/abc123');
+    app()->instance(M3uProxyService::class, $mock);
+
+    $this->get("/live/{$this->user->name}/{$this->playlist->uuid}/{$channel->id}.ts?player=true&client_id=floating-player-test-abc")
+        ->assertRedirect('http://proxy.test/stream/abc123?client_id=floating-player-test-abc');
+});
+
+test('channelPlayer() does not append client_id to the redirect URL when not provided', function () {
+    $this->playlist->update(['enable_proxy' => true]);
+
+    $channel = Channel::factory()->for($this->user)->for($this->playlist)->create([
+        'stream_profile_id' => null,
+        'url' => 'http://provider.test/stream/live.ts',
+        'is_vod' => false,
+        'enabled' => true,
+    ]);
+
+    $mockSettings = Mockery::mock(GeneralSettings::class);
+    $mockSettings->default_stream_profile_id = null;
+    $mockSettings->default_vod_stream_profile_id = null;
+    app()->instance(GeneralSettings::class, $mockSettings);
+
+    $mock = Mockery::mock(M3uProxyService::class);
+    $mock->shouldReceive('getChannelUrl')
+        ->once()
+        ->andReturn('http://proxy.test/stream/abc123');
+    app()->instance(M3uProxyService::class, $mock);
+
+    $response = $this->get("/live/{$this->user->name}/{$this->playlist->uuid}/{$channel->id}.ts?player=true");
+
+    $response->assertRedirect('http://proxy.test/stream/abc123');
+    expect($response->headers->get('Location'))->not->toContain('client_id');
+});
+
+test('episodePlayer() appends client_id to the redirect URL when provided', function () {
+    $episode = Episode::factory()->for($this->user)->for($this->playlist)->create([
+        'container_extension' => 'ts',
+    ]);
+
+    $mockSettings = Mockery::mock(GeneralSettings::class);
+    $mockSettings->default_vod_stream_profile_id = null;
+    app()->instance(GeneralSettings::class, $mockSettings);
+
+    $mock = Mockery::mock(M3uProxyService::class);
+    $mock->shouldReceive('getEpisodeUrl')
+        ->once()
+        ->andReturn('http://proxy.test/vod/ep999');
+    app()->instance(M3uProxyService::class, $mock);
+
+    $request = Request::create('/episodeplayer', 'GET', [
+        'client_id' => 'popout-xyz123',
+    ]);
+
+    $response = app()->call(
+        [app(M3uProxyApiController::class), 'episodePlayer'],
+        ['request' => $request, 'id' => $episode->id]
+    );
+
+    expect($response->getTargetUrl())->toContain('client_id=popout-xyz123');
+});
+
+test('episodePlayer() does not append client_id to the redirect URL when not provided', function () {
+    $episode = Episode::factory()->for($this->user)->for($this->playlist)->create([
+        'container_extension' => 'ts',
+    ]);
+
+    $mockSettings = Mockery::mock(GeneralSettings::class);
+    $mockSettings->default_vod_stream_profile_id = null;
+    app()->instance(GeneralSettings::class, $mockSettings);
+
+    $mock = Mockery::mock(M3uProxyService::class);
+    $mock->shouldReceive('getEpisodeUrl')
+        ->once()
+        ->andReturn('http://proxy.test/vod/ep999');
+    app()->instance(M3uProxyService::class, $mock);
+
+    $request = Request::create('/episodeplayer', 'GET');
+
+    $response = app()->call(
+        [app(M3uProxyApiController::class), 'episodePlayer'],
+        ['request' => $request, 'id' => $episode->id]
+    );
+
+    expect($response->getTargetUrl())->toBe('http://proxy.test/vod/ep999')
+        ->and($response->getTargetUrl())->not->toContain('client_id');
 });

@@ -13,6 +13,7 @@ use App\Models\StreamProfile;
 use App\Services\M3uProxyService;
 use App\Services\NetworkBroadcastService;
 use App\Services\ProfileService;
+use App\Services\StreamProfileRuleEvaluator;
 use App\Settings\GeneralSettings;
 use Exception;
 use Illuminate\Http\JsonResponse;
@@ -38,7 +39,6 @@ class M3uProxyApiController extends Controller
             'streamProfile',
         ])->findOrFail($id);
 
-        // Get username from request (query parameter or header as fallback)
         $username = $request->input('username', $request->header('X-Username'));
 
         // If UUID provided, resolve that specific playlist (e.g., merged playlist)
@@ -60,8 +60,11 @@ class M3uProxyApiController extends Controller
 
         // Channel-level profile takes priority over the playlist-level profile.
         // If neither is set, the stream is proxied directly without transcoding.
+        // An adaptive profile (backend === 'adaptive') is unwrapped to its
+        // concrete target via the channel's cached probe data.
         $profile = $channel->streamProfile
             ?? ($channel->is_vod ? $playlist->vodStreamProfile : $playlist->streamProfile);
+        $profile = app(StreamProfileRuleEvaluator::class)->unwrap($profile, $channel->stream_stats);
 
         $url = app(M3uProxyService::class)
             ->getChannelUrl(
@@ -88,7 +91,6 @@ class M3uProxyApiController extends Controller
             'playlist',
         ])->findOrFail($id);
 
-        // Get username from request (query parameter or header as fallback)
         $username = $request->input('username', $request->header('X-Username'));
 
         // If UUID provided, resolve that specific playlist (e.g., merged playlist)
@@ -134,6 +136,7 @@ class M3uProxyApiController extends Controller
         $channel = Channel::query()->with([
             'playlist',
             'customPlaylist',
+            'streamProfile',
         ])->findOrFail($id);
 
         if ($uuid) {
@@ -142,24 +145,30 @@ class M3uProxyApiController extends Controller
             $playlist = $channel->getEffectivePlaylist();
         }
 
-        // Use in-app player transcoding profiles (from Preferences > In-App Player Transcoding).
+        $username = $request->input('username', $request->header('X-Username'));
+
+        // Channel-level profile takes priority over the global in-app player default.
         // Playlist-level stream profiles are for external clients only — they should not
-        // apply to the in-app floating/popout player.
+        // apply to the in-app floating/popout player. The global defaults (from Preferences >
+        // In-App Player Transcoding) serve as the fallback when no channel-level profile is set.
         $settings = app(GeneralSettings::class);
-        $profileId = $channel->is_vod
+        $globalProfileId = $channel->is_vod
             ? ($settings->default_vod_stream_profile_id ?? null)
             : ($settings->default_stream_profile_id ?? null);
-        $profile = $profileId ? StreamProfile::find($profileId) : null;
+        $profile = $channel->streamProfile
+            ?? ($globalProfileId ? StreamProfile::find($globalProfileId) : null);
+        $profile = app(StreamProfileRuleEvaluator::class)->unwrap($profile, $channel->stream_stats);
 
         $url = app(M3uProxyService::class)
             ->getChannelUrl(
                 $playlist,
                 $channel,
                 $request,
-                $profile
+                $profile,
+                $username
             );
 
-        return redirect($url);
+        return redirect($this->appendClientId($url, $request));
     }
 
     /**
@@ -181,6 +190,8 @@ class M3uProxyApiController extends Controller
             $playlist = $episode->playlist;
         }
 
+        $username = $request->input('username', $request->header('X-Username'));
+
         // Use in-app player VOD transcoding profile (from Preferences > In-App Player Transcoding).
         // Playlist-level stream profiles are for external clients only — they should not
         // apply to the in-app floating/popout player.
@@ -193,11 +204,11 @@ class M3uProxyApiController extends Controller
                 $playlist,
                 $episode,
                 $profile,
-                null,
+                $username,
                 $request
             );
 
-        return redirect($url);
+        return redirect($this->appendClientId($url, $request));
     }
 
     /**
@@ -679,6 +690,23 @@ class M3uProxyApiController extends Controller
     }
 
     /**
+     * Append a client_id query parameter to a URL if the request contains one.
+     *
+     * Each browser tab supplies a unique client_id so the proxy can maintain a
+     * separate stream_clients entry per tab, preventing collisions when multiple
+     * tabs on the same machine watch the same stream.
+     */
+    private function appendClientId(string $url, Request $request): string
+    {
+        if ($clientId = $request->input('client_id')) {
+            $separator = str_contains($url, '?') ? '&' : '?';
+            $url .= $separator.'client_id='.rawurlencode($clientId);
+        }
+
+        return $url;
+    }
+
+    /**
      * Stop a proxy stream initiated by the in-app player.
      *
      * Called via sendBeacon from the browser when a floating/popout player is closed
@@ -705,7 +733,7 @@ class M3uProxyApiController extends Controller
         }
 
         try {
-            M3uProxyService::stopStreamsByMetadata($field, (string) $id);
+            M3uProxyService::stopStreamsByMetadata($field, (string) $id, force: false, clientId: $request->input('client_id'));
         } catch (Exception $e) {
             Log::warning("Failed to stop player stream ({$type}:{$id}): ".$e->getMessage());
         }

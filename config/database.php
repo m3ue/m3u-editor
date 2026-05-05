@@ -35,10 +35,6 @@ return [
             'database' => database_path('database.sqlite'),
             'prefix' => '',
             'foreign_key_constraints' => env('DB_FOREIGN_KEYS', true),
-            // Add these options for better concurrency
-            'options' => [
-                PDO::SQLITE_ATTR_OPEN_FLAGS => PDO::SQLITE_OPEN_READWRITE | PDO::SQLITE_OPEN_CREATE,
-            ],
             'journal_mode' => 'WAL',
             'synchronous' => 'NORMAL',
             'cache_size' => 10000,
@@ -59,10 +55,6 @@ return [
             'database' => database_path('jobs.sqlite'),
             'prefix' => '',
             'foreign_key_constraints' => true,
-            // Add these options for better concurrency
-            'options' => [
-                PDO::SQLITE_ATTR_OPEN_FLAGS => PDO::SQLITE_OPEN_READWRITE | PDO::SQLITE_OPEN_CREATE,
-            ],
             'journal_mode' => 'WAL',
             'synchronous' => 'NORMAL',
             'cache_size' => 10000,

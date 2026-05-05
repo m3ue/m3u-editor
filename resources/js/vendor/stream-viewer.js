@@ -19,6 +19,7 @@ function streamPlayer() {
         selectedAudioTrack: null,
         fragmentErrorCount: 0,
         _videoHandlers: {},
+        _cleaned: false,
 
         // ── Watch Progress ────────────────────────────────────────────────
         progressConfig: null,   // { contentType, streamId, playlistId, seriesId, seasonNumber }
@@ -191,6 +192,7 @@ function streamPlayer() {
 
             // Clean up any existing players before binding the new video element
             this.cleanup();
+            this._cleaned = false;
 
             // Store reference to video element for cleanup
             this.player = video;
@@ -767,6 +769,9 @@ function streamPlayer() {
         },
 
         cleanup() {
+            if (this._cleaned) return;
+            this._cleaned = true;
+
             // Save final progress and stop timer
             this._saveProgress(true);
             this._stopProgressTimer();
@@ -878,16 +883,21 @@ window.toggleStreamDetails = toggleStreamDetails;
  * Notify the proxy server to stop a player stream (best-effort via sendBeacon).
  * Shared by the floating player manager and the pop-out player.
  *
- * @param {string|number} id   - The stream/channel ID
- * @param {string}        type - 'channel' or 'episode'
+ * @param {string|number} id       - The stream/channel ID
+ * @param {string}        type     - 'channel' or 'episode'
+ * @param {string}        clientId - The unique client ID assigned to this player instance
  */
-function notifyProxyStreamStop(id, type) {
+function notifyProxyStreamStop(id, type, clientId) {
     if (!id || !type) {
         return;
     }
     try {
+        const payload = { id, type };
+        if (clientId) {
+            payload.client_id = clientId;
+        }
         const data = new Blob(
-            [JSON.stringify({ id, type })],
+            [JSON.stringify(payload)],
             { type: 'application/json' }
         );
         navigator.sendBeacon('/api/m3u-proxy/player-stream/stop', data);

@@ -4,12 +4,14 @@ namespace App\Jobs;
 
 use App\Models\Episode;
 use App\Models\MediaServerIntegration;
+use App\Models\Playlist;
 use App\Models\Series;
 use App\Models\StreamFileSetting;
 use App\Models\StrmFileMapping;
 use App\Models\User;
 use App\Services\NfoService;
 use App\Services\PlaylistService;
+use App\Services\StrmPathBuilder;
 use App\Settings\GeneralSettings;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -39,6 +41,11 @@ class SyncSeriesStrmFiles implements ShouldQueue
 
     /**
      * Create a new job instance.
+     *
+     * @param  array<int>|null  $series_ids  Optional list of explicit Series IDs to sync.
+     *                                       When provided, batches and cleanup/refresh are scoped to these IDs only.
+     *                                       This avoids dispatching N independent jobs (and N media server refreshes)
+     *                                       when bulk-syncing a user-selected subset of series.
      */
     public function __construct(
         public ?Series $series = null,
@@ -50,6 +57,7 @@ class SyncSeriesStrmFiles implements ShouldQueue
         public ?int $totalBatches = null,
         public ?int $currentBatch = null,
         public bool $isCleanupJob = false, // Special flag for final cleanup
+        public ?array $series_ids = null,
     ) {
         // Run file synces on the dedicated queue
         $this->onQueue('file_sync');
@@ -110,6 +118,9 @@ class SyncSeriesStrmFiles implements ShouldQueue
             ->when($this->playlist_id, function ($query) {
                 $query->where('playlist_id', $this->playlist_id);
             })
+            ->when($this->series_ids !== null, function ($query) {
+                $query->whereIn('id', $this->series_ids);
+            })
             ->count();
 
         if ($totalCount === 0) {
@@ -147,6 +158,7 @@ class SyncSeriesStrmFiles implements ShouldQueue
                 batchOffset: $offset,
                 totalBatches: $totalBatches,
                 currentBatch: $batch + 1,
+                series_ids: $this->series_ids,
             );
         }
 
@@ -160,6 +172,7 @@ class SyncSeriesStrmFiles implements ShouldQueue
             playlist_id: $this->playlist_id,
             user_id: $this->user_id,
             needsCleanup: true, // Cleanup will run after all chains complete
+            series_ids: $this->series_ids,
         );
 
         // Dispatch the chain
@@ -186,6 +199,9 @@ class SyncSeriesStrmFiles implements ShouldQueue
             ])
             ->when($this->playlist_id, function ($query) {
                 $query->where('playlist_id', $this->playlist_id);
+            })
+            ->when($this->series_ids !== null, function ($query) {
+                $query->whereIn('id', $this->series_ids);
             })
             ->orderBy('id')
             ->skip($this->batchOffset)
@@ -232,6 +248,18 @@ class SyncSeriesStrmFiles implements ShouldQueue
         // Get all unique sync locations for this user/playlist
         $syncLocations = StrmFileMapping::query()
             ->where('syncable_type', Episode::class)
+            ->whereHasMorph('syncable', [Episode::class], function ($q) {
+                $q->where('user_id', $this->user_id);
+                if ($this->playlist_id) {
+                    $q->where('playlist_id', $this->playlist_id);
+                }
+                if ($this->series?->id) {
+                    $q->where('series_id', $this->series->id);
+                }
+                if ($this->series_ids !== null) {
+                    $q->whereIn('series_id', $this->series_ids);
+                }
+            })
             ->distinct()
             ->pluck('sync_location')
             ->toArray();
@@ -260,6 +288,14 @@ class SyncSeriesStrmFiles implements ShouldQueue
                     ->body('All series STRM files have been synced.')
                     ->broadcast($user)
                     ->sendToDatabase($user);
+            }
+        }
+
+        // Fire series_stream_files_synced post-processes for the specific playlist
+        if (! $this->all_playlists && $this->playlist_id) {
+            $playlist = Playlist::find($this->playlist_id);
+            if ($playlist) {
+                dispatch(new FireStreamFilesSyncedEvent($playlist, 'series_stream_files_synced'));
             }
         }
     }
@@ -320,6 +356,9 @@ class SyncSeriesStrmFiles implements ShouldQueue
                 if ($this->playlist_id) {
                     $query->where('playlist_id', $this->playlist_id);
                 }
+                if ($this->series_ids !== null) {
+                    $query->whereIn('id', $this->series_ids);
+                }
             })
             ->get();
 
@@ -341,6 +380,11 @@ class SyncSeriesStrmFiles implements ShouldQueue
                 $query->where('user_id', $this->user_id);
                 if ($this->playlist_id) {
                     $query->where('playlist_id', $this->playlist_id);
+                }
+                if ($this->series_ids !== null) {
+                    $query->whereHas('series', function ($q) {
+                        $q->whereIn('id', $this->series_ids);
+                    });
                 }
             })
             ->get();
@@ -606,59 +650,93 @@ class SyncSeriesStrmFiles implements ShouldQueue
                 return;
             }
 
+            // Resolve StreamFileSetting for Trash Guide naming (series → category → global default)
+            $streamFileSetting = $series->streamFileSetting
+                ?? $series->category?->streamFileSetting
+                ?? ($settings->default_series_stream_file_setting_id
+                    ? StreamFileSetting::find($settings->default_series_stream_file_setting_id)
+                    : null);
+
             // Loop through each episode
             foreach ($episodes as $ep) {
-                // Setup episode prefix
-                $season = $ep->season;
-                $num = str_pad($ep->episode_num, 2, '0', STR_PAD_LEFT);
-                $prefx = 'S'.str_pad($season, 2, '0', STR_PAD_LEFT)."E{$num}";
-
-                // Build the base filename (apply name filtering to episode title)
-                $episodeTitle = $applyNameFilter($ep->title);
-                $fileName = "{$prefx} - {$episodeTitle}";
-
-                // Add metadata to filename
-                if (in_array('year', $filenameMetadata) && ! empty($seriesReleaseDate)) {
-                    $year = substr($seriesReleaseDate, 0, 4);
-                    $fileName .= " ({$year})";
-                }
-
-                if ($applyTmdbToEpisodes) {
-                    $tmdbId = $ep->info['tmdb_id'] ?? $seriesMetadata['tmdb_id'] ?? null;
-                    // Ensure ID is a scalar value (not an array)
-                    $tmdbId = is_scalar($tmdbId) ? $tmdbId : null;
-                    if (! empty($tmdbId)) {
-                        $bracket = $tmdbIdFormat === 'curly' ? ['{', '}'] : ['[', ']'];
-                        $fileName .= " {$bracket[0]}tmdb-{$tmdbId}{$bracket[1]}";
+                // Trash Guide naming takes precedence when configured
+                if ($streamFileSetting?->trash_guide_naming_enabled) {
+                    try {
+                        $filePath = app(StrmPathBuilder::class)
+                            ->buildEpisodePath($ep, $streamFileSetting, $sync_settings);
+                    } catch (\Throwable $e) {
+                        Log::warning('STRM Sync: Trash Guide path build failed, falling back to legacy naming', [
+                            'episode_id' => $ep->id,
+                            'error' => $e->getMessage(),
+                        ]);
+                        $filePath = null;
                     }
-                }
-
-                // Add category suffix to filename if enabled
-                if (in_array('category', $filenameMetadata)) {
-                    $catSuffix = $category?->name ?? $category?->name_internal ?? 'Uncategorized';
-                    $catSuffix = $applyNameFilter($catSuffix);
-                    $fileName .= " - {$catSuffix}";
-                }
-
-                // Clean the filename
-                $fileName = $cleanSpecialChars
-                    ? PlaylistService::makeFilesystemSafe($fileName, $replaceChar)
-                    : PlaylistService::makeFilesystemSafe($fileName);
-
-                // Remove consecutive replacement characters if enabled
-                if ($removeConsecutiveChars && $replaceChar !== 'remove') {
-                    $char = $replaceChar === 'space' ? ' ' : ($replaceChar === 'dash' ? '-' : ($replaceChar === 'underscore' ? '_' : '.'));
-                    $fileName = preg_replace('/'.preg_quote($char, '/').'{2,}/', $char, $fileName);
-                }
-
-                $fileName = "{$fileName}.strm";
-
-                // Build the season folder path
-                if (in_array('season', $pathStructure)) {
-                    $seasonPath = $path.'/Season '.str_pad($season, 2, '0', STR_PAD_LEFT);
-                    $filePath = $seasonPath.'/'.$fileName;
                 } else {
-                    $filePath = $path.'/'.$fileName;
+                    $filePath = null;
+                }
+
+                if ($filePath === null) {
+                    // Legacy filename generation
+                    // Setup episode prefix
+                    $season = $ep->season;
+                    $num = str_pad($ep->episode_num, 2, '0', STR_PAD_LEFT);
+                    $prefx = 'S'.str_pad($season, 2, '0', STR_PAD_LEFT)."E{$num}";
+
+                    // Build the base filename (apply name filtering to episode title)
+                    $episodeTitle = $applyNameFilter($ep->title);
+                    $fileName = "{$prefx} - {$episodeTitle}";
+
+                    // Add metadata to filename
+                    if (in_array('year', $filenameMetadata) && ! empty($seriesReleaseDate)) {
+                        $year = substr($seriesReleaseDate, 0, 4);
+                        $fileName .= " ({$year})";
+                    }
+
+                    if ($applyTmdbToEpisodes) {
+                        $tmdbId = $ep->info['tmdb_id'] ?? $seriesMetadata['tmdb_id'] ?? null;
+                        // Ensure ID is a scalar value (not an array)
+                        $tmdbId = is_scalar($tmdbId) ? $tmdbId : null;
+                        if (! empty($tmdbId)) {
+                            $bracket = $tmdbIdFormat === 'curly' ? ['{', '}'] : ['[', ']'];
+                            $fileName .= " {$bracket[0]}tmdb-{$tmdbId}{$bracket[1]}";
+                        }
+                    }
+
+                    // Add category suffix to filename if enabled
+                    if (in_array('category', $filenameMetadata)) {
+                        $catSuffix = $category?->name ?? $category?->name_internal ?? 'Uncategorized';
+                        $catSuffix = $applyNameFilter($catSuffix);
+                        $fileName .= " - {$catSuffix}";
+                    }
+
+                    // Clean the filename
+                    $fileName = $cleanSpecialChars
+                        ? PlaylistService::makeFilesystemSafe($fileName, $replaceChar)
+                        : PlaylistService::makeFilesystemSafe($fileName);
+
+                    // Remove consecutive replacement characters if enabled
+                    if ($removeConsecutiveChars && $replaceChar !== 'remove') {
+                        $char = match ($replaceChar) {
+                            'space' => ' ',
+                            'dash' => '-',
+                            'underscore' => '_',
+                            default => '.',
+                        };
+                        $fileName = preg_replace('/'.preg_quote($char, '/').'{2,}/', $char, $fileName);
+                    }
+
+                    // Ensure the filename (with extension) does not exceed 255 bytes.
+                    $fileName = PlaylistService::truncateFilename($fileName, '.strm');
+
+                    $fileName = "{$fileName}.strm";
+
+                    // Build the season folder path
+                    if (in_array('season', $pathStructure)) {
+                        $seasonPath = $path.'/Season '.str_pad($season, 2, '0', STR_PAD_LEFT);
+                        $filePath = $seasonPath.'/'.$fileName;
+                    } else {
+                        $filePath = $path.'/'.$fileName;
+                    }
                 }
 
                 // Generate the url (use cached playlist properties to avoid object access in loop)

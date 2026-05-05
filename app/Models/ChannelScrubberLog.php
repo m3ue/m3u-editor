@@ -21,6 +21,7 @@ class ChannelScrubberLog extends Model
             'channel_count' => 'integer',
             'dead_count' => 'integer',
             'disabled_count' => 'integer',
+            'live_count' => 'integer',
             'runtime' => 'float',
         ];
     }
