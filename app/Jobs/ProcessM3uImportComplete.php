@@ -359,7 +359,12 @@ class ProcessM3uImportComplete implements ShouldQueue
 
         // Check whether a series metadata sync should follow — evaluated here so we can
         // decide whether to chain it after VOD or dispatch it independently.
-        $syncSeriesMetadata = $playlist->auto_fetch_series_metadata
+        // Skip when runningSeriesImport is true: the series discovery chunks run AFTER this
+        // job in the same chain, so dispatching ProcessM3uImportSeries now would race with
+        // those chunks and corrupt series_progress. ProcessM3uImportSeriesComplete handles
+        // the metadata-sync dispatch once discovery is actually done.
+        $syncSeriesMetadata = ! $this->runningSeriesImport
+            && $playlist->auto_fetch_series_metadata
             && $playlist->series()->where('enabled', true)->exists();
 
         if ($syncVod) {
