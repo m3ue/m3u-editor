@@ -4,7 +4,6 @@ namespace App\Jobs;
 
 use App\Enums\Status;
 use App\Events\SyncCompleted;
-use App\Models\Job;
 use App\Models\Playlist;
 use App\Settings\GeneralSettings;
 use Filament\Notifications\Notification;
@@ -67,15 +66,29 @@ class ProcessM3uImportSeriesComplete implements ShouldQueue
         // runs before the series chunks populate the DB, so it skips dispatching
         // ProcessM3uImportSeries — meaning CheckSeriesImportProgress never fires and TMDB
         // IDs would never be assigned without this dispatch.
-        if (! $settings->tmdb_auto_lookup_on_import) {
-            return;
+        if ($settings->tmdb_auto_lookup_on_import) {
+            Log::info('Series Complete: Queuing bulk TMDB fetch for playlist ID '.$this->playlist->id);
+            FetchTmdbIds::dispatch(
+                seriesPlaylistId: $this->playlist->id,
+                user: $this->playlist->user,
+                sendCompletionNotification: false,
+            );
         }
 
-        Log::info('Series Complete: Queuing bulk TMDB fetch for playlist ID '.$this->playlist->id);
-        FetchTmdbIds::dispatch(
-            seriesPlaylistId: $this->playlist->id,
-            user: $this->playlist->user,
-            sendCompletionNotification: false,
-        );
+        // Trigger episode metadata sync after series discovery completes.
+        // ProcessM3uImportComplete skips this when runningSeriesImport=true so that the
+        // dispatch happens here — after all discovery chunks have run — preventing a race
+        // condition where both jobs write to series_progress concurrently.
+        if ($this->playlist->auto_fetch_series_metadata
+            && $this->playlist->series()->where('enabled', true)->exists()
+        ) {
+            Log::info('Series Complete: Queuing episode metadata sync for playlist ID '.$this->playlist->id);
+            dispatch(new ProcessM3uImportSeries(
+                playlist: $this->playlist,
+                force: true,
+                isNew: false,
+                batchNo: $this->batchNo,
+            ));
+        }
     }
 }
