@@ -1,6 +1,7 @@
 <?php
 
 use App\Jobs\FetchTmdbIds;
+use App\Jobs\ProcessM3uImportSeries;
 use App\Jobs\ProcessM3uImportSeriesComplete;
 use App\Models\Category;
 use App\Models\Playlist;
@@ -103,4 +104,64 @@ it('dispatches FetchTmdbIds on a first-time import when no series exist yet at c
     $job->handle(app(GeneralSettings::class));
 
     Bus::assertDispatched(FetchTmdbIds::class);
+});
+
+it('dispatches ProcessM3uImportSeries when auto_fetch_series_metadata is enabled and enabled series exist', function () {
+    mockSeriesCompleteSettings(tmdbAutoLookupOnImport: false);
+
+    $this->playlist->update(['auto_fetch_series_metadata' => true]);
+
+    $category = Category::factory()->for($this->playlist)->for($this->user)->create();
+    Series::factory()->for($this->playlist)->for($this->user)->for($category)->create([
+        'enabled' => true,
+    ]);
+
+    $job = new ProcessM3uImportSeriesComplete(
+        playlist: $this->playlist->fresh(),
+        batchNo: 'test-batch',
+    );
+
+    $job->handle(app(GeneralSettings::class));
+
+    Bus::assertDispatched(ProcessM3uImportSeries::class, function (ProcessM3uImportSeries $dispatched): bool {
+        return $dispatched->playlist->id === $this->playlist->id
+            && $dispatched->force === true;
+    });
+});
+
+it('does not dispatch ProcessM3uImportSeries when auto_fetch_series_metadata is disabled', function () {
+    mockSeriesCompleteSettings(tmdbAutoLookupOnImport: false);
+
+    $this->playlist->update(['auto_fetch_series_metadata' => false]);
+
+    $category = Category::factory()->for($this->playlist)->for($this->user)->create();
+    Series::factory()->for($this->playlist)->for($this->user)->for($category)->create([
+        'enabled' => true,
+    ]);
+
+    $job = new ProcessM3uImportSeriesComplete(
+        playlist: $this->playlist->fresh(),
+        batchNo: 'test-batch',
+    );
+
+    $job->handle(app(GeneralSettings::class));
+
+    Bus::assertNotDispatched(ProcessM3uImportSeries::class);
+});
+
+it('does not dispatch ProcessM3uImportSeries when no enabled series exist', function () {
+    mockSeriesCompleteSettings(tmdbAutoLookupOnImport: false);
+
+    $this->playlist->update(['auto_fetch_series_metadata' => true]);
+
+    // No series in DB — first-time import, chunks haven't run yet.
+
+    $job = new ProcessM3uImportSeriesComplete(
+        playlist: $this->playlist->fresh(),
+        batchNo: 'test-batch',
+    );
+
+    $job->handle(app(GeneralSettings::class));
+
+    Bus::assertNotDispatched(ProcessM3uImportSeries::class);
 });
