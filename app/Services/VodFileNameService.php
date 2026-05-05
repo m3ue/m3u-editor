@@ -157,9 +157,14 @@ class VodFileNameService
         $streamStats = StreamStatsService::normalize($channel->stream_stats ?? []);
         $hasStats = ! empty($streamStats);
 
+        $title = $this->movieTitle($channel);
+        $year = $this->movieYear($channel);
+
         $replacements = [
-            '{title}' => PlaylistService::makeFilesystemSafe($this->movieTitle($channel), $setting->replace_char ?? 'space'),
-            '{year}' => $this->movieYear($channel),
+            '{title}' => PlaylistService::makeFilesystemSafe($title, $setting->replace_char ?? 'space'),
+            // Only inject year if not already present in the title (mirrors the non-trash-guides strpos guard).
+            // An empty {year} causes ({year}) → () which cleanUnfilledPlaceholders removes.
+            '{year}' => ($year !== '' && strpos($title, "({$year})") !== false) ? '' : $year,
             '{edition}' => $this->formatOptional($this->scalarAttribute($channel, 'edition'), prefix: ' '),
             '{quality}' => $this->quality($channel, $setting, $streamStats, $hasStats),
             '{audio}' => $this->preferStatsManualOrTitle($hasStats ? StreamStatsService::detectAudio($streamStats) : '', fn () => $this->manualValue($channel, $setting, ['audio', 'audio_format', 'audio_codec']), fn () => TitleMetadataParser::detectAudio($this->rawTitle($channel))),

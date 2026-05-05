@@ -85,6 +85,20 @@ it('detects hdr formats', function (array $streamStats, string $expected) {
     'hlg transfer' => [['color_transfer' => 'arib-std-b67'], 'HDR'],
 ]);
 
+it('does not duplicate year when title already contains it in parentheses', function () {
+    $channel = new Channel([
+        'name' => 'Example Movie (2024)',
+        'year' => 2024,
+    ]);
+    $setting = new StreamFileSetting([
+        'movie_format' => '{title} ({year}) [{quality} {video} {audio} {hdr}]',
+    ]);
+
+    $fileName = (new VodFileNameService)->generateMovieFileName($channel, $setting);
+
+    expect($fileName)->toBe('Example Movie (2024)');
+});
+
 it('normalizes ffprobe style stream stats while generating filenames', function () {
     $channel = new Channel([
         'name' => 'Stream Stats Movie',

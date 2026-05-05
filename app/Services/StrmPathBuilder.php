@@ -104,7 +104,7 @@ class StrmPathBuilder
         $tmdbIdApplyTo = $syncSettings['tmdb_id_apply_to'] ?? 'episodes';
 
         $path = $syncLocation;
-        $series = $episode->season?->series ?? $episode->series;
+        $series = $seasonRel?->series ?? $episode->series;
 
         if (in_array('category', $pathStructure)) {
             $category = $series?->category;
