@@ -163,7 +163,8 @@ class Series extends Model
     {
         // Skip the provider call if data is still fresh (unless a forced refresh is requested).
         $isFresh = ! $refresh && $this->last_metadata_fetch && $this->last_modified
-            && $this->last_metadata_fetch >= $this->last_modified;
+            && $this->last_metadata_fetch >= $this->last_modified
+            && $this->episodes()->exists();
 
         try {
             if (! $isFresh) {
