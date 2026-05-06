@@ -17,6 +17,7 @@ use App\Models\Epg;
 use App\Models\Playlist;
 use App\Plugins\PluginHookDispatcher;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Cache;
 
 class SyncListener
 {
@@ -89,6 +90,14 @@ class SyncListener
             ->contains(fn ($r) => $r['enabled'] ?? false);
         $hasSortAlpha = collect($playlist->sort_alpha_config ?? [])
             ->contains(fn ($r) => $r['enabled'] ?? false);
+
+        // Skip F/R if it has already been run earlier in this sync window
+        // (e.g. ProcessVodChannelsComplete chains it before STRM sync so STRM
+        // uses processed title_custom values). Use Cache::pull so the marker
+        // is consumed atomically and won't bleed into a subsequent sync.
+        if ($hasFindReplace && Cache::pull(RunPlaylistFindReplaceRules::ranMarkerKey($playlist))) {
+            $hasFindReplace = false;
+        }
 
         if ($hasFindReplace && $hasSortAlpha) {
             Bus::chain([

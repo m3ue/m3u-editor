@@ -7,6 +7,7 @@ use App\Models\User;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Support\Facades\Cache;
 
 class RunPlaylistFindReplaceRules implements ShouldQueue
 {
@@ -156,5 +157,21 @@ class RunPlaylistFindReplaceRules implements ShouldQueue
             ->body("Ran {$summary} for \"{$this->playlist->name}\" in {$completedIn}s.")
             ->broadcast($user)
             ->sendToDatabase($user);
+
+        // Mark F/R as run for this playlist within the current sync window so that
+        // SyncListener::dispatchNameProcessingPipeline can skip a duplicate F/R
+        // run when this job has already been executed earlier in a chained pipeline
+        // (e.g. ProcessVodChannelsComplete chains F/R before SyncVodStrmFiles to
+        // ensure STRM uses processed title_custom values).
+        Cache::put(self::ranMarkerKey($this->playlist), true, 1800);
+    }
+
+    /**
+     * Cache key used to mark that find & replace has already run for a playlist
+     * within the current sync window.
+     */
+    public static function ranMarkerKey(Playlist $playlist): string
+    {
+        return "playlist:{$playlist->id}:find_replace_ran";
     }
 }

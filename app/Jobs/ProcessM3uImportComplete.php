@@ -3,7 +3,6 @@
 namespace App\Jobs;
 
 use App\Enums\Status;
-use App\Events\SyncCompleted;
 use App\Models\Channel;
 use App\Models\Group;
 use App\Models\Job;
@@ -420,8 +419,8 @@ class ProcessM3uImportComplete implements ShouldQueue
             return;
         }
 
-        // Neither VOD nor series — fire immediately.
-        event(new SyncCompleted($playlist, 'playlist'));
+        // Neither VOD nor series — fire immediately (idempotent within sync window).
+        $playlist->dispatchSyncCompletedOnce();
     }
 
     /**

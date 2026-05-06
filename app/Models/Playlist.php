@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Enums\PlaylistChannelId;
 use App\Enums\PlaylistSourceType;
 use App\Enums\Status;
+use App\Events\SyncCompleted;
 use App\Jobs\UpdateXtreamStats;
 use App\Traits\ShortUrlTrait;
 use Illuminate\Database\Eloquent\Casts\Attribute;
@@ -94,6 +95,54 @@ class Playlist extends Model
     public function isProcessing(): bool
     {
         return collect($this->processing ?? [])->values()->contains(true);
+    }
+
+    /**
+     * Cache key used to dedupe SyncCompleted dispatches for this playlist within
+     * a single sync window. Reset by callers that genuinely start a new sync via
+     * resetSyncCompletedGuard().
+     */
+    protected function syncCompletedGuardKey(): string
+    {
+        return "playlist:sync-completed-fired:{$this->getKey()}";
+    }
+
+    /**
+     * Clear the SyncCompleted dedup guard. Must be called by any code path that
+     * starts a fresh sync (e.g. the entry point of ProcessM3uImport) so the next
+     * SyncCompleted dispatch is allowed to fire.
+     */
+    public function resetSyncCompletedGuard(): void
+    {
+        Cache::forget($this->syncCompletedGuardKey());
+    }
+
+    /**
+     * Atomically dispatch a SyncCompleted event for this playlist exactly once
+     * per sync window. Subsequent calls within the window (default 30 minutes,
+     * or until resetSyncCompletedGuard() is called) are no-ops.
+     *
+     * The dedup window is a safety net while the legacy pipeline still has many
+     * dispatch sites scattered across jobs; once the SyncOrchestrator owns
+     * completion, this becomes structural.
+     */
+    public function dispatchSyncCompletedOnce(string $type = 'playlist'): bool
+    {
+        // Cache::add returns true only when the key was not already present —
+        // atomic across queue workers when using the redis store.
+        $acquired = Cache::add(
+            $this->syncCompletedGuardKey(),
+            true,
+            now()->addMinutes(30),
+        );
+
+        if (! $acquired) {
+            return false;
+        }
+
+        event(new SyncCompleted($this, $type));
+
+        return true;
     }
 
     public function isProcessingLive(): bool

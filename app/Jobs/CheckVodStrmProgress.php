@@ -8,6 +8,7 @@ use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -126,8 +127,12 @@ class CheckVodStrmProgress implements ShouldQueue
         if ($this->playlist_id) {
             $playlist = Playlist::find($this->playlist_id);
             if ($playlist?->auto_probe_vod_streams) {
-                Log::info("STRM Sync: Dispatching VOD probe for playlist {$this->playlist_id}");
-                dispatch(new ProbeVodStreams($this->playlist_id));
+                if (Cache::add("playlist:{$this->playlist_id}:probe_vod", 1, 3600)) {
+                    Log::info("STRM Sync: Dispatching VOD probe for playlist {$this->playlist_id}");
+                    dispatch(new ProbeVodStreams($this->playlist_id));
+                } else {
+                    Log::info("STRM Sync: Skipping VOD probe (already dispatched in this sync window) for playlist {$this->playlist_id}");
+                }
             }
 
             return;
@@ -139,8 +144,12 @@ class CheckVodStrmProgress implements ShouldQueue
                 ->pluck('id');
 
             foreach ($playlistIds as $playlistId) {
-                Log::info("STRM Sync: Dispatching VOD probe for playlist {$playlistId}");
-                dispatch(new ProbeVodStreams($playlistId));
+                if (Cache::add("playlist:{$playlistId}:probe_vod", 1, 3600)) {
+                    Log::info("STRM Sync: Dispatching VOD probe for playlist {$playlistId}");
+                    dispatch(new ProbeVodStreams($playlistId));
+                } else {
+                    Log::info("STRM Sync: Skipping VOD probe (already dispatched in this sync window) for playlist {$playlistId}");
+                }
             }
         }
     }

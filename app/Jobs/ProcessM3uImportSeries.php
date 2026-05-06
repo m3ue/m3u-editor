@@ -3,7 +3,6 @@
 namespace App\Jobs;
 
 use App\Enums\Status;
-use App\Events\SyncCompleted;
 use App\Models\Playlist;
 use Exception;
 use Filament\Notifications\Notification;
@@ -112,8 +111,8 @@ class ProcessM3uImportSeries implements ShouldQueue
                 'trace' => $e->getTraceAsString(),
             ]);
 
-            // Fire the playlist synced event
-            event(new SyncCompleted($this->playlist));
+            // Fire the playlist synced event (idempotent within this sync window)
+            $this->playlist->dispatchSyncCompletedOnce();
         }
     }
 }

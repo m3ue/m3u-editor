@@ -11,6 +11,7 @@ use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -81,13 +82,19 @@ class CheckSeriesImportProgress implements ShouldQueue
             $postJobs = [];
 
             if ($settings->tmdb_auto_lookup_on_import) {
-                Log::info('Series Import: Queuing bulk TMDB fetch for playlist');
-                $postJobs[] = new FetchTmdbIds(
-                    seriesPlaylistId: $this->playlist_id,
-                    overwriteExisting: $this->overwrite_existing,
-                    user: $this->user_id ? User::find($this->user_id) : null,
-                    sendCompletionNotification: false,
-                );
+                if (Cache::add("playlist:{$this->playlist_id}:tmdb_fetch_series", 1, 3600)) {
+                    Log::info('Series Import: Queuing bulk TMDB fetch for playlist');
+                    $postJobs[] = new FetchTmdbIds(
+                        seriesPlaylistId: $this->playlist_id,
+                        overwriteExisting: $this->overwrite_existing,
+                        user: $this->user_id ? User::find($this->user_id) : null,
+                        sendCompletionNotification: false,
+                    );
+                } else {
+                    Log::info('Series Import: Skipping bulk TMDB fetch (already dispatched in this sync window)', [
+                        'playlist_id' => $this->playlist_id,
+                    ]);
+                }
             }
 
             if ($this->sync_stream_files) {
@@ -102,7 +109,21 @@ class CheckSeriesImportProgress implements ShouldQueue
             }
 
             if (! empty($postJobs)) {
+                // Append the SyncCompleted dispatch as the final link so post-sync
+                // listeners (find/replace, sort, merge, scrubber, probe, plugins,
+                // Plex DVR) only run after the metadata + STRM jobs finish.
+                $playlistForChain = $this->playlist_id ? Playlist::find($this->playlist_id) : null;
+                if ($playlistForChain) {
+                    $postJobs[] = new FireSyncCompletedEvent($playlistForChain);
+                }
                 Bus::chain($postJobs)->dispatch();
+            } elseif ($this->playlist_id) {
+                // No post-jobs scheduled — fire immediately so the sync window can
+                // close and listeners can react to series-only completion.
+                $playlistForEvent = Playlist::find($this->playlist_id);
+                if ($playlistForEvent) {
+                    $playlistForEvent->dispatchSyncCompletedOnce();
+                }
             }
 
             // Send completion notification

@@ -2,7 +2,6 @@
 
 namespace App\Jobs;
 
-use App\Events\SyncCompleted;
 use App\Models\Playlist;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -19,6 +18,8 @@ class FireSyncCompletedEvent implements ShouldQueue
 
     public function handle(): void
     {
-        event(new SyncCompleted($this->playlist, 'playlist'));
+        // Idempotent within the current sync window; safe even if other code paths
+        // fired SyncCompleted earlier in this run.
+        $this->playlist->dispatchSyncCompletedOnce();
     }
 }

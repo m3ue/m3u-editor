@@ -9,6 +9,7 @@ use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
 class ProcessVodChannelsComplete implements ShouldQueue
@@ -61,12 +62,18 @@ class ProcessVodChannelsComplete implements ShouldQueue
         $postJobs = [];
 
         if ($settings->tmdb_auto_lookup_on_import) {
-            Log::info('VOD Complete: Queuing bulk TMDB fetch for playlist ID '.$this->playlist->id);
-            $postJobs[] = new FetchTmdbIds(
-                vodPlaylistId: $this->playlist->id,
-                user: $this->playlist->user,
-                sendCompletionNotification: false,
-            );
+            if (Cache::add("playlist:{$this->playlist->id}:tmdb_fetch_vod", 1, 3600)) {
+                Log::info('VOD Complete: Queuing bulk TMDB fetch for playlist ID '.$this->playlist->id);
+                $postJobs[] = new FetchTmdbIds(
+                    vodPlaylistId: $this->playlist->id,
+                    user: $this->playlist->user,
+                    sendCompletionNotification: false,
+                );
+            } else {
+                Log::info('VOD Complete: Skipping bulk TMDB fetch (already dispatched in this sync window)', [
+                    'playlist_id' => $this->playlist->id,
+                ]);
+            }
         }
 
         if ($this->playlist->auto_sync_vod_stream_files) {

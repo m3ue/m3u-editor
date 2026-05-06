@@ -9,6 +9,7 @@ use App\Enums\Status;
 use App\Jobs\CheckSeriesImportProgress;
 use App\Jobs\FetchTmdbIds;
 use App\Jobs\FireStreamFilesSyncedEvent;
+use App\Jobs\FireSyncCompletedEvent;
 use App\Jobs\RunPostProcess;
 use App\Jobs\SyncSeriesStrmFiles;
 use App\Jobs\SyncVodStrmFiles;
@@ -140,7 +141,7 @@ it('chains SyncSeriesStrmFiles when series STRM sync is enabled', function () {
         sync_stream_files: true,
     ))->handle(app(GeneralSettings::class));
 
-    Bus::assertChained([SyncSeriesStrmFiles::class]);
+    Bus::assertChained([SyncSeriesStrmFiles::class, FireSyncCompletedEvent::class]);
     Bus::assertNotDispatched(FireStreamFilesSyncedEvent::class);
 });
 
@@ -176,7 +177,7 @@ it('chains TMDB fetch before SyncSeriesStrmFiles', function () {
         sync_stream_files: true,
     ))->handle(app(GeneralSettings::class));
 
-    Bus::assertChained([FetchTmdbIds::class, SyncSeriesStrmFiles::class]);
+    Bus::assertChained([FetchTmdbIds::class, SyncSeriesStrmFiles::class, FireSyncCompletedEvent::class]);
 });
 
 // ──────────────────────────────────────────────────────────────────────────────

@@ -4,7 +4,6 @@ namespace App\Jobs;
 
 use App\Enums\PlaylistSourceType;
 use App\Enums\Status;
-use App\Events\SyncCompleted;
 use App\Models\Category;
 use App\Models\Group;
 use App\Models\Job;
@@ -222,6 +221,10 @@ class ProcessM3uImport implements ShouldQueue
             }
         }
 
+        // New sync window — clear the SyncCompleted dedup guard so the next
+        // dispatch this run is allowed to fire (subsequent ones become no-ops).
+        $this->playlist->resetSyncCompletedGuard();
+
         // Update the playlist status to processing
         $this->playlist->update([
             'status' => Status::Processing,
@@ -283,8 +286,8 @@ class ProcessM3uImport implements ShouldQueue
             ],
         ]);
 
-        // Fire the playlist synced event
-        event(new SyncCompleted($this->playlist));
+        // Fire the playlist synced event (idempotent within this sync window)
+        $this->playlist->dispatchSyncCompletedOnce();
     }
 
     /**
@@ -758,8 +761,8 @@ class ProcessM3uImport implements ShouldQueue
                 ],
             ]);
 
-            // Fire the playlist synced event
-            event(new SyncCompleted($this->playlist));
+            // Fire the playlist synced event (idempotent within this sync window)
+            $this->playlist->dispatchSyncCompletedOnce();
         }
 
     }
@@ -1083,8 +1086,8 @@ class ProcessM3uImport implements ShouldQueue
                     ],
                 ]);
 
-                // Fire the playlist synced event
-                event(new SyncCompleted($this->playlist));
+                // Fire the playlist synced event (idempotent within this sync window)
+                $playlist->dispatchSyncCompletedOnce();
 
                 return;
             }
@@ -1117,8 +1120,8 @@ class ProcessM3uImport implements ShouldQueue
                 ],
             ]);
 
-            // Fire the playlist synced event
-            event(new SyncCompleted($this->playlist));
+            // Fire the playlist synced event (idempotent within this sync window)
+            $this->playlist->dispatchSyncCompletedOnce();
         }
 
     }
@@ -1552,7 +1555,7 @@ class ProcessM3uImport implements ShouldQueue
                     self::scheduleRetry503($playlist);
                 }
 
-                event(new SyncCompleted($playlist));
+                $playlist->dispatchSyncCompletedOnce();
             })->dispatch();
     }
 
@@ -1787,7 +1790,7 @@ class ProcessM3uImport implements ShouldQueue
                     self::scheduleRetry503($playlist);
                 }
 
-                event(new SyncCompleted($playlist));
+                $playlist->dispatchSyncCompletedOnce();
             })->dispatch();
     }
 

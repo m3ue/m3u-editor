@@ -84,3 +84,22 @@ it('does not dispatch SyncPlexDvrJob on mass update (query builder)', function (
 
     Bus::assertNotDispatched(SyncPlexDvrJob::class);
 });
+
+it('does not dispatch SyncPlexDvrJob while the playlist is processing', function () {
+    Bus::fake();
+
+    $this->playlist->forceFill([
+        'processing' => ['live_processing' => true],
+    ])->save();
+
+    $channel = Channel::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'group_id' => $this->group->id,
+        'enabled' => false,
+    ]);
+
+    $channel->update(['enabled' => true]);
+
+    Bus::assertNotDispatched(SyncPlexDvrJob::class);
+});

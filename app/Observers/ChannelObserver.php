@@ -36,11 +36,22 @@ class ChannelObserver
      * Dispatches a Plex DVR sync when the enabled status changes.
      * SyncPlexDvrJob is ShouldBeUnique (60s window), so rapid
      * individual toggles are automatically debounced.
+     *
+     * Skipped when the channel's playlist is in the middle of a sync — the
+     * post-sync pipeline (SyncListener) dispatches SyncPlexDvrJob exactly
+     * once after the sync completes, so dispatching here would only generate
+     * redundant load while bulk channel updates are in flight.
      */
     public function updated(Channel $channel): void
     {
-        if ($channel->wasChanged('enabled')) {
-            dispatch(new SyncPlexDvrJob(trigger: 'channel_observer'));
+        if (! $channel->wasChanged('enabled')) {
+            return;
         }
+
+        if ($channel->playlist?->isProcessing()) {
+            return;
+        }
+
+        dispatch(new SyncPlexDvrJob(trigger: 'channel_observer'));
     }
 }
