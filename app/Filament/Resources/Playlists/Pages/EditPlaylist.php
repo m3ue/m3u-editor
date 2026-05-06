@@ -5,7 +5,7 @@ namespace App\Filament\Resources\Playlists\Pages;
 use App\Filament\Resources\MediaServerIntegrations\MediaServerIntegrationResource;
 use App\Filament\Resources\Networks\NetworkResource;
 use App\Filament\Resources\Playlists\PlaylistResource;
-use App\Filament\Resources\Playlists\Widgets\ImportProgress;
+use App\Filament\Resources\Playlists\Widgets\LatestSyncRun;
 use App\Models\Playlist;
 use Filament\Actions\ViewAction;
 use Filament\Resources\Pages\EditRecord;
@@ -46,7 +46,7 @@ class EditPlaylist extends EditRecord
     public function getVisibleHeaderWidgets(): array
     {
         return [
-            ImportProgress::class,
+            LatestSyncRun::class,
         ];
     }
 

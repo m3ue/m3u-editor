@@ -132,6 +132,38 @@ final class SyncPlan
     }
 
     /**
+     * Lightweight introspection helper used by UI layers (e.g. the SyncRun
+     * Filament resource) that need to render the planned phases up-front
+     * without instantiating each phase. Order matches declaration order.
+     *
+     * Returned shape per entry:
+     *   [
+     *     'slug'            => string,         // phase slug
+     *     'phase_class'     => class-string,   // FQCN of the phase
+     *     'required'        => bool,           // halts run on failure?
+     *     'parallel_group'  => string|null,    // 'g{n}' when in parallel block
+     *     'chain_group'     => string|null,    // 'c{n}' when in chain block
+     *   ]
+     *
+     * @return array<int, array{slug: string, phase_class: class-string<SyncPhase>, required: bool, parallel_group: ?string, chain_group: ?string}>
+     */
+    public function stepSlugs(): array
+    {
+        return array_map(static function (PlanStep $step): array {
+            /** @var class-string<SyncPhase> $class */
+            $class = $step->phaseClass;
+
+            return [
+                'slug' => $class::slug(),
+                'phase_class' => $class,
+                'required' => $step->required,
+                'parallel_group' => $step->parallelGroup,
+                'chain_group' => $step->chainGroup,
+            ];
+        }, $this->steps);
+    }
+
+    /**
      * @param  class-string  $class
      */
     private function assertPhaseClass(string $class): void
