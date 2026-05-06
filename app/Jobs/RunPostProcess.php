@@ -11,6 +11,7 @@ use App\Models\PostProcessLog;
 use App\Settings\GeneralSettings;
 use Exception;
 use Filament\Notifications\Notification;
+use Illuminate\Bus\Batchable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Foundation\Queue\Queueable;
@@ -22,7 +23,7 @@ use Symfony\Component\Process\Process as SymfonyProcess;
 
 class RunPostProcess implements ShouldQueue
 {
-    use Queueable;
+    use Batchable, Queueable;
 
     // Giving a timeout of 15 minutes to the Job for long-running post processes
     // This should be sufficient for most tasks, but can be adjusted if needed

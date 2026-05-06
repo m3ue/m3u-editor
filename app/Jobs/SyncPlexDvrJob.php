@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Models\MediaServerIntegration;
 use App\Services\PlexManagementService;
+use Illuminate\Bus\Batchable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -11,7 +12,7 @@ use Illuminate\Support\Facades\Log;
 
 class SyncPlexDvrJob implements ShouldBeUnique, ShouldQueue
 {
-    use Queueable;
+    use Batchable, Queueable;
 
     /**
      * @param  int|null  $integrationId  Sync a specific integration. Null = sync all.

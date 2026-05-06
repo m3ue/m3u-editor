@@ -4,12 +4,13 @@ namespace App\Jobs;
 
 use App\Models\Plugin;
 use App\Plugins\PluginManager;
+use Illuminate\Bus\Batchable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 
 class ExecutePluginInvocation implements ShouldQueue
 {
-    use Queueable;
+    use Batchable, Queueable;
 
     public function __construct(
         public int $pluginId,
