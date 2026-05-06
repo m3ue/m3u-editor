@@ -14,6 +14,15 @@ class LatestSyncRun extends Widget
 
     public ?Model $record = null;
 
+    /**
+     * Per-request memoized lookup so a single render cycle (which calls
+     * `getPollingInterval()`, `getTimeline()`, and `getViewRunUrl()` in turn)
+     * only hits the database once instead of three times.
+     */
+    private ?SyncRun $cachedLatestRun = null;
+
+    private bool $latestRunLoaded = false;
+
     public function getColumnSpan(): int|string|array
     {
         return 'full';
@@ -29,11 +38,17 @@ class LatestSyncRun extends Widget
 
     public function getLatestRun(): ?SyncRun
     {
-        if (! $this->record instanceof Playlist) {
-            return null;
+        if ($this->latestRunLoaded) {
+            return $this->cachedLatestRun;
         }
 
-        return $this->record->syncRuns()->latest('id')->first();
+        $this->latestRunLoaded = true;
+
+        if (! $this->record instanceof Playlist) {
+            return $this->cachedLatestRun = null;
+        }
+
+        return $this->cachedLatestRun = $this->record->syncRuns()->latest('id')->first();
     }
 
     /**

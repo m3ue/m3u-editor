@@ -15,6 +15,7 @@ use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\ViewAction;
 use Filament\Infolists\Components\TextEntry;
+use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\View as ViewComponent;
@@ -23,6 +24,7 @@ use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 
@@ -189,7 +191,22 @@ class SyncRunResource extends Resource
             ])
             ->toolbarActions([
                 BulkActionGroup::make([
-                    DeleteBulkAction::make(),
+                    DeleteBulkAction::make()
+                        // Block bulk-deleting active runs: in-flight phase
+                        // jobs would have no ledger to write back to and
+                        // would either crash on the missing FK or silently
+                        // no-op, leaving the run permanently stuck.
+                        ->before(function (DeleteBulkAction $action, Collection $records) {
+                            if ($records->contains(fn (SyncRun $r) => $r->status->isActive())) {
+                                Notification::make()
+                                    ->title(__('Cannot delete active sync runs'))
+                                    ->body(__('One or more selected runs are still Pending or Running. Wait for them to finish (or cancel them) before deleting.'))
+                                    ->danger()
+                                    ->send();
+
+                                $action->cancel();
+                            }
+                        }),
                 ]),
             ]);
     }

@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 /**
@@ -187,6 +188,10 @@ class SyncRun extends Model
 
     /**
      * Append an arbitrary error entry to the run-level error log.
+     *
+     * Wrapped in a transaction with `lockForUpdate` because parallel-group
+     * phases dispatched via `Bus::batch()` may call this concurrently; a naive
+     * read-modify-write on the JSONB `errors` column would lose entries.
      */
     public function recordError(string|\Throwable $error, ?string $phase = null): self
     {
@@ -200,10 +205,17 @@ class SyncRun extends Model
             $entry['exception'] = get_class($error);
         }
 
-        $existing = $this->errors ?? [];
-        $existing[] = $entry;
-        $this->errors = $existing;
-        $this->save();
+        DB::transaction(function () use ($entry): void {
+            /** @var self $fresh */
+            $fresh = self::query()->whereKey($this->getKey())->lockForUpdate()->firstOrFail();
+
+            $existing = $fresh->errors ?? [];
+            $existing[] = $entry;
+            $fresh->errors = $existing;
+            $fresh->save();
+
+            $this->setRawAttributes($fresh->getAttributes(), true);
+        });
 
         return $this;
     }
@@ -302,20 +314,32 @@ class SyncRun extends Model
     /**
      * Merge updates into a phase entry, preserving previously written keys.
      *
+     * Wrapped in a transaction with `lockForUpdate` because parallel-group
+     * phases dispatched via `Bus::batch()` may write to different phase entries
+     * in the same JSONB column simultaneously; without a row lock the
+     * read-modify-write pattern would lose updates.
+     *
      * @param  array<string, mixed>  $updates
      */
     protected function writePhase(string $phase, array $updates): self
     {
-        $phases = $this->phases ?? [];
-        $existing = $phases[$phase] ?? [];
+        DB::transaction(function () use ($phase, $updates): void {
+            /** @var self $fresh */
+            $fresh = self::query()->whereKey($this->getKey())->lockForUpdate()->firstOrFail();
 
-        $phases[$phase] = array_replace($existing, array_filter(
-            $updates,
-            static fn ($value) => $value !== null,
-        ));
+            $phases = $fresh->phases ?? [];
+            $existing = $phases[$phase] ?? [];
 
-        $this->phases = $phases;
-        $this->save();
+            $phases[$phase] = array_replace($existing, array_filter(
+                $updates,
+                static fn ($value) => $value !== null,
+            ));
+
+            $fresh->phases = $phases;
+            $fresh->save();
+
+            $this->setRawAttributes($fresh->getAttributes(), true);
+        });
 
         return $this;
     }
