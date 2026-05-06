@@ -26,8 +26,10 @@ use App\Models\ChannelScrubber;
 use App\Models\Epg;
 use App\Models\Playlist;
 use App\Models\User;
+use Illuminate\Bus\PendingBatch;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Str;
 
 beforeEach(function () {
     Bus::fake();
@@ -342,10 +344,9 @@ it('resets EPG cache state to prevent stale reads before dispatching GenerateEpg
 it('dispatches SyncPlexDvrJob after a successful playlist sync', function () {
     event(new SyncCompleted($this->playlist));
 
-    Bus::assertDispatched(
-        SyncPlexDvrJob::class,
-        fn (SyncPlexDvrJob $job): bool => $job->trigger === 'playlist_sync'
-    );
+    Bus::assertBatched(fn (PendingBatch $batch): bool => $batch->jobs
+        ->whereInstanceOf(SyncPlexDvrJob::class)
+        ->contains(fn (SyncPlexDvrJob $job): bool => $job->trigger === 'playlist_sync'));
 });
 
 it('does not dispatch SyncPlexDvrJob when playlist sync failed', function () {

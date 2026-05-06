@@ -4,8 +4,10 @@ namespace App\Sync;
 
 use App\Models\Playlist;
 use App\Models\SyncRun;
+use App\Sync\Contracts\BatchablePhase;
 use App\Sync\Contracts\ChainablePhase;
 use App\Sync\Contracts\SyncPhase;
+use Illuminate\Bus\Batch;
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Support\Facades\Bus;
@@ -30,12 +32,14 @@ use Throwable;
  *     `chainGroup` and dispatch them as a single `Bus::chain([...])`. Each
  *     phase's jobs are appended in declaration order so the queue runs them
  *     strictly sequentially.
+ *   - Collect jobs from consecutive {@see BatchablePhase} steps that share a
+ *     `parallelGroup` and dispatch them as a single `Bus::batch([...])` so
+ *     the queue may run them concurrently across workers.
  *
  * The orchestrator itself runs synchronously: the underlying phase work is
  * already queued (either dispatched fire-and-forget, or queued as part of an
- * assembled chain), so running phases inline does not block on actual job
- * execution. A future queue-batch runner (Step 7) will dispatch parallel
- * groups concurrently.
+ * assembled chain or batch), so running phases inline does not block on
+ * actual job execution.
  */
 class SyncOrchestrator
 {
@@ -93,6 +97,25 @@ class SyncOrchestrator
                 }
 
                 $context = $this->runChainGroup(
+                    array_slice($steps, $i, $end - $i + 1),
+                    $run,
+                    $playlist,
+                    $context,
+                );
+
+                $i = $end + 1;
+
+                continue;
+            }
+
+            if ($step->parallelGroup !== null) {
+                // Find the contiguous range of steps in this parallel group.
+                $end = $i;
+                while ($end + 1 < $count && $steps[$end + 1]->parallelGroup === $step->parallelGroup) {
+                    $end++;
+                }
+
+                $context = $this->runParallelGroup(
                     array_slice($steps, $i, $end - $i + 1),
                     $run,
                     $playlist,
@@ -219,6 +242,93 @@ class SyncOrchestrator
         return array_merge($context, [
             'chain_dispatched' => $contributors,
             'chain_job_count' => count($jobs),
+        ]);
+    }
+
+    /**
+     * Execute a parallel group: collect jobs from each {@see BatchablePhase}
+     * in the block, then dispatch the assembled `Bus::batch`. Each phase's
+     * lifecycle (markPhaseStarted/Completed/Skipped/Failed) is recorded as
+     * it contributes, mirroring dispatch-time semantics used by chain groups.
+     *
+     * If no phase contributes jobs (all skipped or all returned []), nothing
+     * is dispatched. A `batchJobs` failure on a `required: false` phase is
+     * logged and that phase is excluded from the batch; sibling phases still
+     * contribute. A failure on a `required: true` phase propagates and halts
+     * the orchestrator before dispatch.
+     *
+     * @param  array<int, PlanStep>  $steps
+     * @param  array<string, mixed>  $context
+     * @return array<string, mixed>
+     */
+    private function runParallelGroup(array $steps, SyncRun $run, Playlist $playlist, array $context): array
+    {
+        /** @var array<int, ShouldQueue> $jobs */
+        $jobs = [];
+        $contributors = [];
+
+        foreach ($steps as $step) {
+            /** @var BatchablePhase $phase */
+            $phase = $this->container->make($step->phaseClass);
+
+            if (! $phase->shouldRun($playlist)) {
+                $run->markPhaseSkipped($phase::slug(), reason: 'shouldRun returned false');
+
+                continue;
+            }
+
+            $run->markPhaseStarted($phase::slug());
+
+            try {
+                $contribution = $phase->batchJobs($run, $playlist, $context);
+            } catch (Throwable $e) {
+                $run->markPhaseFailed($phase::slug(), $e);
+
+                if ($step->required) {
+                    throw $e;
+                }
+
+                Log::warning('Sync parallel phase failed (optional, continuing)', [
+                    'sync_run_id' => $run->id,
+                    'phase' => $phase::slug(),
+                    'message' => $e->getMessage(),
+                ]);
+
+                continue;
+            }
+
+            foreach ($contribution as $job) {
+                $jobs[] = $job;
+            }
+
+            $contributors[] = $phase::slug();
+            $run->markPhaseCompleted($phase::slug());
+        }
+
+        $batchId = null;
+
+        if ($jobs !== []) {
+            $runId = $run->id;
+            $batch = Bus::batch($jobs)
+                ->name(sprintf('sync_run:%d:parallel', $runId))
+                ->allowFailures()
+                ->finally(function (Batch $batch) use ($runId): void {
+                    Log::info('Sync parallel batch finished', [
+                        'sync_run_id' => $runId,
+                        'batch_id' => $batch->id,
+                        'total_jobs' => $batch->totalJobs,
+                        'failed_jobs' => $batch->failedJobs,
+                    ]);
+                })
+                ->dispatch();
+
+            $batchId = $batch->id;
+        }
+
+        return array_merge($context, [
+            'batch_dispatched' => $contributors,
+            'batch_job_count' => count($jobs),
+            'batch_id' => $batchId,
         ]);
     }
 }

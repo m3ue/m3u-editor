@@ -20,6 +20,7 @@ use App\Models\CustomPlaylist;
 use App\Models\Group;
 use App\Models\Playlist;
 use App\Models\User;
+use Illuminate\Bus\PendingBatch;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
 
@@ -272,7 +273,9 @@ it('dispatches AutoSyncGroupsToCustomPlaylist for each enabled rule on completed
 
     event(new SyncCompleted($this->playlist));
 
-    Bus::assertDispatched(AutoSyncGroupsToCustomPlaylist::class, 2);
+    Bus::assertBatched(fn (PendingBatch $batch): bool => $batch->jobs
+        ->whereInstanceOf(AutoSyncGroupsToCustomPlaylist::class)
+        ->count() === 2);
 });
 
 it('skips disabled auto-sync rules', function () {

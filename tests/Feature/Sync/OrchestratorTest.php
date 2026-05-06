@@ -19,6 +19,7 @@ use App\Enums\SyncRunStatus;
 use App\Models\Playlist;
 use App\Models\SyncRun;
 use App\Models\User;
+use App\Sync\Contracts\BatchablePhase;
 use App\Sync\Phases\AbstractPhase;
 use App\Sync\Phases\AutoSyncToCustomPhase;
 use App\Sync\Phases\ChannelScanPhase;
@@ -34,7 +35,14 @@ use App\Sync\Plans\PlaylistPostSyncPlan;
 use App\Sync\PlanStep;
 use App\Sync\SyncOrchestrator;
 use App\Sync\SyncPlan;
+use Illuminate\Bus\Batchable;
+use Illuminate\Bus\PendingBatch;
+use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Queue\InteractsWithQueue;
+use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Bus;
 
 uses(RefreshDatabase::class);
@@ -65,7 +73,7 @@ it('builds a plan with phase steps in declaration order', function () {
 it('records a parallel group id on grouped phases', function () {
     $plan = SyncPlan::make('test')
         ->phase(FakeSequentialPhaseA::class)
-        ->parallel([FakeSequentialPhaseB::class, FakeSequentialPhaseC::class]);
+        ->parallel([FakeBatchablePhaseA::class, FakeBatchablePhaseB::class]);
 
     $steps = $plan->steps();
     expect($steps)->toHaveCount(3);
@@ -74,6 +82,11 @@ it('records a parallel group id on grouped phases', function () {
     expect($steps[2]->parallelGroup)->toBe($steps[1]->parallelGroup);
     // Parallel phases are optional by default.
     expect($steps[1]->required)->toBeFalse();
+});
+
+it('rejects non-BatchablePhase classes when building a parallel group', function () {
+    expect(fn () => SyncPlan::make('test')->parallel([FakeSequentialPhaseA::class]))
+        ->toThrow(InvalidArgumentException::class);
 });
 
 it('rejects non-SyncPhase classes when building a plan', function () {
@@ -183,6 +196,112 @@ it('continues past optional phase failures and marks run completed', function ()
     expect($fresh->status)->toBe(SyncRunStatus::Completed);
     expect($fresh->phaseStatus(FakeFailingPhase::slug()))->toBe(SyncPhaseStatus::Failed);
     expect($fresh->phaseStatus(FakeSequentialPhaseA::slug()))->toBe(SyncPhaseStatus::Completed);
+});
+
+// -----------------------------------------------------------------------------
+// SyncOrchestrator parallel groups (Bus::batch)
+// -----------------------------------------------------------------------------
+
+it('dispatches a single Bus::batch with all jobs from a parallel group', function () {
+    FakeBatchablePhaseA::reset();
+    FakeBatchablePhaseB::reset();
+
+    $run = SyncRun::openFor($this->playlist);
+    $plan = SyncPlan::make('test')
+        ->parallel([FakeBatchablePhaseA::class, FakeBatchablePhaseB::class]);
+
+    app(SyncOrchestrator::class)->execute($run, $plan);
+
+    expect(FakeBatchablePhaseA::$batchJobsCalled)->toBe(1);
+    expect(FakeBatchablePhaseB::$batchJobsCalled)->toBe(1);
+
+    Bus::assertBatched(function (PendingBatch $batch) use ($run): bool {
+        return $batch->name === "sync_run:{$run->id}:parallel"
+            && $batch->jobs->count() === 3;
+    });
+    Bus::assertBatchCount(1);
+
+    $fresh = $run->fresh();
+    expect($fresh->status)->toBe(SyncRunStatus::Completed);
+    expect($fresh->phaseStatus(FakeBatchablePhaseA::slug()))->toBe(SyncPhaseStatus::Completed);
+    expect($fresh->phaseStatus(FakeBatchablePhaseB::slug()))->toBe(SyncPhaseStatus::Completed);
+});
+
+it('marks a parallel-group phase Skipped and excludes it from the batch', function () {
+    FakeBatchablePhaseA::reset();
+    FakeBatchableSkippablePhase::$shouldRun = false;
+
+    $run = SyncRun::openFor($this->playlist);
+    $plan = SyncPlan::make('test')
+        ->parallel([FakeBatchablePhaseA::class, FakeBatchableSkippablePhase::class]);
+
+    app(SyncOrchestrator::class)->execute($run, $plan);
+
+    Bus::assertBatched(function (PendingBatch $batch): bool {
+        // Only PhaseA's 2 jobs; the skippable phase contributed nothing.
+        return $batch->jobs->count() === 2
+            && $batch->jobs->every(fn ($job) => in_array($job->tag, ['a1', 'a2'], true));
+    });
+
+    $fresh = $run->fresh();
+    expect($fresh->phaseStatus(FakeBatchableSkippablePhase::slug()))->toBe(SyncPhaseStatus::Skipped);
+    expect($fresh->phaseStatus(FakeBatchablePhaseA::slug()))->toBe(SyncPhaseStatus::Completed);
+});
+
+it('skips dispatching when no parallel-group phase contributes jobs', function () {
+    FakeBatchableSkippablePhase::$shouldRun = false;
+
+    $run = SyncRun::openFor($this->playlist);
+    $plan = SyncPlan::make('test')
+        ->parallel([FakeBatchableSkippablePhase::class]);
+
+    app(SyncOrchestrator::class)->execute($run, $plan);
+
+    Bus::assertNothingBatched();
+    expect($run->fresh()->status)->toBe(SyncRunStatus::Completed);
+});
+
+it('continues past an optional batch-phase failure and dispatches surviving jobs', function () {
+    FakeBatchablePhaseA::reset();
+    FakeBatchableFailingPhase::$message = 'broken';
+
+    $run = SyncRun::openFor($this->playlist);
+    $plan = SyncPlan::make('test')
+        ->parallel([FakeBatchableFailingPhase::class, FakeBatchablePhaseA::class]);
+
+    app(SyncOrchestrator::class)->execute($run, $plan);
+
+    Bus::assertBatched(function (PendingBatch $batch): bool {
+        return $batch->jobs->count() === 2; // only PhaseA contributed
+    });
+
+    $fresh = $run->fresh();
+    expect($fresh->status)->toBe(SyncRunStatus::Completed);
+    expect($fresh->phaseStatus(FakeBatchableFailingPhase::slug()))->toBe(SyncPhaseStatus::Failed);
+    expect($fresh->phaseStatus(FakeBatchablePhaseA::slug()))->toBe(SyncPhaseStatus::Completed);
+    expect($fresh->errors)->not->toBeEmpty();
+});
+
+it('halts and marks run failed when a required parallel phase throws', function () {
+    FakeBatchablePhaseA::reset();
+    FakeBatchableFailingPhase::$message = 'required boom';
+
+    $run = SyncRun::openFor($this->playlist);
+    $plan = SyncPlan::make('test')
+        ->parallel(
+            [FakeBatchableFailingPhase::class, FakeBatchablePhaseA::class],
+            required: true,
+        );
+
+    app(SyncOrchestrator::class)->execute($run, $plan);
+
+    Bus::assertNothingBatched();
+
+    $fresh = $run->fresh();
+    expect($fresh->status)->toBe(SyncRunStatus::Failed);
+    expect($fresh->phaseStatus(FakeBatchableFailingPhase::slug()))->toBe(SyncPhaseStatus::Failed);
+    // PhaseA never got to contribute because the failure halted the orchestrator.
+    expect(FakeBatchablePhaseA::$batchJobsCalled)->toBe(0);
 });
 
 // -----------------------------------------------------------------------------
@@ -357,5 +476,117 @@ class FakeContextReaderPhase extends AbstractPhase
         self::$seenContext = $context;
 
         return null;
+    }
+}
+
+class FakeBatchableJob implements ShouldQueue
+{
+    use Batchable;
+    use Dispatchable;
+    use InteractsWithQueue;
+    use Queueable;
+    use SerializesModels;
+
+    public function __construct(public readonly string $tag) {}
+
+    public function handle(): void {}
+}
+
+class FakeBatchablePhaseA extends AbstractPhase implements BatchablePhase
+{
+    public static int $batchJobsCalled = 0;
+
+    public static function slug(): string
+    {
+        return 'fake_batch_a';
+    }
+
+    public static function reset(): void
+    {
+        self::$batchJobsCalled = 0;
+    }
+
+    protected function execute($run, $playlist, $context): ?array
+    {
+        return null;
+    }
+
+    public function batchJobs($run, $playlist, array $context = []): array
+    {
+        self::$batchJobsCalled++;
+
+        return [new FakeBatchableJob('a1'), new FakeBatchableJob('a2')];
+    }
+}
+
+class FakeBatchablePhaseB extends AbstractPhase implements BatchablePhase
+{
+    public static int $batchJobsCalled = 0;
+
+    public static function slug(): string
+    {
+        return 'fake_batch_b';
+    }
+
+    public static function reset(): void
+    {
+        self::$batchJobsCalled = 0;
+    }
+
+    protected function execute($run, $playlist, $context): ?array
+    {
+        return null;
+    }
+
+    public function batchJobs($run, $playlist, array $context = []): array
+    {
+        self::$batchJobsCalled++;
+
+        return [new FakeBatchableJob('b1')];
+    }
+}
+
+class FakeBatchableSkippablePhase extends AbstractPhase implements BatchablePhase
+{
+    public static bool $shouldRun = true;
+
+    public static function slug(): string
+    {
+        return 'fake_batch_skip';
+    }
+
+    public function shouldRun(Playlist $playlist): bool
+    {
+        return self::$shouldRun;
+    }
+
+    protected function execute($run, $playlist, $context): ?array
+    {
+        return null;
+    }
+
+    public function batchJobs($run, $playlist, array $context = []): array
+    {
+        return [new FakeBatchableJob('skip_should_not_appear')];
+    }
+}
+
+class FakeBatchableFailingPhase extends AbstractPhase implements BatchablePhase
+{
+    public static string $message = 'batch boom';
+
+    public static function slug(): string
+    {
+        return 'fake_batch_fail';
+    }
+
+    protected function execute($run, $playlist, $context): ?array
+    {
+        return null;
+    }
+
+    public function batchJobs($run, $playlist, array $context = []): array
+    {
+        throw new RuntimeException(self::$message);
     }
 }

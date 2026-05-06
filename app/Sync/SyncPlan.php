@@ -3,6 +3,7 @@
 namespace App\Sync;
 
 use App\Models\SyncRun;
+use App\Sync\Contracts\BatchablePhase;
 use App\Sync\Contracts\ChainablePhase;
 use App\Sync\Contracts\SyncPhase;
 use InvalidArgumentException;
@@ -56,13 +57,15 @@ final class SyncPlan
     }
 
     /**
-     * Declare a parallel group of phases. Steps in the group share a parallel
-     * group id but the current orchestrator still runs them sequentially in
-     * declaration order. Any phase in a parallel group is treated as
-     * `required: false` by default since one failure should not block its
-     * sibling phases.
+     * Declare a parallel group of phases. Each phase must implement
+     * {@see BatchablePhase} and contributes jobs to a single `Bus::batch`
+     * the orchestrator dispatches at the end of the block. The queue runs
+     * the contributed jobs concurrently with no ordering between them.
      *
-     * @param  array<int, class-string<SyncPhase>>  $phaseClasses
+     * Phases in a parallel group are treated as `required: false` by default
+     * since one failure should not block its sibling phases.
+     *
+     * @param  array<int, class-string<BatchablePhase>>  $phaseClasses
      */
     public function parallel(array $phaseClasses, bool $required = false): self
     {
@@ -73,7 +76,7 @@ final class SyncPlan
         $groupId = 'g'.(count($this->steps) + 1);
 
         foreach ($phaseClasses as $class) {
-            $this->assertPhaseClass($class);
+            $this->assertBatchablePhaseClass($class);
             $this->steps[] = new PlanStep($class, required: $required, parallelGroup: $groupId);
         }
 
@@ -148,6 +151,18 @@ final class SyncPlan
         if (! is_subclass_of($class, ChainablePhase::class)) {
             throw new InvalidArgumentException(
                 "Phase class [{$class}] used in chain() must implement ".ChainablePhase::class,
+            );
+        }
+    }
+
+    /**
+     * @param  class-string  $class
+     */
+    private function assertBatchablePhaseClass(string $class): void
+    {
+        if (! is_subclass_of($class, BatchablePhase::class)) {
+            throw new InvalidArgumentException(
+                "Phase class [{$class}] used in parallel() must implement ".BatchablePhase::class,
             );
         }
     }
