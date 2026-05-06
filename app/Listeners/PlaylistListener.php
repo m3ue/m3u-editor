@@ -6,9 +6,9 @@ use App\Enums\Status;
 use App\Events\PlaylistCreated;
 use App\Events\PlaylistDeleted;
 use App\Events\PlaylistUpdated;
-use App\Jobs\ProcessM3uImport;
 use App\Jobs\RunPostProcess;
 use App\Services\ProfileService;
+use App\Sync\PlaylistSyncDispatcher;
 use Illuminate\Support\Facades\Log;
 
 class PlaylistListener
@@ -54,7 +54,11 @@ class PlaylistListener
             $this->ensurePrimaryProfileExists($playlist);
         }
 
-        dispatch(new ProcessM3uImport(playlist: $playlist, isNew: true));
+        app(PlaylistSyncDispatcher::class)->dispatch(
+            playlist: $playlist,
+            trigger: PlaylistSyncDispatcher::TRIGGER_PLAYLIST_CREATED,
+            isNew: true,
+        );
         $playlist->postProcesses()->where([
             ['event', 'created'],
             ['enabled', true],

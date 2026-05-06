@@ -26,6 +26,8 @@ use App\Sync\Phases\FindReplaceAndSortAlphaPhase;
 use App\Sync\Phases\PlexDvrSyncPhase;
 use App\Sync\Phases\PluginDispatchPhase;
 use App\Sync\Phases\PostProcessPhase;
+use App\Sync\Phases\StrmPostProcessPhase;
+use App\Sync\Phases\StrmSyncPhase;
 use App\Sync\Plans\PlaylistPostSyncPlan;
 use App\Sync\PlanStep;
 use App\Sync\SyncOrchestrator;
@@ -192,6 +194,8 @@ it('builds the canonical post-sync plan with the expected phases', function () {
     expect($plan->name)->toBe('playlist.post_sync');
     expect($classes)->toBe([
         FindReplaceAndSortAlphaPhase::class,
+        StrmSyncPhase::class,
+        StrmPostProcessPhase::class,
         ChannelScanPhase::class,
         AutoSyncToCustomPhase::class,
         PlexDvrSyncPhase::class,

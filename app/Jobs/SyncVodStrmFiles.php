@@ -60,6 +60,7 @@ class SyncVodStrmFiles implements ShouldQueue
         public ?int $currentBatch = null,
         public bool $isCleanupJob = false,
         public ?array $channel_ids = null,
+        public bool $suppressPostProcessEvents = false,
     ) {
         // Run file synces on the dedicated queue
         $this->onQueue('file_sync');
@@ -582,9 +583,12 @@ class SyncVodStrmFiles implements ShouldQueue
             }
         }
 
-        // Fire vod_stream_files_synced post-processes for the specific playlist
+        // Fire vod_stream_files_synced post-processes for the specific playlist,
+        // unless suppressed by the orchestrator (StrmPostProcessPhase owns
+        // the dispatch within an orchestrated sync to keep the SyncRun ledger
+        // accurate and avoid double-firing).
         $playlistId = $this->resolvePlaylistId();
-        if (! $this->all_playlists && $playlistId) {
+        if (! $this->suppressPostProcessEvents && ! $this->all_playlists && $playlistId) {
             $playlist = $this->playlist ?? Playlist::find($playlistId);
             if ($playlist) {
                 dispatch(new FireStreamFilesSyncedEvent($playlist, 'vod_stream_files_synced'));

@@ -77,22 +77,19 @@ class ProcessVodChannelsComplete implements ShouldQueue
         }
 
         if ($this->playlist->auto_sync_vod_stream_files) {
-            Log::info('VOD Complete: Queuing STRM sync for playlist ID '.$this->playlist->id);
-            $hasFindReplaceRules = collect($this->playlist->find_replace_rules ?? [])
-                ->contains(fn (array $rule): bool => $rule['enabled'] ?? false);
-            if ($hasFindReplaceRules) {
-                // Find & Replace runs concurrently with VOD metadata fetch (dispatched by
-                // SyncListener). Chain it here too so STRM sync is guaranteed to use
-                // the processed title_custom values, not stale ones.
-                $postJobs[] = new RunPlaylistFindReplaceRules($this->playlist);
-            }
-            $postJobs[] = new SyncVodStrmFiles(
-                playlist: $this->playlist,
-            );
+            // STRM sync is now orchestrated post-sync via StrmSyncPhase, which
+            // chains it after FindReplaceAndSortAlphaPhase so `.strm` files
+            // observe processed `title_custom` values. Nothing to dispatch here.
+            Log::info('VOD Complete: STRM sync deferred to orchestrator (StrmSyncPhase)', [
+                'playlist_id' => $this->playlist->id,
+            ]);
         }
 
-        // Append the completion job (FireSyncCompletedEvent or TriggerSeriesImport) as the
-        // very last step so post-processing and series import never start before STRM sync finishes.
+        // Append the completion job (FireSyncCompletedEvent or TriggerSeriesImport)
+        // as the final chain step so SyncListener / TriggerSeriesImport only run
+        // after the TMDB fetch (if any) finishes. STRM sync no longer participates
+        // in this chain — it is dispatched by StrmSyncPhase after SyncListener
+        // hands off to the orchestrator post-completion.
         if (! empty($postJobs)) {
             if ($this->completionJob) {
                 $postJobs[] = $this->completionJob;

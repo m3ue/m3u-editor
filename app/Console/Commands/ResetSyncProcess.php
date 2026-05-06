@@ -5,9 +5,9 @@ namespace App\Console\Commands;
 use App\Enums\Status;
 use App\Jobs\GenerateEpgCache;
 use App\Jobs\ProcessEpgImport;
-use App\Jobs\ProcessM3uImport;
 use App\Models\Epg;
 use App\Models\Playlist;
+use App\Sync\PlaylistSyncDispatcher;
 use Filament\Notifications\Notification;
 use Illuminate\Console\Command;
 
@@ -52,7 +52,11 @@ class ResetSyncProcess extends Command
             // Restart the sync process
             if ($playlist->auto_sync) {
                 $this->line("  → Restarting sync for \"{$playlist->name}\"");
-                dispatch(new ProcessM3uImport($playlist, force: true));
+                app(PlaylistSyncDispatcher::class)->dispatch(
+                    playlist: $playlist,
+                    trigger: PlaylistSyncDispatcher::TRIGGER_CONSOLE_RESET_STUCK,
+                    force: true,
+                );
             } else {
                 $playlist->update([
                     'processing' => [

@@ -4,9 +4,9 @@ namespace App\Http\Controllers;
 
 use App\Facades\PlaylistFacade;
 use App\Jobs\MergeChannels;
-use App\Jobs\ProcessM3uImport;
 use App\Models\Playlist;
 use App\Services\M3uProxyService;
+use App\Sync\PlaylistSyncDispatcher;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -40,7 +40,11 @@ class PlaylistController extends Controller
         }
 
         // Refresh the playlist
-        dispatch(new ProcessM3uImport($playlist, $request->force ?? true));
+        app(PlaylistSyncDispatcher::class)->dispatch(
+            playlist: $playlist,
+            trigger: PlaylistSyncDispatcher::TRIGGER_API_REFRESH,
+            force: $request->force ?? true,
+        );
 
         return response()->json([
             'message' => "Playlist \"{$playlist->name}\" is currently being synced...",

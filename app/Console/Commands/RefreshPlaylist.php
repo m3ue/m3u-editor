@@ -3,8 +3,8 @@
 namespace App\Console\Commands;
 
 use App\Enums\Status;
-use App\Jobs\ProcessM3uImport;
 use App\Models\Playlist;
+use App\Sync\PlaylistSyncDispatcher;
 use Cron\CronExpression;
 use Illuminate\Console\Command;
 
@@ -34,7 +34,11 @@ class RefreshPlaylist extends Command
             $force = $this->argument('force') ?? false;
             $this->info("Refreshing playlist with ID: {$playlistId}");
             $playlist = Playlist::findOrFail($playlistId);
-            dispatch(new ProcessM3uImport($playlist, (bool) $force));
+            app(PlaylistSyncDispatcher::class)->dispatch(
+                playlist: $playlist,
+                trigger: PlaylistSyncDispatcher::TRIGGER_CONSOLE_REFRESH,
+                force: (bool) $force,
+            );
             $this->info('Dispatched playlist for refresh');
         } else {
             $this->info('Refreshing all playlists');
@@ -91,7 +95,11 @@ class RefreshPlaylist extends Command
 
                 if (now() >= $nextDue) {
                     $count++;
-                    dispatch(new ProcessM3uImport($playlist, $force));
+                    app(PlaylistSyncDispatcher::class)->dispatch(
+                        playlist: $playlist,
+                        trigger: PlaylistSyncDispatcher::TRIGGER_CONSOLE_REFRESH_SCHEDULED,
+                        force: $force,
+                    );
                 }
             });
             $this->info('Dispatched '.$count.' playlists for refresh');

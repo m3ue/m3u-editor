@@ -2,17 +2,24 @@
 
 namespace App\Sync;
 
+use App\Sync\Contracts\ChainablePhase;
 use App\Sync\Contracts\SyncPhase;
 
 /**
  * Immutable description of a single step in a {@see SyncPlan}.
  *
  * A step references the phase class to instantiate, whether failure should
- * halt the run (`required`), and an optional group id used to indicate that
- * the step is a member of a parallel group. The orchestrator is currently
- * sequential — group ids are recorded for future use when a queue-batch
- * parallel runner lands (Step 7), but execution order today is the order in
- * which steps were appended to the plan.
+ * halt the run (`required`), an optional parallel group id, and an optional
+ * chain group id.
+ *
+ * - `parallelGroup` (legacy): the orchestrator currently runs grouped phases
+ *   sequentially in declaration order; the future queue-batch runner will
+ *   fan them out concurrently.
+ * - `chainGroup`: phases sharing a chain group must implement
+ *   {@see ChainablePhase} and contribute jobs to a single
+ *   `Bus::chain([...])` that the orchestrator dispatches once at the end of
+ *   the chain block. Used to enforce strict ordering across queue workers
+ *   (e.g. STRM sync must run only after Find/Replace finishes).
  */
 final class PlanStep
 {
@@ -23,5 +30,6 @@ final class PlanStep
         public readonly string $phaseClass,
         public readonly bool $required = true,
         public readonly ?string $parallelGroup = null,
+        public readonly ?string $chainGroup = null,
     ) {}
 }

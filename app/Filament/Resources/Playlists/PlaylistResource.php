@@ -16,7 +16,6 @@ use App\Filament\Tables\SourceCategoriesTable;
 use App\Filament\Tables\SourceGroupsTable;
 use App\Jobs\CopyAttributesToPlaylist;
 use App\Jobs\DuplicatePlaylist;
-use App\Jobs\ProcessM3uImport;
 use App\Jobs\ProcessM3uImportSeries;
 use App\Jobs\ProcessVodChannels;
 use App\Jobs\SyncMediaServer;
@@ -44,6 +43,7 @@ use App\Services\DateFormatService;
 use App\Services\EpgCacheService;
 use App\Services\M3uProxyService;
 use App\Services\ProfileService;
+use App\Sync\PlaylistSyncDispatcher;
 use App\Tables\Columns\ProgressColumn;
 use App\Traits\HasUserFiltering;
 use Carbon\Carbon;
@@ -412,8 +412,11 @@ class PlaylistResource extends Resource implements CopilotResource
                                     'status' => Status::Processing,
                                     'progress' => 0,
                                 ]);
-                                app('Illuminate\Contracts\Bus\Dispatcher')
-                                    ->dispatch(new ProcessM3uImport($record, force: true));
+                                app(PlaylistSyncDispatcher::class)->dispatch(
+                                    playlist: $record,
+                                    trigger: PlaylistSyncDispatcher::TRIGGER_FILAMENT_BULK_PROCESS,
+                                    force: true,
+                                );
                             }
                         })->after(function () {
                             Notification::make()
@@ -513,8 +516,11 @@ class PlaylistResource extends Resource implements CopilotResource
                             'status' => Status::Processing,
                             'progress' => 0,
                         ]);
-                        app('Illuminate\Contracts\Bus\Dispatcher')
-                            ->dispatch(new ProcessM3uImport($record, force: true));
+                        app(PlaylistSyncDispatcher::class)->dispatch(
+                            playlist: $record,
+                            trigger: PlaylistSyncDispatcher::TRIGGER_FILAMENT_PROCESS,
+                            force: true,
+                        );
                     })->after(function ($record) {
                         $isMediaServer = in_array($record->source_type, [PlaylistSourceType::Emby, PlaylistSourceType::Jellyfin]);
                         $message = $isMediaServer
@@ -2941,8 +2947,11 @@ class PlaylistResource extends Resource implements CopilotResource
                             'progress' => 0,
                             'vod_progress' => 0,
                         ]);
-                        app('Illuminate\Contracts\Bus\Dispatcher')
-                            ->dispatch(new ProcessM3uImport($record, force: true));
+                        app(PlaylistSyncDispatcher::class)->dispatch(
+                            playlist: $record,
+                            trigger: PlaylistSyncDispatcher::TRIGGER_FILAMENT_PROCESS,
+                            force: true,
+                        );
                     })->after(function ($record) {
                         $isMediaServer = in_array($record->source_type, [PlaylistSourceType::Emby, PlaylistSourceType::Jellyfin]);
                         $message = $isMediaServer

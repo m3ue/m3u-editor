@@ -5,7 +5,6 @@ namespace App\Jobs;
 use App\Models\Playlist;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
-use Illuminate\Support\Facades\Bus;
 
 class ProcessM3uImportVod implements ShouldQueue
 {
@@ -35,27 +34,18 @@ class ProcessM3uImportVod implements ShouldQueue
         if ($playlist->auto_fetch_vod_metadata) {
             // Metadata fetch dispatches its own internal chain (ProcessVodChannelsChunk × N →
             // ProcessVodChannelsComplete). ProcessVodChannelsComplete will then dispatch TMDB
-            // fetch and SyncVodStrmFiles in sequence once all chunks are done — no race condition.
+            // fetch in sequence once all chunks are done. STRM sync (if enabled) is now
+            // orchestrated post-sync via StrmSyncPhase rather than chained here.
             dispatch(new ProcessVodChannels(
                 playlist: $playlist,
                 updateProgress: false,
                 completionJob: $this->completionJob,
             ));
-        } elseif ($playlist->auto_sync_vod_stream_files) {
-            // No metadata fetch, but stream file sync was requested. Dispatch directly since
-            // ProcessVodChannelsComplete won't run (no metadata chain).
-            $hasFindReplaceRules = collect($playlist->find_replace_rules ?? [])
-                ->contains(fn (array $rule): bool => $rule['enabled'] ?? false);
-
-            $strmJobs = $hasFindReplaceRules
-                ? [new RunPlaylistFindReplaceRules($playlist), new SyncVodStrmFiles(playlist: $playlist)]
-                : [new SyncVodStrmFiles(playlist: $playlist)];
-
-            if ($this->completionJob) {
-                $strmJobs[] = $this->completionJob;
-            }
-
-            Bus::chain($strmJobs)->dispatch();
+        } elseif ($this->completionJob) {
+            // No metadata fetch needed; STRM sync (if enabled) is handled by
+            // StrmSyncPhase post-sync. Just fire the completion job so the
+            // sync pipeline can advance.
+            dispatch($this->completionJob);
         }
 
         // All done! Nothing else to do ;)

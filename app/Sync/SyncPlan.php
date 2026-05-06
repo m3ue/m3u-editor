@@ -3,6 +3,7 @@
 namespace App\Sync;
 
 use App\Models\SyncRun;
+use App\Sync\Contracts\ChainablePhase;
 use App\Sync\Contracts\SyncPhase;
 use InvalidArgumentException;
 
@@ -80,6 +81,41 @@ final class SyncPlan
     }
 
     /**
+     * Declare a chain block: each phase in the block must implement
+     * {@see ChainablePhase} and contributes jobs to a single `Bus::chain`
+     * the orchestrator dispatches at the end of the block. Strict ordering
+     * across queue workers is preserved (the queue runs the next chained
+     * job only after the previous one completes).
+     *
+     * Use this when downstream phases depend on side effects of an earlier
+     * phase's queued work (e.g. STRM sync must observe processed
+     * `title_custom` values written by Find/Replace).
+     *
+     * Phases in a chain block are treated as `required: false` by default
+     * because a single failure in the chain (e.g. F/R failing) should not
+     * be allowed to halt unrelated post-sync work; the failure is recorded
+     * on the SyncRun's error log and the chain itself stops at the failed
+     * job (Bus::chain semantics).
+     *
+     * @param  array<int, class-string<ChainablePhase>>  $phaseClasses
+     */
+    public function chain(array $phaseClasses, bool $required = false): self
+    {
+        if (empty($phaseClasses)) {
+            return $this;
+        }
+
+        $groupId = 'c'.(count($this->steps) + 1);
+
+        foreach ($phaseClasses as $class) {
+            $this->assertChainablePhaseClass($class);
+            $this->steps[] = new PlanStep($class, required: $required, chainGroup: $groupId);
+        }
+
+        return $this;
+    }
+
+    /**
      * @return array<int, PlanStep>
      */
     public function steps(): array
@@ -100,6 +136,18 @@ final class SyncPlan
         if (! is_subclass_of($class, SyncPhase::class)) {
             throw new InvalidArgumentException(
                 "Phase class [{$class}] must implement ".SyncPhase::class,
+            );
+        }
+    }
+
+    /**
+     * @param  class-string  $class
+     */
+    private function assertChainablePhaseClass(string $class): void
+    {
+        if (! is_subclass_of($class, ChainablePhase::class)) {
+            throw new InvalidArgumentException(
+                "Phase class [{$class}] used in chain() must implement ".ChainablePhase::class,
             );
         }
     }
