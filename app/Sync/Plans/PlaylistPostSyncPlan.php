@@ -2,6 +2,7 @@
 
 namespace App\Sync\Plans;
 
+use App\Jobs\CheckSeriesImportProgress;
 use App\Jobs\ProcessM3uImportVod;
 use App\Jobs\ProcessVodChannelsComplete;
 use App\Listeners\SyncListener;
@@ -11,6 +12,8 @@ use App\Sync\Phases\FindReplaceAndSortAlphaPhase;
 use App\Sync\Phases\PlexDvrSyncPhase;
 use App\Sync\Phases\PluginDispatchPhase;
 use App\Sync\Phases\PostProcessPhase;
+use App\Sync\Phases\SeriesStrmPostProcessPhase;
+use App\Sync\Phases\SeriesStrmSyncPhase;
 use App\Sync\Phases\StrmPostProcessPhase;
 use App\Sync\Phases\StrmSyncPhase;
 use App\Sync\SyncPlan;
@@ -22,10 +25,15 @@ use App\Sync\SyncPlan;
  *   1. **Chain block** (strict ordering across queue workers):
  *      a. Find/Replace + Sort Alpha — must run before any work that depends
  *         on processed channel names.
- *      b. STRM sync — writes `.strm` files using the processed
+ *      b. VOD STRM sync — writes `.strm` files using the processed
  *         `title_custom` values from F/R.
- *      c. STRM post-process — fires `vod_stream_files_synced` post-processes
- *         only after STRM finishes.
+ *      c. VOD STRM post-process — fires `vod_stream_files_synced`
+ *         post-processes only after VOD STRM finishes.
+ *      d. Series STRM sync — writes series `.strm` files (depends on F/R for
+ *         processed series/episode names; runs after VOD STRM so the file
+ *         system isn't hit by both at once).
+ *      e. Series STRM post-process — fires `series_stream_files_synced`
+ *         post-processes only after Series STRM finishes.
  *   2. Channel Scan (merge -> scrubbers -> probe chain).
  *   3. Auto-sync to custom playlists.
  *   4. Plex DVR sync (lineup may have changed).
@@ -34,8 +42,9 @@ use App\Sync\SyncPlan;
  *
  * The chain block replaces the previous eager F/R + STRM dispatches inside
  * {@see ProcessVodChannelsComplete} and
- * {@see ProcessM3uImportVod}: ordering is now a property of the
- * plan, not buried in job-level `Bus::chain` calls.
+ * {@see ProcessM3uImportVod}, plus the inline series STRM dispatch that lived
+ * in {@see CheckSeriesImportProgress}: ordering is now a property
+ * of the plan, not buried in job-level `Bus::chain` calls.
  *
  * Phases 3-6 are independent of each other (no shared data flow), so they're
  * declared in a parallel group. The current orchestrator still runs them in
@@ -56,6 +65,8 @@ final class PlaylistPostSyncPlan
                 FindReplaceAndSortAlphaPhase::class,
                 StrmSyncPhase::class,
                 StrmPostProcessPhase::class,
+                SeriesStrmSyncPhase::class,
+                SeriesStrmPostProcessPhase::class,
             ])
             ->phase(ChannelScanPhase::class, required: false)
             ->parallel([

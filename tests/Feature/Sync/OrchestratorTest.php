@@ -26,6 +26,8 @@ use App\Sync\Phases\FindReplaceAndSortAlphaPhase;
 use App\Sync\Phases\PlexDvrSyncPhase;
 use App\Sync\Phases\PluginDispatchPhase;
 use App\Sync\Phases\PostProcessPhase;
+use App\Sync\Phases\SeriesStrmPostProcessPhase;
+use App\Sync\Phases\SeriesStrmSyncPhase;
 use App\Sync\Phases\StrmPostProcessPhase;
 use App\Sync\Phases\StrmSyncPhase;
 use App\Sync\Plans\PlaylistPostSyncPlan;
@@ -196,6 +198,8 @@ it('builds the canonical post-sync plan with the expected phases', function () {
         FindReplaceAndSortAlphaPhase::class,
         StrmSyncPhase::class,
         StrmPostProcessPhase::class,
+        SeriesStrmSyncPhase::class,
+        SeriesStrmPostProcessPhase::class,
         ChannelScanPhase::class,
         AutoSyncToCustomPhase::class,
         PlexDvrSyncPhase::class,

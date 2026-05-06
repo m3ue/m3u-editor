@@ -58,6 +58,7 @@ class SyncSeriesStrmFiles implements ShouldQueue
         public ?int $currentBatch = null,
         public bool $isCleanupJob = false, // Special flag for final cleanup
         public ?array $series_ids = null,
+        public bool $suppressPostProcessEvents = false,
     ) {
         // Run file synces on the dedicated queue
         $this->onQueue('file_sync');
@@ -291,8 +292,10 @@ class SyncSeriesStrmFiles implements ShouldQueue
             }
         }
 
-        // Fire series_stream_files_synced post-processes for the specific playlist
-        if (! $this->all_playlists && $this->playlist_id) {
+        // Fire series_stream_files_synced post-processes for the specific playlist.
+        // Suppressed when the orchestrator's StrmPostProcessPhase owns the dispatch
+        // (see SeriesStrmPostProcessPhase) — standalone dispatches keep firing inline.
+        if (! $this->suppressPostProcessEvents && ! $this->all_playlists && $this->playlist_id) {
             $playlist = Playlist::find($this->playlist_id);
             if ($playlist) {
                 dispatch(new FireStreamFilesSyncedEvent($playlist, 'series_stream_files_synced'));

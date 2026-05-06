@@ -124,10 +124,13 @@ it('dispatches nothing when the playlist has no post-processes', function () {
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
-// CheckSeriesImportProgress — dispatches SyncSeriesStrmFiles (event fires from inside it)
+// CheckSeriesImportProgress — series STRM is now orchestrated post-sync
+// (SeriesStrmSyncPhase). The completion chain only contains TMDB fetch (if
+// enabled) and FireSyncCompletedEvent; the orchestrator picks up STRM after
+// FireSyncCompletedEvent fans out to SyncListener.
 // ──────────────────────────────────────────────────────────────────────────────
 
-it('chains SyncSeriesStrmFiles when series STRM sync is enabled', function () {
+it('does not chain SyncSeriesStrmFiles even when sync_stream_files is true (orchestrator owns it)', function () {
     $mock = Mockery::mock(GeneralSettings::class);
     $mock->tmdb_auto_lookup_on_import = false;
     app()->instance(GeneralSettings::class, $mock);
@@ -141,7 +144,7 @@ it('chains SyncSeriesStrmFiles when series STRM sync is enabled', function () {
         sync_stream_files: true,
     ))->handle(app(GeneralSettings::class));
 
-    Bus::assertChained([SyncSeriesStrmFiles::class, FireSyncCompletedEvent::class]);
+    Bus::assertNotDispatched(SyncSeriesStrmFiles::class);
     Bus::assertNotDispatched(FireStreamFilesSyncedEvent::class);
 });
 
@@ -163,7 +166,7 @@ it('does not dispatch SyncSeriesStrmFiles when series STRM sync is disabled', fu
     Bus::assertNotDispatched(FireStreamFilesSyncedEvent::class);
 });
 
-it('chains TMDB fetch before SyncSeriesStrmFiles', function () {
+it('chains TMDB fetch then FireSyncCompletedEvent (STRM deferred to orchestrator)', function () {
     $mock = Mockery::mock(GeneralSettings::class);
     $mock->tmdb_auto_lookup_on_import = true;
     app()->instance(GeneralSettings::class, $mock);
@@ -177,7 +180,8 @@ it('chains TMDB fetch before SyncSeriesStrmFiles', function () {
         sync_stream_files: true,
     ))->handle(app(GeneralSettings::class));
 
-    Bus::assertChained([FetchTmdbIds::class, SyncSeriesStrmFiles::class, FireSyncCompletedEvent::class]);
+    Bus::assertChained([FetchTmdbIds::class, FireSyncCompletedEvent::class]);
+    Bus::assertNotDispatched(SyncSeriesStrmFiles::class);
 });
 
 // ──────────────────────────────────────────────────────────────────────────────

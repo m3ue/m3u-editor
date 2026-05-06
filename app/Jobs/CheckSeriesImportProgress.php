@@ -98,14 +98,14 @@ class CheckSeriesImportProgress implements ShouldQueue
             }
 
             if ($this->sync_stream_files) {
-                Log::info('Series Import: Queuing STRM sync');
-                $postJobs[] = new SyncSeriesStrmFiles(
-                    series: null,
-                    notify: true,
-                    all_playlists: $this->all_playlists,
-                    playlist_id: $this->playlist_id,
-                    user_id: $this->user_id,
-                );
+                // Series STRM sync is now orchestrated post-sync via
+                // SeriesStrmSyncPhase, which chains it after F/R + VOD STRM
+                // so episode `.strm` files observe processed names. Nothing
+                // to dispatch here — the orchestrator picks it up after
+                // FireSyncCompletedEvent fans out to SyncListener.
+                Log::info('Series Import: STRM sync deferred to orchestrator (SeriesStrmSyncPhase)', [
+                    'playlist_id' => $this->playlist_id,
+                ]);
             }
 
             if (! empty($postJobs)) {
