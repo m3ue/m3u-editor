@@ -5,6 +5,11 @@ namespace App\Sync;
 use App\Jobs\ProcessM3uImport;
 use App\Models\Playlist;
 use App\Models\SyncRun;
+use App\Sync\Contracts\SyncPhase;
+use App\Sync\Middleware\RecordsSyncPhaseCompletion;
+use App\Sync\Phases\AbstractPhase;
+use App\Sync\Plans\PlaylistPreSyncPlan;
+use Illuminate\Contracts\Container\Container;
 
 /**
  * Single entry point for dispatching playlist sync work.
@@ -14,11 +19,21 @@ use App\Models\SyncRun;
  * command, model lifecycle event, ...) before handing off to
  * `ProcessM3uImport`.
  *
+ * Pre-sync work (network/media-server guards, concurrency check, sync state
+ * initialization) is run synchronously via {@see PlaylistPreSyncPlan} against
+ * the same SyncRun. Each pre-sync phase records its own status on the run.
+ * If any pre-sync phase signals `halt` in the shared context, the import job
+ * is **not** dispatched — equivalent to the legacy in-job early returns.
+ *
+ * The `m3u_import` phase on the run is recorded by
+ * {@see RecordsSyncPhaseCompletion} once the worker
+ * picks the import job up — we attach the run + phase slug fluently via
+ * `withSyncContext()` so the middleware has the context it needs.
+ *
  * The post-sync flow that runs after `SyncCompleted` fires opens a *separate*
- * `SyncRun` (kind: `post_sync`) inside `SyncListener`. Wiring the sync-side
- * run into `ProcessM3uImport` itself (so it can be marked Running / Completed
- * / Failed) is intentionally deferred until Step 7 when the import job is
- * split into smaller pieces.
+ * `SyncRun` (kind: `post_sync`) inside `SyncListener`. Closing out the
+ * sync-side run on completion / failure is intentionally still pending and
+ * will be wired once `ProcessM3uImport` is fully decomposed.
  */
 class PlaylistSyncDispatcher
 {
@@ -41,7 +56,17 @@ class PlaylistSyncDispatcher
     public const TRIGGER_FILAMENT_BULK_PROCESS = 'filament.bulk_process';
 
     /**
-     * Open a SyncRun ledger row and dispatch the M3U import job.
+     * Phase slug used for the `ProcessM3uImport` step on the sync-side
+     * `SyncRun`. Recorded by the job's `RecordsSyncPhaseCompletion`
+     * middleware when the worker actually executes the job.
+     */
+    public const PHASE_M3U_IMPORT = 'm3u_import';
+
+    public function __construct(private readonly ?Container $container = null) {}
+
+    /**
+     * Open a SyncRun ledger row, run the pre-sync phase plan, and (if no
+     * pre-sync phase halted) dispatch the M3U import job.
      *
      * @param  array<string, mixed>  $meta  Additional metadata to merge into the run's `meta` column.
      */
@@ -62,8 +87,62 @@ class PlaylistSyncDispatcher
             ], $meta),
         );
 
-        dispatch(new ProcessM3uImport($playlist, $force, $isNew));
+        $context = $this->runPreSync($run, $playlist, [
+            'force' => $force,
+            'is_new' => $isNew,
+        ]);
 
-        return $run;
+        if ($context['halt'] ?? false) {
+            return $run->fresh() ?? $run;
+        }
+
+        dispatch(
+            (new ProcessM3uImport($playlist, $force, $isNew))
+                ->withSyncContext($run, self::PHASE_M3U_IMPORT)
+        );
+
+        return $run->fresh() ?? $run;
+    }
+
+    /**
+     * Walk the {@see PlaylistPreSyncPlan} steps inline, stopping as soon as a
+     * phase sets `halt` on the shared context. Each phase records its own
+     * Started/Completed/Failed transitions on the SyncRun via
+     * {@see AbstractPhase}.
+     *
+     * Pre-sync phases are run synchronously here rather than through the
+     * {@see SyncOrchestrator} so we can:
+     *   - inspect halt context between phases without flipping the run-level
+     *     status to Running/Completed (the run lifecycle is owned by the
+     *     post-sync flow / the import job's middleware);
+     *   - keep the dispatcher as the single owner of "should we dispatch the
+     *     import job?" decision.
+     *
+     * @param  array<string, mixed>  $context
+     * @return array<string, mixed>
+     */
+    private function runPreSync(SyncRun $run, Playlist $playlist, array $context): array
+    {
+        $container = $this->container ?? app();
+
+        foreach (PlaylistPreSyncPlan::build()->steps() as $step) {
+            /** @var SyncPhase $phase */
+            $phase = $container->make($step->phaseClass);
+
+            if (! $phase->shouldRun($playlist)) {
+                $run->markPhaseSkipped($phase::slug(), reason: 'shouldRun returned false');
+
+                continue;
+            }
+
+            $updates = $phase->run($run, $playlist, $context);
+            $context = array_merge($context, $updates);
+
+            if ($context['halt'] ?? false) {
+                break;
+            }
+        }
+
+        return $context;
     }
 }

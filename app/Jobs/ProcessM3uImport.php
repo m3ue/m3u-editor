@@ -12,15 +12,24 @@ use App\Models\Playlist;
 use App\Models\SourceCategory;
 use App\Models\SourceGroup;
 use App\Services\XtreamHealthService;
+use App\Sync\Concerns\InteractsWithSyncRun;
+use App\Sync\Contracts\TracksSyncRun;
+use App\Sync\Importers\InclusionPolicy;
+use App\Sync\Importers\M3uChainBuilder;
+use App\Sync\Importers\Support\ChainDispatcher;
+use App\Sync\Importers\Support\ImportFailureHandler;
+use App\Sync\Importers\Support\Retry503Strategy;
+use App\Sync\Importers\XtreamChainBuilder;
+use App\Sync\Middleware\RecordsSyncPhaseCompletion;
+use App\Sync\Plans\PlaylistPreSyncPlan;
+use App\Sync\PlaylistSyncDispatcher;
 use App\Traits\ProviderRequestDelay;
 use Carbon\Carbon;
 use Exception;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
-use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -32,10 +41,10 @@ use M3uParser\Tag\ExtGrp;
 use M3uParser\Tag\ExtInf;
 use M3uParser\Tag\ExtVlcOpt;
 use M3uParser\Tag\KodiDrop;
-use Throwable;
 
-class ProcessM3uImport implements ShouldQueue
+class ProcessM3uImport implements ShouldQueue, TracksSyncRun
 {
+    use InteractsWithSyncRun;
     use ProviderRequestDelay;
     use Queueable;
 
@@ -109,6 +118,15 @@ class ProcessM3uImport implements ShouldQueue
     // M3U Parser instance
     public $m3uParser = null;
 
+    // Stateless inclusion policy derived from $playlist->import_prefs.
+    private InclusionPolicy $inclusionPolicy;
+
+    // Consolidated failure handler (log + notify + mark Failed + dispatch synced).
+    private ImportFailureHandler $failureHandler;
+
+    // Wraps the standard Bus::chain dispatch boilerplate + shared catch handler.
+    private ChainDispatcher $chainDispatcher;
+
     /**
      * Create a new job instance.
      */
@@ -155,10 +173,33 @@ class ProcessM3uImport implements ShouldQueue
         // Get the enabled groups and categories for this playlist
         $this->enabledGroups = $playlist->groups()->where('enabled', true)->get('name')->pluck('name');
         $this->enabledCategories = $playlist->categories()->where('enabled', true)->get('name')->pluck('name');
+
+        // Stateless inclusion policy derived from the same import_prefs above.
+        $this->inclusionPolicy = InclusionPolicy::fromPlaylist($playlist);
+        $this->failureHandler = new ImportFailureHandler;
+        $this->chainDispatcher = new ChainDispatcher($this->failureHandler);
+    }
+
+    /**
+     * Job middleware. {@see RecordsSyncPhaseCompletion} mirrors the job's
+     * lifecycle onto the attached SyncRun phase entry (no-op when no run is
+     * attached, so legacy direct dispatches keep working).
+     */
+    public function middleware(): array
+    {
+        return [new RecordsSyncPhaseCompletion];
     }
 
     /**
      * Execute the job.
+     *
+     * The guards in this method (network playlist, media-server redirect,
+     * concurrency, sync-state init) are mirrored by the PreSync phases under
+     * {@see PlaylistPreSyncPlan}. When dispatched through
+     * {@see PlaylistSyncDispatcher} the relevant phases halt before
+     * this job is queued. They remain here as defense-in-depth for direct
+     * dispatch sites (e.g. {@see Retry503Strategy})
+     * and are idempotent no-ops in the orchestrated path.
      */
     public function handle(): void
     {
@@ -250,44 +291,20 @@ class ProcessM3uImport implements ShouldQueue
     }
 
     /**
-     * @param  string  $message
-     * @param  string  $error
+     * @param  string  $message  Body shown in the broadcast notification.
+     * @param  string  $error  Stored in playlists.errors and shown in the database notification.
      */
     private function sendError($message, $error): void
     {
-        // Log the exception
-        logger()->error("Error processing \"{$this->playlist->name}\": $error");
-
-        // Send notification
-        Notification::make()
-            ->danger()
-            ->title("Error processing \"{$this->playlist->name}\"")
-            ->body($message)
-            ->broadcast($this->playlist->user);
-        Notification::make()
-            ->danger()
-            ->title("Error processing \"{$this->playlist->name}\"")
-            ->body($message)
-            ->sendToDatabase($this->playlist->user);
-
-        // Update the playlist
-        $this->playlist->update([
-            'status' => Status::Failed,
-            'synced' => now(),
-            'errors' => $error,
-            'progress' => 0,
-            'vod_progress' => 0,
-            'series_progress' => 0,
-            'processing' => [
-                ...$this->playlist->processing ?? [],
-                'live_processing' => false,
-                'vod_processing' => false,
-                'series_processing' => false,
-            ],
-        ]);
-
-        // Fire the playlist synced event (idempotent within this sync window)
-        $this->playlist->dispatchSyncCompletedOnce();
+        $this->failureHandler->fail(
+            $this->playlist,
+            errors: $error,
+            broadcastBody: $message,
+            progress: 0,
+            vodProgress: 0,
+            seriesProgress: 0,
+            clearSeriesProcessing: true,
+        );
     }
 
     /**
@@ -732,37 +749,13 @@ class ProcessM3uImport implements ShouldQueue
                 vodGroups: $vodGroups,
             );
         } catch (Exception $e) {
-            // Log the exception
-            logger()->error("Error processing \"{$this->playlist->name}\": {$e->getMessage()}");
-
-            // Send notification
-            Notification::make()
-                ->danger()
-                ->title("Error processing \"{$this->playlist->name}\"")
-                ->body('Please view your notifications for details.')
-                ->broadcast($this->playlist->user);
-            Notification::make()
-                ->danger()
-                ->title("Error processing \"{$this->playlist->name}\"")
-                ->body($e->getMessage())
-                ->sendToDatabase($this->playlist->user);
-
-            // Update the playlist
-            $this->playlist->update([
-                'status' => Status::Failed,
-                'synced' => now(),
-                'errors' => $e->getMessage(),
-                'progress' => 0,
-                'vod_progress' => 0,
-                'processing' => [
-                    ...$this->playlist->processing ?? [],
-                    'live_processing' => false,
-                    'vod_processing' => false,
-                ],
-            ]);
-
-            // Fire the playlist synced event (idempotent within this sync window)
-            $this->playlist->dispatchSyncCompletedOnce();
+            $this->failureHandler->fail(
+                $this->playlist,
+                errors: $e->getMessage(),
+                exception: $e,
+                progress: 0,
+                vodProgress: 0,
+            );
         }
 
     }
@@ -1059,69 +1052,21 @@ class ProcessM3uImport implements ShouldQueue
                 // Log the exception
                 logger()->error("Error processing \"{$playlist->name}\"");
 
-                // Send notification
                 $error = 'Invalid playlist file. Unable to read or download your playlist file. Please check the URL or uploaded file and try again.';
-                Notification::make()
-                    ->danger()
-                    ->title("Error processing \"{$playlist->name}\"")
-                    ->body('Please view your notifications for details.')
-                    ->broadcast($playlist->user);
-                Notification::make()
-                    ->danger()
-                    ->title("Error processing \"{$playlist->name}\"")
-                    ->body($error)
-                    ->sendToDatabase($playlist->user);
-
-                // Update the Playlist
-                $playlist->update([
-                    'status' => Status::Failed,
-                    'channels' => 0, // not using...
-                    'synced' => now(),
-                    'errors' => $error,
-                    'progress' => 100,
-                    'processing' => [
-                        ...$playlist->processing ?? [],
-                        'live_processing' => false,
-                        'vod_processing' => false,
-                    ],
-                ]);
-
-                // Fire the playlist synced event (idempotent within this sync window)
-                $playlist->dispatchSyncCompletedOnce();
+                $this->failureHandler->fail(
+                    $playlist,
+                    errors: $error,
+                    channels: 0,
+                );
 
                 return;
             }
         } catch (Exception $e) {
-            // Log the exception
-            logger()->error("Error processing \"{$this->playlist->name}\": {$e->getMessage()}");
-
-            // Send notification
-            Notification::make()
-                ->danger()
-                ->title("Error processing \"{$this->playlist->name}\"")
-                ->body('Please view your notifications for details.')
-                ->broadcast($this->playlist->user);
-            Notification::make()
-                ->danger()
-                ->title("Error processing \"{$this->playlist->name}\"")
-                ->body($e->getMessage())
-                ->sendToDatabase($this->playlist->user);
-
-            // Update the playlist
-            $this->playlist->update([
-                'status' => Status::Failed,
-                'synced' => now(),
-                'errors' => $e->getMessage(),
-                'progress' => 100,
-                'processing' => [
-                    ...$this->playlist->processing ?? [],
-                    'live_processing' => false,
-                    'vod_processing' => false,
-                ],
-            ]);
-
-            // Fire the playlist synced event (idempotent within this sync window)
-            $this->playlist->dispatchSyncCompletedOnce();
+            $this->failureHandler->fail(
+                $this->playlist,
+                errors: $e->getMessage(),
+                exception: $e,
+            );
         }
 
     }
@@ -1423,140 +1368,23 @@ class ProcessM3uImport implements ShouldQueue
             return;
         }
 
-        // Create the jobs array
-        $jobs = [];
-
-        // Flag any previously marked new items as not new
-        $playlist->groups()->where('new', true)->update(['new' => false]);
-        $playlist->channels()->where('new', true)->update(['new' => false]);
-
-        // Check if we need to create a backup first (don't include first time syncs)
-        if (! $this->isNew && $playlist->backup_before_sync) {
-            $jobs[] = new CreateBackup(includeFiles: false);
-        }
-
-        // Get the live jobs for the batch
-        if ($liveStreamsEnabled) {
-            $liveJobsWhere = [
-                ['batch_no', '=', $batchNo],
-                ['variables', '!=', null],
-                ['variables->type', '=', 'live'],
-            ];
-            $liveBatchCount = Job::where($liveJobsWhere)->count();
-            $liveJobsBatch = Job::where($liveJobsWhere)->select('id')->cursor();
-            $liveJobsBatch->chunk(100)->each(function ($chunk) use (&$jobs, $liveBatchCount) {
-                $jobs[] = new ProcessM3uImportChunk($chunk->pluck('id')->toArray(), $liveBatchCount);
-            });
-        }
-
-        // Get the VOD jobs for the batch
-        if ($vodStreamsEnabled) {
-            $vodJobsWhere = [
-                ['batch_no', '=', $batchNo],
-                ['variables', '!=', null],
-                ['variables->type', '=', 'vod'],
-            ];
-            $vodBatchCount = Job::where($vodJobsWhere)->count();
-            $vodJobsBatch = Job::where($vodJobsWhere)->select('id')->cursor();
-            $vodJobsBatch->chunk(100)->each(function ($chunk) use (&$jobs, $vodBatchCount) {
-                $jobs[] = new ProcessM3uVodImportChunk($chunk->pluck('id')->toArray(), $vodBatchCount);
-            });
-        }
-
-        // Last job in the batch
-        $jobs[] = new ProcessM3uImportComplete(
-            userId: $userId,
-            playlistId: $playlistId,
+        // Build the chain via the dedicated builder.
+        $jobs = (new XtreamChainBuilder($this->inclusionPolicy))->build(
+            playlist: $playlist,
             batchNo: $batchNo,
+            userId: $userId,
             start: $start,
-            maxHit: $this->maxItemsHit,
-            isNew: $this->isNew,
-            runningSeriesImport: $seriesCategories && $seriesCategories->count() > 0,
-            runningLiveImport: $liveStreamsEnabled,
-            runningVodImport: $vodStreamsEnabled,
+            isNew: (bool) $this->isNew,
+            maxItemsHit: $this->maxItemsHit,
+            liveStreamsEnabled: $liveStreamsEnabled,
+            vodStreamsEnabled: $vodStreamsEnabled,
+            seriesCategories: $seriesCategories,
+            preprocess: (bool) $this->preprocess,
+            enabledCategories: $this->enabledCategories,
         );
 
-        // Add series processing to the chain, if passed in
-        // This will run after the main channel import is complete
-        if ($seriesCategories) {
-            $categoryCount = $seriesCategories->count();
-            $seriesCategories->each(function ($category, $index) use (&$jobs, $playlistId, $batchNo, $categoryCount) {
-                if (! $this->preprocess || $this->shouldIncludeSeries($category['category_name'] ?? '')) {
-                    // Check if category is auto-enabled
-                    $autoEnable = (bool) ($this->playlist->enable_series
-                        || $this->enabledCategories->contains($category['category_name'] ?? ''));
-
-                    // Create a job for each series category
-                    $jobs[] = new ProcessM3uImportSeriesChunk(
-                        [
-                            'categoryId' => $category['category_id'],
-                            'categoryName' => $category['category_name'],
-                            'playlistId' => $playlistId,
-                        ],
-                        $categoryCount,
-                        $batchNo,
-                        $index,
-                        $autoEnable
-                    );
-                }
-            });
-
-            // Add series processing to the chain
-            $jobs[] = new ProcessM3uImportSeriesComplete(
-                playlist: $playlist,
-                batchNo: $batchNo
-            );
-        }
-
         // Start the chain!
-        Bus::chain($jobs)
-            ->onConnection('redis') // force to use redis connection
-            ->onQueue('import')
-            ->catch(function (Throwable $e) use ($playlist) {
-                $error = "Error processing \"{$playlist->name}\": {$e->getMessage()}";
-                Log::error($error);
-
-                Notification::make()
-                    ->danger()
-                    ->title("Error processing \"{$playlist->name}\"")
-                    ->body('Please view your notifications for details.')
-                    ->broadcast($playlist->user);
-
-                Notification::make()
-                    ->danger()
-                    ->title("Error processing \"{$playlist->name}\"")
-                    ->body($error)
-                    ->sendToDatabase($playlist->user);
-
-                $playlist->update([
-                    'status' => Status::Failed,
-                    'channels' => 0,
-                    'synced' => now(),
-                    'errors' => $error,
-                    'progress' => 100,
-                    'processing' => [
-                        ...$playlist->processing ?? [],
-                        'live_processing' => false,
-                        'vod_processing' => false,
-                        'series_processing' => false,
-                    ],
-                ]);
-
-                // Auto retry on HTTP 503
-                if (self::isHttp503($e)) {
-                    $playlist->update([
-                        'processing' => [
-                            ...$playlist->processing ?? [],
-                            'live_processing' => false,
-                            'vod_processing' => false,
-                            'series_processing' => false,
-                        ],
-                    ]);
-                    self::scheduleRetry503($playlist);
-                }
-
-                $playlist->dispatchSyncCompletedOnce();
-            })->dispatch();
+        $this->chainDispatcher->dispatch($jobs, $playlist);
     }
 
     /**
@@ -1713,85 +1541,18 @@ class ProcessM3uImport implements ShouldQueue
             return;
         }
 
-        // Create the jobs array
-        $jobs = [];
-
-        // Check if we need to create a backup first (don't include first time syncs)
-        if (! $this->isNew && $playlist->backup_before_sync) {
-            $jobs[] = new CreateBackup(includeFiles: false);
-        }
-
-        // Get the jobs for the batch
-        $jobsWhere = [
-            ['batch_no', '=', $batchNo],
-            ['variables', '!=', null],
-        ];
-        $batchCount = Job::where($jobsWhere)->count();
-        $jobsBatch = Job::where($jobsWhere)->select('id')->cursor();
-        $jobsBatch->chunk(100)->each(function ($chunk) use (&$jobs, $batchCount) {
-            $jobs[] = new ProcessM3uImportChunk($chunk->pluck('id')->toArray(), $batchCount);
-        });
-
-        // Last job in the batch
-        $jobs[] = new ProcessM3uImportComplete(
-            userId: $userId,
-            playlistId: $playlistId,
+        // Build the chain via the dedicated builder.
+        $jobs = (new M3uChainBuilder)->build(
+            playlist: $playlist,
             batchNo: $batchNo,
+            userId: $userId,
             start: $start,
-            maxHit: $this->maxItemsHit,
-            isNew: $this->isNew,
-            runningSeriesImport: false, // No series import for M3U imports
+            isNew: (bool) $this->isNew,
+            maxItemsHit: $this->maxItemsHit,
         );
 
         // Start the chain!
-        Bus::chain($jobs)
-            ->onConnection('redis') // force to use redis connection
-            ->onQueue('import')
-            ->catch(function (Throwable $e) use ($playlist) {
-                $error = "Error processing \"{$playlist->name}\": {$e->getMessage()}";
-                Log::error($error);
-
-                Notification::make()
-                    ->danger()
-                    ->title("Error processing \"{$playlist->name}\"")
-                    ->body('Please view your notifications for details.')
-                    ->broadcast($playlist->user);
-
-                Notification::make()
-                    ->danger()
-                    ->title("Error processing \"{$playlist->name}\"")
-                    ->body($error)
-                    ->sendToDatabase($playlist->user);
-
-                $playlist->update([
-                    'status' => Status::Failed,
-                    'channels' => 0,
-                    'synced' => now(),
-                    'errors' => $error,
-                    'progress' => 100,
-                    'processing' => [
-                        ...$playlist->processing ?? [],
-                        'live_processing' => false,
-                        'vod_processing' => false,
-                        'series_processing' => false,
-                    ],
-                ]);
-
-                // Auto retry on HTTP 503
-                if (self::isHttp503($e)) {
-                    $playlist->update([
-                        'processing' => [
-                            ...$playlist->processing ?? [],
-                            'live_processing' => false,
-                            'vod_processing' => false,
-                            'series_processing' => false,
-                        ],
-                    ]);
-                    self::scheduleRetry503($playlist);
-                }
-
-                $playlist->dispatchSyncCompletedOnce();
-            })->dispatch();
+        $this->chainDispatcher->dispatch($jobs, $playlist);
     }
 
     /**
@@ -1801,35 +1562,7 @@ class ProcessM3uImport implements ShouldQueue
      */
     private function shouldIncludeChannel($groupName): bool
     {
-        // Check if group is selected...
-        if (in_array(
-            $groupName,
-            $this->selectedGroups
-        )) {
-            // Group selected directly
-            return true;
-        } else {
-            // ...if group not selected, check if group starts with any of the included prefixes
-            // (only check if the group isn't directly included already)
-            foreach ($this->includedGroupPrefixes as $pattern) {
-                if ($this->useRegex) {
-                    // Escape existing delimiters in user input
-                    $delimiter = '/';
-                    $escapedPattern = str_replace($delimiter, '\\'.$delimiter, $pattern);
-                    $finalPattern = $delimiter.$escapedPattern.$delimiter.'u';
-                    if (preg_match($finalPattern, $groupName)) {
-                        return true;
-                    }
-                } else {
-                    // Use simple string prefix matching
-                    if (str_starts_with($groupName, $pattern)) {
-                        return true;
-                    }
-                }
-            }
-        }
-
-        return false;
+        return $this->inclusionPolicy->shouldIncludeChannel((string) $groupName);
     }
 
     /**
@@ -1839,35 +1572,7 @@ class ProcessM3uImport implements ShouldQueue
      */
     private function shouldIncludeVod($groupName): bool
     {
-        // Check if group is selected...
-        if (in_array(
-            $groupName,
-            $this->selectedVodGroups
-        )) {
-            // Group selected directly
-            return true;
-        } else {
-            // ...if group not selected, check if group starts with any of the included prefixes
-            // (only check if the group isn't directly included already)
-            foreach ($this->includedVodGroupPrefixes as $pattern) {
-                if ($this->useRegex) {
-                    // Escape existing delimiters in user input
-                    $delimiter = '/';
-                    $escapedPattern = str_replace($delimiter, '\\'.$delimiter, $pattern);
-                    $finalPattern = $delimiter.$escapedPattern.$delimiter.'u';
-                    if (preg_match($finalPattern, $groupName)) {
-                        return true;
-                    }
-                } else {
-                    // Use simple string prefix matching
-                    if (str_starts_with($groupName, $pattern)) {
-                        return true;
-                    }
-                }
-            }
-        }
-
-        return false;
+        return $this->inclusionPolicy->shouldIncludeVod((string) $groupName);
     }
 
     /**
@@ -1877,81 +1582,6 @@ class ProcessM3uImport implements ShouldQueue
      */
     private function shouldIncludeSeries($categoryName): bool
     {
-        // Check if category is selected...
-        if (in_array(
-            $categoryName,
-            $this->selectedCategories
-        )) {
-            // Category selected directly
-            return true;
-        } else {
-            // ...if category not selected, check if category starts with any of the included prefixes
-            // (only check if the category isn't directly included already)
-            foreach ($this->includedCategoryPrefixes as $pattern) {
-                if ($this->useRegex) {
-                    // Escape existing delimiters in user input
-                    $delimiter = '/';
-                    $escapedPattern = str_replace($delimiter, '\\'.$delimiter, $pattern);
-                    $finalPattern = $delimiter.$escapedPattern.$delimiter.'u';
-                    if (preg_match($finalPattern, $categoryName)) {
-                        return true;
-                    }
-                } else {
-                    // Use simple string prefix matching
-                    if (str_starts_with($categoryName, $pattern)) {
-                        return true;
-                    }
-                }
-            }
-        }
-
-        return false;
-    }
-
-    private static function isHttp503(Throwable $e): bool
-    {
-        if ($e instanceof RequestException) {
-            $response = $e->response;
-            if ($response) {
-                return $response->status() === 503;
-            }
-        }
-
-        return Str::contains($e->getMessage(), [
-            'status code 503',
-            'HTTP request returned status code 503',
-            '503 Service Temporarily Unavailable',
-            ' 503:',
-        ]);
-    }
-
-    private static function scheduleRetry503(Playlist $playlist): void
-    {
-        if (! (bool) config('dev.auto_retry_503_enabled', true)) {
-            return;
-        }
-
-        $max = (int) config('dev.auto_retry_503_max', 3);
-        $cooldown = (int) config('dev.auto_retry_503_cooldown_minutes', 10);
-
-        if (($playlist->auto_retry_503_count ?? 0) >= $max) {
-            return;
-        }
-
-        if ($playlist->auto_retry_503_last_at && $playlist->auto_retry_503_last_at->diffInMinutes(now()) < $cooldown) {
-            return;
-        }
-
-        $playlist->update([
-            'auto_retry_503_count' => ($playlist->auto_retry_503_count ?? 0) + 1,
-            'auto_retry_503_last_at' => now(),
-        ]);
-
-        $min = (int) config('dev.auto_retry_503_delay_min_seconds', 300);
-        $max = (int) config('dev.auto_retry_503_delay_max_seconds', 900);
-        $delay = random_int($min, $max);
-
-        dispatch(new self($playlist))
-            ->delay(now()->addSeconds($delay));
+        return $this->inclusionPolicy->shouldIncludeSeries((string) $categoryName);
     }
 }
