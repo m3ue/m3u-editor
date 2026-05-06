@@ -7,6 +7,7 @@ use App\Models\CustomPlaylist;
 use App\Models\Group;
 use App\Models\User;
 use Filament\Notifications\Notification;
+use Illuminate\Bus\Batchable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\DB;
@@ -14,7 +15,7 @@ use Spatie\Tags\Tag;
 
 class AutoSyncGroupsToCustomPlaylist implements ShouldQueue
 {
-    use Queueable;
+    use Batchable, Queueable;
 
     /**
      * The number of seconds the job can run before timing out.

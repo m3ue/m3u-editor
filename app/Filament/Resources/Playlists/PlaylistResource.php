@@ -12,6 +12,7 @@ use App\Filament\Resources\Playlists\Pages\CreatePlaylist;
 use App\Filament\Resources\Playlists\Pages\EditPlaylist;
 use App\Filament\Resources\Playlists\Pages\ListPlaylists;
 use App\Filament\Resources\Playlists\Pages\ViewPlaylist;
+use App\Filament\Resources\SyncRuns\SyncRunResource;
 use App\Filament\Tables\SourceCategoriesTable;
 use App\Filament\Tables\SourceGroupsTable;
 use App\Jobs\CopyAttributesToPlaylist;
@@ -3207,10 +3208,19 @@ class PlaylistResource extends Resource implements CopilotResource
                 Action::make('view_sync_logs')
                     ->label(__('View Sync Logs'))
                     ->color('gray')
-                    ->icon('heroicon-m-arrows-right-left')
+                    ->icon('heroicon-m-document-text')
                     ->url(function (Playlist $record): string {
                         return "/playlists/{$record->id}/playlist-sync-statuses";
                     })
+                    ->openUrlInNewTab(false)
+                    ->hidden(fn (Playlist $record): bool => $record->is_network_playlist || $record->isMediaServerPlaylist()),
+                Action::make('view_sync_history')
+                    ->label(__('View Sync History'))
+                    ->color('gray')
+                    ->icon('heroicon-m-arrows-right-left')
+                    ->url(fn (Playlist $record): string => SyncRunResource::getUrl('index', [
+                        'tableFilters' => ['playlist_id' => ['value' => $record->id]],
+                    ]))
                     ->openUrlInNewTab(false)
                     ->hidden(fn (Playlist $record): bool => $record->is_network_playlist || $record->isMediaServerPlaylist()),
             ]),

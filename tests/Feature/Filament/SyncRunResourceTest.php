@@ -122,3 +122,33 @@ it('renders the playlist view page with the LatestSyncRun widget', function () {
     Livewire::test(ViewPlaylist::class, ['record' => $this->playlist->getRouteKey()])
         ->assertOk();
 });
+
+it('builds Mermaid flowchart source with status classes for recorded phases', function () {
+    $run = SyncRun::factory()->forPlaylist($this->playlist)->create([
+        'kind' => 'sync',
+        'phases' => [
+            'concurrency_guard' => [
+                'status' => SyncPhaseStatus::Completed->value,
+            ],
+        ],
+    ]);
+
+    $source = SyncRunResource::buildPhaseMermaid($run);
+
+    expect($source)
+        ->toStartWith('flowchart LR')
+        ->toContain('n_concurrency_guard')
+        ->toContain('classDef phase_completed')
+        ->toContain('classDef phase_pending')
+        ->toContain('_start([Start])')
+        ->toContain('_end([End])');
+});
+
+it('returns empty mermaid source when there are no phases or plan', function () {
+    $run = SyncRun::factory()->forPlaylist($this->playlist)->create([
+        'kind' => 'mystery',
+        'phases' => [],
+    ]);
+
+    expect(SyncRunResource::buildPhaseMermaid($run))->toBe('');
+});

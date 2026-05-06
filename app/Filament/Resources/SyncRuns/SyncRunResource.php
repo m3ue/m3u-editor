@@ -103,6 +103,12 @@ class SyncRunResource extends Resource
                             ->dateTime(),
                     ]),
 
+                Section::make(__('Pipeline'))
+                    ->collapsible()
+                    ->schema([
+                        ViewComponent::make('filament.resources.sync-run-resource.phase-diagram'),
+                    ]),
+
                 Section::make(__('Phases'))
                     ->schema([
                         ViewComponent::make('filament.resources.sync-run-resource.phase-timeline'),
@@ -165,6 +171,11 @@ class SyncRunResource extends Resource
                     ->state(fn (SyncRun $record): string => self::formatDuration($record)),
             ])
             ->filters([
+                SelectFilter::make('playlist_id')
+                    ->label(__('Playlist'))
+                    ->relationship('playlist', 'name')
+                    ->searchable()
+                    ->preload(),
                 SelectFilter::make('status')
                     ->options(SyncRunStatus::class),
                 SelectFilter::make('kind')
@@ -304,5 +315,124 @@ class SyncRunResource extends Resource
         }
 
         return "{$finished} / ".count($phases);
+    }
+
+    /**
+     * Render the planned + recorded phases as a Mermaid `flowchart LR` source
+     * string. Sequential phases form a linear chain; parallel groups branch
+     * out and merge back; chain groups render as inner sequences. Status
+     * classes (pending/running/completed/failed/skipped) drive node colors.
+     */
+    public static function buildPhaseMermaid(SyncRun $run): string
+    {
+        $rows = self::buildPhaseTimeline($run);
+        if ($rows === []) {
+            return '';
+        }
+
+        $lines = ['flowchart LR'];
+        $classes = [];
+        $previousExits = ['_start']; // edges flow from these nodes into the next group
+        $lines[] = '    _start([Start])';
+        $classes['_start'] = 'plan_start';
+
+        // Group consecutive rows by their parallel/chain group key.
+        $groups = [];
+        $currentKey = null;
+        $currentGroup = [];
+        foreach ($rows as $row) {
+            $key = $row['parallel_group'] ?? ($row['chain_group'] !== null ? 'C:'.$row['chain_group'] : null);
+            if ($key !== $currentKey) {
+                if ($currentGroup !== []) {
+                    $groups[] = ['key' => $currentKey, 'rows' => $currentGroup];
+                }
+                $currentGroup = [];
+                $currentKey = $key;
+            }
+            $currentGroup[] = $row;
+        }
+        if ($currentGroup !== []) {
+            $groups[] = ['key' => $currentKey, 'rows' => $currentGroup];
+        }
+
+        foreach ($groups as $group) {
+            $key = $group['key'];
+            $rowsInGroup = $group['rows'];
+            $isParallel = $key !== null && ! str_starts_with((string) $key, 'C:');
+            $isChain = $key !== null && str_starts_with((string) $key, 'C:');
+
+            if ($isParallel) {
+                $exits = [];
+                foreach ($rowsInGroup as $row) {
+                    $nodeId = self::mermaidNodeId($row['slug']);
+                    $lines[] = '    '.$nodeId.'["'.self::mermaidEscape($row['label']).'"]';
+                    $classes[$nodeId] = 'phase_'.$row['status']->value;
+                    foreach ($previousExits as $entry) {
+                        $lines[] = '    '.$entry.' --> '.$nodeId;
+                    }
+                    $exits[] = $nodeId;
+                }
+                $previousExits = $exits;
+            } elseif ($isChain) {
+                // Sequential nodes inside a chain block.
+                foreach ($rowsInGroup as $row) {
+                    $nodeId = self::mermaidNodeId($row['slug']);
+                    $lines[] = '    '.$nodeId.'["'.self::mermaidEscape($row['label']).'"]';
+                    $classes[$nodeId] = 'phase_'.$row['status']->value;
+                    foreach ($previousExits as $entry) {
+                        $lines[] = '    '.$entry.' --> '.$nodeId;
+                    }
+                    $previousExits = [$nodeId];
+                }
+            } else {
+                // Single non-grouped phase.
+                foreach ($rowsInGroup as $row) {
+                    $nodeId = self::mermaidNodeId($row['slug']);
+                    $lines[] = '    '.$nodeId.'["'.self::mermaidEscape($row['label']).'"]';
+                    $classes[$nodeId] = 'phase_'.$row['status']->value;
+                    foreach ($previousExits as $entry) {
+                        $lines[] = '    '.$entry.' --> '.$nodeId;
+                    }
+                    $previousExits = [$nodeId];
+                }
+            }
+        }
+
+        $lines[] = '    _end([End])';
+        $classes['_end'] = 'plan_end';
+        foreach ($previousExits as $entry) {
+            $lines[] = '    '.$entry.' --> _end';
+        }
+
+        // classDef style declarations — match the timeline color scheme.
+        $lines[] = '    classDef phase_pending fill:#e5e7eb,stroke:#9ca3af,color:#374151';
+        $lines[] = '    classDef phase_running fill:#3b82f6,stroke:#2563eb,color:#fff';
+        $lines[] = '    classDef phase_completed fill:#10b981,stroke:#059669,color:#fff';
+        $lines[] = '    classDef phase_failed fill:#ef4444,stroke:#dc2626,color:#fff';
+        $lines[] = '    classDef phase_skipped fill:#9ca3af,stroke:#6b7280,color:#fff';
+        $lines[] = '    classDef plan_start fill:#1f2937,stroke:#111827,color:#fff';
+        $lines[] = '    classDef plan_end fill:#1f2937,stroke:#111827,color:#fff';
+
+        // Apply classes (group node ids per class for compactness).
+        $byClass = [];
+        foreach ($classes as $node => $class) {
+            $byClass[$class][] = $node;
+        }
+        foreach ($byClass as $class => $nodes) {
+            $lines[] = '    class '.implode(',', $nodes).' '.$class;
+        }
+
+        return implode("\n", $lines);
+    }
+
+    private static function mermaidNodeId(string $slug): string
+    {
+        // Mermaid node ids must be alphanumeric/underscore; slugs already are.
+        return 'n_'.preg_replace('/[^a-z0-9_]/i', '_', $slug);
+    }
+
+    private static function mermaidEscape(string $label): string
+    {
+        return str_replace(['"', "\n"], ['&quot;', ' '], $label);
     }
 }

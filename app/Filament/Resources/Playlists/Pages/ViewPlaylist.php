@@ -4,6 +4,7 @@ namespace App\Filament\Resources\Playlists\Pages;
 
 use App\Filament\Resources\Playlists\PlaylistResource;
 use App\Filament\Resources\Playlists\Widgets\LatestSyncRun;
+use App\Filament\Resources\SyncRuns\SyncRunResource;
 use Filament\Actions\Action;
 use Filament\Actions\EditAction;
 use Filament\Resources\Pages\ViewRecord;
@@ -13,7 +14,7 @@ class ViewPlaylist extends ViewRecord
 {
     protected static string $resource = PlaylistResource::class;
 
-    public function getVisibleHeaderWidgets(): array
+    protected function getHeaderWidgets(): array
     {
         return [
             LatestSyncRun::class,
@@ -30,10 +31,17 @@ class ViewPlaylist extends ViewRecord
                 ->action(function () {
                     $this->redirect($this->getRecord()->getUrl('edit'));
                 }),
+            Action::make('view_sync_runs')
+                ->label(__('Sync History'))
+                ->color('gray')
+                ->icon('heroicon-m-arrows-right-left')
+                ->url(fn (): string => SyncRunResource::getUrl('index', [
+                    'tableFilters' => ['playlist_id' => ['value' => $this->getRecord()->id]],
+                ])),
             Action::make('view_sync_logs')
                 ->label(__('View Sync Logs'))
                 ->color('gray')
-                ->icon('heroicon-m-arrows-right-left')
+                ->icon('heroicon-m-document-text')
                 ->url(function (): string {
                     return "/playlists/{$this->getRecord()->id}/playlist-sync-statuses";
                 }),
