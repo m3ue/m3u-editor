@@ -325,6 +325,21 @@ class Playlist extends Model
         return $this->hasMany(PlaylistSyncStatus::class);
     }
 
+    public function syncRuns(): HasMany
+    {
+        return $this->hasMany(SyncRun::class)
+            ->orderBy('created_at', 'desc');
+    }
+
+    /**
+     * Latest sync run regardless of status. Use to surface the most recent
+     * attempt in the UI; check `isRunning()` / `isFinished()` on the result.
+     */
+    public function currentSyncRun(): HasOne
+    {
+        return $this->hasOne(SyncRun::class)->latestOfMany();
+    }
+
     public function categories(): HasMany
     {
         return $this->hasMany(Category::class);
