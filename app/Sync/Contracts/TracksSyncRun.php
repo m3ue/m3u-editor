@@ -19,4 +19,15 @@ interface TracksSyncRun
     public function syncRunId(): ?int;
 
     public function syncPhaseSlug(): ?string;
+
+    /**
+     * Whether the middleware should also transition the SyncRun's own
+     * lifecycle (Pending -> Running on entry, Completed/Failed on exit) when
+     * this job runs. Use for jobs that constitute the entire run's work
+     * (e.g. ProcessM3uImport on a sync-kind run).
+     *
+     * Defaults to false: the middleware only updates the phase entry and
+     * leaves run lifecycle to the SyncOrchestrator.
+     */
+    public function closesSyncRun(): bool;
 }

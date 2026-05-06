@@ -30,14 +30,21 @@ trait InteractsWithSyncRun
 
     public ?string $syncPhaseSlug = null;
 
+    public bool $syncClosesRun = false;
+
     /**
      * Attach a SyncRun + phase slug to this job so the middleware can mirror
      * its lifecycle onto the run when the worker executes it.
+     *
+     * Pass `closesRun: true` when this job represents the entire run's work
+     * — the middleware will then also flip the run's status from Pending to
+     * Running on entry and to Completed/Failed on exit.
      */
-    public function withSyncContext(SyncRun $run, string $phaseSlug): static
+    public function withSyncContext(SyncRun $run, string $phaseSlug, bool $closesRun = false): static
     {
         $this->syncRunId = $run->getKey();
         $this->syncPhaseSlug = $phaseSlug;
+        $this->syncClosesRun = $closesRun;
 
         return $this;
     }
@@ -50,5 +57,10 @@ trait InteractsWithSyncRun
     public function syncPhaseSlug(): ?string
     {
         return $this->syncPhaseSlug;
+    }
+
+    public function closesSyncRun(): bool
+    {
+        return $this->syncClosesRun;
     }
 }

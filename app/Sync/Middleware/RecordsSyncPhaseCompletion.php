@@ -2,6 +2,7 @@
 
 namespace App\Sync\Middleware;
 
+use App\Enums\SyncRunStatus;
 use App\Models\SyncRun;
 use App\Sync\Concerns\InteractsWithSyncRun;
 use App\Sync\Contracts\TracksSyncRun;
@@ -18,6 +19,12 @@ use Throwable;
  * - On success: writes phase status = Completed with `finished_at`.
  * - On failure: writes phase status = Failed and rethrows so Laravel's normal
  *   retry/failure handling continues to apply.
+ *
+ * If the job's {@see TracksSyncRun::closesSyncRun()} returns true, the
+ * middleware also flips the run-level status: Pending → Running on entry,
+ * and Completed/Failed on exit. This is used by jobs that constitute the
+ * entire run's work (e.g. ProcessM3uImport on a sync-kind run) so the run
+ * doesn't sit in Pending forever.
  *
  * The job opts in by implementing {@see TracksSyncRun} (typically via the
  * {@see InteractsWithSyncRun} trait) and listing this
@@ -43,14 +50,23 @@ class RecordsSyncPhaseCompletion
         }
 
         $run = SyncRun::find($runId);
+        $closesRun = $job->closesSyncRun();
 
         $run?->markPhaseStarted($slug);
+
+        if ($closesRun && $run !== null && $run->status === SyncRunStatus::Pending) {
+            $run->markStarted();
+        }
 
         try {
             $next($job);
         } catch (Throwable $e) {
             try {
                 $run?->markPhaseFailed($slug, $e);
+
+                if ($closesRun && $run !== null && ! $run->status->isTerminal()) {
+                    $run->markFailed($e);
+                }
             } catch (Throwable $inner) {
                 // Don't let bookkeeping errors mask the original job failure.
                 Log::error('Failed to record SyncRun phase failure', [
@@ -65,5 +81,9 @@ class RecordsSyncPhaseCompletion
         }
 
         $run?->markPhaseCompleted($slug);
+
+        if ($closesRun && $run !== null && ! $run->status->isTerminal()) {
+            $run->markCompleted();
+        }
     }
 }

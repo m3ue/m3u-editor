@@ -28,12 +28,18 @@ use Illuminate\Contracts\Container\Container;
  * The `m3u_import` phase on the run is recorded by
  * {@see RecordsSyncPhaseCompletion} once the worker
  * picks the import job up — we attach the run + phase slug fluently via
- * `withSyncContext()` so the middleware has the context it needs.
+ * `withSyncContext()` so the middleware has the context it needs. The
+ * dispatcher passes `closesRun: true` because `ProcessM3uImport` is the
+ * entire run's work; the middleware therefore also flips the run's status
+ * (Pending → Running on entry, Completed/Failed on exit).
+ *
+ * If a pre-sync phase halts (network playlist, no integration, already
+ * processing, ...), the run is marked Cancelled with the halt reason since
+ * no import job will be dispatched.
  *
  * The post-sync flow that runs after `SyncCompleted` fires opens a *separate*
- * `SyncRun` (kind: `post_sync`) inside `SyncListener`. Closing out the
- * sync-side run on completion / failure is intentionally still pending and
- * will be wired once `ProcessM3uImport` is fully decomposed.
+ * `SyncRun` (kind: `post_sync`) inside `SyncListener`, managed end-to-end by
+ * the {@see SyncOrchestrator}.
  */
 class PlaylistSyncDispatcher
 {
@@ -93,12 +99,15 @@ class PlaylistSyncDispatcher
         ]);
 
         if ($context['halt'] ?? false) {
+            $reason = $context['halt_reason'] ?? 'unknown';
+            $run->markCancelled("Pre-sync halted: {$reason}");
+
             return $run->fresh() ?? $run;
         }
 
         dispatch(
             (new ProcessM3uImport($playlist, $force, $isNew))
-                ->withSyncContext($run, self::PHASE_M3U_IMPORT)
+                ->withSyncContext($run, self::PHASE_M3U_IMPORT, closesRun: true)
         );
 
         return $run->fresh() ?? $run;

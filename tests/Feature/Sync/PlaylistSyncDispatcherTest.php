@@ -150,6 +150,11 @@ it('skips ProcessM3uImport dispatch when network playlist guard halts', function
     expect($fresh->phaseStatus('network_guard'))->toBe(SyncPhaseStatus::Completed);
     // Phases after the halt point are never invoked.
     expect($fresh->phaseStatus('initialize_sync_state'))->toBe(SyncPhaseStatus::Pending);
+    // Halted run is closed out as Cancelled with the halt reason recorded.
+    expect($fresh->status)->toBe(SyncRunStatus::Cancelled);
+    expect($fresh->finished_at)->not->toBeNull();
+    expect($fresh->errors)->toBeArray()->and($fresh->errors[0]['message'] ?? null)
+        ->toBe('Pre-sync halted: network_playlist');
 
     expect($this->playlist->fresh()->status)->toBe(Status::Completed);
 });

@@ -11,6 +11,7 @@
  */
 
 use App\Enums\SyncPhaseStatus;
+use App\Enums\SyncRunStatus;
 use App\Models\Playlist;
 use App\Models\SyncRun;
 use App\Models\User;
@@ -94,6 +95,69 @@ it('does not crash when the SyncRun has been deleted', function () {
     });
 
     expect($ran)->toBeTrue();
+});
+
+it('does not flip run status when closesRun is false (default)', function () {
+    $job = new MiddlewareTestJob;
+    $job->withSyncContext($this->run, 'middleware_phase');
+
+    expect($this->run->fresh()->status)->toBe(SyncRunStatus::Pending);
+
+    $this->middleware->handle($job, function () {
+        // success
+    });
+
+    // Phase completed, but run remains Pending (orchestrator owns the run lifecycle).
+    $fresh = $this->run->fresh();
+    expect($fresh->status)->toBe(SyncRunStatus::Pending);
+    expect($fresh->finished_at)->toBeNull();
+    expect($fresh->phaseStatus('middleware_phase'))->toBe(SyncPhaseStatus::Completed);
+});
+
+it('flips run from Pending to Running then Completed when closesRun is true', function () {
+    $job = new MiddlewareTestJob;
+    $job->withSyncContext($this->run, 'middleware_phase', closesRun: true);
+
+    $observedDuringWork = null;
+
+    $this->middleware->handle($job, function () use (&$observedDuringWork) {
+        $observedDuringWork = $this->run->fresh()->status;
+    });
+
+    expect($observedDuringWork)->toBe(SyncRunStatus::Running);
+
+    $fresh = $this->run->fresh();
+    expect($fresh->status)->toBe(SyncRunStatus::Completed);
+    expect($fresh->finished_at)->not->toBeNull();
+});
+
+it('marks run Failed when closesRun is true and the job throws', function () {
+    $job = new MiddlewareTestJob;
+    $job->withSyncContext($this->run, 'middleware_phase', closesRun: true);
+
+    expect(fn () => $this->middleware->handle($job, function () {
+        throw new RuntimeException('worker boom');
+    }))->toThrow(RuntimeException::class, 'worker boom');
+
+    $fresh = $this->run->fresh();
+    expect($fresh->status)->toBe(SyncRunStatus::Failed);
+    expect($fresh->finished_at)->not->toBeNull();
+    expect($fresh->phaseStatus('middleware_phase'))->toBe(SyncPhaseStatus::Failed);
+});
+
+it('does not overwrite a terminal run status when closesRun is true', function () {
+    $job = new MiddlewareTestJob;
+    $job->withSyncContext($this->run, 'middleware_phase', closesRun: true);
+
+    // Pre-mark the run as Cancelled (e.g. pre-sync halt) before the job runs.
+    $this->run->markCancelled('halted');
+
+    $this->middleware->handle($job, function () {
+        // success path
+    });
+
+    $fresh = $this->run->fresh();
+    expect($fresh->status)->toBe(SyncRunStatus::Cancelled);
 });
 
 class MiddlewareTestJob implements TracksSyncRun
