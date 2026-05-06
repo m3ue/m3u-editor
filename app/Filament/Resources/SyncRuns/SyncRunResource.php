@@ -192,15 +192,17 @@ class SyncRunResource extends Resource
             ->toolbarActions([
                 BulkActionGroup::make([
                     DeleteBulkAction::make()
-                        // Block bulk-deleting active runs: in-flight phase
-                        // jobs would have no ledger to write back to and
+                        // Block bulk-deleting actively Running runs: in-flight
+                        // phase jobs would have no ledger to write back to and
                         // would either crash on the missing FK or silently
-                        // no-op, leaving the run permanently stuck.
+                        // no-op. Pending and terminal runs are safe to delete
+                        // (Pending may be orphaned by an orchestrator crash and
+                        // needs to be cleanable from the UI).
                         ->before(function (DeleteBulkAction $action, Collection $records) {
-                            if ($records->contains(fn (SyncRun $r) => $r->status->isActive())) {
+                            if ($records->contains(fn (SyncRun $r) => $r->status === SyncRunStatus::Running)) {
                                 Notification::make()
-                                    ->title(__('Cannot delete active sync runs'))
-                                    ->body(__('One or more selected runs are still Pending or Running. Wait for them to finish (or cancel them) before deleting.'))
+                                    ->title(__('Cannot delete running sync runs'))
+                                    ->body(__('One or more selected runs are still Running. Wait for them to finish (or cancel them) before deleting.'))
                                     ->danger()
                                     ->send();
 
