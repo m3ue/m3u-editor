@@ -47,4 +47,18 @@ final class PlaylistPostSyncPlan
                 PluginDispatchPhase::class,
             ]);
     }
+
+    /**
+     * Reduced plan used when a playlist sync did NOT complete successfully.
+     *
+     * Mirrors the legacy {@see SyncListener} behaviour where post-process jobs
+     * (e.g. user-defined webhooks) fired regardless of sync outcome, but all
+     * other phases — which mutate the channel list or downstream systems —
+     * were guarded behind a Status::Completed check.
+     */
+    public static function buildPostProcessOnly(): SyncPlan
+    {
+        return SyncPlan::make('playlist.post_sync.post_process_only')
+            ->phase(PostProcessPhase::class, required: false);
+    }
 }
