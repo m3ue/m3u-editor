@@ -41,7 +41,7 @@ it('does not overwrite playlist status to Processing when forced', function () {
 
 it('does not overwrite playlist status to Processing on a normal (non-forced) run', function () {
     // auto_sync=true and synced=false means the early-return guard passes.
-    $this->playlist->update(['auto_sync' => true, 'synced' => false]);
+    $this->playlist->update(['auto_sync' => true, 'synced' => null]);
 
     $job = new ProcessM3uImportSeries(
         playlist: $this->playlist->fresh(),
