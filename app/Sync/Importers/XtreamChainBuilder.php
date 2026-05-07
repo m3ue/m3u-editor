@@ -2,7 +2,6 @@
 
 namespace App\Sync\Importers;
 
-use App\Jobs\CreateBackup;
 use App\Jobs\ProcessM3uImportChunk;
 use App\Jobs\ProcessM3uImportComplete;
 use App\Jobs\ProcessM3uImportSeriesChunk;
@@ -19,7 +18,8 @@ use Illuminate\Support\Collection;
  * The chain is composed dynamically based on which feeds (live, vod, series)
  * are enabled and which jobs have already been queued in the batch table.
  * Returned array is intended to be fed to ChainDispatcher; this class does
- * not dispatch anything itself.
+ * not dispatch anything itself. Backup (when enabled) is handled upstream by
+ * BackupPhase in the pre-sync plan.
  */
 final class XtreamChainBuilder
 {
@@ -49,11 +49,6 @@ final class XtreamChainBuilder
         // Flag any previously marked new items as not new.
         $playlist->groups()->where('new', true)->update(['new' => false]);
         $playlist->channels()->where('new', true)->update(['new' => false]);
-
-        // Backup first (skip on initial sync).
-        if (! $isNew && $playlist->backup_before_sync) {
-            $jobs[] = new CreateBackup(includeFiles: false);
-        }
 
         if ($liveStreamsEnabled) {
             $this->appendBatchJobs(

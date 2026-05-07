@@ -1,6 +1,5 @@
 <?php
 
-use App\Jobs\CreateBackup;
 use App\Jobs\ProcessM3uImportChunk;
 use App\Jobs\ProcessM3uImportComplete;
 use App\Jobs\ProcessM3uImportSeriesChunk;
@@ -52,7 +51,7 @@ function queueChunkJob(string $batchNo, string $type, int $playlistId): void
     ]);
 }
 
-it('builds a live-only chain with backup + chunk + complete', function () {
+it('builds a live-only chain with chunk + complete', function () {
     $playlist = makeXtreamPlaylist(['backup_before_sync' => true]);
     $batchNo = (string) Str::uuid();
     queueChunkJob($batchNo, 'live', $playlist->id);
@@ -71,10 +70,9 @@ it('builds a live-only chain with backup + chunk + complete', function () {
         enabledCategories: collect(),
     );
 
-    expect($jobs)->toHaveCount(3);
-    expect($jobs[0])->toBeInstanceOf(CreateBackup::class);
-    expect($jobs[1])->toBeInstanceOf(ProcessM3uImportChunk::class);
-    expect($jobs[2])->toBeInstanceOf(ProcessM3uImportComplete::class);
+    expect($jobs)->toHaveCount(2);
+    expect($jobs[0])->toBeInstanceOf(ProcessM3uImportChunk::class);
+    expect($jobs[1])->toBeInstanceOf(ProcessM3uImportComplete::class);
 });
 
 it('builds a live + vod chain when both are enabled', function () {

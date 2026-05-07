@@ -2,7 +2,6 @@
 
 namespace App\Sync\Importers;
 
-use App\Jobs\CreateBackup;
 use App\Jobs\ProcessM3uImportChunk;
 use App\Jobs\ProcessM3uImportComplete;
 use App\Models\Job;
@@ -12,9 +11,10 @@ use Carbon\Carbon;
 /**
  * Assembles the ordered Bus chain for a standard M3U+ playlist sync.
  *
- * Simpler than its Xtream counterpart: a single (optional) backup job, the
- * channel chunks queued during parsing, then the completion job. Returned
- * array is intended to be fed to ChainDispatcher.
+ * Simpler than its Xtream counterpart: the channel chunks queued during
+ * parsing followed by the completion job. Returned array is intended to be
+ * fed to ChainDispatcher. Backup (when enabled) is handled upstream by
+ * BackupPhase in the pre-sync plan.
  */
 final class M3uChainBuilder
 {
@@ -31,10 +31,6 @@ final class M3uChainBuilder
     ): array {
         $playlistId = $playlist->id;
         $jobs = [];
-
-        if (! $isNew && $playlist->backup_before_sync) {
-            $jobs[] = new CreateBackup(includeFiles: false);
-        }
 
         $where = [
             ['batch_no', '=', $batchNo],

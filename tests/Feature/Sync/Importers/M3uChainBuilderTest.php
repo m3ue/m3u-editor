@@ -1,6 +1,5 @@
 <?php
 
-use App\Jobs\CreateBackup;
 use App\Jobs\ProcessM3uImportChunk;
 use App\Jobs\ProcessM3uImportComplete;
 use App\Models\Job;
@@ -22,7 +21,7 @@ function makeM3uPlaylist(array $attrs = []): Playlist
     return Playlist::factory()->for($user)->create($attrs);
 }
 
-it('builds a chain with backup + chunks + complete on subsequent syncs', function () {
+it('builds a chain with chunks + complete for a subsequent sync', function () {
     $playlist = makeM3uPlaylist(['backup_before_sync' => true]);
     $batchNo = (string) Str::uuid();
 
@@ -42,29 +41,12 @@ it('builds a chain with backup + chunks + complete on subsequent syncs', functio
         maxItemsHit: false,
     );
 
-    expect($jobs)->toHaveCount(3);
-    expect($jobs[0])->toBeInstanceOf(CreateBackup::class);
-    expect($jobs[1])->toBeInstanceOf(ProcessM3uImportChunk::class);
-    expect($jobs[2])->toBeInstanceOf(ProcessM3uImportComplete::class);
+    expect($jobs)->toHaveCount(2);
+    expect($jobs[0])->toBeInstanceOf(ProcessM3uImportChunk::class);
+    expect($jobs[1])->toBeInstanceOf(ProcessM3uImportComplete::class);
 });
 
-it('omits the backup job for new playlists', function () {
-    $playlist = makeM3uPlaylist(['backup_before_sync' => true]);
-
-    $jobs = (new M3uChainBuilder)->build(
-        playlist: $playlist,
-        batchNo: (string) Str::uuid(),
-        userId: $playlist->user_id,
-        start: Carbon::now(),
-        isNew: true,
-        maxItemsHit: false,
-    );
-
-    expect($jobs)->toHaveCount(1);
-    expect($jobs[0])->toBeInstanceOf(ProcessM3uImportComplete::class);
-});
-
-it('omits the backup job when backup_before_sync is disabled', function () {
+it('builds a chain with only the complete job when no chunks exist', function () {
     $playlist = makeM3uPlaylist(['backup_before_sync' => false]);
 
     $jobs = (new M3uChainBuilder)->build(
@@ -73,6 +55,22 @@ it('omits the backup job when backup_before_sync is disabled', function () {
         userId: $playlist->user_id,
         start: Carbon::now(),
         isNew: false,
+        maxItemsHit: false,
+    );
+
+    expect($jobs)->toHaveCount(1);
+    expect($jobs[0])->toBeInstanceOf(ProcessM3uImportComplete::class);
+});
+
+it('builds a chain with only the complete job for a new playlist', function () {
+    $playlist = makeM3uPlaylist(['backup_before_sync' => true]);
+
+    $jobs = (new M3uChainBuilder)->build(
+        playlist: $playlist,
+        batchNo: (string) Str::uuid(),
+        userId: $playlist->user_id,
+        start: Carbon::now(),
+        isNew: true,
         maxItemsHit: false,
     );
 

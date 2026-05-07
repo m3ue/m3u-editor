@@ -10,11 +10,13 @@
 use App\Enums\PlaylistSourceType;
 use App\Enums\Status;
 use App\Enums\SyncPhaseStatus;
+use App\Jobs\CreateBackup;
 use App\Jobs\SyncMediaServer;
 use App\Models\MediaServerIntegration;
 use App\Models\Playlist;
 use App\Models\SyncRun;
 use App\Models\User;
+use App\Sync\Phases\PreSync\BackupPhase;
 use App\Sync\Phases\PreSync\ConcurrencyGuardPhase;
 use App\Sync\Phases\PreSync\InitializeSyncStatePhase;
 use App\Sync\Phases\PreSync\MediaServerRedirectPhase;
@@ -206,5 +208,33 @@ it('exposes stable phase slugs', function () {
     expect(NetworkPlaylistPhase::slug())->toBe('network_guard');
     expect(MediaServerRedirectPhase::slug())->toBe('media_server_redirect');
     expect(ConcurrencyGuardPhase::slug())->toBe('concurrency_guard');
+    expect(BackupPhase::slug())->toBe('backup');
     expect(InitializeSyncStatePhase::slug())->toBe('initialize_sync_state');
+});
+
+// -----------------------------------------------------------------------------
+// BackupPhase
+// -----------------------------------------------------------------------------
+
+it('dispatches CreateBackup when backup_before_sync is enabled and playlist has been synced', function () {
+    $this->playlist->update(['backup_before_sync' => true, 'synced' => now()]);
+
+    (new BackupPhase)->run($this->run, $this->playlist->fresh());
+
+    Bus::assertDispatched(CreateBackup::class, fn ($job) => $job->includeFiles === false);
+    expect($this->run->fresh()->phaseStatus('backup'))->toBe(SyncPhaseStatus::Completed);
+});
+
+it('does not dispatch CreateBackup on first sync (synced is null)', function () {
+    $this->playlist->update(['backup_before_sync' => true, 'synced' => null]);
+
+    $phase = new BackupPhase;
+    expect($phase->shouldRun($this->playlist->fresh()))->toBeFalse();
+});
+
+it('does not dispatch CreateBackup when backup_before_sync is disabled', function () {
+    $this->playlist->update(['backup_before_sync' => false, 'synced' => now()]);
+
+    $phase = new BackupPhase;
+    expect($phase->shouldRun($this->playlist->fresh()))->toBeFalse();
 });

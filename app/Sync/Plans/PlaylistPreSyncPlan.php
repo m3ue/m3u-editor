@@ -4,6 +4,7 @@ namespace App\Sync\Plans;
 
 use App\Jobs\ProcessM3uImport;
 use App\Jobs\SyncMediaServer;
+use App\Sync\Phases\PreSync\BackupPhase;
 use App\Sync\Phases\PreSync\ConcurrencyGuardPhase;
 use App\Sync\Phases\PreSync\InitializeSyncStatePhase;
 use App\Sync\Phases\PreSync\MediaServerRedirectPhase;
@@ -28,7 +29,9 @@ use App\Sync\SyncPlan;
  *   3. **Concurrency / auto-sync guard** — short-circuits when the playlist
  *      is already processing or auto-sync is disabled. Bypassed when the
  *      dispatcher was called with `force: true`.
- *   4. **Initialize sync state** — only reached when no guard halted. Stamps
+ *   4. **Backup** — dispatches a pre-sync DB backup when `backup_before_sync`
+ *      is enabled and this is not the first sync. Skipped otherwise.
+ *   5. **Initialize sync state** — only reached when no guard halted. Stamps
  *      the playlist into Processing with zeroed progress counters.
  */
 final class PlaylistPreSyncPlan
@@ -39,6 +42,7 @@ final class PlaylistPreSyncPlan
             ->phase(NetworkPlaylistPhase::class)
             ->phase(MediaServerRedirectPhase::class)
             ->phase(ConcurrencyGuardPhase::class)
+            ->phase(BackupPhase::class)
             ->phase(InitializeSyncStatePhase::class);
     }
 }
