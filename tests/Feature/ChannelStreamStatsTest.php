@@ -216,7 +216,7 @@ it('returns persisted stream_stats from database when available', function () {
     // Reload from DB to ensure attribute accessor is tested
     $channel = Channel::find($channel->id);
 
-    expect($channel->stream_stats)->toBe($stats);
+    expect($channel->stream_stats)->toEqual($stats);
 });
 
 it('returns empty array when no stats are persisted or cached', function () {
