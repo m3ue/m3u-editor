@@ -7,11 +7,9 @@ use App\Filament\Resources\Playlists\Resources\PlaylistSyncRuns\Pages\ListPlayli
 use App\Filament\Resources\Playlists\Resources\PlaylistSyncRuns\Pages\ViewPlaylistSyncRun;
 use App\Filament\Resources\SyncRuns\SyncRunResource;
 use App\Models\SyncRun;
-use BackedEnum;
 use Filament\Resources\ParentResourceRegistration;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
-use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
 
 /**
@@ -29,8 +27,6 @@ class PlaylistSyncRunResource extends Resource
     protected static ?string $parentResource = PlaylistResource::class;
 
     protected static ?string $recordTitleAttribute = 'uuid';
-
-    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedArrowsRightLeft;
 
     protected static ?string $label = 'Sync Run';
 

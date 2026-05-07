@@ -17,9 +17,7 @@ class ViewPlaylistSyncRun extends ViewRecord
                 ->label(__('Back to Sync History'))
                 ->icon('heroicon-o-arrow-left')
                 ->color('gray')
-                ->url(fn (): string => PlaylistSyncRunResource::getUrl('index', [
-                    'parent' => $this->getParentRecord(),
-                ])),
+                ->url(fn (): string => "/playlists/{$this->getParentRecord()->id}/playlist-sync-runs"),
         ];
     }
 }
