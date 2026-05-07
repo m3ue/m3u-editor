@@ -290,7 +290,9 @@ class SyncRunResource extends Resource
         // Post-sync orchestrator runs complete in sub-second time (they only
         // dispatch jobs, not await them). Fall back to the import duration
         // stored in meta so the user sees a meaningful elapsed time.
-        if ($seconds === 0 && isset($run->meta['import_duration_seconds'])) {
+        // Use < 1 (not === 0) because Carbon v3 returns float from diffInSeconds(),
+        // and 0.0 === 0 is false under PHP strict comparison.
+        if ($seconds < 1 && isset($run->meta['import_duration_seconds'])) {
             $seconds = (int) $run->meta['import_duration_seconds'];
         }
 
