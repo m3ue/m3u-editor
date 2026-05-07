@@ -287,6 +287,16 @@ class SyncRunResource extends Resource
         $end = $run->finished_at ?? now();
         $seconds = $end->diffInSeconds($run->started_at);
 
+        // Post-sync orchestrator runs complete in sub-second time (they only
+        // dispatch jobs, not await them). Fall back to the import duration
+        // stored in meta so the user sees a meaningful elapsed time.
+        if ($seconds === 0 && isset($run->meta['import_duration_seconds'])) {
+            $seconds = (int) $run->meta['import_duration_seconds'];
+        }
+
+        if ($seconds < 1) {
+            return '< 1s';
+        }
         if ($seconds < 60) {
             return $seconds.'s';
         }

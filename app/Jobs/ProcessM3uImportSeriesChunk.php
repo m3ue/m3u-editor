@@ -2,7 +2,6 @@
 
 namespace App\Jobs;
 
-use App\Enums\Status;
 use App\Models\Category;
 use App\Models\Playlist;
 use App\Models\Series;
@@ -75,7 +74,6 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
                     ...$playlist->processing ?? [],
                     'series_processing' => true,
                 ],
-                'status' => Status::Processing,
                 'errors' => null,
                 'series_progress' => 0,
             ]);

@@ -58,7 +58,6 @@ class ProcessM3uImportSeries implements ShouldQueue
                 ...$this->playlist->processing ?? [],
                 'series_processing' => true,
             ],
-            'status' => Status::Processing,
             'errors' => null,
             'series_progress' => 0,
         ]);

@@ -103,3 +103,27 @@ it('builds a post-process-only plan that contains only the PostProcessPhase', fu
         ->and($steps[0]->phaseClass)->toBe(PostProcessPhase::class)
         ->and($steps[0]->required)->toBeFalse();
 });
+
+it('stores import_duration_seconds in the post-sync SyncRun meta from playlist sync_time', function () {
+    $this->playlist->update(['sync_time' => 13.0]);
+
+    (new SyncListener)->handle(new SyncCompleted($this->playlist->fresh()));
+
+    $run = SyncRun::query()->latest('id')->first();
+
+    expect($run->meta)
+        ->toMatchArray([
+            'playlist_status' => Status::Completed->value,
+            'import_duration_seconds' => 13.0,
+        ]);
+});
+
+it('stores null import_duration_seconds in meta when playlist sync_time is not set', function () {
+    $this->playlist->update(['sync_time' => null]);
+
+    (new SyncListener)->handle(new SyncCompleted($this->playlist->fresh()));
+
+    $run = SyncRun::query()->latest('id')->first();
+
+    expect($run->meta)->toMatchArray(['import_duration_seconds' => null]);
+});

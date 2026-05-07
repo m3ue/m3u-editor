@@ -57,7 +57,10 @@ class SyncListener
             $playlist,
             kind: 'post_sync',
             trigger: 'sync_completed',
-            meta: ['playlist_status' => $playlist->status?->value],
+            meta: [
+                'playlist_status' => $playlist->status?->value,
+                'import_duration_seconds' => $playlist->sync_time,
+            ],
         );
 
         app(SyncOrchestrator::class)->execute($run, $plan, [
