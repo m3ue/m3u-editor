@@ -139,13 +139,14 @@ class ProcessVodChannels implements ShouldQueue
             return;
         }
 
-        // Update the playlist status to processing
+        // Update the playlist processing flags (do NOT overwrite status here;
+        // the import pipeline already set it to Completed and we must not
+        // race-revert it before SyncCompleted fires).
         $playlist->update([
             'processing' => [
                 ...$playlist->processing ?? [],
                 'vod_processing' => true,
             ],
-            'status' => Status::Processing,
             'errors' => null,
             'vod_progress' => 0,
         ]);
