@@ -71,6 +71,7 @@ class SyncRunResource extends Resource
         return $schema
             ->components([
                 Section::make(__('Run'))
+                    ->compact()
                     ->columns(3)
                     ->schema([
                         TextEntry::make('uuid')
@@ -107,17 +108,20 @@ class SyncRunResource extends Resource
                     ]),
 
                 Section::make(__('Pipeline'))
+                    ->compact()
                     ->collapsible()
                     ->schema([
                         ViewComponent::make('filament.resources.sync-run-resource.phase-diagram'),
                     ]),
 
                 Section::make(__('Phases'))
+                    ->compact()
                     ->schema([
                         ViewComponent::make('filament.resources.sync-run-resource.phase-timeline'),
                     ]),
 
                 Section::make(__('Errors'))
+                    ->compact()
                     ->visible(fn (SyncRun $record): bool => ! empty($record->errors))
                     ->collapsed()
                     ->schema([
