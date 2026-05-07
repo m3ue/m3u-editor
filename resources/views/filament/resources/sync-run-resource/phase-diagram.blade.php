@@ -5,7 +5,7 @@
     $hash = md5($source);
 @endphp
 
-<div @if ($isRunning) wire:poll.2s @endif>
+<div @if ($isRunning) wire:poll.2s.visible @endif>
     @if (empty($source))
         <p class="text-sm text-gray-500 dark:text-gray-400">
             {{ __('No pipeline available for this run.') }}
@@ -16,8 +16,10 @@
             panZoom: null,
             zoomIn() { this.panZoom?.zoomIn(); },
             zoomOut() { this.panZoom?.zoomOut(); },
-            resetView() { this.panZoom?.resetZoom();
-                this.panZoom?.resetPan(); },
+            resetView() {
+                this.panZoom?.resetZoom();
+                this.panZoom?.resetPan();
+            },
         }" x-init="const render = async () => {
             if (!window.__mermaid) {
                 const mod = await import('https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs');
