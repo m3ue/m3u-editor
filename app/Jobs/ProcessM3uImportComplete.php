@@ -3,11 +3,13 @@
 namespace App\Jobs;
 
 use App\Enums\Status;
+use App\Enums\SyncRunStatus;
 use App\Models\Channel;
 use App\Models\Group;
 use App\Models\Job;
 use App\Models\PlaylistSyncStatus;
 use App\Models\PlaylistSyncStatusLog;
+use App\Models\SyncRun;
 use App\Models\User;
 use App\Services\EpgCacheService;
 use App\Settings\GeneralSettings;
@@ -366,6 +368,28 @@ class ProcessM3uImportComplete implements ShouldQueue
             && $playlist->auto_fetch_series_metadata
             && $playlist->series()->where('enabled', true)->exists();
 
+        // If any downstream metadata work is about to be dispatched, mark a
+        // `metadata_fetch` phase on the active sync-kind SyncRun so the phase
+        // timeline shows meaningful visibility while the pipeline is running.
+        // The phase is closed by SyncListener::closeSyncKindRun() when
+        // SyncCompleted fires — the true end-of-pipeline signal.
+        if ($syncVod || $syncSeriesMetadata || $this->runningSeriesImport) {
+            $types = array_values(array_filter([
+                $this->runningSeriesImport ? 'series_discovery' : null,
+                $syncVod ? 'vod_metadata' : null,
+                $syncSeriesMetadata ? 'series_metadata' : null,
+            ]));
+
+            $activeSyncRun = SyncRun::query()
+                ->where('playlist_id', $playlist->id)
+                ->where('kind', 'sync')
+                ->whereIn('status', array_map(fn ($s) => $s->value, SyncRunStatus::active()))
+                ->latest('id')
+                ->first();
+
+            $activeSyncRun?->markPhaseStarted('metadata_fetch', ['types' => $types]);
+        }
+
         if ($syncVod) {
             // VOD runs first. When series is also needed it is chained after VOD completes
             // (via TriggerSeriesImport) so both pipelines run sequentially and respect the
@@ -374,7 +398,6 @@ class ProcessM3uImportComplete implements ShouldQueue
             $completionJob = $syncSeriesMetadata
                 ? new TriggerSeriesImport($playlist, $this->isNew, $this->batchNo)
                 : new FireSyncCompletedEvent($playlist);
-
             $syncStreamFiles = $playlist->auto_sync_vod_stream_files;
             $syncMetaData = $playlist->auto_fetch_vod_metadata;
             if ($syncStreamFiles && $syncMetaData) {

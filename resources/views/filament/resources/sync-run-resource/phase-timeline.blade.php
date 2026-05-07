@@ -35,7 +35,7 @@
                         default => ['label' => __('pending'), 'color' => 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'],
                     };
                     $duration = ($row['started_at'] && $row['finished_at'])
-                        ? $row['finished_at']->diffInMilliseconds($row['started_at']) . 'ms'
+                        ? $row['started_at']->diffInMilliseconds($row['finished_at']) . 'ms'
                         : null;
                     $groupChanged = $group !== $previousGroup;
                     $previousGroup = $group;

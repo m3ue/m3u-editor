@@ -3,6 +3,7 @@
 namespace App\Listeners;
 
 use App\Enums\Status;
+use App\Enums\SyncPhaseStatus;
 use App\Enums\SyncRunStatus;
 use App\Events\SyncCompleted;
 use App\Jobs\GenerateEpgCache;
@@ -102,6 +103,17 @@ class SyncListener
 
         if ($syncRun === null) {
             return;
+        }
+
+        // Close the metadata_fetch phase if it was opened by ProcessM3uImportComplete.
+        // It spans the downstream metadata pipeline (VOD, series discovery, series metadata)
+        // and must be closed before the run is sealed so the timeline shows an accurate duration.
+        if ($syncRun->phaseStatus('metadata_fetch') === SyncPhaseStatus::Running) {
+            if ($playlist->status === Status::Completed) {
+                $syncRun->markPhaseCompleted('metadata_fetch');
+            } else {
+                $syncRun->markPhaseFailed('metadata_fetch', "Sync ended with status: {$playlist->status?->value}");
+            }
         }
 
         $meta = array_merge($syncRun->meta ?? [], [
