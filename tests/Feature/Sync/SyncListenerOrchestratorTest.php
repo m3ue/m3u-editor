@@ -8,6 +8,8 @@
  *  - Picks the full PlaylistPostSyncPlan when status is Completed.
  *  - Picks the post-process-only plan when status is not Completed.
  *  - Threads the latest sync status into the orchestrator context.
+ *  - Closes any active sync-kind SyncRun when SyncCompleted fires.
+ *  - Stores import_duration_seconds on the sync-kind run, not the post_sync run.
  */
 
 use App\Enums\Status;
@@ -19,6 +21,7 @@ use App\Models\SyncRun;
 use App\Models\User;
 use App\Sync\Phases\PostProcessPhase;
 use App\Sync\Plans\PlaylistPostSyncPlan;
+use App\Sync\PlaylistSyncDispatcher;
 use App\Sync\SyncOrchestrator;
 use App\Sync\SyncPlan;
 use Illuminate\Support\Facades\Bus;
@@ -104,26 +107,63 @@ it('builds a post-process-only plan that contains only the PostProcessPhase', fu
         ->and($steps[0]->required)->toBeFalse();
 });
 
-it('stores import_duration_seconds in the post-sync SyncRun meta from playlist sync_time', function () {
-    $this->playlist->update(['sync_time' => 13.0]);
+it('closes an active sync-kind run when SyncCompleted fires', function () {
+    $syncRun = SyncRun::openFor($this->playlist, kind: 'sync', trigger: PlaylistSyncDispatcher::TRIGGER_FILAMENT_PROCESS);
+    $syncRun->markStarted();
 
     (new SyncListener)->handle(new SyncCompleted($this->playlist->fresh()));
 
-    $run = SyncRun::query()->latest('id')->first();
-
-    expect($run->meta)
-        ->toMatchArray([
-            'playlist_status' => Status::Completed->value,
-            'import_duration_seconds' => 13.0,
-        ]);
+    $syncRun->refresh();
+    expect($syncRun->status)->toBe(SyncRunStatus::Completed);
+    expect($syncRun->finished_at)->not->toBeNull();
 });
 
-it('stores null import_duration_seconds in meta when playlist sync_time is not set', function () {
-    $this->playlist->update(['sync_time' => null]);
+it('marks the sync-kind run Failed when playlist status is not Completed', function () {
+    $this->playlist->update(['status' => Status::Failed]);
+
+    $syncRun = SyncRun::openFor($this->playlist, kind: 'sync', trigger: PlaylistSyncDispatcher::TRIGGER_FILAMENT_PROCESS);
+    $syncRun->markStarted();
 
     (new SyncListener)->handle(new SyncCompleted($this->playlist->fresh()));
 
-    $run = SyncRun::query()->latest('id')->first();
+    $syncRun->refresh();
+    expect($syncRun->status)->toBe(SyncRunStatus::Failed);
+    expect($syncRun->finished_at)->not->toBeNull();
+});
 
-    expect($run->meta)->toMatchArray(['import_duration_seconds' => null]);
+it('stores import_duration_seconds on the sync-kind run, not the post_sync run', function () {
+    $this->playlist->update(['sync_time' => 13.0]);
+
+    $syncRun = SyncRun::openFor($this->playlist, kind: 'sync', trigger: PlaylistSyncDispatcher::TRIGGER_FILAMENT_PROCESS);
+    $syncRun->markStarted();
+
+    (new SyncListener)->handle(new SyncCompleted($this->playlist->fresh()));
+
+    $syncRun->refresh();
+    expect($syncRun->meta)->toMatchArray(['import_duration_seconds' => 13.0]);
+
+    $postSyncRun = SyncRun::query()->where('kind', 'post_sync')->latest('id')->first();
+    expect($postSyncRun->meta)->not->toHaveKey('import_duration_seconds');
+});
+
+it('handles SyncCompleted with no active sync-kind run gracefully', function () {
+    // No sync-kind run created — should not throw and post_sync run is still opened.
+    expect(SyncRun::query()->where('kind', 'sync')->count())->toBe(0);
+
+    (new SyncListener)->handle(new SyncCompleted($this->playlist->fresh()));
+
+    expect(SyncRun::query()->where('kind', 'post_sync')->count())->toBe(1);
+});
+
+it('stores null import_duration_seconds on the sync-kind run when playlist sync_time is not set', function () {
+    $this->playlist->update(['sync_time' => null]);
+
+    $syncRun = SyncRun::openFor($this->playlist, kind: 'sync', trigger: PlaylistSyncDispatcher::TRIGGER_FILAMENT_PROCESS);
+    $syncRun->markStarted();
+
+    (new SyncListener)->handle(new SyncCompleted($this->playlist->fresh()));
+
+    $syncRun->refresh();
+    expect($syncRun->meta)->toHaveKey('import_duration_seconds');
+    expect($syncRun->meta['import_duration_seconds'])->toBeNull();
 });

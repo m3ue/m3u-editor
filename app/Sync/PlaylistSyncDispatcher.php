@@ -29,9 +29,12 @@ use Illuminate\Contracts\Container\Container;
  * {@see RecordsSyncPhaseCompletion} once the worker
  * picks the import job up — we attach the run + phase slug fluently via
  * `withSyncContext()` so the middleware has the context it needs. The
- * dispatcher passes `closesRun: true` because `ProcessM3uImport` is the
- * entire run's work; the middleware therefore also flips the run's status
- * (Pending → Running on entry, Completed/Failed on exit).
+ * dispatcher passes `startsRun: true` (run transitions Pending → Running when
+ * the worker picks the job up) but `closesRun: false`, because
+ * `ProcessM3uImport` only dispatches downstream chains for Xtream playlists
+ * with series/VOD — the actual sync work lives in those chains. The run is
+ * instead closed by {@see SyncListener} when the `SyncCompleted` event fires,
+ * which is the true end of the initial sync regardless of playlist type.
  *
  * If a pre-sync phase halts (network playlist, no integration, already
  * processing, ...), the run is marked Cancelled with the halt reason since
@@ -107,7 +110,7 @@ class PlaylistSyncDispatcher
 
         dispatch(
             (new ProcessM3uImport($playlist, $force, $isNew))
-                ->withSyncContext($run, self::PHASE_M3U_IMPORT, closesRun: true)
+                ->withSyncContext($run, self::PHASE_M3U_IMPORT, closesRun: false, startsRun: true)
         );
 
         return $run->fresh() ?? $run;

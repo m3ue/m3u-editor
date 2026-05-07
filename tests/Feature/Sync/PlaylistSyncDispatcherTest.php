@@ -53,7 +53,9 @@ it('opens a sync-kind SyncRun and dispatches ProcessM3uImport with sync context 
             && $job->syncPhaseSlug() === PlaylistSyncDispatcher::PHASE_M3U_IMPORT
             && $job->playlist->is($this->playlist)
             && $job->force === true
-            && $job->isNew === false;
+            && $job->isNew === false
+            && $job->startsSyncRun() === true
+            && $job->closesSyncRun() === false;
     });
 });
 

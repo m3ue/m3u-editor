@@ -3,6 +3,7 @@
 namespace App\Listeners;
 
 use App\Enums\Status;
+use App\Enums\SyncRunStatus;
 use App\Events\SyncCompleted;
 use App\Jobs\GenerateEpgCache;
 use App\Jobs\RunPostProcess;
@@ -21,8 +22,12 @@ class SyncListener
      *
      * For playlist sync events all dispatch logic now lives in the
      * {@see SyncOrchestrator} + {@see PlaylistPostSyncPlan} pipeline. This
-     * listener's only remaining responsibility for playlists is to open a
-     * {@see SyncRun} ledger row and pick the right plan based on outcome.
+     * listener's only remaining responsibility for playlists is to:
+     *   1. Close the open `sync`-kind {@see SyncRun} for this playlist (the run
+     *      was left Running by {@see RecordsSyncPhaseCompletion} so it stays
+     *      alive until the true end-of-sync signal arrives here).
+     *   2. Open a `post_sync` {@see SyncRun} ledger row and pick the right plan
+     *      based on outcome.
      *
      * The EPG branch still runs inline because EPG-side dispatches are out of
      * scope for the current refactor and will move to the orchestrator in a
@@ -42,11 +47,20 @@ class SyncListener
     }
 
     /**
-     * Open a SyncRun, select the appropriate plan based on the playlist's
-     * outcome status, and hand off to the orchestrator.
+     * Close any in-flight sync-kind run, open a post_sync run, select the
+     * appropriate plan based on the playlist's outcome status, and hand off
+     * to the orchestrator.
      */
     private function handlePlaylist(Playlist $playlist): void
     {
+        // Close the sync-kind run that was opened by PlaylistSyncDispatcher
+        // and left Running by RecordsSyncPhaseCompletion. SyncCompleted is the
+        // true end-of-import signal — it fires only after all downstream chains
+        // (VOD chunks, series metadata, etc.) have finished. The import
+        // duration (playlist.sync_time) is stored here on the sync-kind run so
+        // the caller trigger carries the timing context rather than post_sync.
+        $this->closeSyncKindRun($playlist);
+
         $lastSync = $playlist->syncStatuses()->first();
 
         $plan = $playlist->status === Status::Completed
@@ -59,13 +73,54 @@ class SyncListener
             trigger: 'sync_completed',
             meta: [
                 'playlist_status' => $playlist->status?->value,
-                'import_duration_seconds' => $playlist->sync_time,
             ],
         );
 
         app(SyncOrchestrator::class)->execute($run, $plan, [
             'last_sync' => $lastSync,
         ]);
+    }
+
+    /**
+     * Find the most recent active (`pending` or `running`) `sync`-kind run
+     * for this playlist and close it based on the playlist's final status.
+     *
+     * The `import_duration_seconds` is stored on this run (sourced from
+     * `playlist.sync_time`, which `ProcessM3uImportComplete` sets) so the
+     * trigger that initiated the sync carries the timing information.
+     */
+    private function closeSyncKindRun(Playlist $playlist): void
+    {
+        $activeStatuses = array_map(fn ($s) => $s->value, SyncRunStatus::active());
+
+        /** @var SyncRun|null $syncRun */
+        $syncRun = $playlist->syncRuns()
+            ->where('kind', 'sync')
+            ->whereIn('status', $activeStatuses)
+            ->latest('id')
+            ->first();
+
+        if ($syncRun === null) {
+            return;
+        }
+
+        $meta = array_merge($syncRun->meta ?? [], [
+            'import_duration_seconds' => $playlist->sync_time,
+        ]);
+
+        if ($playlist->status === Status::Completed) {
+            $syncRun->forceFill([
+                'status' => SyncRunStatus::Completed,
+                'finished_at' => now(),
+                'meta' => $meta,
+            ])->save();
+        } else {
+            $syncRun->forceFill([
+                'meta' => $meta,
+            ])->save();
+
+            $syncRun->markFailed("Playlist sync ended with status: {$playlist->status?->value}");
+        }
     }
 
     /**

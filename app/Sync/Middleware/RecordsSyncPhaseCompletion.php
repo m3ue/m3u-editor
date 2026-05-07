@@ -20,11 +20,22 @@ use Throwable;
  * - On failure: writes phase status = Failed and rethrows so Laravel's normal
  *   retry/failure handling continues to apply.
  *
- * If the job's {@see TracksSyncRun::closesSyncRun()} returns true, the
- * middleware also flips the run-level status: Pending → Running on entry,
- * and Completed/Failed on exit. This is used by jobs that constitute the
- * entire run's work (e.g. ProcessM3uImport on a sync-kind run) so the run
- * doesn't sit in Pending forever.
+ * Two independent run-level lifecycle flags are supported:
+ *
+ * - {@see TracksSyncRun::startsSyncRun()} — when true, the middleware also
+ *   transitions the run Pending → Running on entry. On exception, the run is
+ *   also marked Failed regardless of `closesSyncRun()`, because a job that
+ *   starts a run crashing means the run is dead.
+ *
+ * - {@see TracksSyncRun::closesSyncRun()} — when true, the middleware also
+ *   marks the run Completed on success. Use for jobs whose completion is the
+ *   natural end of the run's work.
+ *
+ * Combining `startsSyncRun: true` with `closesSyncRun: false` lets a job
+ * mark the run as in-flight without terminating it — suitable for jobs that
+ * only dispatch downstream chains (e.g. ProcessM3uImport for Xtream playlists
+ * where the actual work is in the chained jobs). The run is then closed
+ * externally when the downstream work signals completion.
  *
  * The job opts in by implementing {@see TracksSyncRun} (typically via the
  * {@see InteractsWithSyncRun} trait) and listing this
@@ -50,11 +61,12 @@ class RecordsSyncPhaseCompletion
         }
 
         $run = SyncRun::find($runId);
+        $startsRun = $job->startsSyncRun();
         $closesRun = $job->closesSyncRun();
 
         $run?->markPhaseStarted($slug);
 
-        if ($closesRun && $run !== null && $run->status === SyncRunStatus::Pending) {
+        if ($startsRun && $run !== null && $run->status === SyncRunStatus::Pending) {
             $run->markStarted();
         }
 
@@ -64,7 +76,9 @@ class RecordsSyncPhaseCompletion
             try {
                 $run?->markPhaseFailed($slug, $e);
 
-                if ($closesRun && $run !== null && ! $run->status->isTerminal()) {
+                // If this job starts or closes the run, a thrown exception means
+                // the run is dead — mark it Failed regardless of which flag is set.
+                if (($startsRun || $closesRun) && $run !== null && ! $run->status->isTerminal()) {
                     $run->markFailed($e);
                 }
             } catch (Throwable $inner) {

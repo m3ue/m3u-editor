@@ -32,19 +32,29 @@ trait InteractsWithSyncRun
 
     public bool $syncClosesRun = false;
 
+    public bool $syncStartsRun = false;
+
     /**
      * Attach a SyncRun + phase slug to this job so the middleware can mirror
      * its lifecycle onto the run when the worker executes it.
      *
-     * Pass `closesRun: true` when this job represents the entire run's work
-     * — the middleware will then also flip the run's status from Pending to
-     * Running on entry and to Completed/Failed on exit.
+     * Pass `startsRun: true` when this job is the first queued step of the
+     * run — the middleware will transition the run from Pending to Running on
+     * entry (and to Failed on exception).
+     *
+     * Pass `closesRun: true` when this job also constitutes the *end* of the
+     * run's work — the middleware will then also flip the run to
+     * Completed/Failed on exit. When a job only dispatches downstream chains
+     * (e.g. ProcessM3uImport for Xtream playlists), use `startsRun: true` +
+     * `closesRun: false` so the run stays Running until the downstream work
+     * signals completion (SyncCompleted event → SyncListener closes the run).
      */
-    public function withSyncContext(SyncRun $run, string $phaseSlug, bool $closesRun = false): static
+    public function withSyncContext(SyncRun $run, string $phaseSlug, bool $closesRun = false, bool $startsRun = false): static
     {
         $this->syncRunId = $run->getKey();
         $this->syncPhaseSlug = $phaseSlug;
         $this->syncClosesRun = $closesRun;
+        $this->syncStartsRun = $startsRun;
 
         return $this;
     }
@@ -62,5 +72,10 @@ trait InteractsWithSyncRun
     public function closesSyncRun(): bool
     {
         return $this->syncClosesRun;
+    }
+
+    public function startsSyncRun(): bool
+    {
+        return $this->syncStartsRun;
     }
 }
