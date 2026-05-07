@@ -12,6 +12,7 @@ use App\Sync\SyncPlanRegistry;
 use App\Traits\HasUserFiltering;
 use BackedEnum;
 use Filament\Actions\BulkActionGroup;
+use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\ViewAction;
 use Filament\Infolists\Components\TextEntry;
@@ -22,7 +23,7 @@ use Filament\Schemas\Components\View as ViewComponent;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
-use Filament\Tables\Filters\SelectFilter;
+use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Carbon;
@@ -136,13 +137,6 @@ class SyncRunResource extends Resource
                     ->copyable()
                     ->copyableState(fn (string $state): string => $state)
                     ->toggleable(),
-                TextColumn::make('playlist.name')
-                    ->label(__('Playlist'))
-                    ->url(fn (SyncRun $record): ?string => $record->playlist
-                        ? PlaylistResource::getUrl('view', ['record' => $record->playlist])
-                        : null)
-                    ->searchable()
-                    ->sortable(),
                 TextColumn::make('kind')
                     ->badge()
                     ->color('gray')
@@ -172,23 +166,12 @@ class SyncRunResource extends Resource
                     ->label(__('Duration'))
                     ->state(fn (SyncRun $record): string => self::formatDuration($record)),
             ])
-            ->filters([
-                SelectFilter::make('playlist_id')
-                    ->label(__('Playlist'))
-                    ->relationship('playlist', 'name')
-                    ->searchable()
-                    ->preload(),
-                SelectFilter::make('status')
-                    ->options(SyncRunStatus::class),
-                SelectFilter::make('kind')
-                    ->options([
-                        'sync' => __('Pre-sync'),
-                        'post_sync' => __('Post-sync'),
-                    ]),
-            ])
             ->recordActions([
-                ViewAction::make(),
-            ])
+                DeleteAction::make()
+                    ->button()->hiddenLabel()->size('sm'),
+                ViewAction::make()
+                    ->button()->hiddenLabel()->size('sm'),
+            ], RecordActionsPosition::BeforeCells)
             ->toolbarActions([
                 BulkActionGroup::make([
                     DeleteBulkAction::make()
