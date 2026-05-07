@@ -43,7 +43,7 @@ class EditPlaylist extends EditRecord
         return true;
     }
 
-    protected function getHeaderWidgets(): array
+    protected function getFooterWidgets(): array
     {
         return [
             LatestSyncRun::class,
