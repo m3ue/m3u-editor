@@ -108,6 +108,25 @@ class CheckSeriesImportProgress implements ShouldQueue
                 ]);
             }
 
+            // IMPORTANT: Mark the playlist as Completed BEFORE dispatching the
+            // SyncCompleted event (or chaining FireSyncCompletedEvent). The
+            // SyncListener inspects $playlist->status to decide which post-sync
+            // plan to build — if status is still Processing it falls back to
+            // PostProcessOnly and skips STRM/series-STRM/F&R/channel-scan/Plex.
+            if ($this->playlist_id) {
+                $playlist = Playlist::find($this->playlist_id);
+                if ($playlist) {
+                    $playlist->update([
+                        'processing' => [
+                            ...$playlist->processing ?? [],
+                            'series_processing' => false,
+                        ],
+                        'status' => Status::Completed,
+                        'series_progress' => 100,
+                    ]);
+                }
+            }
+
             if (! empty($postJobs)) {
                 // Append the SyncCompleted dispatch as the final link so post-sync
                 // listeners (find/replace, sort, merge, scrubber, probe, plugins,
@@ -143,20 +162,6 @@ class CheckSeriesImportProgress implements ShouldQueue
                         ->body("Successfully processed {$this->totalSeries} series in {$timeStr}.")
                         ->broadcast($user)
                         ->sendToDatabase($user);
-                }
-            }
-
-            if ($this->playlist_id) {
-                $playlist = Playlist::find($this->playlist_id);
-                if ($playlist) {
-                    $playlist->update([
-                        'processing' => [
-                            ...$playlist->processing ?? [],
-                            'series_processing' => false,
-                        ],
-                        'status' => Status::Completed,
-                        'series_progress' => 100,
-                    ]);
                 }
             }
 
