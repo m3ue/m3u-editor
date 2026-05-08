@@ -135,6 +135,7 @@ class Playlist extends Model
             return false;
         }
 
+        $this->refresh();
         event(new SyncCompleted($this, $type));
 
         return true;

@@ -109,7 +109,7 @@ final class XtreamChainBuilder
             ['variables->type', '=', $type],
         ];
         $count = Job::where($where)->count();
-        Job::where($where)->select('id')->cursor()->chunk(100)->each(function ($chunk) use (&$jobs, $count, $jobClass) {
+        Job::where($where)->select('id')->chunkById(100, function ($chunk) use (&$jobs, $count, $jobClass) {
             $jobs[] = new $jobClass($chunk->pluck('id')->toArray(), $count);
         });
     }

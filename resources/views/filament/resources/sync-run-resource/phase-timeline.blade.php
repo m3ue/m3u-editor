@@ -28,7 +28,7 @@
                         default => 'bg-gray-300 dark:bg-gray-600',
                     };
                     $statusBadge = match ($row['status']->value) {
-                        'completed' => ['label' => __('triggered'), 'color' => 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'],
+                        'completed' => ['label' => __('completed'), 'color' => 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'],
                         'running' => ['label' => __('running'), 'color' => 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300'],
                         'failed' => ['label' => __('failed'), 'color' => 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'],
                         'skipped' => ['label' => __('skipped'), 'color' => 'bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-300'],

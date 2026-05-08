@@ -65,7 +65,7 @@ final class Retry503Strategy
         ]);
 
         $minSeconds = (int) config('dev.auto_retry_503_delay_min_seconds', 300);
-        $maxSeconds = (int) config('dev.auto_retry_503_delay_max_seconds', 900);
+        $maxSeconds = max($minSeconds, (int) config('dev.auto_retry_503_delay_max_seconds', 900));
         $delay = random_int($minSeconds, $maxSeconds);
 
         dispatch(new ProcessM3uImport($playlist))

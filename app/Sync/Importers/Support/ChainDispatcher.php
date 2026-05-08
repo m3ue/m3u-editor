@@ -33,7 +33,7 @@ final class ChainDispatcher
                     playlist: $playlist,
                     errors: "Error processing \"{$playlist->name}\": {$e->getMessage()}",
                     exception: $e,
-                    channels: 0,
+                    channels: null,
                     clearSeriesProcessing: true,
                     tryRetry503: true,
                 );

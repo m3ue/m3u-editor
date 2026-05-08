@@ -139,6 +139,10 @@ class SyncRun extends Model
      */
     public function markStarted(): self
     {
+        if ($this->status->isTerminal()) {
+            return $this;
+        }
+
         $this->forceFill([
             'status' => SyncRunStatus::Running,
             'started_at' => $this->started_at ?? now(),
@@ -149,6 +153,10 @@ class SyncRun extends Model
 
     public function markCompleted(): self
     {
+        if ($this->status->isTerminal()) {
+            return $this;
+        }
+
         $this->forceFill([
             'status' => SyncRunStatus::Completed,
             'finished_at' => now(),

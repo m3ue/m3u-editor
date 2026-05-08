@@ -38,7 +38,7 @@ final class M3uChainBuilder
             ['variables', '!=', null],
         ];
         $batchCount = Job::where($where)->count();
-        Job::where($where)->select('id')->cursor()->chunk(100)->each(function ($chunk) use (&$jobs, $batchCount) {
+        Job::where($where)->select('id')->chunkById(100, function ($chunk) use (&$jobs, $batchCount) {
             $jobs[] = new ProcessM3uImportChunk($chunk->pluck('id')->toArray(), $batchCount);
         });
 
