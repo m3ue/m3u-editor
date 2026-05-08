@@ -28,15 +28,12 @@
                         default => 'bg-gray-300 dark:bg-gray-600',
                     };
                     $statusBadge = match ($row['status']->value) {
-                        'completed' => ['label' => __('completed'), 'color' => 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'],
+                        'completed' => ['label' => __('triggered'), 'color' => 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'],
                         'running' => ['label' => __('running'), 'color' => 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300'],
                         'failed' => ['label' => __('failed'), 'color' => 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'],
                         'skipped' => ['label' => __('skipped'), 'color' => 'bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-300'],
                         default => ['label' => __('pending'), 'color' => 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'],
                     };
-                    $duration = ($row['started_at'] && $row['finished_at'])
-                        ? $row['started_at']->diffInMilliseconds($row['finished_at']) . 'ms'
-                        : null;
                     $groupChanged = $group !== $previousGroup;
                     $previousGroup = $group;
                 @endphp
@@ -64,9 +61,6 @@
                                 <span class="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400">
                                     {{ __('optional') }}
                                 </span>
-                            @endif
-                            @if($duration)
-                                <span class="text-xs text-gray-500 dark:text-gray-400">{{ $duration }}</span>
                             @endif
                         </div>
                         <div class="text-xs text-gray-500 dark:text-gray-400 font-mono">
