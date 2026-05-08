@@ -3,6 +3,7 @@
 namespace App\Sync\Phases;
 
 use App\Jobs\SyncPlexDvrJob;
+use App\Models\MediaServerIntegration;
 use App\Models\Playlist;
 use App\Models\SyncRun;
 use App\Sync\Contracts\BatchablePhase;
@@ -25,13 +26,11 @@ class PlexDvrSyncPhase extends AbstractPhase implements BatchablePhase
         return 'plex_dvr_sync';
     }
 
-    /**
-     * Always run on a completed playlist sync — the job itself is a no-op when
-     * Plex DVR isn't configured, so there's no value in checking config here.
-     */
     public function shouldRun(Playlist $playlist): bool
     {
-        return true;
+        return MediaServerIntegration::where('plex_management_enabled', true)
+            ->whereNotNull('plex_dvr_id')
+            ->exists();
     }
 
     protected function execute(SyncRun $run, Playlist $playlist, array $context): ?array

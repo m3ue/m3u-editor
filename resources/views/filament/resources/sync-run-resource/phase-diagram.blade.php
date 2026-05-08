@@ -21,33 +21,18 @@
                 this.panZoom?.resetPan();
             },
         }" x-init="const render = async () => {
-            if (!window.__mermaid) {
-                const mod = await import('https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs');
-                window.__mermaid = mod.default;
-                window.__mermaid.initialize({ startOnLoad: false, securityLevel: 'loose', theme: 'default' });
-            }
+            await window.__loadMermaid();
             const id = 'mermaid-svg-{{ $hash }}';
             try {
                 const { svg } = await window.__mermaid.render(id, src);
                 $refs.target.innerHTML = svg;
-        
+
                 const svgEl = $refs.target.querySelector('svg');
                 if (svgEl) {
                     svgEl.setAttribute('width', '100%');
                     svgEl.setAttribute('height', '100%');
                     svgEl.style.maxWidth = 'none';
-        
-                    if (!window.__svgPanZoom) {
-                        await new Promise((resolve, reject) => {
-                            const s = document.createElement('script');
-                            s.src = 'https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/dist/svg-pan-zoom.min.js';
-                            s.onload = resolve;
-                            s.onerror = reject;
-                            document.head.appendChild(s);
-                        });
-                        window.__svgPanZoom = window.svgPanZoom;
-                    }
-        
+
                     panZoom = window.__svgPanZoom(svgEl, {
                         zoomEnabled: true,
                         controlIconsEnabled: false,

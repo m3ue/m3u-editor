@@ -60,7 +60,7 @@ final class ImportFailureHandler
             ->sendToDatabase($playlist->user);
 
         $processing = [
-            ...$playlist->processing ?? [],
+            ...($playlist->fresh()->processing ?? []),
             'live_processing' => false,
             'vod_processing' => false,
         ];

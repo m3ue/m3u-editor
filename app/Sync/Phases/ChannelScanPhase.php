@@ -81,7 +81,7 @@ class ChannelScanPhase extends AbstractPhase
 
         foreach ($failoverPlaylists as $failover) {
             $failoverId = is_array($failover) ? ($failover['playlist_failover_id'] ?? null) : $failover;
-            if ($failoverId && $failoverId != $playlist->id) {
+            if ($failoverId && (int) $failoverId !== $playlist->id) {
                 $playlists->push(['playlist_failover_id' => $failoverId]);
             }
         }

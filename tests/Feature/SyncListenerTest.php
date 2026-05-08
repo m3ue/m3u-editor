@@ -342,6 +342,11 @@ it('resets EPG cache state to prevent stale reads before dispatching GenerateEpg
 // ──────────────────────────────────────────────────────────────────────────────
 
 it('dispatches SyncPlexDvrJob after a successful playlist sync', function () {
+    \App\Models\MediaServerIntegration::factory()->for($this->user)->create([
+        'plex_management_enabled' => true,
+        'plex_dvr_id' => 'dvr-1',
+    ]);
+
     event(new SyncCompleted($this->playlist));
 
     Bus::assertBatched(fn (PendingBatch $batch): bool => $batch->jobs

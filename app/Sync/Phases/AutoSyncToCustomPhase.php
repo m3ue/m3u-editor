@@ -72,7 +72,7 @@ class AutoSyncToCustomPhase extends AbstractPhase implements BatchablePhase
                     'category' => $rule['category'] ?? null,
                     'new_category' => $rule['new_category'] ?? null,
                 ],
-                type: $rule['type'] === 'series_categories' ? 'series' : 'channel',
+                type: ($rule['type'] ?? '') === 'series_categories' ? 'series' : 'channel',
                 syncMode: $rule['sync_mode'] ?? 'full_sync',
             );
         }

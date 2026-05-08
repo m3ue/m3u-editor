@@ -227,6 +227,12 @@ class SyncOrchestrator
                 continue;
             }
 
+            if ($contribution === []) {
+                $run->markPhaseSkipped($phase::slug(), reason: 'no jobs contributed');
+
+                continue;
+            }
+
             foreach ($contribution as $job) {
                 $jobs[] = $job;
             }
@@ -293,6 +299,12 @@ class SyncOrchestrator
                     'phase' => $phase::slug(),
                     'message' => $e->getMessage(),
                 ]);
+
+                continue;
+            }
+
+            if ($contribution === []) {
+                $run->markPhaseSkipped($phase::slug(), reason: 'no jobs contributed');
 
                 continue;
             }
