@@ -87,12 +87,12 @@ class VodFileNameService
             return $explicit;
         }
 
-        $info = $this->scalarFromArray($channel->info ?? [], ['edition', 'movie_edition']);
+        $info = $this->scalarFromArray($channel->info ?? [], ['edition', 'movie_edition', 'release_name']);
         if ($info !== '') {
             return $info;
         }
 
-        return $this->scalarFromArray($channel->movie_data ?? [], ['edition', 'movie_edition']);
+        return $this->scalarFromArray($channel->movie_data ?? [], ['edition', 'movie_edition', 'release_name']);
     }
 
     /**
@@ -216,34 +216,6 @@ class VodFileNameService
 
         // No title-based fallback: only probed stats or explicit manual value.
         return $this->manualValue($channel, $setting, ['quality', 'resolution']);
-    }
-
-    /**
-     * Get the channel's raw title-like fields for title-based metadata extraction.
-     */
-    private function rawTitle(Channel $channel): string
-    {
-        return trim(implode(' ', array_filter([
-            $this->scalarAttribute($channel, 'title'),
-            $this->scalarAttribute($channel, 'name'),
-            $this->scalarAttribute($channel, 'title_custom'),
-        ])));
-    }
-
-    /**
-     * Stats → manual → title-based fallback chain.
-     */
-    private function preferStatsManualOrTitle(string $statsValue, \Closure $manualFallback, \Closure $titleFallback): string
-    {
-        if ($statsValue !== '') {
-            return $statsValue;
-        }
-        $manual = $manualFallback();
-        if ($manual !== '') {
-            return $manual;
-        }
-
-        return $titleFallback();
     }
 
     private function preferStatsOrManual(string $statsValue, \Closure $manualFallback): string

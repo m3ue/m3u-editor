@@ -11,7 +11,7 @@ use App\Models\StrmFileMapping;
 use App\Models\User;
 use App\Services\NfoService;
 use App\Services\PlaylistService;
-use App\Services\StreamStatsService;
+use App\Services\SerieFileNameService;
 use App\Settings\GeneralSettings;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -678,24 +678,13 @@ class SyncSeriesStrmFiles implements ShouldQueue
                 // Trash Guide naming: append quality/video/audio/hdr bracket additively
                 // (provider-driven only, missing stream_stats → no extras)
                 if ($streamFileSetting?->trash_guide_naming_enabled) {
-                    $stats = StreamStatsService::normalize($ep->stream_stats ?? []);
-                    if (! empty($stats)) {
-                        $components = $streamFileSetting->trash_episode_components ?? ['quality', 'video', 'audio', 'hdr'];
-                        $map = [
-                            'quality' => StreamStatsService::detectQuality($stats),
-                            'video' => StreamStatsService::detectVideoCodec($stats),
-                            'audio' => StreamStatsService::detectAudio($stats),
-                            'hdr' => StreamStatsService::detectHdr($stats),
-                        ];
-                        $parts = [];
-                        foreach (['quality', 'video', 'audio', 'hdr'] as $key) {
-                            if (in_array($key, $components, true) && ! empty($map[$key])) {
-                                $parts[] = $map[$key];
-                            }
+                    try {
+                        $extras = app(SerieFileNameService::class)->generateEpisodeExtras($ep, $streamFileSetting);
+                        if ($extras !== '') {
+                            $fileName .= ' '.$extras;
                         }
-                        if ($parts) {
-                            $fileName .= ' ['.implode(' ', $parts).']';
-                        }
+                    } catch (\Throwable $e) {
+                        Log::warning("Trash Guide series extras build failed for episode {$ep->id}: ".$e->getMessage());
                     }
                 }
 
