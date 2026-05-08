@@ -34,7 +34,7 @@ beforeEach(function () {
 it('opens a sync-kind SyncRun and dispatches ProcessM3uImport with sync context attached', function () {
     Bus::fake();
 
-    $dispatcher = new PlaylistSyncDispatcher;
+    $dispatcher = app(PlaylistSyncDispatcher::class);
     $run = $dispatcher->dispatch(
         $this->playlist,
         PlaylistSyncDispatcher::TRIGGER_API_REFRESH,
@@ -123,7 +123,7 @@ it('records the m3u_import phase as failed when the worker throws', function () 
 it('runs the pre-sync plan and records each phase on the SyncRun', function () {
     Bus::fake();
 
-    $run = (new PlaylistSyncDispatcher)->dispatch(
+    $run = app(PlaylistSyncDispatcher::class)->dispatch(
         $this->playlist->fresh(),
         PlaylistSyncDispatcher::TRIGGER_API_REFRESH,
     );
@@ -141,7 +141,7 @@ it('skips ProcessM3uImport dispatch when network playlist guard halts', function
     Bus::fake();
     $this->playlist->update(['is_network_playlist' => true]);
 
-    $run = (new PlaylistSyncDispatcher)->dispatch(
+    $run = app(PlaylistSyncDispatcher::class)->dispatch(
         $this->playlist->fresh(),
         PlaylistSyncDispatcher::TRIGGER_API_REFRESH,
     );
@@ -168,7 +168,7 @@ it('skips ProcessM3uImport dispatch and dispatches SyncMediaServer when integrat
         ->for($this->user)
         ->create(['playlist_id' => $this->playlist->id, 'type' => 'emby']);
 
-    (new PlaylistSyncDispatcher)->dispatch(
+    app(PlaylistSyncDispatcher::class)->dispatch(
         $this->playlist->fresh(),
         PlaylistSyncDispatcher::TRIGGER_API_REFRESH,
     );
@@ -181,7 +181,7 @@ it('skips ProcessM3uImport dispatch when concurrency guard halts (already proces
     Bus::fake();
     $this->playlist->update(['processing' => ['live_processing' => true]]);
 
-    $run = (new PlaylistSyncDispatcher)->dispatch(
+    $run = app(PlaylistSyncDispatcher::class)->dispatch(
         $this->playlist->fresh(),
         PlaylistSyncDispatcher::TRIGGER_API_REFRESH,
         force: false,
@@ -195,7 +195,7 @@ it('bypasses concurrency guard when dispatched with force=true', function () {
     Bus::fake();
     $this->playlist->update(['processing' => ['live_processing' => true]]);
 
-    (new PlaylistSyncDispatcher)->dispatch(
+    app(PlaylistSyncDispatcher::class)->dispatch(
         $this->playlist->fresh(),
         PlaylistSyncDispatcher::TRIGGER_API_REFRESH,
         force: true,

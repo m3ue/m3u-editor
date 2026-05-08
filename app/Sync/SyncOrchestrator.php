@@ -65,12 +65,12 @@ class SyncOrchestrator
         } catch (Throwable $e) {
             $run->markFailed($e);
 
-            return $run->fresh() ?? $run;
+            return $run;
         }
 
         $run->markCompleted();
 
-        return $run->fresh() ?? $run;
+        return $run;
     }
 
     /**

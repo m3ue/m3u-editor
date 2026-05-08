@@ -82,8 +82,12 @@ final class InclusionPolicy
                 $delimiter = '/';
                 $escapedPattern = str_replace($delimiter, '\\'.$delimiter, $pattern);
                 $finalPattern = $delimiter.$escapedPattern.$delimiter.'u';
-                if (@preg_match($finalPattern, $name)) {
-                    return true;
+                try {
+                    if (preg_match($finalPattern, $name) === 1) {
+                        return true;
+                    }
+                } catch (\ValueError $e) {
+                    // Invalid regex pattern — skip silently rather than crashing the import.
                 }
             } elseif (str_starts_with($name, $pattern)) {
                 return true;

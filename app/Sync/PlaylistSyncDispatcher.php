@@ -72,7 +72,7 @@ class PlaylistSyncDispatcher
      */
     public const PHASE_M3U_IMPORT = 'm3u_import';
 
-    public function __construct(private readonly ?Container $container = null) {}
+    public function __construct(private readonly Container $container) {}
 
     /**
      * Open a SyncRun ledger row, run the pre-sync phase plan, and (if no
@@ -153,11 +153,9 @@ class PlaylistSyncDispatcher
      */
     private function runPreSync(SyncRun $run, Playlist $playlist, array $context): array
     {
-        $container = $this->container ?? app();
-
         foreach (PlaylistPreSyncPlan::build()->steps() as $step) {
             /** @var SyncPhase $phase */
-            $phase = $container->make($step->phaseClass);
+            $phase = $this->container->make($step->phaseClass);
 
             if (! $phase->shouldRun($playlist)) {
                 $run->markPhaseSkipped($phase::slug(), reason: 'shouldRun returned false');
