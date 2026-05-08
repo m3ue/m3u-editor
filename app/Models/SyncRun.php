@@ -235,7 +235,8 @@ class SyncRun extends Model
         return $this->writePhase($phase, [
             'status' => SyncPhaseStatus::Running->value,
             'started_at' => $this->phases[$phase]['started_at'] ?? now()->toIso8601String(),
-            'finished_at' => null,
+            // finished_at is intentionally omitted: writePhase treats absent/null
+            // keys as "preserve existing", and a running phase has no finish time.
             'meta' => $meta,
         ]);
     }
@@ -298,7 +299,7 @@ class SyncRun extends Model
      * Convenience accessor returning the slug of whichever phase is currently
      * Running, or null if the run is between phases.
      */
-    protected function currentPhase(): Attribute
+    public function currentPhase(): Attribute
     {
         return Attribute::get(function (): ?string {
             foreach ($this->phases ?? [] as $slug => $data) {
@@ -314,6 +315,12 @@ class SyncRun extends Model
     /**
      * Merge updates into a phase entry, preserving previously written keys.
      *
+     * Null values in `$updates` are treated as "no change" — they leave any
+     * previously written value for that key intact. This lets callers omit
+     * optional fields (e.g. `meta`) without accidentally clearing them.
+     * To explicitly clear a field, pass it as an empty value (e.g. `[]` for
+     * an array field, `''` for a string) rather than null.
+     *
      * Wrapped in a transaction with `lockForUpdate` because parallel-group
      * phases dispatched via `Bus::batch()` may write to different phase entries
      * in the same JSONB column simultaneously; without a row lock the
@@ -328,13 +335,16 @@ class SyncRun extends Model
             $fresh = self::query()->whereKey($this->getKey())->lockForUpdate()->firstOrFail();
 
             $phases = $fresh->phases ?? [];
-            $existing = $phases[$phase] ?? [];
+            $merged = $phases[$phase] ?? [];
 
-            $phases[$phase] = array_replace($existing, array_filter(
-                $updates,
-                static fn ($value) => $value !== null,
-            ));
+            foreach ($updates as $key => $value) {
+                if ($value !== null) {
+                    $merged[$key] = $value;
+                }
+                // null → preserve the existing value for this key (no-op)
+            }
 
+            $phases[$phase] = $merged;
             $fresh->phases = $phases;
             $fresh->save();
 

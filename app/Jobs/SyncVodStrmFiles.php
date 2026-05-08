@@ -60,6 +60,21 @@ class SyncVodStrmFiles implements ShouldQueue
         public ?int $currentBatch = null,
         public bool $isCleanupJob = false,
         public ?array $channel_ids = null,
+        // When true the inline FireStreamFilesSyncedEvent dispatch at the end
+        // of performGlobalCleanup() is skipped; the caller (StrmPostProcessPhase
+        // in an orchestrated sync) owns the post-process firing instead.
+        //
+        // This flag distinguishes two permanent dispatch modes:
+        //   - Orchestrated (StrmSyncPhase): suppress=true, StrmPostProcessPhase
+        //     fires the event as a separate chain link so it appears in the
+        //     SyncRun phase timeline.
+        //   - Standalone (Filament VOD/VodGroup actions, CheckVodStrmProgress):
+        //     suppress=false (default), event fires inline here.
+        //
+        // Removal path (Step 8): route all standalone dispatch sites through a
+        // lightweight StandaloneStrmSyncPlan that includes both StrmSyncPhase and
+        // StrmPostProcessPhase. Once every dispatch goes through the orchestrator,
+        // this flag and the conditional below can be deleted.
         public bool $suppressPostProcessEvents = false,
     ) {
         // Run file synces on the dedicated queue

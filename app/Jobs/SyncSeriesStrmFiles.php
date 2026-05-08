@@ -58,6 +58,16 @@ class SyncSeriesStrmFiles implements ShouldQueue
         public ?int $currentBatch = null,
         public bool $isCleanupJob = false, // Special flag for final cleanup
         public ?array $series_ids = null,
+        // When true the inline FireStreamFilesSyncedEvent dispatch at the end
+        // of performGlobalCleanup() is skipped; the caller (SeriesStrmPostProcessPhase
+        // in an orchestrated sync) owns the post-process firing instead.
+        //
+        // Same two-mode distinction as SyncVodStrmFiles::$suppressPostProcessEvents.
+        //
+        // Removal path (Step 8): route all standalone dispatch sites (Filament
+        // Series/Category actions, Series model, CheckSeriesStrmProgress) through
+        // a lightweight StandaloneStrmSyncPlan. Once every dispatch goes through
+        // the orchestrator this flag and the conditional below can be deleted.
         public bool $suppressPostProcessEvents = false,
     ) {
         // Run file synces on the dedicated queue
