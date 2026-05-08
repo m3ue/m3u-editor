@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<tvshow>
+    <title>Star Trek - Starfleet Academy</title>
+    <originaltitle>Star Trek - Starfleet Academy</originaltitle>
+    <sorttitle>Star Trek - Starfleet Academy</sorttitle>
+    <plot>Eine Gruppe junger Kadetten findet zusammen, um einen gemeinsamen Traum von Hoffnung und Optimismus zu verfolgen. Unter den wachsamen und anspruchsvollen Augen ihrer Ausbilder entdecken sie, was es braucht, um Sternenflottenoffiziere zu werden, während sie sich durch aufkeimende Freundschaften, explosive Rivalitäten, erste Lieben und einen neuen Feind navigieren, der sowohl die Akademie als auch die Föderation selbst bedroht.</plot>
+    <outline>Eine Gruppe junger Kadetten findet zusammen, um einen gemeinsamen Traum von Hoffnung und Optimismus zu verfolgen. Unter den wachsamen und anspruchsvollen Augen ihrer Ausbilder entdecken sie, was es braucht, um Sternenflottenoffiziere zu werden, während sie sich durch aufkeimende Freundschaften, explosive Rivalitäten, erste Lieben und einen neuen Feind navigieren, der sowohl die Akademie als auch die Föderation selbst bedroht.</outline>
+    <year>2026</year>
+    <premiered>2026-01-15</premiered>
+    <fanart>https://image.tmdb.org/t/p/w780/fStyKyKB7zTfBqNNXCBc3Z4P4OL.jpg</fanart>
+    <uniqueid type="tmdb" default="true">223530</uniqueid>
+    <tmdbid>223530</tmdbid>
+    <uniqueid type="tvdb">433120</uniqueid>
+    <tvdbid>433120</tvdbid>
+    <uniqueid type="imdb">tt8622160</uniqueid>
+    <imdbid>tt8622160</imdbid>
+</tvshow>

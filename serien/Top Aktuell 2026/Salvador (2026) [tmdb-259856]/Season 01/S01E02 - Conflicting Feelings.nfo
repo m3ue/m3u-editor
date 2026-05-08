@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Conflicting Feelings</title>
+    <showtitle>Salvador</showtitle>
+    <season>1</season>
+    <episode>2</episode>
+    <plot>At the funeral, a bereft Salvador is caught off guard, drawing unwanted attention. As the police investigation stalls, he looks for answers elsewhere.</plot>
+    <aired>2026-02-06</aired>
+    <rating>7</rating>
+    <runtime>48</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/yLRcAEbDFta4uxeSgsRWw26UQff.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6780864</uniqueid>
+    <uniqueid type="tvdb">452682</uniqueid>
+    <uniqueid type="imdb">tt35316779</uniqueid>
+</episodedetails>

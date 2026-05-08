@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Exit Strategy</title>
+    <showtitle>Love Story</showtitle>
+    <season>1</season>
+    <episode>8</episode>
+    <plot>Tensions boil over after John and Carolyn discover devastating news.</plot>
+    <aired>2026-03-19</aired>
+    <rating>8.5</rating>
+    <runtime>42</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/sOR1aaX7lo1VQOYDZpeHKl7ElO4.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6888357</uniqueid>
+    <uniqueid type="tvdb">408694</uniqueid>
+    <uniqueid type="imdb">tt15232564</uniqueid>
+</episodedetails>

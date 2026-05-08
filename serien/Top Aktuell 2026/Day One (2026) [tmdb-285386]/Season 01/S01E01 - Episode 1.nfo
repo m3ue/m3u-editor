@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Episode 1</title>
+    <showtitle>Day One</showtitle>
+    <season>1</season>
+    <episode>1</episode>
+    <plot>After years in isolation, Ulises returns to Barcelona when his former partner asks for help decrypting Pandora, the code behind a revolutionary technology. The reunion ends in murder, turning Ulises into the main suspect. As a video of his escape goes viral, tech mogul Damián Diskin prepares to launch Day One, and Ulises realizes that nothing - not even his friend's death - is what it seems.</plot>
+    <aired>2026-03-13</aired>
+    <runtime>46</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/rj0jUDKN0mh7nmiuDuz2S49gbb5.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6012628</uniqueid>
+    <uniqueid type="tvdb">475359</uniqueid>
+    <uniqueid type="imdb">tt35996744</uniqueid>
+</episodedetails>

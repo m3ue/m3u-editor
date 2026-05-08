@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Rock, Paper, Scissors</title>
+    <showtitle>Big Mistakes</showtitle>
+    <season>1</season>
+    <episode>8</episode>
+    <plot>Morgan and Nicky brace for blowback from the Miami operation as their family, friends and some unwelcome faces converge around the election results.</plot>
+    <aired>2026-04-09</aired>
+    <rating>8.5</rating>
+    <runtime>38</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/oMXdH26pjtEN6CYLWpFGla4z6iN.jpg</thumb>
+    <uniqueid type="tmdb" default="true">7037202</uniqueid>
+    <uniqueid type="tvdb">466852</uniqueid>
+    <uniqueid type="imdb">tt36957934</uniqueid>
+</episodedetails>

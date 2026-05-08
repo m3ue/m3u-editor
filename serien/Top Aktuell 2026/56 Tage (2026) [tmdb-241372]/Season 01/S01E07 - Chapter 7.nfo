@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Chapter 7</title>
+    <showtitle>56 Tage</showtitle>
+    <season>1</season>
+    <episode>7</episode>
+    <plot>The incident at Narrow River sends shockwaves through Oliver and Ciara's lives. Lee and Karl discover the truth, but face brutal consequences.</plot>
+    <aired>2026-02-18</aired>
+    <rating>2.778</rating>
+    <runtime>53</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/287WStcGcEzgqBYBMFX4WqcaXNa.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6753298</uniqueid>
+    <uniqueid type="tvdb">443312</uniqueid>
+    <uniqueid type="imdb">tt30412869</uniqueid>
+</episodedetails>

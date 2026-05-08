@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Kim Mi-jeong</title>
+    <showtitle>The Art of Sarah</showtitle>
+    <season>1</season>
+    <episode>7</episode>
+    <plot>Mu-gyeong tries to shake Sarah by going after what she guards most: Boudoir's name. Pushed to the edge, she drops a new name into the case.</plot>
+    <aired>2026-02-13</aired>
+    <rating>7</rating>
+    <runtime>39</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/tF0bk9e9akGAGlbp9fbZtsiYMhu.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6841877</uniqueid>
+    <uniqueid type="tvdb">472689</uniqueid>
+    <uniqueid type="imdb">tt35149250</uniqueid>
+</episodedetails>

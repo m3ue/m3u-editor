@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>The Squire</title>
+    <showtitle>A Knight of the Seven Kingdoms</showtitle>
+    <season>1</season>
+    <episode>3</episode>
+    <plot>After Egg attempts to train Dunk's uncooperative horse, Dunk teaches his new squire an important skill. As they take in the tourney's first full day of events, Dunk receives a proposition from the Ashford steward that could help secure his future.</plot>
+    <aired>2026-02-01</aired>
+    <rating>8.545</rating>
+    <runtime>31</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/8coDmuDhHGJGpgOqr7eT4FtA4uD.jpg</thumb>
+    <uniqueid type="tmdb" default="true">5329380</uniqueid>
+    <uniqueid type="tvdb">433631</uniqueid>
+    <uniqueid type="imdb">tt27497448</uniqueid>
+</episodedetails>

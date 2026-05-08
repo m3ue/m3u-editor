@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Episode 5</title>
+    <showtitle>Hameln</showtitle>
+    <season>1</season>
+    <episode>5</episode>
+    <plot>Bei ihrer Begegnung gibt Christian Finja einen entscheidenden Hinweis, wie der Rattenfänger aufgehalten werden kann. Dabei spielen die erwachsenen Hamelner eine wesentliche Rolle.</plot>
+    <aired>2024-12-30</aired>
+    <rating>3</rating>
+    <runtime>47</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/5IQsO66UwvWuCaIHz19OjId8wmp.jpg</thumb>
+    <uniqueid type="tmdb" default="true">5710038</uniqueid>
+    <uniqueid type="imdb">tt29267609</uniqueid>
+</episodedetails>

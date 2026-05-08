@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Sorry for Your Loss</title>
+    <showtitle>Sweetpea</showtitle>
+    <season>1</season>
+    <episode>1</episode>
+    <plot>When her father dies and her bully returns, Rhiannon reaches her breaking point.</plot>
+    <aired>2024-10-10</aired>
+    <rating>6.955</rating>
+    <runtime>41</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/qJomU9FjJAX8QVZoeV9yTLSmStf.jpg</thumb>
+    <uniqueid type="tmdb" default="true">4163053</uniqueid>
+    <uniqueid type="tvdb">421654</uniqueid>
+    <uniqueid type="imdb">tt11218290</uniqueid>
+</episodedetails>

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Hello from space, my Dear</title>
+    <showtitle>Scarpetta</showtitle>
+    <season>1</season>
+    <episode>5</episode>
+    <plot>In the present, Scarpetta and Benton's marriage is put to the test when Kay is called in by the FBI to perform autopsies on two dead astronauts found at a crash site that might connect to the murder victim. In the past, it's Friday night and the killer could strike at any moment.</plot>
+    <aired>2026-03-11</aired>
+    <rating>6.455</rating>
+    <runtime>55</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/ArKF00PP8CTDxco4GVLparr0Po1.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6719128</uniqueid>
+    <uniqueid type="tvdb">464253</uniqueid>
+    <uniqueid type="imdb">tt14786934</uniqueid>
+</episodedetails>

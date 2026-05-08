@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Unidentified Man #1</title>
+    <showtitle>Land der Sünde</showtitle>
+    <season>1</season>
+    <episode>2</episode>
+    <plot>Questions mount in the case as fresh evidence and buried secrets surface. Dani and Malik pursue multiple leads to track down an unknown suspect.</plot>
+    <aired>2026-01-02</aired>
+    <rating>2.167</rating>
+    <runtime>39</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/koeYpAkJcXBFC4mUB0paUZCLZOt.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6769810</uniqueid>
+    <uniqueid type="tvdb">462797</uniqueid>
+    <uniqueid type="imdb">tt33501959</uniqueid>
+</episodedetails>

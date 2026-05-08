@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Armageddon</title>
+    <showtitle>Kacken an der Havel</showtitle>
+    <season>1</season>
+    <episode>9</episode>
+    <plot>Concerned with Toni's dwindling positivity, Charly hatches an "Armageddon"-sized plan to get his father's dream back on track.</plot>
+    <aired>2026-02-26</aired>
+    <rating>7</rating>
+    <runtime>36</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/hdGFw7fZxhsFwG4W2NXVS7LECjd.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6984954</uniqueid>
+    <uniqueid type="tvdb">465305</uniqueid>
+    <uniqueid type="imdb">tt34458461</uniqueid>
+</episodedetails>

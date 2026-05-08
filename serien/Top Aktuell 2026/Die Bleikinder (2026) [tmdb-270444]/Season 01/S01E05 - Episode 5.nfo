@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Episode 5</title>
+    <showtitle>Die Bleikinder</showtitle>
+    <season>1</season>
+    <episode>5</episode>
+    <plot>General Secretary Brezhnev's visit sets everyone on edge. A new discovery helps Jolanta to convince parents that their children are in real danger.</plot>
+    <aired>2026-02-11</aired>
+    <rating>8.5</rating>
+    <runtime>52</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/25EqW7BWqFd3Ul6Oddoo2yU8Y6r.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6830937</uniqueid>
+    <uniqueid type="tvdb">460249</uniqueid>
+    <uniqueid type="imdb">tt33322230</uniqueid>
+</episodedetails>

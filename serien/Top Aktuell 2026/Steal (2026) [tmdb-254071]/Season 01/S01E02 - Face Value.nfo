@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Face Value</title>
+    <showtitle>Steal</showtitle>
+    <season>1</season>
+    <episode>2</episode>
+    <plot>In the aftermath of the heist, Zara finds herself under intense pressure as Luke breaks down. DCI Rhys meets unexpected resistance on the investigation.</plot>
+    <aired>2026-01-21</aired>
+    <rating>8.1</rating>
+    <runtime>46</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/aeWoD0LsDxvijO3AZun9nJLm8XW.jpg</thumb>
+    <uniqueid type="tmdb" default="true">5337596</uniqueid>
+    <uniqueid type="tvdb">449950</uniqueid>
+    <uniqueid type="imdb">tt32499731</uniqueid>
+</episodedetails>

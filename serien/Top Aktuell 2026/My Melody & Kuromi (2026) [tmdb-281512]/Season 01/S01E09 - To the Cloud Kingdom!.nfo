@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>To the Cloud Kingdom!</title>
+    <showtitle>My Melody &amp; Kuromi</showtitle>
+    <season>1</season>
+    <episode>9</episode>
+    <plot>Amidst the rubble, My Melody shares her honest feelings with Kuromi. They decide to return to the Cloud Kingdom together to set things right.</plot>
+    <aired>2025-07-24</aired>
+    <runtime>12</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/xsyp4JVV1dRJxID9gvCyGrlJT5F.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6303063</uniqueid>
+    <uniqueid type="tvdb">458692</uniqueid>
+    <uniqueid type="imdb">tt35323313</uniqueid>
+</episodedetails>

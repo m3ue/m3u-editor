@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>The Case of the Burnt Photograph</title>
+    <showtitle>Young Sherlock</showtitle>
+    <season>1</season>
+    <episode>2</episode>
+    <plot>Sherlock is thrown into jail. He has to clear his name or face the gallows.</plot>
+    <aired>2026-03-04</aired>
+    <rating>8.167</rating>
+    <runtime>45</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/fRXi19UrOW3p7c5GWikkAFGFdRU.jpg</thumb>
+    <uniqueid type="tmdb" default="true">5657753</uniqueid>
+    <uniqueid type="tvdb">450633</uniqueid>
+    <uniqueid type="imdb">tt8599532</uniqueid>
+</episodedetails>

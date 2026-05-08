@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Three</title>
+    <showtitle>Man on Fire</showtitle>
+    <season>1</season>
+    <episode>3</episode>
+    <plot>Creasy leverages Tiago to gain access to Osmar's hideout. Poe befriends a sensitive teen enlisted to protect her from the dangers of the favela.</plot>
+    <aired>2026-04-30</aired>
+    <rating>3.143</rating>
+    <runtime>44</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/4rZFkL2Io3YWRUrcBQBOOqyyxn5.jpg</thumb>
+    <uniqueid type="tmdb" default="true">7024853</uniqueid>
+    <uniqueid type="tvdb">433027</uniqueid>
+    <uniqueid type="imdb">tt27331527</uniqueid>
+</episodedetails>

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Part 2</title>
+    <showtitle>Charlotte's Web</showtitle>
+    <season>1</season>
+    <episode>2</episode>
+    <plot>In the wake of Charlotte's miraculous web message, Wilbur and Fern embrace their newfound celebrity. But a twist of fortune puts Wilbur's fate back into question, sending Charlotte and the barn animals on another quest to save him.</plot>
+    <aired>2025-10-02</aired>
+    <runtime>45</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/xOwZy58IMaZIObsrqB9sJPWueZ7.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6553417</uniqueid>
+    <uniqueid type="tvdb">468654</uniqueid>
+    <uniqueid type="imdb">tt18953896</uniqueid>
+</episodedetails>

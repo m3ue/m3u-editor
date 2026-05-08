@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Family Matters</title>
+    <showtitle>Age of Attraction</showtitle>
+    <season>1</season>
+    <episode>6</episode>
+    <plot>Reality sets in as the couples face the judgement of their friends and family. While some receive encouragement, others encounter major concerns.</plot>
+    <aired>2026-03-18</aired>
+    <rating>8</rating>
+    <runtime>62</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/2ORYvda9ZobMNlbh1yELTTFhc6U.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6900234</uniqueid>
+    <uniqueid type="tvdb">461944</uniqueid>
+    <uniqueid type="imdb">tt37610452</uniqueid>
+</episodedetails>

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>The Last Lesson</title>
+    <showtitle>Dear Killer Nannies</showtitle>
+    <season>1</season>
+    <episode>7</episode>
+    <plot>Amidst suspicions and while everything collapses, Juampi has a connection him with his roots.</plot>
+    <aired>2026-04-01</aired>
+    <runtime>38</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/uFoqBWws17zpF8rm51COfdwECsG.jpg</thumb>
+    <uniqueid type="tmdb" default="true">7085241</uniqueid>
+    <uniqueid type="tvdb">475233</uniqueid>
+    <uniqueid type="imdb">tt32125946</uniqueid>
+</episodedetails>

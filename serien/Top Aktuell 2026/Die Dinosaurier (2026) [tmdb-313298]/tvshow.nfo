@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<tvshow>
+    <title>Die Dinosaurier</title>
+    <originaltitle>Die Dinosaurier</originaltitle>
+    <sorttitle>Die Dinosaurier</sorttitle>
+    <plot>Von den ersten bis zu den letzten Dinosauriern untersucht diese umfassende Dokuserie ihre 165 Millionen Jahre auf der Erde und die Kräfte, die ihre Evolution beeinflussten.</plot>
+    <outline>Von den ersten bis zu den letzten Dinosauriern untersucht diese umfassende Dokuserie ihre 165 Millionen Jahre auf der Erde und die Kräfte, die ihre Evolution beeinflussten.</outline>
+    <year>2026</year>
+    <premiered>2026-03-06</premiered>
+    <fanart>https://image.tmdb.org/t/p/w780/zNDB9OaW6zEPTf2AWmrdPQDXIYB.jpg</fanart>
+    <uniqueid type="tmdb" default="true">313298</uniqueid>
+    <tmdbid>313298</tmdbid>
+    <uniqueid type="tvdb">473613</uniqueid>
+    <tvdbid>473613</tvdbid>
+    <uniqueid type="imdb">tt32493765</uniqueid>
+    <imdbid>tt32493765</imdbid>
+</tvshow>

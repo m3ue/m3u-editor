@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Viral</title>
+    <showtitle>Recale</showtitle>
+    <season>1</season>
+    <episode>5</episode>
+    <plot>Professor Fish goes viral across France as Lucie attempts to strike a deal with Sagirov's contact and Eddy makes a stand on local television.</plot>
+    <aired>2026-04-23</aired>
+    <runtime>32</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/L5noi3GNzWuI1m28iQZrLmQI4r.jpg</thumb>
+    <uniqueid type="tmdb" default="true">7079289</uniqueid>
+    <uniqueid type="tvdb">475208</uniqueid>
+    <uniqueid type="imdb">tt37031059</uniqueid>
+</episodedetails>

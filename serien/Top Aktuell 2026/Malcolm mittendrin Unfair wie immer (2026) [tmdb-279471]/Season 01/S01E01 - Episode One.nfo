@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Episode One</title>
+    <showtitle>Malcolm mittendrin: Unfair wie immer</showtitle>
+    <season>1</season>
+    <episode>1</episode>
+    <plot>"Hey, I remember him! That freaky kid genius with the weird family. And look, he's happy and successful and even has a nice daughter. I'm glad everything worked out for him. Wait... Oh. Wow, I did not see that coming."</plot>
+    <aired>2026-04-10</aired>
+    <rating>7.868</rating>
+    <runtime>27</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/euQUHCCiaTM7DZyULE4AIYsYVcD.jpg</thumb>
+    <uniqueid type="tmdb" default="true">5832872</uniqueid>
+    <uniqueid type="tvdb">457779</uniqueid>
+    <uniqueid type="imdb">tt35466672</uniqueid>
+</episodedetails>

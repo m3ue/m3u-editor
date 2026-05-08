@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>A Different Time</title>
+    <showtitle>Suche mich nicht</showtitle>
+    <season>1</season>
+    <episode>4</episode>
+    <plot>Simon learns about his daughter's life at university — and his wife's secret. Dee Dee and Ash put a violent end to a chapter of their traumatic past.</plot>
+    <aired>2026-01-01</aired>
+    <rating>5.364</rating>
+    <runtime>50</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/19WoNtZscYsijWmuM1YTXco4Aj0.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6615363</uniqueid>
+    <uniqueid type="tvdb">445068</uniqueid>
+    <uniqueid type="imdb">tt9169516</uniqueid>
+</episodedetails>

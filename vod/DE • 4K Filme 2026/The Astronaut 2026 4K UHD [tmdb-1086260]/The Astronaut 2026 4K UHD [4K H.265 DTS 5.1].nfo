@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<movie>
+    <title>The Astronaut 2026 4K/UHD</title>
+    <originaltitle>The Astronaut 2026 4K/UHD</originaltitle>
+    <sorttitle>The Astronaut 2026 4K/UHD</sorttitle>
+    <plot>Nachdem sie von ihrer ersten Weltraummission zurückgekehrt ist, wird die Astronautin Sam Walker von der NASA in einem Hochsicherheits-Haus untergebracht, um rehabilitiert und medizinisch untersucht zu werden. Doch als auf dem Gelände zunehmend beunruhigende Ereignisse auftreten, fürchtet sie, dass etwas Außerirdisches ihr zurück zur Erde gefolgt sein könnte.</plot>
+    <outline>Nachdem sie von ihrer ersten Weltraummission zurückgekehrt ist, wird die Astronautin Sam Walker von der NASA in einem Hochsicherheits-Haus untergebracht, um rehabilitiert und medizinisch untersucht zu werden. Doch als auf dem Gelände zunehmend beunruhigende Ereignisse auftreten, fürchtet sie, dass e</outline>
+    <rating>7</rating>
+    <director>Jess Varley</director>
+    <actor>
+        <name>Kate Mara</name>
+    </actor>
+    <actor>
+        <name>Laurence Fishburne</name>
+    </actor>
+    <actor>
+        <name>Gabriel Luna</name>
+    </actor>
+    <actor>
+        <name>Ivana Miličević</name>
+    </actor>
+    <actor>
+        <name>Scarlett Holmes</name>
+    </actor>
+    <actor>
+        <name>Macy Gray</name>
+    </actor>
+    <actor>
+        <name>Reza Diako</name>
+    </actor>
+    <actor>
+        <name>Daniel Quirke</name>
+    </actor>
+    <actor>
+        <name>Daiana Madeira</name>
+    </actor>
+    <actor>
+        <name>Christine Abernathy</name>
+    </actor>
+    <actor>
+        <name>Ezrael MacTire</name>
+    </actor>
+    <actor>
+        <name>Erin Gill</name>
+    </actor>
+    <actor>
+        <name>Gareth Battersby</name>
+    </actor>
+    <actor>
+        <name>Aidan O'Sullivan</name>
+    </actor>
+    <actor>
+        <name>Alex Conlon</name>
+    </actor>
+    <actor>
+        <name>Hans Boller</name>
+    </actor>
+    <fanart>https://image.tmdb.org/t/p/w780/3C01kAcKGR6FwsUUSOvJ8N82pqr.jpg</fanart>
+    <uniqueid type="tmdb" default="true">1086260</uniqueid>
+    <tmdbid>1086260</tmdbid>
+</movie>

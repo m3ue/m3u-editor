@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Homecoming</title>
+    <showtitle>Only Margo</showtitle>
+    <season>1</season>
+    <episode>2</episode>
+    <plot>Margo brings baby Bodhi home. Shyanne bets on her future as Jinx re-enters the picture.</plot>
+    <aired>2026-04-14</aired>
+    <rating>9</rating>
+    <runtime>38</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/xUwVCH0Q6jUcfTLJrav9Vnl7sYn.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6754974</uniqueid>
+    <uniqueid type="tvdb">445651</uniqueid>
+    <uniqueid type="imdb">tt31137273</uniqueid>
+</episodedetails>

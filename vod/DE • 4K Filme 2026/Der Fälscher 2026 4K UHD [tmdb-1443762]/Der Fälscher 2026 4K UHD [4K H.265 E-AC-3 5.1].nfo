@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<movie>
+    <title>Der Fälscher 2026 4K/UHD</title>
+    <originaltitle>Der Fälscher 2026 4K/UHD</originaltitle>
+    <sorttitle>Der Fälscher 2026 4K/UHD</sorttitle>
+    <plot>Ein ambitionierter Künstler wird in diesem Drama nach wahren Ereignissen in den 1970ern zum Meisterfälscher für kriminelle Banden der Stadt Rom.</plot>
+    <outline>Ein ambitionierter Künstler wird in diesem Drama nach wahren Ereignissen in den 1970ern zum Meisterfälscher für kriminelle Banden der Stadt Rom.</outline>
+    <rating>7</rating>
+    <director>Stefano Lodovichi</director>
+    <actor>
+        <name>Pietro Castellitto</name>
+    </actor>
+    <actor>
+        <name>Giulia Michelini</name>
+    </actor>
+    <actor>
+        <name>Andrea Arcangeli</name>
+    </actor>
+    <actor>
+        <name>Pierluigi Gigante</name>
+    </actor>
+    <actor>
+        <name>Aurora Giovinazzo</name>
+    </actor>
+    <actor>
+        <name>Edoardo Pesce</name>
+    </actor>
+    <actor>
+        <name>Claudio Santamaria</name>
+    </actor>
+    <fanart>https://image.tmdb.org/t/p/w780/uHavtqbnMDcwqVK9Y94ZQSWxtCw.jpg</fanart>
+    <uniqueid type="tmdb" default="true">1443762</uniqueid>
+    <tmdbid>1443762</tmdbid>
+</movie>

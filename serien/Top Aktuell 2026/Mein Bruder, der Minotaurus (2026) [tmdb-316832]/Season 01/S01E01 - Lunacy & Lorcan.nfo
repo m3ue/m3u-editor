@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Lunacy &amp; Lorcan</title>
+    <showtitle>Mein Bruder, der Minotaurus</showtitle>
+    <season>1</season>
+    <episode>1</episode>
+    <plot>When Lorcan the minotaur starts having visions and acting out, his human brother Charlie helps him get to the bottom of it.</plot>
+    <aired>2026-04-24</aired>
+    <runtime>26</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/opdY7j961sUxAloIMXUHV8wUGwI.jpg</thumb>
+    <uniqueid type="tmdb" default="true">7050846</uniqueid>
+    <uniqueid type="tvdb">476545</uniqueid>
+    <uniqueid type="imdb">tt40822983</uniqueid>
+</episodedetails>

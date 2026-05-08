@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Escape</title>
+    <showtitle>Girl Taken</showtitle>
+    <season>1</season>
+    <episode>3</episode>
+    <plot>Five years after her kidnapping, Lily escapes - but Rick denies everything.</plot>
+    <aired>2026-01-08</aired>
+    <rating>1</rating>
+    <runtime>54</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/cTXdeMrEPg1bI8y9nziY1r2NA3P.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6398352</uniqueid>
+    <uniqueid type="tvdb">465411</uniqueid>
+    <uniqueid type="imdb">tt39133077</uniqueid>
+</episodedetails>

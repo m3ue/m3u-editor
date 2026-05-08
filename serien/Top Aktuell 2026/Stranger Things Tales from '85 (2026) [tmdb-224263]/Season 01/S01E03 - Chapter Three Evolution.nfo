@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Chapter Three: Evolution</title>
+    <showtitle>Stranger Things: Tales from '85</showtitle>
+    <season>1</season>
+    <episode>3</episode>
+    <plot>The kids look for answers about the mutant creatures plaguing their town and get a helpful lesson from Mrs. Baxter, their substitute science teacher.</plot>
+    <aired>2026-04-23</aired>
+    <rating>6</rating>
+    <runtime>28</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/za2tysMuA6sXL9A4XxSe3ZYlqCr.jpg</thumb>
+    <uniqueid type="tmdb" default="true">7146122</uniqueid>
+    <uniqueid type="tvdb">462906</uniqueid>
+    <uniqueid type="imdb">tt27486290</uniqueid>
+</episodedetails>

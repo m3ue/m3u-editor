@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Bad Behavior</title>
+    <showtitle>Vladimir</showtitle>
+    <season>1</season>
+    <episode>4</episode>
+    <plot>Sid joins on to support John's case. M resorts to desperate measures to delay a hearing and has a surprisingly frank conversation with Cynthia.</plot>
+    <aired>2026-03-05</aired>
+    <rating>4.75</rating>
+    <runtime>29</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/fhWV9ikwNG6mmzd5IdoAlAzhHNA.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6891025</uniqueid>
+    <uniqueid type="tvdb">460989</uniqueid>
+    <uniqueid type="imdb">tt35997699</uniqueid>
+</episodedetails>

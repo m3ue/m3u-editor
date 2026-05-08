@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Stormy Crossroads</title>
+    <showtitle>Love Through a Prism</showtitle>
+    <season>1</season>
+    <episode>15</episode>
+    <plot>Despite a sense of unease, everyone works on their final pieces as Kit attempts a brand new approach. Shin receives a confusing telegram from home.</plot>
+    <aired>2026-01-15</aired>
+    <rating>6.5</rating>
+    <runtime>25</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/9RUMHmkceG56rdCM8HrcqnxiBhV.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6720826</uniqueid>
+    <uniqueid type="tvdb">470980</uniqueid>
+    <uniqueid type="imdb">tt39050141</uniqueid>
+</episodedetails>

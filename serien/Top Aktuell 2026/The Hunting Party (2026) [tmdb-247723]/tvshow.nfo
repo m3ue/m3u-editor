@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<tvshow>
+    <title>The Hunting Party</title>
+    <originaltitle>The Hunting Party</originaltitle>
+    <sorttitle>The Hunting Party</sorttitle>
+    <plot>Eine Katastrophe ist passiert, etwas so Unverantwortliches und Verheerendes, dass nur ein Team aus den besten Ermittler:innen diese Katastrophe aufhalten können. Die gefährlichsten Serienmörder des Landes sind auf freiem Fuß. Sie sind aus einem streng geheimen Gefängnis geflohen, das nicht einmal existieren dürfte. Ein Wettlauf gegen die Zeit beginnt und noch ist nicht klar, wer das Rennen gewinnen wird.</plot>
+    <outline>Eine Katastrophe ist passiert, etwas so Unverantwortliches und Verheerendes, dass nur ein Team aus den besten Ermittler:innen diese Katastrophe aufhalten können. Die gefährlichsten Serienmörder des Landes sind auf freiem Fuß. Sie sind aus einem streng geheimen Gefängnis geflohen, das nicht einmal existieren dürfte. Ein Wettlauf gegen die Zeit beginnt und noch ist nicht klar, wer das Rennen gewinnen wird.</outline>
+    <year>2026</year>
+    <premiered>2026-01-19</premiered>
+    <fanart>https://image.tmdb.org/t/p/w780/mP3bH1RdN1yCbUxrcQbCzFtIOaR.jpg</fanart>
+    <uniqueid type="tmdb" default="true">247723</uniqueid>
+    <tmdbid>247723</tmdbid>
+    <uniqueid type="tvdb">446821</uniqueid>
+    <tvdbid>446821</tvdbid>
+    <uniqueid type="imdb">tt21906554</uniqueid>
+    <imdbid>tt21906554</imdbid>
+</tvshow>

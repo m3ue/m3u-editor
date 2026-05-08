@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<movie>
+    <title>Eat Pray Bark 2026 4K/UHD</title>
+    <originaltitle>Eat Pray Bark 2026 4K/UHD</originaltitle>
+    <sorttitle>Eat Pray Bark 2026 4K/UHD</sorttitle>
+    <plot>In dieser turbulenten Komödie suchen fünf exzentrische Hundebesitzer Rat im Umgang mit ihren Vierbeinern. Ihre letzte Hoffnung: ein Intensivkurs beim charismatischen und legendären Hundetrainer Nodon in den Tiroler Bergen.</plot>
+    <outline>In dieser turbulenten Komödie suchen fünf exzentrische Hundebesitzer Rat im Umgang mit ihren Vierbeinern. Ihre letzte Hoffnung: ein Intensivkurs beim charismatischen und legendären Hundetrainer Nodon in den Tiroler Bergen.</outline>
+    <rating>6.6</rating>
+    <director>Marco Petry</director>
+    <actor>
+        <name>Alexandra Maria Lara</name>
+    </actor>
+    <actor>
+        <name>Anna Herrmann</name>
+    </actor>
+    <actor>
+        <name>Devid Striesow</name>
+    </actor>
+    <actor>
+        <name>Doğa Gürer</name>
+    </actor>
+    <actor>
+        <name>Rúrik Gíslason</name>
+    </actor>
+    <actor>
+        <name>Kerim Waller</name>
+    </actor>
+    <actor>
+        <name>Catalina Navarro Kirner</name>
+    </actor>
+    <fanart>https://image.tmdb.org/t/p/w780/7weSO3kEzMpMgdmte4AasS0tbeV.jpg</fanart>
+    <uniqueid type="tmdb" default="true">1635276</uniqueid>
+    <tmdbid>1635276</tmdbid>
+</movie>

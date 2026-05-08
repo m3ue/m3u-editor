@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Episode 6</title>
+    <showtitle>Bandi - Unter Geschwistern</showtitle>
+    <season>1</season>
+    <episode>6</episode>
+    <plot>Kylian takes inspiration from Julius Caesar as Fatso and Annabelle clash in Le Havre. Using Cass's intel, King scopes out Croquet's yacht on the marina.</plot>
+    <aired>2026-04-09</aired>
+    <rating>6</rating>
+    <runtime>51</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/6jfGv8Jd9zCDMAPxuhxjAvEJBtE.jpg</thumb>
+    <uniqueid type="tmdb" default="true">7080776</uniqueid>
+    <uniqueid type="tvdb">475364</uniqueid>
+    <uniqueid type="imdb">tt37024175</uniqueid>
+</episodedetails>

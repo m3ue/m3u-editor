@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Episode 4</title>
+    <showtitle>Highter &amp; Wolkig</showtitle>
+    <season>1</season>
+    <episode>4</episode>
+    <aired>2026-04-20</aired>
+    <runtime>16</runtime>
+    <uniqueid type="tmdb" default="true">7171180</uniqueid>
+    <uniqueid type="tvdb">477077</uniqueid>
+    <uniqueid type="imdb">tt37776970</uniqueid>
+</episodedetails>

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Buddies</title>
+    <showtitle>Only Margo</showtitle>
+    <season>1</season>
+    <episode>4</episode>
+    <plot>Worlds collide as Margo makes new friends. Jinx reunites with his wrestling roots.</plot>
+    <aired>2026-04-21</aired>
+    <rating>9</rating>
+    <runtime>36</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/p3AUoI8HxDUTlhpzN0o7vAUjxeJ.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6754976</uniqueid>
+    <uniqueid type="tvdb">445651</uniqueid>
+    <uniqueid type="imdb">tt31137273</uniqueid>
+</episodedetails>

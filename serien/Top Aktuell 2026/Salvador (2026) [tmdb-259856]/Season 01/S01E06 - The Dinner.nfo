@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>The Dinner</title>
+    <showtitle>Salvador</showtitle>
+    <season>1</season>
+    <episode>6</episode>
+    <plot>Hoping to move on, Salvador lays Milena to rest. But as violent footage of her murder goes viral, he attends an explosive dinner in the lion's den.</plot>
+    <aired>2026-02-06</aired>
+    <rating>7</rating>
+    <runtime>39</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/gGaPTq458U7vN1XB7M8SuzC8yW3.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6780868</uniqueid>
+    <uniqueid type="tvdb">452682</uniqueid>
+    <uniqueid type="imdb">tt35316779</uniqueid>
+</episodedetails>

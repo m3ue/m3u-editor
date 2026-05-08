@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>The North Pole</title>
+    <showtitle>Von Pol zu Pol mit Will Smith</showtitle>
+    <season>1</season>
+    <episode>7</episode>
+    <plot>Will heads to the North Pole for his final and most dangerous mission.</plot>
+    <aired>2026-02-03</aired>
+    <rating>10</rating>
+    <runtime>37</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/dYsHla4QBeZPr8etMdPq1aCVrhj.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6770300</uniqueid>
+    <uniqueid type="tvdb">449405</uniqueid>
+    <uniqueid type="imdb">tt18069218</uniqueid>
+</episodedetails>

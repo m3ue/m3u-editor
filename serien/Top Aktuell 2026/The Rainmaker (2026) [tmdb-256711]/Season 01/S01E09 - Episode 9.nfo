@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Episode 9</title>
+    <showtitle>The Rainmaker</showtitle>
+    <season>1</season>
+    <episode>9</episode>
+    <plot>Rudy must decide whether to make an argument he can win or to expose the truth.</plot>
+    <aired>2025-10-10</aired>
+    <rating>8.2</rating>
+    <runtime>46</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/yEaPH0JQCnTr8axyPdxqGAmjhDs.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6493446</uniqueid>
+    <uniqueid type="tvdb">451143</uniqueid>
+    <uniqueid type="imdb">tt6151526</uniqueid>
+</episodedetails>

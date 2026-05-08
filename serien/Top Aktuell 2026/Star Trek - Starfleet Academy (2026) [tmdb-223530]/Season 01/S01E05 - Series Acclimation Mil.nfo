@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Series Acclimation Mil</title>
+    <showtitle>Star Trek - Starfleet Academy</showtitle>
+    <season>1</season>
+    <episode>5</episode>
+    <plot>As a cadet sets out to solve an ancient Starfleet mystery, she embarks on a journey of self-discovery and learns the value of forging her own path. Meanwhile, Nahla agrees to help a fellow chancellor with an elaborate alien ritual.</plot>
+    <aired>2026-02-05</aired>
+    <rating>4.8</rating>
+    <runtime>58</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/sMBKqU7Mv5R4SB1enu3z92NhcBd.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6594796</uniqueid>
+    <uniqueid type="tvdb">433120</uniqueid>
+    <uniqueid type="imdb">tt8622160</uniqueid>
+</episodedetails>

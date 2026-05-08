@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<tvshow>
+    <title>The Art of Sarah</title>
+    <originaltitle>The Art of Sarah</originaltitle>
+    <sorttitle>The Art of Sarah</sorttitle>
+    <plot>Eine Leiche mitten in der Stadt, ein Luxuslabel im Aufwind. Ein Kommissar hinterfragt die Geschichte einer Frau, die sich ständig ändert. Was ist hier wirklich passiert?</plot>
+    <outline>Eine Leiche mitten in der Stadt, ein Luxuslabel im Aufwind. Ein Kommissar hinterfragt die Geschichte einer Frau, die sich ständig ändert. Was ist hier wirklich passiert?</outline>
+    <year>2026</year>
+    <premiered>2026-02-13</premiered>
+    <fanart>https://image.tmdb.org/t/p/w780/qy8gJEwspR7L5WZn4e8ItwK8m23.jpg</fanart>
+    <uniqueid type="tmdb" default="true">273977</uniqueid>
+    <tmdbid>273977</tmdbid>
+    <uniqueid type="tvdb">472689</uniqueid>
+    <tvdbid>472689</tvdbid>
+    <uniqueid type="imdb">tt35149250</uniqueid>
+    <imdbid>tt35149250</imdbid>
+</tvshow>

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>What's This? My Heart Is Pounding</title>
+    <showtitle>My Melody &amp; Kuromi</showtitle>
+    <season>1</season>
+    <episode>1</episode>
+    <plot>Tired of being overshadowed, Kuromi steals precious ingredients from her rival. My Melody ventures into the forest and stumbles upon a strange discovery.</plot>
+    <aired>2025-07-24</aired>
+    <rating>10</rating>
+    <runtime>16</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/hFrZbyzfIQyfiCYU76pLGG233Gj.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6211378</uniqueid>
+    <uniqueid type="tvdb">458692</uniqueid>
+    <uniqueid type="imdb">tt35323313</uniqueid>
+</episodedetails>

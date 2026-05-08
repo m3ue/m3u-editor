@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>The Hungry Ghost</title>
+    <showtitle>Only Margo</showtitle>
+    <season>1</season>
+    <episode>1</episode>
+    <plot>Margo is left reeling when her first year of college is derailed, forcing her to make a tough decision that changes everything.</plot>
+    <aired>2026-04-14</aired>
+    <rating>8.2</rating>
+    <runtime>36</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/xc7rZSzaokaB7kmtYTDrtACoEdq.jpg</thumb>
+    <uniqueid type="tmdb" default="true">5119022</uniqueid>
+    <uniqueid type="tvdb">445651</uniqueid>
+    <uniqueid type="imdb">tt31137273</uniqueid>
+</episodedetails>

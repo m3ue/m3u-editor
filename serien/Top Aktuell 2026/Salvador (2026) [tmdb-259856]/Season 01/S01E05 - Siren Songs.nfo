@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Siren Songs</title>
+    <showtitle>Salvador</showtitle>
+    <season>1</season>
+    <episode>5</episode>
+    <plot>When footage from the airport makes headlines, Salvador hits another low point. Disgusted by a new narrative being peddled, Martín doesn't hold back.</plot>
+    <aired>2026-02-06</aired>
+    <rating>7</rating>
+    <runtime>45</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/Ad3BPy3zSI3mVwvo3OwM4gtkEls.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6780867</uniqueid>
+    <uniqueid type="tvdb">452682</uniqueid>
+    <uniqueid type="imdb">tt35316779</uniqueid>
+</episodedetails>

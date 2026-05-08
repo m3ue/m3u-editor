@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Mok Ga-hui</title>
+    <showtitle>The Art of Sarah</showtitle>
+    <season>1</season>
+    <episode>3</episode>
+    <plot>Sarah's buried past surfaces: a down-on-her-luck woman with aspirations for luxury, who'll stop at nothing to reach her goal — no matter the cost.</plot>
+    <aired>2026-02-13</aired>
+    <rating>7.25</rating>
+    <runtime>51</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/k8yc5hWw9rNIdJh4AMUY9Pm0zdA.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6841873</uniqueid>
+    <uniqueid type="tvdb">472689</uniqueid>
+    <uniqueid type="imdb">tt35149250</uniqueid>
+</episodedetails>

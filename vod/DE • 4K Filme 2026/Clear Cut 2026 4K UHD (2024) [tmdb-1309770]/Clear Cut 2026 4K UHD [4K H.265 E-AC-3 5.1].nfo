@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<movie>
+    <title>Clear Cut 2026 4K/UHD</title>
+    <originaltitle>Clear Cut 2026 4K/UHD</originaltitle>
+    <sorttitle>Clear Cut 2026 4K/UHD</sorttitle>
+    <plot>Für einen Mann, der im Nordwesten des Pazifiks Holz fällt, ist jeder Moment voller Gefahren, doch als Jack tiefer in die Wälder vordringt, trifft er auf eine kriminelle Bande von Verrückten aus seiner Vergangenheit, die ihn umbringen wollen, bevor er sich in die Zivilisation zurückkämpfen kann.</plot>
+    <outline>Für einen Mann, der im Nordwesten des Pazifiks Holz fällt, ist jeder Moment voller Gefahren, doch als Jack tiefer in die Wälder vordringt, trifft er auf eine kriminelle Bande von Verrückten aus seiner Vergangenheit, die ihn umbringen wollen, bevor er sich in die Zivilisation zurückkämpfen kann.</outline>
+    <year>2024</year>
+    <rating>6.6</rating>
+    <director>Brian Skiba</director>
+    <actor>
+        <name>Clive Standen</name>
+    </actor>
+    <actor>
+        <name>Tom Welling</name>
+    </actor>
+    <actor>
+        <name>Stephen Dorff</name>
+    </actor>
+    <actor>
+        <name>Alec Baldwin</name>
+    </actor>
+    <actor>
+        <name>Jesse Metcalfe</name>
+    </actor>
+    <actor>
+        <name>Lochlyn Munro</name>
+    </actor>
+    <actor>
+        <name>Lucy Martin</name>
+    </actor>
+    <actor>
+        <name>Chelsey Reist</name>
+    </actor>
+    <actor>
+        <name>Tom Stevens</name>
+    </actor>
+    <actor>
+        <name>Mike Dopud</name>
+    </actor>
+    <fanart>https://image.tmdb.org/t/p/original/4IRzdPLmYsSs9fvjWNxJ5nPaEBm.jpg</fanart>
+    <uniqueid type="tmdb" default="true">1309770</uniqueid>
+    <tmdbid>1309770</tmdbid>
+    <uniqueid type="imdb">tt28637902</uniqueid>
+    <imdbid>tt28637902</imdbid>
+</movie>

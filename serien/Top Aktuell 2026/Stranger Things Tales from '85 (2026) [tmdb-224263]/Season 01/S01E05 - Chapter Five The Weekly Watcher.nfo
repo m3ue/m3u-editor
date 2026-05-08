@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Chapter Five: The Weekly Watcher</title>
+    <showtitle>Stranger Things: Tales from '85</showtitle>
+    <season>1</season>
+    <episode>5</episode>
+    <plot>When a photo that could put El in danger gets sold to a popular tabloid, the kids pull Nancy into a heist to get it back. If they can't? It's game over.</plot>
+    <aired>2026-04-23</aired>
+    <rating>6</rating>
+    <runtime>29</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/w784CqRgjdT4yaNPEn1iSvKvmzl.jpg</thumb>
+    <uniqueid type="tmdb" default="true">7146124</uniqueid>
+    <uniqueid type="tvdb">462906</uniqueid>
+    <uniqueid type="imdb">tt27486290</uniqueid>
+</episodedetails>

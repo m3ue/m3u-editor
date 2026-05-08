@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Paula</title>
+    <showtitle>Jene Nacht</showtitle>
+    <season>1</season>
+    <episode>2</episode>
+    <plot>Paula discovers Elena isn't telling her and Cris the whole truth. But her own secrets cause her to lash out at strangers, attracting unwanted attention.</plot>
+    <aired>2026-03-13</aired>
+    <rating>5.25</rating>
+    <runtime>38</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/q6E06yG9rXZGIBrPmTMD1cr9B6T.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6899701</uniqueid>
+    <uniqueid type="tvdb">459927</uniqueid>
+    <uniqueid type="imdb">tt35674865</uniqueid>
+</episodedetails>

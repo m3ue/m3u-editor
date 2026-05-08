@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Because I'm a Guy!</title>
+    <showtitle>Hana-Kimi</showtitle>
+    <season>1</season>
+    <episode>7</episode>
+    <plot>Dorm 2 is being renovated, so Mizuki needs a place to stay for 2 weeks. Desperate, she turns to Umeda...</plot>
+    <aired>2026-02-15</aired>
+    <rating>6</rating>
+    <runtime>24</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/n6JyBtkOgBbuXELO6tibO96Wsmj.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6814240</uniqueid>
+    <uniqueid type="tvdb">450072</uniqueid>
+    <uniqueid type="imdb">tt38646611</uniqueid>
+</episodedetails>

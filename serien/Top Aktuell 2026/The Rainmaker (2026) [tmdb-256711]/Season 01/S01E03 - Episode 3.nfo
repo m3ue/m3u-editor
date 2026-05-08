@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Episode 3</title>
+    <showtitle>The Rainmaker</showtitle>
+    <season>1</season>
+    <episode>3</episode>
+    <plot>As Rudy and Deck search for a missing nurse, their investigation suggests a dark conspiracy at play.</plot>
+    <aired>2025-08-29</aired>
+    <rating>8.4</rating>
+    <runtime>43</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/wpPKvdln4GQPhjbEjf1lbimwcag.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6437346</uniqueid>
+    <uniqueid type="tvdb">451143</uniqueid>
+    <uniqueid type="imdb">tt6151526</uniqueid>
+</episodedetails>

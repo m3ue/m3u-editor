@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Chapter Ten: Countdown</title>
+    <showtitle>Stranger Things: Tales from '85</showtitle>
+    <season>1</season>
+    <episode>10</episode>
+    <plot>With time running out, the party pulls together for a brave battle to stay alive. Friends have to help friends — because Hawkins' future depends on it.</plot>
+    <aired>2026-04-23</aired>
+    <rating>5.667</rating>
+    <runtime>28</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/ls5Ctm2zIjMlEVpItcv3JU5GLRA.jpg</thumb>
+    <uniqueid type="tmdb" default="true">7146129</uniqueid>
+    <uniqueid type="tvdb">462906</uniqueid>
+    <uniqueid type="imdb">tt27486290</uniqueid>
+</episodedetails>

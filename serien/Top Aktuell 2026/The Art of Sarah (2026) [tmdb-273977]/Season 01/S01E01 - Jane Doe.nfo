@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Jane Doe</title>
+    <showtitle>The Art of Sarah</showtitle>
+    <season>1</season>
+    <episode>1</episode>
+    <plot>After Sarah Kim is discovered dead, Jeong Yeo-jin recounts her memories of the elusive woman to Park Mu-gyeong — who suspects something is askew.</plot>
+    <aired>2026-02-13</aired>
+    <rating>6</rating>
+    <runtime>44</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/8IfDAafAu30ZA8xS92JUArCg75W.jpg</thumb>
+    <uniqueid type="tmdb" default="true">5666389</uniqueid>
+    <uniqueid type="tvdb">472689</uniqueid>
+    <uniqueid type="imdb">tt35149250</uniqueid>
+</episodedetails>

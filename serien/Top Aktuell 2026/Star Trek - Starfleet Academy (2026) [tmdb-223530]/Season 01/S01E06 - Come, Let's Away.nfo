@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Come, Let's Away</title>
+    <showtitle>Star Trek - Starfleet Academy</showtitle>
+    <season>1</season>
+    <episode>6</episode>
+    <plot>During the cadets' first training mission on an abandoned ship, they encounter a dangerous new enemy and must fight for survival while Nahla seeks help from an unexpected source.</plot>
+    <aired>2026-02-12</aired>
+    <rating>5.4</rating>
+    <runtime>62</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/57hPm0uTsZ3wtY3ADSQ9H5spPJf.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6594797</uniqueid>
+    <uniqueid type="tvdb">433120</uniqueid>
+    <uniqueid type="imdb">tt8622160</uniqueid>
+</episodedetails>

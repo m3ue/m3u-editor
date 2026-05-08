@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<movie>
+    <title>Podlachien - Alle für eine 2026 4K/UHD</title>
+    <originaltitle>Podlachien - Alle für eine 2026 4K/UHD</originaltitle>
+    <sorttitle>Podlachien - Alle für eine 2026 4K/UHD</sorttitle>
+    <plot>Als Halina aufgrund finanzieller Schwierigkeiten ihre Hochzeit absagen muss, beschließen ihre Freunde und Familie einen verrückten Plan auszuhecken, um ihr zu helfen.</plot>
+    <outline>Als Halina aufgrund finanzieller Schwierigkeiten ihre Hochzeit absagen muss, beschließen ihre Freunde und Familie einen verrückten Plan auszuhecken, um ihr zu helfen.</outline>
+    <year>2026</year>
+    <rating>5.5</rating>
+    <director>Łukasz Kośmicki</director>
+    <actor>
+        <name>Anna Seniuk</name>
+    </actor>
+    <actor>
+        <name>Artur Barciś</name>
+    </actor>
+    <actor>
+        <name>Filip Gurłacz</name>
+    </actor>
+    <actor>
+        <name>Joanna Trzepiecińska</name>
+    </actor>
+    <actor>
+        <name>Anna Szymańczyk</name>
+    </actor>
+    <actor>
+        <name>Cezary Żak</name>
+    </actor>
+    <actor>
+        <name>Mateusz Janicki</name>
+    </actor>
+    <actor>
+        <name>Wiktor Zborowski</name>
+    </actor>
+    <actor>
+        <name>Piotr Pręgowski</name>
+    </actor>
+    <actor>
+        <name>Paulina Holtz</name>
+    </actor>
+    <fanart>https://image.tmdb.org/t/p/original/8PK61ixYoSX3kXWyCMH4ats79k4.jpg</fanart>
+    <uniqueid type="tmdb" default="true">1561758</uniqueid>
+    <tmdbid>1561758</tmdbid>
+    <uniqueid type="imdb">tt38681815</uniqueid>
+    <imdbid>tt38681815</imdbid>
+</movie>

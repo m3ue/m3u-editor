@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Mountain Law</title>
+    <showtitle>Traques – Gejagt</showtitle>
+    <season>1</season>
+    <episode>4</episode>
+    <plot>Franck and the group make a desperate deal to save one of their own.</plot>
+    <aired>2026-03-18</aired>
+    <rating>1</rating>
+    <runtime>53</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/x3JOM4Z3u741XyYZSi2ijpGD8Tm.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6553042</uniqueid>
+    <uniqueid type="tvdb">451658</uniqueid>
+    <uniqueid type="imdb">tt33086602</uniqueid>
+</episodedetails>

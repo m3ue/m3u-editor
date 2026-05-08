@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Daisy</title>
+    <showtitle>The Testaments - Die Zeuginnen</showtitle>
+    <season>1</season>
+    <episode>3</episode>
+    <plot>An incident on a school trip spurs Daisy's memories of Toronto, revealing her past and a world shattered by violence.</plot>
+    <aired>2026-04-08</aired>
+    <rating>3.75</rating>
+    <runtime>52</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/4GkpptniSxyTMTUEkCvPng14UlD.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6087302</uniqueid>
+    <uniqueid type="tvdb">460241</uniqueid>
+    <uniqueid type="imdb">tt10970762</uniqueid>
+</episodedetails>

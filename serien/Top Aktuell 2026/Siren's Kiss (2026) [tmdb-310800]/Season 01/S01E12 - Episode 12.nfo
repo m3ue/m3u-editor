@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Episode 12</title>
+    <showtitle>Siren's Kiss</showtitle>
+    <season>1</season>
+    <episode>12</episode>
+    <plot>Woo-seok and Seol-ah fight to save each other. They embrace their wounds, trying to reclaim daily life, perhaps with something left to protect.</plot>
+    <aired>2026-04-07</aired>
+    <rating>7.5</rating>
+    <runtime>67</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/zEONCD952EubMZYhp4mx5kmx8QY.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6841921</uniqueid>
+    <uniqueid type="tvdb">472692</uniqueid>
+    <uniqueid type="imdb">tt39303992</uniqueid>
+</episodedetails>

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>My Angel</title>
+    <showtitle>Scrubs</showtitle>
+    <season>1</season>
+    <episode>5</episode>
+    <plot>J.D. ventures into the world of post-divorce dating with Turk's guidance. Elliot gets creative when sourcing an organ for a beloved elderly patient, while the interns learn about the unspoken rules of the hospital.</plot>
+    <aired>2026-03-18</aired>
+    <rating>8.3</rating>
+    <runtime>22</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/pIs9DZeI4oD5qsRqhYuzTE6McRp.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6852554</uniqueid>
+    <uniqueid type="tvdb">465690</uniqueid>
+    <uniqueid type="imdb">tt40197357</uniqueid>
+</episodedetails>

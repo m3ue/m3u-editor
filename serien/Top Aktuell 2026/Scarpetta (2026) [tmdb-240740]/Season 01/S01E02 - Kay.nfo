@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Kay</title>
+    <showtitle>Scarpetta</showtitle>
+    <season>1</season>
+    <episode>2</episode>
+    <plot>In present day, Scarpetta and Marino enlist Lucy to track down their former prime suspect from 28 years ago, Matt Petersen, due to a possible link between the cases; while in the past, the two investigate Petersen's potential involvement in his wife's murder.</plot>
+    <aired>2026-03-11</aired>
+    <rating>6.417</rating>
+    <runtime>51</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/d8aQsWdEPabUCkWKn8nvkYbqIeq.jpg</thumb>
+    <uniqueid type="tmdb" default="true">5607288</uniqueid>
+    <uniqueid type="tvdb">464253</uniqueid>
+    <uniqueid type="imdb">tt14786934</uniqueid>
+</episodedetails>

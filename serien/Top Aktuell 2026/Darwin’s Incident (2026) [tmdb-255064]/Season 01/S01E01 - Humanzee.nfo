@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Humanzee</title>
+    <showtitle>Darwin’s Incident</showtitle>
+    <season>1</season>
+    <episode>1</episode>
+    <plot>The Animal Liberation Alliance, a terrorist group, raids a research institute and takes away a pregnant chimpanzee. Fifteen years later, Charlie, the half-human, half-chimpanzee Humanzee born that night enrolls into high school. He befriends Lucy, but little do they know how fragile their peaceful days really are.</plot>
+    <aired>2026-01-07</aired>
+    <rating>7</rating>
+    <runtime>24</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/hDvl8VxMjwseshMwO8ZgDH7dI1g.jpg</thumb>
+    <uniqueid type="tmdb" default="true">5363736</uniqueid>
+    <uniqueid type="tvdb">450282</uniqueid>
+    <uniqueid type="imdb">tt38980285</uniqueid>
+</episodedetails>

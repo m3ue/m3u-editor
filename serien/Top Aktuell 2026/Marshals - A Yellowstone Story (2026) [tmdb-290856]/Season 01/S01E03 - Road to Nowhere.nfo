@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Road to Nowhere</title>
+    <showtitle>Marshals - A Yellowstone Story</showtitle>
+    <season>1</season>
+    <episode>3</episode>
+    <plot>When a standoff between Broken Rock and local ranchers over a mine groundbreaking turns violent, the Marshals lead a manhunt to find the shooters.</plot>
+    <aired>2026-03-15</aired>
+    <rating>7.3</rating>
+    <runtime>43</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/r1oUWBp9C19nBVOVAmx40e8x3Ud.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6942501</uniqueid>
+    <uniqueid type="tvdb">463433</uniqueid>
+    <uniqueid type="imdb">tt36849871</uniqueid>
+</episodedetails>

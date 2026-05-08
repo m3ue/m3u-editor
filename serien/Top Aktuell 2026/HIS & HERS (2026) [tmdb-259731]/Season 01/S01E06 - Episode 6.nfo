@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Episode 6</title>
+    <showtitle>HIS &amp; HERS</showtitle>
+    <season>1</season>
+    <episode>6</episode>
+    <plot>As the case comes to a close, Jack and Anna must reckon with the sins of the past — and the brutal consequences in the present.</plot>
+    <aired>2026-01-08</aired>
+    <rating>5.3</rating>
+    <runtime>40</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/iw6hFVQ8ItYOGS4excmauXnyEI5.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6665657</uniqueid>
+    <uniqueid type="tvdb">452521</uniqueid>
+    <uniqueid type="imdb">tt33035373</uniqueid>
+</episodedetails>

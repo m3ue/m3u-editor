@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Episode 4</title>
+    <showtitle>Secret Service</showtitle>
+    <season>1</season>
+    <episode>4</episode>
+    <plot>The pressure mounts on Kate when the Russians target her family, and Rav follows clues to Geneva.</plot>
+    <aired>2026-05-04</aired>
+    <runtime>45</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/fE2S8BFreaJuDhnU8TxkpHn85Uk.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6076829</uniqueid>
+    <uniqueid type="tvdb">451314</uniqueid>
+    <uniqueid type="imdb">tt32477632</uniqueid>
+</episodedetails>

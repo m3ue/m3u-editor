@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Monaco Under the Stars</title>
+    <showtitle>Grosse Pointe Garden Society</showtitle>
+    <season>1</season>
+    <episode>11</episode>
+    <plot>The big night of the gala has arrived, but nothing goes as planned for Birdie, Catherine, Brett and Alice.</plot>
+    <aired>2025-05-02</aired>
+    <rating>3.3</rating>
+    <runtime>42</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/sUD3XtP0yY4gP24qjI7sCJ9bpSK.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6069968</uniqueid>
+    <uniqueid type="tvdb">449379</uniqueid>
+    <uniqueid type="imdb">tt26748764</uniqueid>
+</episodedetails>

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Copenhagen</title>
+    <showtitle>The Copenhagen Test</showtitle>
+    <season>1</season>
+    <episode>1</episode>
+    <plot>Trying to prove he's not the mole at his agency, an analyst makes a discovery that upends his life.</plot>
+    <aired>2025-12-27</aired>
+    <rating>5.333</rating>
+    <runtime>56</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/nIFLnCWlWbiavYHTrwvr2DaWg9S.jpg</thumb>
+    <uniqueid type="tmdb" default="true">5147214</uniqueid>
+    <uniqueid type="tvdb">453657</uniqueid>
+    <uniqueid type="imdb">tt31314791</uniqueid>
+</episodedetails>

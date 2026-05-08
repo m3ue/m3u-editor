@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Episode Two</title>
+    <showtitle>Malcolm mittendrin: Unfair wie immer</showtitle>
+    <season>1</season>
+    <episode>2</episode>
+    <plot>"How does someone who's supposed to be so smart ruin everything so quickly? He's even fighting with his daughter, how's he going to fix that? I bet his dad can help… Jeez, never mind."</plot>
+    <aired>2026-04-10</aired>
+    <rating>7.083</rating>
+    <runtime>26</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/mLSBftIQaBOWTMXWjnqRmrqMe5f.jpg</thumb>
+    <uniqueid type="tmdb" default="true">5832873</uniqueid>
+    <uniqueid type="tvdb">457779</uniqueid>
+    <uniqueid type="imdb">tt35466672</uniqueid>
+</episodedetails>

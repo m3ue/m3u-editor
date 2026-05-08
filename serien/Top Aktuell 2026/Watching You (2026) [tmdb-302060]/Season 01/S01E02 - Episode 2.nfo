@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Episode 2</title>
+    <showtitle>Watching You</showtitle>
+    <season>1</season>
+    <episode>2</episode>
+    <plot>Lina races against the clock to uncover the voyeur, and is shocked to learn that they may be closer than she imagined.</plot>
+    <aired>2025-10-03</aired>
+    <rating>7</rating>
+    <runtime>44</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/awwzsLdUCPeJSwlWYok2tG7Pyur.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6569468</uniqueid>
+    <uniqueid type="tvdb">460377</uniqueid>
+    <uniqueid type="imdb">tt35836640</uniqueid>
+</episodedetails>

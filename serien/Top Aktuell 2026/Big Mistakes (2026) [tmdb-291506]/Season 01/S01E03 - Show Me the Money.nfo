@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Show Me the Money</title>
+    <showtitle>Big Mistakes</showtitle>
+    <season>1</season>
+    <episode>3</episode>
+    <plot>Nicky and Morgan's success is short-lived when they're coerced into a "friendship" with Yusuf's boss. Linda reconsiders her run for mayor.</plot>
+    <aired>2026-04-09</aired>
+    <rating>7</rating>
+    <runtime>32</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/pA3ywM1zRo9a8ct2xsUwT23lt71.jpg</thumb>
+    <uniqueid type="tmdb" default="true">7037197</uniqueid>
+    <uniqueid type="tvdb">466852</uniqueid>
+    <uniqueid type="imdb">tt36957934</uniqueid>
+</episodedetails>

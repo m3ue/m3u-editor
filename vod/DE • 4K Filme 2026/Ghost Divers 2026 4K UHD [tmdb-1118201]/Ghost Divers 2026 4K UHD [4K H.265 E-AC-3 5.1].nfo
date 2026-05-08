@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<movie>
+    <title>Ghost Divers 2026 4K/UHD</title>
+    <originaltitle>Ghost Divers 2026 4K/UHD</originaltitle>
+    <sorttitle>Ghost Divers 2026 4K/UHD</sorttitle>
+    <plot>Als ein Meeresbiologenteam ungewöhnliche Haiaktivitäten in Mittelamerika untersucht, entdecken sie die erschreckende Wahrheit hinter einer Insellegende.</plot>
+    <outline>Als ein Meeresbiologenteam ungewöhnliche Haiaktivitäten in Mittelamerika untersucht, entdecken sie die erschreckende Wahrheit hinter einer Insellegende.</outline>
+    <rating>6.8</rating>
+    <director>Mark Clark</director>
+    <actor>
+        <name>Angella Dawne</name>
+    </actor>
+    <actor>
+        <name>Mark Clark</name>
+    </actor>
+    <actor>
+        <name>Nicholas Digiacomo</name>
+    </actor>
+    <actor>
+        <name>Mike Bolton</name>
+    </actor>
+    <actor>
+        <name>Rodrigo Cobo</name>
+    </actor>
+    <actor>
+        <name>Tanner Mansell</name>
+    </actor>
+    <actor>
+        <name>Robert Mercado</name>
+    </actor>
+    <uniqueid type="tmdb" default="true">1118201</uniqueid>
+    <tmdbid>1118201</tmdbid>
+</movie>

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>A Collage of Joy and Sorrow</title>
+    <showtitle>Love Through a Prism</showtitle>
+    <season>1</season>
+    <episode>13</episode>
+    <plot>During a weekend in Dorothy's hometown, Lili faces her feelings. When they return to school, she's shocked by the results of the final assignment.</plot>
+    <aired>2026-01-15</aired>
+    <rating>7.5</rating>
+    <runtime>28</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/7sx2K8YzIYzMtQkPF9ho5VVndhB.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6720824</uniqueid>
+    <uniqueid type="tvdb">470980</uniqueid>
+    <uniqueid type="imdb">tt39050141</uniqueid>
+</episodedetails>

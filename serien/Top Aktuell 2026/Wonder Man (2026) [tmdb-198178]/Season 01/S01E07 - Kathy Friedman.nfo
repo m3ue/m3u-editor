@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Kathy Friedman</title>
+    <showtitle>Wonder Man</showtitle>
+    <season>1</season>
+    <episode>7</episode>
+    <plot>The New York Times finds us fascinating.</plot>
+    <aired>2026-01-27</aired>
+    <rating>5.3</rating>
+    <runtime>35</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/oyUdIN5KAfQpvia6WYFs1TpE8Kg.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6594789</uniqueid>
+    <uniqueid type="tvdb">428629</uniqueid>
+    <uniqueid type="imdb">tt21066182</uniqueid>
+</episodedetails>

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>We Always Have Options</title>
+    <showtitle>Nuklearer Notfall</showtitle>
+    <season>1</season>
+    <episode>4</episode>
+    <plot>The crisis draws global attention and aid, but the path to a solution is rocky. Márcio gains firsthand insight into the lives of the isolated patients.</plot>
+    <aired>2026-03-18</aired>
+    <rating>7.1</rating>
+    <runtime>53</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/rTBNrHmbHXlysKVAJiYjRPX6knE.jpg</thumb>
+    <uniqueid type="tmdb" default="true">7007851</uniqueid>
+    <uniqueid type="tvdb">464073</uniqueid>
+    <uniqueid type="imdb">tt37041021</uniqueid>
+</episodedetails>

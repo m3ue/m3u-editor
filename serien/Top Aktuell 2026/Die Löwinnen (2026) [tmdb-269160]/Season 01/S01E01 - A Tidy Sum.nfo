@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>A Tidy Sum</title>
+    <showtitle>Die Löwinnen</showtitle>
+    <season>1</season>
+    <episode>1</episode>
+    <plot>In dire need of money, best friends Rosalie and Kim decide to rob a bank. Along the way they pick up more partners in crime — and more problems.</plot>
+    <aired>2026-02-05</aired>
+    <rating>7</rating>
+    <runtime>55</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/embsn2N972dsnrgHB7tSwYS3VRC.jpg</thumb>
+    <uniqueid type="tmdb" default="true">5574724</uniqueid>
+    <uniqueid type="tvdb">457486</uniqueid>
+    <uniqueid type="imdb">tt34139155</uniqueid>
+</episodedetails>

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Episode 4</title>
+    <showtitle>Das Museum der Unschuld</showtitle>
+    <season>1</season>
+    <episode>4</episode>
+    <plot>Emotions run high at Sibel and Kemal's engagement party. While Sibel spends her time matchmaking her friends, Kemal learns that he can't have it all.</plot>
+    <aired>2026-02-13</aired>
+    <rating>9</rating>
+    <runtime>54</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/qHrrIYjcmSyrwcAKgdfp7FOSlnV.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6942184</uniqueid>
+    <uniqueid type="tvdb">456888</uniqueid>
+    <uniqueid type="imdb">tt34692373</uniqueid>
+</episodedetails>

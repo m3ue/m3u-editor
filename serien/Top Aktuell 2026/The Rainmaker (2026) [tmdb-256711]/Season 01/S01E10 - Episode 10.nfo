@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Episode 10</title>
+    <showtitle>The Rainmaker</showtitle>
+    <season>1</season>
+    <episode>10</episode>
+    <plot>Up against Sarah, Rudy wonders if she's still the woman he once knew and loved.</plot>
+    <aired>2025-10-17</aired>
+    <rating>8.2</rating>
+    <runtime>46</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/ywpoPFZ3IkUUD5AHVTMod1sgBXi.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6493447</uniqueid>
+    <uniqueid type="tvdb">451143</uniqueid>
+    <uniqueid type="imdb">tt6151526</uniqueid>
+</episodedetails>

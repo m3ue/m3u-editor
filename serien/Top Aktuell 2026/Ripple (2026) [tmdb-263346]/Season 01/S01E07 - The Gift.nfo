@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>The Gift</title>
+    <showtitle>Ripple</showtitle>
+    <season>1</season>
+    <episode>7</episode>
+    <plot>Walter checks in on Kris as she settles into her new apartment. Nate's friends and family rush to his side after an incident at the bar.</plot>
+    <aired>2025-12-03</aired>
+    <rating>5.5</rating>
+    <runtime>42</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/2A6UuPbZbsBHGC9BDlLKjvftZfd.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6736215</uniqueid>
+    <uniqueid type="tvdb">453835</uniqueid>
+    <uniqueid type="imdb">tt33378120</uniqueid>
+</episodedetails>

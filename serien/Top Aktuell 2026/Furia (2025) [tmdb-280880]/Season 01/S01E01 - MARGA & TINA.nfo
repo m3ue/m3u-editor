@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>MARGA &amp; TINA</title>
+    <showtitle>Furia</showtitle>
+    <season>1</season>
+    <episode>1</episode>
+    <plot>An unlikely alliance forms when successful artist Marga learns that her husband Robert is having an affair with their maid Tina.</plot>
+    <aired>2025-07-11</aired>
+    <rating>5.3</rating>
+    <runtime>35</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/hmL9Ak4kd7zKEiKJAwIWSYoZzP3.jpg</thumb>
+    <uniqueid type="tmdb" default="true">5872533</uniqueid>
+    <uniqueid type="tvdb">464727</uniqueid>
+    <uniqueid type="imdb">tt32327588</uniqueid>
+</episodedetails>

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Rise</title>
+    <showtitle>Die Dinosaurier</showtitle>
+    <season>1</season>
+    <episode>1</episode>
+    <plot>A fuzzy little creature that hatches 235 million years ago will spawn a dinosaur dynasty — if it can survive a chaotic climate and carnivorous reptiles.</plot>
+    <aired>2026-03-06</aired>
+    <rating>7.25</rating>
+    <runtime>48</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/cLrKgHtnPVZqKtwjocQydg7ASHY.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6918627</uniqueid>
+    <uniqueid type="tvdb">473613</uniqueid>
+    <uniqueid type="imdb">tt32493765</uniqueid>
+</episodedetails>

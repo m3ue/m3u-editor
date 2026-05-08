@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<tvshow>
+    <title>Die Bleikinder</title>
+    <originaltitle>Die Bleikinder</originaltitle>
+    <sorttitle>Die Bleikinder</sorttitle>
+    <plot>Als eine junge Ärztin entdeckt, dass Kinder in der Nähe eines Hüttenwerks unter Bleivergiftungen leiden, riskiert sie Karriere und Sicherheit, um sie zu retten.</plot>
+    <outline>Als eine junge Ärztin entdeckt, dass Kinder in der Nähe eines Hüttenwerks unter Bleivergiftungen leiden, riskiert sie Karriere und Sicherheit, um sie zu retten.</outline>
+    <year>2026</year>
+    <premiered>2026-02-11</premiered>
+    <fanart>https://image.tmdb.org/t/p/w780/ra12F3J3uVe112FEqBGmQapW2Bu.jpg</fanart>
+    <uniqueid type="tmdb" default="true">270444</uniqueid>
+    <tmdbid>270444</tmdbid>
+    <uniqueid type="tvdb">460249</uniqueid>
+    <tvdbid>460249</tvdbid>
+    <uniqueid type="imdb">tt33322230</uniqueid>
+    <imdbid>tt33322230</imdbid>
+</tvshow>

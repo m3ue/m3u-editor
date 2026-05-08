@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>The Case of the Missing Button</title>
+    <showtitle>Young Sherlock</showtitle>
+    <season>1</season>
+    <episode>4</episode>
+    <plot>Sherlock returns to his childhood home in search of answers.</plot>
+    <aired>2026-03-04</aired>
+    <rating>8.286</rating>
+    <runtime>50</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/i3ebygGTIcnfYAiFpHpKFO0oBSs.jpg</thumb>
+    <uniqueid type="tmdb" default="true">5657755</uniqueid>
+    <uniqueid type="tvdb">450633</uniqueid>
+    <uniqueid type="imdb">tt8599532</uniqueid>
+</episodedetails>

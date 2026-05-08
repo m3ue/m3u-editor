@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Episode 4</title>
+    <showtitle>City of God - Der Kampf geht weiter</showtitle>
+    <season>1</season>
+    <episode>4</episode>
+    <plot>Amid chaos brought by Bradock’s erratic behavior, Wilson and Lígia uncover a mysterious connection to a local politician.</plot>
+    <aired>2024-09-15</aired>
+    <rating>6</rating>
+    <runtime>53</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/hCC7CsiHthnCaMEWiNCtMlh2amQ.jpg</thumb>
+    <uniqueid type="tmdb" default="true">5550349</uniqueid>
+    <uniqueid type="tvdb">433775</uniqueid>
+    <uniqueid type="imdb">tt27535062</uniqueid>
+</episodedetails>

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Four</title>
+    <showtitle>Man on Fire</showtitle>
+    <season>1</season>
+    <episode>4</episode>
+    <plot>The favela goes on high alert when enemies arrive with an agenda. Creasy races against time to extract information in a high-stakes hostage situation.</plot>
+    <aired>2026-04-30</aired>
+    <rating>2</rating>
+    <runtime>42</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/wNPOZAlduGULcdrhIoDRXXBPKee.jpg</thumb>
+    <uniqueid type="tmdb" default="true">7024854</uniqueid>
+    <uniqueid type="tvdb">433027</uniqueid>
+    <uniqueid type="imdb">tt27331527</uniqueid>
+</episodedetails>

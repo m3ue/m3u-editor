@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Seasons</title>
+    <showtitle>Grosse Pointe Garden Society</showtitle>
+    <season>1</season>
+    <episode>10</episode>
+    <plot>Alice welcomes a new addition to the family to snap Doug out of his funk. Catherine is torn as she must help sell her childhood home. Birdie receives surprising news that changes everything. Brett teams up with Melissa to care for their sick kids.</plot>
+    <aired>2025-04-25</aired>
+    <rating>3</rating>
+    <runtime>42</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/5zszJOpe5cbvXSmi9SzYPH0HQwU.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6069967</uniqueid>
+    <uniqueid type="tvdb">449379</uniqueid>
+    <uniqueid type="imdb">tt26748764</uniqueid>
+</episodedetails>

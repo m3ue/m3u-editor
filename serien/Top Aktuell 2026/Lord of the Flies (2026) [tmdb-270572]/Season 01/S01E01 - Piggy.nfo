@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Piggy</title>
+    <showtitle>Lord of the Flies</showtitle>
+    <season>1</season>
+    <episode>1</episode>
+    <plot>Piggy finds something that proves useful to the group but is hurt when his new friend breaks a promise.</plot>
+    <aired>2026-02-08</aired>
+    <rating>6.6</rating>
+    <runtime>58</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/dNMNUBeHrvSFXEmpoDrnfSwTyYP.jpg</thumb>
+    <uniqueid type="tmdb" default="true">5579495</uniqueid>
+    <uniqueid type="tvdb">434004</uniqueid>
+    <uniqueid type="imdb">tt27557666</uniqueid>
+</episodedetails>

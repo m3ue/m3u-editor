@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Episode 1</title>
+    <showtitle>In Flight</showtitle>
+    <season>1</season>
+    <episode>1</episode>
+    <plot>After a fight outside a bar, 19-year-old Sonny Conran is arrested and charged with a murder. His mum Jo rushes to Bulgaria, but Sonny's lawyer warns Jo that the police have already made up their minds. Jo focuses on proving Sonny's innocence.</plot>
+    <aired>2025-08-12</aired>
+    <rating>3.5</rating>
+    <runtime>47</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/gw7MFrJbvMWgojRnnUXhGucF49v.jpg</thumb>
+    <uniqueid type="tmdb" default="true">5749341</uniqueid>
+    <uniqueid type="tvdb">465139</uniqueid>
+    <uniqueid type="imdb">tt22299034</uniqueid>
+</episodedetails>

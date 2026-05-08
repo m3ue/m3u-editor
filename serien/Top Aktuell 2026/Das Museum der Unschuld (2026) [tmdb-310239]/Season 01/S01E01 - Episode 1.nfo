@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Episode 1</title>
+    <showtitle>Das Museum der Unschuld</showtitle>
+    <season>1</season>
+    <episode>1</episode>
+    <plot>With Kemal and Sibel's long-awaited engagement arrangements underway, a chance encounter with a familiar face puts a new spring in Kemal's step.</plot>
+    <aired>2026-02-13</aired>
+    <rating>9</rating>
+    <runtime>51</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/gBtyZiFxB4vgVb4ZdkAXwOSb7RQ.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6821758</uniqueid>
+    <uniqueid type="tvdb">456888</uniqueid>
+    <uniqueid type="imdb">tt34692373</uniqueid>
+</episodedetails>

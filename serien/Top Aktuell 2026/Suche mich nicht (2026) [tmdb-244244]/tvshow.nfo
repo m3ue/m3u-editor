@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<tvshow>
+    <title>Suche mich nicht</title>
+    <originaltitle>Suche mich nicht</originaltitle>
+    <sorttitle>Suche mich nicht</sorttitle>
+    <plot>Ein verzweifelter Vater sucht nach seiner Tochter und gerät in einen Mordfall. Dabei kommen Geheimnisse ans Licht, die seine Familie für immer zerstören könnten.</plot>
+    <outline>Ein verzweifelter Vater sucht nach seiner Tochter und gerät in einen Mordfall. Dabei kommen Geheimnisse ans Licht, die seine Familie für immer zerstören könnten.</outline>
+    <year>2026</year>
+    <premiered>2026-01-01</premiered>
+    <fanart>https://image.tmdb.org/t/p/w780/1jBYTcOuiPNJsTcfYk66bbVLSBz.jpg</fanart>
+    <uniqueid type="tmdb" default="true">244244</uniqueid>
+    <tmdbid>244244</tmdbid>
+    <uniqueid type="tvdb">445068</uniqueid>
+    <tvdbid>445068</tvdbid>
+    <uniqueid type="imdb">tt9169516</uniqueid>
+    <imdbid>tt9169516</imdbid>
+</tvshow>

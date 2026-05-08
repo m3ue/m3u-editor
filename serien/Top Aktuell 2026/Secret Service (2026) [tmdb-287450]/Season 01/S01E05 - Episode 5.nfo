@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Episode 5</title>
+    <showtitle>Secret Service</showtitle>
+    <season>1</season>
+    <episode>5</episode>
+    <plot>Kate runs Cyclops in an audacious mission inside Moscow Secret Service HQ to finally trap the MI6 mole.</plot>
+    <aired>2026-05-05</aired>
+    <runtime>46</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/mKHxuPKFudHAt67VyKu4yasjQsK.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6076830</uniqueid>
+    <uniqueid type="tvdb">451314</uniqueid>
+    <uniqueid type="imdb">tt32477632</uniqueid>
+</episodedetails>

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Beautiful Betrayal</title>
+    <showtitle>The Beauty</showtitle>
+    <season>1</season>
+    <episode>11</episode>
+    <plot>Beauty has a price.</plot>
+    <aired>2026-03-04</aired>
+    <rating>6.591</rating>
+    <runtime>39</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/8ZYpjtv6aQZbxAgDa3hq2OMWVzA.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6736835</uniqueid>
+    <uniqueid type="tvdb">455046</uniqueid>
+    <uniqueid type="imdb">tt33517752</uniqueid>
+</episodedetails>

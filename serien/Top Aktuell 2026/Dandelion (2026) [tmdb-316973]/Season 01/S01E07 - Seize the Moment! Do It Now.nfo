@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Seize the Moment! Do It Now</title>
+    <showtitle>Dandelion</showtitle>
+    <season>1</season>
+    <episode>7</episode>
+    <plot>The chairman's agenda rapidly reduces the number of earthbound spirits but the collection tank overloads, releasing vengeful souls into the mortal realm.</plot>
+    <aired>2026-04-16</aired>
+    <rating>8</rating>
+    <runtime>38</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/kQLiR4C2jQFUMdPfJMRmvxGtU0s.jpg</thumb>
+    <uniqueid type="tmdb" default="true">7112581</uniqueid>
+    <uniqueid type="tvdb">474691</uniqueid>
+    <uniqueid type="imdb">tt40356933</uniqueid>
+</episodedetails>

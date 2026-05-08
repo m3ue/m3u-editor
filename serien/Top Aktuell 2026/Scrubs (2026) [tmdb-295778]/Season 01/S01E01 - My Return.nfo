@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>My Return</title>
+    <showtitle>Scrubs</showtitle>
+    <season>1</season>
+    <episode>1</episode>
+    <plot>John "J.D." Dorian unexpectedly finds himself back at Sacred Heart, reuniting him with new and old faces.</plot>
+    <aired>2026-02-25</aired>
+    <rating>8.4</rating>
+    <runtime>23</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/xBjdMxUUWtOinW157VniWiuiyQ1.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6372133</uniqueid>
+    <uniqueid type="tvdb">465690</uniqueid>
+    <uniqueid type="imdb">tt40197357</uniqueid>
+</episodedetails>

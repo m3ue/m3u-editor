@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Chapter 1: The Dark Revenge</title>
+    <showtitle>Star Wars: Maul - Shadow Lord</showtitle>
+    <season>1</season>
+    <episode>1</episode>
+    <plot>In the criminal underworld of Janix, Maul enacts a plan to consolidate his power.</plot>
+    <aired>2026-04-06</aired>
+    <rating>7.4</rating>
+    <runtime>31</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/3hP2yvCoZM9Is0tk3l4YceslqD.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6140910</uniqueid>
+    <uniqueid type="tvdb">462715</uniqueid>
+    <uniqueid type="imdb">tt36594331</uniqueid>
+</episodedetails>

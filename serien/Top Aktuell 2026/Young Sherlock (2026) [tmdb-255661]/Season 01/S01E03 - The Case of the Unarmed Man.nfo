@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>The Case of the Unarmed Man</title>
+    <showtitle>Young Sherlock</showtitle>
+    <season>1</season>
+    <episode>3</episode>
+    <plot>The game's afoot. With another murder and two professors missing, it's a race against time for Sherlock and Moriarty to find them before the killer does.</plot>
+    <aired>2026-03-04</aired>
+    <rating>8.417</rating>
+    <runtime>43</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/uGV7r8hH3bRPfN8NO37ROw0KIfC.jpg</thumb>
+    <uniqueid type="tmdb" default="true">5657754</uniqueid>
+    <uniqueid type="tvdb">450633</uniqueid>
+    <uniqueid type="imdb">tt8599532</uniqueid>
+</episodedetails>

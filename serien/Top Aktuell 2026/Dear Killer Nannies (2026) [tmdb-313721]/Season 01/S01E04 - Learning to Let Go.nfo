@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Learning to Let Go</title>
+    <showtitle>Dear Killer Nannies</showtitle>
+    <season>1</season>
+    <episode>4</episode>
+    <plot>Juan Pablo seeks to break with his past, confronting those who want to see him dead face-to-face.</plot>
+    <aired>2026-04-01</aired>
+    <rating>10</rating>
+    <runtime>38</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/2PxzZZG5O324E7Sz3gHJrLlBPkI.jpg</thumb>
+    <uniqueid type="tmdb" default="true">7085238</uniqueid>
+    <uniqueid type="tvdb">475233</uniqueid>
+    <uniqueid type="imdb">tt32125946</uniqueid>
+</episodedetails>

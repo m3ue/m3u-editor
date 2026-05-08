@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Self-Tape</title>
+    <showtitle>Wonder Man</showtitle>
+    <season>1</season>
+    <episode>2</episode>
+    <plot>It's never been this hard to do a self-tape before.</plot>
+    <aired>2026-01-27</aired>
+    <rating>6</rating>
+    <runtime>34</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/70EKlIWAu8fWjbRufqJouHVb4Ca.jpg</thumb>
+    <uniqueid type="tmdb" default="true">4924078</uniqueid>
+    <uniqueid type="tvdb">428629</uniqueid>
+    <uniqueid type="imdb">tt21066182</uniqueid>
+</episodedetails>

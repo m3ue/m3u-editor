@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Episode 6</title>
+    <showtitle>Hameln</showtitle>
+    <season>1</season>
+    <episode>6</episode>
+    <plot>Da die Freunde ihre Eltern nicht überzeugen konnten, sich mit ihrer Vergangenheit auseinanderzusetzen, gelingt es dem Rattenfänger, einen entscheidenden Vorteil zu erringen.</plot>
+    <aired>2024-12-30</aired>
+    <rating>2</rating>
+    <runtime>42</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/rLtJTj4dEKS8MJJ4eUqUdcYFWHL.jpg</thumb>
+    <uniqueid type="tmdb" default="true">5710039</uniqueid>
+    <uniqueid type="imdb">tt29267609</uniqueid>
+</episodedetails>

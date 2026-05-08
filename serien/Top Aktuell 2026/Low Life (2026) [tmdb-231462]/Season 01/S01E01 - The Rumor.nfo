@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>The Rumor</title>
+    <showtitle>Low Life</showtitle>
+    <season>1</season>
+    <episode>1</episode>
+    <plot>Gwanseok and Heedong are offered a job salvaging treasure off the coast of Korea and head to Mokpo.</plot>
+    <aired>2025-07-16</aired>
+    <rating>7.5</rating>
+    <runtime>54</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/cNm2cVWY1HpOCXGRXvCQpBtCXza.jpg</thumb>
+    <uniqueid type="tmdb" default="true">4605420</uniqueid>
+    <uniqueid type="tvdb">437684</uniqueid>
+    <uniqueid type="imdb">tt32122656</uniqueid>
+</episodedetails>

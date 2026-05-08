@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>BLATANT, NOT SUBTLE</title>
+    <showtitle>Bait</showtitle>
+    <season>1</season>
+    <episode>1</episode>
+    <plot>Shah blows the audition of a lifetime. Desperate times call for desperate measures...but at what cost?</plot>
+    <aired>2026-03-25</aired>
+    <rating>3</rating>
+    <runtime>25</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/3odfD6gJ2kUdtibBDW24zAXH3QA.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6875331</uniqueid>
+    <uniqueid type="tvdb">455830</uniqueid>
+    <uniqueid type="imdb">tt32252887</uniqueid>
+</episodedetails>

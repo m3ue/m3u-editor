@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<tvshow>
+    <title>Rooster</title>
+    <originaltitle>Rooster</originaltitle>
+    <sorttitle>Rooster</sorttitle>
+    <plot>Ein Autor  muss feststellen, dass sein Verhältnis zu seiner erwachsenen Tochter vollkommen aus dem Gleichgewicht geraten ist. Auf einem College-Campus tragen sie ihre familiären Spannungen aus.</plot>
+    <outline>Ein Autor  muss feststellen, dass sein Verhältnis zu seiner erwachsenen Tochter vollkommen aus dem Gleichgewicht geraten ist. Auf einem College-Campus tragen sie ihre familiären Spannungen aus.</outline>
+    <year>2026</year>
+    <premiered>2026-03-08</premiered>
+    <fanart>https://image.tmdb.org/t/p/w780/mhZAT8ktiNi7YwuL50kmumsau69.jpg</fanart>
+    <uniqueid type="tmdb" default="true">254953</uniqueid>
+    <tmdbid>254953</tmdbid>
+    <uniqueid type="tvdb">457770</uniqueid>
+    <tvdbid>457770</tvdbid>
+    <uniqueid type="imdb">tt32420734</uniqueid>
+    <imdbid>tt32420734</imdbid>
+</tvshow>

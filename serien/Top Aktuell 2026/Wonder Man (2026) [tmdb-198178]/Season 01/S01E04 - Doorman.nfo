@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Doorman</title>
+    <showtitle>Wonder Man</showtitle>
+    <season>1</season>
+    <episode>4</episode>
+    <plot>Ding dong.</plot>
+    <aired>2026-01-27</aired>
+    <rating>6</rating>
+    <runtime>32</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/rP2wAtWGiRxHB3C4eM9Z1rEdIkk.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6594786</uniqueid>
+    <uniqueid type="tvdb">428629</uniqueid>
+    <uniqueid type="imdb">tt21066182</uniqueid>
+</episodedetails>

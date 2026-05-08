@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Because It Is Bitter and Because It Is My Heart</title>
+    <showtitle>Vladimir</showtitle>
+    <season>1</season>
+    <episode>6</episode>
+    <plot>Facing fallout from John's indiscretions and the cold shoulder from her colleagues, M takes her case directly to the student body.</plot>
+    <aired>2026-03-05</aired>
+    <rating>4</rating>
+    <runtime>32</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/7dwcTWyRtzsfGNUwMDtneWVl6te.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6891027</uniqueid>
+    <uniqueid type="tvdb">460989</uniqueid>
+    <uniqueid type="imdb">tt35997699</uniqueid>
+</episodedetails>

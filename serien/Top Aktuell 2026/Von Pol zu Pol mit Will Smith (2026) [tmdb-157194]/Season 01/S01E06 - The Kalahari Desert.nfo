@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>The Kalahari Desert</title>
+    <showtitle>Von Pol zu Pol mit Will Smith</showtitle>
+    <season>1</season>
+    <episode>6</episode>
+    <plot>Will travels to the Kalahari Desert to learn the secrets of the San people.</plot>
+    <aired>2026-01-27</aired>
+    <runtime>36</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/b4Kh4JHDO6HADk0SyduHzPh9ly5.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6770297</uniqueid>
+    <uniqueid type="tvdb">449405</uniqueid>
+    <uniqueid type="imdb">tt18069218</uniqueid>
+</episodedetails>

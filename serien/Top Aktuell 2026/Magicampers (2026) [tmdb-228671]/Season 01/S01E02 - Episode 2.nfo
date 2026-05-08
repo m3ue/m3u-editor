@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Episode 2</title>
+    <showtitle>Magicampers</showtitle>
+    <season>1</season>
+    <episode>2</episode>
+    <aired>2026-03-23</aired>
+    <uniqueid type="tmdb" default="true">7073461</uniqueid>
+    <uniqueid type="imdb">tt28070105</uniqueid>
+</episodedetails>

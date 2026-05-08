@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Watch Her Fall</title>
+    <showtitle>The Madison</showtitle>
+    <season>1</season>
+    <episode>3</episode>
+    <plot>Stacy confronts Abigail about her future, triggering a roadside reckoning.</plot>
+    <aired>2026-03-14</aired>
+    <rating>9.7</rating>
+    <runtime>47</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/7BLTZu266YujJZUNXkW0jpOIZw2.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6861978</uniqueid>
+    <uniqueid type="tvdb">441735</uniqueid>
+    <uniqueid type="imdb">tt33204276</uniqueid>
+</episodedetails>

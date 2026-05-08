@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Queen Bee</title>
+    <showtitle>Land der Sünde</showtitle>
+    <season>1</season>
+    <episode>5</episode>
+    <plot>As unsettling new evidence and hard truths come to light, both police and locals scramble to find those responsible — before it's too late.</plot>
+    <aired>2026-01-02</aired>
+    <rating>2.167</rating>
+    <runtime>44</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/eb046jecXt3XD7Mf5tKU95bcOfY.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6777395</uniqueid>
+    <uniqueid type="tvdb">462797</uniqueid>
+    <uniqueid type="imdb">tt33501959</uniqueid>
+</episodedetails>

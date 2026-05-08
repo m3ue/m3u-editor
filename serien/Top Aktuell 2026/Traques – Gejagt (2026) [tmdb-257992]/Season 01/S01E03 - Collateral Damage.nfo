@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Collateral Damage</title>
+    <showtitle>Traques – Gejagt</showtitle>
+    <season>1</season>
+    <episode>3</episode>
+    <plot>A spike in violence has the valley on edge. Franck's loved ones begin to face the consequences of his secrets.</plot>
+    <aired>2026-03-11</aired>
+    <rating>1</rating>
+    <runtime>47</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/YccVPtyTKaOnjgoJUtrdG5oktT.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6553041</uniqueid>
+    <uniqueid type="tvdb">451658</uniqueid>
+    <uniqueid type="imdb">tt33086602</uniqueid>
+</episodedetails>

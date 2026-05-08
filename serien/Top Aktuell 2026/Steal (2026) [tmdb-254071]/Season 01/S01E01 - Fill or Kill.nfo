@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Fill or Kill</title>
+    <showtitle>Steal</showtitle>
+    <season>1</season>
+    <episode>1</episode>
+    <plot>A group of master thieves break into Lochmill Capital and hold Zara and her colleagues at gunpoint, attempting the heist of the century.</plot>
+    <aired>2026-01-21</aired>
+    <rating>8.1</rating>
+    <runtime>42</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/92RKb1U77W7dzvSrUper30VyMBf.jpg</thumb>
+    <uniqueid type="tmdb" default="true">5337594</uniqueid>
+    <uniqueid type="tvdb">449950</uniqueid>
+    <uniqueid type="imdb">tt32499731</uniqueid>
+</episodedetails>

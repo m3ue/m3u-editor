@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Allegiance</title>
+    <showtitle>The Copenhagen Test</showtitle>
+    <season>1</season>
+    <episode>6</episode>
+    <plot>Alexander is given an impossible choice; The Orphanage must decide if he has turned on them.</plot>
+    <aired>2025-12-27</aired>
+    <rating>4.9</rating>
+    <runtime>48</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/oCnvMPMR47GWIud8qSHWSbQ5dqH.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6750132</uniqueid>
+    <uniqueid type="tvdb">453657</uniqueid>
+    <uniqueid type="imdb">tt31314791</uniqueid>
+</episodedetails>

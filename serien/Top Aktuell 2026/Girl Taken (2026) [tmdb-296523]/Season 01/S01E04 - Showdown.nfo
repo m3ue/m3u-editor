@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Showdown</title>
+    <showtitle>Girl Taken</showtitle>
+    <season>1</season>
+    <episode>4</episode>
+    <plot>Rick, in prison, offers to talk on one condition: he'll only speak to Lily.</plot>
+    <aired>2026-01-08</aired>
+    <rating>1</rating>
+    <runtime>47</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/5k2ueLLfJ65klEMNPv7sGZIkuRa.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6398356</uniqueid>
+    <uniqueid type="tvdb">465411</uniqueid>
+    <uniqueid type="imdb">tt39133077</uniqueid>
+</episodedetails>

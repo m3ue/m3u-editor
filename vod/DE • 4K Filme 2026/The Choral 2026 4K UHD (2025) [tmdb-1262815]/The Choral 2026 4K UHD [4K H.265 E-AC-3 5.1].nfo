@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<movie>
+    <title>The Choral 2026 4K/UHD</title>
+    <originaltitle>The Choral 2026 4K/UHD</originaltitle>
+    <sorttitle>The Choral 2026 4K/UHD</sorttitle>
+    <plot>Yorkshire, 1916. Die männlichen Mitglieder eines Chors melden sich freiwillig zum Ersten Weltkrieg, sodass der anspruchsvolle Dr. Guthrie nun Teenager rekrutieren muss. Gemeinsam erleben sie die Freude am Singen, während die jungen Männer mit ihrer bevorstehenden Einberufung ringen.</plot>
+    <outline>Yorkshire, 1916. Die männlichen Mitglieder eines Chors melden sich freiwillig zum Ersten Weltkrieg, sodass der anspruchsvolle Dr. Guthrie nun Teenager rekrutieren muss. Gemeinsam erleben sie die Freude am Singen, während die jungen Männer mit ihrer bevorstehenden Einberufung ringen.</outline>
+    <year>2025</year>
+    <rating>6.6</rating>
+    <director>Nicholas Hytner</director>
+    <actor>
+        <name>Ralph Fiennes</name>
+    </actor>
+    <actor>
+        <name>Roger Allam</name>
+    </actor>
+    <actor>
+        <name>Mark Addy</name>
+    </actor>
+    <actor>
+        <name>Alun Armstrong</name>
+    </actor>
+    <actor>
+        <name>Simon Russell Beale</name>
+    </actor>
+    <actor>
+        <name>Robert Emms</name>
+    </actor>
+    <actor>
+        <name>Lyndsey Marshal</name>
+    </actor>
+    <actor>
+        <name>Ron Cook</name>
+    </actor>
+    <actor>
+        <name>Amara Okereke</name>
+    </actor>
+    <actor>
+        <name>Emily Fairn</name>
+    </actor>
+    <fanart>https://image.tmdb.org/t/p/original/4zyeIE8ceP95gehaPsgqamEYRuy.jpg</fanart>
+    <uniqueid type="tmdb" default="true">1262815</uniqueid>
+    <tmdbid>1262815</tmdbid>
+    <uniqueid type="imdb">tt31851518</uniqueid>
+    <imdbid>tt31851518</imdbid>
+</movie>

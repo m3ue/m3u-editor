@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Five</title>
+    <showtitle>Harry Hole</showtitle>
+    <season>1</season>
+    <episode>6</episode>
+    <plot>Unable to find a logical connection between the symbolism, locations and victims, Harry attempts a mind-bending method to crack the serial killer’s code.</plot>
+    <aired>2026-03-26</aired>
+    <rating>6.5</rating>
+    <runtime>51</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/rOUbWdNnFpdIfwEmTNvlghwV76V.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6770187</uniqueid>
+    <uniqueid type="tvdb">447892</uniqueid>
+    <uniqueid type="imdb">tt31810018</uniqueid>
+</episodedetails>

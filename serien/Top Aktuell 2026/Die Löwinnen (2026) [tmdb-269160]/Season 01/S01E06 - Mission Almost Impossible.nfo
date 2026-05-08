@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Mission Almost Impossible</title>
+    <showtitle>Die Löwinnen</showtitle>
+    <season>1</season>
+    <episode>6</episode>
+    <plot>A lost suitcase causes even more stress for the gang. Victor's father puts Rosa to the test and Ezéchiel takes something very precious from Marionnaud.</plot>
+    <aired>2026-02-05</aired>
+    <rating>5.5</rating>
+    <runtime>45</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/zrumygbWJRcrNobm4t1m5dZeH1m.jpg</thumb>
+    <uniqueid type="tmdb" default="true">5574735</uniqueid>
+    <uniqueid type="tvdb">457486</uniqueid>
+    <uniqueid type="imdb">tt34139155</uniqueid>
+</episodedetails>

@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<movie>
+    <title>Splitsville 2026 4K/UHD</title>
+    <originaltitle>Splitsville 2026 4K/UHD</originaltitle>
+    <sorttitle>Splitsville 2026 4K/UHD</sorttitle>
+    <plot>Wo Liebe endet, beginnt Chaos. Nachdem Ashley unerwartet die Scheidung verlangt hat, sucht der gutmütige Carey bei seinen Freunden Julie und Paul Trost. Als er entdeckt, dass das Geheimnis ihres Glücks eine offene Ehe ist, zeigt er sich zunächst schockiert, findet dann aber den Mut, Neues auszutesten. Ein gewagter Schritt, bei dem Carey Grenzen überschreitet und nicht nur seine eigene Beziehung ins Chaos stürzt.“</plot>
+    <outline>Wo Liebe endet, beginnt Chaos. Nachdem Ashley unerwartet die Scheidung verlangt hat, sucht der gutmütige Carey bei seinen Freunden Julie und Paul Trost. Als er entdeckt, dass das Geheimnis ihres Glücks eine offene Ehe ist, zeigt er sich zunächst schockiert, findet dann aber den Mut, Neues auszuteste</outline>
+    <rating>7</rating>
+    <director>Michael Angelo Covino</director>
+    <actor>
+        <name>Kyle Marvin</name>
+    </actor>
+    <actor>
+        <name>Michael Angelo Covino</name>
+    </actor>
+    <actor>
+        <name>Dakota Johnson</name>
+    </actor>
+    <actor>
+        <name>Adria Arjona</name>
+    </actor>
+    <actor>
+        <name>Nicholas Braun</name>
+    </actor>
+    <actor>
+        <name>David Castañeda</name>
+    </actor>
+    <actor>
+        <name>O-T Fagbenle</name>
+    </actor>
+    <actor>
+        <name>Charlie Gillespie</name>
+    </actor>
+    <actor>
+        <name>Simon Webster</name>
+    </actor>
+    <actor>
+        <name>Nahéma Ricci</name>
+    </actor>
+    <actor>
+        <name>Tyrone Benskin</name>
+    </actor>
+    <actor>
+        <name>Leo Hennely</name>
+    </actor>
+    <actor>
+        <name>Robin Guillen</name>
+    </actor>
+    <actor>
+        <name>Letitia Brookes</name>
+    </actor>
+    <actor>
+        <name>Tyler Hall</name>
+    </actor>
+    <actor>
+        <name>Emily O'Connor</name>
+    </actor>
+    <actor>
+        <name>Luke McPhail</name>
+    </actor>
+    <actor>
+        <name>Jean-Claude Morais</name>
+    </actor>
+    <actor>
+        <name>Jai Pun</name>
+    </actor>
+    <actor>
+        <name>Jessika Mathurin</name>
+    </actor>
+    <actor>
+        <name>Stephen Adekolu</name>
+    </actor>
+    <actor>
+        <name>Vincent Robitaille</name>
+    </actor>
+    <actor>
+        <name>Nicholas Boshier</name>
+    </actor>
+    <actor>
+        <name>Nicholas J. Walker</name>
+    </actor>
+    <actor>
+        <name>Marc Assiniwi</name>
+    </actor>
+    <fanart>https://image.tmdb.org/t/p/w780/AbaRJXNmyLjG4tY48k2fhNNmuW4.jpg</fanart>
+    <uniqueid type="tmdb" default="true">1337562</uniqueid>
+    <tmdbid>1337562</tmdbid>
+</movie>

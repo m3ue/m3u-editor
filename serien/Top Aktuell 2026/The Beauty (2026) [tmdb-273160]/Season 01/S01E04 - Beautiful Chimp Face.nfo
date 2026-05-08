@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Beautiful Chimp Face</title>
+    <showtitle>The Beauty</showtitle>
+    <season>1</season>
+    <episode>4</episode>
+    <plot>Cooper interviews an assistant editor following a disturbing event at the offices of a fashion magazine in New York City.</plot>
+    <aired>2026-01-28</aired>
+    <rating>5.895</rating>
+    <runtime>38</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/8ArL3RGvrOHpgsayOGipS4Qt18E.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6736814</uniqueid>
+    <uniqueid type="tvdb">455046</uniqueid>
+    <uniqueid type="imdb">tt33517752</uniqueid>
+</episodedetails>

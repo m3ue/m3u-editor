@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>The Return</title>
+    <showtitle>Traques – Gejagt</showtitle>
+    <season>1</season>
+    <episode>2</episode>
+    <plot>Anxiety mounts as the group receives threats from unseen enemies. Franck comes up with a new plan to level the playing field.</plot>
+    <aired>2026-03-04</aired>
+    <rating>1</rating>
+    <runtime>50</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/rI1HLe7s1LhMrizlN7EfaTTaYbQ.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6553040</uniqueid>
+    <uniqueid type="tvdb">451658</uniqueid>
+    <uniqueid type="imdb">tt33086602</uniqueid>
+</episodedetails>

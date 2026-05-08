@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Kids These Days</title>
+    <showtitle>Star Trek - Starfleet Academy</showtitle>
+    <season>1</season>
+    <episode>1</episode>
+    <plot>Caleb Mir, a brilliant street kid, is offered admission to the new Starfleet Academy class.</plot>
+    <aired>2026-01-15</aired>
+    <rating>5.402</rating>
+    <runtime>75</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/1U61OOu2BCLeqqjdIdSeXCCwDWc.jpg</thumb>
+    <uniqueid type="tmdb" default="true">4331860</uniqueid>
+    <uniqueid type="tvdb">433120</uniqueid>
+    <uniqueid type="imdb">tt8622160</uniqueid>
+</episodedetails>

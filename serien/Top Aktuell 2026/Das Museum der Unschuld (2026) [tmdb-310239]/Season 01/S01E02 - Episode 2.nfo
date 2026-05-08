@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Episode 2</title>
+    <showtitle>Das Museum der Unschuld</showtitle>
+    <season>1</season>
+    <episode>2</episode>
+    <plot>Füsun's secret visits become more frequent — along with her worries — and Kemal finds himself blissfully slipping into unchartered territories.</plot>
+    <aired>2026-02-13</aired>
+    <rating>8</rating>
+    <runtime>50</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/q1eUyYciOdEQolO85olmBitseNq.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6942182</uniqueid>
+    <uniqueid type="tvdb">456888</uniqueid>
+    <uniqueid type="imdb">tt34692373</uniqueid>
+</episodedetails>

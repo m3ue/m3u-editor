@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Episode 4</title>
+    <showtitle>HIS &amp; HERS</showtitle>
+    <season>1</season>
+    <episode>4</episode>
+    <plot>Jack struggles to placate the locals at a fiery town hall. Priya's suspicions reach a breaking point. Anna is haunted by painful memories.</plot>
+    <aired>2026-01-08</aired>
+    <rating>4.6</rating>
+    <runtime>48</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/2fJzyBF7QFJFMVI9XT7fw2Tv9Vt.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6665646</uniqueid>
+    <uniqueid type="tvdb">452521</uniqueid>
+    <uniqueid type="imdb">tt33035373</uniqueid>
+</episodedetails>

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>The Go Getter</title>
+    <showtitle>DTF St. Louis</showtitle>
+    <season>1</season>
+    <episode>3</episode>
+    <plot>When Detective Plumb discovers that Carol has lied about key details of her affair, she presses Homer to let her question Clark. Once in the hot seat, unsettling truths about Clark's relationships with both Floyd and Carol begin to come to light.</plot>
+    <aired>2026-03-15</aired>
+    <rating>6.6</rating>
+    <runtime>50</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/nLtrw2JciYcyqTkLK7F7JQXyc7N.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6893547</uniqueid>
+    <uniqueid type="tvdb">468739</uniqueid>
+    <uniqueid type="imdb">tt34385331</uniqueid>
+</episodedetails>

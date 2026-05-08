@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Shoot the Duck</title>
+    <showtitle>Finding Her Edge</showtitle>
+    <season>1</season>
+    <episode>2</episode>
+    <plot>Tensions flare at the annual bonfire when Elise invites the hockey team, Katya tries to take charge and Adriana shows up with an unexpected guest.</plot>
+    <aired>2026-01-22</aired>
+    <rating>6.8</rating>
+    <runtime>47</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/fXpfSFjgEpUCDonH2jQrvElQqjD.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6769831</uniqueid>
+    <uniqueid type="tvdb">461179</uniqueid>
+    <uniqueid type="imdb">tt35495058</uniqueid>
+</episodedetails>

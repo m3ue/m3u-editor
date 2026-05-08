@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Lodging</title>
+    <showtitle>Widow's Bay</showtitle>
+    <season>1</season>
+    <episode>2</episode>
+    <plot>Cherish the historical charm of our local inn, which Mayor Loftis will prove is safe by spending a night there alone.</plot>
+    <aired>2026-04-28</aired>
+    <rating>6</rating>
+    <runtime>37</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/vB37UqlmHX8zS4VwxHiNcQSg56E.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6768810</uniqueid>
+    <uniqueid type="tvdb">454109</uniqueid>
+    <uniqueid type="imdb">tt33332385</uniqueid>
+</episodedetails>

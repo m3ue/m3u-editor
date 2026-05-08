@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>It Stays with Us</title>
+    <showtitle>Suche mich nicht</showtitle>
+    <season>1</season>
+    <episode>8</episode>
+    <plot>As the police close in on the Shining Haven, missing pieces fall into place and hidden truths come to light — but some threaten to stay buried forever.</plot>
+    <aired>2026-01-01</aired>
+    <rating>4.636</rating>
+    <runtime>46</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/aJoRhYeczeScQS262lHN9CWZQ3N.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6801939</uniqueid>
+    <uniqueid type="tvdb">445068</uniqueid>
+    <uniqueid type="imdb">tt9169516</uniqueid>
+</episodedetails>

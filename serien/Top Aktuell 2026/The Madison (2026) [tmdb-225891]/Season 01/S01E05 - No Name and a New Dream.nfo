@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>No Name and a New Dream</title>
+    <showtitle>The Madison</showtitle>
+    <season>1</season>
+    <episode>5</episode>
+    <plot>Stacy returns to New York and faces the weight of her grief.</plot>
+    <aired>2026-03-21</aired>
+    <rating>9</rating>
+    <runtime>54</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/ysEoZIOZqmHdAgv13pIVXjKlr0w.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6861980</uniqueid>
+    <uniqueid type="tvdb">441735</uniqueid>
+    <uniqueid type="imdb">tt33204276</uniqueid>
+</episodedetails>

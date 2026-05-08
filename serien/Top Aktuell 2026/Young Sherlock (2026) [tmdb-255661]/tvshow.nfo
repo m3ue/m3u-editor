@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<tvshow>
+    <title>Young Sherlock</title>
+    <originaltitle>Young Sherlock</originaltitle>
+    <sorttitle>Young Sherlock</sorttitle>
+    <plot>Von Guy Ritchie: Erleben Sie die legendäre Entstehungsgeschichte von Sherlock Holmes in diesem respektlosen, actiongeladenen Krimi, der die frühen Abenteuer des ikonischen Detektivs nachzeichnet.</plot>
+    <outline>Von Guy Ritchie: Erleben Sie die legendäre Entstehungsgeschichte von Sherlock Holmes in diesem respektlosen, actiongeladenen Krimi, der die frühen Abenteuer des ikonischen Detektivs nachzeichnet.</outline>
+    <year>2026</year>
+    <premiered>2026-03-04</premiered>
+    <fanart>https://image.tmdb.org/t/p/w780/5jtztRxN7x8QrMfBQ0uLdRgfXHc.jpg</fanart>
+    <uniqueid type="tmdb" default="true">255661</uniqueid>
+    <tmdbid>255661</tmdbid>
+    <uniqueid type="tvdb">450633</uniqueid>
+    <tvdbid>450633</tvdbid>
+    <uniqueid type="imdb">tt8599532</uniqueid>
+    <imdbid>tt8599532</imdbid>
+</tvshow>

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Short Run</title>
+    <showtitle>Steal</showtitle>
+    <season>1</season>
+    <episode>3</episode>
+    <plot>A flashback shows more of Zara and Luke's lives pre-heist. Present day, Zara finds herself in a high-stakes situation. Running out of options, she makes a risky choice.</plot>
+    <aired>2026-01-21</aired>
+    <rating>7.8</rating>
+    <runtime>49</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/jAqUCuVcE1jGVCk5X324MCOXef7.jpg</thumb>
+    <uniqueid type="tmdb" default="true">5337597</uniqueid>
+    <uniqueid type="tvdb">449950</uniqueid>
+    <uniqueid type="imdb">tt32499731</uniqueid>
+</episodedetails>

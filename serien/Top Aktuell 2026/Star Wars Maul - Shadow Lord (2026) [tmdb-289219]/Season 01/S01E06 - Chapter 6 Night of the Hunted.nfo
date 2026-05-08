@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Chapter 6: Night of the Hunted</title>
+    <showtitle>Star Wars: Maul - Shadow Lord</showtitle>
+    <season>1</season>
+    <episode>6</episode>
+    <plot>Pushed to their breaking point, our heroes have no choice but to run.</plot>
+    <aired>2026-04-20</aired>
+    <rating>8.833</rating>
+    <runtime>25</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/8oev322DsOJ18ofxl7gZIvfgEQi.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6876366</uniqueid>
+    <uniqueid type="tvdb">462715</uniqueid>
+    <uniqueid type="imdb">tt36594331</uniqueid>
+</episodedetails>

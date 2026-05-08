@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Episode 1</title>
+    <showtitle>All Her Fault</showtitle>
+    <season>1</season>
+    <episode>1</episode>
+    <plot>Marissa Irvine arrives to collect her young son Milo from his first playdate, but the woman who answers the door isn't a mother she recognizes and doesn't have Milo, beginning every parent's worst nightmare.</plot>
+    <aired>2025-11-07</aired>
+    <rating>7.5</rating>
+    <runtime>47</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/8EOvHm8e3ftOPNmB19s8hfqFXKl.jpg</thumb>
+    <uniqueid type="tmdb" default="true">5146536</uniqueid>
+    <uniqueid type="tvdb">446149</uniqueid>
+    <uniqueid type="imdb">tt31314751</uniqueid>
+</episodedetails>

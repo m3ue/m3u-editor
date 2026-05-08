@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Beautiful Billionaires</title>
+    <showtitle>The Beauty</showtitle>
+    <season>1</season>
+    <episode>5</episode>
+    <plot>A group of billionaires gather to make history.</plot>
+    <aired>2026-02-04</aired>
+    <rating>5.588</rating>
+    <runtime>46</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/cb7yagjevLu45SSqUz2wUrMuuC4.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6736816</uniqueid>
+    <uniqueid type="tvdb">455046</uniqueid>
+    <uniqueid type="imdb">tt33517752</uniqueid>
+</episodedetails>

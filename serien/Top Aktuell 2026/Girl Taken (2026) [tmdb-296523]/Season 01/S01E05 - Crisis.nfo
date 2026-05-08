@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Crisis</title>
+    <showtitle>Girl Taken</showtitle>
+    <season>1</season>
+    <episode>5</episode>
+    <plot>Lily refuses to attend Rick's trial. Abby uncovers a shocking truth.</plot>
+    <aired>2026-01-08</aired>
+    <rating>1.2</rating>
+    <runtime>52</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/xzBA3UKlC2kKGdQe4me9sx2zQWt.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6398358</uniqueid>
+    <uniqueid type="tvdb">465411</uniqueid>
+    <uniqueid type="imdb">tt39133077</uniqueid>
+</episodedetails>

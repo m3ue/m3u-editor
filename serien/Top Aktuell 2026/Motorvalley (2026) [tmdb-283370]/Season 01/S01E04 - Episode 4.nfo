@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Episode 4</title>
+    <showtitle>Motorvalley</showtitle>
+    <season>1</season>
+    <episode>4</episode>
+    <plot>A figure from Blu's past resurfaces with an unexpected request. The SC17 team runs on fumes as Elena places a risky bet that could change their future.</plot>
+    <aired>2026-02-10</aired>
+    <rating>6</rating>
+    <runtime>44</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/jAtDgjAvjesSss0yAcjaLMRiPaS.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6769801</uniqueid>
+    <uniqueid type="tvdb">459582</uniqueid>
+    <uniqueid type="imdb">tt35449383</uniqueid>
+</episodedetails>

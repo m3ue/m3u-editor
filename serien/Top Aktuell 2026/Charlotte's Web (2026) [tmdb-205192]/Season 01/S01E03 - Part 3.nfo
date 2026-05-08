@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Part 3</title>
+    <showtitle>Charlotte's Web</showtitle>
+    <season>1</season>
+    <episode>3</episode>
+    <plot>Charlotte, Wilbur, Fern, and family are off to the County Fair! Will Wilbur win the blue ribbon and ensure his life is saved? Can Charlotte help by spinning a message in her web that's greater than any she's spun before?</plot>
+    <aired>2025-10-02</aired>
+    <runtime>45</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/r6wbcQJytlmSsovOWeu6MCIkYlm.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6553418</uniqueid>
+    <uniqueid type="tvdb">468654</uniqueid>
+    <uniqueid type="imdb">tt18953896</uniqueid>
+</episodedetails>

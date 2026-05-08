@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Sliding Doors</title>
+    <showtitle>Suche mich nicht</showtitle>
+    <season>1</season>
+    <episode>7</episode>
+    <plot>Dee Dee comes clean to Ash, and zeroes in on a new target. The police find a lead connected to the Shining Truth, and Simon returns to Rocco's basement.</plot>
+    <aired>2026-01-01</aired>
+    <rating>4.208</rating>
+    <runtime>44</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/eLin9ULN0n27u8zYJVH7j5dBxTw.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6801937</uniqueid>
+    <uniqueid type="tvdb">445068</uniqueid>
+    <uniqueid type="imdb">tt9169516</uniqueid>
+</episodedetails>

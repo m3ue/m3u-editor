@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Episode 2</title>
+    <showtitle>Hameln</showtitle>
+    <season>1</season>
+    <episode>2</episode>
+    <plot>Ruben überredet die Bundeswehrpilotin Romy, ihnen Beweise für übernatürliche Phänomene am Poppenberg zu zeigen. Dort war der Rattenfänger im Mittelalter mit den Kindern verschwunden.</plot>
+    <aired>2024-12-30</aired>
+    <rating>2</rating>
+    <runtime>40</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/iZy38aENLuUTTFLeVk3Y3hdtHfI.jpg</thumb>
+    <uniqueid type="tmdb" default="true">5710035</uniqueid>
+    <uniqueid type="imdb">tt29267609</uniqueid>
+</episodedetails>

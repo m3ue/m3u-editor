@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Episode 2</title>
+    <showtitle>Die Bleikinder</showtitle>
+    <season>1</season>
+    <episode>2</episode>
+    <plot>As the extent of the epidemic dawns on her, Jolanta cautiously starts bringing allies to her cause — but one of them isn't being truthful with her.</plot>
+    <aired>2026-02-11</aired>
+    <rating>8.5</rating>
+    <runtime>52</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/6biLHeVe56izZWaV5IYzuSXI7Oa.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6830934</uniqueid>
+    <uniqueid type="tvdb">460249</uniqueid>
+    <uniqueid type="imdb">tt33322230</uniqueid>
+</episodedetails>

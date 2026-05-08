@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Beautiful Brothers</title>
+    <showtitle>The Beauty</showtitle>
+    <season>1</season>
+    <episode>8</episode>
+    <plot>The Corporation's master plan intensifies.</plot>
+    <aired>2026-02-25</aired>
+    <rating>5.5</rating>
+    <runtime>35</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/u28gYOXcLegDMkhnjNyRQwj7Nng.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6736822</uniqueid>
+    <uniqueid type="tvdb">455046</uniqueid>
+    <uniqueid type="imdb">tt33517752</uniqueid>
+</episodedetails>

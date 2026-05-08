@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>False Flag</title>
+    <showtitle>The Copenhagen Test</showtitle>
+    <season>1</season>
+    <episode>3</episode>
+    <plot>Alexander must decide if he will sacrifice a real mission in order to hunt the hackers.</plot>
+    <aired>2025-12-27</aired>
+    <rating>4.6</rating>
+    <runtime>54</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/j5Lc6hHadmHYgq5LxcAcQyrWGMe.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6750129</uniqueid>
+    <uniqueid type="tvdb">453657</uniqueid>
+    <uniqueid type="imdb">tt31314791</uniqueid>
+</episodedetails>

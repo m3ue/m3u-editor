@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>The Golden Fleece</title>
+    <showtitle>Sherlock &amp; Daughter</showtitle>
+    <season>1</season>
+    <episode>7</episode>
+    <plot>Having cracked the code of the Red Thread's communications network, Sherlock is hot on the path of the kidnap victims, chasing a trail of breadcrumbs that leads all the way to the vaults of the Bank of England.</plot>
+    <aired>2025-06-04</aired>
+    <rating>9.7</rating>
+    <runtime>44</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/yUfrh4nXxmeNMeSdl7j1VVVuqqE.jpg</thumb>
+    <uniqueid type="tmdb" default="true">5756035</uniqueid>
+    <uniqueid type="tvdb">446190</uniqueid>
+    <uniqueid type="imdb">tt31322085</uniqueid>
+</episodedetails>

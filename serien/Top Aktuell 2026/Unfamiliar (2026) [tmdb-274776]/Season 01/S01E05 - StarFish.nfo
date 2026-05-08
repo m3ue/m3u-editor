@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>StarFish</title>
+    <showtitle>Unfamiliar</showtitle>
+    <season>1</season>
+    <episode>5</episode>
+    <plot>Julika digs deeper into the Belarus connection. Katya arranges a meeting with Koleev, leading him right to the doorstep of Meret and Simon.</plot>
+    <aired>2026-02-05</aired>
+    <rating>6.9</rating>
+    <runtime>49</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/sDSWi2qQEFMDDLClenCrXjlrQWe.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6875378</uniqueid>
+    <uniqueid type="tvdb">464966</uniqueid>
+    <uniqueid type="imdb">tt37024136</uniqueid>
+</episodedetails>

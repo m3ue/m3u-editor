@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>The Morrow</title>
+    <showtitle>A Knight of the Seven Kingdoms</showtitle>
+    <season>1</season>
+    <episode>6</episode>
+    <plot>As Ashford mourns a great loss, Dunk considers his next move...and whether to keep Egg as his squire.</plot>
+    <aired>2026-02-22</aired>
+    <rating>8.307</rating>
+    <runtime>31</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/9VixNtswlKTzjSD0oFmT6eTcC9e.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6613706</uniqueid>
+    <uniqueid type="tvdb">433631</uniqueid>
+    <uniqueid type="imdb">tt27497448</uniqueid>
+</episodedetails>

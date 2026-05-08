@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>The Denny's Plan</title>
+    <showtitle>DTF St. Louis</showtitle>
+    <season>1</season>
+    <episode>6</episode>
+    <plot>Floyd's ego takes a hit after a failed attempt to reconnect with Carol, leading Clark to help his friend using the DTF app.</plot>
+    <aired>2026-04-05</aired>
+    <rating>6.714</rating>
+    <runtime>49</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/44ImACO3TOIZyBSKMeyxP8T77qb.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6893550</uniqueid>
+    <uniqueid type="tvdb">468739</uniqueid>
+    <uniqueid type="imdb">tt34385331</uniqueid>
+</episodedetails>

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Episode 8</title>
+    <showtitle>Bandi - Unter Geschwistern</showtitle>
+    <season>1</season>
+    <episode>8</episode>
+    <plot>As news of the shooting makes headlines, police scrutiny intensifies. With his family on the line, Kylian feels there is no right choice left to make.</plot>
+    <aired>2026-04-09</aired>
+    <rating>4.7</rating>
+    <runtime>63</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/dfQwA2TtuzDquQrpDKZtpOqnI6b.jpg</thumb>
+    <uniqueid type="tmdb" default="true">7080780</uniqueid>
+    <uniqueid type="tvdb">475364</uniqueid>
+    <uniqueid type="imdb">tt37024175</uniqueid>
+</episodedetails>

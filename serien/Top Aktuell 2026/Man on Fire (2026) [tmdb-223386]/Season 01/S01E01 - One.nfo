@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>One</title>
+    <showtitle>Man on Fire</showtitle>
+    <season>1</season>
+    <episode>1</episode>
+    <plot>Sidelined by PTSD, Special Forces veteran John Creasy gets a second chance when an old friend hires him to investigate a terrorist plot in Brazil.</plot>
+    <aired>2026-04-30</aired>
+    <rating>2.417</rating>
+    <runtime>49</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/7nDn3sPwuibz6pQbNPGLELdYuBg.jpg</thumb>
+    <uniqueid type="tmdb" default="true">4328324</uniqueid>
+    <uniqueid type="tvdb">433027</uniqueid>
+    <uniqueid type="imdb">tt27331527</uniqueid>
+</episodedetails>

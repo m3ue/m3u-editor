@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Everybody Loves Julia</title>
+    <showtitle>Sweetpea</showtitle>
+    <season>1</season>
+    <episode>4</episode>
+    <plot>Rhiannon sets out to prove she's not the loser she once was.</plot>
+    <aired>2024-10-31</aired>
+    <rating>6.438</rating>
+    <runtime>42</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/am33xvjzvbjc3vFE0ULeFF5cpL5.jpg</thumb>
+    <uniqueid type="tmdb" default="true">5593207</uniqueid>
+    <uniqueid type="tvdb">421654</uniqueid>
+    <uniqueid type="imdb">tt11218290</uniqueid>
+</episodedetails>

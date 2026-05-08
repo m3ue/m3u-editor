@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>With or Without You</title>
+    <showtitle>Ich vermisse dich</showtitle>
+    <season>1</season>
+    <episode>2</episode>
+    <plot>Kat begs Stagger to help her extract a confession from LeBurne, and Stacey offers to look for Josh. Someone needing help from Kat arrives at the station.</plot>
+    <aired>2025-01-01</aired>
+    <rating>4</rating>
+    <runtime>42</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/whbB7dr6oXkDOv2VAf7i4ztCA56.jpg</thumb>
+    <uniqueid type="tmdb" default="true">5732943</uniqueid>
+    <uniqueid type="tvdb">445067</uniqueid>
+    <uniqueid type="imdb">tt31019484</uniqueid>
+</episodedetails>

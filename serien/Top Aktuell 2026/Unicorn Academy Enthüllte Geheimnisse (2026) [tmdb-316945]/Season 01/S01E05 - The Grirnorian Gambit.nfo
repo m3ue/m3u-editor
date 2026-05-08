@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>The Grirnorian Gambit</title>
+    <showtitle>Unicorn Academy: Enthüllte Geheimnisse</showtitle>
+    <season>1</season>
+    <episode>5</episode>
+    <plot>Drawn into Grimoria in search of the final gem, the Sapphires face dark enchantments and a leadership clash that puts their unicoms and mission at risk.</plot>
+    <aired>2026-03-19</aired>
+    <rating>10</rating>
+    <runtime>25</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/jg2fiGABJ5KWiVyUG1YEoHrR4XY.jpg</thumb>
+    <uniqueid type="tmdb" default="true">7059472</uniqueid>
+    <uniqueid type="imdb">tt40029087</uniqueid>
+</episodedetails>

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Do Not Disturb</title>
+    <showtitle>Privilèges</showtitle>
+    <season>1</season>
+    <episode>1</episode>
+    <plot>On her first shift in the Citadel's day-release program, Adèle is accused of theft -- and must accept a risky mission to keep her job.</plot>
+    <aired>2026-03-27</aired>
+    <rating>2.9</rating>
+    <runtime>48</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/2TMQCPJ5rMUvFYvSWECZ02UcIIp.jpg</thumb>
+    <uniqueid type="tmdb" default="true">5973542</uniqueid>
+    <uniqueid type="tvdb">457522</uniqueid>
+    <uniqueid type="imdb">tt35677100</uniqueid>
+</episodedetails>

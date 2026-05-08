@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>When Are We Going Home?</title>
+    <showtitle>Nuklearer Notfall</showtitle>
+    <season>1</season>
+    <episode>2</episode>
+    <plot>As the news spreads, families are divided and panic grows in Goiânia. Meanwhile, Orenstein and his team discover danger lurking around every corner.</plot>
+    <aired>2026-03-18</aired>
+    <rating>6.8</rating>
+    <runtime>64</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/qicUJJUptke2GqvPsCIPpkhGeQJ.jpg</thumb>
+    <uniqueid type="tmdb" default="true">7000390</uniqueid>
+    <uniqueid type="tvdb">464073</uniqueid>
+    <uniqueid type="imdb">tt37041021</uniqueid>
+</episodedetails>

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Bridge of Time (1)</title>
+    <showtitle>Scarpetta</showtitle>
+    <season>1</season>
+    <episode>1</episode>
+    <plot>After returning to her former position as Virginia's Chief Medical Examiner, renowned forensic pathologist Dr. Kay Scarpetta investigates a sinister and mysterious murder that eerily resembles her first big case from 28 years prior.</plot>
+    <aired>2026-03-11</aired>
+    <rating>5.6</rating>
+    <runtime>55</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/eODG8V5FOFNFaY9aJjAtuXUp742.jpg</thumb>
+    <uniqueid type="tmdb" default="true">4965081</uniqueid>
+    <uniqueid type="tvdb">464253</uniqueid>
+    <uniqueid type="imdb">tt14786934</uniqueid>
+</episodedetails>

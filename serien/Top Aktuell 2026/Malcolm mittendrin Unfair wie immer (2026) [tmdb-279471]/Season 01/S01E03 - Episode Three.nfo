@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Episode Three</title>
+    <showtitle>Malcolm mittendrin: Unfair wie immer</showtitle>
+    <season>1</season>
+    <episode>3</episode>
+    <plot>"Dude, this one is crazy. Fistfights, young love, revenge, dark secrets, acrobatics, a birth and a kidnapping.... Sorry, I'll stop before I spoil it."</plot>
+    <aired>2026-04-10</aired>
+    <rating>7.2</rating>
+    <runtime>28</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/mBrq6XJD8AqcS1bzFB7SEkLJ84b.jpg</thumb>
+    <uniqueid type="tmdb" default="true">5832874</uniqueid>
+    <uniqueid type="tvdb">457779</uniqueid>
+    <uniqueid type="imdb">tt35466672</uniqueid>
+</episodedetails>

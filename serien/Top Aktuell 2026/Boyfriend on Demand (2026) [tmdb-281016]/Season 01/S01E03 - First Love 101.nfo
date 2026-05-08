@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>First Love 101</title>
+    <showtitle>Boyfriend on Demand</showtitle>
+    <season>1</season>
+    <episode>3</episode>
+    <plot>Mi-rae's second date unfolds on a college campus, but her match plays hard to get while memories of her first love keep coming back.</plot>
+    <aired>2026-03-06</aired>
+    <rating>10</rating>
+    <runtime>63</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/74hKwLY5nrIqq7XsSbBsxIFyim1.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6991192</uniqueid>
+    <uniqueid type="tvdb">454321</uniqueid>
+    <uniqueid type="imdb">tt35848827</uniqueid>
+</episodedetails>

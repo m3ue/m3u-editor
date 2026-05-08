@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>The End of Innocence</title>
+    <showtitle>Dear Killer Nannies</showtitle>
+    <season>1</season>
+    <episode>1</episode>
+    <plot>Juampi grows up surrounded by luxury and violence, raised by Pablo Escobar's hitmen.</plot>
+    <aired>2026-04-01</aired>
+    <rating>10</rating>
+    <runtime>34</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/32BVEh94LX0beb4otXJ7WLwyKSJ.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6936545</uniqueid>
+    <uniqueid type="tvdb">475233</uniqueid>
+    <uniqueid type="imdb">tt32125946</uniqueid>
+</episodedetails>

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Episode 2</title>
+    <showtitle>In Flight</showtitle>
+    <season>1</season>
+    <episode>2</episode>
+    <plot>Left with no choice but to continue Cormac's international drug runs, Jo turns to her ex for help. Following a close call with the police, Jo is forced to quickly secrete heroin in the airport, but it goes missing. She has 24 hours to get it back.</plot>
+    <aired>2025-08-13</aired>
+    <rating>3.5</rating>
+    <runtime>45</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/1E2xH4ggpNWRrXuOYf2XqrdhDRZ.jpg</thumb>
+    <uniqueid type="tmdb" default="true">5749342</uniqueid>
+    <uniqueid type="tvdb">465139</uniqueid>
+    <uniqueid type="imdb">tt22299034</uniqueid>
+</episodedetails>

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Episode 6</title>
+    <showtitle>Unchosen</showtitle>
+    <season>1</season>
+    <episode>6</episode>
+    <plot>When little Grace's safety becomes uncertain once again, Rosie's rising suspicions lead to a chilling question: who is the true devil among them?</plot>
+    <aired>2026-04-21</aired>
+    <runtime>40</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/3V70dnnpXdtyjLXvg9pV7rUG3Lo.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6466181</uniqueid>
+    <uniqueid type="tvdb">453813</uniqueid>
+    <uniqueid type="imdb">tt31631142</uniqueid>
+</episodedetails>

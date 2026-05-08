@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<tvshow>
+    <title>Man on Fire</title>
+    <originaltitle>Man on Fire</originaltitle>
+    <sorttitle>Man on Fire</sorttitle>
+    <plot>Ein von seiner Vergangenheit verfolgter und von seinen Feinden gejagter Spezialagent versucht auf den tödlichen Straßen Rio de Janeiros, das Leben einer Jugendlichen zu retten.</plot>
+    <outline>Ein von seiner Vergangenheit verfolgter und von seinen Feinden gejagter Spezialagent versucht auf den tödlichen Straßen Rio de Janeiros, das Leben einer Jugendlichen zu retten.</outline>
+    <year>2026</year>
+    <premiered>2026-04-30</premiered>
+    <fanart>https://image.tmdb.org/t/p/w780/dMCfHJRnAZfKoPTjYyZk2QCL8au.jpg</fanart>
+    <uniqueid type="tmdb" default="true">223386</uniqueid>
+    <tmdbid>223386</tmdbid>
+    <uniqueid type="tvdb">433027</uniqueid>
+    <tvdbid>433027</tvdbid>
+    <uniqueid type="imdb">tt27331527</uniqueid>
+    <imdbid>tt27331527</imdbid>
+</tvshow>

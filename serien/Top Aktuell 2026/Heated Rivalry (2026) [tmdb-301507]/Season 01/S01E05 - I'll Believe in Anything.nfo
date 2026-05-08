@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>I'll Believe in Anything</title>
+    <showtitle>Heated Rivalry</showtitle>
+    <season>1</season>
+    <episode>5</episode>
+    <plot>Shane, Ilya, and Scott each face pivotal personal decisions.</plot>
+    <aired>2025-12-19</aired>
+    <rating>9.083</rating>
+    <runtime>56</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/aeDNeNxmKdBcNb5qI4ci5mHZlkh.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6601281</uniqueid>
+    <uniqueid type="tvdb">464461</uniqueid>
+    <uniqueid type="imdb">tt35495073</uniqueid>
+</episodedetails>

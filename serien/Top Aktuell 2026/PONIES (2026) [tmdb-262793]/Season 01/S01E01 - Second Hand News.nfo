@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Second Hand News</title>
+    <showtitle>PONIES</showtitle>
+    <season>1</season>
+    <episode>1</episode>
+    <plot>After tragedy strikes, two American women embark on a new life as spies in the Soviet Union.‬</plot>
+    <aired>2026-01-15</aired>
+    <rating>7.875</rating>
+    <runtime>54</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/d9uu4QnjGTCEpwKCNbkeTAOcdss.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6765040</uniqueid>
+    <uniqueid type="tvdb">453786</uniqueid>
+    <uniqueid type="imdb">tt33270420</uniqueid>
+</episodedetails>

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>I Love You</title>
+    <showtitle>Love Story</showtitle>
+    <season>1</season>
+    <episode>4</episode>
+    <plot>Carolyn struggles to assimilate into John's world; John discovers a secret.</plot>
+    <aired>2026-02-19</aired>
+    <rating>9.2</rating>
+    <runtime>48</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/zb4jQ9LsNKKlRdaDyqIHCSXtVWb.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6888352</uniqueid>
+    <uniqueid type="tvdb">408694</uniqueid>
+    <uniqueid type="imdb">tt15232564</uniqueid>
+</episodedetails>

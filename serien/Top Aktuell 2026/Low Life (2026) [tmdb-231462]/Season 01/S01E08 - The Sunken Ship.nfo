@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>The Sunken Ship</title>
+    <showtitle>Low Life</showtitle>
+    <season>1</season>
+    <episode>8</episode>
+    <plot>The sunken ship finally emerges before Heedong's eyes.</plot>
+    <aired>2025-08-06</aired>
+    <rating>7</rating>
+    <runtime>57</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/aQkVkjyst8uUGWgkvn1cztOx5FK.jpg</thumb>
+    <uniqueid type="tmdb" default="true">4605427</uniqueid>
+    <uniqueid type="tvdb">437684</uniqueid>
+    <uniqueid type="imdb">tt32122656</uniqueid>
+</episodedetails>

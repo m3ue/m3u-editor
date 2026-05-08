@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>My 2nd First Day</title>
+    <showtitle>Scrubs</showtitle>
+    <season>1</season>
+    <episode>2</episode>
+    <plot>J.D. navigates a new normal; Elliot and Turk clash over the budget.</plot>
+    <aired>2026-02-25</aired>
+    <rating>8.7</rating>
+    <runtime>21</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/zCfXONGaY69e97iMHFaaoL4V4nd.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6638204</uniqueid>
+    <uniqueid type="tvdb">465690</uniqueid>
+    <uniqueid type="imdb">tt40197357</uniqueid>
+</episodedetails>

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<tvshow>
+    <title>Gold Land</title>
+    <originaltitle>Gold Land</originaltitle>
+    <sorttitle>Gold Land</sorttitle>
+    <plot>Heeju gerät an eine große Menge Gold. Ein Kampf um Gier, Verrat und das eigene Leben beginnt.</plot>
+    <outline>Heeju gerät an eine große Menge Gold. Ein Kampf um Gier, Verrat und das eigene Leben beginnt.</outline>
+    <year>2026</year>
+    <premiered>2026-04-29</premiered>
+    <fanart>https://image.tmdb.org/t/p/w780/tJxbqrKBoCJdJrsBKL9qTswENc5.jpg</fanart>
+    <uniqueid type="tmdb" default="true">278113</uniqueid>
+    <tmdbid>278113</tmdbid>
+    <uniqueid type="tvdb">457275</uniqueid>
+    <tvdbid>457275</tvdbid>
+    <uniqueid type="imdb">tt37253311</uniqueid>
+    <imdbid>tt37253311</imdbid>
+</tvshow>

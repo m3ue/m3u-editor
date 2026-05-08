@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Episode 1</title>
+    <showtitle>Motorvalley</showtitle>
+    <season>1</season>
+    <episode>1</episode>
+    <plot>When the Dionisi siblings inherit the family racing team, Elena goes rogue and starts her own squad to beat her brother in the Italian Gran Turismo.</plot>
+    <aired>2026-02-10</aired>
+    <rating>7</rating>
+    <runtime>48</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/1YzFzGB0RZwhEZsoAPACs4KW6Ny.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6769798</uniqueid>
+    <uniqueid type="tvdb">459582</uniqueid>
+    <uniqueid type="imdb">tt35449383</uniqueid>
+</episodedetails>

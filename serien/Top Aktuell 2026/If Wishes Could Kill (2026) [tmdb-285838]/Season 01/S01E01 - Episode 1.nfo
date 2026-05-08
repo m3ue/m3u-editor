@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Episode 1</title>
+    <showtitle>If Wishes Could Kill</showtitle>
+    <season>1</season>
+    <episode>1</episode>
+    <plot>After Girigo grants Choi Hyeong-wook a wish, he introduces the app to his friends, who brush him off. But soon, his behavior grows concerning.</plot>
+    <aired>2026-04-24</aired>
+    <rating>7.7</rating>
+    <runtime>43</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/erDGFY3r8vvF6H7JhjyfpLfHRIU.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6027264</uniqueid>
+    <uniqueid type="tvdb">461062</uniqueid>
+    <uniqueid type="imdb">tt36104233</uniqueid>
+</episodedetails>

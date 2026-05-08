@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Welcome to Widow's Bay!</title>
+    <showtitle>Widow's Bay</showtitle>
+    <season>1</season>
+    <episode>1</episode>
+    <plot>We hope you enjoyed the three-hour ferry to New England's best-kept secret! Ignore the warnings about the fog. Everything's fine.</plot>
+    <aired>2026-04-28</aired>
+    <rating>5</rating>
+    <runtime>41</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/ozsXKu0NRccykQd4i3QTbeL6loJ.jpg</thumb>
+    <uniqueid type="tmdb" default="true">5577631</uniqueid>
+    <uniqueid type="tvdb">454109</uniqueid>
+    <uniqueid type="imdb">tt33332385</uniqueid>
+</episodedetails>

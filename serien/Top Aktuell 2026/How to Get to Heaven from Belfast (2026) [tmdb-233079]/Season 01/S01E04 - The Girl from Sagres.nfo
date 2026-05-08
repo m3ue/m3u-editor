@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>The Girl from Sagres</title>
+    <showtitle>How to Get to Heaven from Belfast</showtitle>
+    <season>1</season>
+    <episode>4</episode>
+    <plot>After some stellar sleuthing, the trio's search for answers takes them to a five-star resort in Portugal, where they're not the only ones on a mission.</plot>
+    <aired>2026-02-12</aired>
+    <rating>7.2</rating>
+    <runtime>49</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/dBd2MOGmkGazNtpFnMKPar3huni.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6851892</uniqueid>
+    <uniqueid type="tvdb">438599</uniqueid>
+    <uniqueid type="imdb">tt31709373</uniqueid>
+</episodedetails>

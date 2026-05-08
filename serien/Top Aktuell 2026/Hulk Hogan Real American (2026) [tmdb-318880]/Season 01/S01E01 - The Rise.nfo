@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>The Rise</title>
+    <showtitle>Hulk Hogan: Real American</showtitle>
+    <season>1</season>
+    <episode>1</episode>
+    <plot>Who was Terry Bollea? From his discovery of wrestling to his storied rise to fame, the larger-than-life persona of Hulk Hogan is born.</plot>
+    <aired>2026-04-22</aired>
+    <rating>10</rating>
+    <runtime>46</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/7BUs4zXAz9RdZAZ0PfjS8lwiRgu.jpg</thumb>
+    <uniqueid type="tmdb" default="true">7120802</uniqueid>
+    <uniqueid type="tvdb">476473</uniqueid>
+    <uniqueid type="imdb">tt41508977</uniqueid>
+</episodedetails>

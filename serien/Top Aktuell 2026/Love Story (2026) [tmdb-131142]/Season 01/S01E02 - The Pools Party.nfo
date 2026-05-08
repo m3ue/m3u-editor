@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>The Pools Party</title>
+    <showtitle>Love Story</showtitle>
+    <season>1</season>
+    <episode>2</episode>
+    <plot>John juggles his mother's waning health, his strained relationship with Daryl and his newfound feelings for Carolyn.</plot>
+    <aired>2026-02-12</aired>
+    <rating>7.9</rating>
+    <runtime>46</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/euSZa336sA439axnBXpXchzScKS.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6888349</uniqueid>
+    <uniqueid type="tvdb">408694</uniqueid>
+    <uniqueid type="imdb">tt15232564</uniqueid>
+</episodedetails>

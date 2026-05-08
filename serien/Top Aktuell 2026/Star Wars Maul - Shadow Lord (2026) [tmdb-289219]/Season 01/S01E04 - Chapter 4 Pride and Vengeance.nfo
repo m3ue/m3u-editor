@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Chapter 4: Pride and Vengeance</title>
+    <showtitle>Star Wars: Maul - Shadow Lord</showtitle>
+    <season>1</season>
+    <episode>4</episode>
+    <plot>A confrontation between Lawson and Maul threatens everyone.</plot>
+    <aired>2026-04-13</aired>
+    <rating>7.214</rating>
+    <runtime>25</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/je7TX3VikaDYomdZBdkF79IzsE1.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6876364</uniqueid>
+    <uniqueid type="tvdb">462715</uniqueid>
+    <uniqueid type="imdb">tt36594331</uniqueid>
+</episodedetails>

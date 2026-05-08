@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>The Himalayas</title>
+    <showtitle>Von Pol zu Pol mit Will Smith</showtitle>
+    <season>1</season>
+    <episode>4</episode>
+    <plot>Will heads to the Himalayas in search of the secret to happiness.</plot>
+    <aired>2026-01-20</aired>
+    <rating>4.8</rating>
+    <runtime>46</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/9PXolHiNh6NK0bO2PUPAxaeDINh.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6770293</uniqueid>
+    <uniqueid type="tvdb">449405</uniqueid>
+    <uniqueid type="imdb">tt18069218</uniqueid>
+</episodedetails>

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Search and Recovery</title>
+    <showtitle>Love Story</showtitle>
+    <season>1</season>
+    <episode>9</episode>
+    <plot>John and Carolyn fight to keep their relationship intact; the world watches as tragedy strikes.</plot>
+    <aired>2026-03-26</aired>
+    <rating>8.5</rating>
+    <runtime>57</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/8aV4XmI2LZgdxxBGfJwKDMiZgtQ.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6888358</uniqueid>
+    <uniqueid type="tvdb">408694</uniqueid>
+    <uniqueid type="imdb">tt15232564</uniqueid>
+</episodedetails>

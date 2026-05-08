@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Rosefinch</title>
+    <showtitle>Vanished - Vertraust du ihm</showtitle>
+    <season>1</season>
+    <episode>1</episode>
+    <plot>Alice searches for her boyfriend Tom, uncovering secrets in his charity that make her question his past and what she thought she knew.</plot>
+    <aired>2026-02-01</aired>
+    <rating>6.3</rating>
+    <runtime>45</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/xUpncRJOuLyOiF5KotW8DROw0FL.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6070959</uniqueid>
+    <uniqueid type="tvdb">461839</uniqueid>
+    <uniqueid type="imdb">tt36958533</uniqueid>
+</episodedetails>

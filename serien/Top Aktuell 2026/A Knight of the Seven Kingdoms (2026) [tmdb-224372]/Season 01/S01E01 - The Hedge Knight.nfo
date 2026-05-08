@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>The Hedge Knight</title>
+    <showtitle>A Knight of the Seven Kingdoms</showtitle>
+    <season>1</season>
+    <episode>1</episode>
+    <plot>On his journey to the forthcoming tournament in Ashford, Dunk meets a clever young boy named Egg, who offers to be his squire.</plot>
+    <aired>2026-01-18</aired>
+    <rating>7.598</rating>
+    <runtime>42</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/wXdKaVDjQNTCdtyM7kxMwbRvuIY.jpg</thumb>
+    <uniqueid type="tmdb" default="true">4360857</uniqueid>
+    <uniqueid type="tvdb">433631</uniqueid>
+    <uniqueid type="imdb">tt27497448</uniqueid>
+</episodedetails>

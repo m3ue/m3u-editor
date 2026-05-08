@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>A Stone's Throw</title>
+    <showtitle>Ripple</showtitle>
+    <season>1</season>
+    <episode>1</episode>
+    <plot>A grieving man, a music exec, a father in crisis, a conflicted woman - and a pebble that causes a ripple effect connecting the lives of four strangers.</plot>
+    <aired>2025-12-03</aired>
+    <rating>5.7</rating>
+    <runtime>42</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/8Dn7zodQR6zmQee2mKy7UwivU4z.jpg</thumb>
+    <uniqueid type="tmdb" default="true">5563821</uniqueid>
+    <uniqueid type="tvdb">453835</uniqueid>
+    <uniqueid type="imdb">tt33378120</uniqueid>
+</episodedetails>

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>36 Seconds</title>
+    <showtitle>Harry Hole</showtitle>
+    <season>1</season>
+    <episode>1</episode>
+    <plot>Five years after a traumatic incident, Detective Harry Hole buries himself in case work when a weapons seizure points to a shocking suspect.</plot>
+    <aired>2026-03-26</aired>
+    <rating>6.5</rating>
+    <runtime>62</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/koFZ4to875fxunD7ZMe0Mu8F9Zx.jpg</thumb>
+    <uniqueid type="tmdb" default="true">5221957</uniqueid>
+    <uniqueid type="tvdb">447892</uniqueid>
+    <uniqueid type="imdb">tt31810018</uniqueid>
+</episodedetails>

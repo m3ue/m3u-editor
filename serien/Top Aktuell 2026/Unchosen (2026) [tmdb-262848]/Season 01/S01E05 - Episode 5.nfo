@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Episode 5</title>
+    <showtitle>Unchosen</showtitle>
+    <season>1</season>
+    <episode>5</episode>
+    <plot>Questions of loyalty, power and sin emerge in the wake of a tragic incident, sparking a big change in the community and a tense search for answers.</plot>
+    <aired>2026-04-21</aired>
+    <runtime>46</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/AlECyr5PlFRtz5hC8qKezkXCw0k.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6466180</uniqueid>
+    <uniqueid type="tvdb">453813</uniqueid>
+    <uniqueid type="imdb">tt31631142</uniqueid>
+</episodedetails>

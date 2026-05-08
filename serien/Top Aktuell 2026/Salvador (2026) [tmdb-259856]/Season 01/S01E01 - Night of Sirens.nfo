@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Night of Sirens</title>
+    <showtitle>Salvador</showtitle>
+    <season>1</season>
+    <episode>1</episode>
+    <plot>On a tense night in Madrid, as Spanish and French hooligans face off, an ambulance driver reels from seeing his daughter among the violent crowd.</plot>
+    <aired>2026-02-06</aired>
+    <rating>6.8</rating>
+    <runtime>50</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/xvOUJJex7ZchqIVSJtN0jCNQBTy.jpg</thumb>
+    <uniqueid type="tmdb" default="true">5496506</uniqueid>
+    <uniqueid type="tvdb">452682</uniqueid>
+    <uniqueid type="imdb">tt35316779</uniqueid>
+</episodedetails>

@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<movie>
+    <title>The Mannequin 2026 4K/UHD</title>
+    <originaltitle>The Mannequin 2026 4K/UHD</originaltitle>
+    <sorttitle>The Mannequin 2026 4K/UHD</sorttitle>
+    <plot>Eine junge Stylistin-Assistentin versucht herauszufinden, wie ihre Schwester in einem historischen Gebäude in Los Angeles ums Leben kam. Bei ihren Nachforschungen stößt sie auf den Geist eines Serienmörders, der dort vor Jahrzehnten seine Opfer grausam zerstückelte. Schon bald gerät sie selbst ins Visier der übernatürlichen Bedrohung und muss einen Weg finden zu entkommen, bevor sie ebenfalls zum Opfer wird.</plot>
+    <outline>Eine junge Stylistin-Assistentin versucht herauszufinden, wie ihre Schwester in einem historischen Gebäude in Los Angeles ums Leben kam. Bei ihren Nachforschungen stößt sie auf den Geist eines Serienmörders, der dort vor Jahrzehnten seine Opfer grausam zerstückelte. Schon bald gerät sie selbst ins V</outline>
+    <year>2025</year>
+    <rating>6.6</rating>
+    <director>John Berardo</director>
+    <actor>
+        <name>Isabella Gómez</name>
+    </actor>
+    <actor>
+        <name>Lindsay LaVanchy</name>
+    </actor>
+    <actor>
+        <name>Shireen Lai</name>
+    </actor>
+    <actor>
+        <name>Maxwell Hamilton</name>
+    </actor>
+    <actor>
+        <name>Gabriella Rivera</name>
+    </actor>
+    <actor>
+        <name>Jack Sochet</name>
+    </actor>
+    <fanart>https://image.tmdb.org/t/p/original/z6Pi72HrGhc50GDhDdREUTEh2xm.jpg</fanart>
+    <uniqueid type="tmdb" default="true">1169210</uniqueid>
+    <tmdbid>1169210</tmdbid>
+    <uniqueid type="imdb">tt11261532</uniqueid>
+    <imdbid>tt11261532</imdbid>
+</movie>

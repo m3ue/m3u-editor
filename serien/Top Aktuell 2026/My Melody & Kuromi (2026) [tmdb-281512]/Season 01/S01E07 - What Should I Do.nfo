@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>What Should I Do?</title>
+    <showtitle>My Melody &amp; Kuromi</showtitle>
+    <season>1</season>
+    <episode>7</episode>
+    <plot>Chased into the forest by ravenous villagers, My Melody and Kuromi find themselves in a jam — until a thunderous voice comes to their rescue.</plot>
+    <aired>2025-07-24</aired>
+    <rating>10</rating>
+    <runtime>14</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/u5Zyf4ZzhcL6eGwbo4FV3ilwK5I.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6303061</uniqueid>
+    <uniqueid type="tvdb">458692</uniqueid>
+    <uniqueid type="imdb">tt35323313</uniqueid>
+</episodedetails>

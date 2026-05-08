@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Episode 5</title>
+    <showtitle>Watching You</showtitle>
+    <season>1</season>
+    <episode>5</episode>
+    <plot>Lina faces the consequences of uncovering the truth and finds herself in an intense psychological mind game with life and death stakes.</plot>
+    <aired>2025-10-24</aired>
+    <runtime>44</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/AeTO6eGFXbInAb6hbrBfK2o4Oxf.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6569862</uniqueid>
+    <uniqueid type="tvdb">460377</uniqueid>
+    <uniqueid type="imdb">tt35836640</uniqueid>
+</episodedetails>

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Episode 2</title>
+    <showtitle>If Wishes Could Kill</showtitle>
+    <season>1</season>
+    <episode>2</episode>
+    <plot>After a sudden tragedy, Yoo Se-ah realizes Kim Geon-woo may be next and rallies her friends to find a solution. But Girigo proves too sinister to stop.</plot>
+    <aired>2026-04-24</aired>
+    <rating>7</rating>
+    <runtime>37</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/wJBaYdqgVRSKz72EasSJUGK5pYo.jpg</thumb>
+    <uniqueid type="tmdb" default="true">7148185</uniqueid>
+    <uniqueid type="tvdb">461062</uniqueid>
+    <uniqueid type="imdb">tt36104233</uniqueid>
+</episodedetails>

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Beautiful Christopher Cross</title>
+    <showtitle>The Beauty</showtitle>
+    <season>1</season>
+    <episode>3</episode>
+    <plot>An unlikely partnership is formed after The Assassin is sent to clean up a messy situation.</plot>
+    <aired>2026-01-21</aired>
+    <rating>4.889</rating>
+    <runtime>44</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/yVb3oftdZ1QcX5jlmpdlbUhLuuV.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6736812</uniqueid>
+    <uniqueid type="tvdb">455046</uniqueid>
+    <uniqueid type="imdb">tt33517752</uniqueid>
+</episodedetails>

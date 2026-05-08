@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Episode 8</title>
+    <showtitle>Das Museum der Unschuld</showtitle>
+    <season>1</season>
+    <episode>8</episode>
+    <plot>When an opportunity presents itself, Kemal convinces his mother to make amends with her cousin. Finally true happiness seems within his grasp.</plot>
+    <aired>2026-02-13</aired>
+    <rating>9</rating>
+    <runtime>60</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/ySu586eoSq2bwqBs9vs4OKaudkM.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6942188</uniqueid>
+    <uniqueid type="tvdb">456888</uniqueid>
+    <uniqueid type="imdb">tt34692373</uniqueid>
+</episodedetails>

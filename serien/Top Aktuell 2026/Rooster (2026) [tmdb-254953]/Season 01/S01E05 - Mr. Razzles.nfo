@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Mr. Razzles</title>
+    <showtitle>Rooster</showtitle>
+    <season>1</season>
+    <episode>5</episode>
+    <plot>When his ex-wife Beth shows up for a dedication ceremony on campus, Greg starts to backslide into old habits. Later, Katie reconnects with Archie, and Dylan finds herself flourishing in her new role.</plot>
+    <aired>2026-04-05</aired>
+    <rating>7.2</rating>
+    <runtime>31</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/7USTx4km0zTgHAu8tEO0anZuQsg.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6919255</uniqueid>
+    <uniqueid type="tvdb">457770</uniqueid>
+    <uniqueid type="imdb">tt32420734</uniqueid>
+</episodedetails>

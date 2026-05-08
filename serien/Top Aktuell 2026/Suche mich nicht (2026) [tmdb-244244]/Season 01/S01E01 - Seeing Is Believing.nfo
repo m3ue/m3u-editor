@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Seeing Is Believing</title>
+    <showtitle>Suche mich nicht</showtitle>
+    <season>1</season>
+    <episode>1</episode>
+    <plot>Simon Greene's violent attempt to bring his runaway daughter home goes viral. Another desperate father hires PI Elena Ravenscroft to find his son.</plot>
+    <aired>2026-01-01</aired>
+    <rating>5.036</rating>
+    <runtime>50</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/xh3RgXYMkffe5gn1AfF4Z5z7OQ4.jpg</thumb>
+    <uniqueid type="tmdb" default="true">5093108</uniqueid>
+    <uniqueid type="tvdb">445068</uniqueid>
+    <uniqueid type="imdb">tt9169516</uniqueid>
+</episodedetails>

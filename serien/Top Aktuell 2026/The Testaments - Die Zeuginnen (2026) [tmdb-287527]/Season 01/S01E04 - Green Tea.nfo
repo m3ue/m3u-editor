@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Green Tea</title>
+    <showtitle>The Testaments - Die Zeuginnen</showtitle>
+    <season>1</season>
+    <episode>4</episode>
+    <plot>As the Green girls gather for a tea party, Daisy struggles to keep on task, while Agnes begins to understand what being a woman in Gilead means.</plot>
+    <aired>2026-04-15</aired>
+    <rating>4.462</rating>
+    <runtime>44</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/azUwuFCAY9ZgOq70zKeQH6WzLIk.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6888138</uniqueid>
+    <uniqueid type="tvdb">460241</uniqueid>
+    <uniqueid type="imdb">tt10970762</uniqueid>
+</episodedetails>

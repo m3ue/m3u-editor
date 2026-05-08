@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Episode 3</title>
+    <showtitle>Hameln</showtitle>
+    <season>1</season>
+    <episode>3</episode>
+    <plot>Nach der aufreibenden Begegnung mit dem komatösen Künstler Bruno Mannheimer, dem Vater von Jannik und Sam, bauen die Brüder dessen Licht- und Klanginstallation wieder auf.</plot>
+    <aired>2024-12-30</aired>
+    <rating>3</rating>
+    <runtime>40</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/scKcKJyppLIoOCltBExnugUeKhu.jpg</thumb>
+    <uniqueid type="tmdb" default="true">5710036</uniqueid>
+    <uniqueid type="imdb">tt29267609</uniqueid>
+</episodedetails>

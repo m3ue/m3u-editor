@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>The Art of Sarah</title>
+    <showtitle>The Art of Sarah</showtitle>
+    <season>1</season>
+    <episode>8</episode>
+    <plot>As the clock runs down, Sarah fights to protect everything she's built — and Mu-gyeong follows her ever-shifting story, hoping to finally reach the truth.</plot>
+    <aired>2026-02-13</aired>
+    <rating>6.75</rating>
+    <runtime>39</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/9ydtX2cFpt6nxFLJxM3S2qG8YLj.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6841879</uniqueid>
+    <uniqueid type="tvdb">472689</uniqueid>
+    <uniqueid type="imdb">tt35149250</uniqueid>
+</episodedetails>

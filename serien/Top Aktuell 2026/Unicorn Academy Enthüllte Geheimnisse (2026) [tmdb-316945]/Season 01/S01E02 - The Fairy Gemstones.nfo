@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>The Fairy Gemstones</title>
+    <showtitle>Unicorn Academy: Enthüllte Geheimnisse</showtitle>
+    <season>1</season>
+    <episode>2</episode>
+    <plot>Valentina tells the tale of how unicorn magic began as the crew finds a map showing where the gems are, pointing to Whispering Willows and Prism Beach.</plot>
+    <aired>2026-03-19</aired>
+    <rating>10</rating>
+    <runtime>26</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/vpqRVGu64R9qXXiBxlwOOKFSoCp.jpg</thumb>
+    <uniqueid type="tmdb" default="true">7059469</uniqueid>
+    <uniqueid type="imdb">tt40029087</uniqueid>
+</episodedetails>

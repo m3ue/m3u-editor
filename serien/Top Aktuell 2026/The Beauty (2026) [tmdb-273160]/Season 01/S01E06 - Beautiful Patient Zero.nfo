@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Beautiful Patient Zero</title>
+    <showtitle>The Beauty</showtitle>
+    <season>1</season>
+    <episode>6</episode>
+    <plot>A team of scientists stumble upon a life-changing secret.</plot>
+    <aired>2026-02-11</aired>
+    <rating>5</rating>
+    <runtime>52</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/9JU0g7gyS6W1LZOvm3fjE1xZEoV.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6736817</uniqueid>
+    <uniqueid type="tvdb">455046</uniqueid>
+    <uniqueid type="imdb">tt33517752</uniqueid>
+</episodedetails>

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Episode 3</title>
+    <showtitle>Motorvalley</showtitle>
+    <season>1</season>
+    <episode>3</episode>
+    <plot>Elena is cut off from the family estate and scrambles for help. The competition heats up as Blu and rival Paolo go head-to-head off the racecourse.</plot>
+    <aired>2026-02-10</aired>
+    <rating>6</rating>
+    <runtime>48</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/c89RTkxnhaYE6zez7AYWh00il6R.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6769800</uniqueid>
+    <uniqueid type="tvdb">459582</uniqueid>
+    <uniqueid type="imdb">tt35449383</uniqueid>
+</episodedetails>

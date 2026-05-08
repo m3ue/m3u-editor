@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Hollywood Hogan</title>
+    <showtitle>Hulk Hogan: Real American</showtitle>
+    <season>1</season>
+    <episode>3</episode>
+    <plot>As retirement rumors swirl, a scandal ousts Hulk from the WWE. He pivots to TV and film, but wrestling still calls — and now it needs a villain.</plot>
+    <aired>2026-04-22</aired>
+    <rating>10</rating>
+    <runtime>67</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/wXIfC9woJYYS5YWYji0SaOg2UCg.jpg</thumb>
+    <uniqueid type="tmdb" default="true">7120805</uniqueid>
+    <uniqueid type="tvdb">476473</uniqueid>
+    <uniqueid type="imdb">tt41508977</uniqueid>
+</episodedetails>

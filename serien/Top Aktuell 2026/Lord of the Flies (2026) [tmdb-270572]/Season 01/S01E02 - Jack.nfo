@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Jack</title>
+    <showtitle>Lord of the Flies</showtitle>
+    <season>1</season>
+    <episode>2</episode>
+    <plot>Jack’s determination to kill a pig leads him to neglect other duties, with grave consequences.</plot>
+    <aired>2026-02-15</aired>
+    <rating>5.3</rating>
+    <runtime>58</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/w6Ab7VyVn8XLcnW6MCn9wYr6EmK.jpg</thumb>
+    <uniqueid type="tmdb" default="true">5579580</uniqueid>
+    <uniqueid type="tvdb">434004</uniqueid>
+    <uniqueid type="imdb">tt27557666</uniqueid>
+</episodedetails>

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Breaking Point</title>
+    <showtitle>Suche mich nicht</showtitle>
+    <season>1</season>
+    <episode>3</episode>
+    <plot>Elena makes an unwelcome late-night visit to Maria. Simon reluctantly attends a memorial service and learns some unsettling news about Paige.</plot>
+    <aired>2026-01-01</aired>
+    <rating>2.889</rating>
+    <runtime>48</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/oqmndWzd79VVkIDvGhpYzZdFW4o.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6615362</uniqueid>
+    <uniqueid type="tvdb">445068</uniqueid>
+    <uniqueid type="imdb">tt9169516</uniqueid>
+</episodedetails>

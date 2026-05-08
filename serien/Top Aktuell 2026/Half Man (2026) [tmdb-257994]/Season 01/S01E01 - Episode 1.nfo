@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Episode 1</title>
+    <showtitle>Half Man</showtitle>
+    <season>1</season>
+    <episode>1</episode>
+    <plot>1987. When their households merge, Niall and Ruben form a close and unsettling bond. An intimate yet epic exploration of what it means to be a man.</plot>
+    <aired>2026-04-28</aired>
+    <runtime>54</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/4l8wwhjOmyEhU7f03Br7ghmlTLS.jpg</thumb>
+    <uniqueid type="tmdb" default="true">5964359</uniqueid>
+    <uniqueid type="tvdb">446817</uniqueid>
+    <uniqueid type="imdb">tt32767294</uniqueid>
+</episodedetails>

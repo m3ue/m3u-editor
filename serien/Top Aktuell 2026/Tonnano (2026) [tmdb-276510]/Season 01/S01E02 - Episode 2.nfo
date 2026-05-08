@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Episode 2</title>
+    <showtitle>Tonnano</showtitle>
+    <season>1</season>
+    <episode>2</episode>
+    <aired>2025-09-22</aired>
+    <rating>7</rating>
+    <runtime>28</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/iVEkqzEdZucXEVLexhkp20WDkYl.jpg</thumb>
+    <uniqueid type="tmdb" default="true">5747088</uniqueid>
+    <uniqueid type="tvdb">456768</uniqueid>
+    <uniqueid type="imdb">tt38454816</uniqueid>
+</episodedetails>

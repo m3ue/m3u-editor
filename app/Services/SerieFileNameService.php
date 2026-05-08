@@ -27,11 +27,11 @@ class SerieFileNameService
         $stats = StreamStatsService::normalize($episode->stream_stats ?? []);
         $episodeTitle = $this->safeName($episode->title);
 
-        $titleHaystack = trim((string) ($episode->title ?? '').' '.($episode->name ?? ''));
-        $quality = $this->safeName(StreamStatsService::detectQuality($stats)) ?: $this->safeName(TitleMetadataParser::detectQuality($titleHaystack));
-        $audio = $this->safeName(StreamStatsService::detectAudio($stats)) ?: $this->safeName(TitleMetadataParser::detectAudio($titleHaystack));
+        // Provider/probe data only - no title-parser fallback (avoids false positives)
+        $quality = $this->safeName(StreamStatsService::detectQuality($stats));
+        $audio = $this->safeName(StreamStatsService::detectAudio($stats));
         $video = $this->safeName(StreamStatsService::detectVideoCodec($stats));
-        $hdr = $this->safeName(StreamStatsService::detectHdr($stats)) ?: $this->safeName(TitleMetadataParser::detectHdr($titleHaystack));
+        $hdr = $this->safeName(StreamStatsService::detectHdr($stats));
         $fileName = strtr($format, [
             '{title}' => $this->safeName($this->serieName($episode)),
             '{season}' => $this->padNumber($episode->season ?? $episode->season_number ?? $episode->season?->season_number),

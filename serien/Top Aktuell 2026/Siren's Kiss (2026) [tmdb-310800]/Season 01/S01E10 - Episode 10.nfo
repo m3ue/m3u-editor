@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Episode 10</title>
+    <showtitle>Siren's Kiss</showtitle>
+    <season>1</season>
+    <episode>10</episode>
+    <plot>Woo-seok and Seol-ah find a lead, but a painting raises her suspicion again. She prepares a final strike and enters the secret vault with Woo-seok.</plot>
+    <aired>2026-03-31</aired>
+    <rating>7.5</rating>
+    <runtime>62</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/9BCQOE3uzZ1lrqs7HF1qIye5M0T.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6841918</uniqueid>
+    <uniqueid type="tvdb">472692</uniqueid>
+    <uniqueid type="imdb">tt39303992</uniqueid>
+</episodedetails>

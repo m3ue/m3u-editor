@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Episode 1</title>
+    <showtitle>Hameln</showtitle>
+    <season>1</season>
+    <episode>1</episode>
+    <plot>Erst hält es die blinde Finja für eine fantasievolle Anmache, als sie von Sam und dessen gehörlosem Bruder Jannik angesprochen wird. Angeblich seien sie sich im Traum begegnet.</plot>
+    <aired>2024-12-30</aired>
+    <rating>3</rating>
+    <runtime>37</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/q96Ew2H2EptbCqgySLZOvAz5hBD.jpg</thumb>
+    <uniqueid type="tmdb" default="true">5709991</uniqueid>
+    <uniqueid type="imdb">tt29267609</uniqueid>
+</episodedetails>

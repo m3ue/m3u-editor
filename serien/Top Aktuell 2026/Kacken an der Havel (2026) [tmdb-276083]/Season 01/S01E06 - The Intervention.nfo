@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>The Intervention</title>
+    <showtitle>Kacken an der Havel</showtitle>
+    <season>1</season>
+    <episode>6</episode>
+    <plot>Finally with a potential hit on his hands, Toni is shocked to see his family has staged an intervention about his parenting skills... or lack thereof.</plot>
+    <aired>2026-02-26</aired>
+    <rating>7</rating>
+    <runtime>34</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/arVWSNHq9NXVtJuP9qZqy4Sw3ci.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6984950</uniqueid>
+    <uniqueid type="tvdb">465305</uniqueid>
+    <uniqueid type="imdb">tt34458461</uniqueid>
+</episodedetails>

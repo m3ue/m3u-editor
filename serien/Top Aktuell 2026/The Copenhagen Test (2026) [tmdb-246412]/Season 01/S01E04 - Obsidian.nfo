@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Obsidian</title>
+    <showtitle>The Copenhagen Test</showtitle>
+    <season>1</season>
+    <episode>4</episode>
+    <plot>In a mission where nothing is as it seems, Alexander must save a Source's life by risking his own.</plot>
+    <aired>2025-12-27</aired>
+    <rating>6.4</rating>
+    <runtime>54</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/myPTzFq3SUUp4wO9MRzYY3qrxGF.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6750130</uniqueid>
+    <uniqueid type="tvdb">453657</uniqueid>
+    <uniqueid type="imdb">tt31314791</uniqueid>
+</episodedetails>

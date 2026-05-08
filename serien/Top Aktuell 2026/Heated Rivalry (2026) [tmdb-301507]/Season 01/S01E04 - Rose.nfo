@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Rose</title>
+    <showtitle>Heated Rivalry</showtitle>
+    <season>1</season>
+    <episode>4</episode>
+    <plot>A moment of unexpected vulnerability and a high-profile romance unleash a storm of turmoil for Shane and Ilya.</plot>
+    <aired>2025-12-12</aired>
+    <rating>8.273</rating>
+    <runtime>44</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/KxTzboqeKccNpiaKdHQA0rM7mc.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6601280</uniqueid>
+    <uniqueid type="tvdb">464461</uniqueid>
+    <uniqueid type="imdb">tt35495073</uniqueid>
+</episodedetails>

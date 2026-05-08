@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>You've Been Warned</title>
+    <showtitle>Land der Sünde</showtitle>
+    <season>1</season>
+    <episode>1</episode>
+    <plot>Malmö detectives Dani and Malik pay an unwelcome visit to a rural village to investigate the disappearance of a teenager — only for Dani, it's personal.</plot>
+    <aired>2026-01-02</aired>
+    <rating>2.167</rating>
+    <runtime>46</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/vR83wi1JaTsEx29iCv4WuLNWn4h.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6769809</uniqueid>
+    <uniqueid type="tvdb">462797</uniqueid>
+    <uniqueid type="imdb">tt33501959</uniqueid>
+</episodedetails>

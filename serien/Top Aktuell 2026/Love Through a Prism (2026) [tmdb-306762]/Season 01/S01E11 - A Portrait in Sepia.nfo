@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>A Portrait in Sepia</title>
+    <showtitle>Love Through a Prism</showtitle>
+    <season>1</season>
+    <episode>11</episode>
+    <plot>Catherine stands up to Richard and stands up for her new friend. Thinking that Kit has been locked away, Lili rushes to Drunnheim Hall to rescue him.</plot>
+    <aired>2026-01-15</aired>
+    <rating>8.5</rating>
+    <runtime>26</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/ySPjsZJjv4sFR9l2343wD0t6Lja.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6720822</uniqueid>
+    <uniqueid type="tvdb">470980</uniqueid>
+    <uniqueid type="imdb">tt39050141</uniqueid>
+</episodedetails>

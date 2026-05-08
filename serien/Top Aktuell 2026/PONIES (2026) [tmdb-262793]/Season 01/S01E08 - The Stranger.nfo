@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>The Stranger</title>
+    <showtitle>PONIES</showtitle>
+    <season>1</season>
+    <episode>8</episode>
+    <plot>Bea, Twila and Sasha flee the city and learn the secret behind Andrei's rise in the KGB.</plot>
+    <aired>2026-01-15</aired>
+    <rating>7.05</rating>
+    <runtime>48</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/cHunG99nX72i4VxfOStHIBWVNcb.jpg</thumb>
+    <uniqueid type="tmdb" default="true">6795833</uniqueid>
+    <uniqueid type="tvdb">453786</uniqueid>
+    <uniqueid type="imdb">tt33270420</uniqueid>
+</episodedetails>

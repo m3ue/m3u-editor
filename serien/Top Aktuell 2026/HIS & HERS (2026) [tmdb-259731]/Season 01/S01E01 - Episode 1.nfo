@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Episode 1</title>
+    <showtitle>HIS &amp; HERS</showtitle>
+    <season>1</season>
+    <episode>1</episode>
+    <plot>TV newswoman Anna returns to her small Georgia hometown to report on a murder case, in which her estranged husband Jack is the lead investigator.</plot>
+    <aired>2026-01-08</aired>
+    <rating>5.8</rating>
+    <runtime>47</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/fJjdHdLMdx9hM20hQU5XAHMtpvY.jpg</thumb>
+    <uniqueid type="tmdb" default="true">5494298</uniqueid>
+    <uniqueid type="tvdb">452521</uniqueid>
+    <uniqueid type="imdb">tt33035373</uniqueid>
+</episodedetails>

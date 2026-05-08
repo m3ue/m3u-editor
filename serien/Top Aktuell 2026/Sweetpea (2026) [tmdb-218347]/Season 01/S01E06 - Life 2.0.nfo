@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+    <title>Life 2.0</title>
+    <showtitle>Sweetpea</showtitle>
+    <season>1</season>
+    <episode>6</episode>
+    <plot>Rhiannon might just get away with it - but what does she stand to lose in the process?</plot>
+    <aired>2024-11-14</aired>
+    <rating>6.647</rating>
+    <runtime>49</runtime>
+    <thumb>https://image.tmdb.org/t/p/original/lOrfeGgpRgzBubVHv8HbI2KQ8Ar.jpg</thumb>
+    <uniqueid type="tmdb" default="true">5593210</uniqueid>
+    <uniqueid type="tvdb">421654</uniqueid>
+    <uniqueid type="imdb">tt11218290</uniqueid>
+</episodedetails>
