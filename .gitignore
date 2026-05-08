@@ -72,7 +72,4 @@ compose.dev.yaml
 compose.services.yaml
 mediaserver.env
 .env.testing
-
-# local strm sync output
-/serien/
-/vod/
+debug*.md
