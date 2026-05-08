@@ -430,8 +430,8 @@ class XtreamApiControllerTest extends TestCase
     public function test_get_vod_info_missing_vod_id_parameter()
     {
         $response = $this->getJson($this->getXtreamApiUrl('get_vod_info')); // No vod_id param
-        $response->assertStatus(404) // Controller returns 404 when VOD not found (null vod_id)
-            ->assertJson(['error' => 'VOD not found']);
+        $response->assertStatus(400)
+            ->assertJson(['error' => 'vod_id parameter is required for get_vod_info action']);
     }
 
     /**
