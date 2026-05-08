@@ -162,3 +162,51 @@ it('generates full path with all components', function () {
 
     expect($path)->toBe('The Office/Season 01/The Office - S01E02 - Diversity Day.strm');
 });
+
+it('generates episode extras bracket from stream stats', function () {
+    $episode = new Episode([
+        'stream_stats' => [
+            'resolution' => '1920x1080',
+            'video_codec' => 'hevc',
+            'audio_codec' => 'eac3',
+            'audio_channels' => 6,
+            'hdr' => 'HDR10',
+        ],
+    ]);
+    $setting = new StreamFileSetting([
+        'trash_episode_components' => ['quality', 'video', 'audio', 'hdr'],
+    ]);
+
+    $extras = (new SerieFileNameService)->generateEpisodeExtras($episode, $setting);
+
+    expect($extras)->toBe('[1080p H.265 E-AC-3 5.1 HDR]');
+});
+
+it('returns empty episode extras when stream_stats are absent', function () {
+    $episode = new Episode([]);
+    $setting = new StreamFileSetting([
+        'trash_episode_components' => ['quality', 'video', 'audio', 'hdr'],
+    ]);
+
+    $extras = (new SerieFileNameService)->generateEpisodeExtras($episode, $setting);
+
+    expect($extras)->toBe('');
+});
+
+it('respects trash_episode_components when building episode extras', function () {
+    $episode = new Episode([
+        'stream_stats' => [
+            'resolution' => '3840x2160',
+            'video_codec' => 'hevc',
+            'audio_codec' => 'truehd',
+            'audio_channels' => 8,
+        ],
+    ]);
+    $setting = new StreamFileSetting([
+        'trash_episode_components' => ['quality', 'audio'],
+    ]);
+
+    $extras = (new SerieFileNameService)->generateEpisodeExtras($episode, $setting);
+
+    expect($extras)->toBe('[4K TrueHD 7.1]');
+});
