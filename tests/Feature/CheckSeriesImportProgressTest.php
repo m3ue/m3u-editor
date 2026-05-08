@@ -40,6 +40,8 @@ it('marks the playlist Completed BEFORE dispatching SyncCompleted so the orchest
         }
     });
 
+    $this->playlist->resetSyncCompletedGuard();
+
     $job = new CheckSeriesImportProgress(
         currentOffset: 5,
         totalSeries: 5,

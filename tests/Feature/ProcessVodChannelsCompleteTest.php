@@ -242,6 +242,7 @@ it('TriggerSeriesImport dispatches ProcessM3uImportSeries with force=true', func
 it('FireSyncCompletedEvent fires SyncCompleted for its playlist', function () {
     Event::fake();
 
+    $this->playlist->resetSyncCompletedGuard();
     (new FireSyncCompletedEvent($this->playlist))->handle();
 
     Event::assertDispatched(SyncCompleted::class, fn (SyncCompleted $e) => $e->model->id === $this->playlist->id);
