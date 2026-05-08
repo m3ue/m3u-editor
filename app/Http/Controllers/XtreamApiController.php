@@ -1376,6 +1376,12 @@ class XtreamApiController extends Controller
         } elseif ($action === 'get_vod_info') {
             $channelId = $request->input('vod_id');
 
+            if (! $channelId || ! is_numeric($channelId)) {
+                return response()->json(['error' => 'vod_id parameter is required for get_vod_info action'], 400);
+            }
+
+            $channelId = (int) $channelId;
+
             // Find the channel
             $channel = $playlist->channels()
                 ->where('enabled', true)
