@@ -57,6 +57,7 @@ class ProcessM3uImportComplete implements ShouldQueue
         public bool $runningSeriesImport = false,
         public bool $runningLiveImport = true, // Default to true for live imports
         public bool $runningVodImport = true, // Default to true for VOD imports
+        public ?int $syncRunId = null,
     ) {
         // Set the invalidate import settings from config
         $this->invalidateImport = config('dev.invalidate_import', null);
@@ -380,12 +381,17 @@ class ProcessM3uImportComplete implements ShouldQueue
                 $syncSeriesMetadata ? 'series_metadata' : null,
             ]));
 
-            $activeSyncRun = SyncRun::query()
-                ->where('playlist_id', $playlist->id)
-                ->where('kind', 'sync')
-                ->whereIn('status', array_map(fn ($s) => $s->value, SyncRunStatus::active()))
-                ->latest('id')
-                ->first();
+            // Prefer the known run ID threaded from PlaylistSyncDispatcher so
+            // we update the correct run even when a newer sync was triggered
+            // while this job chain was still executing.
+            $activeSyncRun = $this->syncRunId
+                ? SyncRun::find($this->syncRunId)
+                : SyncRun::query()
+                    ->where('playlist_id', $playlist->id)
+                    ->where('kind', 'sync')
+                    ->whereIn('status', array_map(fn ($s) => $s->value, SyncRunStatus::active()))
+                    ->latest('id')
+                    ->first();
 
             $activeSyncRun?->markPhaseStarted('metadata_fetch', ['types' => $types]);
         }

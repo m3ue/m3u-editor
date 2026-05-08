@@ -408,10 +408,6 @@ class PlaylistResource extends Resource implements CopilotResource
                                 }
 
                                 // For regular playlists, use the standard M3U import process
-                                $record->update([
-                                    'status' => Status::Processing,
-                                    'progress' => 0,
-                                ]);
                                 app(PlaylistSyncDispatcher::class)->dispatch(
                                     playlist: $record,
                                     trigger: PlaylistSyncDispatcher::TRIGGER_FILAMENT_BULK_PROCESS,
@@ -512,10 +508,6 @@ class PlaylistResource extends Resource implements CopilotResource
                         }
 
                         // For regular playlists, use the standard M3U import process
-                        $record->update([
-                            'status' => Status::Processing,
-                            'progress' => 0,
-                        ]);
                         app(PlaylistSyncDispatcher::class)->dispatch(
                             playlist: $record,
                             trigger: PlaylistSyncDispatcher::TRIGGER_FILAMENT_PROCESS,
@@ -2942,11 +2934,6 @@ class PlaylistResource extends Resource implements CopilotResource
                         }
 
                         // For regular playlists, use the standard M3U import process
-                        $record->update([
-                            'status' => Status::Processing,
-                            'progress' => 0,
-                            'vod_progress' => 0,
-                        ]);
                         app(PlaylistSyncDispatcher::class)->dispatch(
                             playlist: $record,
                             trigger: PlaylistSyncDispatcher::TRIGGER_FILAMENT_PROCESS,

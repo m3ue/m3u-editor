@@ -42,6 +42,7 @@ final class XtreamChainBuilder
         ?Collection $seriesCategories,
         bool $preprocess,
         Collection $enabledCategories,
+        ?int $syncRunId = null,
     ): array {
         $playlistId = $playlist->id;
         $jobs = [];
@@ -78,6 +79,7 @@ final class XtreamChainBuilder
             runningSeriesImport: $seriesCategories && $seriesCategories->count() > 0,
             runningLiveImport: $liveStreamsEnabled,
             runningVodImport: $vodStreamsEnabled,
+            syncRunId: $syncRunId,
         );
 
         if ($seriesCategories) {

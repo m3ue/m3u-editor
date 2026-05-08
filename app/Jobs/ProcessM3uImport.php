@@ -1381,6 +1381,7 @@ class ProcessM3uImport implements ShouldQueue, TracksSyncRun
             seriesCategories: $seriesCategories,
             preprocess: (bool) $this->preprocess,
             enabledCategories: $this->enabledCategories,
+            syncRunId: $this->syncRunId,
         );
 
         // Start the chain!
@@ -1549,6 +1550,7 @@ class ProcessM3uImport implements ShouldQueue, TracksSyncRun
             start: $start,
             isNew: (bool) $this->isNew,
             maxItemsHit: $this->maxItemsHit,
+            syncRunId: $this->syncRunId,
         );
 
         // Start the chain!

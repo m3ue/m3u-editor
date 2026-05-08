@@ -28,6 +28,7 @@ final class M3uChainBuilder
         Carbon $start,
         bool $isNew,
         bool $maxItemsHit,
+        ?int $syncRunId = null,
     ): array {
         $playlistId = $playlist->id;
         $jobs = [];
@@ -48,7 +49,8 @@ final class M3uChainBuilder
             start: $start,
             maxHit: $maxItemsHit,
             isNew: $isNew,
-            runningSeriesImport: false, // No series import for M3U imports
+            runningSeriesImport: false,
+            syncRunId: $syncRunId,
         );
 
         return $jobs;

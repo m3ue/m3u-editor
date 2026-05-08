@@ -2,6 +2,7 @@
 
 namespace App\Sync;
 
+use App\Enums\Status;
 use App\Jobs\ProcessM3uImport;
 use App\Models\Playlist;
 use App\Models\SyncRun;
@@ -107,6 +108,23 @@ class PlaylistSyncDispatcher
 
             return $run->fresh() ?? $run;
         }
+
+        // Optimistically mark the playlist as Processing so the UI reflects the
+        // new state immediately, without waiting for a queue worker to pick up
+        // the import job. This is what activates the 3s progress-column polling
+        // in the Filament table (columns poll when status is Processing/Pending).
+        // ProcessM3uImport::handle() will overwrite this with the full reset
+        // (errors, progress, processing flags) when it runs.
+        //
+        // Intentionally placed AFTER the pre-sync halt check: if a pre-sync
+        // phase cancels the run (e.g. playlist already processing), we must
+        // NOT set Processing here — the status would otherwise be stuck until
+        // the user manually resets it.
+        $playlist->update([
+            'status' => Status::Processing,
+            'progress' => 0,
+            'vod_progress' => 0,
+        ]);
 
         dispatch(
             (new ProcessM3uImport($playlist, $force, $isNew))

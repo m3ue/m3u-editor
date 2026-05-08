@@ -19,6 +19,8 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
 class Playlist extends Model
 {
@@ -98,45 +100,38 @@ class Playlist extends Model
     }
 
     /**
-     * Cache key used to dedupe SyncCompleted dispatches for this playlist within
-     * a single sync window. Reset by callers that genuinely start a new sync via
-     * resetSyncCompletedGuard().
-     */
-    protected function syncCompletedGuardKey(): string
-    {
-        return "playlist:sync-completed-fired:{$this->getKey()}";
-    }
-
-    /**
-     * Clear the SyncCompleted dedup guard. Must be called by any code path that
-     * starts a fresh sync (e.g. the entry point of ProcessM3uImport) so the next
-     * SyncCompleted dispatch is allowed to fire.
+     * Open a new sync window by stamping a UUID token on the row. The token
+     * acts as the dedup guard for {@see dispatchSyncCompletedOnce()}: only the
+     * first caller that clears the token (via an atomic WHERE NOT NULL UPDATE)
+     * will fire the SyncCompleted event.
+     *
+     * Must be called by any code path that starts a fresh sync (e.g. the entry
+     * point of ProcessM3uImport) so the next SyncCompleted dispatch is allowed
+     * to fire.
      */
     public function resetSyncCompletedGuard(): void
     {
-        Cache::forget($this->syncCompletedGuardKey());
+        DB::table('playlists')
+            ->where('id', $this->getKey())
+            ->update(['sync_event_token' => (string) Str::uuid()]);
     }
 
     /**
      * Atomically dispatch a SyncCompleted event for this playlist exactly once
-     * per sync window. Subsequent calls within the window (default 30 minutes,
-     * or until resetSyncCompletedGuard() is called) are no-ops.
+     * per sync window. Subsequent calls within the window are no-ops.
      *
-     * The dedup window is a safety net while the legacy pipeline still has many
-     * dispatch sites scattered across jobs; once the SyncOrchestrator owns
-     * completion, this becomes structural.
+     * Uses a single-row UPDATE WHERE NOT NULL so the dedup is atomic on any
+     * database backend — no Redis requirement. The first worker to clear the
+     * token fires the event; all others see 0 affected rows and return false.
      */
     public function dispatchSyncCompletedOnce(string $type = 'playlist'): bool
     {
-        // Cache::add returns true only when the key was not already present —
-        // atomic across queue workers when using the redis store.
-        $acquired = Cache::add(
-            $this->syncCompletedGuardKey(),
-            true,
-            now()->addMinutes(30),
-        );
+        $affected = DB::table('playlists')
+            ->where('id', $this->getKey())
+            ->whereNotNull('sync_event_token')
+            ->update(['sync_event_token' => null]);
 
-        if (! $acquired) {
+        if ($affected === 0) {
             return false;
         }
 
