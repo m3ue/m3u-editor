@@ -13,7 +13,6 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Schema;
 use Throwable;
 
 class ProbeVodStreams implements ShouldQueue
@@ -67,7 +66,7 @@ class ProbeVodStreams implements ShouldQueue
             ->where('enabled', true)
             ->where('probe_enabled', true);
 
-        if ($this->onlyUnprobed && Schema::hasColumn('episodes', 'stream_stats_probed_at')) {
+        if ($this->onlyUnprobed) {
             $episodeQuery->whereNull('stream_stats_probed_at');
         }
 
