@@ -134,35 +134,72 @@
 
             <div x-show="showOptions" x-collapse>
                 <div class="mt-3 space-y-3">
-                    <x-filament::input.wrapper label="{{ __('New episodes only') }}">
-                        <x-filament::input.select wire:model.live="seriesNewOnly">
-                            <option value="0" @selected(! $seriesNewOnly)>{{ __('No') }}</option>
-                            <option value="1" @selected($seriesNewOnly)>{{ __('Yes') }}</option>
-                        </x-filament::input.select>
-                    </x-filament::input.wrapper>
-
-                    <x-filament::input.wrapper label="{{ __('Channel (contains)') }}">
-                        <x-filament::input type="text" wire:model.live="seriesChannelName"
-                            placeholder="{{ __('Any channel') }}" />
-                    </x-filament::input.wrapper>
-
-                    <x-filament::input.wrapper label="{{ __('Priority') }}">
-                        <x-filament::input type="number" wire:model.live="seriesPriority" min="1" max="99" />
-                    </x-filament::input.wrapper>
-
-                    <div class="grid grid-cols-2 gap-3">
-                        <x-filament::input.wrapper label="{{ __('Start early (seconds)') }}">
-                            <x-filament::input type="number" wire:model.live="seriesStartEarly" min="0" />
-                        </x-filament::input.wrapper>
-                        <x-filament::input.wrapper label="{{ __('End late (seconds)') }}">
-                            <x-filament::input type="number" wire:model.live="seriesEndLate" min="0" />
+                    <div class="flex flex-col gap-1">
+                        <label class="fi-fo-field-wrp-label inline-flex items-center gap-x-3">
+                            <span class="text-sm font-medium text-gray-950 dark:text-white">{{ __('New episodes only') }}</span>
+                        </label>
+                        <x-filament::input.wrapper>
+                            <x-filament::input.select wire:model.live="seriesNewOnly">
+                                <option value="0" @selected(! $seriesNewOnly)>{{ __('No') }}</option>
+                                <option value="1" @selected($seriesNewOnly)>{{ __('Yes') }}</option>
+                            </x-filament::input.select>
                         </x-filament::input.wrapper>
                     </div>
 
-                    <x-filament::input.wrapper label="{{ __('Keep last N recordings') }}">
-                        <x-filament::input type="number" wire:model.live="seriesKeepLast" min="1"
-                            placeholder="{{ __('All recordings') }}" />
-                    </x-filament::input.wrapper>
+                    <div class="flex flex-col gap-1">
+                        <label class="fi-fo-field-wrp-label inline-flex items-center gap-x-3">
+                            <span class="text-sm font-medium text-gray-950 dark:text-white">{{ __('Channel') }}</span>
+                        </label>
+                        <x-filament::input.wrapper>
+                            <x-filament::input.select wire:model.live="seriesChannelId">
+                                <option value="0">
+                                    {{ __('From Original Source') }}{{ ($sourceChannelId ?? null) && isset($channelOptions[$sourceChannelId]) ? ' — ' . $channelOptions[$sourceChannelId] : '' }}
+                                </option>
+                                <option value="-1">{{ __('Any channel') }}</option>
+                                @foreach ($channelOptions ?? [] as $id => $label)
+                                    <option value="{{ $id }}">{{ $label }}</option>
+                                @endforeach
+                            </x-filament::input.select>
+                        </x-filament::input.wrapper>
+                    </div>
+
+                    <div class="flex flex-col gap-1">
+                        <label class="fi-fo-field-wrp-label inline-flex items-center gap-x-3">
+                            <span class="text-sm font-medium text-gray-950 dark:text-white">{{ __('Priority') }}</span>
+                        </label>
+                        <x-filament::input.wrapper>
+                            <x-filament::input type="number" wire:model.live="seriesPriority" min="1" max="99" />
+                        </x-filament::input.wrapper>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-3">
+                        <div class="flex flex-col gap-1">
+                            <label class="fi-fo-field-wrp-label inline-flex items-center gap-x-3">
+                                <span class="text-sm font-medium text-gray-950 dark:text-white">{{ __('Start early (seconds)') }}</span>
+                            </label>
+                            <x-filament::input.wrapper>
+                                <x-filament::input type="number" wire:model.live="seriesStartEarly" min="0" />
+                            </x-filament::input.wrapper>
+                        </div>
+                        <div class="flex flex-col gap-1">
+                            <label class="fi-fo-field-wrp-label inline-flex items-center gap-x-3">
+                                <span class="text-sm font-medium text-gray-950 dark:text-white">{{ __('End late (seconds)') }}</span>
+                            </label>
+                            <x-filament::input.wrapper>
+                                <x-filament::input type="number" wire:model.live="seriesEndLate" min="0" />
+                            </x-filament::input.wrapper>
+                        </div>
+                    </div>
+
+                    <div class="flex flex-col gap-1">
+                        <label class="fi-fo-field-wrp-label inline-flex items-center gap-x-3">
+                            <span class="text-sm font-medium text-gray-950 dark:text-white">{{ __('Keep last N recordings') }}</span>
+                        </label>
+                        <x-filament::input.wrapper>
+                            <x-filament::input type="number" wire:model.live="seriesKeepLast" min="1"
+                                placeholder="{{ __('All recordings') }}" />
+                        </x-filament::input.wrapper>
+                    </div>
 
                     <x-filament::button
                         wire:click="recordSeriesWithOptions({{ \Illuminate\Support\Js::from($show['title']) }})"

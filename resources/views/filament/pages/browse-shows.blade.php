@@ -107,16 +107,50 @@
                 </x-filament::input.wrapper>
             </div>
 
-            {{-- Channel --}}
-            <div class="flex flex-col gap-1">
+            {{-- Channel (searchable) --}}
+            <div class="flex flex-col gap-1" x-data="{
+                open: false,
+                search: '',
+                allOptions: @js($this->channelOptions),
+                get filtered() {
+                    if (!this.search) return this.allOptions;
+                    const q = this.search.toLowerCase();
+                    return Object.fromEntries(
+                        Object.entries(this.allOptions).filter(([id, label]) => label.toLowerCase().includes(q))
+                    );
+                }
+            }" x-effect="if (!$wire.channel_id) search = ''">
                 <label class="fi-fo-field-wrp-label inline-flex items-center gap-x-3">
                     <span
-                        class="text-sm font-medium leading-6 text-gray-950 dark:text-white">{{ __('Channel (contains)') }}</span>
+                        class="text-sm font-medium leading-6 text-gray-950 dark:text-white">{{ __('Channel') }}</span>
                 </label>
-                <x-filament::input.wrapper>
-                    <x-filament::input type="text" wire:model="channel_name"
-                        placeholder="{{ __('e.g. HBO, CNN...') }}" :disabled="!$dvr_setting_id" />
-                </x-filament::input.wrapper>
+                <div class="relative">
+                    <input type="text" x-model="search" @focus="open = true" @keydown.escape="open = false"
+                        :placeholder="!$wire.channel_id ? '{{ __('— Any —') }}' : ''"
+                        class="w-full rounded-lg border border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-white text-sm shadow-sm outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500 placeholder-gray-400 dark:placeholder-gray-500 py-2 pl-3" />
+                    <div x-show="open && Object.keys(filtered).length > 0" x-transition @click.stop
+                        @keydown.escape="open = false"
+                        class="absolute z-50 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-white/10 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                        <button type="button" @click="search = ''; $wire.channel_id = ''; open = false"
+                            class="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-white/10 transition border-b border-gray-100 dark:border-white/5"
+                            :class="!$wire.channel_id ? 'text-primary-600 dark:text-primary-400 font-medium' :
+                                'text-gray-600 dark:text-gray-300'">
+                            {{ __('— Any —') }}
+                        </button>
+                        <template x-for="[id, label] in Object.entries(filtered)" :key="id">
+                            <button type="button"
+                                @click="search = label; $wire.channel_id = parseInt(id); open = false"
+                                class="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-white/10 transition"
+                                :class="$wire.channel_id == id ? 'text-primary-600 dark:text-primary-400 font-medium' :
+                                    'text-gray-700 dark:text-gray-200'"
+                                x-text="label"></button>
+                        </template>
+                        <div x-show="Object.keys(filtered).length === 0"
+                            class="px-3 py-2 text-sm text-gray-400 dark:text-gray-500">
+                            {{ __('No matches') }}
+                        </div>
+                    </div>
+                </div>
             </div>
 
             {{-- Days --}}
@@ -399,7 +433,9 @@
             <div class="p-4 flex-1 overflow-y-auto">
                 @include('filament.pages.browse-show-detail', [
                     'show' => $selectedShowDetail,
+                    'channelOptions' => $this->channelOptions,
                     'seriesHint' => $this->seriesHint,
+                    'sourceChannelId' => $sourceChannelId,
                 ])
             </div>
         </div>

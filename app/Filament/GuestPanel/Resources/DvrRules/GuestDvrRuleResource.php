@@ -160,6 +160,7 @@ class GuestDvrRuleResource extends Resource
                         ->where('playlist_id', $playlistId)
                         ->orderBy('title')
                         ->pluck('title', 'id')
+                        ->prepend(__('From Original Source'), 0)
                     : [])
                 ->searchable()
                 ->nullable(),
@@ -273,7 +274,26 @@ class GuestDvrRuleResource extends Resource
                     ->button()
                     ->hiddenLabel()
                     ->size('sm')
-                    ->slideOver(),
+                    ->slideOver()
+                    ->mutateRecordDataUsing(function (array $data, DvrRecordingRule $record): array {
+                        if ($record->channel_id === null && $record->source_channel_id !== null) {
+                            $data['channel_id'] = 0;
+                        }
+
+                        return $data;
+                    })
+                    ->mutateDataUsing(function (array $data, DvrRecordingRule $record): array {
+                        $channelId = $data['channel_id'] ?? null;
+
+                        if ($channelId !== null && (int) $channelId === 0) {
+                            $data['channel_id'] = null;
+                            $data['source_channel_id'] = $record->source_channel_id;
+                        } else {
+                            $data['source_channel_id'] = null;
+                        }
+
+                        return $data;
+                    }),
 
                 DeleteAction::make()
                     ->before(function (DvrRecordingRule $record, Action $action) use ($currentAuth): void {
@@ -309,6 +329,13 @@ class GuestDvrRuleResource extends Resource
 
                             return;
                         }
+
+                        // Sentinel 0 = "From Original Source"; no existing record in create context → any channel.
+                        if (($data['channel_id'] ?? null) !== null && (int) ($data['channel_id']) === 0) {
+                            $data['channel_id'] = null;
+                        }
+
+                        $data['source_channel_id'] = null;
 
                         DvrRecordingRule::create([
                             ...$data,

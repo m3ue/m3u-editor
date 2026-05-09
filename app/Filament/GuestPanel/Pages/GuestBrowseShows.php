@@ -88,9 +88,13 @@ class GuestBrowseShows extends Page
 
     // --- Series options form state ---
 
-    public bool $seriesNewOnly = false;
+    public int $seriesNewOnly = 0;
 
-    public ?int $seriesChannelId = null;
+    /** 0 = "From Original Source" (sentinel), null/negative = "Any channel", int = specific channel */
+    public int $seriesChannelId = 0;
+
+    /** The actual channel ID the show was browsed from (null if not resolved). */
+    public ?int $sourceChannelId = null;
 
     public int $seriesPriority = 50;
 
@@ -139,9 +143,14 @@ class GuestBrowseShows extends Page
     public function getSeriesHintProperty(): string
     {
         $channelOptions = $this->channelOptions;
-        $channelName = ($this->seriesChannelId && isset($channelOptions[$this->seriesChannelId]))
-            ? Str::limit($channelOptions[$this->seriesChannelId], 18)
-            : __('any channel');
+
+        $channelName = match (true) {
+            $this->seriesChannelId === 0 => $this->sourceChannelId && isset($channelOptions[$this->sourceChannelId])
+                ? Str::limit($channelOptions[$this->sourceChannelId], 18)
+                : __('original source'),
+            $this->seriesChannelId > 0 && isset($channelOptions[$this->seriesChannelId]) => Str::limit($channelOptions[$this->seriesChannelId], 18),
+            default => __('any channel'),
+        };
 
         $parts = array_filter([
             $channelName,
@@ -162,12 +171,13 @@ class GuestBrowseShows extends Page
     {
         Log::info('GuestBrowseShows: openShowDetail called: '.$title);
         $this->selectedShowTitle = $title;
-        $this->seriesNewOnly = false;
+        $this->seriesNewOnly = 0;
         $this->seriesPriority = 50;
         $this->seriesStartEarly = 0;
         $this->seriesEndLate = 0;
         $this->seriesKeepLast = null;
-        $this->seriesChannelId = $this->resolveDefaultChannelIdForShow($title);
+        $this->sourceChannelId = $this->resolveSourceChannelId($title);
+        $this->seriesChannelId = 0;
     }
 
     public function closeShowDetail(): void
@@ -302,15 +312,26 @@ class GuestBrowseShows extends Page
         $this->createSeriesRule($title, [
             'series_mode' => DvrSeriesMode::All,
             'priority' => 50,
+            'source_channel_id' => $this->resolveSourceChannelId($title),
         ]);
     }
 
     public function recordSeriesWithOptions(string $title): void
     {
+        $channelId = null;
+        $sourceChannelId = null;
+
+        if ($this->seriesChannelId === 0) {
+            $sourceChannelId = $this->sourceChannelId;
+        } elseif ($this->seriesChannelId > 0) {
+            $channelId = $this->seriesChannelId;
+        }
+
         $this->createSeriesRule($title, [
             'new_only' => $this->seriesNewOnly,
             'series_mode' => $this->seriesNewOnly ? DvrSeriesMode::NewFlag : DvrSeriesMode::All,
-            'channel_id' => $this->seriesChannelId ?: null,
+            'channel_id' => $channelId,
+            'source_channel_id' => $sourceChannelId,
             'priority' => $this->seriesPriority,
             'start_early_seconds' => $this->seriesStartEarly,
             'end_late_seconds' => $this->seriesEndLate,
@@ -632,11 +653,13 @@ class GuestBrowseShows extends Page
     }
 
     /**
-     * Resolve the channel that a show most likely airs on within the current DVR
-     * setting's playlist. Used to pre-populate the series options form so the user
-     * sees the right channel pre-selected when they open the advanced options panel.
+     * Resolve the channel (within the DVR setting's playlist) that a show most likely
+     * airs on. Used to pre-populate sourceChannelId when the slide-over opens and to
+     * set source_channel_id when creating a series rule with defaults.
+     *
+     * Returns null when the channel cannot be determined.
      */
-    private function resolveDefaultChannelIdForShow(string $title): ?int
+    private function resolveSourceChannelId(string $title): ?int
     {
         $playlistId = static::getDvrSetting()?->playlist_id;
         if (! $playlistId) {

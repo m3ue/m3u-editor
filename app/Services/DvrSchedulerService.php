@@ -64,7 +64,7 @@ class DvrSchedulerService
     private function matchAndSchedule(int $lookaheadMinutes): void
     {
         $rules = DvrRecordingRule::enabled()
-            ->with(['dvrSetting.playlist', 'channel.epgChannel', 'epgChannel'])
+            ->with(['dvrSetting.playlist', 'channel.epgChannel', 'sourceChannel.epgChannel', 'epgChannel'])
             ->orderByDesc('priority')
             ->orderBy('id')
             ->get();
@@ -197,6 +197,13 @@ class DvrSchedulerService
             return $stringId ? [$stringId] : [];
         }
 
+        // 2.5. Source channel: created via Browse Shows; use the original channel's EPG mapping
+        if ($rule->source_channel_id) {
+            $stringId = $rule->sourceChannel?->epgChannel?->channel_id;
+
+            return $stringId ? [$stringId] : [];
+        }
+
         // 3. No explicit channel: scope to all EPG-mapped channels in the playlist
         $playlistId = $rule->dvrSetting->playlist_id;
 
@@ -308,6 +315,7 @@ class DvrSchedulerService
                 'user_id' => $setting->user_id,
                 'dvr_setting_id' => $setting->id,
                 'dvr_recording_rule_id' => $rule->id,
+                'playlist_auth_id' => $rule->playlist_auth_id,
                 'channel_id' => $rule->channel_id,
                 'status' => DvrRecordingStatus::Scheduled,
                 'title' => $title,
@@ -541,6 +549,7 @@ class DvrSchedulerService
                 'user_id' => $setting->user_id,
                 'dvr_setting_id' => $setting->id,
                 'dvr_recording_rule_id' => $rule->id,
+                'playlist_auth_id' => $rule->playlist_auth_id,
                 'channel_id' => $resolvedChannelId ?? $rule->channel_id,
                 'status' => DvrRecordingStatus::Scheduled,
                 'title' => $programme->title,
@@ -666,6 +675,9 @@ class DvrSchedulerService
 
         if ($rule->channel_id) {
             $channel = $rule->channel;
+        } elseif ($rule->source_channel_id) {
+            // Rule was created via Browse Shows — use the original source channel directly.
+            $channel = $rule->sourceChannel;
         } elseif ($programme?->epg_channel_id) {
             // Rule was created without an explicit channel (e.g. series defaults or guest once rule).
             // Attempt to resolve the matching channel from the programme's EPG channel ID.

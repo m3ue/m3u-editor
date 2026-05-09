@@ -113,7 +113,8 @@ class DvrRecordingRuleResource extends Resource
                     ->options(fn () => Channel::query()
                         ->where('user_id', Auth::id())
                         ->orderBy('title')
-                        ->pluck('title', 'id'))
+                        ->pluck('title', 'id')
+                        ->prepend(__('From Original Source'), 0))
                     ->searchable()
                     ->nullable(),
 
@@ -219,7 +220,26 @@ class DvrRecordingRuleResource extends Resource
                     ->hiddenLabel()->size('sm'),
                 Actions\EditAction::make()->button()
                     ->hiddenLabel()->size('sm')
-                    ->slideOver(),
+                    ->slideOver()
+                    ->mutateRecordDataUsing(function (array $data, DvrRecordingRule $record): array {
+                        if ($record->channel_id === null && $record->source_channel_id !== null) {
+                            $data['channel_id'] = 0;
+                        }
+
+                        return $data;
+                    })
+                    ->mutateDataUsing(function (array $data, DvrRecordingRule $record): array {
+                        $channelId = $data['channel_id'] ?? null;
+
+                        if ($channelId !== null && (int) $channelId === 0) {
+                            $data['channel_id'] = null;
+                            $data['source_channel_id'] = $record->source_channel_id;
+                        } else {
+                            $data['source_channel_id'] = null;
+                        }
+
+                        return $data;
+                    }),
             ], position: RecordActionsPosition::BeforeCells)
             ->toolbarActions([
                 Actions\BulkActionGroup::make([
