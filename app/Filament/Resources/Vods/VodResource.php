@@ -998,12 +998,15 @@ class VodResource extends Resource implements CopilotResource
                 BulkAction::make('sync')
                     ->label(__('Sync VOD .strm files'))
                     ->action(function ($records) {
-                        foreach ($records as $record) {
-                            app('Illuminate\Contracts\Bus\Dispatcher')
-                                ->dispatch(new SyncVodStrmFiles(
-                                    channel: $record,
-                                ));
+                        $channelIds = collect($records)->pluck('id')->filter()->unique()->values()->all();
+                        if (empty($channelIds)) {
+                            return;
                         }
+                        app('Illuminate\Contracts\Bus\Dispatcher')
+                            ->dispatch(new SyncVodStrmFiles(
+                                user_id: auth()->id(),
+                                channel_ids: $channelIds,
+                            ));
                     })->after(function () {
                         Notification::make()
                             ->success()
