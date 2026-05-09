@@ -13,6 +13,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use Throwable;
 
 class ProbeVodStreams implements ShouldQueue
@@ -25,8 +26,16 @@ class ProbeVodStreams implements ShouldQueue
 
     public $deleteWhenMissingModels = true;
 
+    /**
+     * @param  bool  $onlyUnprobed  When true, only probe VOD channels and episodes that have
+     *                              never been probed (stream_stats_probed_at IS NULL). Defaults
+     *                              to true so auto-probe runs after sync stay incremental.
+     *                              Manual re-probe via UI bulk actions bypasses this filter
+     *                              by dispatching ProbeVodStreamsChunk directly with explicit IDs.
+     */
     public function __construct(
         public int $playlistId,
+        public bool $onlyUnprobed = true,
     ) {}
 
     public function handle(): void
@@ -43,16 +52,32 @@ class ProbeVodStreams implements ShouldQueue
         $probeTimeout = $playlist->probe_timeout ?? 15;
         $useBatching = (bool) ($playlist->probe_use_batching ?? false);
 
-        $vodChannelIds = Channel::where('playlist_id', $this->playlistId)
+        $vodChannelQuery = Channel::where('playlist_id', $this->playlistId)
             ->where('enabled', true)
             ->where('is_vod', true)
-            ->pluck('id')
-            ->toArray();
+            ->where('probe_enabled', true);
 
-        $episodeIds = Episode::where('playlist_id', $this->playlistId)
-            ->where('enabled', true)
-            ->pluck('id')
-            ->toArray();
+        if ($this->onlyUnprobed) {
+            $vodChannelQuery->whereNull('stream_stats_probed_at');
+        }
+
+        $vodChannelIds = $vodChannelQuery->pluck('id')->toArray();
+
+        $episodeQuery = Episode::where('playlist_id', $this->playlistId)
+            ->where('enabled', true);
+
+        // Episode probe columns ship in migration 2026_04_30_092715. Be defensive
+        // for installs where that migration has not yet run so the auto-probe job
+        // does not crash mid-sync.
+        if (Schema::hasColumn('episodes', 'probe_enabled')) {
+            $episodeQuery->where('probe_enabled', true);
+        }
+
+        if ($this->onlyUnprobed && Schema::hasColumn('episodes', 'stream_stats_probed_at')) {
+            $episodeQuery->whereNull('stream_stats_probed_at');
+        }
+
+        $episodeIds = $episodeQuery->pluck('id')->toArray();
 
         $totalChannels = count($vodChannelIds);
         $totalEpisodes = count($episodeIds);

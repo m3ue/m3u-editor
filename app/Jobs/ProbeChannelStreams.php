@@ -27,10 +27,16 @@ class ProbeChannelStreams implements ShouldQueue
     /**
      * @param  int|null  $playlistId  Probe all enabled live channels for this playlist
      * @param  array<int>|null  $channelIds  Probe specific channel IDs (overrides playlistId)
+     * @param  bool  $onlyUnprobed  When true and dispatching by playlistId, only probe channels
+     *                              that have never been probed (stream_stats_probed_at IS NULL).
+     *                              Defaults to true so auto-probe runs after sync stay incremental.
+     *                              Manual re-probe via the channel UI passes explicit channelIds
+     *                              and bypasses this filter.
      */
     public function __construct(
         public ?int $playlistId = null,
         public ?array $channelIds = null,
+        public bool $onlyUnprobed = true,
     ) {}
 
     /**
@@ -49,6 +55,10 @@ class ProbeChannelStreams implements ShouldQueue
                 ->where('enabled', true)
                 ->where('is_vod', false)
                 ->where('probe_enabled', true);
+
+            if ($this->onlyUnprobed) {
+                $query->whereNull('stream_stats_probed_at');
+            }
         } else {
             Log::warning('ProbeChannelStreams: No playlist or channel IDs provided.');
 
