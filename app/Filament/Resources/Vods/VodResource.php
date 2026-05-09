@@ -15,6 +15,7 @@ use App\Forms\Components\TmdbSearchResults;
 use App\Jobs\ChannelFindAndReplace;
 use App\Jobs\ChannelFindAndReplaceReset;
 use App\Jobs\FetchTmdbIds;
+use App\Jobs\ProbeManualComplete;
 use App\Jobs\ProbeVodStreamsChunk;
 use App\Jobs\ProcessVodChannels;
 use App\Jobs\SyncPlexDvrJob;
@@ -1378,19 +1379,11 @@ class VodResource extends Resource implements CopilotResource
                 BulkAction::make('probe-streams')
                     ->label(__('Probe Streams'))
                     ->action(function (Collection $records): void {
-                        $ids = $records->pluck('id')->all();
-                        $total = count($ids);
-                        $chunks = array_chunk($ids, 50);
-                        $last = count($chunks) - 1;
-                        foreach ($chunks as $i => $chunk) {
-                            dispatch(new ProbeVodStreamsChunk(
-                                channelIds: $chunk,
-                                probeTimeout: 15,
-                                notifyUserId: $i === $last ? auth()->id() : null,
-                                notifyLabel: $i === $last ? __('VOD stream probing') : null,
-                                notifyTotal: $i === $last ? $total : null,
-                            ));
-                        }
+                        ProbeManualComplete::dispatchBulk(
+                            notifyUserId: auth()->id(),
+                            notifyLabel: __('VOD stream probing'),
+                            channelIds: $records->pluck('id')->all(),
+                        );
                     })->after(function () {
                         Notification::make()
                             ->success()

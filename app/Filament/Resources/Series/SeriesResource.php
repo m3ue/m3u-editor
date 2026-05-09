@@ -14,7 +14,7 @@ use App\Filament\Resources\Series\Pages\ViewSeries;
 use App\Filament\Resources\Series\RelationManagers\EpisodesRelationManager;
 use App\Forms\Components\TmdbSearchResults;
 use App\Jobs\FetchTmdbIds;
-use App\Jobs\ProbeVodStreamsChunk;
+use App\Jobs\ProbeManualComplete;
 use App\Jobs\ProcessM3uImportSeriesEpisodes;
 use App\Jobs\SeriesFindAndReplace;
 use App\Jobs\SyncSeriesStrmFiles;
@@ -531,18 +531,11 @@ class SeriesResource extends Resource implements CopilotResource
                             ->pluck('id')
                             ->all();
                         if (! empty($episodeIds)) {
-                            $total = count($episodeIds);
-                            $chunks = array_chunk($episodeIds, 50);
-                            $last = count($chunks) - 1;
-                            foreach ($chunks as $i => $chunk) {
-                                dispatch(new ProbeVodStreamsChunk(
-                                    episodeIds: $chunk,
-                                    probeTimeout: 15,
-                                    notifyUserId: $i === $last ? auth()->id() : null,
-                                    notifyLabel: $i === $last ? __('Series stream probing') : null,
-                                    notifyTotal: $i === $last ? $total : null,
-                                ));
-                            }
+                            ProbeManualComplete::dispatchBulk(
+                                notifyUserId: auth()->id(),
+                                notifyLabel: __('Series stream probing'),
+                                episodeIds: $episodeIds,
+                            );
                         }
                     })->after(function () {
                         Notification::make()
@@ -953,18 +946,11 @@ class SeriesResource extends Resource implements CopilotResource
                             ->pluck('id')
                             ->all();
                         if (! empty($episodeIds)) {
-                            $total = count($episodeIds);
-                            $chunks = array_chunk($episodeIds, 50);
-                            $last = count($chunks) - 1;
-                            foreach ($chunks as $i => $chunk) {
-                                dispatch(new ProbeVodStreamsChunk(
-                                    episodeIds: $chunk,
-                                    probeTimeout: 15,
-                                    notifyUserId: $i === $last ? auth()->id() : null,
-                                    notifyLabel: $i === $last ? __('Series stream probing') : null,
-                                    notifyTotal: $i === $last ? $total : null,
-                                ));
-                            }
+                            ProbeManualComplete::dispatchBulk(
+                                notifyUserId: auth()->id(),
+                                notifyLabel: __('Series stream probing'),
+                                episodeIds: $episodeIds,
+                            );
                         }
                     })->after(function () {
                         Notification::make()

@@ -3,7 +3,7 @@
 namespace App\Filament\Resources\Series\RelationManagers;
 
 use App\Filament\Tables\ProbeStatusColumn;
-use App\Jobs\ProbeVodStreamsChunk;
+use App\Jobs\ProbeManualComplete;
 use Filament\Actions;
 use Filament\Actions\Action;
 use Filament\Actions\ViewAction;
@@ -254,19 +254,11 @@ class EpisodesRelationManager extends RelationManager
                     Actions\BulkAction::make('probe-streams')
                         ->label(__('Probe Streams'))
                         ->action(function (Collection $records): void {
-                            $ids = $records->pluck('id')->all();
-                            $total = count($ids);
-                            $chunks = array_chunk($ids, 50);
-                            $last = count($chunks) - 1;
-                            foreach ($chunks as $i => $chunk) {
-                                dispatch(new ProbeVodStreamsChunk(
-                                    episodeIds: $chunk,
-                                    probeTimeout: 15,
-                                    notifyUserId: $i === $last ? auth()->id() : null,
-                                    notifyLabel: $i === $last ? __('Episode stream probing') : null,
-                                    notifyTotal: $i === $last ? $total : null,
-                                ));
-                            }
+                            ProbeManualComplete::dispatchBulk(
+                                notifyUserId: auth()->id(),
+                                notifyLabel: __('Episode stream probing'),
+                                episodeIds: $records->pluck('id')->all(),
+                            );
                         })->after(function () {
                             Notification::make()
                                 ->success()
