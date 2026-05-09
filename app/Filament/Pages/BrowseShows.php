@@ -380,7 +380,7 @@ class BrowseShows extends Page
         $this->createSeriesRule($title, [
             'series_mode' => DvrSeriesMode::All,
             'priority' => 50,
-            'source_channel_id' => $this->sourceChannelId,
+            'source_channel_id' => $this->resolveSourceChannelId($title),
         ]);
     }
 
