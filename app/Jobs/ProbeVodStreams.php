@@ -25,8 +25,16 @@ class ProbeVodStreams implements ShouldQueue
 
     public $deleteWhenMissingModels = true;
 
+    /**
+     * @param  bool  $onlyUnprobed  When true, only probe VOD channels and episodes that have
+     *                              never been probed (stream_stats_probed_at IS NULL). Defaults
+     *                              to true so auto-probe runs after sync stay incremental.
+     *                              Manual re-probe via UI bulk actions bypasses this filter
+     *                              by dispatching ProbeVodStreamsChunk directly with explicit IDs.
+     */
     public function __construct(
         public int $playlistId,
+        public bool $onlyUnprobed = true,
     ) {}
 
     public function handle(): void
@@ -43,16 +51,26 @@ class ProbeVodStreams implements ShouldQueue
         $probeTimeout = $playlist->probe_timeout ?? 15;
         $useBatching = (bool) ($playlist->probe_use_batching ?? false);
 
-        $vodChannelIds = Channel::where('playlist_id', $this->playlistId)
+        $vodChannelQuery = Channel::where('playlist_id', $this->playlistId)
             ->where('enabled', true)
             ->where('is_vod', true)
-            ->pluck('id')
-            ->toArray();
+            ->where('probe_enabled', true);
 
-        $episodeIds = Episode::where('playlist_id', $this->playlistId)
+        if ($this->onlyUnprobed) {
+            $vodChannelQuery->whereNull('stream_stats_probed_at');
+        }
+
+        $vodChannelIds = $vodChannelQuery->pluck('id')->toArray();
+
+        $episodeQuery = Episode::where('playlist_id', $this->playlistId)
             ->where('enabled', true)
-            ->pluck('id')
-            ->toArray();
+            ->where('probe_enabled', true);
+
+        if ($this->onlyUnprobed) {
+            $episodeQuery->whereNull('stream_stats_probed_at');
+        }
+
+        $episodeIds = $episodeQuery->pluck('id')->toArray();
 
         $totalChannels = count($vodChannelIds);
         $totalEpisodes = count($episodeIds);
