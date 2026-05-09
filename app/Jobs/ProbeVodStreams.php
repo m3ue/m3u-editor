@@ -64,14 +64,8 @@ class ProbeVodStreams implements ShouldQueue
         $vodChannelIds = $vodChannelQuery->pluck('id')->toArray();
 
         $episodeQuery = Episode::where('playlist_id', $this->playlistId)
-            ->where('enabled', true);
-
-        // Episode probe columns ship in migration 2026_04_30_092715. Be defensive
-        // for installs where that migration has not yet run so the auto-probe job
-        // does not crash mid-sync.
-        if (Schema::hasColumn('episodes', 'probe_enabled')) {
-            $episodeQuery->where('probe_enabled', true);
-        }
+            ->where('enabled', true)
+            ->where('probe_enabled', true);
 
         if ($this->onlyUnprobed && Schema::hasColumn('episodes', 'stream_stats_probed_at')) {
             $episodeQuery->whereNull('stream_stats_probed_at');
