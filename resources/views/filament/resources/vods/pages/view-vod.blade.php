@@ -300,6 +300,12 @@
                     </div>
                 </div>
             </div>
+
+            {{-- Probed stream info (ffprobe) --}}
+            <div class="mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
+                <h3 class="text-sm font-semibold mb-2">{{ __('Probed Stream Info') }}</h3>
+                @include('filament.partials.probed-stream-info', ['record' => $record])
+            </div>
         </x-filament::section>
     </div>
 </x-filament-panels::page>

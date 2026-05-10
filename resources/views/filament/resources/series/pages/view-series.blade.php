@@ -202,6 +202,9 @@
         </div>
     @endif
 
+    {{-- Probed Stream Info (aggregated across episodes) --}}
+    @include('filament.partials.probed-stream-info-series', ['record' => $record])
+
     {{-- Seasons Grid --}}
     @php
         // Fetch all episodes with season relationship, ordered by season and episode number
@@ -341,6 +344,26 @@
                                                 </span>
                                             @endif
                                         </div>
+
+                                        @if($episode->stream_stats_probed_at)
+                                            @php
+                                                $epStats = \App\Services\StreamStatsService::normalize(is_array($episode->stream_stats) ? $episode->stream_stats : []);
+                                                $epQuality = \App\Services\StreamStatsService::detectQuality($epStats);
+                                                $epHdr = \App\Services\StreamStatsService::detectHdr($epStats);
+                                                $epVideo = \App\Services\StreamStatsService::detectVideoCodec($epStats);
+                                                $epAudio = \App\Services\StreamStatsService::detectAudio($epStats);
+                                                $badges = array_filter([$epQuality, $epHdr, $epVideo, $epAudio]);
+                                            @endphp
+                                            @if(! empty($badges))
+                                                <div class="flex flex-wrap gap-1 pt-1">
+                                                    @foreach($badges as $badge)
+                                                        <span class="inline-block text-[10px] px-1.5 py-0.5 rounded bg-gray-200 dark:bg-gray-700">
+                                                            {{ $badge }}
+                                                        </span>
+                                                    @endforeach
+                                                </div>
+                                            @endif
+                                        @endif
                                     </div>
                                 </div>
                             @endforeach
