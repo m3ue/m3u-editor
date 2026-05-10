@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Models\Channel;
 use App\Models\Episode;
 use App\Models\Playlist;
+use App\Models\User;
 use Carbon\Carbon;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -21,27 +22,36 @@ class ProbeVodStreamsComplete implements ShouldQueue
     public $deleteWhenMissingModels = true;
 
     public function __construct(
-        public int $playlistId,
+        public ?int $playlistId,
         public int $total,
         public Carbon $start,
+        public ?array $channelIds = null,
+        public ?array $episodeIds = null,
+        public ?int $notifyUserId = null,
     ) {}
 
     public function handle(): void
     {
-        $probedChannels = Channel::where('playlist_id', $this->playlistId)
-            ->where('stream_stats_probed_at', '>=', $this->start)
-            ->count();
+        $channelQuery = Channel::query()->where('stream_stats_probed_at', '>=', $this->start);
+        $episodeQuery = Episode::query()->where('stream_stats_probed_at', '>=', $this->start);
 
-        $probedEpisodes = Episode::where('playlist_id', $this->playlistId)
-            ->where('stream_stats_probed_at', '>=', $this->start)
-            ->count();
+        if ($this->playlistId) {
+            $channelQuery->where('playlist_id', $this->playlistId);
+            $episodeQuery->where('playlist_id', $this->playlistId);
+        } else {
+            $channelQuery->whereIn('id', $this->channelIds ?? []);
+            $episodeQuery->whereIn('id', $this->episodeIds ?? []);
+        }
 
-        $probed = $probedChannels + $probedEpisodes;
+        $probed = $channelQuery->count() + $episodeQuery->count();
         $failed = max(0, $this->total - $probed);
 
         Log::info("ProbeVodStreams: Completed. Probed: {$probed}, Failed: {$failed}, Total: {$this->total}");
 
-        $user = Playlist::find($this->playlistId)?->user;
+        $user = $this->playlistId
+            ? Playlist::find($this->playlistId)?->user
+            : User::find($this->notifyUserId);
+
         if (! $user) {
             return;
         }

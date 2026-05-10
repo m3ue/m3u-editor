@@ -4,6 +4,7 @@ namespace App\Filament\Resources\Series\RelationManagers;
 
 use App\Filament\Tables\ProbeStatusColumn;
 use App\Jobs\ProbeVodStreamsChunk;
+use App\Jobs\ProbeVodStreamsComplete;
 use Filament\Actions;
 use Filament\Actions\Action;
 use Filament\Actions\ViewAction;
@@ -21,6 +22,7 @@ use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Facades\Bus;
 
 class EpisodesRelationManager extends RelationManager
 {
@@ -255,18 +257,25 @@ class EpisodesRelationManager extends RelationManager
                         ->label(__('Probe Streams'))
                         ->action(function (Collection $records): void {
                             $ids = $records->pluck('id')->all();
-                            $total = count($ids);
-                            $chunks = array_chunk($ids, 50);
-                            $last = count($chunks) - 1;
-                            foreach ($chunks as $i => $chunk) {
-                                dispatch(new ProbeVodStreamsChunk(
-                                    episodeIds: $chunk,
-                                    probeTimeout: 15,
-                                    notifyUserId: $i === $last ? auth()->id() : null,
-                                    notifyLabel: $i === $last ? __('Episode stream probing') : null,
-                                    notifyTotal: $i === $last ? $total : null,
-                                ));
-                            }
+                            $start = now();
+
+                            $chunks = collect(array_chunk($ids, 50))
+                                ->map(fn ($chunk) => new ProbeVodStreamsChunk(episodeIds: $chunk, probeTimeout: 15))
+                                ->all();
+
+                            Bus::chain([
+                                ...$chunks,
+                                new ProbeVodStreamsComplete(
+                                    playlistId: null,
+                                    total: count($ids),
+                                    start: $start,
+                                    episodeIds: $ids,
+                                    notifyUserId: auth()->id(),
+                                ),
+                            ])
+                                ->onConnection('redis')
+                                ->onQueue('import')
+                                ->dispatch();
                         })->after(function () {
                             Notification::make()
                                 ->success()
