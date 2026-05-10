@@ -16,6 +16,7 @@ use App\Jobs\ChannelFindAndReplace;
 use App\Jobs\ChannelFindAndReplaceReset;
 use App\Jobs\FetchTmdbIds;
 use App\Jobs\ProbeVodStreamsChunk;
+use App\Jobs\ProbeVodStreamsComplete;
 use App\Jobs\ProcessVodChannels;
 use App\Jobs\SyncPlexDvrJob;
 use App\Jobs\SyncVodStrmFiles;
@@ -73,6 +74,7 @@ use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\HtmlString;
 use Illuminate\Support\Str;
@@ -1382,18 +1384,25 @@ class VodResource extends Resource implements CopilotResource
                     ->label(__('Probe Streams'))
                     ->action(function (Collection $records): void {
                         $ids = $records->pluck('id')->all();
-                        $total = count($ids);
-                        $chunks = array_chunk($ids, 50);
-                        $last = count($chunks) - 1;
-                        foreach ($chunks as $i => $chunk) {
-                            dispatch(new ProbeVodStreamsChunk(
-                                channelIds: $chunk,
-                                probeTimeout: 15,
-                                notifyUserId: $i === $last ? auth()->id() : null,
-                                notifyLabel: $i === $last ? __('VOD stream probing') : null,
-                                notifyTotal: $i === $last ? $total : null,
-                            ));
-                        }
+                        $start = now();
+
+                        $chunks = collect(array_chunk($ids, 50))
+                            ->map(fn ($chunk) => new ProbeVodStreamsChunk(channelIds: $chunk, probeTimeout: 15))
+                            ->all();
+
+                        Bus::chain([
+                            ...$chunks,
+                            new ProbeVodStreamsComplete(
+                                playlistId: null,
+                                total: count($ids),
+                                start: $start,
+                                channelIds: $ids,
+                                notifyUserId: auth()->id(),
+                            ),
+                        ])
+                            ->onConnection('redis')
+                            ->onQueue('import')
+                            ->dispatch();
                     })->after(function () {
                         Notification::make()
                             ->success()
