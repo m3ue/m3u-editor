@@ -139,7 +139,7 @@ it('detects hdr through filename generation', function () {
     ]);
 
     expect((new SerieFileNameService)->generateEpisodeFileName($episode, $setting))
-        ->toBe('Show [HDR]');
+        ->toBe('Show [HDR10]');
 });
 
 it('generates full path with all components', function () {
@@ -179,7 +179,7 @@ it('generates episode extras bracket from stream stats', function () {
 
     $extras = (new SerieFileNameService)->generateEpisodeExtras($episode, $setting);
 
-    expect($extras)->toBe('[1080p H.265 E-AC-3 5.1 HDR]');
+    expect($extras)->toBe('[1080p H.265 E-AC-3 5.1 HDR10]');
 });
 
 it('returns empty episode extras when stream_stats are absent', function () {
