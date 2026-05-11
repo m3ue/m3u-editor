@@ -4,7 +4,8 @@
      */
     use App\Services\StreamStatsService;
 
-    $probedEpisodes = $record->episodes()
+    $probedEpisodes = $record
+        ->episodes()
         ->whereNotNull('stream_stats_probed_at')
         ->get(['id', 'stream_stats', 'stream_stats_probed_at']);
 
@@ -13,9 +14,18 @@
 
     $aggregator = [];
     $fieldsToTrack = [
-        'video_codec', 'audio_codec', 'resolution', 'video_profile', 'pix_fmt',
-        'color_transfer', 'color_space', 'color_primaries', 'codec_tag_string',
-        'audio_channels', 'audio_profile', 'bit_depth',
+        'video_codec',
+        'audio_codec',
+        'resolution',
+        'video_profile',
+        'pix_fmt',
+        'color_transfer',
+        'color_space',
+        'color_primaries',
+        'codec_tag_string',
+        'audio_channels',
+        'audio_profile',
+        'bit_depth',
     ];
     $hdrValues = [];
     $qualityValues = [];
@@ -58,11 +68,10 @@
 
 @if ($probedCount > 0)
     <div class="mb-6">
-        <x-filament::section
-            icon="heroicon-o-cog-6-tooth"
-            :heading="__('Probed Stream Info (Series Aggregate)')"
-            :description="__(':probed of :total episodes probed. Mixed values mean episodes differ.', ['probed' => $probedCount, 'total' => $totalEpisodes])"
-            collapsible
+        <x-filament::section icon="heroicon-o-cog-6-tooth" :heading="__('Probed Stream Info (Series Aggregate)')" :description="__(':probed of :total episodes probed. Mixed values mean episodes differ.', [
+            'probed' => $probedCount,
+            'total' => $totalEpisodes,
+        ])" collapsible compact
             collapsed>
             <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
                 @foreach ($rows as $row)

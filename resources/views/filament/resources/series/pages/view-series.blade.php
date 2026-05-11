@@ -280,9 +280,9 @@
                                     $info = $episode->info ?? [];
                                 @endphp
                                 <div
-                                    class="bg-white dark:bg-gray-800 rounded-lg shadow-sm ring-1 ring-gray-200 dark:ring-gray-700 overflow-hidden {{ !$episode->enabled ? 'opacity-50' : '' }}">
+                                    class="bg-white dark:bg-gray-800 rounded-lg shadow-sm ring-1 ring-gray-200 dark:ring-gray-700 flex flex-col {{ !$episode->enabled ? 'opacity-50' : '' }}">
                                     {{-- Episode Thumbnail --}}
-                                    <div class="relative aspect-video overflow-hidden bg-gray-100 dark:bg-gray-700">
+                                    <div class="relative aspect-video overflow-hidden rounded-t-lg bg-gray-100 dark:bg-gray-700">
                                         @if ($episodeCover)
                                             <img src="{{ $episodeCover }}" alt="{{ $episode->title }}"
                                                 class="w-full h-full object-cover" />
