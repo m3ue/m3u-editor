@@ -63,7 +63,7 @@ services:
     volumes:
       - redis-data:/data
     restart: unless-stopped
-    command: redis-server --port ${REDIS_PORT:-6379} --requirepass ${REDIS_PASSWORD:-changeme} --appendonly no --save "" --maxmemory 256mb --maxmemory-policy allkeys-lru
+    command: redis-server --port ${REDIS_PORT:-6379} --requirepass ${REDIS_PASSWORD:-changeme} --appendonly no --save "" --maxmemory 256mb --maxmemory-policy allkeys-lru --loglevel warning
     networks:
       - m3u-network
     healthcheck:

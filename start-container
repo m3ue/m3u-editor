@@ -24,7 +24,9 @@ export PG_DATABASE="${PG_DATABASE:-m3ue}"
 export PG_USER="${PG_USER:-root}"
 export PG_PASSWORD="${PG_PASSWORD:-root}"
 export PG_PORT="${PG_PORT:-5432}" # Default 5432
-export PG_MAX_WAIT_SECONDS="${PG_MAX_WAIT_SECONDS:-60}" # Default 60
+# Tells supervisord whether to start [program:postgresql] and [program:db-init].
+# Set to "true" below when local embedded Postgres is initialised.
+export POSTGRES_LOCAL_ENABLED="false"
 
 # Network Broadcast Worker
 # Enables continuous broadcasting for Networks (pseudo-TV channels)
@@ -432,171 +434,47 @@ fi
 php artisan sqlite:wal-enable jobs
 echo ""
 
-# If postgres is enabled, start it
+# If local embedded Postgres is enabled, initialise the data directory.
+# Role/database setup and migrations are deferred to [program:db-init] in supervisord.
 if [ "${ENABLE_POSTGRES}" = "true" ]; then
-  # Check if DB_HOST is set from the environment (passed by Docker)
-  # and is not localhost or 127.0.0.1, indicating an external DB.
-  # Note: Ensure DB_HOST is actually passed to the container's environment.
-  # Your docker-compose.yml shows it is.
   if [ -n "${DB_HOST}" ] && [ "${DB_HOST}" != "localhost" ] && [ "${DB_HOST}" != "127.0.0.1" ]; then
-    echo "📡 Using external Postgres server configured at ${DB_HOST}. Skipping local Postgres setup."
-    # Even if external, ensure the log file directory exists for other potential logs
+    echo "📡 External Postgres configured at ${DB_HOST}. Skipping local data directory setup."
     [ ! -f "${postgres_log_file}" ] && touch "${postgres_log_file}"
-    echo "" > "${postgres_log_file}" # Clear it or add a note about external DB
-    echo "INFO: Configured to use external PostgreSQL at ${DB_HOST}:${DB_PORT:-5432}" >> "${postgres_log_file}"
+    echo "" > "${postgres_log_file}"
+    echo "INFO: Using external PostgreSQL at ${DB_HOST}:${DB_PORT:-5432}" >> "${postgres_log_file}"
     chown $WWWUSER:$WWWGROUP "${postgres_log_file}"
   else
-    echo "📡 Starting local Postgres server setup..."
-
-    # Create log file for local Postgres
+    echo "📡 Preparing local Postgres data directory..."
     [ ! -f "${postgres_log_file}" ] && touch "${postgres_log_file}"
     echo "" > "${postgres_log_file}"
     chown $WWWUSER:$WWWGROUP "${postgres_log_file}"
 
-    # Make sure permissions are correct for $PGDATA *if it exists*
-    # These lines were causing issues if $PGDATA (e.g. /var/lib/postgresql/data) didn't exist.
-    # initdb is responsible for creating $PGDATA if it's not there.
-    # The parent directory /var/lib/postgresql is created in Dockerfile and chowned.
     if [ -d "$PGDATA" ]; then
-      echo "- $PGDATA directory exists. Ensuring correct permissions..."
       chown -R $WWWUSER:$WWWGROUP "$PGDATA"
       chmod -R 700 "$PGDATA"
-    else
-      echo "- $PGDATA does not exist. 'initdb' will attempt to create it."
     fi
 
-    # Ensure data & run initdb on first-run
     if [ ! -f "$PGDATA/PG_VERSION" ]; then
       pwfile="/tmp/.pg_pwfile"
       echo "$PG_PASSWORD" > "$pwfile"
       chown $WWWUSER:$WWWGROUP "$pwfile" && chmod 600 "$pwfile"
-      echo "- Initializing local Postgres database in $PGDATA (User: $WWWUSER, DB: $PG_DATABASE)..."
-      # Ensure the parent directory of $PGDATA exists and is writable by $WWWUSER
-      # Dockerfile creates and chowns /var/lib/postgresql to $WWWUSER:$WWWGROUP
+      echo "- Initializing Postgres data directory in $PGDATA..."
       if ! su-exec $WWWUSER initdb --username=postgres --pwfile="$pwfile" -D "$PGDATA"; then
-        echo "FATAL: Failed to initialize local Postgres database. Check permissions on /var/lib/postgresql and logs at ${postgres_log_file}."
+        echo "FATAL: initdb failed. Check permissions on /var/lib/postgresql."
         exit 1
       fi
       rm -f "$pwfile"
-      echo "- Local Postgres database initialized."
+      echo "- Data directory initialized."
     else
-      echo "- Local Postgres database already initialized at $PGDATA."
+      echo "- Data directory already exists at $PGDATA."
     fi
 
-    # Create socket dir and start Postgres
     mkdir -p /run/postgresql && chown $WWWUSER:$WWWGROUP /run/postgresql
-    echo "- Starting local Postgres process..."
-    su-exec $WWWUSER postgres -D "$PGDATA" -h 0.0.0.0 -p "$PG_PORT" >> "${postgres_log_file}" 2>&1 &
-
-    # Wait until it's ready
-    dots=""
-    max_wait_seconds=${PG_MAX_WAIT_SECONDS}
-    wait_interval=1
-    elapsed_wait=0
-    echo "- Waiting for local Postgres to be ready (max ${max_wait_seconds}s)..."
-    until su-exec $WWWUSER pg_isready -h localhost -p "$PG_PORT" --quiet; do
-      dots+="."
-      echo "⏳ Waiting for local Postgres${dots}"
-      sleep $wait_interval
-      elapsed_wait=$((elapsed_wait + wait_interval))
-      if [ $elapsed_wait -ge $max_wait_seconds ]; then
-        echo "FATAL: Local Postgres failed to start within ${max_wait_seconds} seconds. Check logs: ${postgres_log_file}"
-        exit 1
-      fi
-    done
-    echo "✅ Local Postgres is ready."
+    export POSTGRES_LOCAL_ENABLED="true"
+    echo "✅ Local Postgres data directory ready. Supervisord will start and manage it."
     echo ""
-
-    # Idempotent role + database creation for local postgres
-    echo "- Configuring local Postgres roles and database (User: ${PG_USER}, DB: ${PG_DATABASE})..."
-    # Note: PG_USER, PG_PASSWORD, PG_DATABASE are used here for the local instance.
-    # For external DB, these would be DB_USER, DB_PASSWORD, DB_DATABASE from .env
-    su-exec $WWWUSER psql \
-    --quiet \
-    --tuples-only \
-    --no-align \
-    -U postgres \
-    -h localhost -p "$PG_PORT" \
-    <<-EOSQL
-DO \$\$
-BEGIN
-  -- ensure your app user exists and has the right password
-  IF NOT EXISTS (
-    SELECT FROM pg_catalog.pg_roles WHERE rolname = '${PG_USER}'
-  ) THEN
-    CREATE ROLE "${PG_USER}" LOGIN PASSWORD '${PG_PASSWORD}';
-  ELSE
-    ALTER ROLE "${PG_USER}" WITH PASSWORD '${PG_PASSWORD}';
-  END IF;
-
-  -- ensure the postgres superuser also has the password (using PG_PASSWORD for local setup)
-  ALTER ROLE postgres WITH PASSWORD '${PG_PASSWORD}';
-END
-\$\$;
-EOSQL
-
-    # If the database exists but is owned by someone else, reassign it (for local postgres)
-    if su-exec $WWWUSER psql -U postgres -h localhost -p "$PG_PORT" --quiet -tAc "SELECT 1 FROM pg_database WHERE datname='${PG_DATABASE}'" | grep -q 1; then
-      echo "- Database '${PG_DATABASE}' exists. Ensuring correct owner ('${PG_USER}')."
-      su-exec $WWWUSER psql -U postgres -h localhost -p "$PG_PORT" --quiet <<-EOSQL
--- change the database owner
-ALTER DATABASE "${PG_DATABASE}" OWNER TO "${PG_USER}";
-
--- change ownership of all schemas and tables in that DB
-\c "${PG_DATABASE}" postgres
-DO \$\$
-DECLARE
-    tbl record;
-BEGIN
-    -- first change schema owner
-    EXECUTE 'ALTER SCHEMA public OWNER TO "${PG_USER}"';
-    -- then change each table
-    FOR tbl IN
-    SELECT table_schema, table_name
-        FROM information_schema.tables
-        WHERE table_schema = 'public'
-    LOOP
-    EXECUTE format(
-        'ALTER TABLE %I.%I OWNER TO "${PG_USER}"',
-        tbl.table_schema, tbl.table_name
-    );
-    END LOOP;
-END
-\$\$;
-EOSQL
-    else
-      echo "- Database '${PG_DATABASE}' does not exist. Creating it with owner '${PG_USER}'."
-      su-exec $WWWUSER psql -U postgres -h localhost -p "$PG_PORT" --quiet -v ON_ERROR_STOP=1 <<-EOSQL
-CREATE DATABASE "${PG_DATABASE}"
-  OWNER = "${PG_USER}"
-  ENCODING = 'UTF8'
-  LC_COLLATE = 'C'
-  LC_CTYPE = 'C.UTF-8'
-  TEMPLATE = template0;
-EOSQL
-    fi
-
-    # Create extensions in the database (after database is ensured to exist)
-    echo "- Creating PostgreSQL extensions..."
-    su-exec $WWWUSER psql \
-    --quiet \
-    -U postgres \
-    -h localhost -p "$PG_PORT" \
-    -d "${PG_DATABASE}" \
-    <<-EOSQL
--- Create extensions if they don't exist
-CREATE EXTENSION IF NOT EXISTS fuzzystrmatch;
-CREATE EXTENSION IF NOT EXISTS pg_trgm;
-EOSQL
-    echo "✅ Local Postgres setup and configuration complete."
   fi
 fi
-
-# Run migrations
-echo "💾 Running migrations..."
-php artisan migrate --force
-# Jobs database uses a separate SQLite file for queue job tracking (see config/database.php)
-php artisan migrate --database=jobs --force
 
 # Register webhook for real-time cache invalidation
 # This works for both embedded and external m3u-proxy modes
