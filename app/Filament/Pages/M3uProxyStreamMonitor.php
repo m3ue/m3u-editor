@@ -409,6 +409,29 @@ class M3uProxyStreamMonitor extends Page implements HasActions, HasSchemas
                                 $model['media_info'] = $merged;
                             }
 
+                            // Encoder-side counterpart describing what ffmpeg is producing
+                            // (target codec/resolution/container plus the live progress
+                            // numbers). Only present when the proxy is actually transcoding
+                            // — for plain HTTP-proxy streams this stays empty and the row
+                            // never renders.
+                            $liveOutputMediaInfo = $stream['output_media_info'] ?? [];
+                            if (! empty($liveOutputMediaInfo)) {
+                                $output = array_filter([
+                                    'resolution' => $liveOutputMediaInfo['resolution'] ?? null,
+                                    'video_codec' => $liveOutputMediaInfo['video_codec'] ?? null,
+                                    'fps' => $liveOutputMediaInfo['fps'] ?? null,
+                                    'bitrate_kbps' => $liveOutputMediaInfo['bitrate_kbps'] ?? null,
+                                    'audio_codec' => $liveOutputMediaInfo['audio_codec'] ?? null,
+                                    'audio_channels' => $liveOutputMediaInfo['audio_channels'] ?? null,
+                                    'container' => $liveOutputMediaInfo['container'] ?? null,
+                                    'speed' => $liveOutputMediaInfo['speed'] ?? null,
+                                ], fn ($v) => $v !== null && $v !== '');
+
+                                if (! empty($output)) {
+                                    $model['output_media_info'] = $output;
+                                }
+                            }
+
                             // When the proxy is on a failover URL, identify which configured
                             // failover channel is currently in use. URL match handles dynamic
                             // resolver mode (where current_failover_index doesn't necessarily

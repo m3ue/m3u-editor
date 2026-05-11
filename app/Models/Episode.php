@@ -330,6 +330,13 @@ class Episode extends Model
                             'channel_layout' => $stream['channel_layout'] ?? null,
                             'bits_per_raw_sample' => $stream['bits_per_raw_sample'] ?? null,
                             'refs' => $stream['refs'] ?? null,
+                            'pix_fmt' => $stream['pix_fmt'] ?? null,
+                            'color_transfer' => $stream['color_transfer'] ?? null,
+                            'color_space' => $stream['color_space'] ?? null,
+                            'color_primaries' => $stream['color_primaries'] ?? null,
+                            'color_range' => $stream['color_range'] ?? null,
+                            'codec_tag_string' => $stream['codec_tag_string'] ?? null,
+                            'side_data_list' => $stream['side_data_list'] ?? null,
                             'tags' => $stream['tags'] ?? [],
                         ];
                     }
