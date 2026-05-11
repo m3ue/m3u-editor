@@ -76,7 +76,7 @@ class UpdateXtreamStats implements ShouldBeUnique, ShouldQueue
             return $xtream ? ($xtream->userInfo(timeout: 3) ?: []) : [];
         } catch (\Exception $e) {
             Cache::delete($this->cacheKey); // Allow retry on next job run
-            Log::error("Failed Xtream fetch for {$type} {$playlist->id}", ['exception' => $e]);
+            Log::error("Failed Xtream fetch for {$type} {$playlist->id}", ['error' => $e->getMessage()]);
 
             return [];
         }
