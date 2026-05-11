@@ -57,9 +57,42 @@ class StreamStatsService
             'color_transfer' => $video['color_transfer'] ?? null,
             'color_space' => $video['color_space'] ?? null,
             'color_primaries' => $video['color_primaries'] ?? null,
+            'color_range' => $video['color_range'] ?? null,
+            'pix_fmt' => $video['pix_fmt'] ?? null,
+            'codec_tag_string' => $video['codec_tag_string'] ?? null,
+            'side_data_list' => $video['side_data_list'] ?? null,
+            'bit_depth' => self::extractBitDepth($video),
             'audio_codec' => $audio['codec_name'] ?? null,
+            'audio_profile' => $audio['profile'] ?? null,
             'audio_channels' => $audio['channels'] ?? $audio['channel_layout'] ?? null,
         ];
+    }
+
+    /**
+     * Try to derive bit depth from a video stream entry.
+     *
+     * @param  array<string, mixed>|null  $video
+     */
+    private static function extractBitDepth(?array $video): ?int
+    {
+        if (! is_array($video)) {
+            return null;
+        }
+
+        $bps = $video['bits_per_raw_sample'] ?? null;
+        if (is_numeric($bps) && (int) $bps > 0) {
+            return (int) $bps;
+        }
+
+        $pix = strtolower((string) ($video['pix_fmt'] ?? ''));
+        if ($pix !== '' && preg_match('/(\d{1,2})(?:le|be)?p?$/', $pix, $m) === 1) {
+            $depth = (int) $m[1];
+            if ($depth >= 8 && $depth <= 16) {
+                return $depth;
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -147,18 +180,53 @@ class StreamStatsService
         $colorTransfer = Str::of(self::stringValue($stats['color_transfer'] ?? null))->lower();
         $colorSpace = Str::of(self::stringValue($stats['color_space'] ?? null))->lower();
         $colorPrimaries = Str::of(self::stringValue($stats['color_primaries'] ?? null))->lower();
+        $codecTag = Str::of(self::stringValue($stats['codec_tag_string'] ?? null))->lower();
 
-        $combined = Str::of($hdr.' '.$profile.' '.$colorTransfer.' '.$colorSpace.' '.$colorPrimaries);
+        // ffprobe encodes HDR side data (mastering display, content light level,
+        // dynamic metadata, Dolby Vision configuration) as a list under side_data_list.
+        $sideDataDump = '';
+        $sideData = $stats['side_data_list'] ?? null;
+        if (is_array($sideData)) {
+            $flat = [];
+            array_walk_recursive($sideData, static function ($value) use (&$flat) {
+                if (is_scalar($value)) {
+                    $flat[] = (string) $value;
+                }
+            });
+            $sideDataDump = strtolower(implode(' ', $flat));
+        }
 
-        if ($combined->contains(['dolby vision', 'dovi', 'dvhe'])) {
+        $combined = Str::of($hdr.' '.$profile.' '.$colorTransfer.' '.$colorSpace.' '.$colorPrimaries.' '.$codecTag.' '.$sideDataDump);
+
+        // Dolby Vision: dvh1/dvhe codec tag, profile string, or DOVI configuration record.
+        if (
+            $combined->contains(['dolby vision', 'dovi', 'dvhe', 'dvh1', 'dolby_vision', 'dovi configuration'])
+            || $codecTag->is(['dvh1', 'dvhe', 'dav1', 'dva1'])
+        ) {
             return 'DV';
         }
 
-        if ($combined->contains(['hdr10+', 'smpte2094'])) {
+        // HDR10+: SMPTE2094-40 dynamic metadata.
+        if ($combined->contains(['hdr10+', 'hdr10plus', 'smpte2094-40', 'smpte 2094-40', 'smpte2094_40', 'st2094-40'])) {
             return 'HDR10+';
         }
 
-        if ($combined->contains(['hdr', 'smpte2084', 'arib-std-b67', 'hlg', 'bt2020'])) {
+        // HDR10: PQ transfer (smpte2084) plus mastering metadata. We emit "HDR10"
+        // explicitly when the mastering display / content light level side data is
+        // present, otherwise fall back to generic "HDR".
+        $hasPq = $colorTransfer->contains(['smpte2084', 'st2084']);
+        $hasMastering = str_contains($sideDataDump, 'mastering display')
+            || str_contains($sideDataDump, 'content light level');
+
+        if ($hasPq && $hasMastering) {
+            return 'HDR10';
+        }
+
+        if ($combined->contains(['hdr10'])) {
+            return 'HDR10';
+        }
+
+        if ($combined->contains(['hdr', 'smpte2084', 'st2084', 'arib-std-b67', 'hlg', 'bt2020'])) {
             return 'HDR';
         }
 
