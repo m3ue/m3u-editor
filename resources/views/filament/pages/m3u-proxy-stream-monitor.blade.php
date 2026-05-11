@@ -294,136 +294,118 @@
                                 </div>
                             </div>
 
-                            @php
-                                $mediaInfo = $stream['model']['media_info'] ?? null;
-                                $outputMediaInfo = $stream['model']['output_media_info'] ?? null;
-                            @endphp
-                            @if ($mediaInfo || $outputMediaInfo)
-                                <!-- Stream stats: input row always shown when present, output row added when transcoding -->
+                            @php $mediaInfo = $stream['model']['media_info'] ?? null; @endphp
+                            @if ($mediaInfo)
+                                <!-- Media Info Row -->
                                 <div
-                                    class="mb-4 rounded-lg border border-gray-200 dark:border-gray-700 divide-y divide-gray-200 dark:divide-gray-700 overflow-hidden">
-                                    @if ($mediaInfo)
-                                        <div
-                                            class="flex flex-wrap items-center gap-2 p-3 bg-gray-50 dark:bg-gray-800/60">
-                                            <div
-                                                class="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 mr-1">
-                                                <x-heroicon-s-arrow-down-tray class="w-3.5 h-3.5" />
-                                                <span class="font-medium uppercase tracking-wide">Input</span>
-                                                @if ($mediaInfo['is_live'] ?? false)
-                                                    <span
-                                                        class="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse"
-                                                        title="Live data from active ffmpeg"></span>
-                                                @endif
-                                            </div>
-                                            @if ($mediaInfo['resolution'] ?? false)
-                                                <x-filament::badge color="info" size="sm"
-                                                    icon="heroicon-s-squares-2x2">
-                                                    {{ $mediaInfo['resolution'] }}
-                                                </x-filament::badge>
-                                            @endif
-                                            @if ($mediaInfo['video_codec'] ?? false)
-                                                @php
-                                                    $codecDisplay = strtoupper($mediaInfo['video_codec']);
-                                                    if ($mediaInfo['video_profile'] ?? false) {
-                                                        $codecDisplay .= ' · ' . $mediaInfo['video_profile'];
-                                                    }
-                                                @endphp
-                                                <x-filament::badge color="primary" size="sm"
-                                                    icon="heroicon-s-cpu-chip">
-                                                    {{ $codecDisplay }}
-                                                </x-filament::badge>
-                                            @endif
-                                            @if ($mediaInfo['source_fps'] ?? false)
-                                                <x-filament::badge color="gray" size="sm">
-                                                    {{ $mediaInfo['source_fps'] }} fps
-                                                </x-filament::badge>
-                                            @endif
-                                            @if ($mediaInfo['video_bitrate_kbps'] ?? false)
-                                                <x-filament::badge color="gray" size="sm">
-                                                    {{ $mediaInfo['video_bitrate_kbps'] >= 1000 ? round($mediaInfo['video_bitrate_kbps'] / 1000, 1) . ' Mbps' : $mediaInfo['video_bitrate_kbps'] . ' kbps' }}
-                                                </x-filament::badge>
-                                            @endif
-                                            @if ($mediaInfo['audio_codec'] ?? false)
-                                                @php
-                                                    $audioDisplay = strtoupper($mediaInfo['audio_codec']);
-                                                    if ($mediaInfo['audio_channels'] ?? false) {
-                                                        $audioDisplay .= ' · ' . $mediaInfo['audio_channels'];
-                                                    }
-                                                    if ($mediaInfo['audio_language'] ?? false) {
-                                                        $audioDisplay .=
-                                                            ' [' . strtoupper($mediaInfo['audio_language']) . ']';
-                                                    }
-                                                @endphp
-                                                <x-filament::badge color="success" size="sm"
-                                                    icon="heroicon-s-speaker-wave">
-                                                    {{ $audioDisplay }}
-                                                </x-filament::badge>
-                                            @endif
-                                            @if ($mediaInfo['audio_bitrate_kbps'] ?? false)
-                                                <x-filament::badge color="gray" size="sm">
-                                                    {{ $mediaInfo['audio_bitrate_kbps'] }} kbps audio
-                                                </x-filament::badge>
-                                            @endif
-                                        </div>
+                                    class="flex flex-wrap gap-2 mb-4 p-3 bg-gray-50 dark:bg-gray-800/60 rounded-lg border border-gray-200 dark:border-gray-700">
+                                    <div class="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 mr-1">
+                                        <x-heroicon-s-film class="w-3.5 h-3.5" />
+                                        <span class="font-medium uppercase tracking-wide">Stream Info</span>
+                                        @if ($mediaInfo['is_live'] ?? false)
+                                            <span
+                                                class="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse"
+                                                title="Live data from active ffmpeg"></span>
+                                        @endif
+                                    </div>
+                                    @if ($mediaInfo['resolution'] ?? false)
+                                        <x-filament::badge color="info" size="sm"
+                                            icon="heroicon-s-squares-2x2">
+                                            {{ $mediaInfo['resolution'] }}
+                                        </x-filament::badge>
                                     @endif
-                                    @if ($outputMediaInfo)
-                                        <div
-                                            class="flex flex-wrap items-center gap-2 p-3 bg-gray-50 dark:bg-gray-800/60">
-                                            <div
-                                                class="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 mr-1">
-                                                <x-heroicon-s-arrow-up-tray class="w-3.5 h-3.5" />
-                                                <span class="font-medium uppercase tracking-wide">Output</span>
-                                                <span
-                                                    class="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse"
-                                                    title="Live data from active ffmpeg encoder"></span>
-                                            </div>
-                                            @if ($outputMediaInfo['resolution'] ?? false)
-                                                <x-filament::badge color="info" size="sm"
-                                                    icon="heroicon-s-squares-2x2">
-                                                    {{ $outputMediaInfo['resolution'] }}
-                                                </x-filament::badge>
-                                            @endif
-                                            @if ($outputMediaInfo['video_codec'] ?? false)
-                                                <x-filament::badge color="primary" size="sm"
-                                                    icon="heroicon-s-cpu-chip">
-                                                    {{ strtoupper($outputMediaInfo['video_codec']) }}
-                                                </x-filament::badge>
-                                            @endif
-                                            @if ($outputMediaInfo['fps'] ?? false)
-                                                <x-filament::badge color="gray" size="sm">
-                                                    {{ $outputMediaInfo['fps'] }} fps
-                                                </x-filament::badge>
-                                            @endif
-                                            @if ($outputMediaInfo['bitrate_kbps'] ?? false)
-                                                <x-filament::badge color="gray" size="sm">
-                                                    {{ $outputMediaInfo['bitrate_kbps'] >= 1000 ? round($outputMediaInfo['bitrate_kbps'] / 1000, 1) . ' Mbps' : $outputMediaInfo['bitrate_kbps'] . ' kbps' }}
-                                                </x-filament::badge>
-                                            @endif
-                                            @if ($outputMediaInfo['audio_codec'] ?? false)
-                                                @php
-                                                    $outAudioDisplay = strtoupper($outputMediaInfo['audio_codec']);
-                                                    if ($outputMediaInfo['audio_channels'] ?? false) {
-                                                        $outAudioDisplay .= ' · ' . $outputMediaInfo['audio_channels'];
-                                                    }
-                                                @endphp
-                                                <x-filament::badge color="success" size="sm"
-                                                    icon="heroicon-s-speaker-wave">
-                                                    {{ $outAudioDisplay }}
-                                                </x-filament::badge>
-                                            @endif
-                                            @if ($outputMediaInfo['container'] ?? false)
-                                                <x-filament::badge color="gray" size="sm">
-                                                    {{ $outputMediaInfo['container'] }}
-                                                </x-filament::badge>
-                                            @endif
-                                            @if ($outputMediaInfo['speed'] ?? false)
-                                                <x-filament::badge
-                                                    color="{{ $outputMediaInfo['speed'] >= 1.0 ? 'success' : 'warning' }}"
-                                                    size="sm" icon="heroicon-s-bolt">
-                                                    {{ number_format($outputMediaInfo['speed'], 2) }}×
-                                                </x-filament::badge>
-                                            @endif
-                                        </div>
+                                    @if ($mediaInfo['video_codec'] ?? false)
+                                        @php
+                                            $codecDisplay = strtoupper($mediaInfo['video_codec']);
+                                            if ($mediaInfo['video_profile'] ?? false) {
+                                                $codecDisplay .= ' · ' . $mediaInfo['video_profile'];
+                                            }
+                                        @endphp
+                                        <x-filament::badge color="primary" size="sm" icon="heroicon-s-cpu-chip">
+                                            {{ $codecDisplay }}
+                                        </x-filament::badge>
+                                    @endif
+                                    @if ($mediaInfo['source_fps'] ?? false)
+                                        <x-filament::badge color="gray" size="sm">
+                                            {{ $mediaInfo['source_fps'] }} fps
+                                        </x-filament::badge>
+                                    @endif
+                                    @if ($mediaInfo['video_bitrate_kbps'] ?? false)
+                                        <x-filament::badge color="gray" size="sm">
+                                            {{ $mediaInfo['video_bitrate_kbps'] >= 1000 ? round($mediaInfo['video_bitrate_kbps'] / 1000, 1) . ' Mbps' : $mediaInfo['video_bitrate_kbps'] . ' kbps' }}
+                                        </x-filament::badge>
+                                    @endif
+                                    @if ($mediaInfo['audio_codec'] ?? false)
+                                        @php
+                                            $audioDisplay = strtoupper($mediaInfo['audio_codec']);
+                                            if ($mediaInfo['audio_channels'] ?? false) {
+                                                $audioDisplay .= ' · ' . $mediaInfo['audio_channels'];
+                                            }
+                                            if ($mediaInfo['audio_language'] ?? false) {
+                                                $audioDisplay .= ' [' . strtoupper($mediaInfo['audio_language']) . ']';
+                                            }
+                                        @endphp
+                                        <x-filament::badge color="success" size="sm"
+                                            icon="heroicon-s-speaker-wave">
+                                            {{ $audioDisplay }}
+                                        </x-filament::badge>
+                                    @endif
+                                    @if ($mediaInfo['audio_bitrate_kbps'] ?? false)
+                                        <x-filament::badge color="gray" size="sm">
+                                            {{ $mediaInfo['audio_bitrate_kbps'] }} kbps audio
+                                        </x-filament::badge>
+                                    @endif
+                                </div>
+                            @endif
+
+                            @php $outputMediaInfo = $stream['model']['output_media_info'] ?? null; @endphp
+                            @if ($outputMediaInfo)
+                                <!-- Output Info Row (encoder/muxer side, transcoded streams only) -->
+                                <div
+                                    class="flex flex-wrap gap-2 mb-4 p-3 bg-violet-50 dark:bg-violet-950/30 rounded-lg border border-violet-200 dark:border-violet-900/50">
+                                    <div
+                                        class="flex items-center gap-1 text-xs text-violet-700 dark:text-violet-300 mr-1">
+                                        <x-heroicon-s-arrow-up-tray class="w-3.5 h-3.5" />
+                                        <span class="font-medium uppercase tracking-wide">Output</span>
+                                        <span
+                                            class="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse"
+                                            title="Live data from active ffmpeg encoder"></span>
+                                    </div>
+                                    @if ($outputMediaInfo['resolution'] ?? false)
+                                        <x-filament::badge color="info" size="sm" icon="heroicon-s-squares-2x2">
+                                            {{ $outputMediaInfo['resolution'] }}
+                                        </x-filament::badge>
+                                    @endif
+                                    @if ($outputMediaInfo['video_codec'] ?? false)
+                                        <x-filament::badge color="primary" size="sm" icon="heroicon-s-cpu-chip">
+                                            {{ strtoupper($outputMediaInfo['video_codec']) }}
+                                        </x-filament::badge>
+                                    @endif
+                                    @if ($outputMediaInfo['fps'] ?? false)
+                                        <x-filament::badge color="gray" size="sm">
+                                            {{ $outputMediaInfo['fps'] }} fps
+                                        </x-filament::badge>
+                                    @endif
+                                    @if ($outputMediaInfo['bitrate_kbps'] ?? false)
+                                        <x-filament::badge color="gray" size="sm">
+                                            {{ $outputMediaInfo['bitrate_kbps'] >= 1000 ? round($outputMediaInfo['bitrate_kbps'] / 1000, 1) . ' Mbps' : $outputMediaInfo['bitrate_kbps'] . ' kbps' }}
+                                        </x-filament::badge>
+                                    @endif
+                                    @if ($outputMediaInfo['audio_codec'] ?? false)
+                                        @php
+                                            $outAudioDisplay = strtoupper($outputMediaInfo['audio_codec']);
+                                            if ($outputMediaInfo['audio_channels'] ?? false) {
+                                                $outAudioDisplay .= ' · ' . $outputMediaInfo['audio_channels'];
+                                            }
+                                        @endphp
+                                        <x-filament::badge color="success" size="sm" icon="heroicon-s-speaker-wave">
+                                            {{ $outAudioDisplay }}
+                                        </x-filament::badge>
+                                    @endif
+                                    @if ($outputMediaInfo['container'] ?? false)
+                                        <x-filament::badge color="gray" size="sm">
+                                            {{ $outputMediaInfo['container'] }}
+                                        </x-filament::badge>
                                     @endif
                                 </div>
                             @endif

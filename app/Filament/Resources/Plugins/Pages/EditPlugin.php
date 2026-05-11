@@ -117,39 +117,28 @@ class EditPlugin extends EditRecord
 
             // Security & trust group
             ActionGroup::make([
-                Action::make('validate')
-                    ->label(__('Validate'))
-                    ->icon('heroicon-o-shield-check')
-                    ->visible(fn () => $canManagePlugins)
-                    ->action(function () use ($record): void {
-                        $plugin = app(PluginManager::class)->validate($record);
-
-                        Notification::make()
-                            ->title(__('Validation completed'))
-                            ->body($plugin->validation_status === 'valid'
-                                ? 'Plugin manifest and class contract are valid.'
-                                : implode("\n", $plugin->validation_errors ?? ['Plugin validation failed.']))
-                            ->color($plugin->validation_status === 'valid' ? 'success' : 'danger')
-                            ->send();
-
-                        $this->refreshFormData(['validation_status', 'validation_errors_json']);
-                    }),
                 Action::make('verify_integrity')
                     ->label(__('Check for File Changes'))
                     ->icon('heroicon-o-finger-print')
                     ->visible(fn () => $canManagePlugins)
                     ->action(function () use ($record): void {
                         $plugin = app(PluginManager::class)->verifyIntegrity($record);
+                        $this->record = $plugin;
 
                         Notification::make()
                             ->title(__('File check complete'))
                             ->body($plugin->hasVerifiedIntegrity()
-                                ? 'No changes detected — plugin files match the trusted version.'
-                                : "Files have been modified. Trust status is now [{$plugin->trust_state}].")
+                                ? __('No changes detected — plugin files match the trusted version.')
+                                : __('Files have been modified. Use Trust Plugin to approve the new version.'))
                             ->color($plugin->hasVerifiedIntegrity() ? 'success' : 'warning')
                             ->send();
 
-                        $this->refreshFormData(['integrity_status', 'trust_state', 'enabled']);
+                        $this->refreshFormData([
+                            'integrity_status',
+                            'trust_state',
+                            'validation_status',
+                            'enabled',
+                        ]);
                     }),
                 Action::make('trust')
                     ->label(__('Trust Plugin'))
@@ -159,18 +148,42 @@ class EditPlugin extends EditRecord
                     ->hidden(fn () => $this->record->isTrusted() && $this->record->hasVerifiedIntegrity())
                     ->disabled(fn () => $this->record->validation_status !== 'valid' || ! $this->record->available || ! $this->record->isInstalled())
                     ->requiresConfirmation()
-                    ->modalDescription(__('Trusting a plugin locks its current files as the approved version and sets up any database tables or storage the plugin needs.'))
+                    ->modalDescription(fn () => $this->record->integrity_status === 'changed'
+                        ? __('This confirms the updated files are safe. Validation runs automatically and the plugin will be re-activated.')
+                        : __('Trusting locks the current files as the approved version and sets up any database tables or storage the plugin needs.'))
                     ->action(function () use ($record): void {
+                        // Capture whether this is a re-trust of changed files — if so
+                        // the plugin was previously active and should be restored.
+                        $reActivate = $record->integrity_status === 'changed';
+
                         try {
-                            app(PluginManager::class)->trust($record, auth()->id());
+                            $plugin = app(PluginManager::class)->trust($record, auth()->id());
+
+                            if ($reActivate && $plugin->isTrusted() && $plugin->hasVerifiedIntegrity() && $plugin->available) {
+                                $plugin->update(['enabled' => true]);
+                                $plugin = $plugin->fresh();
+                            }
+
+                            // Replace the component's record so every action condition
+                            // (hidden/disabled closures) immediately sees the new state
+                            // without requiring a full page reload or a separate Validate click.
+                            $this->record = $plugin;
 
                             Notification::make()
                                 ->success()
-                                ->title(__('Plugin trusted'))
-                                ->body(__('The plugin is now trusted. You can enable it when you are ready.'))
+                                ->title($plugin->enabled ? __('Plugin trusted and activated') : __('Plugin trusted'))
+                                ->body($plugin->enabled
+                                    ? __('Updated files have been trusted and the plugin is now active.')
+                                    : __('The plugin is now trusted. You can enable it when you are ready.'))
                                 ->send();
 
-                            $this->refreshFormData(['trust_state', 'integrity_status', 'trusted_at']);
+                            $this->refreshFormData([
+                                'enabled',
+                                'trust_state',
+                                'integrity_status',
+                                'trusted_at',
+                                'validation_status',
+                            ]);
                         } catch (\RuntimeException $exception) {
                             Notification::make()
                                 ->danger()
@@ -241,10 +254,10 @@ class EditPlugin extends EditRecord
                     ->color('success')
                     ->visible(fn () => $canManagePlugins && $this->record->hasUpdateAvailable() && filled($this->record->latest_release_url))
                     ->requiresConfirmation()
-                    ->modalHeading(__('Stage plugin update'))
-                    ->modalDescription(fn () => filled($this->record->latest_release_sha256)
-                        ? __('This will download the latest release and stage it for review. The checksum will be verified automatically.')
-                        : __('No checksum was found for this release. Please provide the SHA-256 hash to verify the download.'))
+                    ->modalHeading(fn () => $this->isAutoInstallEnabled()
+                        ? __('Apply plugin update')
+                        : __('Stage plugin update'))
+                    ->modalDescription(fn () => $this->updateModalDescription())
                     ->schema(fn () => filled($this->record->latest_release_sha256)
                         ? []
                         : [
@@ -256,41 +269,84 @@ class EditPlugin extends EditRecord
                                 ->helperText(__('Copy the file hash from the GitHub release page.')),
                         ])
                     ->action(function (array $data) use ($record): void {
+                        $sha256 = $data['sha256'] ?? $record->latest_release_sha256;
+                        if (! $sha256) {
+                            Notification::make()
+                                ->danger()
+                                ->title(__('Missing checksum'))
+                                ->body(__('A SHA-256 checksum is required to stage this update.'))
+                                ->send();
+
+                            return;
+                        }
+
+                        $manager = app(PluginManager::class);
+                        $autoInstall = $this->isAutoInstallEnabled();
+
                         try {
-                            $sha256 = $data['sha256'] ?? $record->latest_release_sha256;
-                            if (! $sha256) {
-                                Notification::make()
-                                    ->danger()
-                                    ->title(__('Missing checksum'))
-                                    ->body(__('A SHA-256 checksum is required to stage this update.'))
-                                    ->send();
-
-                                return;
-                            }
-
-                            $review = app(PluginManager::class)->stageGithubReleaseReview(
+                            $review = $manager->stageGithubReleaseReview(
                                 $record->latest_release_url,
                                 $sha256,
                                 auth()->id(),
                             );
-
-                            Notification::make()
-                                ->success()
-                                ->title(__('Update staged for review'))
-                                ->body(__('Review #:id is ready - check Plugin Installs to scan and approve it.', ['id' => $review->id]))
-                                ->actions([
-                                    Action::make('view_review')
-                                        ->label(__('View Review'))
-                                        ->url(PluginInstallReviewResource::getUrl('edit', ['record' => $review->id])),
-                                ])
-                                ->send();
                         } catch (\RuntimeException $exception) {
                             Notification::make()
                                 ->danger()
                                 ->title(__('Update staging failed'))
                                 ->body($exception->getMessage())
                                 ->send();
+
+                            return;
                         }
+
+                        if (! $autoInstall) {
+                            Notification::make()
+                                ->success()
+                                ->title(__('Update staged for review'))
+                                ->body(__('Review #:id is ready — check Plugin Installs to approve it.', ['id' => $review->id]))
+                                ->actions([
+                                    Action::make('view_review')
+                                        ->label(__('View Review'))
+                                        ->url(PluginInstallReviewResource::getUrl('edit', ['record' => $review->id])),
+                                ])
+                                ->send();
+
+                            return;
+                        }
+
+                        try {
+                            $manager->approveInstallReview($review, false, auth()->id());
+                        } catch (\RuntimeException $exception) {
+                            Notification::make()
+                                ->warning()
+                                ->title(__('Update staged but not installed'))
+                                ->body($exception->getMessage().' '.
+                                    __('You can approve it manually from Plugin Installs.'))
+                                ->persistent()
+                                ->actions([
+                                    Action::make('view_review')
+                                        ->label(__('View Review'))
+                                        ->url(PluginInstallReviewResource::getUrl('edit', ['record' => $review->id])),
+                                ])
+                                ->send();
+
+                            return;
+                        }
+
+                        Notification::make()
+                            ->success()
+                            ->title(__(':plugin updated', ['plugin' => $record->name]))
+                            ->body(__('Version :version is now active.', ['version' => $record->latest_version]))
+                            ->send();
+
+                        $this->refreshFormData([
+                            'enabled',
+                            'trust_state',
+                            'integrity_status',
+                            'version',
+                            'latest_version',
+                            'installation_status',
+                        ]);
                     }),
                 Action::make('stage_review')
                     ->label(__('Submit for Review'))
@@ -427,5 +483,24 @@ class EditPlugin extends EditRecord
                     }),
             ])->label(__('Manage'))->icon('heroicon-o-cog-6-tooth')->button(),
         ];
+    }
+
+    private function updateModalDescription(): string
+    {
+        if (! filled($this->record->latest_release_sha256)) {
+            return __('No checksum was found for this release. Please provide the SHA-256 hash to verify the download.');
+        }
+
+        if ($this->isAutoInstallEnabled()) {
+            return __('This will download, verify, and immediately install the update. The plugin will be re-enabled automatically if it was active before.');
+        }
+
+        return __('This will download the latest release and stage it for review. The checksum will be verified automatically.');
+    }
+
+    private function isAutoInstallEnabled(): bool
+    {
+        return config('plugins.auto_trust_official', true)
+            && app(PluginManager::class)->isFromTrustedOrg($this->record->repository);
     }
 }

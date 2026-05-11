@@ -12,6 +12,38 @@ class StreamFileSetting extends Model
 {
     use HasFactory;
 
+    protected $fillable = [
+        'user_id',
+        'name',
+        'description',
+        'type',
+        'enabled',
+        'location',
+        'path_structure',
+        'filename_metadata',
+        'folder_metadata',
+        'tmdb_id_format',
+        'tmdb_id_apply_to',
+        'clean_special_chars',
+        'remove_consecutive_chars',
+        'replace_char',
+        'name_filter_enabled',
+        'name_filter_patterns',
+        'generate_nfo',
+        'refresh_media_server',
+        'media_server_integration_id',
+        'refresh_delay_seconds',
+        'url_type',
+        'movie_format',
+        'episode_format',
+        'trash_guide_naming_enabled',
+        'version_detection_pattern',
+        'group_versions',
+        'use_stream_stats',
+        'trash_movie_components',
+        'trash_episode_components',
+    ];
+
     protected $casts = [
         'enabled' => 'boolean',
         'path_structure' => 'array',
@@ -24,6 +56,11 @@ class StreamFileSetting extends Model
         'generate_nfo' => 'boolean',
         'refresh_media_server' => 'boolean',
         'refresh_delay_seconds' => 'integer',
+        'trash_guide_naming_enabled' => 'boolean',
+        'group_versions' => 'boolean',
+        'use_stream_stats' => 'boolean',
+        'trash_movie_components' => 'array',
+        'trash_episode_components' => 'array',
     ];
 
     public function user(): BelongsTo
@@ -89,6 +126,14 @@ class StreamFileSetting extends Model
             'refresh_media_server' => $this->refresh_media_server,
             'media_server_integration_id' => $this->media_server_integration_id,
             'refresh_delay_seconds' => $this->refresh_delay_seconds ?? 5,
+            'trash_guide_naming_enabled' => $this->trash_guide_naming_enabled ?? false,
+            'movie_format' => $this->movie_format,
+            'episode_format' => $this->episode_format,
+            'version_detection_pattern' => $this->version_detection_pattern,
+            'group_versions' => $this->group_versions ?? true,
+            'use_stream_stats' => $this->use_stream_stats ?? true,
+            'trash_movie_components' => $this->trash_movie_components ?? [],
+            'trash_episode_components' => $this->trash_episode_components ?? [],
         ];
     }
 }
