@@ -205,6 +205,7 @@ it('exposes proxy output_media_info as model.output_media_info on the stream', f
                 'container' => 'MPEGTS',
                 'fps' => 25.0,
                 'bitrate_kbps' => 2500.0,
+                'speed' => 1.05,
             ],
         ],
     ]);
@@ -219,7 +220,8 @@ it('exposes proxy output_media_info as model.output_media_info on the stream', f
                 && $output['audio_channels'] === 'stereo'
                 && $output['container'] === 'MPEGTS'
                 && $output['fps'] === 25.0
-                && $output['bitrate_kbps'] === 2500.0;
+                && $output['bitrate_kbps'] === 2500.0
+                && $output['speed'] === 1.05;
         });
 });
 
@@ -250,7 +252,7 @@ it('omits output_media_info on the model when the proxy reports none', function 
             'created_at' => now()->toIso8601String(),
             'has_failover' => false,
             'error_count' => 0,
-            // no media_info, no output_media_info
+            'output_media_info' => [],
         ],
     ]);
 

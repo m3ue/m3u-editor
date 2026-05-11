@@ -413,6 +413,7 @@ class M3uProxyStreamMonitor extends Page implements HasActions, HasSchemas
                                     'audio_codec' => $liveOutputMediaInfo['audio_codec'] ?? null,
                                     'audio_channels' => $liveOutputMediaInfo['audio_channels'] ?? null,
                                     'container' => $liveOutputMediaInfo['container'] ?? null,
+                                    'speed' => $liveOutputMediaInfo['speed'] ?? null,
                                 ], fn ($v) => $v !== null && $v !== '');
 
                                 if (! empty($output)) {

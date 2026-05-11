@@ -407,6 +407,14 @@
                                             {{ $outputMediaInfo['container'] }}
                                         </x-filament::badge>
                                     @endif
+                                    @if ($outputMediaInfo['speed'] ?? false)
+                                        <x-filament::badge
+                                            color="{{ $outputMediaInfo['speed'] >= 1.0 ? 'success' : 'warning' }}"
+                                            size="sm"
+                                            icon="heroicon-s-bolt">
+                                            {{ number_format($outputMediaInfo['speed'], 2) }}×
+                                        </x-filament::badge>
+                                    @endif
                                 </div>
                             @endif
 
