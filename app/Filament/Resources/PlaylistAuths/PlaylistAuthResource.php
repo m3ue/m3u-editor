@@ -27,6 +27,7 @@ use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Grid;
+use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 use Filament\Tables;
 use Filament\Tables\Columns\TextColumn;
@@ -151,51 +152,75 @@ class PlaylistAuthResource extends Resource implements CopilotResource
 
     public static function getForm(): array
     {
-        $schema = [
-            TextInput::make('name')
-                ->label(__('Name'))
-                ->required()
-                ->helperText(__('Used to reference this auth internally.'))
-                ->columnSpan(1),
-            Toggle::make('enabled')
-                ->label(__('Enabled'))
-                ->columnSpan(1)
-                ->inline(false)
-                ->default(true),
-            TextInput::make('username')
-                ->label(__('Username'))
-                ->required()
-                ->rules(function ($record) {
-                    return [
-                        Rule::unique('playlist_auths', 'username')->ignore($record?->id),
-                        Rule::unique('playlist_aliases', 'username'),
-                    ];
-                })
-                ->columnSpan(1),
-            TextInput::make('password')
-                ->label(__('Password'))
-                ->password()
-                ->required()
-                ->revealable()
-                ->columnSpan(1),
-            DateTimePicker::make('expires_at')
-                ->label(__('Expiration (date & time)'))
-                ->seconds(false)
-                ->native(false)
-                ->helperText(__('If set, this account will stop working at that exact time.'))
-                ->nullable()
-                ->columnSpan(2),
-        ];
+        $dvrSection = Section::make(__('DVR Access'))
+            ->description(__('Control whether this guest can schedule and manage DVR recordings.'))
+            ->schema([
+                Toggle::make('dvr_enabled')
+                    ->label(__('Enable DVR'))
+                    ->helperText(__('Allow this guest to view and schedule recordings via the public playlist viewer.'))
+                    ->default(false)
+                    ->live()
+                    ->columnSpan(2),
+                TextInput::make('dvr_max_concurrent_recordings')
+                    ->label(__('Max Concurrent Recordings'))
+                    ->numeric()
+                    ->minValue(1)
+                    ->maxValue(99)
+                    ->nullable()
+                    ->placeholder(__('Inherit from DVR settings'))
+                    ->helperText(__('Override the maximum number of simultaneous recordings for this guest. Leave empty to use the playlist\'s DVR setting.'))
+                    ->visible(fn ($get) => $get('dvr_enabled'))
+                    ->columnSpan(1),
+                TextInput::make('dvr_storage_quota_gb')
+                    ->label(__('Storage Quota (GB)'))
+                    ->numeric()
+                    ->minValue(1)
+                    ->nullable()
+                    ->placeholder(__('No quota'))
+                    ->helperText(__('Maximum total disk space this guest\'s recordings may use. Leave empty for unlimited.'))
+                    ->visible(fn ($get) => $get('dvr_enabled'))
+                    ->columnSpan(1),
+            ])
+            ->columns(2)
+            ->collapsible()
+            ->collapsed(fn ($record) => ! ($record?->dvr_enabled));
 
         return [
             Grid::make()
-                ->hiddenOn(['edit']) // hide this field on the edit form
-                ->schema($schema)
-                ->columns(2),
-            Grid::make()
-                ->hiddenOn(['create']) // hide this field on the create form
                 ->schema([
-                    ...$schema,
+                    TextInput::make('name')
+                        ->label(__('Name'))
+                        ->required()
+                        ->helperText(__('Used to reference this auth internally.'))
+                        ->columnSpan(1),
+                    Toggle::make('enabled')
+                        ->label(__('Enabled'))
+                        ->columnSpan(1)
+                        ->inline(false)
+                        ->default(true),
+                    TextInput::make('username')
+                        ->label(__('Username'))
+                        ->required()
+                        ->rules(function ($record) {
+                            return [
+                                Rule::unique('playlist_auths', 'username')->ignore($record?->id),
+                                Rule::unique('playlist_aliases', 'username'),
+                            ];
+                        })
+                        ->columnSpan(1),
+                    TextInput::make('password')
+                        ->label(__('Password'))
+                        ->password()
+                        ->required()
+                        ->revealable()
+                        ->columnSpan(1),
+                    DateTimePicker::make('expires_at')
+                        ->label(__('Expiration (date & time)'))
+                        ->seconds(false)
+                        ->native(false)
+                        ->helperText(__('If set, this account will stop working at that exact time.'))
+                        ->nullable()
+                        ->columnSpan(2),
                     Select::make('assigned_playlist')
                         ->label(__('Assigned to Playlist'))
                         ->options(function ($record) {
