@@ -251,6 +251,21 @@ class GeneralSettings extends Settings
 
     public ?array $copilot_quick_actions = null;
 
+    // Alerts - Slack / Discord integration
+    public ?bool $discord_alerts_enabled = false;
+
+    public ?string $discord_webhook_url = null;
+
+    public ?bool $slack_alerts_enabled = false;
+
+    public ?string $slack_webhook_url = null;
+
+    /** Forward queued job failures to enabled alert channels */
+    public ?bool $alerts_on_job_failed = false;
+
+    /** Forward playlist import failures to enabled alert channels */
+    public ?bool $alerts_on_import_failed = false;
+
     public static function group(): string
     {
         return 'general';

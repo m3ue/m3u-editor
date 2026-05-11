@@ -1,5 +1,6 @@
 <?php
 
+use App\Logging\AlertsHandler;
 use Monolog\Handler\NullHandler;
 use Monolog\Handler\StreamHandler;
 use Monolog\Handler\SyslogUdpHandler;
@@ -54,7 +55,7 @@ return [
 
         'stack' => [
             'driver' => 'stack',
-            'channels' => ['daily', 'stdout'],
+            'channels' => ['daily', 'stdout', 'alerts'],
             'ignore_exceptions' => false,
         ],
 
@@ -143,6 +144,13 @@ return [
             'path' => storage_path('logs/ffmpeg.log'),
             'level' => 'debug', // env('LOG_LEVEL', 'error'),
             'days' => env('LOG_DAILY_DAYS', 3),
+        ],
+
+        // Forwards error-level+ entries to Discord/Slack when configured in Settings.
+        'alerts' => [
+            'driver' => 'monolog',
+            'level' => 'error',
+            'handler' => AlertsHandler::class,
         ],
 
     ],

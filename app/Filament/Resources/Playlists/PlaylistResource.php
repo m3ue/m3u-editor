@@ -44,6 +44,7 @@ use App\Services\DateFormatService;
 use App\Services\EpgCacheService;
 use App\Services\M3uProxyService;
 use App\Services\ProfileService;
+use App\Services\XtreamService;
 use App\Settings\GeneralSettings;
 use App\Tables\Columns\ProgressColumn;
 use App\Traits\HasUserFiltering;
@@ -94,6 +95,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\HtmlString;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
 class PlaylistResource extends Resource implements CopilotResource
@@ -823,7 +825,85 @@ class PlaylistResource extends Resource implements CopilotResource
                         ->url()
                         ->columnSpan(2)
                         ->required()
-                        ->hidden(fn (Get $get): bool => ! $get('xtream')),
+                        ->hidden(fn (Get $get): bool => ! $get('xtream'))
+                        ->suffixAction(
+                            Action::make('test_xtream_connection')
+                                ->label(__('Test connection'))
+                                ->icon('heroicon-m-signal')
+                                ->tooltip(__('Test Xtream API connection using the credentials below'))
+                                ->action(function (Get $get): void {
+                                    $url = $get('xtream_config.url');
+                                    $username = $get('xtream_config.username');
+                                    $password = $get('xtream_config.password');
+
+                                    if (empty($url) || empty($username) || empty($password)) {
+                                        Notification::make()
+                                            ->title(__('Missing Credentials'))
+                                            ->body(__('Please fill in the Xtream API URL, username, and password before testing.'))
+                                            ->warning()
+                                            ->send();
+
+                                        return;
+                                    }
+
+                                    try {
+                                        $xtream = XtreamService::make(xtream_config: [
+                                            'url' => $url,
+                                            'username' => $username,
+                                            'password' => $password,
+                                        ]);
+
+                                        $result = $xtream->userInfo(timeout: 10);
+
+                                        if (empty($result) || ! isset($result['user_info'])) {
+                                            Notification::make()
+                                                ->title(__('Connection Failed'))
+                                                ->body(__('No valid response from the Xtream API. Check your URL, username, and password.'))
+                                                ->danger()
+                                                ->send();
+
+                                            return;
+                                        }
+
+                                        $userInfo = $result['user_info'];
+                                        $serverInfo = $result['server_info'] ?? [];
+
+                                        $status = $userInfo['status'] ?? 'Unknown';
+                                        $maxConnections = $userInfo['max_connections'] ?? '?';
+                                        $activeCons = $userInfo['active_cons'] ?? '0';
+                                        $expDate = ! empty($userInfo['exp_date'])
+                                            ? date('Y-m-d', (int) $userInfo['exp_date'])
+                                            : 'Never';
+                                        $serverUrl = $serverInfo['url'] ?? $url;
+                                        $serverTime = ! empty($serverInfo['time_now'])
+                                            ? $serverInfo['time_now']
+                                            : 'Unknown';
+
+                                        $isActive = $status === 'Active';
+                                        $statusIcon = $isActive ? '✅' : '⚠️';
+
+                                        $details = "{$statusIcon} **Status:** {$status}\n\n";
+                                        $details .= "**Max Connections:** {$maxConnections}\n\n";
+                                        $details .= "**Active Connections:** {$activeCons}\n\n";
+                                        $details .= "**Expires:** {$expDate}\n\n";
+                                        $details .= "**Server:** {$serverUrl}\n\n";
+                                        $details .= "**Server Time:** {$serverTime}";
+
+                                        Notification::make()
+                                            ->title(__('Connection Successful'))
+                                            ->body(Str::markdown($details))
+                                            ->success()
+                                            ->persistent()
+                                            ->send();
+                                    } catch (Exception $e) {
+                                        Notification::make()
+                                            ->title(__('Connection Failed'))
+                                            ->body($e->getMessage())
+                                            ->danger()
+                                            ->send();
+                                    }
+                                }),
+                        ),
                     Section::make(__('DNS failover URLs'))
                         ->icon('heroicon-s-globe-alt')
                         ->iconSize('md')

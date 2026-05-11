@@ -12,7 +12,9 @@ use App\Models\MediaServerIntegration;
 use App\Models\Playlist;
 use App\Models\SourceCategory;
 use App\Models\SourceGroup;
+use App\Services\AlertService;
 use App\Services\XtreamHealthService;
+use App\Settings\GeneralSettings;
 use App\Traits\ProviderRequestDelay;
 use Carbon\Carbon;
 use Exception;
@@ -1950,5 +1952,36 @@ class ProcessM3uImport implements ShouldQueue
 
         dispatch(new self($playlist))
             ->delay(now()->addSeconds($delay));
+    }
+
+    /**
+     * Handle a job failure — send an alert when imports fail alerts are enabled.
+     */
+    public function failed(Throwable $exception): void
+    {
+        try {
+            /** @var GeneralSettings $settings */
+            $settings = app(GeneralSettings::class);
+
+            if (! $settings->alerts_on_import_failed) {
+                return;
+            }
+
+            /** @var AlertService $alertService */
+            $alertService = app(AlertService::class);
+
+            if (! $alertService->isEnabled()) {
+                return;
+            }
+
+            $playlistName = $this->playlist->name ?? "ID:{$this->playlist->id}";
+            $context = ['playlist' => $playlistName, 'playlist_id' => $this->playlist->id];
+            $encoded = json_encode($context, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+            $message = "[IMPORT FAILED] Playlist \"{$playlistName}\" failed to sync: {$exception->getMessage()}\n```\n{$encoded}\n```";
+
+            $alertService->send($message);
+        } catch (Throwable) {
+            // Silently ignore.
+        }
     }
 }

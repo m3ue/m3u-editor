@@ -15,6 +15,7 @@ use App\Events\PlaylistUpdated;
 use App\Http\Middleware\EnsureUserCanUseCopilot;
 use App\Jobs\ProcessChannelScrubber;
 use App\Jobs\SyncMediaServer;
+use App\Listeners\AlertOnJobFailed;
 use App\Listeners\PersistUserLocale;
 use App\Livewire\BackupDestinationListRecords;
 use App\Livewire\TmdbSearch;
@@ -61,6 +62,7 @@ use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\Request;
+use Illuminate\Queue\Events\JobFailed;
 use Illuminate\Routing\Route;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
@@ -179,6 +181,9 @@ class AppServiceProvider extends ServiceProvider
 
         // Persist user locale preference when changed via the language switcher
         $this->registerLocaleListener();
+
+        // Forward failed queue jobs to Discord/Slack when configured
+        $this->registerJobFailedAlertListener();
 
         // Livewire components
         $this->registerLivewireComponents();
@@ -1007,6 +1012,14 @@ class AppServiceProvider extends ServiceProvider
         Event::listen(
             LocaleChanged::class,
             PersistUserLocale::class,
+        );
+    }
+
+    private function registerJobFailedAlertListener(): void
+    {
+        Event::listen(
+            JobFailed::class,
+            AlertOnJobFailed::class,
         );
     }
 
