@@ -155,12 +155,12 @@ class GuestDvrRuleResource extends Resource
 
             Select::make('channel_id')
                 ->label(__('Channel'))
-                ->options(fn () => $playlistId
+                ->options(fn (?DvrRecordingRule $record) => $playlistId
                     ? Channel::query()
                         ->where('playlist_id', $playlistId)
                         ->orderBy('title')
                         ->pluck('title', 'id')
-                        ->prepend(__('From Original Source'), 0)
+                        ->when($record !== null, fn ($col) => $col->prepend(__('From Original Source'), 0))
                     : [])
                 ->searchable()
                 ->nullable(),

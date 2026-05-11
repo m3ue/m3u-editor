@@ -119,7 +119,7 @@
                         Object.entries(this.allOptions).filter(([id, label]) => label.toLowerCase().includes(q))
                     );
                 }
-            }" x-effect="if (!$wire.channel_id) search = ''">
+            }" x-effect="if (!$wire.channel_id) search = ''" @click.away="open = false">
                 <label class="fi-fo-field-wrp-label inline-flex items-center gap-x-3">
                     <span
                         class="text-sm font-medium leading-6 text-gray-950 dark:text-white">{{ __('Channel') }}</span>
@@ -131,7 +131,7 @@
                     <div x-show="open && Object.keys(filtered).length > 0" x-transition @click.stop
                         @keydown.escape="open = false"
                         class="absolute z-50 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-white/10 rounded-lg shadow-lg max-h-60 overflow-y-auto">
-                        <button type="button" @click="search = ''; $wire.channel_id = ''; open = false"
+                        <button type="button" @click="search = ''; $wire.set('channel_id', null); open = false"
                             class="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-white/10 transition border-b border-gray-100 dark:border-white/5"
                             :class="!$wire.channel_id ? 'text-primary-600 dark:text-primary-400 font-medium' :
                                 'text-gray-600 dark:text-gray-300'">
@@ -139,7 +139,7 @@
                         </button>
                         <template x-for="[id, label] in Object.entries(filtered)" :key="id">
                             <button type="button"
-                                @click="search = label; $wire.channel_id = parseInt(id); open = false"
+                                @click="search = label; $wire.set('channel_id', parseInt(id)); open = false"
                                 class="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-white/10 transition"
                                 :class="$wire.channel_id == id ? 'text-primary-600 dark:text-primary-400 font-medium' :
                                     'text-gray-700 dark:text-gray-200'"
