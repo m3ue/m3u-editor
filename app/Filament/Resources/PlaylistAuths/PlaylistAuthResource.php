@@ -11,6 +11,7 @@ use App\Models\MergedPlaylist;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
 use App\Models\PlaylistAuth;
+use App\Pivots\PlaylistAuthPivot;
 use App\Services\DateFormatService;
 use App\Traits\HasUserFiltering;
 use EslamRedaDiv\FilamentCopilot\Contracts\CopilotResource;
@@ -26,7 +27,6 @@ use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Grid;
-use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 use Filament\Tables;
 use Filament\Tables\Columns\TextColumn;
@@ -116,7 +116,13 @@ class PlaylistAuthResource extends Resource implements CopilotResource
             ])
             ->recordActions([
                 ActionGroup::make([
-                    EditAction::make(),
+                    EditAction::make()
+                        ->using(function (PlaylistAuth $record, array $data): PlaylistAuth {
+                            unset($data['assigned_playlist']);
+                            $record->update($data);
+
+                            return $record;
+                        }),
                     DeleteAction::make(),
                 ])->button()->hiddenLabel()->size('sm'),
             ], position: RecordActionsPosition::BeforeCells)
@@ -181,39 +187,6 @@ class PlaylistAuthResource extends Resource implements CopilotResource
                 ->columnSpan(2),
         ];
 
-        $dvrSection = Section::make(__('DVR Access'))
-            ->description(__('Control whether this guest can schedule and manage DVR recordings.'))
-            ->schema([
-                Toggle::make('dvr_enabled')
-                    ->label(__('Enable DVR'))
-                    ->helperText(__('Allow this guest to view and schedule recordings via the public playlist viewer.'))
-                    ->default(false)
-                    ->live()
-                    ->columnSpan(2),
-                TextInput::make('dvr_max_concurrent_recordings')
-                    ->label(__('Max Concurrent Recordings'))
-                    ->numeric()
-                    ->minValue(1)
-                    ->maxValue(99)
-                    ->nullable()
-                    ->placeholder(__('Inherit from DVR settings'))
-                    ->helperText(__('Override the maximum number of simultaneous recordings for this guest. Leave empty to use the playlist\'s DVR setting.'))
-                    ->visible(fn ($get) => $get('dvr_enabled'))
-                    ->columnSpan(1),
-                TextInput::make('dvr_storage_quota_gb')
-                    ->label(__('Storage Quota (GB)'))
-                    ->numeric()
-                    ->minValue(1)
-                    ->nullable()
-                    ->placeholder(__('No quota'))
-                    ->helperText(__('Maximum total disk space this guest\'s recordings may use. Leave empty for unlimited.'))
-                    ->visible(fn ($get) => $get('dvr_enabled'))
-                    ->columnSpan(1),
-            ])
-            ->columns(2)
-            ->collapsible()
-            ->collapsed(fn ($record) => ! ($record?->dvr_enabled));
-
         return [
             Grid::make()
                 ->hiddenOn(['edit']) // hide this field on the edit form
@@ -227,8 +200,21 @@ class PlaylistAuthResource extends Resource implements CopilotResource
                         ->label(__('Assigned to Playlist'))
                         ->options(function ($record) {
                             $options = [];
+                            $userId = auth()->id();
 
-                            // Add currently assigned playlist if any
+                            // Collect IDs already assigned to other auths, keyed by model class
+                            $assignedIds = [];
+                            PlaylistAuthPivot::select('authenticatable_type', 'authenticatable_id', 'playlist_auth_id')
+                                ->get()
+                                ->each(function (PlaylistAuthPivot $pivot) use ($record, &$assignedIds) {
+                                    // Always exclude assignments belonging to other auths
+                                    if ($record && $pivot->playlist_auth_id === $record->id) {
+                                        return;
+                                    }
+                                    $assignedIds[$pivot->authenticatable_type][] = $pivot->authenticatable_id;
+                                });
+
+                            // Add currently assigned playlist for edit so it appears as selected
                             if ($record && $record->isAssigned()) {
                                 $assignedModel = $record->getAssignedModel();
                                 if ($assignedModel) {
@@ -244,44 +230,41 @@ class PlaylistAuthResource extends Resource implements CopilotResource
                                 }
                             }
 
-                            // Add all available playlists for current user
-                            $userId = auth()->id();
+                            $takenPlaylists = $assignedIds[Playlist::class] ?? [];
+                            Playlist::where('user_id', $userId)
+                                ->when($takenPlaylists, fn ($q) => $q->whereNotIn('id', $takenPlaylists))
+                                ->get()
+                                ->each(function (Playlist $playlist) use (&$options) {
+                                    $key = Playlist::class.'|'.$playlist->id;
+                                    $options[$key] ??= $playlist->name.' (Playlist)';
+                                });
 
-                            // Standard Playlists
-                            $playlists = Playlist::where('user_id', $userId)->get();
-                            foreach ($playlists as $playlist) {
-                                $key = Playlist::class.'|'.$playlist->id;
-                                if (! isset($options[$key])) {
-                                    $options[$key] = $playlist->name.' (Playlist)';
-                                }
-                            }
+                            $takenCustom = $assignedIds[CustomPlaylist::class] ?? [];
+                            CustomPlaylist::where('user_id', $userId)
+                                ->when($takenCustom, fn ($q) => $q->whereNotIn('id', $takenCustom))
+                                ->get()
+                                ->each(function (CustomPlaylist $playlist) use (&$options) {
+                                    $key = CustomPlaylist::class.'|'.$playlist->id;
+                                    $options[$key] ??= $playlist->name.' (Custom Playlist)';
+                                });
 
-                            // Custom Playlists
-                            $customPlaylists = CustomPlaylist::where('user_id', $userId)->get();
-                            foreach ($customPlaylists as $playlist) {
-                                $key = CustomPlaylist::class.'|'.$playlist->id;
-                                if (! isset($options[$key])) {
-                                    $options[$key] = $playlist->name.' (Custom Playlist)';
-                                }
-                            }
+                            $takenMerged = $assignedIds[MergedPlaylist::class] ?? [];
+                            MergedPlaylist::where('user_id', $userId)
+                                ->when($takenMerged, fn ($q) => $q->whereNotIn('id', $takenMerged))
+                                ->get()
+                                ->each(function (MergedPlaylist $playlist) use (&$options) {
+                                    $key = MergedPlaylist::class.'|'.$playlist->id;
+                                    $options[$key] ??= $playlist->name.' (Merged Playlist)';
+                                });
 
-                            // Merged Playlists
-                            $mergedPlaylists = MergedPlaylist::where('user_id', $userId)->get();
-                            foreach ($mergedPlaylists as $playlist) {
-                                $key = MergedPlaylist::class.'|'.$playlist->id;
-                                if (! isset($options[$key])) {
-                                    $options[$key] = $playlist->name.' (Merged Playlist)';
-                                }
-                            }
-
-                            // Playlist Aliases
-                            $aliases = PlaylistAlias::where('user_id', $userId)->get();
-                            foreach ($aliases as $alias) {
-                                $key = PlaylistAlias::class.'|'.$alias->id;
-                                if (! isset($options[$key])) {
-                                    $options[$key] = $alias->name.' (Playlist Alias)';
-                                }
-                            }
+                            $takenAliases = $assignedIds[PlaylistAlias::class] ?? [];
+                            PlaylistAlias::where('user_id', $userId)
+                                ->when($takenAliases, fn ($q) => $q->whereNotIn('id', $takenAliases))
+                                ->get()
+                                ->each(function (PlaylistAlias $alias) use (&$options) {
+                                    $key = PlaylistAlias::class.'|'.$alias->id;
+                                    $options[$key] ??= $alias->name.' (Playlist Alias)';
+                                });
 
                             return $options;
                         })
@@ -289,22 +272,11 @@ class PlaylistAuthResource extends Resource implements CopilotResource
                         ->nullable()
                         ->placeholder(__('Select a playlist or leave empty'))
                         ->helperText(__('Assign this auth to a specific playlist. Each auth can only be assigned to one playlist at a time.'))
-                        ->default(function ($record) {
-                            if ($record && $record->isAssigned()) {
-                                $assignedModel = $record->getAssignedModel();
-                                if ($assignedModel) {
-                                    return get_class($assignedModel).'|'.$assignedModel->id;
-                                }
-                            }
-
-                            return null;
-                        })
                         ->afterStateHydrated(function ($component, $state, $record) {
                             if ($record && $record->isAssigned()) {
                                 $assignedModel = $record->getAssignedModel();
                                 if ($assignedModel) {
-                                    $value = get_class($assignedModel).'|'.$assignedModel->id;
-                                    $component->state($value);
+                                    $component->state(get_class($assignedModel).'|'.$assignedModel->id);
                                 }
                             }
                         })
@@ -314,7 +286,6 @@ class PlaylistAuthResource extends Resource implements CopilotResource
                             }
 
                             if ($state) {
-                                // Parse the selection (format: "ModelClass|ID")
                                 [$modelClass, $modelId] = explode('|', $state, 2);
                                 $model = $modelClass::find($modelId);
 
@@ -322,11 +293,9 @@ class PlaylistAuthResource extends Resource implements CopilotResource
                                     $record->assignTo($model);
                                 }
                             } else {
-                                // Clear assignment
                                 $record->clearAssignment();
                             }
                         })
-                        ->dehydrated(false) // Don't save this field directly
                         ->columnSpan(2),
                 ])
                 ->columns(2),
