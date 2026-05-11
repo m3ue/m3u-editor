@@ -201,7 +201,7 @@ class StreamStatsService
         // Dolby Vision: dvh1/dvhe codec tag, profile string, or DOVI configuration record.
         if (
             $combined->contains(['dolby vision', 'dovi', 'dvhe', 'dvh1', 'dolby_vision', 'dovi configuration'])
-            || $codecTag->is(['dvh1', 'dvhe', 'dav1', 'dva1'])
+            || $codecTag->is(['dav1', 'dva1'])
         ) {
             return 'DV';
         }

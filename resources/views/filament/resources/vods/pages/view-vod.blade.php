@@ -18,33 +18,38 @@
             $movieInfo = is_array($movieData['info'] ?? null) ? $movieData['info'] : [];
 
             // Get metadata - check all possible locations
-            $title = $record->title_custom ?? $record->title ?? $record->name ?? 'Unknown';
-            $plot = $info['plot'] ?? $info['description'] ?? $movieInfo['plot'] ?? $movieInfo['description'] ?? null;
-            $genre = $info['genre'] ?? $movieInfo['genre'] ?? null;
+            $title = $record->title_custom ?? ($record->title ?? ($record->name ?? 'Unknown'));
+            $plot =
+                $info['plot'] ?? ($info['description'] ?? ($movieInfo['plot'] ?? ($movieInfo['description'] ?? null)));
+            $genre = $info['genre'] ?? ($movieInfo['genre'] ?? null);
             $year = $record->year ?? null;
             if (!$year && isset($info['releasedate']) && is_string($info['releasedate'])) {
                 $year = substr($info['releasedate'], 0, 4);
             }
-            $rating = $record->rating ?? $info['rating'] ?? $movieInfo['rating'] ?? null;
-            $duration = $info['duration'] ?? $movieInfo['duration'] ?? $info['duration_secs'] ?? $movieInfo['duration_secs'] ?? null;
-            $director = $info['director'] ?? $movieInfo['director'] ?? null;
-            $cast = $info['cast'] ?? $movieInfo['cast'] ?? $info['actors'] ?? $movieInfo['actors'] ?? null;
-            $country = $info['country'] ?? $movieInfo['country'] ?? null;
+            $rating = $record->rating ?? ($info['rating'] ?? ($movieInfo['rating'] ?? null));
+            $duration =
+                $info['duration'] ??
+                ($movieInfo['duration'] ?? ($info['duration_secs'] ?? ($movieInfo['duration_secs'] ?? null)));
+            $director = $info['director'] ?? ($movieInfo['director'] ?? null);
+            $cast = $info['cast'] ?? ($movieInfo['cast'] ?? ($info['actors'] ?? ($movieInfo['actors'] ?? null)));
+            $country = $info['country'] ?? ($movieInfo['country'] ?? null);
 
             // Handle backdrop_path - can be array (Emby), string (Xtream), or nested array
-            $backdropRaw = $info['backdrop_path'] ?? $movieInfo['backdrop_path'] ?? $info['cover_big'] ?? $movieInfo['cover_big'] ?? null;
+            $backdropRaw =
+                $info['backdrop_path'] ??
+                ($movieInfo['backdrop_path'] ?? ($info['cover_big'] ?? ($movieInfo['cover_big'] ?? null)));
             if (is_array($backdropRaw)) {
                 // Could be array of URLs or array of objects
                 $first = $backdropRaw[0] ?? null;
-                $backdrop = is_array($first) ? ($first['url'] ?? null) : $first;
+                $backdrop = is_array($first) ? $first['url'] ?? null : $first;
             } else {
                 $backdrop = is_string($backdropRaw) ? $backdropRaw : null;
             }
 
             $cover = \App\Facades\LogoFacade::getChannelLogoUrl($record);
-            $tmdbId = $record->tmdb_id ?? $info['tmdb_id'] ?? $movieInfo['tmdb_id'] ?? null;
-            $imdbId = $record->imdb_id ?? $info['imdb_id'] ?? $movieInfo['imdb_id'] ?? null;
-            $youtubeTrailer = $info['youtube_trailer'] ?? $movieInfo['youtube_trailer'] ?? null;
+            $tmdbId = $record->tmdb_id ?? ($info['tmdb_id'] ?? ($movieInfo['tmdb_id'] ?? null));
+            $imdbId = $record->imdb_id ?? ($info['imdb_id'] ?? ($movieInfo['imdb_id'] ?? null));
+            $youtubeTrailer = $info['youtube_trailer'] ?? ($movieInfo['youtube_trailer'] ?? null);
 
             // Format duration safely
             $formattedDuration = null;
@@ -65,20 +70,17 @@
             $hasError = true;
             $errorMessage = $e->getMessage();
             // Set defaults to prevent further errors
-            $title = $record->title_custom ?? $record->title ?? $record->name ?? 'Unknown';
+            $title = $record->title_custom ?? ($record->title ?? ($record->name ?? 'Unknown'));
             $plot = $genre = $year = $rating = $formattedDuration = $director = $cast = $country = null;
             $backdrop = null;
             $cover = null;
             $tmdbId = $imdbId = $youtubeTrailer = null;
         }
 
-        $playerArgs = json_encode($record->getFloatingPlayerAttributes(
-            username: $username,
-            password: $password,
-        ));
+        $playerArgs = json_encode($record->getFloatingPlayerAttributes(username: $username, password: $password));
     @endphp
 
-    @if($hasError ?? false)
+    @if ($hasError ?? false)
         <div class="p-4 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-lg mb-4">
             <p class="font-medium">Error loading VOD metadata</p>
             <p class="text-sm">{{ $errorMessage ?? 'Unknown error' }}</p>
@@ -86,7 +88,7 @@
     @endif
 
     {{-- Hero Section with Backdrop --}}
-    @if($backdrop)
+    @if ($backdrop)
         <div class="relative -mt-4 mb-6 overflow-hidden rounded-xl" style="min-height: 400px;">
             {{-- Backdrop Image --}}
             <div class="absolute inset-0">
@@ -99,7 +101,7 @@
             <div class="relative z-10 p-8 flex flex-col md:flex-row gap-8">
                 {{-- Poster --}}
                 <div class="flex-shrink-0">
-                    @if($cover)
+                    @if ($cover)
                         <img src="{{ $cover }}" alt="{{ $title }}"
                             class="w-48 h-72 object-cover rounded-lg shadow-2xl ring-1 ring-white/20" />
                     @else
@@ -115,19 +117,20 @@
 
                     {{-- Metadata Badges --}}
                     <div class="flex flex-wrap gap-2 items-center text-sm">
-                        @if($year)
+                        @if ($year)
                             <span class="px-3 py-1 bg-white/10 rounded-full">{{ $year }}</span>
                         @endif
-                        @if($genre)
+                        @if ($genre)
                             <span class="px-3 py-1 bg-white/10 rounded-full">{{ $genre }}</span>
                         @endif
-                        @if($rating)
-                            <span class="px-3 py-1 bg-yellow-500/20 text-yellow-300 rounded-full flex items-center gap-1">
+                        @if ($rating)
+                            <span
+                                class="px-3 py-1 bg-yellow-500/20 text-yellow-300 rounded-full flex items-center gap-1">
                                 <x-heroicon-s-star class="w-4 h-4" />
                                 {{ $rating }}
                             </span>
                         @endif
-                        @if($formattedDuration)
+                        @if ($formattedDuration)
                             <span class="px-3 py-1 bg-white/10 rounded-full flex items-center gap-1">
                                 <x-heroicon-o-clock class="w-4 h-4" />
                                 {{ $formattedDuration }}
@@ -142,20 +145,20 @@
                     </div>
 
                     {{-- Plot --}}
-                    @if($plot)
+                    @if ($plot)
                         <p class="text-gray-300 max-w-2xl leading-relaxed">{{ Str::limit($plot, 500) }}</p>
                     @endif
 
                     {{-- External IDs --}}
-                    @if($tmdbId || $imdbId)
+                    @if ($tmdbId || $imdbId)
                         <div class="flex gap-3 pt-2">
-                            @if($tmdbId)
+                            @if ($tmdbId)
                                 <a href="https://www.themoviedb.org/movie/{{ $tmdbId }}" target="_blank"
                                     class="px-3 py-1 bg-blue-600/30 hover:bg-blue-600/50 text-blue-300 rounded text-xs transition-colors">
                                     TMDB: {{ $tmdbId }}
                                 </a>
                             @endif
-                            @if($imdbId)
+                            @if ($imdbId)
                                 <a href="https://www.imdb.com/title/{{ $imdbId }}" target="_blank"
                                     class="px-3 py-1 bg-yellow-600/30 hover:bg-yellow-600/50 text-yellow-300 rounded text-xs transition-colors">
                                     {{ $imdbId }}
@@ -173,7 +176,7 @@
                             Play Movie
                         </button>
 
-                        @if($youtubeTrailer)
+                        @if ($youtubeTrailer)
                             <a href="https://www.youtube.com/watch?v={{ $youtubeTrailer }}" target="_blank"
                                 class="inline-flex items-center gap-2 px-4 py-3 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors">
                                 <x-heroicon-s-play class="w-5 h-5" />
@@ -183,13 +186,13 @@
                     </div>
 
                     {{-- Cast & Director --}}
-                    @if($director || $cast)
+                    @if ($director || $cast)
                         <div class="pt-4 border-t border-white/10 space-y-2">
-                            @if($director)
+                            @if ($director)
                                 <p class="text-sm"><span class="text-gray-400">Director:</span> <span
                                         class="text-white">{{ $director }}</span></p>
                             @endif
-                            @if($cast)
+                            @if ($cast)
                                 <p class="text-sm"><span class="text-gray-400">Cast:</span> <span
                                         class="text-white">{{ Str::limit($cast, 200) }}</span></p>
                             @endif
@@ -204,8 +207,9 @@
             <div class="flex flex-col md:flex-row gap-6">
                 {{-- Poster --}}
                 <div class="flex-shrink-0">
-                    @if($cover)
-                        <img src="{{ $cover }}" alt="{{ $title }}" class="w-48 h-72 object-cover rounded-lg shadow-lg" />
+                    @if ($cover)
+                        <img src="{{ $cover }}" alt="{{ $title }}"
+                            class="w-48 h-72 object-cover rounded-lg shadow-lg" />
                     @else
                         <div class="w-48 h-72 bg-gray-300 dark:bg-gray-700 rounded-lg flex items-center justify-center">
                             <x-heroicon-o-film class="w-12 h-12 text-gray-400" />
@@ -218,20 +222,20 @@
                     <h1 class="text-2xl font-bold">{{ $title }}</h1>
 
                     <div class="flex flex-wrap gap-2 items-center text-sm">
-                        @if($year)
+                        @if ($year)
                             <span class="px-2 py-1 bg-gray-200 dark:bg-gray-700 rounded">{{ $year }}</span>
                         @endif
-                        @if($genre)
+                        @if ($genre)
                             <span class="px-2 py-1 bg-gray-200 dark:bg-gray-700 rounded">{{ $genre }}</span>
                         @endif
-                        @if($rating)
+                        @if ($rating)
                             <span
                                 class="px-2 py-1 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300 rounded flex items-center gap-1">
                                 <x-heroicon-s-star class="w-3 h-3" />
                                 {{ $rating }}
                             </span>
                         @endif
-                        @if($formattedDuration)
+                        @if ($formattedDuration)
                             <span class="px-2 py-1 bg-gray-200 dark:bg-gray-700 rounded flex items-center gap-1">
                                 <x-heroicon-o-clock class="w-3 h-3" />
                                 {{ $formattedDuration }}
@@ -243,7 +247,7 @@
                         </span>
                     </div>
 
-                    @if($plot)
+                    @if ($plot)
                         <p class="text-gray-600 dark:text-gray-300">{{ Str::limit($plot, 300) }}</p>
                     @endif
 
@@ -256,12 +260,12 @@
                         </button>
                     </div>
 
-                    @if($director || $cast)
+                    @if ($director || $cast)
                         <div class="text-sm space-y-1 pt-2">
-                            @if($director)
+                            @if ($director)
                                 <p><span class="text-gray-500">Director:</span> {{ $director }}</p>
                             @endif
-                            @if($cast)
+                            @if ($cast)
                                 <p><span class="text-gray-500">Cast:</span> {{ Str::limit($cast, 150) }}</p>
                             @endif
                         </div>
