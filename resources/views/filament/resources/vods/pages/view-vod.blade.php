@@ -294,7 +294,7 @@
                 <div class="col-span-full">
                     <span class="text-sm text-gray-500">Stream URL</span>
                     <div class="font-mono text-sm bg-gray-100 dark:bg-gray-800 p-2 rounded mt-1 overflow-x-auto">
-                        {{ $record->url_custom ?? $record->url }}
+                        {{ rtrim($record->getProxyUrl(username: $username, password: $password), '?proxy=true') }}
                     </div>
                 </div>
                 <div class="col-span-full">
