@@ -242,8 +242,13 @@ class AppServiceProvider extends ServiceProvider
 
         $configuredPort = config('app.port');
         $hasPortInUrl = parse_url($baseUrl, PHP_URL_PORT) !== null;
+        $scheme = parse_url($baseUrl, PHP_URL_SCHEME);
 
-        if ($configuredPort && ! $hasPortInUrl) {
+        // Only append the port for HTTP URLs. HTTPS URLs are assumed to be
+        // behind a reverse proxy terminating TLS at port 443, so appending
+        // APP_PORT would produce incorrect external URLs (e.g. https://host:36400).
+        // This mirrors the guard in PlaylistService::getBaseUrl().
+        if ($configuredPort && ! $hasPortInUrl && $scheme !== 'https') {
             $baseUrl .= ':'.$configuredPort;
         }
 

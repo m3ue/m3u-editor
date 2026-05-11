@@ -316,7 +316,7 @@ it('warns when recordSeriesDefaults is called without a dvr setting selected', f
 it('creates a series rule with custom options', function () {
     Livewire::test(BrowseShows::class)
         ->set('dvr_setting_id', $this->setting->id)
-        ->set('seriesNewOnly', true)
+        ->set('seriesNewOnly', 1)
         ->set('seriesPriority', 75)
         ->set('seriesStartEarly', 120)
         ->set('seriesEndLate', 300)

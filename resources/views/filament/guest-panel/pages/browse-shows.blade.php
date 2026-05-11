@@ -349,6 +349,7 @@
                     'show' => $selectedShow ?? null,
                     'channelOptions' => $this->channelOptions,
                     'seriesHint' => $this->seriesHint,
+                    'sourceChannelId' => $sourceChannelId,
                 ])
             </div>
         </div>

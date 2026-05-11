@@ -64,6 +64,8 @@ class BrowseShows extends Page
 
     public string $channel_name = '';
 
+    public ?int $channel_id = null;
+
     public int $days = 14;
 
     // --- Result state ---
@@ -88,9 +90,13 @@ class BrowseShows extends Page
 
     // --- Series options form state ---
 
-    public bool $seriesNewOnly = false;
+    public int $seriesNewOnly = 0;
 
-    public string $seriesChannelName = '';
+    /** 0 = "From Original Source" (sentinel), null = "Any channel", int = specific channel */
+    public int $seriesChannelId = 0;
+
+    /** The actual channel ID the show was browsed from (null if not resolved). */
+    public ?int $sourceChannelId = null;
 
     public int $seriesPriority = 50;
 
@@ -140,8 +146,31 @@ class BrowseShows extends Page
         }
 
         return Group::where('playlist_id', $playlistId)
+            ->where('enabled', true)
             ->orderBy('name')
             ->pluck('name', 'id')
+            ->all();
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    public function getChannelOptionsProperty(): array
+    {
+        if (! $this->dvr_setting_id) {
+            return [];
+        }
+
+        $playlistId = $this->resolvedDvrSetting()?->playlist_id;
+
+        if (! $playlistId) {
+            return [];
+        }
+
+        return Channel::where('playlist_id', $playlistId)
+            ->where('enabled', true)
+            ->orderBy('title')
+            ->pluck('title', 'id')
             ->all();
     }
 
@@ -157,9 +186,15 @@ class BrowseShows extends Page
 
     public function getSeriesHintProperty(): string
     {
-        $channelName = $this->seriesChannelName
-            ? Str::limit($this->seriesChannelName, 18)
-            : __('any channel');
+        $channelOptions = $this->channelOptions;
+
+        $channelName = match (true) {
+            $this->seriesChannelId === 0 => $this->sourceChannelId && isset($channelOptions[$this->sourceChannelId])
+                ? Str::limit($channelOptions[$this->sourceChannelId], 18)
+                : __('original source'),
+            $this->seriesChannelId > 0 && isset($channelOptions[$this->seriesChannelId]) => Str::limit($channelOptions[$this->seriesChannelId], 18),
+            default => __('any channel'),
+        };
 
         $parts = array_filter([
             $channelName,
@@ -225,12 +260,13 @@ class BrowseShows extends Page
     public function openShowDetail(string $title): void
     {
         $this->selectedShowTitle = $title;
-        $this->seriesNewOnly = false;
+        $this->seriesNewOnly = 0;
         $this->seriesPriority = 50;
         $this->seriesStartEarly = 0;
         $this->seriesEndLate = 0;
         $this->seriesKeepLast = null;
-        $this->seriesChannelName = '';
+        $this->sourceChannelId = $this->resolveSourceChannelId($title);
+        $this->seriesChannelId = 0;
         $this->selectedShowDetail = $this->buildShowDetail($title);
     }
 
@@ -344,27 +380,28 @@ class BrowseShows extends Page
         $this->createSeriesRule($title, [
             'series_mode' => DvrSeriesMode::All,
             'priority' => 50,
+            'source_channel_id' => $this->sourceChannelId,
         ]);
     }
 
     public function recordSeriesWithOptions(string $title): void
     {
         $channelId = null;
+        $sourceChannelId = null;
 
-        if ($this->seriesChannelName && $this->dvr_setting_id) {
-            $playlistId = $this->resolvedDvrSetting()?->playlist_id;
-            if ($playlistId) {
-                $seriesChannelKw = mb_strtolower($this->seriesChannelName);
-                $channelId = Channel::where('playlist_id', $playlistId)
-                    ->whereRaw('LOWER(title) LIKE ?', ["%{$seriesChannelKw}%"])
-                    ->value('id');
-            }
+        if ($this->seriesChannelId === 0) {
+            // "From Original Source" sentinel — store source channel, leave channel_id null
+            $sourceChannelId = $this->sourceChannelId;
+        } elseif ($this->seriesChannelId > 0) {
+            $channelId = $this->seriesChannelId;
         }
+        // seriesChannelId < 0 is not valid; both remain null → "Any channel"
 
         $this->createSeriesRule($title, [
             'new_only' => $this->seriesNewOnly,
             'series_mode' => $this->seriesNewOnly ? DvrSeriesMode::NewFlag : DvrSeriesMode::All,
             'channel_id' => $channelId,
+            'source_channel_id' => $sourceChannelId,
             'priority' => $this->seriesPriority,
             'start_early_seconds' => $this->seriesStartEarly,
             'end_late_seconds' => $this->seriesEndLate,
@@ -375,7 +412,39 @@ class BrowseShows extends Page
     // --- Internal ---
 
     /**
-     * Find the selected DvrSetting scoped to the authenticated user.
+     * Find the channel (within the selected DVR setting's playlist) that a show most
+     * likely airs on. Used to pre-populate the source channel when the slide-over opens
+     * and to set source_channel_id when creating a series rule with defaults.
+     *
+     * Returns null when the channel cannot be determined.
+     */
+    private function resolveSourceChannelId(string $title): ?int
+    {
+        $playlistId = $this->resolvedDvrSetting()?->playlist_id;
+        if (! $playlistId) {
+            return null;
+        }
+
+        $programme = $this->buildBaseQuery()
+            ->where('title', $title)
+            ->orderBy('start_time')
+            ->first(['epg_channel_id']);
+
+        if (! $programme?->epg_channel_id) {
+            return null;
+        }
+
+        $epgChannelPk = EpgChannel::where('channel_id', $programme->epg_channel_id)->value('id');
+        if (! $epgChannelPk) {
+            return null;
+        }
+
+        return Channel::where('playlist_id', $playlistId)
+            ->where('epg_channel_id', $epgChannelPk)
+            ->value('id');
+    }
+
+    /**
      * Returns null if none is selected or the setting doesn't belong to this user,
      * preventing cross-user data access via a manipulated dvr_setting_id.
      */
@@ -769,6 +838,16 @@ class BrowseShows extends Page
             ->where('channels.enabled', true)
             ->whereNotNull('channels.stream_id')
             ->where('channels.stream_id', '!=', '');
+
+        if ($this->channel_id) {
+            $channel = Channel::where('id', $this->channel_id)
+                ->where('enabled', true)
+                ->with('epgChannel')
+                ->first();
+            $epgId = $channel?->epgChannel?->channel_id;
+
+            return $epgId ? [$epgId] : null;
+        }
 
         if ($this->channel_name) {
             $channelKw = mb_strtolower($this->channel_name);

@@ -225,7 +225,7 @@ it('does not duplicate a Series rule for the same title', function () {
 
 it('creates a Series rule with custom options and playlist_auth_id', function () {
     $component = makeGuestBrowseShows();
-    $component->seriesNewOnly = true;
+    $component->seriesNewOnly = 1;
     $component->seriesPriority = 75;
     $component->seriesStartEarly = 60;
     $component->seriesEndLate = 120;

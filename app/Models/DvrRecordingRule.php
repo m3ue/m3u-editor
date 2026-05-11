@@ -30,6 +30,7 @@ class DvrRecordingRule extends Model
         'series_key',
         'normalized_title',
         'channel_id',
+        'source_channel_id',
         'epg_channel_id',
         'new_only',
         'series_mode',
@@ -113,6 +114,11 @@ class DvrRecordingRule extends Model
     public function channel(): BelongsTo
     {
         return $this->belongsTo(Channel::class);
+    }
+
+    public function sourceChannel(): BelongsTo
+    {
+        return $this->belongsTo(Channel::class, 'source_channel_id');
     }
 
     public function epgChannel(): BelongsTo
