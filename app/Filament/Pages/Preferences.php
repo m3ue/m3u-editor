@@ -1443,7 +1443,6 @@ class Preferences extends SettingsPage
                                                         'ollama' => 'llama3',
                                                         default => 'gpt-4o',
                                                     })
-                                                    ->required(fn (Get $get): bool => (bool) $get('copilot_enabled'))
                                                     ->helperText(__('The model to use. Leave blank to use the provider default.')),
                                             ]),
                                         TextInput::make('copilot_api_key')
