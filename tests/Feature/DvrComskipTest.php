@@ -311,8 +311,11 @@ it('runComskipOnRecording skips silently when recording has no file_path', funct
     $proxy = Mockery::mock(M3uProxyService::class);
     $processor = new DvrPostProcessorService($downloader, $proxy);
 
-    // Should not throw despite no file
+    // Should not throw despite no file; post_processing_step should be unchanged
     $processor->runComskipOnRecording($recording);
+
+    $recording->refresh();
+    expect($recording->post_processing_step)->toBeNull();
 });
 
 it('ProcessComskipOnRecording job produces .edl and clears post_processing_step', function () {

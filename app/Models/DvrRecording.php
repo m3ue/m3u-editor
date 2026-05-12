@@ -259,7 +259,7 @@ class DvrRecording extends Model
     {
         $rule = $this->recordingRule;
         if ($rule && $rule->enable_comskip !== null) {
-            return $rule->enable_comskip;
+            return (bool) $rule->enable_comskip;
         }
 
         return $this->dvrSetting?->enable_comskip ?? false;
@@ -281,7 +281,7 @@ class DvrRecording extends Model
                 if (Storage::disk($diskName)->exists($setting->comskip_ini_path)) {
                     return Storage::disk($diskName)->path($setting->comskip_ini_path);
                 }
-            } catch (\Throwable) {
+            } catch (\Exception) {
                 // Fall through to default
             }
         }

@@ -411,9 +411,8 @@ class DvrPostProcessorService
      *
      * This is used by the "Reprocess Comskip" action in the Filament
      * resources to re-run commercial detection on a previously processed
-     * recording. Unlike the private runComskip() which is called during
-     * post-processing, this method resolves the file path from the DB
-     * and always runs comskip regardless of the shouldRunComskip() flag.
+     * recording. Unlike during normal post-processing, this always runs
+     * comskip regardless of the shouldRunComskip() flag.
      */
     public function runComskipOnRecording(DvrRecording $recording): void
     {
@@ -447,7 +446,7 @@ class DvrPostProcessorService
         }
 
         $this->setStep($recording, 'Running commercial detection');
-        $this->runComskip($recording, $outputFullPath);
+        $this->runComskip($recording, $outputFullPath, force: true);
         $recording->update(['post_processing_step' => null]);
     }
 
@@ -458,10 +457,13 @@ class DvrPostProcessorService
      * completes normally even if comskip is unavailable or fails.
      *
      * Produces a .edl sidecar file next to the media file.
+     *
+     * @param  bool  $force  When true, run even if shouldRunComskip() returns false
+     *                       (used by the manual "Reprocess Comskip" action).
      */
-    private function runComskip(DvrRecording $recording, string $outputFullPath): void
+    private function runComskip(DvrRecording $recording, string $outputFullPath, bool $force = false): void
     {
-        if (! $recording->shouldRunComskip()) {
+        if (! $force && ! $recording->shouldRunComskip()) {
             return;
         }
 
@@ -481,11 +483,14 @@ class DvrPostProcessorService
         ]);
 
         try {
-            $cmd = escapeshellcmd($comskipPath)
-                .' --ini='.escapeshellarg($iniPath)
-                .' --output='.escapeshellarg($outputDir)
-                .' '.escapeshellarg($outputFullPath)
-                .' 2>&1';
+            $args = [
+                $comskipPath,
+                '--ini='.$iniPath,
+                '--output='.$outputDir,
+                $outputFullPath,
+            ];
+
+            $cmd = implode(' ', array_map('escapeshellarg', $args)).' 2>&1';
 
             $output = [];
             $exitCode = 0;
