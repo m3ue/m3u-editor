@@ -151,6 +151,9 @@ class DvrPostProcessorService
             'duration_seconds' => $duration,
         ]);
 
+        // ── Step 1b: Commercial detection via Comskip (non-fatal) ──────────
+        $this->runComskip($recording, $outputFullPath);
+
         // ── Step 2: Update DB with file location ────────────────────────────
         $this->setStep($recording, 'Saving to library');
 
@@ -400,6 +403,117 @@ class DvrPostProcessorService
         if ($exitCode !== 0) {
             $log = file_exists($logFile) ? file_get_contents($logFile) : 'no log';
             throw new Exception("ffmpeg concat exited with code {$exitCode}: ".substr($log, -500));
+        }
+    }
+
+    /**
+     * Run comskip on an already-completed recording's file on disk.
+     *
+     * This is used by the "Reprocess Comskip" action in the Filament
+     * resources to re-run commercial detection on a previously processed
+     * recording. Unlike the private runComskip() which is called during
+     * post-processing, this method resolves the file path from the DB
+     * and always runs comskip regardless of the shouldRunComskip() flag.
+     */
+    public function runComskipOnRecording(DvrRecording $recording): void
+    {
+        $setting = $recording->dvrSetting;
+        if (! $setting) {
+            Log::warning('runComskipOnRecording: no DvrSetting for recording', [
+                'recording_id' => $recording->id,
+            ]);
+
+            return;
+        }
+
+        if (! $recording->hasFilePath()) {
+            Log::warning('runComskipOnRecording: recording has no file path', [
+                'recording_id' => $recording->id,
+            ]);
+
+            return;
+        }
+
+        $disk = $setting->storage_disk ?: config('dvr.storage_disk');
+        $outputFullPath = Storage::disk($disk)->path($recording->file_path);
+
+        if (! file_exists($outputFullPath)) {
+            Log::warning('runComskipOnRecording: file not found on disk', [
+                'recording_id' => $recording->id,
+                'expected_path' => $outputFullPath,
+            ]);
+
+            return;
+        }
+
+        $this->setStep($recording, 'Running commercial detection');
+        $this->runComskip($recording, $outputFullPath);
+        $recording->update(['post_processing_step' => null]);
+    }
+
+    /**
+     * Run comskip commercial detection on the concatenated output file.
+     *
+     * Non-fatal: exceptions are caught and logged, but the recording
+     * completes normally even if comskip is unavailable or fails.
+     *
+     * Produces a .edl sidecar file next to the media file.
+     */
+    private function runComskip(DvrRecording $recording, string $outputFullPath): void
+    {
+        if (! $recording->shouldRunComskip()) {
+            return;
+        }
+
+        $this->setStep($recording, 'Running commercial detection');
+
+        $comskipPath = config('dvr.comskip_path');
+        $iniPath = $recording->resolveComskipIniPath();
+
+        $edlPath = preg_replace('/\.[^.]+$/', '.edl', $outputFullPath);
+        $outputDir = dirname($outputFullPath);
+
+        Log::info('DVR post-processing step 1b: running comskip', [
+            'recording_id' => $recording->id,
+            'comskip_path' => $comskipPath,
+            'ini_path' => $iniPath,
+            'output_dir' => $outputDir,
+        ]);
+
+        try {
+            $cmd = escapeshellcmd($comskipPath)
+                .' --ini='.escapeshellarg($iniPath)
+                .' --output='.escapeshellarg($outputDir)
+                .' '.escapeshellarg($outputFullPath)
+                .' 2>&1';
+
+            $output = [];
+            $exitCode = 0;
+            exec($cmd, $output, $exitCode);
+
+            if ($exitCode !== 0) {
+                Log::warning("Comskip exited with code {$exitCode}", [
+                    'recording_id' => $recording->id,
+                    'output' => implode("\n", array_slice($output, -20)),
+                ]);
+            }
+
+            if (file_exists($edlPath)) {
+                Log::info('Comskip complete — .edl generated', [
+                    'recording_id' => $recording->id,
+                    'edl_path' => $edlPath,
+                ]);
+            } else {
+                Log::warning('Comskip completed but no .edl file was produced', [
+                    'recording_id' => $recording->id,
+                    'expected_path' => $edlPath,
+                ]);
+            }
+        } catch (Exception $e) {
+            Log::warning("Comskip failed (non-fatal): {$e->getMessage()}", [
+                'recording_id' => $recording->id,
+                'exception' => $e,
+            ]);
         }
     }
 

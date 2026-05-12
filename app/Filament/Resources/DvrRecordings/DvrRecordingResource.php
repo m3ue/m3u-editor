@@ -5,6 +5,7 @@ namespace App\Filament\Resources\DvrRecordings;
 use App\Enums\DvrRecordingStatus;
 use App\Jobs\GenerateDvrNfo;
 use App\Jobs\PostProcessDvrRecording;
+use App\Jobs\ProcessComskipOnRecording;
 use App\Jobs\StopDvrRecording;
 use App\Models\DvrRecording;
 use App\Traits\HasUserFiltering;
@@ -232,6 +233,21 @@ class DvrRecordingResource extends Resource
                             Notification::make()
                                 ->success()
                                 ->title(__('Recording cancellation queued'))
+                                ->send();
+                        }),
+                    Action::make('reprocessComskip')
+                        ->label(__('Reprocess Comskip'))
+                        ->icon('heroicon-o-scissors')
+                        ->color('gray')
+                        ->visible(fn (DvrRecording $record): bool => $record->hasFilePath())
+                        ->requiresConfirmation()
+                        ->modalDescription(__('Re-run commercial detection (comskip) on the existing recording file. Any existing .edl file will be overwritten.'))
+                        ->action(function (DvrRecording $record): void {
+                            ProcessComskipOnRecording::dispatch($record->id);
+
+                            Notification::make()
+                                ->success()
+                                ->title(__('Comskip reprocessing queued'))
                                 ->send();
                         }),
                     DeleteAction::make()

@@ -4,6 +4,7 @@ namespace App\Filament\GuestPanel\Resources\DvrRecordings;
 
 use App\Enums\DvrRecordingStatus;
 use App\Filament\GuestPanel\Pages\Concerns\HasGuestDvr;
+use App\Jobs\ProcessComskipOnRecording;
 use App\Jobs\StopDvrRecording;
 use App\Models\DvrRecording;
 use Filament\Actions\Action;
@@ -253,6 +254,21 @@ class GuestDvrRecordingResource extends Resource
                             Notification::make()
                                 ->success()
                                 ->title(__('Recording cancellation queued'))
+                                ->send();
+                        }),
+                    Action::make('reprocessComskip')
+                        ->label(__('Reprocess Comskip'))
+                        ->icon('heroicon-o-scissors')
+                        ->color('gray')
+                        ->visible(fn (DvrRecording $record): bool => $record->hasFilePath())
+                        ->requiresConfirmation()
+                        ->modalDescription(__('Re-run commercial detection (comskip) on the existing recording file. Any existing .edl file will be overwritten.'))
+                        ->action(function (DvrRecording $record): void {
+                            ProcessComskipOnRecording::dispatch($record->id);
+
+                            Notification::make()
+                                ->success()
+                                ->title(__('Comskip reprocessing queued'))
                                 ->send();
                         }),
                 ])->button()->hiddenLabel()->size('sm'),

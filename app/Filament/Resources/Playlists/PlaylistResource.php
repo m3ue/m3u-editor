@@ -2961,6 +2961,12 @@ class PlaylistResource extends Resource implements CopilotResource
                                     ->default(true)
                                     ->inline(false)
                                     ->live(),
+                                Toggle::make('dvr_enable_comskip')
+                                    ->label(__('Enable Commercial Detection (Comskip)'))
+                                    ->helperText(__('Run comskip after recording to detect and mark commercials. Produces .edl files that Kodi, Jellyfin, and Emby can use for automatic commercial skipping.'))
+                                    ->default(false)
+                                    ->inline(false)
+                                    ->columnSpanFull(),
                                 Placeholder::make('dvr_tmdb_status')
                                     ->label(__('TMDB'))
                                     ->content(function (): HtmlString {

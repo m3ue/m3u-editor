@@ -120,6 +120,34 @@ RUN --mount=type=bind,target=/build-context \
     rm -rf .git
 
 ########################################
+# Stage 3.5: Comskip builder — compiles commercial detection tool
+########################################
+FROM alpine:3.21.3 AS comskip_builder
+
+WORKDIR /tmp
+
+# Build argtable2 (not in Alpine repos) then comskip from git.
+# Uses --virtual=builddeps to keep only the final binary in this layer.
+# ffmpeg-dev must come from edge to match the runtime ffmpeg ABI.
+# @edge tag doesn't work inside --virtual, so install ffmpeg-dev separately.
+RUN echo "@edge https://dl-cdn.alpinelinux.org/alpine/edge/main" >> /etc/apk/repositories && \
+    echo "@edge https://dl-cdn.alpinelinux.org/alpine/edge/community" >> /etc/apk/repositories && \
+    apk update && \
+    apk add --no-cache ffmpeg-dev@edge spirv-tools@edge && \
+    apk add --no-cache --virtual=builddeps \
+    autoconf automake libtool git wget tar build-base && \
+    wget -q http://prdownloads.sourceforge.net/argtable/argtable2-13.tar.gz && \
+    tar xzf argtable2-13.tar.gz && \
+    cd argtable2-13/ && ./configure CFLAGS="-Wno-implicit-function-declaration" && make && make install && \
+    cd /tmp && \
+    git clone --depth 1 --branch master https://github.com/erikkaashoek/Comskip && \
+    cd Comskip && ./autogen.sh && ./configure && \
+    sed -i '/is->dec_ctx->ticks_per_frame = /d; s/is->dec_ctx->ticks_per_frame/1/g' mpeg2dec.c && \
+    make && \
+    mkdir -p /opt/comskip && cp comskip /opt/comskip/ && \
+    apk del builddeps ffmpeg-dev && rm -rf /var/cache/apk/* /tmp/*
+
+########################################
 # Stage 4: Runtime image
 ########################################
 FROM alpine:3.21.3 AS runtime
@@ -261,6 +289,11 @@ COPY --from=proxy_builder --chown=${WWWUSER}:${WWWGROUP} /opt/m3u-proxy /opt/m3u
 RUN if [ -f /opt/m3u-proxy/requirements.txt ]; then \
         pip3 install --no-cache-dir --break-system-packages -r /opt/m3u-proxy/requirements.txt; \
     fi
+
+# Copy Comskip binary from builder stage
+COPY --from=comskip_builder /opt/comskip/comskip /usr/local/bin/comskip
+# Copy libargtable2.so* that comskip depends on at runtime (Alpine musl loader)
+COPY --from=comskip_builder /usr/local/lib/libargtable2.so.* /usr/lib/
 
 # Copy application code (changes more frequently)
 COPY --chown=${WWWUSER}:${WWWGROUP} . /var/www/html
