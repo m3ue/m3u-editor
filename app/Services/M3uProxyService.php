@@ -1374,6 +1374,8 @@ class M3uProxyService
                 'profile_id' => $profile->id,
                 'strict_live_ts' => $playlist->strict_live_ts ?? false,
                 'use_sticky_session' => $playlist->use_sticky_session ?? false,
+                'original_channel_id' => $id,           // Enables findExistingPooledStream reuse
+                'original_playlist_uuid' => $playlist->uuid,
             ];
 
             // Add provider profile ID if using profiles
@@ -1399,7 +1401,7 @@ class M3uProxyService
 
             // Finalize the reservation with the real stream ID
             if ($selectedProfile && $reservationId) {
-                ProfileService::finalizeReservation($selectedProfile, $reservationId, $streamId);
+                ProfileService::finalizeReservation($selectedProfile, $reservationId, $streamId, $id, $playlist->uuid);
             }
 
             // Return transcoded stream URL
@@ -1413,6 +1415,8 @@ class M3uProxyService
                 'playlist_uuid' => $playlist->uuid,
                 'strict_live_ts' => $playlist->strict_live_ts ?? false,
                 'use_sticky_session' => $playlist->use_sticky_session ?? false,
+                'original_channel_id' => $id,           // Enables findExistingPooledStream reuse
+                'original_playlist_uuid' => $playlist->uuid,
             ];
 
             // Add provider profile ID if using profiles
@@ -1437,7 +1441,7 @@ class M3uProxyService
 
             // Finalize the reservation with the real stream ID
             if ($selectedProfile && $reservationId) {
-                ProfileService::finalizeReservation($selectedProfile, $reservationId, $streamId);
+                ProfileService::finalizeReservation($selectedProfile, $reservationId, $streamId, $id, $playlist->uuid);
             }
 
             // For direct (non-transcoded) streams, always use the /stream/ endpoint.
