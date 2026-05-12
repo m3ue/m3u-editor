@@ -1226,7 +1226,7 @@ class M3uProxyService
         // This check applies regardless of whether provider profiles are enabled —
         // available_streams is the authoritative proxy-level limit.
         if ($playlist->available_streams !== 0) {
-            $activeStreams = self::getCachedActiveStreamsCountByMetadata('playlist_uuid', $playlist->uuid, 1);
+            $activeStreams = self::getActiveStreamsCountByMetadata('playlist_uuid', $playlist->uuid);
 
             if ($activeStreams >= $playlist->available_streams) {
                 // Check if "stop oldest on limit" is enabled in settings
@@ -1244,7 +1244,7 @@ class M3uProxyService
 
                         // Short delay to allow proxy to clean up
                         usleep(100000); // 100ms
-                        $activeStreams = self::getCachedActiveStreamsCountByMetadata('playlist_uuid', $playlist->uuid, 0);
+                        $activeStreams = self::getActiveStreamsCountByMetadata('playlist_uuid', $playlist->uuid);
                     }
                 }
 
