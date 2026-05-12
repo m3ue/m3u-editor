@@ -139,7 +139,7 @@ class DvrRecordingRuleResource extends Resource
                     ->placeholder(__('Inherit from DVR Setting'))
                     ->nullable()
                     ->hintIcon('heroicon-m-question-mark-circle')
-                    ->hintIconTooltip(__('When not set, the DVR Setting default is used. Comskip detects and marks commercials in recordings.')),
+                    ->hintIconTooltip(__('When not set, the DVR Setting default is used. Comskip detects and marks commercials in recordings. The Emby.ComSkiper plugin for Emby is available at https://github.com/BillOatmanWork/Emby.ComSkipper')),
 
                 TextInput::make('start_early_seconds')
                     ->label(__('Start Early (seconds)'))

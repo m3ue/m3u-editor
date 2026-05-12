@@ -2963,7 +2963,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                     ->live(),
                                 Toggle::make('dvr_enable_comskip')
                                     ->label(__('Enable Commercial Detection (Comskip)'))
-                                    ->helperText(__('Run comskip after recording to detect and mark commercials. Produces .edl files that Kodi, Jellyfin, and Emby can use for automatic commercial skipping.'))
+                                    ->helperText(new HtmlString(__('Run comskip after recording to detect and mark commercials. Produces .edl files that Kodi, Jellyfin, and Emby can use for automatic commercial skipping. The Emby.ComSkiper plugin for Emby is available at <a href="https://github.com/BillOatmanWork/Emby.ComSkipper" class="underline" target="_blank" rel="noopener">GitHub/BillOatmanWork/Emby.ComSkipper</a>.')))
                                     ->default(false)
                                     ->inline(false)
                                     ->columnSpanFull(),
