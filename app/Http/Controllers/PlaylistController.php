@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\PlaylistSourceType;
 use App\Facades\PlaylistFacade;
 use App\Jobs\MergeChannels;
 use App\Jobs\ProcessM3uImport;
@@ -44,6 +45,124 @@ class PlaylistController extends Controller
 
         return response()->json([
             'message' => "Playlist \"{$playlist->name}\" is currently being synced...",
+        ]);
+    }
+
+    /**
+     * Update the playlist source URL.
+     *
+     * Update the playlist's source URL (and optionally credentials for Xtream playlists).
+     * For M3U playlists the `url` column is updated. For Xtream playlists, `xtream_config.url`
+     * is updated, and `username`/`password` may be provided to rotate credentials.
+     *
+     * Pass `resync=true` to dispatch an immediate import job after saving the changes.
+     *
+     * @response 200 {
+     *   "success": true,
+     *   "message": "Playlist updated successfully",
+     *   "data": {
+     *     "uuid": "abc-123-def",
+     *     "name": "My Provider",
+     *     "url": "https://provider.com:8080",
+     *     "resync_dispatched": true
+     *   }
+     * }
+     * @response 403 {
+     *   "success": false,
+     *   "message": "You do not have permission to update this playlist"
+     * }
+     * @response 404 {
+     *   "success": false,
+     *   "message": "Playlist not found"
+     * }
+     * @response 422 {
+     *   "message": "The given data was invalid.",
+     *   "errors": {
+     *     "url": ["The url must be a valid URL."]
+     *   }
+     * }
+     */
+    public function update(Request $request, string $uuid): JsonResponse
+    {
+        $user = $request->user();
+
+        $playlist = PlaylistFacade::resolvePlaylistByUuid($uuid);
+        if (! $playlist) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Playlist not found',
+            ], 404);
+        }
+
+        if (! $playlist instanceof Playlist) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Only standard playlists support this update endpoint',
+            ], 422);
+        }
+
+        if ($playlist->user_id !== $user->id) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You do not have permission to update this playlist',
+            ], 403);
+        }
+
+        $validated = $request->validate([
+            'url' => 'required|url|max:4000',
+            'username' => 'sometimes|nullable|string|max:255',
+            'password' => 'sometimes|nullable|string|max:255',
+            'resync' => 'sometimes|boolean',
+        ]);
+
+        $normalizedUrl = rtrim($validated['url'], '/');
+
+        if ($playlist->source_type === PlaylistSourceType::Xtream) {
+            $config = $playlist->xtream_config ?? [];
+            $config['url'] = $normalizedUrl;
+
+            if (array_key_exists('username', $validated) && $validated['username'] !== null) {
+                $config['username'] = $validated['username'];
+            }
+
+            if (array_key_exists('password', $validated) && $validated['password'] !== null) {
+                $config['password'] = $validated['password'];
+            }
+
+            $playlist->xtream_config = $config;
+        } else {
+            if ($request->has('username') || $request->has('password')) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Credentials are only supported for Xtream playlists',
+                ], 422);
+            }
+
+            $playlist->url = $normalizedUrl;
+        }
+
+        if ($playlist->isDirty()) {
+            $playlist->save();
+        }
+
+        $resync = (bool) ($validated['resync'] ?? false);
+        if ($resync) {
+            dispatch(new ProcessM3uImport($playlist, force: true));
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => $resync
+                ? 'Playlist updated successfully and resync dispatched'
+                : 'Playlist updated successfully',
+            'data' => [
+                'uuid' => $playlist->uuid,
+                'name' => $playlist->name,
+                'url' => $playlist->source_type === PlaylistSourceType::Xtream
+                    ? ($playlist->xtream_config['url'] ?? null)
+                    : $playlist->url,
+                'resync_dispatched' => $resync,
+            ],
         ]);
     }
 
