@@ -1395,7 +1395,7 @@ class Preferences extends SettingsPage
                             ->icon('heroicon-o-sparkles')
                             ->schema([
                                 Section::make(__('AI Copilot'))
-                                    ->description(__('You will need to save and refresh the page after changing settings for them to take effect.'))
+                                    ->description(__('You will need to save and refresh the page after changing settings for them to take effect. Look for the ✨ AI Copilot icon in the top navigation bar after enabling.'))
                                     ->schema([
                                         Toggle::make('copilot_enabled')
                                             ->label(__('Enable AI Copilot'))
