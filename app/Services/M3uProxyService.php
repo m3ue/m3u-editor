@@ -1279,11 +1279,11 @@ class M3uProxyService
         $reservationId = null;
         if ($profileSourcePlaylist) {
             $forceSelect = $profileSourcePlaylist->bypass_provider_limits ?? false;
-            [$selectedProfile, $reservationId] = ProfileService::selectAndReserveProfile($profileSourcePlaylist, null, $id, $playlist->uuid, $forceSelect, $clientIdentifier);
+            [$selectedProfile, $reservationId] = ProfileService::selectAndReserveProfile($profileSourcePlaylist, null, $id, $playlist->uuid, $forceSelect, $clientIdentifier, 'episode');
 
             if (! $selectedProfile) {
                 // Check if reuse was detected inside the lock (another request is creating this stream).
-                if (ProfileService::isChannelStreamActive($id, $playlist->uuid)) {
+                if (ProfileService::isChannelStreamActive($id, $playlist->uuid, 'episode')) {
                     $existingStreamId = $this->findExistingPooledStream($id, $playlist->uuid, $profile?->id, null);
 
                     if ($existingStreamId) {
@@ -1303,10 +1303,20 @@ class M3uProxyService
 
                         return $this->buildProxyUrl($existingStreamId, $format, $username);
                     }
+
+                    // Channel key exists but no proxy stream found — stale key from a failed or
+                    // ended stream. Clear it so the retry below can allocate a fresh profile.
+                    Log::debug('Clearing stale episode channel stream key before retry', [
+                        'episode_id' => $id,
+                        'playlist_uuid' => $playlist->uuid,
+                    ]);
+                    ProfileService::clearChannelStreamMapping($id, $playlist->uuid, 'episode');
                 }
 
+                [$selectedProfile, $reservationId] = ProfileService::selectAndReserveProfile($profileSourcePlaylist, null, $id, $playlist->uuid, $forceSelect, $clientIdentifier, 'episode');
+
                 // No profiles with capacity - try "stop oldest on limit" before giving up
-                if ($this->stopOldestOnLimit) {
+                if (! $selectedProfile && $this->stopOldestOnLimit) {
                     $stopResult = self::stopOldestPlaylistStream($playlist->uuid, $id);
 
                     if ($stopResult['deleted_count'] > 0) {
@@ -1317,7 +1327,7 @@ class M3uProxyService
                         ]);
 
                         usleep(200000); // 200ms
-                        [$selectedProfile, $reservationId] = ProfileService::selectAndReserveProfile($profileSourcePlaylist, null, $id, $playlist->uuid, $forceSelect, $clientIdentifier);
+                        [$selectedProfile, $reservationId] = ProfileService::selectAndReserveProfile($profileSourcePlaylist, null, $id, $playlist->uuid, $forceSelect, $clientIdentifier, 'episode');
                     }
                 }
 
@@ -1401,7 +1411,7 @@ class M3uProxyService
 
             // Finalize the reservation with the real stream ID
             if ($selectedProfile && $reservationId) {
-                ProfileService::finalizeReservation($selectedProfile, $reservationId, $streamId, $id, $playlist->uuid);
+                ProfileService::finalizeReservation($selectedProfile, $reservationId, $streamId, $id, $playlist->uuid, 'episode');
             }
 
             // Return transcoded stream URL
@@ -1441,7 +1451,7 @@ class M3uProxyService
 
             // Finalize the reservation with the real stream ID
             if ($selectedProfile && $reservationId) {
-                ProfileService::finalizeReservation($selectedProfile, $reservationId, $streamId, $id, $playlist->uuid);
+                ProfileService::finalizeReservation($selectedProfile, $reservationId, $streamId, $id, $playlist->uuid, 'episode');
             }
 
             // For direct (non-transcoded) streams, always use the /stream/ endpoint.
