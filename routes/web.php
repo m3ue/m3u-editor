@@ -257,6 +257,8 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     // Playlist API routes (authenticated)
     Route::get('playlist/{uuid}/stats', [PlaylistController::class, 'stats'])
         ->name('api.playlist.stats');
+    Route::patch('playlist/{uuid}', [PlaylistController::class, 'update'])
+        ->name('api.playlist.update');
     Route::post('playlist/{uuid}/merge-channels', [PlaylistController::class, 'mergeChannels'])
         ->name('api.playlist.merge-channels');
 
