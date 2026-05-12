@@ -338,11 +338,13 @@ class M3uProxyStreamMonitor extends Page implements HasActions, HasSchemas
                 if (isset($stream['metadata']['type']) && isset($stream['metadata']['id'])) {
                     $modelType = $stream['metadata']['type'];
                     $modelId = $stream['metadata']['id'];
+                    $isSmartChannel = false;
                     if ($modelType === 'channel') {
                         $channel = $channelsById[$modelId] ?? null;
                         if ($channel) {
                             $title = $channel->name_custom ?? $channel->name ?? $channel->title;
                             $logo = LogoFacade::getChannelLogoUrl($channel);
+                            $isSmartChannel = (bool) $channel->is_smart_channel;
                         }
                     } elseif ($modelType === 'episode') {
                         $episode = $episodesById[$modelId] ?? null;
@@ -355,6 +357,7 @@ class M3uProxyStreamMonitor extends Page implements HasActions, HasSchemas
                         $model = [
                             'title' => $title ?? 'N/A',
                             'logo' => $logo,
+                            'is_smart_channel' => $isSmartChannel,
                         ];
                     }
 

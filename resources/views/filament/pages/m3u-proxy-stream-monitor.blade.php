@@ -212,6 +212,12 @@
 
                             <!-- Stream Badges -->
                             <div class="flex flex-wrap items-center gap-2 mb-4">
+                                @if ($stream['model']['is_smart_channel'] ?? false)
+                                    <x-filament::badge color="info" size="sm" icon="heroicon-s-sparkles"
+                                        tooltip="Smart channel — streams the highest-ranked failover automatically">
+                                        Smart Channel
+                                    </x-filament::badge>
+                                @endif
                                 @if ($stream['alias_name'] ?? false)
                                     <x-filament::badge color="primary" size="sm">
                                         Alias: {{ $stream['alias_name'] }}

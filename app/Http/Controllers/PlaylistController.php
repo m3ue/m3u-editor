@@ -275,7 +275,7 @@ class PlaylistController extends Controller
             ],
             'group_priorities.*.weight' => 'required_with:group_priorities|integer|min:1|max:1000',
             'priority_attributes' => 'sometimes|array',
-            'priority_attributes.*' => 'string|in:playlist_priority,group_priority,catchup_support,resolution,codec,keyword_match',
+            'priority_attributes.*' => 'string|in:playlist_priority,group_priority,catchup_support,resolution,fps,bitrate,codec,keyword_match',
         ]);
 
         $config = $playlist->auto_merge_config ?? [];

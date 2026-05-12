@@ -19,6 +19,7 @@ use App\Jobs\DuplicatePlaylist;
 use App\Jobs\ProcessM3uImport;
 use App\Jobs\ProcessM3uImportSeries;
 use App\Jobs\ProcessVodChannels;
+use App\Jobs\RescoreChannelFailovers;
 use App\Jobs\SyncMediaServer;
 use App\Livewire\EpgViewer;
 use App\Livewire\MediaFlowProxyUrl;
@@ -617,6 +618,26 @@ class PlaylistResource extends Resource implements CopilotResource
                             ->send();
                     })
                     ->visible(fn ($record) => $record->isProcessing()),
+                Action::make('rescore_failovers')
+                    ->label(__('Re-score failovers now'))
+                    ->icon('heroicon-o-arrow-trending-up')
+                    ->color('info')
+                    ->action(function ($record) {
+                        app('Illuminate\Contracts\Bus\Dispatcher')
+                            ->dispatch(new RescoreChannelFailovers($record->id));
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title(__('Failover rescoring queued'))
+                            ->body(__('Failover groups will be re-scored in the background. You can keep using the app while this runs.'))
+                            ->duration(5000)
+                            ->send();
+                    })
+                    ->visible(fn ($record): bool => (bool) ($record->auto_merge_channels_enabled ?? false))
+                    ->requiresConfirmation()
+                    ->modalIcon('heroicon-o-arrow-trending-up')
+                    ->modalDescription(__('Queue a one-off failover rescore for this playlist? Stale channels will be re-probed (subject to the configured staleness window) and failovers re-sorted so the highest-quality source sits first.'))
+                    ->modalSubmitActionLabel(__('Yes, rescore now')),
                 Action::make('Download M3U')
                     ->label(__('Download M3U'))
                     ->icon('heroicon-o-arrow-down-tray')
@@ -2155,6 +2176,8 @@ class PlaylistResource extends Resource implements CopilotResource
                                             'group_priority' => '📁 Group Priority (from weights above)',
                                             'catchup_support' => '⏪ Catch-up/Replay Support',
                                             'resolution' => '📺 Resolution (requires stream analysis)',
+                                            'fps' => '🎞️ Frame Rate (requires stream analysis)',
+                                            'bitrate' => '📊 Bitrate (requires stream analysis)',
                                             'codec' => '🎬 Codec Preference (HEVC/H264)',
                                             'keyword_match' => '🏷️ Keyword Match',
                                         ])
@@ -2180,6 +2203,30 @@ class PlaylistResource extends Resource implements CopilotResource
                                     }
                                 }),
                         ]),
+
+                ]),
+            Section::make(__('Failover Rescoring'))
+                ->description(__('Keeps failover ordering in sync with current stream quality. Affects three places: scheduled rescoring (the interval below), the per-channel "Rescore now" action, and the "Make smart channel" bulk action. The Priority Order under Auto-Merge above is reused for the actual scoring in all three.'))
+                ->columnSpanFull()
+                ->collapsible()
+                ->collapsed($creating)
+                ->columns(2)
+                ->schema([
+                    Select::make('auto_rescore_failovers_interval')
+                        ->label(__('Periodic rescoring'))
+                        ->options([
+                            'daily' => __('Daily'),
+                            'weekly' => __('Weekly'),
+                        ])
+                        ->placeholder(__('Off'))
+                        ->helperText(__('Schedule a recurring rescore for every failover group in this playlist. Master channels are never promoted or replaced — only failover sort order changes. Off = rescore manually only via the "Rescore now" button.')),
+                    TextInput::make('failover_rescore_staleness_days')
+                        ->label(__('Re-probe channels older than (days)'))
+                        ->numeric()
+                        ->default(7)
+                        ->minValue(0)
+                        ->maxValue(365)
+                        ->helperText(__('During scheduled or manual rescoring, channels with stats older than this are re-probed first. Set to 0 to always re-probe. The "Make smart channel" action uses existing stats only and does not consult this setting.')),
                 ]),
             Section::make(__('Find & Replace Rules'))
                 ->description(__('Define find & replace rules that automatically run after each playlist sync. Rules execute in order.'))
