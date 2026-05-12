@@ -119,6 +119,7 @@ class PlaylistController extends Controller
 
         if ($playlist->source_type === PlaylistSourceType::Xtream) {
             $config = $playlist->xtream_config ?? [];
+            $urlChanged = ($config['url'] ?? null) !== $normalizedUrl;
             $config['url'] = $normalizedUrl;
 
             if (array_key_exists('username', $validated) && $validated['username'] !== null) {
@@ -130,6 +131,10 @@ class PlaylistController extends Controller
             }
 
             $playlist->xtream_config = $config;
+
+            if ($urlChanged) {
+                $playlist->xtream_fallback_urls = [];
+            }
         } else {
             if ($request->has('username') || $request->has('password')) {
                 return response()->json([
@@ -141,11 +146,13 @@ class PlaylistController extends Controller
             $playlist->url = $normalizedUrl;
         }
 
+        $saved = false;
         if ($playlist->isDirty()) {
             $playlist->save();
+            $saved = true;
         }
 
-        $resync = (bool) ($validated['resync'] ?? false);
+        $resync = $saved && (bool) ($validated['resync'] ?? false);
         if ($resync) {
             dispatch(new ProcessM3uImport($playlist, force: true));
         }

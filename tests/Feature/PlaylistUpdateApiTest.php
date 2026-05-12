@@ -54,6 +54,21 @@ it('dispatches a resync when resync=true is passed', function () {
     );
 });
 
+it('does not dispatch a resync when the url is unchanged even with resync=true', function () {
+    Bus::fake();
+    $playlist = Playlist::factory()->for($this->user)->createQuietly([
+        'source_type' => PlaylistSourceType::M3u,
+        'url' => 'https://same.example.com/playlist.m3u',
+    ]);
+
+    $this->patchJson("/playlist/{$playlist->uuid}", [
+        'url' => 'https://same.example.com/playlist.m3u',
+        'resync' => true,
+    ])->assertOk()->assertJsonPath('data.resync_dispatched', false);
+
+    Bus::assertNotDispatched(ProcessM3uImport::class);
+});
+
 it('does not dispatch a resync when resync=false', function () {
     Bus::fake();
     $playlist = Playlist::factory()->for($this->user)->createQuietly([
@@ -89,6 +104,7 @@ it('updates xtream_config url and rotates credentials when provided', function (
             'password' => 'oldpass',
             'output' => 'ts',
         ],
+        'xtream_fallback_urls' => ['https://fallback.example.com:8080'],
     ]);
 
     $response = $this->patchJson("/playlist/{$playlist->uuid}", [
@@ -101,11 +117,41 @@ it('updates xtream_config url and rotates credentials when provided', function (
         ->assertJsonPath('success', true)
         ->assertJsonPath('data.url', 'https://new.example.com:8080');
 
-    $config = $playlist->fresh()->xtream_config;
+    $fresh = $playlist->fresh();
+    $config = $fresh->xtream_config;
     expect($config['url'])->toBe('https://new.example.com:8080')
         ->and($config['username'])->toBe('newuser')
         ->and($config['password'])->toBe('newpass')
-        ->and($config['output'])->toBe('ts');
+        ->and($config['output'])->toBe('ts')
+        ->and($fresh->xtream_fallback_urls)->toBe([]);
+});
+
+it('clears xtream fallback urls when the xtream url changes', function () {
+    $playlist = Playlist::factory()->for($this->user)->createQuietly([
+        'source_type' => PlaylistSourceType::Xtream,
+        'xtream_config' => ['url' => 'https://old.example.com:8080', 'username' => 'u', 'password' => 'p'],
+        'xtream_fallback_urls' => ['https://fallback1.example.com:8080', 'https://fallback2.example.com:8080'],
+    ]);
+
+    $this->patchJson("/playlist/{$playlist->uuid}", [
+        'url' => 'https://new.example.com:8080',
+    ])->assertOk();
+
+    expect($playlist->fresh()->xtream_fallback_urls)->toBe([]);
+});
+
+it('does not clear xtream fallback urls when the url is unchanged', function () {
+    $playlist = Playlist::factory()->for($this->user)->createQuietly([
+        'source_type' => PlaylistSourceType::Xtream,
+        'xtream_config' => ['url' => 'https://same.example.com:8080', 'username' => 'u', 'password' => 'p'],
+        'xtream_fallback_urls' => ['https://fallback.example.com:8080'],
+    ]);
+
+    $this->patchJson("/playlist/{$playlist->uuid}", [
+        'url' => 'https://same.example.com:8080',
+    ])->assertOk();
+
+    expect($playlist->fresh()->xtream_fallback_urls)->toBe(['https://fallback.example.com:8080']);
 });
 
 it('keeps existing xtream credentials when only url is updated', function () {
