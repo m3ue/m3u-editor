@@ -32,6 +32,7 @@ return Application::configure(basePath: dirname(__DIR__))
                 'channel/*',
                 'group',
                 'group/*',
+                'playlist/*',
                 'player_api.php',
                 'get.php',
             ])
