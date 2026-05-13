@@ -8,6 +8,7 @@ use App\Jobs\PostProcessDvrRecording;
 use App\Jobs\ProcessComskipOnRecording;
 use App\Jobs\StopDvrRecording;
 use App\Models\DvrRecording;
+use App\Tables\Columns\AnimatedStatusColumn;
 use App\Traits\HasUserFiltering;
 use BackedEnum;
 use Filament\Actions\Action;
@@ -124,10 +125,8 @@ class DvrRecordingResource extends Resource
                     ->searchable()
                     ->sortable()
                     ->description(fn (DvrRecording $record): string => $record->subtitle ?? ''),
-                TextColumn::make('status')
-                    ->badge()
-                    ->sortable()
-                    ->description(fn (DvrRecording $record): ?string => $record->post_processing_step),
+                AnimatedStatusColumn::make('status')
+                    ->sortable(),
                 TextColumn::make('channel.title')
                     ->label(__('Channel'))
                     ->searchable()
