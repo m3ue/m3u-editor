@@ -326,20 +326,42 @@ class PlaylistAlias extends Model
         // (Xtream API, M3U generation, EPG, counts, etc.) without duplication.
         // group_internal is the provider-supplied name updated on every sync and is never
         // overridden by the user, unlike the user-facing group name.
+        //
+        // Custom channels (is_custom = true) never have group_internal set — it is only
+        // populated during provider sync. For custom channels we fall back to comparing
+        // channels.group (the user-assigned display name) against the filter list.
+        // Custom channels with no group assigned (group IS NULL) always pass through
+        // because they cannot be meaningfully filtered by a provider group name.
         $liveGroups = $this->getAllowedLiveGroupNames();
         $vodGroups = $this->getAllowedVodGroupNames();
 
         if (! empty($liveGroups)) {
             $relation->where(function ($q) use ($liveGroups): void {
                 $q->where('channels.is_vod', true)
-                    ->orWhereIn('channels.group_internal', $liveGroups);
+                    ->orWhereIn('channels.group_internal', $liveGroups)
+                    ->orWhere(function ($q) use ($liveGroups): void {
+                        // Custom channels: match on user-assigned group name, or pass through if ungrouped
+                        $q->where('channels.is_custom', true)
+                            ->where(function ($q) use ($liveGroups): void {
+                                $q->whereNull('channels.group')
+                                    ->orWhereIn('channels.group', $liveGroups);
+                            });
+                    });
             });
         }
 
         if (! empty($vodGroups)) {
             $relation->where(function ($q) use ($vodGroups): void {
                 $q->where('channels.is_vod', false)
-                    ->orWhereIn('channels.group_internal', $vodGroups);
+                    ->orWhereIn('channels.group_internal', $vodGroups)
+                    ->orWhere(function ($q) use ($vodGroups): void {
+                        // Custom channels: match on user-assigned group name, or pass through if ungrouped
+                        $q->where('channels.is_custom', true)
+                            ->where(function ($q) use ($vodGroups): void {
+                                $q->whereNull('channels.group')
+                                    ->orWhereIn('channels.group', $vodGroups);
+                            });
+                    });
             });
         }
 
