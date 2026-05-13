@@ -1433,15 +1433,15 @@ class Preferences extends SettingsPage
                                                 TextInput::make('copilot_model')
                                                     ->label(__('Model'))
                                                     ->placeholder(fn (Get $get): string => match ($get('copilot_provider')) {
-                                                        'anthropic' => 'claude-sonnet-4',
+                                                        'anthropic' => 'claude-sonnet-4-6',
                                                         'gemini' => 'gemini-2.5-flash',
                                                         'mistral' => 'mistral-large-latest',
                                                         'groq' => 'llama-3.3-70b-versatile',
-                                                        'deepseek' => 'deepseek-chat',
+                                                        'deepseek' => 'deepseek-v4-flash',
                                                         'xai' => 'grok-3',
-                                                        'openrouter' => 'openai/gpt-4o',
+                                                        'openrouter' => 'openai/gpt-5.4',
                                                         'ollama' => 'llama3',
-                                                        default => 'gpt-4o',
+                                                        default => 'gpt-5.4-mini',
                                                     })
                                                     ->helperText(__('The model to use. Leave blank to use the provider default.')),
                                             ]),
