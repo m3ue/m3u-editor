@@ -114,7 +114,7 @@ class DvrRecordingResource extends Resource
     public static function table(Table $table): Table
     {
         return $table
-            ->poll('15s')
+            ->poll('3s')
             ->filtersTriggerAction(function ($action) {
                 return $action->button()->label(__('Filters'));
             })
