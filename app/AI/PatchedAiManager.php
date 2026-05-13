@@ -8,6 +8,7 @@ use Laravel\Ai\AiManager;
 use Laravel\Ai\Gateway\Prism\PrismGateway;
 use Laravel\Ai\Providers\DeepSeekProvider;
 use Laravel\Ai\Providers\GeminiProvider;
+use Laravel\Ai\Providers\MiniMaxProvider;
 use Laravel\Ai\Providers\OpenAiProvider;
 use Prism\Prism\PrismManager;
 
@@ -42,6 +43,14 @@ class PatchedAiManager extends AiManager
 
         return new DeepSeekProvider(
             new PrismGateway($this->app['events']),
+            $config,
+            $this->app->make(Dispatcher::class)
+        );
+    }
+
+    public function createMiniMaxDriver(array $config): MiniMaxProvider
+    {
+        return new MiniMaxProvider(
             $config,
             $this->app->make(Dispatcher::class)
         );
