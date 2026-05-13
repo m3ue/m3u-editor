@@ -355,8 +355,8 @@ class EpgViewer extends Component implements HasActions, HasForms
                 ->success()
                 ->title(ucfirst($typeLabel))
                 ->body($ruleType === DvrRuleType::Series
-                    ? __('(':title') — series rule created', ['title' => $title])
-                    : __('(':title') has been scheduled.', ['title' => $title]))
+                    ? __('(:title) — series rule created', ['title' => $title])
+                    : __('(:title) has been scheduled.', ['title' => $title]))
                 ->send();
         } catch (Exception $e) {
             Log::error('Failed to create DVR recording rule', [
