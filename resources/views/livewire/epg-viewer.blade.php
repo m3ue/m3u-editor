@@ -11,7 +11,7 @@
         <!-- Loading State -->
         <div x-show="loading" class="flex items-center justify-center p-8">
             <div class="flex items-center space-x-2">
-                <svg class="animate-spin h-5 w-5 text-gray-500 dark:text-gray-400" xmlns="http://www.w3.org/2000/svg"
+                <svg class="animate-spin h-5 w-5 text-indigo-500 dark:text-indigo-400" xmlns="http://www.w3.org/2000/svg"
                     fill="none" viewBox="0 0 24 24">
                     <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                     <path class="opacity-75" fill="currentColor"

@@ -176,6 +176,14 @@
         </div>
     </form>
 
+    {{-- Loading indicator --}}
+    <div wire:loading wire:target="search,gotoPage" class="py-12">
+        <div class="flex items-center justify-center gap-2">
+            <x-filament::loading-indicator class="h-5 w-5 text-indigo-500 dark:text-indigo-400" />
+            <span class="text-sm text-gray-500 dark:text-gray-400">{{ __('Loading results...') }}</span>
+        </div>
+    </div>
+
     {{-- Results --}}
     @if ($searched)
         @if (empty($shows))
