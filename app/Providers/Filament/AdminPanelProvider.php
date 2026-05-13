@@ -369,15 +369,15 @@ class AdminPanelProvider extends PanelProvider
      */
     /** Default models used when the model field is left blank. */
     private const COPILOT_DEFAULT_MODELS = [
-        'openai' => 'gpt-4o',
-        'anthropic' => 'claude-sonnet-4',
+        'openai' => 'gpt-5.4-mini',
+        'anthropic' => 'claude-sonnet-4-6',
         'gemini' => 'gemini-2.5-flash',
         'mistral' => 'mistral-large-latest',
         'ollama' => 'llama3',
         'groq' => 'llama-3.3-70b-versatile',
-        'deepseek' => 'deepseek-chat',
+        'deepseek' => 'deepseek-v4-flash',
         'xai' => 'grok-3',
-        'openrouter' => 'openai/gpt-4o',
+        'openrouter' => 'openai/gpt-5.4',
     ];
 
     /**
