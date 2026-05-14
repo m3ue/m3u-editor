@@ -8,6 +8,7 @@ use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Log;
+use Throwable;
 
 class ProcessComskipOnRecording implements ShouldQueue
 {
@@ -38,6 +39,24 @@ class ProcessComskipOnRecording implements ShouldQueue
             Notification::make()
                 ->success()
                 ->title('Comskip reprocessing complete')
+                ->body($recording->display_title ?? $recording->title)
+                ->broadcast($user)
+                ->sendToDatabase($user);
+        }
+    }
+
+    public function failed(Throwable $exception): void
+    {
+        Log::error("ProcessComskipOnRecording: all retries exhausted for recording {$this->recordingId}", [
+            'exception' => $exception->getMessage(),
+        ]);
+
+        $recording = DvrRecording::with('user')->find($this->recordingId);
+
+        if ($user = $recording?->user) {
+            Notification::make()
+                ->danger()
+                ->title('Comskip reprocessing failed')
                 ->body($recording->display_title ?? $recording->title)
                 ->broadcast($user)
                 ->sendToDatabase($user);
