@@ -188,7 +188,6 @@ class CustomPlaylistResource extends Resource implements CopilotResource
                         ->icon('heroicon-o-arrow-top-right-on-square')
                         ->url(fn ($record) => '/playlist/v/'.$record->uuid)
                         ->openUrlInNewTab(),
-                    
                     Action::make('Duplicate')
                         ->label(__('Duplicate'))
                         ->icon('heroicon-o-document-duplicate')
