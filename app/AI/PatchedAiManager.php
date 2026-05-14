@@ -8,7 +8,6 @@ use Laravel\Ai\AiManager;
 use Laravel\Ai\Gateway\Prism\PrismGateway;
 use Laravel\Ai\Providers\DeepSeekProvider;
 use Laravel\Ai\Providers\GeminiProvider;
-use Laravel\Ai\Providers\MiniMaxProvider;
 use Laravel\Ai\Providers\OpenAiProvider;
 use Prism\Prism\PrismManager;
 
