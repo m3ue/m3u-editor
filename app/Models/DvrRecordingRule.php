@@ -61,7 +61,7 @@ class DvrRecordingRule extends Model
             'end_late_seconds' => 'integer',
             'keep_last' => 'integer',
             'enabled' => 'boolean',
-            'enable_comskip' => 'integer',
+            'enable_comskip' => 'boolean',
             'manual_start' => 'datetime',
             'manual_end' => 'datetime',
         ];

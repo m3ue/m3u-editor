@@ -749,6 +749,7 @@ class M3uProxyService
             $dvrRecording = DvrRecording::where('channel_id', $channel->id)
                 ->where('status', DvrRecordingStatus::Recording)
                 ->whereNotNull('proxy_network_id')
+                ->latest('created_at')
                 ->first();
 
             if ($dvrRecording) {

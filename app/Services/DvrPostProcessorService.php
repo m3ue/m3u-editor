@@ -12,6 +12,7 @@ use Exception;
 use Filament\Notifications\Notification;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Symfony\Component\Process\Process;
 
 /**
  * DvrPostProcessorService — Runs after ffmpeg stops.
@@ -445,7 +446,6 @@ class DvrPostProcessorService
             return;
         }
 
-        $this->setStep($recording, 'Running commercial detection');
         $this->runComskip($recording, $outputFullPath, force: true);
         $recording->update(['post_processing_step' => null]);
     }
@@ -490,16 +490,17 @@ class DvrPostProcessorService
                 $outputFullPath,
             ];
 
-            $cmd = implode(' ', array_map('escapeshellarg', $args)).' 2>&1';
+            $process = new Process($args);
+            $process->setTimeout(300);
+            $process->run();
 
-            $output = [];
-            $exitCode = 0;
-            exec($cmd, $output, $exitCode);
+            $exitCode = $process->getExitCode();
 
             if ($exitCode !== 0) {
+                $errorOutput = $process->getErrorOutput();
                 Log::warning("Comskip exited with code {$exitCode}", [
                     'recording_id' => $recording->id,
-                    'output' => implode("\n", array_slice($output, -20)),
+                    'output' => $errorOutput,
                 ]);
             }
 

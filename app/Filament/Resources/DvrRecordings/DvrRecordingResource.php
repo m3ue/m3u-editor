@@ -115,7 +115,10 @@ class DvrRecordingResource extends Resource
     public static function table(Table $table): Table
     {
         return $table
-            ->poll('3s')
+            ->poll(fn (): ?string => DvrRecording::whereIn('status', [
+                DvrRecordingStatus::Recording->value,
+                DvrRecordingStatus::PostProcessing->value,
+            ])->exists() ? '3s' : '15s')
             ->filtersTriggerAction(function ($action) {
                 return $action->button()->label(__('Filters'));
             })

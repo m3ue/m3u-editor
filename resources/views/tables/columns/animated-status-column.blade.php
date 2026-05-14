@@ -14,7 +14,7 @@
 
         $isAnimated = in_array($status, [\App\Enums\DvrRecordingStatus::Recording, \App\Enums\DvrRecordingStatus::PostProcessing], true);
         $animationClass = $isAnimated ? 'dfi-status-animated-pulse' : '';
-        $label = $status?->getLabel() ?? ucfirst($status ?? 'unknown');
+        $label = $status?->getLabel() ?? ucfirst($status?->value ?? 'unknown');
     @endphp
 
     <span class="fi-badge fi-color {{ $colorClasses }} {{ $animationClass }}">

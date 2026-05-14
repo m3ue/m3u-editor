@@ -168,7 +168,7 @@ class DvrStreamController extends Controller
             // We rewrite to: /dvr-hls/{uuid}/live000001.ts
             $baseUrl = url("/dvr-hls/{$recording->uuid}");
             $playlist = preg_replace(
-                '/^(live\d+\.ts)$/m',
+                '/^(live\d+\.ts)\r?$/m',
                 $baseUrl.'/$1',
                 $playlist
             );
@@ -188,32 +188,6 @@ class DvrStreamController extends Controller
 
             abort(503, 'Broadcast not available');
         }
-    }
-
-    /**
-     * Serve a segment for an in-progress DVR recording.
-     *
-     * Proxies the request to the m3u-proxy service at the correct segment endpoint.
-     */
-    public function segment(Request $request, string $username, string $password, string $uuid, string $segment): RedirectResponse|Response
-    {
-        $user = $this->resolveUser($username, $password);
-
-        if (! $user) {
-            abort(401, 'Invalid credentials');
-        }
-
-        $recording = DvrRecording::where('uuid', $uuid)
-            ->where('user_id', $user->id)
-            ->first();
-
-        if (! $recording || $recording->status !== DvrRecordingStatus::Recording) {
-            abort(404, 'Recording not found or not in progress');
-        }
-
-        $proxyUrl = $this->proxy->getDvrBroadcastSegmentUrl($recording->proxy_network_id, $segment);
-
-        return redirect()->to($proxyUrl);
     }
 
     /**
@@ -257,6 +231,7 @@ class DvrStreamController extends Controller
 
         try {
             $response = Http::timeout(15)
+                ->withOptions(['stream' => true])
                 ->withHeaders([
                     'X-API-Token' => $this->proxy->getApiToken(),
                 ])
@@ -266,12 +241,17 @@ class DvrStreamController extends Controller
                 abort($response->status(), 'Segment not available');
             }
 
-            return response($response->body(), 200, [
+            return response()->stream(function () use ($response) {
+                $stream = $response->toPsrResponse()->getBody();
+                while (! $stream->eof()) {
+                    echo $stream->read(8192);
+                    flush();
+                }
+            }, 200, [
                 'Content-Type' => 'video/MP2T',
                 'Cache-Control' => 'no-cache, no-store, must-revalidate',
                 'Pragma' => 'no-cache',
                 'Access-Control-Allow-Origin' => '*',
-                'Content-Length' => strlen($response->body()),
             ]);
         } catch (\Exception $e) {
             Log::error('Failed to proxy DVR broadcast segment', [
