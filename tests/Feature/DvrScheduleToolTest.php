@@ -71,9 +71,9 @@ it('search finds upcoming programmes by title keyword', function () {
         'display_name' => 'Test Channel',
     ]);
     $playlist = Playlist::factory()->for($user)->create();
-    $channel = Channel::factory()->for($user)->for($playlist)->create([
-        'epg_channel_id' => $epgChannel->id,
-    ]);
+    $channel = Channel::factory()->for($user)->for($playlist)->create();
+    $channel->epg_channel_id = $epgChannel->id;
+    $channel->save();
 
     $programme = makeEpgProgramme($epgChannel, $user, [
         'title' => 'Doctor Who',
