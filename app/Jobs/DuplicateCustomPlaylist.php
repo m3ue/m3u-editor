@@ -29,7 +29,6 @@ class DuplicateCustomPlaylist implements ShouldQueue
     public function handle(): void
     {
         DB::transaction(function () {
-
             $newPlaylist = $this->playlist->replicate();
 
             $newPlaylist->name = $this->newName;
