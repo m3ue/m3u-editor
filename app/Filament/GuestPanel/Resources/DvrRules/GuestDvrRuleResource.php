@@ -177,6 +177,17 @@ class GuestDvrRuleResource extends Resource
                 ->default(DvrSeriesMode::All->value)
                 ->visible(fn (Get $get): bool => self::isRuleType($get('type'), DvrRuleType::Series)),
 
+            Select::make('enable_comskip')
+                ->label(__('Commercial Detection (Comskip)'))
+                ->options([
+                    1 => __('Enable'),
+                    0 => __('Disable'),
+                ])
+                ->placeholder(__('Inherit from DVR Setting'))
+                ->nullable()
+                ->hintIcon('heroicon-m-question-mark-circle')
+                ->hintIconTooltip(__('When not set, the DVR Setting default is used. Comskip detects and marks commercials in recordings. The Emby.ComSkiper plugin for Emby is available at https://github.com/BillOatmanWork/Emby.ComSkipper')),
+
             TextInput::make('start_early_seconds')
                 ->label(__('Start Early (seconds)'))
                 ->numeric()

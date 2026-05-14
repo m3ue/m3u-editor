@@ -636,7 +636,7 @@ class M3uProxyStreamMonitor extends Page implements HasActions, HasSchemas
                     'status' => (($bcast['status'] ?? '') === 'running') ? 'active' : 'idle',
                     'client_count' => 0,
                     'bandwidth_kbps' => $startedAt && ($durationSecs = $startedAt->diffInSeconds(now())) > 0
-                        ? round(($bcast['bytes_written'] * 8) / $durationSecs / 1000, 2)
+                        ? round((($bcast['bytes_written'] ?? 0) * 8) / $durationSecs / 1000, 2)
                         : 0,
                     'bytes_transferred' => $this->formatBytes($bcast['bytes_written'] ?? 0),
                     'uptime' => $uptime,

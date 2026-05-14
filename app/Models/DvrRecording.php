@@ -250,6 +250,46 @@ class DvrRecording extends Model
     }
 
     /**
+     * Whether comskip (commercial detection) should run for this recording.
+     *
+     * Per-rule setting takes precedence when explicitly set;
+     * otherwise falls back to the DvrSetting default.
+     */
+    public function shouldRunComskip(): bool
+    {
+        $rule = $this->recordingRule;
+        if ($rule && $rule->enable_comskip !== null) {
+            return (bool) $rule->enable_comskip;
+        }
+
+        return $this->dvrSetting?->enable_comskip ?? false;
+    }
+
+    /**
+     * Resolve the comskip .ini file path for this recording.
+     *
+     * If the DvrSetting specifies a custom ini path that exists on the storage
+     * disk, it is used. Otherwise the bundled default is returned.
+     */
+    public function resolveComskipIniPath(): string
+    {
+        $setting = $this->dvrSetting;
+        $diskName = $setting?->storage_disk ?: config('dvr.storage_disk', 'dvr');
+
+        if ($setting && $setting->comskip_ini_path) {
+            try {
+                if (Storage::disk($diskName)->exists($setting->comskip_ini_path)) {
+                    return Storage::disk($diskName)->path($setting->comskip_ini_path);
+                }
+            } catch (\Exception) {
+                // Fall through to default
+            }
+        }
+
+        return config('dvr.comskip_default_ini');
+    }
+
+    /**
      * Walk up from $relativePath's directory and delete each directory that is
      * empty after the file has been removed. Stops at $stopAt (exclusive) or
      * at the disk root, whichever comes first.

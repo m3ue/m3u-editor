@@ -85,3 +85,31 @@
     max-height: calc(100vh - 64px);
     overflow-y: auto;
 } */
+
+/* DVR Status Animations */
+@keyframes dvr-status-spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+@keyframes dvr-status-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+}
+
+@keyframes dvr-description-fade-in {
+    0% { opacity: 0; transform: translateY(-4px); }
+    100% { opacity: 1; transform: translateY(0); }
+}
+
+.dfi-status-animated-spin {
+    animation: dvr-status-spin 1.5s linear infinite;
+}
+
+.dfi-status-animated-pulse {
+    animation: dvr-status-pulse 2.5s ease-in-out infinite;
+}
+
+.dfi-description-animated {
+    animation: dvr-description-fade-in 0.4s ease-out forwards;
+}

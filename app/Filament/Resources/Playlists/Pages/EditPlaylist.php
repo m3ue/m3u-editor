@@ -92,11 +92,13 @@ class EditPlaylist extends EditRecord
             $data['dvr_global_disk_quota_gb'] = $dvr->global_disk_quota_gb;
             $data['dvr_enable_metadata_enrichment'] = $dvr->enable_metadata_enrichment;
             $data['dvr_generate_nfo_files'] = $dvr->generate_nfo_files;
+            $data['dvr_enable_comskip'] = $dvr->enable_comskip;
         } else {
             $data['dvr_enabled'] = false;
             $data['dvr_output_format'] = 'ts';
             $data['dvr_enable_metadata_enrichment'] = true;
             $data['dvr_generate_nfo_files'] = false;
+            $data['dvr_enable_comskip'] = false;
         }
 
         return $data;
@@ -146,6 +148,7 @@ class EditPlaylist extends EditRecord
                 'global_disk_quota_gb' => $data['dvr_global_disk_quota_gb'] ?? 0,
                 'enable_metadata_enrichment' => $data['dvr_enable_metadata_enrichment'] ?? true,
                 'generate_nfo_files' => $data['dvr_generate_nfo_files'] ?? false,
+                'enable_comskip' => $data['dvr_enable_comskip'] ?? false,
             ]
         );
     }

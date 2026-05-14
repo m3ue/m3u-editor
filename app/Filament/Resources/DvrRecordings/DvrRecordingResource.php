@@ -5,8 +5,10 @@ namespace App\Filament\Resources\DvrRecordings;
 use App\Enums\DvrRecordingStatus;
 use App\Jobs\GenerateDvrNfo;
 use App\Jobs\PostProcessDvrRecording;
+use App\Jobs\ProcessComskipOnRecording;
 use App\Jobs\StopDvrRecording;
 use App\Models\DvrRecording;
+use App\Tables\Columns\AnimatedStatusColumn;
 use App\Traits\HasUserFiltering;
 use BackedEnum;
 use Filament\Actions\Action;
@@ -113,7 +115,10 @@ class DvrRecordingResource extends Resource
     public static function table(Table $table): Table
     {
         return $table
-            ->poll('15s')
+            ->poll(fn (): ?string => DvrRecording::whereIn('status', [
+                DvrRecordingStatus::Recording->value,
+                DvrRecordingStatus::PostProcessing->value,
+            ])->exists() ? '3s' : '15s')
             ->filtersTriggerAction(function ($action) {
                 return $action->button()->label(__('Filters'));
             })
@@ -123,10 +128,8 @@ class DvrRecordingResource extends Resource
                     ->searchable()
                     ->sortable()
                     ->description(fn (DvrRecording $record): string => $record->subtitle ?? ''),
-                TextColumn::make('status')
-                    ->badge()
-                    ->sortable()
-                    ->description(fn (DvrRecording $record): ?string => $record->post_processing_step),
+                AnimatedStatusColumn::make('status')
+                    ->sortable(),
                 TextColumn::make('channel.title')
                     ->label(__('Channel'))
                     ->searchable()
@@ -232,6 +235,21 @@ class DvrRecordingResource extends Resource
                             Notification::make()
                                 ->success()
                                 ->title(__('Recording cancellation queued'))
+                                ->send();
+                        }),
+                    Action::make('reprocessComskip')
+                        ->label(__('Reprocess Comskip'))
+                        ->icon('heroicon-o-scissors')
+                        ->color('gray')
+                        ->visible(fn (DvrRecording $record): bool => $record->hasFilePath())
+                        ->requiresConfirmation()
+                        ->modalDescription(__('Re-run commercial detection (comskip) on the existing recording file. Any existing .edl file will be overwritten.'))
+                        ->action(function (DvrRecording $record): void {
+                            ProcessComskipOnRecording::dispatch($record->id);
+
+                            Notification::make()
+                                ->success()
+                                ->title(__('Comskip reprocessing queued'))
                                 ->send();
                         }),
                     DeleteAction::make()

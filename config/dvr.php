@@ -107,4 +107,14 @@ return [
 
     'stream_base_url' => env('DVR_STREAM_BASE_URL'),
 
+    /*
+    |--------------------------------------------------------------------------
+    | DVR — Comskip (commercial detection)
+    |--------------------------------------------------------------------------
+    */
+
+    'comskip_path' => env('DVR_COMSKIP_PATH', '/usr/local/bin/comskip'),
+
+    'comskip_default_ini' => env('DVR_COMSKIP_INI', config_path('comskip.default.ini')),
+
 ];

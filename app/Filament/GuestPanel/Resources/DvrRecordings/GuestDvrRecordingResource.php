@@ -4,8 +4,10 @@ namespace App\Filament\GuestPanel\Resources\DvrRecordings;
 
 use App\Enums\DvrRecordingStatus;
 use App\Filament\GuestPanel\Pages\Concerns\HasGuestDvr;
+use App\Jobs\ProcessComskipOnRecording;
 use App\Jobs\StopDvrRecording;
 use App\Models\DvrRecording;
+use App\Tables\Columns\AnimatedStatusColumn;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Actions\ViewAction;
@@ -164,10 +166,8 @@ class GuestDvrRecordingResource extends Resource
                     ->searchable()
                     ->sortable()
                     ->description(fn (DvrRecording $record): string => $record->subtitle ?? ''),
-                TextColumn::make('status')
-                    ->badge()
-                    ->sortable()
-                    ->description(fn (DvrRecording $record): ?string => $record->post_processing_step),
+                AnimatedStatusColumn::make('status')
+                    ->sortable(),
                 TextColumn::make('channel.title')
                     ->label(__('Channel'))
                     ->sortable(),
@@ -253,6 +253,21 @@ class GuestDvrRecordingResource extends Resource
                             Notification::make()
                                 ->success()
                                 ->title(__('Recording cancellation queued'))
+                                ->send();
+                        }),
+                    Action::make('reprocessComskip')
+                        ->label(__('Reprocess Comskip'))
+                        ->icon('heroicon-o-scissors')
+                        ->color('gray')
+                        ->visible(fn (DvrRecording $record): bool => $record->hasFilePath())
+                        ->requiresConfirmation()
+                        ->modalDescription(__('Re-run commercial detection (comskip) on the existing recording file. Any existing .edl file will be overwritten.'))
+                        ->action(function (DvrRecording $record): void {
+                            ProcessComskipOnRecording::dispatch($record->id);
+
+                            Notification::make()
+                                ->success()
+                                ->title(__('Comskip reprocessing queued'))
                                 ->send();
                         }),
                 ])->button()->hiddenLabel()->size('sm'),
