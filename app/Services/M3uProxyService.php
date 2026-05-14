@@ -759,7 +759,11 @@ class M3uProxyService
                     'proxy_network_id' => $dvrRecording->proxy_network_id,
                 ]);
 
+                $playlist->loadMissing('user');
+
                 return route('dvr.recording.hls.playlist', [
+                    'username' => $playlist->user->name,
+                    'password' => $playlist->uuid,
                     'uuid' => $dvrRecording->uuid,
                 ]);
             }

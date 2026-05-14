@@ -300,13 +300,6 @@ Route::get('/movie/{username}/{password}/{streamId}.{format?}', [XtreamStreamCon
 Route::get('/series/{username}/{password}/{streamId}.{format?}', [XtreamStreamController::class, 'handleSeries'])
     ->name('xtream.stream.series.root');
 
-// DVR HLS playlist route (must be before the Xtream fallback route which would
-// catch /dvr-hls/{uuid}/live.m3u8 as {username}/{password}/{streamId}.{format}).
-// Only the playlist passes through the editor — segment URLs in the playlist are
-// rewritten to point directly at the proxy's public segment endpoint.
-Route::get('/dvr-hls/{uuid}/live.m3u8', [DvrStreamController::class, 'hlsPlaylist'])
-    ->name('dvr.recording.hls.playlist');
-
 // Timeshift endpoints
 Route::get('/timeshift/{username}/{password}/{duration}/{date}/{streamId}.{format?}', [XtreamStreamController::class, 'handleTimeshift'])
     ->name('xtream.stream.timeshift.root');
@@ -364,6 +357,14 @@ Route::get('/webdav-media/{integration}/stream/{item}', [
  * or PlaylistAuth credentials embedded in the URL.
  * The callback route is unauthenticated (validated by API token in the controller).
  */
+
+// HLS playlist for in-progress DVR recordings. Must be declared before the generic
+// dvr.recording.stream route so Laravel does not consume "live.m3u8" as {uuid}.{format?}.
+// Only the playlist (~1 KB) passes through the editor; segment URLs are rewritten to
+// point directly at the proxy's public segment endpoint.
+Route::get('/dvr/{username}/{password}/{uuid}/live.m3u8', [DvrStreamController::class, 'hlsPlaylist'])
+    ->name('dvr.recording.hls.playlist');
+
 Route::get('/dvr/{username}/{password}/{uuid}.{format?}', [DvrStreamController::class, 'stream'])
     ->name('dvr.recording.stream');
 

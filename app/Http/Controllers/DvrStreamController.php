@@ -194,16 +194,20 @@ class DvrStreamController extends Controller
     /**
      * Serve the HLS playlist for an in-progress DVR recording.
      *
-     * Used by two callers:
-     *   - The authenticated stream() method (live in-progress recording)
-     *   - The no-auth /dvr-hls/{uuid}/live.m3u8 route (Xtream piggyback)
-     *
-     * The recording UUID acts as the security token for the no-auth path.
+     * Authentication mirrors stream(): PlaylistAuth credentials or
+     * username = owner's name / password = playlist UUID (Method 2).
      * Segment traffic never passes through the editor — only this playlist does.
      */
-    public function hlsPlaylist(Request $request, string $uuid): Response
+    public function hlsPlaylist(Request $request, string $username, string $password, string $uuid): Response
     {
+        $user = $this->resolveUser($username, $password);
+
+        if (! $user) {
+            abort(401, 'Invalid credentials');
+        }
+
         $recording = DvrRecording::where('uuid', $uuid)
+            ->where('user_id', $user->id)
             ->where('status', DvrRecordingStatus::Recording)
             ->whereNotNull('proxy_network_id')
             ->first();
