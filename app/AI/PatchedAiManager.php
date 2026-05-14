@@ -46,4 +46,12 @@ class PatchedAiManager extends AiManager
             $this->app->make(Dispatcher::class)
         );
     }
+
+    public function createMiniMaxDriver(array $config): MiniMaxProvider
+    {
+        return new MiniMaxProvider(
+            $config,
+            $this->app->make(Dispatcher::class)
+        );
+    }
 }

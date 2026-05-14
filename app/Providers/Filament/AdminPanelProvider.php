@@ -388,6 +388,7 @@ class AdminPanelProvider extends PanelProvider
         'deepseek' => 'deepseek-v4-flash',
         'xai' => 'grok-3',
         'openrouter' => 'openai/gpt-5.4',
+        'minimax' => 'MiniMax-M2.7',
     ];
 
     /**
@@ -423,8 +424,8 @@ class AdminPanelProvider extends PanelProvider
                 config(["ai.providers.{$provider}.key" => $s['copilot_api_key']]);
             }
 
-            // Custom base URL — supported for OpenAI-compatible and Ollama endpoints.
-            if (! empty($s['copilot_url']) && in_array($provider, ['openai', 'ollama'], true)) {
+            // Custom base URL — supported for OpenAI-compatible, Ollama, and MiniMax endpoints.
+            if (! empty($s['copilot_url']) && in_array($provider, ['openai', 'ollama', 'minimax'], true)) {
                 config(["ai.providers.{$provider}.url" => $s['copilot_url']]);
             }
 
