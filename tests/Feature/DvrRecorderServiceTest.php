@@ -74,6 +74,8 @@ function mockProxy(string $networkId = 'test-network-id')
     $mock->shouldReceive('startDvrBroadcast')->andReturn($networkId);
     $mock->shouldReceive('stopDvrBroadcast')->andReturn(true);
     $mock->shouldReceive('cleanupDvrBroadcast')->andReturn(true);
+    $mock->shouldReceive('getActiveStreamIdForChannel')->andReturnNull();
+    $mock->shouldReceive('getStreamProxyUrl')->andReturn('');
     app()->instance(M3uProxyService::class, $mock);
 
     return $mock;

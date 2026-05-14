@@ -15,6 +15,8 @@ use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -50,13 +52,14 @@ class DvrStreamController extends Controller
             abort(404, 'Recording not found');
         }
 
-        // In-progress recording — redirect to the live HLS stream on the proxy.
-        // Clients (VLC, Infuse, etc.) will play the live HLS just as they would
-        // play the completed file, and will naturally see new segments as they arrive.
+        // In-progress recording — serve through the editor so segment URLs resolve correctly.
+        // The proxy's HLS playlist uses relative segment filenames (live000001.ts) which the
+        // browser resolves relative to the playlist URL. If we redirect to the proxy directly,
+        // segments resolve to /broadcast/{uuid}/live000001.ts instead of
+        // /broadcast/{uuid}/segment/live000001.ts. Proxying through the editor lets us rewrite
+        // segment URLs to the correct editor route.
         if ($recording->status === DvrRecordingStatus::Recording && $recording->proxy_network_id) {
-            $liveUrl = $this->proxy->getDvrBroadcastLiveUrl($recording->proxy_network_id);
-
-            return redirect($liveUrl);
+            return $this->serveLivePlaylist($request, $recording, $username, $password);
         }
 
         if (! $recording->hasFilePath()) {
@@ -131,6 +134,154 @@ class DvrStreamController extends Controller
 
             fclose($handle);
         }, 200, $headers);
+    }
+
+    /**
+     * Serve the live HLS playlist for an in-progress recording.
+     *
+     * Fetches the playlist from the proxy, rewrites segment URLs to route through the
+     * editor, and serves it to the client. This ensures segments resolve correctly
+     * (the proxy uses /broadcast/{uuid}/segment/{file}.ts, not relative to the playlist).
+     */
+    protected function serveLivePlaylist(Request $request, DvrRecording $recording, string $username, string $password): Response
+    {
+        $networkId = $recording->proxy_network_id;
+        // Use the API base URL for the internal fetch (editor→proxy within Docker).
+        // The public URL (getDvrBroadcastLiveUrl) is for clients outside the network.
+        $playlistUrl = $this->proxy->getDvrBroadcastLiveApiUrl($networkId);
+
+        try {
+            $response = Http::timeout(10)
+                ->withHeaders([
+                    'X-API-Token' => $this->proxy->getApiToken(),
+                ])
+                ->get($playlistUrl);
+
+            if (! $response->successful()) {
+                abort($response->status(), 'Broadcast not available');
+            }
+
+            $playlist = $response->body();
+
+            // Rewrite segment URLs to route through the editor.
+            // Proxy outputs: live000001.ts
+            // We rewrite to: /dvr-hls/{uuid}/live000001.ts
+            $baseUrl = url("/dvr-hls/{$recording->uuid}");
+            $playlist = preg_replace(
+                '/^(live\d+\.ts)$/m',
+                $baseUrl.'/$1',
+                $playlist
+            );
+
+            return response($playlist, 200, [
+                'Content-Type' => 'application/vnd.apple.mpegurl',
+                'Cache-Control' => 'no-cache, no-store, must-revalidate',
+                'Pragma' => 'no-cache',
+                'Access-Control-Allow-Origin' => '*',
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Failed to fetch DVR broadcast playlist', [
+                'recording_id' => $recording->id,
+                'proxy_network_id' => $networkId,
+                'error' => $e->getMessage(),
+            ]);
+
+            abort(503, 'Broadcast not available');
+        }
+    }
+
+    /**
+     * Serve a segment for an in-progress DVR recording.
+     *
+     * Proxies the request to the m3u-proxy service at the correct segment endpoint.
+     */
+    public function segment(Request $request, string $username, string $password, string $uuid, string $segment): RedirectResponse|Response
+    {
+        $user = $this->resolveUser($username, $password);
+
+        if (! $user) {
+            abort(401, 'Invalid credentials');
+        }
+
+        $recording = DvrRecording::where('uuid', $uuid)
+            ->where('user_id', $user->id)
+            ->first();
+
+        if (! $recording || $recording->status !== DvrRecordingStatus::Recording) {
+            abort(404, 'Recording not found or not in progress');
+        }
+
+        $proxyUrl = $this->proxy->getDvrBroadcastSegmentUrl($recording->proxy_network_id, $segment);
+
+        return redirect()->to($proxyUrl);
+    }
+
+    /**
+     * Serve the HLS playlist for an in-progress DVR recording (no-auth route).
+     *
+     * The recording UUID acts as the security token (hard to guess).
+     */
+    public function hlsPlaylist(Request $request, string $uuid): Response
+    {
+        $recording = DvrRecording::where('uuid', $uuid)
+            ->where('status', DvrRecordingStatus::Recording)
+            ->whereNotNull('proxy_network_id')
+            ->first();
+
+        if (! $recording) {
+            abort(404, 'Recording not found or not in progress');
+        }
+
+        return $this->serveLivePlaylist($request, $recording, '', '');
+    }
+
+    /**
+     * Serve an HLS segment for an in-progress DVR recording (no-auth route).
+     *
+     * Proxies the segment from the proxy through the editor so external players don't
+     * need direct access to the proxy's public URL (which may resolve to a different
+     * domain/environment than the editor).
+     */
+    public function hlsSegment(Request $request, string $uuid, string $segment): Response
+    {
+        $recording = DvrRecording::where('uuid', $uuid)
+            ->where('status', DvrRecordingStatus::Recording)
+            ->whereNotNull('proxy_network_id')
+            ->first();
+
+        if (! $recording) {
+            abort(404, 'Recording not found or not in progress');
+        }
+
+        $segmentUrl = $this->proxy->getDvrBroadcastSegmentApiUrl($recording->proxy_network_id, $segment);
+
+        try {
+            $response = Http::timeout(15)
+                ->withHeaders([
+                    'X-API-Token' => $this->proxy->getApiToken(),
+                ])
+                ->get($segmentUrl);
+
+            if (! $response->successful()) {
+                abort($response->status(), 'Segment not available');
+            }
+
+            return response($response->body(), 200, [
+                'Content-Type' => 'video/MP2T',
+                'Cache-Control' => 'no-cache, no-store, must-revalidate',
+                'Pragma' => 'no-cache',
+                'Access-Control-Allow-Origin' => '*',
+                'Content-Length' => strlen($response->body()),
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Failed to proxy DVR broadcast segment', [
+                'recording_id' => $recording->id,
+                'segment' => $segment,
+                'error' => $e->getMessage(),
+            ]);
+
+            abort(503, 'Segment not available');
+        }
     }
 
     /**

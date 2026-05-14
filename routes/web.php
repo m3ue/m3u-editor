@@ -300,6 +300,14 @@ Route::get('/movie/{username}/{password}/{streamId}.{format?}', [XtreamStreamCon
 Route::get('/series/{username}/{password}/{streamId}.{format?}', [XtreamStreamController::class, 'handleSeries'])
     ->name('xtream.stream.series.root');
 
+// DVR HLS proxy routes (must be before the Xtream fallback route which would
+// catch /dvr-hls/{uuid}/live.m3u8 as {username}/{password}/{streamId}.{format})
+Route::get('/dvr-hls/{uuid}/live.m3u8', [DvrStreamController::class, 'hlsPlaylist'])
+    ->name('dvr.recording.hls.playlist');
+Route::get('/dvr-hls/{uuid}/{segment}.ts', [DvrStreamController::class, 'hlsSegment'])
+    ->name('dvr.recording.hls.segment')
+    ->where('segment', 'live[0-9]+');
+
 // Timeshift endpoints
 Route::get('/timeshift/{username}/{password}/{duration}/{date}/{streamId}.{format?}', [XtreamStreamController::class, 'handleTimeshift'])
     ->name('xtream.stream.timeshift.root');

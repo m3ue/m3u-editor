@@ -69,11 +69,11 @@ class DvrRecorderService
             throw new Exception("DvrSetting not found for recording {$recording->id}");
         }
 
-        // Use the raw source URL so the proxy connects directly to the provider.
-        // getProxyUrl() would generate an editor-routed URL (/live/…?proxy=true) that
-        // loops back through XtreamStreamController → m3u-proxy pooled stream, causing
-        // double-proxying. The DVR broadcast already runs inside the proxy, which handles
-        // its own reconnects and buffering natively.
+        // Resolve the raw source URL for the recording.
+        // If there's already an active stream on the proxy for this channel, piggyback
+        // off it by using the stream's local proxy URL as the broadcast source. This
+        // avoids creating a second upstream connection to the provider, which can cause
+        // circuit-breaker drops (provider kills one connection when a second opens).
         $channel = $recording->channel;
         if ($channel) {
             $streamUrl = $channel->url_custom ?? $channel->url ?? $recording->stream_url;
@@ -83,6 +83,21 @@ class DvrRecorderService
 
         if (empty($streamUrl)) {
             throw new Exception("Recording {$recording->id} has no stream_url — cannot start");
+        }
+
+        // Check if there's an existing stream for this channel to piggyback off
+        $playlistUuid = $recording->dvrSetting?->playlist?->uuid;
+        if ($channel && $playlistUuid) {
+            $activeStreamId = $this->proxy->getActiveStreamIdForChannel($channel->id, $playlistUuid);
+            if ($activeStreamId) {
+                $proxyUrl = $this->proxy->getStreamProxyUrl($activeStreamId);
+                Log::info('DVR: Piggybacking off existing stream', [
+                    'recording_id' => $recording->id,
+                    'stream_id' => $activeStreamId,
+                    'proxy_url' => $proxyUrl,
+                ]);
+                $streamUrl = $proxyUrl;
+            }
         }
 
         if ($streamUrl !== $recording->stream_url) {
