@@ -140,7 +140,7 @@ RUN echo "@edge https://dl-cdn.alpinelinux.org/alpine/edge/main" >> /etc/apk/rep
     tar xzf argtable2-13.tar.gz && \
     cd argtable2-13/ && ./configure CFLAGS="-Wno-implicit-function-declaration" && make && make install && \
     cd /tmp && \
-    git clone --depth 1 --branch master https://github.com/erikkaashoek/Comskip && \
+    git clone --depth 1 --branch V0.83 https://github.com/erikkaashoek/Comskip && \
     cd Comskip && ./autogen.sh && ./configure && \
     sed -i '/is->dec_ctx->ticks_per_frame = /d; s/is->dec_ctx->ticks_per_frame/1/g' mpeg2dec.c && \
     make && \
