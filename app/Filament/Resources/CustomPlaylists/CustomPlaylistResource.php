@@ -114,7 +114,7 @@ class CustomPlaylistResource extends Resource implements CopilotResource
                     ->toggleable()
                     ->formatStateUsing(fn (int $state): string => $state === 0 ? '∞' : (string) $state)
                     ->tooltip(__('Total streams available for this playlist (∞ indicates no limit)'))
-                    ->description(fn (CustomPlaylist $record): string => 'Active: ' . M3uProxyService::getPlaylistActiveStreamsCount($record)
+                    ->description(fn (CustomPlaylist $record): string => 'Active: ' . M3uProxyService::getPlaylistActiveStreamsCount($record))
                     ->sortable(),
                 TextColumn::make('live_channels_count')
                     ->label(__('Live'))
