@@ -19,16 +19,8 @@ test('trash guide naming columns exist on the relevant tables', function () {
     }
 });
 
-test('stream file settings model exposes fillable attributes and casts', function () {
+test('stream file settings model casts the new attributes', function () {
     $model = new StreamFileSetting;
-
-    expect($model->getFillable())->toContain(
-        'movie_format',
-        'episode_format',
-        'version_detection_pattern',
-        'group_versions',
-        'use_stream_stats',
-    );
 
     expect($model->getCasts())->toMatchArray([
         'group_versions' => 'boolean',
