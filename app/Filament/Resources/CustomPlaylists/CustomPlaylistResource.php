@@ -13,6 +13,7 @@ use App\Filament\Resources\CustomPlaylists\RelationManagers\ChannelsRelationMana
 use App\Filament\Resources\CustomPlaylists\RelationManagers\GroupsRelationManager;
 use App\Filament\Resources\CustomPlaylists\RelationManagers\SeriesRelationManager;
 use App\Filament\Resources\CustomPlaylists\RelationManagers\VodRelationManager;
+use App\Jobs\DuplicateCustomPlaylist;
 use App\Models\CustomPlaylist;
 use App\Models\PlaylistAuth;
 use App\Models\StreamProfile;
@@ -187,6 +188,23 @@ class CustomPlaylistResource extends Resource implements CopilotResource
                         ->icon('heroicon-o-arrow-top-right-on-square')
                         ->url(fn ($record) => '/playlist/v/'.$record->uuid)
                         ->openUrlInNewTab(),
+                    Action::make('Duplicate')
+                        ->label(__('Duplicate'))
+                        ->icon('heroicon-o-document-duplicate')
+                        ->color('gray')
+                        ->schema([
+                            TextInput::make('name')
+                                ->label(__('New playlist name'))
+                                ->required()
+                                ->default(fn (CustomPlaylist $record): string => $record->name.' (Copy)'),
+                        ])
+                        ->action(function (CustomPlaylist $record, array $data): void {
+                            DuplicateCustomPlaylist::dispatch(
+                                $record,
+                                $data['name'],
+                            );
+                        })
+                        ->successNotificationTitle(__('Playlist duplication started')),
                     DeleteAction::make(),
                 ])->button()->hiddenLabel()->size('sm'),
                 EditAction::make()
