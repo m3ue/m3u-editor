@@ -4,7 +4,6 @@ namespace App\Jobs;
 
 use App\Models\Channel;
 use App\Models\CustomPlaylist;
-use App\Models\Series;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -23,8 +22,7 @@ class DuplicateCustomPlaylist implements ShouldQueue
     public function __construct(
         public CustomPlaylist $playlist,
         public string $newName
-    ) {
-    }
+    ) {}
 
     public function handle(): void
     {
@@ -45,13 +43,11 @@ class DuplicateCustomPlaylist implements ShouldQueue
                 ->get();
 
             foreach ($channelPivots as $pivot) {
-
                 $newChannelId = $pivot->channel_id;
 
                 $channel = Channel::find($pivot->channel_id);
 
                 if ($channel && $channel->custom) {
-
                     $newChannel = $channel->replicate();
 
                     $newChannel->uuid = Str::uuid()->toString();
@@ -63,7 +59,6 @@ class DuplicateCustomPlaylist implements ShouldQueue
                         ->get();
 
                     foreach ($failovers as $failover) {
-
                         DB::table('channel_failovers')->insert([
                             'channel_id' => $newChannel->id,
                             'failover_channel_id' => $failover->failover_channel_id,
@@ -88,7 +83,6 @@ class DuplicateCustomPlaylist implements ShouldQueue
                 ->get();
 
             foreach ($seriesPivots as $pivot) {
-
                 DB::table('series_custom_playlist')->insert([
                     'series_id' => $pivot->series_id,
                     'custom_playlist_id' => $newPlaylist->id,
@@ -103,7 +97,6 @@ class DuplicateCustomPlaylist implements ShouldQueue
                 ->get();
 
             foreach ($tags as $tag) {
-
                 DB::table('tags')->insert([
                     'name' => $tag->name,
                     'type' => $tag->type,
@@ -120,7 +113,6 @@ class DuplicateCustomPlaylist implements ShouldQueue
                 ->get();
 
             foreach ($postProcesses as $process) {
-
                 DB::table('post_processes')->insert([
                     'custom_playlist_id' => $newPlaylist->id,
                     'type' => $process->type,
