@@ -18,35 +18,6 @@ class DvrRecordingRule extends Model
     use HasFactory;
 
     /**
-     * @var list<string>
-     */
-    protected $fillable = [
-        'user_id',
-        'playlist_auth_id',
-        'dvr_setting_id',
-        'type',
-        'programme_id',
-        'series_title',
-        'series_key',
-        'normalized_title',
-        'channel_id',
-        'source_channel_id',
-        'epg_channel_id',
-        'new_only',
-        'series_mode',
-        'match_mode',
-        'tmdb_id',
-        'priority',
-        'start_early_seconds',
-        'end_late_seconds',
-        'keep_last',
-        'enabled',
-        'enable_comskip',
-        'manual_start',
-        'manual_end',
-    ];
-
-    /**
      * @return array<string, string>
      */
     protected function casts(): array
@@ -76,6 +47,12 @@ class DvrRecordingRule extends Model
     protected static function boot(): void
     {
         parent::boot();
+
+        static::creating(function (self $rule): void {
+            if (! $rule->user_id) {
+                $rule->user_id = auth()->id();
+            }
+        });
 
         static::saving(function (self $rule): void {
             if (
