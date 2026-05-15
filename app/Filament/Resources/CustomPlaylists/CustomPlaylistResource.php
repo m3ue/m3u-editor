@@ -13,6 +13,7 @@ use App\Filament\Resources\CustomPlaylists\RelationManagers\ChannelsRelationMana
 use App\Filament\Resources\CustomPlaylists\RelationManagers\GroupsRelationManager;
 use App\Filament\Resources\CustomPlaylists\RelationManagers\SeriesRelationManager;
 use App\Filament\Resources\CustomPlaylists\RelationManagers\VodRelationManager;
+use App\Jobs\DuplicateCustomPlaylist;
 use App\Models\CustomPlaylist;
 use App\Models\PlaylistAuth;
 use App\Models\StreamProfile;
@@ -32,6 +33,7 @@ use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
+use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Fieldset;
 use Filament\Schemas\Components\Grid;
@@ -187,6 +189,30 @@ class CustomPlaylistResource extends Resource implements CopilotResource
                         ->icon('heroicon-o-arrow-top-right-on-square')
                         ->url(fn ($record) => '/playlist/v/'.$record->uuid)
                         ->openUrlInNewTab(),
+                    Action::make('Duplicate')
+                        ->label(__('Duplicate'))
+                        ->schema([
+                            TextInput::make('name')
+                                ->label(__('Playlist name'))
+                                ->required()
+                                ->helperText(__('This will be the name of the duplicated playlist.')),
+                        ])
+                        ->action(function ($record, $data) {
+                            app('Illuminate\Contracts\Bus\Dispatcher')
+                                ->dispatch(new DuplicateCustomPlaylist($record, $data['name']));
+                        })->after(function () {
+                            Notification::make()
+                                ->success()
+                                ->title(__('Custom playlist is being duplicated'))
+                                ->body(__('The custom playlist is being duplicated in the background. You will be notified on completion.'))
+                                ->duration(3000)
+                                ->send();
+                        })
+                        ->requiresConfirmation()
+                        ->icon('heroicon-o-document-duplicate')
+                        ->modalIcon('heroicon-o-document-duplicate')
+                        ->modalDescription(__('Duplicate custom playlist now?'))
+                        ->modalSubmitActionLabel(__('Yes, duplicate now')),
                     DeleteAction::make(),
                 ])->button()->hiddenLabel()->size('sm'),
                 EditAction::make()
