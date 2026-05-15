@@ -70,6 +70,7 @@ class FetchTmdbIds implements ShouldQueue
         public ?User $user = null,
         public bool $isChunkJob = false,
         public bool $sendCompletionNotification = true,
+        public array $postCompletionJobs = [],
     ) {
         // Legacy support: convert Collections to arrays
         if ($this->vodChannelIds instanceof Collection) {
@@ -127,6 +128,11 @@ class FetchTmdbIds implements ShouldQueue
         if ($this->sendCompletionNotification) {
             $this->sendCompletionNotification();
         }
+
+        // Dispatch downstream jobs after inline processing completes (non-chunk root jobs only)
+        if (! $this->isChunkJob && ! empty($this->postCompletionJobs)) {
+            Bus::chain($this->postCompletionJobs)->dispatch();
+        }
     }
 
     /**
@@ -152,58 +158,63 @@ class FetchTmdbIds implements ShouldQueue
                 $this->sendCompletionNotification();
             }
 
+            if (! empty($this->postCompletionJobs)) {
+                Bus::chain($this->postCompletionJobs)->dispatch();
+            }
+
             return;
         }
 
         $chunkCount = $jobs->count();
         $userId = $this->user?->id;
+        $postCompletionJobs = $this->postCompletionJobs;
 
         Bus::batch($jobs->all())
             ->onConnection('redis') // force to use redis connection
             ->onQueue('import')
             ->allowFailures()
-            ->finally(function (Batch $batch) use ($userId): void {
-                if (! $userId) {
-                    return;
+            ->finally(function (Batch $batch) use ($userId, $postCompletionJobs): void {
+                if ($userId) {
+                    $user = User::find($userId);
+
+                    if ($user) {
+                        $stats = self::readBatchStats($batch->id);
+                        $failedJobs = $batch->failedJobs;
+                        $total = $stats['found'] + $stats['not_found'] + $stats['skipped'] + $stats['errors'];
+
+                        $body = sprintf(
+                            'Found: %d | Not found: %d | Skipped (already had IDs): %d | Errors: %d',
+                            $stats['found'],
+                            $stats['not_found'],
+                            $stats['skipped'],
+                            $stats['errors']
+                        );
+
+                        if ($failedJobs > 0) {
+                            $body .= " | Failed chunks: {$failedJobs}";
+                        }
+
+                        $notification = Notification::make()
+                            ->title("TMDB ID Lookup Complete ({$total} processed)")
+                            ->body($body);
+
+                        if ($failedJobs > 0 || $stats['errors'] > 0) {
+                            $notification->warning();
+                        } else {
+                            $notification->success();
+                        }
+
+                        $notification
+                            ->broadcast($user)
+                            ->sendToDatabase($user);
+
+                        self::clearBatchStats($batch->id);
+                    }
                 }
 
-                $user = User::find($userId);
-
-                if (! $user) {
-                    return;
+                if (! empty($postCompletionJobs)) {
+                    Bus::chain($postCompletionJobs)->dispatch();
                 }
-
-                $stats = self::readBatchStats($batch->id);
-                $failedJobs = $batch->failedJobs;
-                $total = $stats['found'] + $stats['not_found'] + $stats['skipped'] + $stats['errors'];
-
-                $body = sprintf(
-                    'Found: %d | Not found: %d | Skipped (already had IDs): %d | Errors: %d',
-                    $stats['found'],
-                    $stats['not_found'],
-                    $stats['skipped'],
-                    $stats['errors']
-                );
-
-                if ($failedJobs > 0) {
-                    $body .= " | Failed chunks: {$failedJobs}";
-                }
-
-                $notification = Notification::make()
-                    ->title("TMDB ID Lookup Complete ({$total} processed)")
-                    ->body($body);
-
-                if ($failedJobs > 0 || $stats['errors'] > 0) {
-                    $notification->warning();
-                } else {
-                    $notification->success();
-                }
-
-                $notification
-                    ->broadcast($user)
-                    ->sendToDatabase($user);
-
-                self::clearBatchStats($batch->id);
             })
             ->dispatch();
 
