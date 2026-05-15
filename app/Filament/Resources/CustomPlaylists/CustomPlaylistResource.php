@@ -114,7 +114,7 @@ class CustomPlaylistResource extends Resource implements CopilotResource
                     ->toggleable()
                     ->formatStateUsing(fn (int $state): string => $state === 0 ? '∞' : (string) $state)
                     ->tooltip(__('Total streams available for this playlist (∞ indicates no limit)'))
-                    ->description(fn (CustomPlaylist $record): string => 'Active: '.M3uProxyService::getPlaylistActiveStreamsCount($record))
+                    ->description(fn (CustomPlaylist $record): string => 'Active: ' . M3uProxyService::getPlaylistActiveStreamsCount($record)
                     ->sortable(),
                 TextColumn::make('live_channels_count')
                     ->label(__('Live'))
@@ -186,7 +186,7 @@ class CustomPlaylistResource extends Resource implements CopilotResource
                     Action::make('Public URL')
                         ->label(__('Public URL'))
                         ->icon('heroicon-o-arrow-top-right-on-square')
-                        ->url(fn ($record) => '/playlist/v/'.$record->uuid)
+                        ->url(fn ($record) => '/playlist/v/' . $record->uuid)
                         ->openUrlInNewTab(),
                     Action::make('Duplicate')
                         ->label(__('Duplicate'))
@@ -196,7 +196,7 @@ class CustomPlaylistResource extends Resource implements CopilotResource
                             TextInput::make('name')
                                 ->label(__('New playlist name'))
                                 ->required()
-                                ->default(fn (CustomPlaylist $record): string => $record->name.' (Copy)'),
+                                ->default(fn (CustomPlaylist $record): string => $record->name . ' (Copy)'),
                         ])
                         ->action(function (CustomPlaylist $record, array $data): void {
                             DuplicateCustomPlaylist::dispatch(
@@ -205,7 +205,6 @@ class CustomPlaylistResource extends Resource implements CopilotResource
                             );
                         })
                         ->successNotificationTitle(__('Playlist duplication started')),
-                    
                     DeleteAction::make(),
                 ])->button()->hiddenLabel()->size('sm'),
                 EditAction::make()
@@ -587,7 +586,7 @@ class CustomPlaylistResource extends Resource implements CopilotResource
                                                     if ($record) {
                                                         $currentAuths = $record->playlistAuths()->get();
                                                         foreach ($currentAuths as $auth) {
-                                                            $options[$auth->id] = $auth->name.' (currently assigned)';
+                                                            $options[$auth->id] = $auth->name . ' (currently assigned)';
                                                         }
                                                     }
 
