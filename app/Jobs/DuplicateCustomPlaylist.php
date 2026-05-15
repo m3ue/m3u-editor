@@ -21,7 +21,7 @@ class DuplicateCustomPlaylist implements ShouldQueue
 
     public function __construct(
         public CustomPlaylist $playlist,
-        public string $newName
+        public string $newName,
     ) {}
 
     public function handle(): void
