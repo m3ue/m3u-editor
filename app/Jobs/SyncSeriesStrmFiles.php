@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Enums\SyncRunPhase;
 use App\Models\Episode;
 use App\Models\MediaServerIntegration;
 use App\Models\Playlist;
@@ -53,11 +54,13 @@ class SyncSeriesStrmFiles implements ShouldQueue
         public bool $all_playlists = false,
         public ?int $playlist_id = null,
         public ?int $user_id = null,
-        public ?int $batchOffset = null,  // For batch processing
+        public ?int $batchOffset = null,
         public ?int $totalBatches = null,
         public ?int $currentBatch = null,
-        public bool $isCleanupJob = false, // Special flag for final cleanup
+        public bool $isCleanupJob = false,
         public ?array $series_ids = null,
+        public ?int $syncRunId = null,
+        public ?SyncRunPhase $completionPhase = null,
     ) {
         // Run file synces on the dedicated queue
         $this->onQueue('file_sync');
@@ -171,8 +174,10 @@ class SyncSeriesStrmFiles implements ShouldQueue
             all_playlists: $this->all_playlists,
             playlist_id: $this->playlist_id,
             user_id: $this->user_id,
-            needsCleanup: true, // Cleanup will run after all chains complete
+            needsCleanup: true,
             series_ids: $this->series_ids,
+            syncRunId: $this->syncRunId,
+            completionPhase: $this->completionPhase,
         );
 
         // Dispatch the chain

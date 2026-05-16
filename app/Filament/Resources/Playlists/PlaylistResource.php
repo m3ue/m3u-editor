@@ -3284,6 +3284,15 @@ class PlaylistResource extends Resource implements CopilotResource
                     })
                     ->openUrlInNewTab(false)
                     ->hidden(fn (Playlist $record): bool => $record->is_network_playlist || $record->isMediaServerPlaylist()),
+                Action::make('view_sync_runs')
+                    ->label(__('View Sync Runs'))
+                    ->color('gray')
+                    ->icon('heroicon-m-queue-list')
+                    ->url(function (Playlist $record): string {
+                        return "/playlists/{$record->id}/sync-runs";
+                    })
+                    ->openUrlInNewTab(false)
+                    ->hidden(fn (Playlist $record): bool => $record->is_network_playlist || $record->isMediaServerPlaylist()),
             ]),
 
             // -- Reset & Delete --

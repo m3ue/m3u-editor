@@ -401,7 +401,7 @@ class Channel extends Model
             $process->run();
 
             if ($process->getExitCode() !== 0) {
-                Log::error("Error running ffprobe for channel \"{$this->title}\": {$process->getErrorOutput()}");
+                Log::warning("Error running ffprobe for channel \"{$this->title}\": {$process->getErrorOutput()}");
 
                 return [];
             }
@@ -452,7 +452,7 @@ class Channel extends Model
                 return $streamStats;
             }
         } catch (Exception $e) {
-            Log::error("Error running ffprobe for channel \"{$this->title}\": {$e->getMessage()}");
+            Log::warning("Error running ffprobe for channel \"{$this->title}\": {$e->getMessage()}");
         }
 
         return [];

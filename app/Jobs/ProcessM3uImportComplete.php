@@ -11,6 +11,7 @@ use App\Models\PlaylistSyncStatus;
 use App\Models\PlaylistSyncStatusLog;
 use App\Models\User;
 use App\Services\EpgCacheService;
+use App\Services\SyncPipelineService;
 use App\Settings\GeneralSettings;
 use Carbon\Carbon;
 use Filament\Notifications\Notification;
@@ -351,77 +352,19 @@ class ProcessM3uImportComplete implements ShouldQueue
 
         $this->seriesCleanup($playlist);
 
-        $syncVod = ($playlist->auto_sync_vod_stream_files || $playlist->auto_fetch_vod_metadata)
-            && $playlist->channels()->where([
-                ['enabled', true],
-                ['is_vod', true],
-            ])->exists();
-
-        // Check whether a series metadata sync should follow — evaluated here so we can
-        // decide whether to chain it after VOD or dispatch it independently.
-        // Skip when runningSeriesImport is true: the series discovery chunks run AFTER this
-        // job in the same chain, so dispatching ProcessM3uImportSeries now would race with
-        // those chunks and corrupt series_progress. ProcessM3uImportSeriesComplete handles
-        // the metadata-sync dispatch once discovery is actually done.
-        $syncSeriesMetadata = ! $this->runningSeriesImport
-            && $playlist->auto_fetch_series_metadata
-            && $playlist->series()->where('enabled', true)->exists();
-
-        if ($syncVod) {
-            // VOD runs first. When series is also needed it is chained after VOD completes
-            // (via TriggerSeriesImport) so both pipelines run sequentially and respect the
-            // provider's rate-limiting / concurrency settings. SyncCompleted fires only after
-            // the last pipeline in the sequence finishes.
-            $completionJob = $syncSeriesMetadata
-                ? new TriggerSeriesImport($playlist, $this->isNew, $this->batchNo)
-                : new FireSyncCompletedEvent($playlist);
-
-            $syncStreamFiles = $playlist->auto_sync_vod_stream_files;
-            $syncMetaData = $playlist->auto_fetch_vod_metadata;
-            if ($syncStreamFiles && $syncMetaData) {
-                $message = 'Syncing VOD stream files and fetching VOD metadata now. Please check back later.';
-            } elseif ($syncStreamFiles) {
-                $message = 'Syncing VOD stream files now. Please check back later.';
-            } else {
-                $message = 'Fetching VOD metadata now. Please check back later.';
-            }
-
-            dispatch(new ProcessM3uImportVod(
-                playlist: $playlist,
-                isNew: $this->isNew,
-                batchNo: $this->batchNo,
-                completionJob: $completionJob,
-            ));
-            Notification::make()
-                ->info()
-                ->title('Syncing VOD Channels')
-                ->body($message)
-                ->broadcast($playlist->user)
-                ->sendToDatabase($playlist->user);
-
-            return; // VOD pipeline (and series if needed) will fire SyncCompleted when done
-        }
-
-        if ($syncSeriesMetadata) {
-            // No VOD to run — dispatch series directly and let it fire SyncCompleted.
-            dispatch(new ProcessM3uImportSeries(
-                playlist: $playlist,
-                force: true,
-                isNew: $this->isNew,
-                batchNo: $this->batchNo,
-            ));
-            Notification::make()
-                ->info()
-                ->title('Fetching Series Metadata')
-                ->body('Fetching series metadata now. This may take a while depending on how many series you have enabled. If stream file syncing is enabled, it will also be ran. Please check back later.')
-                ->broadcast($playlist->user)
-                ->sendToDatabase($playlist->user);
-
-            return;
-        }
-
-        // Neither VOD nor series — fire immediately.
-        event(new SyncCompleted($playlist, 'playlist'));
+        // Always build and start the pipeline. When no post-processing is configured
+        // resolvePipeline() returns only [SyncCompleted] and startRun() finishes immediately.
+        // This guarantees a SyncRun record exists for every sync operation.
+        //
+        // Skip series metadata when runningSeriesImport is true: the series discovery
+        // chunks run AFTER this job in the same chain, so series dispatch must wait.
+        $pipeline = app(SyncPipelineService::class);
+        $run = $pipeline->buildPipeline(
+            $playlist,
+            $settings,
+            skipSeriesMetadata: $this->runningSeriesImport,
+        );
+        $pipeline->startRun($run);
     }
 
     /**

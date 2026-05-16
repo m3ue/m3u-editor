@@ -3,9 +3,11 @@
 namespace App\Jobs;
 
 use App\Enums\Status;
+use App\Enums\SyncRunPhase;
 use App\Models\Playlist;
 use App\Models\Series;
 use App\Models\User;
+use App\Services\SyncPipelineService;
 use App\Settings\GeneralSettings;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -40,6 +42,7 @@ class CheckSeriesImportProgress implements ShouldQueue
         public ?int $user_id = null,
         public ?bool $sync_stream_files = true,
         public ?float $startedAt = null,
+        public ?int $syncRunId = null,
     ) {
         // Track start time on first checker
         if ($this->startedAt === null) {
@@ -77,29 +80,35 @@ class CheckSeriesImportProgress implements ShouldQueue
                 'sync_stream_files' => $this->sync_stream_files,
             ]);
 
-            // Build post-TMDB pipeline: STRM sync runs after TMDB completes (not alongside it).
-            $strmJob = $this->sync_stream_files
-                ? new SyncSeriesStrmFiles(
-                    series: null,
-                    notify: true,
-                    all_playlists: $this->all_playlists,
-                    playlist_id: $this->playlist_id,
-                    user_id: $this->user_id,
-                )
-                : null;
+            // Pipeline path: hand off to SyncPipelineService.
+            if ($this->syncRunId) {
+                Log::info('Series Import: Handing off to SyncPipeline. run='.$this->syncRunId);
+                app(SyncPipelineService::class)->completePhase($this->syncRunId, SyncRunPhase::SeriesMetadata);
+            } else {
+                // Legacy path — build and dispatch post-metadata chain manually.
+                $strmJob = $this->sync_stream_files
+                    ? new SyncSeriesStrmFiles(
+                        series: null,
+                        notify: true,
+                        all_playlists: $this->all_playlists,
+                        playlist_id: $this->playlist_id,
+                        user_id: $this->user_id,
+                    )
+                    : null;
 
-            if ($settings->tmdb_auto_lookup_on_import) {
-                Log::info('Series Import: Queuing bulk TMDB fetch for playlist');
-                FetchTmdbIds::dispatch(
-                    seriesPlaylistId: $this->playlist_id,
-                    overwriteExisting: $this->overwrite_existing,
-                    user: $this->user_id ? User::find($this->user_id) : null,
-                    sendCompletionNotification: false,
-                    postCompletionJobs: $strmJob ? [$strmJob] : [],
-                );
-            } elseif ($strmJob) {
-                Log::info('Series Import: Queuing STRM sync');
-                dispatch($strmJob);
+                if ($settings->tmdb_auto_lookup_on_import) {
+                    Log::info('Series Import: Queuing bulk TMDB fetch for playlist');
+                    FetchTmdbIds::dispatch(
+                        seriesPlaylistId: $this->playlist_id,
+                        overwriteExisting: $this->overwrite_existing,
+                        user: $this->user_id ? User::find($this->user_id) : null,
+                        sendCompletionNotification: false,
+                        postCompletionJobs: $strmJob ? [$strmJob] : [],
+                    );
+                } elseif ($strmJob) {
+                    Log::info('Series Import: Queuing STRM sync');
+                    dispatch($strmJob);
+                }
             }
 
             // Send completion notification
@@ -174,6 +183,7 @@ class CheckSeriesImportProgress implements ShouldQueue
             user_id: $this->user_id,
             sync_stream_files: $this->sync_stream_files,
             startedAt: $this->startedAt,
+            syncRunId: $this->syncRunId,
         );
 
         Log::info('Series Import: Dispatching next chain', [

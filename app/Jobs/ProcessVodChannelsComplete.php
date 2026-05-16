@@ -3,7 +3,9 @@
 namespace App\Jobs;
 
 use App\Enums\Status;
+use App\Enums\SyncRunPhase;
 use App\Models\Playlist;
+use App\Services\SyncPipelineService;
 use App\Settings\GeneralSettings;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -28,6 +30,7 @@ class ProcessVodChannelsComplete implements ShouldQueue
     public function __construct(
         public Playlist $playlist,
         public ?ShouldQueue $completionJob = null,
+        public ?int $syncRunId = null,
     ) {}
 
     /**
@@ -56,8 +59,15 @@ class ProcessVodChannelsComplete implements ShouldQueue
             ->broadcast($this->playlist->user)
             ->sendToDatabase($this->playlist->user);
 
-        // Build the post-TMDB pipeline so STRM sync always runs after TMDB IDs are written,
-        // even when FetchTmdbIds batches its work across multiple chunk jobs.
+        // Pipeline path: delegate next-phase dispatch to SyncPipelineService.
+        if ($this->syncRunId) {
+            Log::info('VOD Complete: Handing off to SyncPipeline. run='.$this->syncRunId);
+            app(SyncPipelineService::class)->completePhase($this->syncRunId, SyncRunPhase::VodMetadata);
+
+            return;
+        }
+
+        // Legacy path — build and dispatch post-metadata chain manually.
         $postTmdbJobs = [];
 
         if ($this->playlist->auto_sync_vod_stream_files) {
@@ -65,16 +75,11 @@ class ProcessVodChannelsComplete implements ShouldQueue
             $hasFindReplaceRules = collect($this->playlist->find_replace_rules ?? [])
                 ->contains(fn (array $rule): bool => $rule['enabled'] ?? false);
             if ($hasFindReplaceRules) {
-                // Find & Replace runs concurrently with VOD metadata fetch (dispatched by
-                // SyncListener). Chain it here too so STRM sync is guaranteed to use
-                // the processed title_custom values, not stale ones.
                 $postTmdbJobs[] = new RunPlaylistFindReplaceRules($this->playlist);
             }
             $postTmdbJobs[] = new SyncVodStrmFiles(playlist: $this->playlist);
         }
 
-        // Append the completion job (FireSyncCompletedEvent or TriggerSeriesImport) as the
-        // very last step so post-processing and series import never start before STRM sync finishes.
         if ($this->completionJob) {
             $postTmdbJobs[] = $this->completionJob;
         }

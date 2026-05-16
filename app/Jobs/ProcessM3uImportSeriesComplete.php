@@ -3,8 +3,11 @@
 namespace App\Jobs;
 
 use App\Enums\Status;
+use App\Enums\SyncRunPhase;
+use App\Enums\SyncRunStatus;
 use App\Events\SyncCompleted;
 use App\Models\Playlist;
+use App\Services\SyncPipelineService;
 use App\Settings\GeneralSettings;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -55,40 +58,61 @@ class ProcessM3uImportSeriesComplete implements ShouldQueue
         // Fire the playlist synced event
         event(new SyncCompleted($this->playlist));
 
-        // Mirror the VOD pipeline (ProcessVodChannelsComplete) by auto-fetching
-        // TMDB IDs for newly imported series when the global setting is enabled.
-        //
-        // We always dispatch here regardless of auto_fetch_series_metadata. If episode
-        // metadata sync is also enabled, CheckSeriesImportProgress will dispatch its own
-        // FetchTmdbIds afterwards, but with overwriteExisting=false that second run is a
-        // near no-op for series that already received IDs. Always dispatching here ensures
-        // first-time imports are covered: on the very first sync, ProcessM3uImportComplete
-        // runs before the series chunks populate the DB, so it skips dispatching
-        // ProcessM3uImportSeries — meaning CheckSeriesImportProgress never fires and TMDB
-        // IDs would never be assigned without this dispatch.
-        if ($settings->tmdb_auto_lookup_on_import) {
-            Log::info('Series Complete: Queuing bulk TMDB fetch for playlist ID '.$this->playlist->id);
-            FetchTmdbIds::dispatch(
-                seriesPlaylistId: $this->playlist->id,
-                user: $this->playlist->user,
-                sendCompletionNotification: false,
-            );
+        // Build a standalone mini-pipeline for the post-series phases.
+        // This avoids any SyncRun lookup and works safely even if two syncs somehow overlap,
+        // because each call creates its own SyncRun with a fresh ID that flows through
+        // ProcessM3uImportSeries → CheckSeriesImportProgress → completePhase().
+        $this->dispatchSeriesPostProcessingPipeline($settings);
+    }
+
+    /**
+     * Build a mini standalone pipeline for post-series-discovery phases and dispatch
+     * episode metadata sync (if enabled) with the new run's ID baked in.
+     *
+     * By creating a fresh SyncRun here — rather than looking up the existing one — we
+     * avoid any race condition when two syncs overlap, and the syncRunId flows naturally
+     * through ProcessM3uImportSeries → CheckSeriesImportProgress → completePhase().
+     */
+    private function dispatchSeriesPostProcessingPipeline(GeneralSettings $settings): void
+    {
+        $playlist = $this->playlist;
+
+        if (! $playlist->series()->where('enabled', true)->exists()) {
+            return;
         }
 
-        // Trigger episode metadata sync after series discovery completes.
-        // ProcessM3uImportComplete skips this when runningSeriesImport=true so that the
-        // dispatch happens here — after all discovery chunks have run — preventing a race
-        // condition where both jobs write to series_progress concurrently.
-        if ($this->playlist->auto_fetch_series_metadata
-            && $this->playlist->series()->where('enabled', true)->exists()
-        ) {
-            Log::info('Series Complete: Queuing episode metadata sync for playlist ID '.$this->playlist->id);
+        $pipeline = app(SyncPipelineService::class);
+        $phases = $pipeline->resolveSeriesPhases($playlist, $settings);
+
+        if (empty($phases)) {
+            return;
+        }
+
+        $run = $pipeline->buildStandalonePipeline($playlist, $phases, 'series_discovery_complete');
+
+        // When episode metadata sync is enabled, SeriesMetadata is the first phase.
+        // Dispatch ProcessM3uImportSeries now with the run ID so CheckSeriesImportProgress
+        // can hand off to the pipeline (via completePhase) when discovery finishes.
+        // The pipeline will then dispatch the remaining phases (SeriesTmdb, SeriesStrm, etc.).
+        if ($playlist->auto_fetch_series_metadata) {
+            Log::info("Series Complete: Queuing episode metadata sync for playlist ID {$playlist->id}, syncRunId={$run->id}");
             dispatch(new ProcessM3uImportSeries(
-                playlist: $this->playlist,
+                playlist: $playlist,
                 force: true,
                 isNew: false,
                 batchNo: $this->batchNo,
+                syncRunId: $run->id,
             ));
+
+            $run->update([
+                'status' => SyncRunStatus::Running->value,
+                'current_phase' => SyncRunPhase::SeriesMetadata->value,
+            ]);
+
+            return;
         }
+
+        // No metadata sync — let the pipeline dispatch from the first phase normally.
+        $pipeline->startRun($run);
     }
 }
