@@ -2,11 +2,13 @@
 
 namespace App\Jobs;
 
+use App\Enums\SyncRunPhase;
 use App\Models\Category;
 use App\Models\Channel;
 use App\Models\Group;
 use App\Models\Series;
 use App\Models\User;
+use App\Services\SyncPipelineService;
 use App\Services\TmdbService;
 use App\Settings\GeneralSettings;
 use Filament\Notifications\Notification;
@@ -71,6 +73,8 @@ class FetchTmdbIds implements ShouldQueue
         public bool $isChunkJob = false,
         public bool $sendCompletionNotification = true,
         public array $postCompletionJobs = [],
+        public ?int $syncRunId = null,
+        public ?SyncRunPhase $completionPhase = null,
     ) {
         // Legacy support: convert Collections to arrays
         if ($this->vodChannelIds instanceof Collection) {
@@ -130,8 +134,12 @@ class FetchTmdbIds implements ShouldQueue
         }
 
         // Dispatch downstream jobs after inline processing completes (non-chunk root jobs only)
-        if (! $this->isChunkJob && ! empty($this->postCompletionJobs)) {
-            Bus::chain($this->postCompletionJobs)->dispatch();
+        if (! $this->isChunkJob) {
+            if ($this->syncRunId && $this->completionPhase) {
+                app(SyncPipelineService::class)->completePhase($this->syncRunId, $this->completionPhase);
+            } elseif (! empty($this->postCompletionJobs)) {
+                Bus::chain($this->postCompletionJobs)->dispatch();
+            }
         }
     }
 
@@ -158,7 +166,9 @@ class FetchTmdbIds implements ShouldQueue
                 $this->sendCompletionNotification();
             }
 
-            if (! empty($this->postCompletionJobs)) {
+            if ($this->syncRunId && $this->completionPhase) {
+                app(SyncPipelineService::class)->completePhase($this->syncRunId, $this->completionPhase);
+            } elseif (! empty($this->postCompletionJobs)) {
                 Bus::chain($this->postCompletionJobs)->dispatch();
             }
 
@@ -168,12 +178,14 @@ class FetchTmdbIds implements ShouldQueue
         $chunkCount = $jobs->count();
         $userId = $this->user?->id;
         $postCompletionJobs = $this->postCompletionJobs;
+        $syncRunId = $this->syncRunId;
+        $completionPhase = $this->completionPhase;
 
         Bus::batch($jobs->all())
             ->onConnection('redis') // force to use redis connection
             ->onQueue('import')
             ->allowFailures()
-            ->finally(function (Batch $batch) use ($userId, $postCompletionJobs): void {
+            ->finally(function (Batch $batch) use ($userId, $postCompletionJobs, $syncRunId, $completionPhase): void {
                 if ($userId) {
                     $user = User::find($userId);
 
@@ -212,7 +224,9 @@ class FetchTmdbIds implements ShouldQueue
                     }
                 }
 
-                if (! empty($postCompletionJobs)) {
+                if ($syncRunId && $completionPhase) {
+                    app(SyncPipelineService::class)->completePhase($syncRunId, $completionPhase);
+                } elseif (! empty($postCompletionJobs)) {
                     Bus::chain($postCompletionJobs)->dispatch();
                 }
             })

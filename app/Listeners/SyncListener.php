@@ -3,6 +3,7 @@
 namespace App\Listeners;
 
 use App\Enums\Status;
+use App\Enums\SyncRunPhase;
 use App\Events\SyncCompleted;
 use App\Jobs\AutoSyncGroupsToCustomPlaylist;
 use App\Jobs\GenerateEpgCache;
@@ -15,6 +16,7 @@ use App\Jobs\RunPostProcess;
 use App\Jobs\SyncPlexDvrJob;
 use App\Models\Epg;
 use App\Models\Playlist;
+use App\Models\SyncRun;
 use App\Plugins\PluginHookDispatcher;
 use Illuminate\Support\Facades\Bus;
 
@@ -31,14 +33,20 @@ class SyncListener
 
             // Only run the following on completed syncs
             if ($playlist->status === Status::Completed) {
-                // Handle saved find & replace rules and sort alpha if enabled
-                $this->dispatchNameProcessingPipeline($playlist);
+                $syncRun = $event->syncRunId ? SyncRun::find($event->syncRunId) : null;
+
+                // Skip if the pipeline already ran find-replace / sort-alpha as a tracked phase
+                if (! $syncRun?->isPhaseComplete(SyncRunPhase::FindReplace)) {
+                    $this->dispatchNameProcessingPipeline($playlist);
+                }
 
                 // Handle channel merge & scrubbers if enabled
                 $this->dispatchChannelScanJobs($playlist);
 
-                // Auto-sync configured groups to custom playlists
-                $this->dispatchAutoSyncToCustomPlaylistJobs($playlist);
+                // Skip if the pipeline already ran custom playlist sync as a tracked phase
+                if (! $syncRun?->isPhaseComplete(SyncRunPhase::CustomPlaylistSync)) {
+                    $this->dispatchAutoSyncToCustomPlaylistJobs($playlist);
+                }
 
                 // Sync Plex DVR channel maps (lineup may have changed)
                 dispatch(new SyncPlexDvrJob(trigger: 'playlist_sync'));

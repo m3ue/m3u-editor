@@ -16,9 +16,11 @@ class SyncCompleted
      * Create a new event instance.
      *
      * @param  string  $source  The source of the sync (e.g., 'playlist', 'emby_vod', 'emby_series')
+     * @param  int|null  $syncRunId  Set when fired from the SyncPipeline; null for legacy syncs
      */
     public function __construct(
         public Model $model,
         public string $source = 'playlist',
+        public ?int $syncRunId = null,
     ) {}
 }

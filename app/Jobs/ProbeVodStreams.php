@@ -35,6 +35,8 @@ class ProbeVodStreams implements ShouldQueue
     public function __construct(
         public int $playlistId,
         public bool $onlyUnprobed = true,
+        public ?int $syncRunId = null,
+        public bool $isSeriesProbe = false,
     ) {}
 
     public function handle(): void
@@ -137,13 +139,17 @@ class ProbeVodStreams implements ShouldQueue
         Playlist $playlist,
     ): void {
         $userId = $playlist->user?->id;
+        $syncRunId = $this->syncRunId;
+        $isSeriesProbe = $this->isSeriesProbe;
 
         $batch = Bus::batch($chunkJobs)
-            ->then(function () use ($playlistId, $total, $start) {
+            ->then(function () use ($playlistId, $total, $start, $syncRunId, $isSeriesProbe) {
                 dispatch(new ProbeVodStreamsComplete(
                     playlistId: $playlistId,
                     total: $total,
                     start: $start,
+                    syncRunId: $syncRunId,
+                    isSeriesProbe: $isSeriesProbe,
                 ));
             })
             ->catch(function (Batch $batch, Throwable $e) use ($userId) {
@@ -173,6 +179,8 @@ class ProbeVodStreams implements ShouldQueue
                 playlistId: $playlistId,
                 total: $total,
                 start: $start,
+                syncRunId: $this->syncRunId,
+                isSeriesProbe: $this->isSeriesProbe,
             ),
         ])
             ->onConnection('redis')

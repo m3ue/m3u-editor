@@ -2,8 +2,10 @@
 
 namespace App\Jobs;
 
+use App\Enums\SyncRunPhase;
 use App\Models\Playlist;
 use App\Models\User;
+use App\Services\SyncPipelineService;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -30,6 +32,8 @@ class CheckVodStrmProgress implements ShouldQueue
         public ?int $user_id = null,
         public bool $needsCleanup = false,
         public ?array $channel_ids = null,
+        public ?int $syncRunId = null,
+        public ?SyncRunPhase $completionPhase = null,
     ) {
         $this->onQueue('file_sync');
     }
@@ -76,7 +80,11 @@ class CheckVodStrmProgress implements ShouldQueue
                 }
             }
 
-            $this->dispatchVodProbe();
+            if ($this->syncRunId && $this->completionPhase) {
+                app(SyncPipelineService::class)->completePhase($this->syncRunId, $this->completionPhase);
+            } else {
+                $this->dispatchVodProbe();
+            }
 
             return;
         }
@@ -111,6 +119,8 @@ class CheckVodStrmProgress implements ShouldQueue
             user_id: $this->user_id,
             needsCleanup: $this->needsCleanup,
             channel_ids: $this->channel_ids,
+            syncRunId: $this->syncRunId,
+            completionPhase: $this->completionPhase,
         );
 
         Log::info('STRM Sync: Dispatching next VOD chain', [

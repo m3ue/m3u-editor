@@ -283,7 +283,7 @@ class Episode extends Model
             $process->run();
 
             if ($process->getExitCode() !== 0) {
-                Log::error("Error running ffprobe for episode \"{$this->title}\": {$process->getErrorOutput()}");
+                Log::warning("Error running ffprobe for episode \"{$this->title}\": {$process->getErrorOutput()}");
 
                 return [];
             }
@@ -324,7 +324,7 @@ class Episode extends Model
                 return $streamStats;
             }
         } catch (Exception $e) {
-            Log::error("Error running ffprobe for episode \"{$this->title}\": {$e->getMessage()}");
+            Log::warning("Error running ffprobe for episode \"{$this->title}\": {$e->getMessage()}");
         }
 
         return [];

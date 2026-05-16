@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Enums\SyncRunPhase;
 use App\Models\Channel;
 use App\Models\MediaServerIntegration;
 use App\Models\Playlist;
@@ -60,6 +61,8 @@ class SyncVodStrmFiles implements ShouldQueue
         public ?int $currentBatch = null,
         public bool $isCleanupJob = false,
         public ?array $channel_ids = null,
+        public ?int $syncRunId = null,
+        public ?SyncRunPhase $completionPhase = null,
     ) {
         // Run file synces on the dedicated queue
         $this->onQueue('file_sync');
@@ -181,6 +184,8 @@ class SyncVodStrmFiles implements ShouldQueue
             user_id: $this->resolveUserId(),
             needsCleanup: true,
             channel_ids: $this->channel_ids,
+            syncRunId: $this->syncRunId,
+            completionPhase: $this->completionPhase,
         );
 
         Bus::chain($jobs)->dispatch();

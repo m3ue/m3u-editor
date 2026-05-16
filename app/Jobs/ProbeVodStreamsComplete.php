@@ -2,10 +2,12 @@
 
 namespace App\Jobs;
 
+use App\Enums\SyncRunPhase;
 use App\Models\Channel;
 use App\Models\Episode;
 use App\Models\Playlist;
 use App\Models\User;
+use App\Services\SyncPipelineService;
 use Carbon\Carbon;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -28,6 +30,8 @@ class ProbeVodStreamsComplete implements ShouldQueue
         public ?array $channelIds = null,
         public ?array $episodeIds = null,
         public ?int $notifyUserId = null,
+        public ?int $syncRunId = null,
+        public bool $isSeriesProbe = false,
     ) {}
 
     public function handle(): void
@@ -67,6 +71,11 @@ class ProbeVodStreamsComplete implements ShouldQueue
             ->body($body)
             ->broadcast($user)
             ->sendToDatabase($user);
+
+        if ($this->syncRunId) {
+            $phase = $this->isSeriesProbe ? SyncRunPhase::SeriesProbe : SyncRunPhase::VodProbe;
+            app(SyncPipelineService::class)->completePhase($this->syncRunId, $phase);
+        }
     }
 
     public function failed(Throwable $exception): void
