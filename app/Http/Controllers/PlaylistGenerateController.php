@@ -48,13 +48,6 @@ class PlaylistGenerateController extends Controller
 
         // Check auth
         $auths = $playlist->playlistAuths()->where('enabled', true)->get();
-        // For PlaylistAlias, also check direct alias credentials as fallback
-        if ($auths->isEmpty() && $playlist instanceof PlaylistAlias) {
-            $auth = $playlist->authObject;
-            if ($auth) {
-                $auths = collect([$auth]);
-            }
-        }
 
         $usedAuth = null;
         if ($auths->isNotEmpty()) {
@@ -407,12 +400,6 @@ class PlaylistGenerateController extends Controller
         $providedPassword = $password ?? $request->get('password');
 
         $auths = $playlist->playlistAuths()->where('enabled', true)->get();
-        if ($auths->isEmpty() && $playlist instanceof PlaylistAlias) {
-            $auth = $playlist->authObject;
-            if ($auth) {
-                $auths = collect([$auth]);
-            }
-        }
 
         if ($auths->isNotEmpty()) {
             $authenticated = false;
@@ -469,12 +456,6 @@ class PlaylistGenerateController extends Controller
 
         $usedAuth = null;
         $auths = $playlist->playlistAuths()->where('enabled', true)->get();
-        if ($auths->isEmpty() && $playlist instanceof PlaylistAlias) {
-            $auth = $playlist->authObject;
-            if ($auth) {
-                $auths = collect([$auth]);
-            }
-        }
 
         if ($auths->isNotEmpty()) {
             $authenticated = false;
@@ -600,12 +581,6 @@ class PlaylistGenerateController extends Controller
         $providedPassword = $password ?? $request->get('password');
 
         $auths = $playlist->playlistAuths()->where('enabled', true)->get();
-        if ($auths->isEmpty() && $playlist instanceof PlaylistAlias) {
-            $auth = $playlist->authObject;
-            if ($auth) {
-                $auths = collect([$auth]);
-            }
-        }
 
         if ($auths->isNotEmpty()) {
             foreach ($auths as $auth) {

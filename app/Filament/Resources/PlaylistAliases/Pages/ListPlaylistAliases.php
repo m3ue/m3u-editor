@@ -7,6 +7,7 @@ use Filament\Actions;
 use Filament\Resources\Pages\ListRecords;
 use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
 
 class ListPlaylistAliases extends ListRecords
 {
@@ -21,7 +22,17 @@ class ListPlaylistAliases extends ListRecords
     {
         return [
             Actions\CreateAction::make()
-                ->slideOver(),
+                ->slideOver()
+                ->using(function (array $data, string $model): Model {
+                    $assignedAuthIds = PlaylistAliasResource::pullAssignedAuthIdsFromFormData($data);
+                    $record = $model::create($data);
+
+                    if ($assignedAuthIds !== null) {
+                        PlaylistAliasResource::syncAssignedAuths($record, $assignedAuthIds);
+                    }
+
+                    return $record;
+                }),
         ];
     }
 

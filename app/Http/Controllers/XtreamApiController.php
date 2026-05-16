@@ -2090,7 +2090,7 @@ class XtreamApiController extends Controller
      * Resolve viewer from request context, with fallback based on auth method:
      * - viewer_id param provided → use it
      * - playlist_auth → find or create PlaylistViewer linked to the PlaylistAuth
-     * - owner_auth / alias_auth → use the admin viewer for this playlist
+     * - owner_auth → use the admin viewer for this playlist
      */
     private function resolveContextViewer(Request $request, $playlist, string $authMethod, string $username, string $password): ?PlaylistViewer
     {

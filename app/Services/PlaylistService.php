@@ -91,12 +91,6 @@ class PlaylistService
         if (method_exists($playlist, 'playlistAuths')) {
             $playlistAuth = $playlist->playlistAuths()->where('enabled', true)->first();
         }
-        // For PlaylistAlias, fall back to direct alias credentials if no PlaylistAuth found
-        if (! $playlistAuth && $playlist instanceof PlaylistAlias) {
-            $playlistAuth = $playlist->username && $playlist->password
-                ? (object) ['username' => $playlist->username, 'password' => $playlist->password]
-                : null;
-        }
         $auth = null;
         if ($playlistAuth) {
             $auth = '?username='.urlencode($playlistAuth->username).'&password='.urlencode($playlistAuth->password);
@@ -176,15 +170,6 @@ class PlaylistService
             'username' => $playlist->user->name,
             'password' => $playlist->uuid,
         ];
-        if ($playlist instanceof PlaylistAlias) {
-            // For PlaylistAlias, override default auth if set
-            if ($playlist->username && $playlist->password) {
-                $auth = [
-                    'username' => $playlist->username,
-                    'password' => $playlist->password,
-                ];
-            }
-        }
 
         // Return the results
         return [
@@ -218,13 +203,9 @@ class PlaylistService
     public function getMediaFlowProxyUrls($playlist)
     {
         // Get the first enabled auth (URLs can only contain one set of credentials)
+        $playlistAuth = null;
         if (method_exists($playlist, 'playlistAuths')) {
             $playlistAuth = $playlist->playlistAuths()->where('enabled', true)->first();
-        } elseif ($playlist instanceof PlaylistAlias) {
-            // If PlaylistAlias, check if direct authentication is set
-            $playlistAuth = $playlist->username && $playlist->password
-                ? (object) ['username' => $playlist->username, 'password' => $playlist->password]
-                : null;
         }
         $auth = '';
         if ($playlistAuth) {
@@ -459,27 +440,6 @@ class PlaylistService
             }
         }
 
-        // Method 1b: Direct authentication with PlaylistAlias credentials
-        // Only check if Method 1 didn't find a result
-        if (! $playlist) {
-            $alias = PlaylistAlias::where('username', $username)
-                ->where('password', $password)
-                ->with(['user', 'playlist', 'customPlaylist'])
-                ->first();
-
-            if ($alias) {
-                // If alias found but expired, fall through to Method 2
-                if (! $alias->isExpired()) {
-                    return [
-                        $alias,
-                        'alias_auth',
-                        $username,
-                        $password,
-                    ];
-                }
-            }
-        }
-
         // Method 2: Fall back to original authentication:
         //      (username = playlist owner, password = playlist UUID)
         if (! $playlist) {
@@ -609,11 +569,6 @@ class PlaylistService
 
             // If found, return the custom expiration timestamp
             return $playlistAuth?->expires_at?->timestamp ?? 0;
-        }
-
-        // Alias login
-        if ($authMethod === 'alias_auth' && $authRecord instanceof PlaylistAlias) {
-            return $authRecord?->expires_at?->timestamp ?? 0;
         }
 
         // Legacy (owner_auth) optional override

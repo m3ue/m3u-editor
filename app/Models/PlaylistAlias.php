@@ -29,7 +29,6 @@ class PlaylistAlias extends Model
         'proxy_options' => 'array',
         'enable_proxy' => 'boolean',
         'priority' => 'integer',
-        'expires_at' => 'datetime',
         'custom_headers' => 'array',
         'strict_live_ts' => 'boolean',
         'use_sticky_session' => 'boolean',
@@ -161,18 +160,6 @@ class PlaylistAlias extends Model
     public function customPlaylist(): BelongsTo
     {
         return $this->belongsTo(CustomPlaylist::class);
-    }
-
-    /**
-     * Determine whether this alias auth credential is expired.
-     */
-    public function isExpired(): bool
-    {
-        if ($this->expires_at === null) {
-            return false;
-        }
-
-        return now()->greaterThanOrEqualTo($this->expires_at);
     }
 
     /**
@@ -469,33 +456,6 @@ class PlaylistAlias extends Model
         return Attribute::make(
             get: fn () => $this->series()->count()
         );
-    }
-
-    /**
-     * Get the alias credentials (username/password) as an object instead of array.
-     *
-     * This normalises the alias authentication format so that controllers and
-     * services can safely access:
-     *
-     *      $auth->username
-     *      $auth->password
-     *
-     * regardless of whether the credentials originally came from PlaylistAlias
-     * (array) or PlaylistAuth (Eloquent model / object).
-     *
-     * @return object|null
-     */
-    public function getAuthObjectAttribute()
-    {
-        // If explicit alias-level credentials exist, always prefer them.
-        if ($this->username && $this->password) {
-            return (object) [
-                'username' => $this->username,
-                'password' => $this->password,
-            ];
-        }
-
-        return null;
     }
 
     /**

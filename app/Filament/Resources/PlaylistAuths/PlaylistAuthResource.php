@@ -170,7 +170,6 @@ class PlaylistAuthResource extends Resource implements CopilotResource
                         ->rules(function ($record) {
                             return [
                                 Rule::unique('playlist_auths', 'username')->ignore($record?->id),
-                                Rule::unique('playlist_aliases', 'username'),
                             ];
                         })
                         ->columnSpan(1),

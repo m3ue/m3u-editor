@@ -1,5 +1,6 @@
 <?php
 
+use App\Filament\Resources\PlaylistAliases\PlaylistAliasResource;
 use App\Models\Channel;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
@@ -8,6 +9,9 @@ use App\Models\Series;
 use App\Models\SourceCategory;
 use App\Models\User;
 use App\Services\PlaylistService;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -51,20 +55,6 @@ describe('PlaylistService::authenticate() with aliases', function () {
         $this->playlist = Playlist::factory()->for($this->user)->create();
     });
 
-    it('authenticates via alias direct credentials (Method 1b)', function () {
-        $alias = makeAlias($this->user, $this->playlist, [
-            'username' => 'aliasuser',
-            'password' => 'aliaspass',
-        ]);
-
-        $result = (new PlaylistService)->authenticate('aliasuser', 'aliaspass');
-
-        expect($result)->toBeArray()
-            ->and($result[0])->toBeInstanceOf(PlaylistAlias::class)
-            ->and($result[0]->id)->toBe($alias->id)
-            ->and($result[1])->toBe('alias_auth');
-    });
-
     it('authenticates via PlaylistAuth assigned to alias (Method 1)', function () {
         $alias = makeAlias($this->user, $this->playlist);
 
@@ -84,41 +74,17 @@ describe('PlaylistService::authenticate() with aliases', function () {
             ->and($result[1])->toBe('playlist_auth');
     });
 
-    it('PlaylistAuth (Method 1) is not short-circuited by an expired alias with the same credentials', function () {
-        // Core regression for the Method 1b control-flow bug:
-        // Before the fix, Method 1b ran unconditionally. An expired alias matching
-        // the same credentials as a valid PlaylistAuth would cause authenticate()
-        // to return false, denying access even though Method 1 had succeeded.
-        $otherPlaylist = Playlist::factory()->for($this->user)->create();
+    it('rejects expired PlaylistAuth credentials assigned to an alias', function () {
+        $alias = makeAlias($this->user, $this->playlist);
 
         $auth = PlaylistAuth::factory()->create([
-            'username' => 'shared_user',
-            'password' => 'shared_pass',
-            'enabled' => true,
-            'user_id' => $this->user->id,
-        ]);
-        $auth->assignTo($otherPlaylist);
-
-        // Expired alias with the same credentials — must not block the PlaylistAuth path
-        makeAlias($this->user, $this->playlist, [
-            'username' => 'shared_user',
-            'password' => 'shared_pass',
-            'expires_at' => now()->subDay(),
-        ]);
-
-        $result = (new PlaylistService)->authenticate('shared_user', 'shared_pass');
-
-        expect($result)->toBeArray()
-            ->and($result[1])->toBe('playlist_auth')
-            ->and($result[0]->id)->toBe($otherPlaylist->id);
-    });
-
-    it('rejects expired alias direct credentials', function () {
-        makeAlias($this->user, $this->playlist, [
             'username' => 'expireduser',
             'password' => 'expiredpass',
+            'enabled' => true,
+            'user_id' => $this->user->id,
             'expires_at' => now()->subDay(),
         ]);
+        $auth->assignTo($alias);
 
         $result = (new PlaylistService)->authenticate('expireduser', 'expiredpass');
 
@@ -139,22 +105,6 @@ describe('Xtream API panel action with aliases', function () {
     beforeEach(function () {
         $this->user = User::factory()->create();
         $this->playlist = Playlist::factory()->for($this->user)->create();
-    });
-
-    it('returns panel response when authenticated via alias direct credentials', function () {
-        makeAlias($this->user, $this->playlist, [
-            'username' => 'aliasuser',
-            'password' => 'aliaspass',
-        ]);
-
-        $response = $this->getJson(route('xtream.api.player').'?'.http_build_query([
-            'action' => 'panel',
-            'username' => 'aliasuser',
-            'password' => 'aliaspass',
-        ]));
-
-        $response->assertOk()
-            ->assertJsonStructure(['user_info', 'server_info']);
     });
 
     it('returns panel response when authenticated via PlaylistAuth assigned to alias', function () {
@@ -202,6 +152,75 @@ describe('PlaylistAuth::assignTo() with PlaylistAlias', function () {
         $auth = PlaylistAuth::factory()->create();
 
         expect(fn () => $auth->assignTo(new User))->toThrow(InvalidArgumentException::class);
+    });
+
+    it('syncs selected PlaylistAuths from the alias modal form data', function () {
+        $user = User::factory()->create();
+        $playlist = Playlist::factory()->for($user)->create();
+        $alias = makeAlias($user, $playlist);
+
+        $firstAuth = PlaylistAuth::factory()->create(['user_id' => $user->id]);
+        $secondAuth = PlaylistAuth::factory()->create(['user_id' => $user->id]);
+
+        $data = [
+            'name' => 'Alias with Auths',
+            'assigned_auth_ids' => [$firstAuth->id, $secondAuth->id],
+        ];
+
+        $assignedAuthIds = PlaylistAliasResource::pullAssignedAuthIdsFromFormData($data);
+
+        expect($assignedAuthIds)->toBe([$firstAuth->id, $secondAuth->id])
+            ->and($data)->not->toHaveKey('assigned_auth_ids');
+
+        PlaylistAliasResource::syncAssignedAuths($alias, $assignedAuthIds);
+
+        expect($alias->playlistAuths()->pluck('playlist_auths.id')->all())
+            ->toEqualCanonicalizing([$firstAuth->id, $secondAuth->id]);
+
+        PlaylistAliasResource::syncAssignedAuths($alias, [$secondAuth->id]);
+
+        expect($alias->playlistAuths()->pluck('playlist_auths.id')->all())
+            ->toEqualCanonicalizing([$secondAuth->id])
+            ->and($firstAuth->refresh()->isAssigned())->toBeFalse();
+    });
+
+    it('migrates legacy alias credentials into an assigned PlaylistAuth', function () {
+        if (! Schema::hasColumn('playlist_aliases', 'username')) {
+            Schema::table('playlist_aliases', function (Blueprint $table): void {
+                $table->string('username')->nullable();
+                $table->string('password')->nullable();
+                $table->dateTime('expires_at')->nullable()->index();
+            });
+        }
+
+        try {
+            $user = User::factory()->create();
+            $playlist = Playlist::factory()->for($user)->create();
+            $alias = makeAlias($user, $playlist);
+            $expiresAt = now()->addDay()->startOfSecond();
+
+            DB::table('playlist_aliases')
+                ->where('id', $alias->id)
+                ->update([
+                    'username' => 'legacy-user',
+                    'password' => 'legacy-pass',
+                    'expires_at' => $expiresAt,
+                ]);
+
+            $migration = require database_path('migrations/2026_05_16_000001_migrate_playlist_alias_credentials_to_playlist_auths.php');
+            $migration->up();
+
+            $auth = $alias->playlistAuths()->first();
+
+            expect($auth)->not->toBeNull();
+            expect($auth->username)->toBe('legacy-user')
+                ->and($auth->password)->toBe('legacy-pass')
+                ->and($auth->expires_at->equalTo($expiresAt))->toBeTrue()
+                ->and($auth->getAssignedModel()->is($alias))->toBeTrue();
+        } finally {
+            $migration = require database_path('migrations/2026_05_16_000002_drop_legacy_auth_columns_from_playlist_aliases.php');
+            $migration->up();
+        }
     });
 });
 
