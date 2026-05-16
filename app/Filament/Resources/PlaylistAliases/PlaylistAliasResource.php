@@ -11,6 +11,7 @@ use App\Filament\Tables\SourceGroupsTable;
 use App\Models\CustomPlaylist;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
+use App\Models\PlaylistAuth;
 use App\Models\SourceCategory;
 use App\Models\SourceGroup;
 use App\Models\StreamProfile;
@@ -218,6 +219,17 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                 ])->button()->hiddenLabel()->size('sm'),
                 Actions\EditAction::make()
                     ->slideOver()
+                    ->using(function (PlaylistAlias $record, array $data): PlaylistAlias {
+                        $assignedAuthIds = self::pullAssignedAuthIdsFromFormData($data);
+
+                        $record->update($data);
+
+                        if ($assignedAuthIds !== null) {
+                            self::syncAssignedAuths($record, $assignedAuthIds);
+                        }
+
+                        return $record;
+                    })
                     ->button()->hiddenLabel()->size('sm'),
             ], position: RecordActionsPosition::BeforeCells)
             ->toolbarActions([
@@ -531,33 +543,9 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                         ])->hidden(fn (Get $get): bool => ! $get('enable_proxy')),
                 ])->columnSpanFull(),
 
-            Schemas\Components\Fieldset::make(__('Auth (optional)'))
-                ->columns(2)
+            Schemas\Components\Fieldset::make(__('Auth'))
                 ->schema([
-                    Forms\Components\TextInput::make('username')
-                        ->label(__('Username'))
-                        ->helperText(__('Optional: Set credentials to access this alias via Xtream API. Must be unique across all aliases and playlist auths.'))
-                        ->rules(function ($record) {
-                            return [
-                                'nullable',
-                                Rule::unique('playlist_aliases', 'username')->ignore($record?->id),
-                                Rule::unique('playlist_auths', 'username'),
-                            ];
-                        })
-                        ->columnSpan(1),
-                    Forms\Components\TextInput::make('password')
-                        ->label(__('Password'))
-                        ->columnSpan(1)
-                        ->password()
-                        ->revealable(),
-                    Forms\Components\DateTimePicker::make('expires_at')
-                        ->label(__('Expiration (date & time)'))
-                        ->seconds(false)
-                        ->native(false)
-                        ->prefixIcon('heroicon-o-calendar')
-                        ->helperText(__('If set, this alias credentials will stop working at that exact time.'))
-                        ->nullable()
-                        ->columnSpan(2),
+                    self::assignedAuthsSelect(),
                 ]),
 
             Schemas\Components\Fieldset::make(__('Channel Filter (optional)'))
@@ -787,6 +775,94 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                         ]),
                 ]),
         ];
+    }
+
+    public static function pullAssignedAuthIdsFromFormData(array &$data): ?array
+    {
+        if (! array_key_exists('assigned_auth_ids', $data)) {
+            return null;
+        }
+
+        $assignedAuthIds = $data['assigned_auth_ids'];
+
+        unset($data['assigned_auth_ids']);
+
+        if (! is_array($assignedAuthIds)) {
+            return $assignedAuthIds ? [$assignedAuthIds] : [];
+        }
+
+        return $assignedAuthIds;
+    }
+
+    public static function syncAssignedAuths(PlaylistAlias $record, array $authIds): void
+    {
+        $currentAuthIds = $record->playlistAuths()
+            ->pluck('playlist_auths.id')
+            ->map(fn ($authId): int => (int) $authId)
+            ->all();
+
+        $newAuthIds = collect($authIds)
+            ->filter()
+            ->map(fn ($authId): int => (int) $authId)
+            ->unique()
+            ->values()
+            ->all();
+
+        foreach (array_diff($currentAuthIds, $newAuthIds) as $authId) {
+            PlaylistAuth::find($authId)?->clearAssignment();
+        }
+
+        PlaylistAuth::where('user_id', $record->user_id)
+            ->whereKey(array_diff($newAuthIds, $currentAuthIds))
+            ->whereDoesntHave('assignedPlaylist')
+            ->get()
+            ->each(function (PlaylistAuth $auth) use ($record): void {
+                $auth->assignTo($record);
+            });
+    }
+
+    private static function assignedAuthsSelect(): Forms\Components\Select
+    {
+        return Forms\Components\Select::make('assigned_auth_ids')
+            ->label(__('Assigned Auths'))
+            ->multiple()
+            ->options(function ($record) {
+                $options = [];
+
+                if ($record) {
+                    foreach ($record->playlistAuths()->get() as $auth) {
+                        $options[$auth->id] = $auth->name.' (currently assigned)';
+                    }
+                }
+
+                foreach (PlaylistAuth::where('user_id', auth()->id())
+                    ->whereDoesntHave('assignedPlaylist')
+                    ->get() as $auth) {
+                    $options[$auth->id] = $auth->name;
+                }
+
+                return $options;
+            })
+            ->searchable()
+            ->nullable()
+            ->placeholder(__('Select auths or leave empty'))
+            ->default(function ($record) {
+                if ($record) {
+                    return $record->playlistAuths()->pluck('playlist_auths.id')->toArray();
+                }
+
+                return [];
+            })
+            ->afterStateHydrated(function ($component, $state, $record): void {
+                if ($record) {
+                    $component->state($record->playlistAuths()->pluck('playlist_auths.id')->toArray());
+                }
+            })
+            ->hintIcon(
+                'heroicon-m-question-mark-circle',
+                tooltip: 'Only unassigned auths are available. Each auth can only be assigned to one playlist at a time. You will also be able to access the Xtream API using any assigned auths.'
+            )
+            ->helperText(__('Simple authentication for playlist alias access.'));
     }
 
     /**
