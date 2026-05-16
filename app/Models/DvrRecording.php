@@ -19,47 +19,6 @@ class DvrRecording extends Model
     use HasFactory;
 
     /**
-     * @var list<string>
-     */
-    protected $fillable = [
-        'uuid',
-        'proxy_network_id',
-        'user_id',
-        'playlist_auth_id',
-        'dvr_setting_id',
-        'dvr_recording_rule_id',
-        'channel_id',
-        'status',
-        'user_cancelled',
-        'attempt_count',
-        'title',
-        'series_key',
-        'normalized_title',
-        'subtitle',
-        'description',
-        'season',
-        'episode',
-        'scheduled_start',
-        'scheduled_end',
-        'actual_start',
-        'actual_end',
-        'duration_seconds',
-        'file_path',
-        'file_size_bytes',
-        'stream_url',
-        'metadata',
-        'error_message',
-        'post_processing_step',
-        'programme_start',
-        'programme_end',
-        'epg_programme_data',
-        'programme_uid',
-        'pid',
-        'temp_path',
-        'temp_manifest_path',
-    ];
-
-    /**
      * @return array<string, string>
      */
     protected function casts(): array

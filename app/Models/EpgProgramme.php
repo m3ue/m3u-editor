@@ -13,29 +13,6 @@ class EpgProgramme extends Model
     use HasFactory;
 
     /**
-     * @var list<string>
-     */
-    protected $fillable = [
-        'epg_id',
-        'epg_channel_id',
-        'title',
-        'subtitle',
-        'description',
-        'category',
-        'start_time',
-        'end_time',
-        'episode_num',
-        'season',
-        'episode',
-        'is_new',
-        'previously_shown',
-        'premiere',
-        'tmdb_id',
-        'icon',
-        'rating',
-    ];
-
-    /**
      * @return array<string, string>
      */
     protected function casts(): array

@@ -13,28 +13,6 @@ class DvrSetting extends Model
     use HasFactory;
 
     /**
-     * @var list<string>
-     */
-    protected $fillable = [
-        'playlist_id',
-        'user_id',
-        'enabled',
-        'use_proxy',
-        'dvr_output_format',
-        'storage_disk',
-        'max_concurrent_recordings',
-        'default_start_early_seconds',
-        'default_end_late_seconds',
-        'enable_metadata_enrichment',
-        'generate_nfo_files',
-        'enable_comskip',
-        'comskip_ini_path',
-        'tmdb_api_key',
-        'global_disk_quota_gb',
-        'retention_days',
-    ];
-
-    /**
      * @return array<string, string>
      */
     protected function casts(): array

@@ -56,18 +56,9 @@ class ProcessVodChannelsComplete implements ShouldQueue
             ->broadcast($this->playlist->user)
             ->sendToDatabase($this->playlist->user);
 
-        // Now that all metadata chunks are done, dispatch TMDB fetch and/or STRM sync.
-        // This avoids the race condition where SyncVodStrmFiles fired before chunks completed.
-        $postJobs = [];
-
-        if ($settings->tmdb_auto_lookup_on_import) {
-            Log::info('VOD Complete: Queuing bulk TMDB fetch for playlist ID '.$this->playlist->id);
-            $postJobs[] = new FetchTmdbIds(
-                vodPlaylistId: $this->playlist->id,
-                user: $this->playlist->user,
-                sendCompletionNotification: false,
-            );
-        }
+        // Build the post-TMDB pipeline so STRM sync always runs after TMDB IDs are written,
+        // even when FetchTmdbIds batches its work across multiple chunk jobs.
+        $postTmdbJobs = [];
 
         if ($this->playlist->auto_sync_vod_stream_files) {
             Log::info('VOD Complete: Queuing STRM sync for playlist ID '.$this->playlist->id);
@@ -77,22 +68,27 @@ class ProcessVodChannelsComplete implements ShouldQueue
                 // Find & Replace runs concurrently with VOD metadata fetch (dispatched by
                 // SyncListener). Chain it here too so STRM sync is guaranteed to use
                 // the processed title_custom values, not stale ones.
-                $postJobs[] = new RunPlaylistFindReplaceRules($this->playlist);
+                $postTmdbJobs[] = new RunPlaylistFindReplaceRules($this->playlist);
             }
-            $postJobs[] = new SyncVodStrmFiles(
-                playlist: $this->playlist,
-            );
+            $postTmdbJobs[] = new SyncVodStrmFiles(playlist: $this->playlist);
         }
 
         // Append the completion job (FireSyncCompletedEvent or TriggerSeriesImport) as the
         // very last step so post-processing and series import never start before STRM sync finishes.
-        if (! empty($postJobs)) {
-            if ($this->completionJob) {
-                $postJobs[] = $this->completionJob;
-            }
-            Bus::chain($postJobs)->dispatch();
-        } elseif ($this->completionJob) {
-            dispatch($this->completionJob);
+        if ($this->completionJob) {
+            $postTmdbJobs[] = $this->completionJob;
+        }
+
+        if ($settings->tmdb_auto_lookup_on_import) {
+            Log::info('VOD Complete: Queuing bulk TMDB fetch for playlist ID '.$this->playlist->id);
+            FetchTmdbIds::dispatch(
+                vodPlaylistId: $this->playlist->id,
+                user: $this->playlist->user,
+                sendCompletionNotification: false,
+                postCompletionJobs: $postTmdbJobs,
+            );
+        } elseif (! empty($postTmdbJobs)) {
+            Bus::chain($postTmdbJobs)->dispatch();
         }
     }
 }

@@ -77,32 +77,29 @@ class CheckSeriesImportProgress implements ShouldQueue
                 'sync_stream_files' => $this->sync_stream_files,
             ]);
 
-            // Build post-processing chain: TMDB fetch (if enabled) → STRM sync (if enabled)
-            $postJobs = [];
-
-            if ($settings->tmdb_auto_lookup_on_import) {
-                Log::info('Series Import: Queuing bulk TMDB fetch for playlist');
-                $postJobs[] = new FetchTmdbIds(
-                    seriesPlaylistId: $this->playlist_id,
-                    overwriteExisting: $this->overwrite_existing,
-                    user: $this->user_id ? User::find($this->user_id) : null,
-                    sendCompletionNotification: false,
-                );
-            }
-
-            if ($this->sync_stream_files) {
-                Log::info('Series Import: Queuing STRM sync');
-                $postJobs[] = new SyncSeriesStrmFiles(
+            // Build post-TMDB pipeline: STRM sync runs after TMDB completes (not alongside it).
+            $strmJob = $this->sync_stream_files
+                ? new SyncSeriesStrmFiles(
                     series: null,
                     notify: true,
                     all_playlists: $this->all_playlists,
                     playlist_id: $this->playlist_id,
                     user_id: $this->user_id,
-                );
-            }
+                )
+                : null;
 
-            if (! empty($postJobs)) {
-                Bus::chain($postJobs)->dispatch();
+            if ($settings->tmdb_auto_lookup_on_import) {
+                Log::info('Series Import: Queuing bulk TMDB fetch for playlist');
+                FetchTmdbIds::dispatch(
+                    seriesPlaylistId: $this->playlist_id,
+                    overwriteExisting: $this->overwrite_existing,
+                    user: $this->user_id ? User::find($this->user_id) : null,
+                    sendCompletionNotification: false,
+                    postCompletionJobs: $strmJob ? [$strmJob] : [],
+                );
+            } elseif ($strmJob) {
+                Log::info('Series Import: Queuing STRM sync');
+                dispatch($strmJob);
             }
 
             // Send completion notification

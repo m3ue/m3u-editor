@@ -12,38 +12,6 @@ class StreamFileSetting extends Model
 {
     use HasFactory;
 
-    protected $fillable = [
-        'user_id',
-        'name',
-        'description',
-        'type',
-        'enabled',
-        'location',
-        'path_structure',
-        'filename_metadata',
-        'folder_metadata',
-        'tmdb_id_format',
-        'tmdb_id_apply_to',
-        'clean_special_chars',
-        'remove_consecutive_chars',
-        'replace_char',
-        'name_filter_enabled',
-        'name_filter_patterns',
-        'generate_nfo',
-        'refresh_media_server',
-        'media_server_integration_id',
-        'refresh_delay_seconds',
-        'url_type',
-        'movie_format',
-        'episode_format',
-        'trash_guide_naming_enabled',
-        'version_detection_pattern',
-        'group_versions',
-        'use_stream_stats',
-        'trash_movie_components',
-        'trash_episode_components',
-    ];
-
     protected $casts = [
         'enabled' => 'boolean',
         'path_structure' => 'array',

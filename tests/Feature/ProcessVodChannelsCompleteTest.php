@@ -110,7 +110,12 @@ it('chains FireSyncCompletedEvent after FetchTmdbIds when only TMDB lookup is en
     (new ProcessVodChannelsComplete($this->playlist, $completionJob))->handle(app(GeneralSettings::class));
 
     Event::assertNotDispatched(SyncCompleted::class);
-    Bus::assertChained([FetchTmdbIds::class, FireSyncCompletedEvent::class]);
+    // FetchTmdbIds carries FireSyncCompletedEvent in postCompletionJobs so it fires
+    // after all TMDB chunk jobs complete — not chained alongside them.
+    Bus::assertDispatched(FetchTmdbIds::class, function (FetchTmdbIds $job): bool {
+        return count($job->postCompletionJobs) === 1
+            && $job->postCompletionJobs[0] instanceof FireSyncCompletedEvent;
+    });
 });
 
 it('chains FireSyncCompletedEvent last when both TMDB and STRM sync are enabled', function () {
@@ -121,7 +126,13 @@ it('chains FireSyncCompletedEvent last when both TMDB and STRM sync are enabled'
     (new ProcessVodChannelsComplete($this->playlist, $completionJob))->handle(app(GeneralSettings::class));
 
     Event::assertNotDispatched(SyncCompleted::class);
-    Bus::assertChained([FetchTmdbIds::class, SyncVodStrmFiles::class, FireSyncCompletedEvent::class]);
+    // FetchTmdbIds carries [SyncVodStrmFiles, FireSyncCompletedEvent] in postCompletionJobs
+    // so they run after all TMDB chunk jobs complete — not chained alongside them.
+    Bus::assertDispatched(FetchTmdbIds::class, function (FetchTmdbIds $job): bool {
+        return count($job->postCompletionJobs) === 2
+            && $job->postCompletionJobs[0] instanceof SyncVodStrmFiles
+            && $job->postCompletionJobs[1] instanceof FireSyncCompletedEvent;
+    });
 });
 
 it('chains FindReplace before SyncVodStrmFiles and FireSyncCompletedEvent last', function () {
