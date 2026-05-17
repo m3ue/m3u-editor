@@ -169,7 +169,9 @@ class PluginSchemaMapper
     {
         $select = Select::make($name)
             ->options($field['options'] ?? [])
-            ->searchable();
+            ->searchable()
+            ->placeholder($this->selectPlaceholder($field))
+            ->selectablePlaceholder(! (bool) ($field['required'] ?? false));
 
         if ((bool) ($field['multiple'] ?? false)) {
             $select->multiple();
@@ -191,6 +193,8 @@ class PluginSchemaMapper
         $select = Select::make($name)
             ->searchable()
             ->preload()
+            ->placeholder($this->selectPlaceholder($field))
+            ->selectablePlaceholder(! (bool) ($field['required'] ?? false))
             ->options(function () use ($field, $modelClass, $labelAttribute) {
                 $query = $modelClass::query();
 
@@ -219,6 +223,8 @@ class PluginSchemaMapper
         $select = Select::make($name)
             ->searchable()
             ->preload()
+            ->placeholder($this->selectPlaceholder($field))
+            ->selectablePlaceholder(! (bool) ($field['required'] ?? false))
             ->options(fn (): array => $plugin
                 ? app(PluginUiTableRegistry::class)->lookupOptions($plugin, [
                     ...$field,
@@ -232,6 +238,11 @@ class PluginSchemaMapper
         }
 
         return $select;
+    }
+
+    private function selectPlaceholder(array $field): string
+    {
+        return (string) ($field['placeholder'] ?? ((bool) ($field['required'] ?? false) ? __('Select an option') : __('None')));
     }
 
     private function rulesForFields(array $fields, string $prefix = ''): array

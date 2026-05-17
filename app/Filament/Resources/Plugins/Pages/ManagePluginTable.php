@@ -167,6 +167,8 @@ class ManagePluginTable extends Page implements HasTable
 
         $selectColumn = SelectColumn::make($name)
             ->label($label)
+            ->placeholder($this->selectPlaceholder($column))
+            ->selectablePlaceholder(! (bool) ($column['required'] ?? false))
             ->options(fn (): array => $this->columnOptions($column))
             ->state(fn (PluginTableRecord $record): mixed => data_get($record->toArray(), $name))
             ->rules([(bool) ($column['required'] ?? false) ? 'required' : 'nullable']);
@@ -203,6 +205,11 @@ class ManagePluginTable extends Page implements HasTable
         return is_array($column['lookup'] ?? null)
             ? app(PluginUiTableRegistry::class)->lookupOptions($this->getRecord(), $column['lookup'])
             : [];
+    }
+
+    private function selectPlaceholder(array $column): string
+    {
+        return (string) ($column['placeholder'] ?? ((bool) ($column['required'] ?? false) ? __('Select an option') : __('None')));
     }
 
     /**

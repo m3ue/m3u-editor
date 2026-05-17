@@ -239,6 +239,7 @@ it('prefills plugin-declared table rows from an owned source table', function ()
         ->assertOk()
         ->assertSee('Alpha Playlist')
         ->assertSee('Beta Playlist')
+        ->assertSee('None')
         ->assertDontSee('Other User Playlist');
 
     expect($component->get('tableDefinition.prefill'))->not->toBeNull();
