@@ -99,7 +99,7 @@ class PluginManifest
     private static function normalizeSchema(mixed $schema, string $pluginId): array
     {
         if ($schema === [] || $schema === null) {
-            return ['tables' => []];
+            return ['tables' => [], 'ui_tables' => []];
         }
 
         if (! is_array($schema)) {
@@ -123,6 +123,7 @@ class PluginManifest
 
         return [
             'tables' => $tables,
+            'ui_tables' => array_values($schema['ui_tables'] ?? []),
         ];
     }
 

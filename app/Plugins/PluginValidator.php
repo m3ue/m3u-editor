@@ -585,7 +585,7 @@ class PluginValidator
             $errors[] = "{$group}.{$fieldId} uses unsupported type [{$type}]";
         }
 
-        if (in_array($type, ['select', 'model_select'], true) && blank($field['label'] ?? null)) {
+        if (in_array($type, ['select', 'model_select', 'table_select'], true) && blank($field['label'] ?? null)) {
             $errors[] = "{$group}.{$fieldId} should define a human-friendly [label]";
         }
 
@@ -595,6 +595,10 @@ class PluginValidator
 
         if ($type === 'model_select' && blank($field['model'] ?? null)) {
             $errors[] = "{$group}.{$fieldId} model_select fields require [model]";
+        }
+
+        if ($type === 'table_select' && blank($field['table'] ?? null)) {
+            $errors[] = "{$group}.{$fieldId} table_select fields require [table]";
         }
 
         return $errors;
@@ -650,6 +654,7 @@ class PluginValidator
         $tablePrefix = (string) data_get($manifest->dataOwnership, 'table_prefix', '');
         $supportedColumnTypes = config('plugins.schema_column_types', []);
         $supportedIndexTypes = config('plugins.schema_index_types', []);
+        $fieldTypes = config('plugins.field_types', []);
 
         foreach ($manifest->schema['tables'] ?? [] as $table) {
             $tableName = trim((string) ($table['name'] ?? ''));
@@ -698,6 +703,87 @@ class PluginValidator
                 if (Arr::wrap($definition['columns'] ?? []) === []) {
                     $errors[] = "{$indexPath} requires [columns]";
                 }
+            }
+        }
+
+        $declaredTableNames = collect($manifest->schema['tables'] ?? [])
+            ->pluck('name')
+            ->filter()
+            ->values()
+            ->all();
+        $uiTableIds = [];
+
+        foreach ($manifest->schema['ui_tables'] ?? [] as $index => $uiTable) {
+            $path = "schema.ui_tables.{$index}";
+            if (! is_array($uiTable)) {
+                $errors[] = "{$path} must be an object.";
+
+                continue;
+            }
+
+            $id = trim((string) ($uiTable['id'] ?? ''));
+            $tableName = trim((string) ($uiTable['table'] ?? ''));
+
+            if ($id === '') {
+                $errors[] = "{$path} requires [id].";
+            } elseif (in_array($id, $uiTableIds, true)) {
+                $errors[] = "{$path} duplicate ui table id [{$id}].";
+            }
+
+            $uiTableIds[] = $id;
+
+            if ($tableName === '') {
+                $errors[] = "{$path} requires [table].";
+            } elseif (! in_array($tableName, $declaredTableNames, true)) {
+                $errors[] = "{$path} table [{$tableName}] must be declared in schema.tables.";
+            }
+
+            if (blank($uiTable['label'] ?? null)) {
+                $errors[] = "{$path} requires [label].";
+            }
+
+            if (array_key_exists('prefill', $uiTable)) {
+                $prefill = $uiTable['prefill'];
+                $prefillPath = "{$path}.prefill";
+
+                if (! is_array($prefill)) {
+                    $errors[] = "{$prefillPath} must be an object.";
+                } else {
+                    $source = $prefill['source'] ?? null;
+
+                    if (! is_array($source)) {
+                        $errors[] = "{$prefillPath}.source must be an object.";
+                    } elseif (blank($source['table'] ?? null)) {
+                        $errors[] = "{$prefillPath}.source requires [table].";
+                    }
+
+                    if (blank($prefill['target_column'] ?? null)) {
+                        $errors[] = "{$prefillPath} requires [target_column].";
+                    }
+
+                    if (array_key_exists('defaults', $prefill) && ! is_array($prefill['defaults'])) {
+                        $errors[] = "{$prefillPath}.defaults must be an object.";
+                    }
+                }
+            }
+
+            foreach ($uiTable['columns'] ?? [] as $columnIndex => $column) {
+                if (! is_array($column) || blank($column['name'] ?? null)) {
+                    $errors[] = "{$path}.columns.{$columnIndex} requires [name].";
+                }
+            }
+
+            foreach ($uiTable['fields'] ?? [] as $field) {
+                if (! is_array($field)) {
+                    $errors[] = "{$path}.fields must only contain objects.";
+
+                    continue;
+                }
+
+                $errors = [
+                    ...$errors,
+                    ...$this->validateFieldDefinition($field, $fieldTypes, "{$path}.fields"),
+                ];
             }
         }
 
