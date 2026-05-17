@@ -25,14 +25,19 @@ class PluginSchemaMapper
             return [];
         }
 
-        return $this->componentsForFields($plugin->settings_schema ?? [], 'settings.');
+        return $this->componentsForFields($plugin->settings_schema ?? [], 'settings.', plugin: $plugin);
     }
 
     public function actionComponents(Plugin $plugin, string $actionId): array
     {
         $action = $plugin->getActionDefinition($actionId);
 
-        return $this->componentsForFields($action['fields'] ?? [], '', $plugin->settings ?? []);
+        return $this->componentsForFields($action['fields'] ?? [], '', $plugin->settings ?? [], $plugin);
+    }
+
+    public function componentsForFieldDefinitions(array $fields, string $prefix = '', array $existing = [], ?Plugin $plugin = null): array
+    {
+        return $this->componentsForFields($fields, $prefix, $existing, $plugin);
     }
 
     public function settingsRules(?Plugin $plugin): array
@@ -76,21 +81,21 @@ class PluginSchemaMapper
         return $defaults;
     }
 
-    private function componentsForFields(array $fields, string $prefix = '', array $existing = []): array
+    private function componentsForFields(array $fields, string $prefix = '', array $existing = [], ?Plugin $plugin = null): array
     {
         return collect($fields)
             ->filter(fn (array $field): bool => ($field['type'] ?? null) === 'section' || filled($field['id'] ?? null))
-            ->map(fn (array $field) => $this->componentForField($field, $prefix, $existing))
+            ->map(fn (array $field) => $this->componentForField($field, $prefix, $existing, $plugin))
             ->values()
             ->all();
     }
 
-    private function componentForField(array $field, string $prefix = '', array $existing = [])
+    private function componentForField(array $field, string $prefix = '', array $existing = [], ?Plugin $plugin = null)
     {
         $type = $field['type'] ?? 'text';
 
         if ($type === 'section') {
-            return $this->sectionComponent($field, $prefix, $existing);
+            return $this->sectionComponent($field, $prefix, $existing, $plugin);
         }
 
         $label = $field['label'] ?? Str::headline((string) ($field['id'] ?? 'value'));
@@ -108,6 +113,7 @@ class PluginSchemaMapper
             'tags' => TagsInput::make($name)->splitKeys(['Tab', 'Return']),
             'select' => $this->staticSelectComponent($name, $field),
             'model_select' => $this->modelSelectComponent($name, $field),
+            'table_select' => $this->tableSelectComponent($name, $field, $plugin),
             'text' => TextInput::make($name),
             default => throw new InvalidArgumentException("Unsupported plugin field type [{$type}]"),
         };
@@ -125,14 +131,14 @@ class PluginSchemaMapper
      * `fields` array is processed recursively through componentsForFields(), so any depth
      * of nesting works for both rendering and defaults/rules flattening.
      */
-    private function sectionComponent(array $field, string $prefix = '', array $existing = []): Section
+    private function sectionComponent(array $field, string $prefix = '', array $existing = [], ?Plugin $plugin = null): Section
     {
         $label = $field['label'] ?? Str::headline((string) ($field['id'] ?? 'Section'));
         $description = $field['description'] ?? $field['helper_text'] ?? null;
         $columns = (int) ($field['columns'] ?? 1);
 
         $section = Section::make($label)
-            ->schema($this->componentsForFields($field['fields'] ?? [], $prefix, $existing))
+            ->schema($this->componentsForFields($field['fields'] ?? [], $prefix, $existing, $plugin))
             ->columnSpanFull();
 
         if (filled($description)) {
@@ -206,6 +212,28 @@ class PluginSchemaMapper
         return $select;
     }
 
+    private function tableSelectComponent(string $name, array $field, ?Plugin $plugin): Select
+    {
+        $multiple = (bool) ($field['multiple'] ?? false);
+
+        $select = Select::make($name)
+            ->searchable()
+            ->preload()
+            ->options(fn (): array => $plugin
+                ? app(PluginUiTableRegistry::class)->lookupOptions($plugin, [
+                    ...$field,
+                    'key_column' => $field['value_column'] ?? 'id',
+                    'enabled_only' => $field['enabled_only'] ?? true,
+                ])
+                : []);
+
+        if ($multiple) {
+            $select->multiple();
+        }
+
+        return $select;
+    }
+
     private function rulesForFields(array $fields, string $prefix = ''): array
     {
         $rules = [];
@@ -231,15 +259,18 @@ class PluginSchemaMapper
             $multiple = (bool) ($field['multiple'] ?? false);
             $isMultiSelect = $multiple && $type === 'select';
             $isMultiModelSelect = $multiple && $type === 'model_select';
+            $isMultiTableSelect = $multiple && $type === 'table_select';
 
-            if ($isMultiModelSelect) {
+            if ($isMultiModelSelect || $isMultiTableSelect) {
                 // Parent rule: nullable array (or required with at least one item).
                 $rules[$name] = [$required ? 'required' : 'nullable', 'array'];
                 if ($required) {
                     $rules[$name][] = 'min:1';
                 }
                 // Per-item rule applied via wildcard.
-                $rules[$name.'.*'] = ['integer', $this->modelSelectExistsRule($field)];
+                $rules[$name.'.*'] = $isMultiModelSelect
+                    ? ['integer', $this->modelSelectExistsRule($field)]
+                    : ['integer'];
 
                 continue;
             }
@@ -271,6 +302,7 @@ class PluginSchemaMapper
                     'textarea', 'text' => ['string'],
                     'select' => ['string', Rule::in(array_keys($field['options'] ?? []))],
                     'model_select' => ['integer', $this->modelSelectExistsRule($field)],
+                    'table_select' => ['integer'],
                     'tags' => ['string'],
                     default => ['string'],
                 },

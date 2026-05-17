@@ -169,6 +169,7 @@ it('validates plugin manifests that use grouped settings sections', function () 
     $pluginId = 'grouped-schema-'.Str::lower(Str::random(6));
     $sourcePath = storage_path('app/testing-plugin-sources/'.$pluginId);
     $classSegment = Str::studly(str_replace('-', ' ', $pluginId));
+    $tableName = 'plugin_'.str_replace('-', '_', $pluginId).'_profiles';
 
     File::deleteDirectory($sourcePath);
     File::ensureDirectoryExists($sourcePath);
@@ -183,7 +184,7 @@ it('validates plugin manifests that use grouped settings sections', function () 
         'class' => "AppLocalPlugins\\{$classSegment}\\Plugin",
         'capabilities' => [],
         'hooks' => [],
-        'permissions' => [],
+        'permissions' => ['schema_manage'],
         'settings' => [
             [
                 'id' => 'core_setup',
@@ -209,7 +210,30 @@ it('validates plugin manifests that use grouped settings sections', function () 
         ],
         'actions' => [],
         'schema' => [
-            'tables' => [],
+            'tables' => [
+                [
+                    'name' => $tableName,
+                    'columns' => [
+                        ['type' => 'id', 'name' => 'id'],
+                        ['type' => 'string', 'name' => 'name'],
+                        ['type' => 'json', 'name' => 'settings', 'nullable' => true],
+                        ['type' => 'timestamps'],
+                    ],
+                ],
+            ],
+            'ui_tables' => [
+                [
+                    'id' => 'profiles',
+                    'label' => 'Profiles',
+                    'table' => $tableName,
+                    'columns' => [
+                        ['name' => 'name', 'label' => 'Name'],
+                    ],
+                    'fields' => [
+                        ['id' => 'name', 'label' => 'Name', 'type' => 'text', 'required' => true],
+                    ],
+                ],
+            ],
         ],
         'data_ownership' => [
             'plugin_id' => $pluginId,

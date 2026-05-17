@@ -197,6 +197,7 @@ return [
         'tags',
         'select',
         'model_select',
+        'table_select',
     ],
 
     'schema_column_types' => [
