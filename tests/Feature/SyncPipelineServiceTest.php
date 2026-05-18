@@ -386,3 +386,79 @@ it('getPhaseTimeline returns label and status for each phase', function () {
         ->and($timeline[0]['status'])->toBe('completed')
         ->and($timeline[1]['status'])->toBe('pending');
 });
+
+// ── Upfront Import phase (modern kickoff flow) ───────────────────────────────
+
+it('startImport creates a SyncRun immediately with only the Import phase', function () {
+    $playlist = Playlist::factory()->for($this->user)->create();
+
+    $run = $this->service->startImport($playlist, trigger: 'unit_test');
+
+    expect($run->status)->toBe(SyncRunStatus::Running->value)
+        ->and($run->trigger)->toBe('unit_test')
+        ->and($run->phases)->toBe([SyncRunPhase::Import->value])
+        ->and($run->current_phase)->toBe(SyncRunPhase::Import->value)
+        ->and($run->started_at)->not->toBeNull()
+        ->and($run->context['playlist_id'])->toBe($playlist->id);
+});
+
+it('expandPipelineAfterImport replaces phases with the resolved post-import plan', function () {
+    mockPipelineSettings();
+    $playlist = makePlaylistWithVod($this->user, [
+        'auto_fetch_vod_metadata' => true,
+        'auto_sync_vod_stream_files' => true,
+    ]);
+
+    $run = $this->service->startImport($playlist);
+    $this->service->expandPipelineAfterImport($run, $playlist, app(GeneralSettings::class));
+
+    $run->refresh();
+    $phases = $run->phases;
+
+    expect($phases[0])->toBe(SyncRunPhase::Import->value)
+        ->and($phases)->toContain(SyncRunPhase::VodMetadata->value)
+        ->and($phases)->toContain(SyncRunPhase::VodStrm->value)
+        ->and(end($phases))->toBe(SyncRunPhase::SyncCompleted->value);
+});
+
+it('completing the Import phase dispatches the next resolved phase', function () {
+    mockPipelineSettings();
+    $playlist = makePlaylistWithVod($this->user, ['auto_fetch_vod_metadata' => true]);
+
+    $run = $this->service->startImport($playlist);
+    $this->service->expandPipelineAfterImport($run, $playlist, app(GeneralSettings::class));
+
+    $this->service->completePhase($run->id, SyncRunPhase::Import);
+
+    Bus::assertDispatched(ProcessVodChannels::class);
+    expect($run->fresh()->isPhaseComplete(SyncRunPhase::Import))->toBeTrue()
+        ->and($run->fresh()->current_phase)->toBe(SyncRunPhase::VodMetadata->value);
+});
+
+it('expanded pipeline finishes cleanly when only Import + SyncCompleted remain', function () {
+    mockPipelineSettings();
+    // Playlist with no post-processing configured at all
+    $playlist = Playlist::factory()->for($this->user)->create();
+
+    $run = $this->service->startImport($playlist);
+    $this->service->expandPipelineAfterImport($run, $playlist, app(GeneralSettings::class));
+
+    expect($run->fresh()->phases)->toBe([
+        SyncRunPhase::Import->value,
+        SyncRunPhase::SyncCompleted->value,
+    ]);
+
+    $this->service->completePhase($run->id, SyncRunPhase::Import);
+
+    expect($run->fresh()->status)->toBe(SyncRunStatus::Completed->value);
+    Event::assertDispatched(SyncCompleted::class, fn ($event) => $event->syncRunId === $run->id);
+});
+
+it('Import phase is a no-op in dispatchPhase (driven externally)', function () {
+    $playlist = Playlist::factory()->for($this->user)->create();
+    $run = $this->service->startImport($playlist);
+
+    $this->service->dispatchPhase($run, SyncRunPhase::Import);
+
+    Bus::assertNothingDispatched();
+});

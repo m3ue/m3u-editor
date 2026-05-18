@@ -8,6 +8,7 @@ use App\Filament\Resources\Playlists\PlaylistResource;
 use App\Models\SyncRun;
 use App\Services\DateFormatService;
 use Filament\Actions;
+use Filament\Actions\DeleteAction;
 use Filament\Infolists;
 use Filament\Infolists\Components\ViewEntry;
 use Filament\Resources\ParentResourceRegistration;
@@ -104,6 +105,7 @@ class SyncRunResource extends Resource
                 Section::make(__('Run Summary'))
                     ->columnSpanFull()
                     ->columns(3)
+                    ->poll()
                     ->schema([
                         Infolists\Components\TextEntry::make('trigger')
                             ->label(__('Trigger'))
@@ -141,6 +143,7 @@ class SyncRunResource extends Resource
     {
         return $table
             ->defaultSort('created_at', 'desc')
+            ->poll()
             ->columns([
                 TextColumn::make('created_at')
                     ->label(__('Started'))
@@ -175,10 +178,14 @@ class SyncRunResource extends Resource
             ])
             ->filters([])
             ->recordActions([
+                DeleteAction::make()
+                    ->button()->hiddenLabel()->size('sm'),
                 Actions\ViewAction::make()
                     ->button()->hiddenLabel()->size('sm'),
             ], position: RecordActionsPosition::BeforeCells)
-            ->toolbarActions([]);
+            ->toolbarActions([
+                Actions\DeleteBulkAction::make(),
+            ]);
     }
 
     public static function getRelations(): array

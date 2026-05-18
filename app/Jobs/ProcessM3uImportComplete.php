@@ -3,11 +3,13 @@
 namespace App\Jobs;
 
 use App\Enums\Status;
+use App\Enums\SyncRunPhase;
 use App\Models\Channel;
 use App\Models\Group;
 use App\Models\Job;
 use App\Models\PlaylistSyncStatus;
 use App\Models\PlaylistSyncStatusLog;
+use App\Models\SyncRun;
 use App\Models\User;
 use App\Services\EpgCacheService;
 use App\Services\SyncPipelineService;
@@ -55,6 +57,7 @@ class ProcessM3uImportComplete implements ShouldQueue
         public bool $isNew = false,
         public bool $runningLiveImport = true, // Default to true for live imports
         public bool $runningVodImport = true, // Default to true for VOD imports
+        public ?int $syncRunId = null,
     ) {
         // Set the invalidate import settings from config
         $this->invalidateImport = config('dev.invalidate_import', null);
@@ -350,14 +353,34 @@ class ProcessM3uImportComplete implements ShouldQueue
 
         $this->seriesCleanup($playlist);
 
-        // Always build and start the pipeline. When no post-processing is configured
-        // resolvePipeline() returns only [SyncCompleted] and startRun() finishes immediately.
-        // This guarantees a SyncRun record exists for every sync operation.
+        // Hand off to the SyncPipeline.
+        //
+        // Two paths:
+        //   1. Modern (syncRunId set): a SyncRun was created at sync kickoff with
+        //      phases = [Import]. We now resolve the real post-import phases (using
+        //      the populated DB) and replace the phases array, then mark Import
+        //      complete so the next phase dispatches.
+        //   2. Legacy (syncRunId null): one-off partial actions that dispatched
+        //      ProcessM3uImport directly without going through startImport(). We
+        //      build and start a pipeline from scratch here.
         //
         // By the time this job runs, both VOD channels and Series rows are populated
         // (series-discovery chunks run earlier in the chain), so FindReplace can safely
         // target series titles before STRM filenames are generated.
         $pipeline = app(SyncPipelineService::class);
+
+        if ($this->syncRunId !== null) {
+            $run = SyncRun::find($this->syncRunId);
+            if ($run) {
+                $pipeline->expandPipelineAfterImport($run, $playlist, $settings);
+                $pipeline->completePhase($this->syncRunId, SyncRunPhase::Import);
+
+                return;
+            }
+
+            // SyncRun vanished (shouldn't normally happen) — fall through to legacy path.
+        }
+
         $run = $pipeline->buildPipeline($playlist, $settings);
         $pipeline->startRun($run);
     }

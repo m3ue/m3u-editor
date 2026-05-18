@@ -4,6 +4,8 @@ namespace App\Enums;
 
 enum SyncRunPhase: string
 {
+    case Import = 'import';
+
     case VodMetadata = 'vod_metadata';
     case VodTmdb = 'vod_tmdb';
     case VodStrm = 'vod_strm';
@@ -24,6 +26,7 @@ enum SyncRunPhase: string
     public function getLabel(): string
     {
         return match ($this) {
+            self::Import => 'Import',
             self::VodMetadata => 'VOD Metadata',
             self::VodTmdb => 'VOD TMDB IDs',
             self::VodStrm => 'VOD STRM Files',
@@ -43,6 +46,7 @@ enum SyncRunPhase: string
     public function getColor(): string
     {
         return match ($this) {
+            self::Import => 'info',
             self::VodMetadata,
             self::VodTmdb,
             self::VodStrm,

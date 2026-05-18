@@ -8,6 +8,7 @@ use App\Jobs\MergeChannels;
 use App\Jobs\ProcessM3uImport;
 use App\Models\Playlist;
 use App\Services\M3uProxyService;
+use App\Services\SyncPipelineService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -41,7 +42,9 @@ class PlaylistController extends Controller
         }
 
         // Refresh the playlist
-        dispatch(new ProcessM3uImport($playlist, $request->force ?? true));
+        $force = (bool) ($request->force ?? true);
+        $syncRun = app(SyncPipelineService::class)->startImport($playlist, trigger: 'api_refresh');
+        dispatch(new ProcessM3uImport($playlist, $force, syncRunId: $syncRun->id));
 
         return response()->json([
             'message' => "Playlist \"{$playlist->name}\" is currently being synced...",
@@ -154,7 +157,8 @@ class PlaylistController extends Controller
 
         $resync = $saved && (bool) ($validated['resync'] ?? false);
         if ($resync) {
-            dispatch(new ProcessM3uImport($playlist, force: true));
+            $syncRun = app(SyncPipelineService::class)->startImport($playlist, trigger: 'api_save_resync');
+            dispatch(new ProcessM3uImport($playlist, force: true, syncRunId: $syncRun->id));
         }
 
         return response()->json([

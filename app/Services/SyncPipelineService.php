@@ -26,10 +26,65 @@ use Throwable;
 class SyncPipelineService
 {
     /**
+     * Create a SyncRun at the very start of an import so the UI has visibility
+     * into the sync from kickoff. The pipeline starts with only the [Import]
+     * phase; once the import job chain completes and we know which post-import
+     * phases will actually run, expandPipelineAfterImport() replaces the
+     * phases array with the full resolved plan.
+     */
+    public function startImport(
+        Playlist $playlist,
+        string $trigger = 'full_sync',
+    ): SyncRun {
+        return SyncRun::create([
+            'playlist_id' => $playlist->id,
+            'user_id' => $playlist->user_id,
+            'trigger' => $trigger,
+            'status' => SyncRunStatus::Running->value,
+            'current_phase' => SyncRunPhase::Import->value,
+            'phases' => [SyncRunPhase::Import->value],
+            'phase_statuses' => (object) [],
+            'context' => [
+                'playlist_id' => $playlist->id,
+                'user_id' => $playlist->user_id,
+            ],
+            'started_at' => now(),
+        ]);
+    }
+
+    /**
+     * After the import job chain finishes, resolve the real post-import
+     * pipeline (now that channel/series rows exist in the DB) and replace
+     * the run's phases with [Import, ...resolved phases..., SyncCompleted].
+     *
+     * The Import phase itself is NOT yet marked completed here — the caller
+     * marks it via completePhase() so dispatch of the next phase happens
+     * through the normal pipeline progression path.
+     */
+    public function expandPipelineAfterImport(
+        SyncRun $run,
+        Playlist $playlist,
+        GeneralSettings $settings,
+    ): void {
+        $resolved = $this->resolvePipeline($playlist, $settings);
+
+        $phaseValues = array_merge(
+            [SyncRunPhase::Import->value],
+            array_map(fn (SyncRunPhase $p) => $p->value, $resolved),
+        );
+
+        $run->update([
+            'phases' => $phaseValues,
+        ]);
+    }
+
+    /**
      * Build and persist a SyncRun for a full post-import pipeline.
      *
-     * Called from ProcessM3uImportComplete after channels/series are in the DB
-     * so existence checks reflect the actual import result.
+     * Legacy path: used when an import dispatches ProcessM3uImportComplete
+     * without a pre-existing SyncRun (e.g. one-off partial actions). Modern
+     * full-sync entry points should call startImport() first and pass the
+     * resulting SyncRun id through the chain.
      */
     public function buildPipeline(
         Playlist $playlist,
@@ -161,6 +216,7 @@ class SyncPipelineService
         Log::info("SyncPipeline: Dispatching phase. run={$run->id}, phase={$phase->value}");
 
         match ($phase) {
+            SyncRunPhase::Import => null, // No-op: Import is driven externally by the ProcessM3uImport job chain.
             SyncRunPhase::VodMetadata => $this->dispatchVodMetadata($run, $playlist),
             SyncRunPhase::VodTmdb => $this->dispatchVodTmdb($run, $playlist),
             SyncRunPhase::VodStrm => $this->dispatchVodStrm($run, $playlist),

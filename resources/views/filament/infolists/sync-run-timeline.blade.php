@@ -2,6 +2,16 @@
     /** @var \App\Models\SyncRun $record */
     $record = $getRecord();
     $phases = $getState();
+
+    // While a run is active and only the upfront `Import` phase exists, the real
+    // post-import phases haven't been resolved yet (ProcessM3uImportComplete will
+    // expand the plan once channel/series rows are populated). Show a synthetic
+    // placeholder row so users see "something comes after Import" without us
+    // committing to specific phases that may or may not actually run.
+    $showPostProcessingPlaceholder = $record->status === \App\Enums\SyncRunStatus::Running->value
+        && count($phases) === 1
+        && ($phases[0]['phase'] ?? null) === \App\Enums\SyncRunPhase::Import->value
+        && $record->current_phase === \App\Enums\SyncRunPhase::Import->value;
 @endphp
 
 @if (empty($phases))
@@ -11,7 +21,7 @@
         @foreach ($phases as $phase)
             @php
                 $status   = $phase['status'];
-                $isLast   = $loop->last;
+                $isLast   = $loop->last && ! $showPostProcessingPlaceholder;
             @endphp
 
             {{--
@@ -103,5 +113,31 @@
                 </div>
             </li>
         @endforeach
+
+        @if ($showPostProcessingPlaceholder)
+            {{-- Synthetic placeholder shown only while the real post-import phases
+                 are still being resolved. Replaced with concrete phase rows the
+                 moment ProcessM3uImportComplete expands the pipeline. --}}
+            <li class="relative">
+                <div class="relative flex gap-4">
+                    <div class="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-800">
+                        <div class="h-2.5 w-2.5 rounded-full bg-gray-300 dark:bg-gray-600"></div>
+                    </div>
+                    <div class="flex min-w-0 flex-1 items-center justify-between gap-4 pt-0.5">
+                        <div class="min-w-0">
+                            <p class="text-sm font-medium leading-6 text-gray-400 dark:text-gray-500">
+                                Post-processing
+                            </p>
+                            <p class="text-xs leading-5 text-gray-500 dark:text-gray-400 italic">
+                                Resolving phases…
+                            </p>
+                        </div>
+                        <span class="inline-flex shrink-0 items-center rounded-full px-2.5 py-0.5 text-xs font-medium bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+                            Pending
+                        </span>
+                    </div>
+                </div>
+            </li>
+        @endif
     </ul>
 @endif
