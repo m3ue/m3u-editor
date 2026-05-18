@@ -8,13 +8,17 @@ use App\Events\SyncCompleted;
 use App\Jobs\AutoSyncGroupsToCustomPlaylist;
 use App\Jobs\CompleteSyncPhase;
 use App\Jobs\FetchTmdbIds;
+use App\Jobs\MergeChannels;
+use App\Jobs\ProbeChannelStreams;
 use App\Jobs\ProbeVodStreams;
+use App\Jobs\ProcessChannelScrubber;
 use App\Jobs\ProcessM3uImportSeries;
 use App\Jobs\ProcessVodChannels;
 use App\Jobs\RunPlaylistFindReplaceRules;
 use App\Jobs\RunPlaylistSortAlpha;
 use App\Jobs\SyncSeriesStrmFiles;
 use App\Jobs\SyncVodStrmFiles;
+use App\Listeners\SyncListener;
 use App\Models\Playlist;
 use App\Models\SyncRun;
 use App\Settings\GeneralSettings;
@@ -228,6 +232,8 @@ class SyncPipelineService
             SyncRunPhase::SeriesProbe => $this->dispatchProbe($run, $playlist, isSeriesProbe: true),
             SyncRunPhase::SeriesStrmPostProbe => $this->dispatchSeriesStrmPostProbe($run, $playlist),
             SyncRunPhase::FindReplace => $this->dispatchFindReplace($run, $playlist),
+            SyncRunPhase::ChannelMerge => $this->dispatchChannelMerge($run, $playlist),
+            SyncRunPhase::LiveProbe => $this->dispatchLiveProbe($run, $playlist),
             SyncRunPhase::CustomPlaylistSync => $this->dispatchCustomPlaylistSync($run, $playlist),
             SyncRunPhase::SyncCompleted => $this->finish($run),
         };
@@ -338,6 +344,61 @@ class SyncPipelineService
         $jobs[] = new CompleteSyncPhase($run->id, SyncRunPhase::FindReplace);
 
         $this->chainOrDispatch($jobs, $run);
+    }
+
+    /**
+     * Merge live channels across failover playlists. MergeChannels is a single
+     * synchronous job, so we chain it with CompleteSyncPhase to mark the phase
+     * done once the merge work returns.
+     */
+    private function dispatchChannelMerge(SyncRun $run, Playlist $playlist): void
+    {
+        $mergeJob = SyncListener::getMergeJob($playlist);
+
+        // No merge work to do — complete the phase immediately and progress.
+        if (! $mergeJob) {
+            $this->completePhase($run->id, SyncRunPhase::ChannelMerge);
+
+            return;
+        }
+
+        $this->chainOrDispatch([
+            $mergeJob,
+            new CompleteSyncPhase($run->id, SyncRunPhase::ChannelMerge),
+        ], $run);
+    }
+
+    /**
+     * Run channel scrubbers (fire-and-forget; they run in parallel) and then
+     * the live stream probe. ProbeChannelStreamsComplete completes the
+     * LiveProbe phase via SyncPipelineService::completePhase() once probing
+     * actually finishes.
+     *
+     * Scrubbers are dispatched here (not chained before the probe) because
+     * each scrubber is an orchestrator that returns synchronously after
+     * dispatching its own async sub-chain. Chaining wouldn't actually wait
+     * for scrubber sub-chunks. This matches the legacy SyncListener semantics.
+     */
+    private function dispatchLiveProbe(SyncRun $run, Playlist $playlist): void
+    {
+        // Dispatch any recurring scrubbers in parallel — they don't block the probe.
+        $playlist->channelScrubbers()
+            ->where('recurring', true)
+            ->get()
+            ->each(fn ($scrubber) => dispatch(new ProcessChannelScrubber($scrubber->id)));
+
+        // Live probe completes the phase via ProbeChannelStreamsComplete -> completePhase.
+        // If auto_probe_streams was toggled off after the phase was queued, short-circuit.
+        if (! ($playlist->auto_probe_streams ?? false)) {
+            $this->completePhase($run->id, SyncRunPhase::LiveProbe);
+
+            return;
+        }
+
+        dispatch(new ProbeChannelStreams(
+            playlistId: $playlist->id,
+            syncRunId: $run->id,
+        ));
     }
 
     private function dispatchCustomPlaylistSync(SyncRun $run, Playlist $playlist): void
@@ -467,6 +528,19 @@ class SyncPipelineService
 
         if ($hasFindReplaceWork) {
             $phases[] = SyncRunPhase::FindReplace;
+        }
+
+        // Group 2b: live-channel housekeeping. ChannelMerge resolves failover
+        // priorities/duplicates; LiveProbe (and any recurring scrubbers it
+        // dispatches alongside) then runs against the resulting enabled-channel
+        // set. Placed before STRM generation so the merged/probed view is
+        // current when filenames are written.
+        if ($playlist->auto_merge_channels_enabled ?? false) {
+            $phases[] = SyncRunPhase::ChannelMerge;
+        }
+
+        if ($playlist->auto_probe_streams ?? false) {
+            $phases[] = SyncRunPhase::LiveProbe;
         }
 
         // Group 3: STRM generation (runs after find-replace so filenames embed corrected titles)

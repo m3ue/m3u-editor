@@ -13,6 +13,7 @@ use Filament\Infolists;
 use Filament\Infolists\Components\ViewEntry;
 use Filament\Resources\ParentResourceRegistration;
 use Filament\Resources\Resource;
+use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\TextColumn;
@@ -102,39 +103,46 @@ class SyncRunResource extends Resource
     {
         return $schema
             ->components([
-                Section::make(__('Run Summary'))
+                Grid::make()
+                    ->poll(fn ($record) => $record->status === SyncRunStatus::Running->value)
                     ->columnSpanFull()
-                    ->columns(3)
-                    ->poll()
                     ->schema([
-                        Infolists\Components\TextEntry::make('trigger')
-                            ->label(__('Trigger'))
-                            ->badge()
-                            ->color('gray'),
-                        Infolists\Components\TextEntry::make('status')
-                            ->label(__('Status'))
-                            ->badge()
-                            ->color(fn (string $state): string => self::statusBadgeColor($state)),
-                        Infolists\Components\TextEntry::make('duration')
-                            ->label(__('Duration'))
-                            ->formatStateUsing(fn (?float $state): string => self::formatDuration($state)),
-                        Infolists\Components\TextEntry::make('current_phase')
-                            ->label(__('Current Phase'))
-                            ->formatStateUsing(fn (?string $state): string => self::phaseLabel($state)),
-                        Infolists\Components\TextEntry::make('started_at')
-                            ->label(__('Started'))
-                            ->formatStateUsing(fn ($state): string => self::formatDate($state)),
-                        Infolists\Components\TextEntry::make('finished_at')
-                            ->label(__('Finished'))
-                            ->formatStateUsing(fn ($state): string => self::formatDate($state)),
-                    ]),
+                        Section::make(__('Run Summary'))
+                            ->columnSpanFull()
+                            ->compact()
+                            ->columns(3)
+                            ->schema([
+                                Infolists\Components\TextEntry::make('trigger')
+                                    ->label(__('Trigger'))
+                                    ->badge()
+                                    ->color('gray'),
+                                Infolists\Components\TextEntry::make('status')
+                                    ->label(__('Status'))
+                                    ->badge()
+                                    ->color(fn (string $state): string => self::statusBadgeColor($state)),
+                                Infolists\Components\TextEntry::make('duration')
+                                    ->label(__('Duration'))
+                                    ->formatStateUsing(fn (?float $state): string => self::formatDuration($state)),
+                                Infolists\Components\TextEntry::make('current_phase')
+                                    ->label(__('Current Phase'))
+                                    ->formatStateUsing(fn (?string $state): string => self::phaseLabel($state)),
+                                Infolists\Components\TextEntry::make('started_at')
+                                    ->label(__('Started'))
+                                    ->formatStateUsing(fn ($state): string => self::formatDate($state)),
+                                Infolists\Components\TextEntry::make('finished_at')
+                                    ->label(__('Finished'))
+                                    ->formatStateUsing(fn ($state): string => self::formatDate($state)),
+                            ]),
 
-                Section::make(__('Phase Timeline'))
-                    ->columnSpanFull()
-                    ->schema([
-                        ViewEntry::make('phase_timeline')
-                            ->label('')
-                            ->view('filament.infolists.sync-run-timeline'),
+                        Section::make(__('Phase Timeline'))
+                            ->columnSpanFull()
+                            ->compact()
+                            ->schema([
+                                ViewEntry::make('phase_timeline')
+                                    ->label('')
+                                    ->poll()
+                                    ->view('filament.infolists.sync-run-timeline'),
+                            ]),
                     ]),
             ]);
     }

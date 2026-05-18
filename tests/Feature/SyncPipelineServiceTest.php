@@ -4,6 +4,8 @@ use App\Enums\SyncRunPhase;
 use App\Enums\SyncRunStatus;
 use App\Events\SyncCompleted;
 use App\Jobs\FetchTmdbIds;
+use App\Jobs\MergeChannels;
+use App\Jobs\ProbeChannelStreams;
 use App\Jobs\ProcessM3uImportSeries;
 use App\Jobs\ProcessVodChannels;
 use App\Jobs\SyncSeriesStrmFiles;
@@ -461,4 +463,145 @@ it('Import phase is a no-op in dispatchPhase (driven externally)', function () {
     $this->service->dispatchPhase($run, SyncRunPhase::Import);
 
     Bus::assertNothingDispatched();
+});
+
+// ── ChannelMerge & LiveProbe phases ──────────────────────────────────────────
+
+it('includes ChannelMerge when auto_merge_channels_enabled is true', function () {
+    mockPipelineSettings();
+    $playlist = Playlist::factory()->for($this->user)->create([
+        'auto_merge_channels_enabled' => true,
+    ]);
+
+    $run = $this->service->buildPipeline($playlist, app(GeneralSettings::class));
+
+    expect($run->phases)->toContain(SyncRunPhase::ChannelMerge->value);
+});
+
+it('excludes ChannelMerge when auto_merge_channels_enabled is false', function () {
+    mockPipelineSettings();
+    $playlist = Playlist::factory()->for($this->user)->create([
+        'auto_merge_channels_enabled' => false,
+    ]);
+
+    $run = $this->service->buildPipeline($playlist, app(GeneralSettings::class));
+
+    expect($run->phases)->not->toContain(SyncRunPhase::ChannelMerge->value);
+});
+
+it('includes LiveProbe when auto_probe_streams is true', function () {
+    mockPipelineSettings();
+    $playlist = Playlist::factory()->for($this->user)->create([
+        'auto_probe_streams' => true,
+    ]);
+
+    $run = $this->service->buildPipeline($playlist, app(GeneralSettings::class));
+
+    expect($run->phases)->toContain(SyncRunPhase::LiveProbe->value);
+});
+
+it('excludes LiveProbe when auto_probe_streams is false', function () {
+    mockPipelineSettings();
+    $playlist = Playlist::factory()->for($this->user)->create([
+        'auto_probe_streams' => false,
+    ]);
+
+    $run = $this->service->buildPipeline($playlist, app(GeneralSettings::class));
+
+    expect($run->phases)->not->toContain(SyncRunPhase::LiveProbe->value);
+});
+
+it('orders ChannelMerge before LiveProbe and both before VOD/Series STRM phases', function () {
+    mockPipelineSettings();
+    $playlist = makePlaylistWithVod($this->user, [
+        'auto_merge_channels_enabled' => true,
+        'auto_probe_streams' => true,
+        'auto_sync_vod_stream_files' => true,
+    ]);
+
+    $run = $this->service->buildPipeline($playlist, app(GeneralSettings::class));
+
+    $mergePos = array_search(SyncRunPhase::ChannelMerge->value, $run->phases);
+    $probePos = array_search(SyncRunPhase::LiveProbe->value, $run->phases);
+    $strmPos = array_search(SyncRunPhase::VodStrm->value, $run->phases);
+
+    expect($mergePos)->not->toBeFalse()
+        ->and($probePos)->not->toBeFalse()
+        ->and($strmPos)->not->toBeFalse()
+        ->and($mergePos)->toBeLessThan($probePos)
+        ->and($probePos)->toBeLessThan($strmPos);
+});
+
+it('dispatchChannelMerge dispatches MergeChannels job when merge config produces a job', function () {
+    mockPipelineSettings();
+    $playlist = Playlist::factory()->for($this->user)->create([
+        'auto_merge_channels_enabled' => true,
+    ]);
+
+    $run = SyncRun::create([
+        'playlist_id' => $playlist->id,
+        'user_id' => $this->user->id,
+        'trigger' => 'test',
+        'status' => SyncRunStatus::Running->value,
+        'phases' => [SyncRunPhase::ChannelMerge->value, SyncRunPhase::SyncCompleted->value],
+        'phase_statuses' => (object) [],
+        'context' => ['playlist_id' => $playlist->id],
+        'started_at' => now(),
+    ]);
+
+    $this->service->startRun($run);
+
+    Bus::assertDispatched(MergeChannels::class);
+});
+
+it('dispatchLiveProbe dispatches ProbeChannelStreams with syncRunId', function () {
+    mockPipelineSettings();
+    $playlist = Playlist::factory()->for($this->user)->create([
+        'auto_probe_streams' => true,
+    ]);
+
+    $run = SyncRun::create([
+        'playlist_id' => $playlist->id,
+        'user_id' => $this->user->id,
+        'trigger' => 'test',
+        'status' => SyncRunStatus::Running->value,
+        'phases' => [SyncRunPhase::LiveProbe->value, SyncRunPhase::SyncCompleted->value],
+        'phase_statuses' => (object) [],
+        'context' => ['playlist_id' => $playlist->id],
+        'started_at' => now(),
+    ]);
+
+    $this->service->startRun($run);
+
+    Bus::assertDispatched(
+        ProbeChannelStreams::class,
+        fn ($job) => $job->syncRunId === $run->id && $job->playlistId === $playlist->id,
+    );
+});
+
+it('dispatchLiveProbe short-circuits to completePhase if auto_probe_streams was toggled off', function () {
+    mockPipelineSettings();
+    // Build the run with LiveProbe in phases, then flip the setting before dispatch.
+    $playlist = Playlist::factory()->for($this->user)->create([
+        'auto_probe_streams' => true,
+    ]);
+
+    $run = SyncRun::create([
+        'playlist_id' => $playlist->id,
+        'user_id' => $this->user->id,
+        'trigger' => 'test',
+        'status' => SyncRunStatus::Running->value,
+        'phases' => [SyncRunPhase::LiveProbe->value, SyncRunPhase::SyncCompleted->value],
+        'phase_statuses' => (object) [],
+        'context' => ['playlist_id' => $playlist->id],
+        'started_at' => now(),
+    ]);
+
+    // Toggle off after the phase was scheduled.
+    $playlist->update(['auto_probe_streams' => false]);
+
+    $this->service->startRun($run);
+
+    Bus::assertNotDispatched(ProbeChannelStreams::class);
+    expect($run->fresh()->isPhaseComplete(SyncRunPhase::LiveProbe))->toBeTrue();
 });

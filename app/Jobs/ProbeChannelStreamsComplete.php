@@ -2,8 +2,10 @@
 
 namespace App\Jobs;
 
+use App\Enums\SyncRunPhase;
 use App\Models\Channel;
 use App\Models\Playlist;
+use App\Services\SyncPipelineService;
 use Carbon\Carbon;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -27,6 +29,7 @@ class ProbeChannelStreamsComplete implements ShouldQueue
         public ?array $channelIds,
         public int $total,
         public Carbon $start,
+        public ?int $syncRunId = null,
     ) {}
 
     /**
@@ -53,21 +56,23 @@ class ProbeChannelStreamsComplete implements ShouldQueue
             ? Playlist::find($this->playlistId)?->user
             : (! empty($this->channelIds) ? Channel::find($this->channelIds[0])?->user : null);
 
-        if (! $user) {
-            return;
+        if ($user) {
+            $body = "Probed {$probed} of {$this->total} channel(s).";
+            if ($failed > 0) {
+                $body .= " ({$failed} failed)";
+            }
+
+            Notification::make()
+                ->success()
+                ->title(__('Stream probing completed'))
+                ->body($body)
+                ->broadcast($user)
+                ->sendToDatabase($user);
         }
 
-        $body = "Probed {$probed} of {$this->total} channel(s).";
-        if ($failed > 0) {
-            $body .= " ({$failed} failed)";
+        if ($this->syncRunId) {
+            app(SyncPipelineService::class)->completePhase($this->syncRunId, SyncRunPhase::LiveProbe);
         }
-
-        Notification::make()
-            ->success()
-            ->title(__('Stream probing completed'))
-            ->body($body)
-            ->broadcast($user)
-            ->sendToDatabase($user);
     }
 
     /**

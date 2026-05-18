@@ -44,8 +44,14 @@ class SyncListener
                     $this->dispatchNameProcessingPipeline($playlist);
                 }
 
-                // Handle channel merge & scrubbers if enabled
-                $this->dispatchChannelScanJobs($playlist);
+                // Handle channel merge & scrubbers if enabled.
+                // Skip pieces already executed by the tracked pipeline (ChannelMerge runs
+                // merge; LiveProbe runs scrubbers + probe — they share the LiveProbe phase).
+                $this->dispatchChannelScanJobs(
+                    $playlist,
+                    skipMerge: (bool) $syncRun?->isPhaseComplete(SyncRunPhase::ChannelMerge),
+                    skipLiveProbe: (bool) $syncRun?->isPhaseComplete(SyncRunPhase::LiveProbe),
+                );
 
                 // Skip if the pipeline already ran custom playlist sync as a tracked phase
                 if (! $syncRun?->isPhaseComplete(SyncRunPhase::CustomPlaylistSync)) {
@@ -121,22 +127,25 @@ class SyncListener
      * However, channel scrubber jobs should be dispatched after the merge channels job completes,
      * to ensure they run against the updated channel list and avoid potential conflicts with the merge process.
      */
-    private function dispatchChannelScanJobs(Playlist $playlist): void
+    private function dispatchChannelScanJobs(Playlist $playlist, bool $skipMerge = false, bool $skipLiveProbe = false): void
     {
         // Merge channels first
-        $mergeJob = ($playlist->auto_merge_channels_enabled ?? false)
-            ? $this->getMergeJob($playlist)
+        $mergeJob = (! $skipMerge && ($playlist->auto_merge_channels_enabled ?? false))
+            ? self::getMergeJob($playlist)
             : null;
 
-        // Run scrubbers after merge completes (if enabled)
-        // This will enable/disable channels
-        $scrubberJobs = $playlist->channelScrubbers()
-            ->where('recurring', true)->get()
-            ->map(fn ($scrubber) => new ProcessChannelScrubber($scrubber->id))
-            ->toArray();
+        // Run scrubbers after merge completes (if enabled).
+        // Scrubbers are bundled into the LiveProbe phase when the pipeline runs them,
+        // so honor skipLiveProbe here too.
+        $scrubberJobs = $skipLiveProbe
+            ? []
+            : $playlist->channelScrubbers()
+                ->where('recurring', true)->get()
+                ->map(fn ($scrubber) => new ProcessChannelScrubber($scrubber->id))
+                ->toArray();
 
         // Run probe last since it only runs against enabled channels, so should wait for merge + scrubber jobs to complete
-        $probeJob = ($playlist->auto_probe_streams ?? false)
+        $probeJob = (! $skipLiveProbe && ($playlist->auto_probe_streams ?? false))
            ? (new ProbeChannelStreams(playlistId: $playlist->id))
            : null;
 
@@ -168,9 +177,13 @@ class SyncListener
     }
 
     /**
-     * Handle auto-merge channels after playlist sync.
+     * Build a MergeChannels job from playlist config.
+     *
+     * Public/static so SyncPipelineService can reuse this builder when running
+     * the merge as a tracked pipeline phase. Returns null if the merge would
+     * be a no-op (used to short-circuit dispatch decisions).
      */
-    private function getMergeJob(Playlist $playlist): ?MergeChannels
+    public static function getMergeJob(Playlist $playlist): ?MergeChannels
     {
         $config = $playlist->auto_merge_config ?? [];
         $useResolution = $config['check_resolution'] ?? false;
@@ -200,7 +213,7 @@ class SyncListener
             deactivateFailoverChannels: $deactivateFailover,
             forceCompleteRemerge: $forceCompleteRemerge,
             preferCatchupAsPrimary: $preferCatchupAsPrimary,
-            weightedConfig: $this->buildWeightedConfig($config),
+            weightedConfig: self::buildWeightedConfig($config),
             newChannelsOnly: $newChannelsOnly,
             regexPatterns: ! empty($config['regex_patterns'] ?? []) ? $config['regex_patterns'] : null,
         );
@@ -209,7 +222,7 @@ class SyncListener
     /**
      * Build weighted config array from playlist config if any weighted options are set
      */
-    private function buildWeightedConfig(array $config): ?array
+    private static function buildWeightedConfig(array $config): ?array
     {
         $hasWeightedOptions = ! empty($config['priority_attributes'])
             || ! empty($config['group_priorities'])
