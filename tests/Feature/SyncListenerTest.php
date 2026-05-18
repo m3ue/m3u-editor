@@ -447,7 +447,7 @@ it('still runs find-replace when the SyncRun did NOT complete that phase', funct
     Bus::assertDispatched(RunPlaylistFindReplaceRules::class);
 });
 
-it('skips find-replace when fired without a syncRunId (legacy path)', function () {
+it('dispatches find-replace on the legacy path when no syncRunId is provided', function () {
     // No syncRunId → $syncRun is null → isPhaseComplete() returns null → listener dispatches
     $this->playlist->update([
         'find_replace_rules' => [['enabled' => true, 'find_replace' => '^US- ', 'replace_with' => '']],

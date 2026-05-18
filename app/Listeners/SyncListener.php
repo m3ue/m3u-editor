@@ -33,7 +33,11 @@ class SyncListener
 
             // Only run the following on completed syncs
             if ($playlist->status === Status::Completed) {
-                $syncRun = $event->syncRunId ? SyncRun::find($event->syncRunId) : null;
+                $syncRun = $event->syncRunId
+                    ? SyncRun::where('id', $event->syncRunId)
+                        ->where('playlist_id', $playlist->id)
+                        ->first()
+                    : null;
 
                 // Skip if the pipeline already ran find-replace / sort-alpha as a tracked phase
                 if (! $syncRun?->isPhaseComplete(SyncRunPhase::FindReplace)) {

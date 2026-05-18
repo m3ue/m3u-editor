@@ -19,7 +19,9 @@ use App\Models\Playlist;
 use App\Models\SyncRun;
 use App\Settings\GeneralSettings;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Throwable;
 
 class SyncPipelineService
 {
@@ -110,43 +112,64 @@ class SyncPipelineService
      */
     public function completePhase(int $syncRunId, SyncRunPhase $phase): void
     {
-        $run = SyncRun::find($syncRunId);
+        // Wrap the read-check-write sequence in a transaction with a row lock so that
+        // two workers calling completePhase() simultaneously for the same run cannot
+        // both pass the guards and double-dispatch the next phase.
+        // Dispatching happens after the transaction commits to avoid sending jobs based
+        // on state that could be rolled back.
+        $run = null;
+        $next = null;
+        $shouldFinish = false;
 
-        // Only allow progression while the run is actively running.
-        // Completed, failed, and cancelled runs must not be resurrected by late/retried jobs.
-        if (! $run || $run->status !== SyncRunStatus::Running->value) {
+        DB::transaction(function () use ($syncRunId, $phase, &$run, &$next, &$shouldFinish): void {
+            $candidate = SyncRun::lockForUpdate()->find($syncRunId);
+
+            // Only allow progression while the run is actively running.
+            if (! $candidate || $candidate->status !== SyncRunStatus::Running->value) {
+                return;
+            }
+
+            // Ignore phases not in this run's plan.
+            if (! in_array($phase->value, $candidate->phases ?? [])) {
+                Log::warning("SyncPipeline: Phase {$phase->value} not in run {$syncRunId} plan. Ignoring.");
+
+                return;
+            }
+
+            // Idempotency: handles retries and any duplicate completion signals.
+            if ($candidate->isPhaseComplete($phase)) {
+                Log::warning("SyncPipeline: Phase {$phase->value} already completed in run {$syncRunId}. Ignoring duplicate.");
+
+                return;
+            }
+
+            $candidate->markPhase($phase, 'completed');
+
+            Log::info("SyncPipeline: Phase completed. run={$syncRunId}, phase={$phase->value}");
+
+            $nextPhase = $candidate->getNextPendingPhase();
+
+            if ($nextPhase === null || $nextPhase === SyncRunPhase::SyncCompleted) {
+                $run = $candidate;
+                $shouldFinish = true;
+
+                return;
+            }
+
+            $candidate->update(['current_phase' => $nextPhase->value]);
+            $run = $candidate;
+            $next = $nextPhase;
+        });
+
+        if ($run === null) {
             return;
         }
 
-        // Ignore phases that are not part of this run's plan to prevent
-        // stale or out-of-plan job completions from re-dispatching in-progress phases.
-        if (! in_array($phase->value, $run->phases ?? [])) {
-            Log::warning("SyncPipeline: Phase {$phase->value} not in run {$syncRunId} plan. Ignoring.");
-
-            return;
-        }
-
-        // Idempotency guard: if a job retries after its phase was already marked complete,
-        // do not dispatch the next phase a second time.
-        if ($run->isPhaseComplete($phase)) {
-            Log::warning("SyncPipeline: Phase {$phase->value} already completed in run {$syncRunId}. Ignoring duplicate.");
-
-            return;
-        }
-
-        $run->markPhase($phase, 'completed');
-
-        Log::info("SyncPipeline: Phase completed. run={$syncRunId}, phase={$phase->value}");
-
-        $next = $run->getNextPendingPhase();
-
-        if ($next === null || $next === SyncRunPhase::SyncCompleted) {
+        if ($shouldFinish) {
             $this->finish($run);
 
             return;
         }
-
-        $run->update(['current_phase' => $next->value]);
 
         $this->dispatchPhase($run, $next);
     }
@@ -289,7 +312,7 @@ class SyncPipelineService
         }
         $jobs[] = new CompleteSyncPhase($run->id, SyncRunPhase::FindReplace);
 
-        $this->chainOrDispatch($jobs);
+        $this->chainOrDispatch($jobs, $run);
     }
 
     private function dispatchCustomPlaylistSync(SyncRun $run, Playlist $playlist): void
@@ -314,17 +337,29 @@ class SyncPipelineService
 
         $jobs[] = new CompleteSyncPhase($run->id, SyncRunPhase::CustomPlaylistSync);
 
-        $this->chainOrDispatch($jobs);
+        $this->chainOrDispatch($jobs, $run);
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
 
-    private function chainOrDispatch(array $jobs): void
+    private function chainOrDispatch(array $jobs, ?SyncRun $run = null): void
     {
         if (count($jobs) === 1) {
             dispatch($jobs[0]);
         } else {
-            Bus::chain($jobs)->dispatch();
+            $chain = Bus::chain($jobs);
+
+            if ($run) {
+                $runId = $run->id;
+                $chain->catch(function (Throwable $e) use ($runId): void {
+                    $stuckRun = SyncRun::find($runId);
+                    if ($stuckRun && $stuckRun->status === SyncRunStatus::Running->value) {
+                        $this->fail($stuckRun, "Chain job failed: {$e->getMessage()}");
+                    }
+                });
+            }
+
+            $chain->dispatch();
         }
     }
 

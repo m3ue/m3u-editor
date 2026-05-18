@@ -3,9 +3,11 @@
 namespace App\Jobs;
 
 use App\Enums\Status;
+use App\Enums\SyncRunPhase;
 use App\Models\Playlist;
 use App\Models\Series;
 use App\Models\User;
+use App\Services\SyncPipelineService;
 use App\Settings\GeneralSettings;
 use App\Traits\ProviderRequestDelay;
 use Filament\Notifications\Notification;
@@ -115,6 +117,11 @@ class ProcessM3uImportSeriesEpisodes implements ShouldQueue
                         'series_progress' => 100,
                     ]);
                 }
+            }
+
+            // Advance the pipeline so the run is not left stuck in running.
+            if ($this->syncRunId) {
+                app(SyncPipelineService::class)->completePhase($this->syncRunId, SyncRunPhase::SeriesMetadata);
             }
 
             return;
