@@ -36,13 +36,7 @@ class SyncPipelineService
         bool $skipSeriesMetadata = false,
     ): SyncRun {
         $phases = $this->resolvePipeline($playlist, $settings, $skipSeriesMetadata);
-
-        // When series chunks are still running (first sync), SeriesMetadata is included
-        // in the phases array but must not be auto-dispatched by the pipeline — it will
-        // be handed off by ProcessM3uImportSeriesComplete once discovery is complete.
         $phaseValues = array_map(fn (SyncRunPhase $p) => $p->value, $phases);
-        $seriesMetadataExternal = $skipSeriesMetadata
-            && in_array(SyncRunPhase::SeriesMetadata->value, $phaseValues);
 
         return SyncRun::create([
             'playlist_id' => $playlist->id,
@@ -54,7 +48,6 @@ class SyncPipelineService
             'context' => [
                 'playlist_id' => $playlist->id,
                 'user_id' => $playlist->user_id,
-                'series_metadata_external' => $seriesMetadataExternal,
             ],
             'started_at' => now(),
         ]);
@@ -119,7 +112,9 @@ class SyncPipelineService
     {
         $run = SyncRun::find($syncRunId);
 
-        if (! $run || $run->status === SyncRunStatus::Completed->value) {
+        // Only allow progression while the run is actively running.
+        // Completed, failed, and cancelled runs must not be resurrected by late/retried jobs.
+        if (! $run || $run->status !== SyncRunStatus::Running->value) {
             return;
         }
 
@@ -127,6 +122,14 @@ class SyncPipelineService
         // stale or out-of-plan job completions from re-dispatching in-progress phases.
         if (! in_array($phase->value, $run->phases ?? [])) {
             Log::warning("SyncPipeline: Phase {$phase->value} not in run {$syncRunId} plan. Ignoring.");
+
+            return;
+        }
+
+        // Idempotency guard: if a job retries after its phase was already marked complete,
+        // do not dispatch the next phase a second time.
+        if ($run->isPhaseComplete($phase)) {
+            Log::warning("SyncPipeline: Phase {$phase->value} already completed in run {$syncRunId}. Ignoring duplicate.");
 
             return;
         }
@@ -292,7 +295,8 @@ class SyncPipelineService
     private function dispatchCustomPlaylistSync(SyncRun $run, Playlist $playlist): void
     {
         $rules = collect($playlist->auto_sync_to_custom_config ?? [])
-            ->filter(fn (array $rule): bool => $rule['enabled'] ?? false);
+            ->filter(fn (array $rule): bool => $rule['enabled'] ?? false)
+            ->filter(fn (array $rule): bool => (int) ($rule['custom_playlist_id'] ?? 0) > 0 && ! empty($rule['groups'] ?? []));
 
         $jobs = $rules->map(fn (array $rule): AutoSyncGroupsToCustomPlaylist => new AutoSyncGroupsToCustomPlaylist(
             userId: $playlist->user_id,

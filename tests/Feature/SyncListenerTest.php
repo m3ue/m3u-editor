@@ -14,7 +14,9 @@
  */
 
 use App\Enums\Status;
+use App\Enums\SyncRunPhase;
 use App\Events\SyncCompleted;
+use App\Jobs\AutoSyncGroupsToCustomPlaylist;
 use App\Jobs\GenerateEpgCache;
 use App\Jobs\MergeChannels;
 use App\Jobs\ProbeChannelStreams;
@@ -25,6 +27,7 @@ use App\Jobs\SyncPlexDvrJob;
 use App\Models\ChannelScrubber;
 use App\Models\Epg;
 use App\Models\Playlist;
+use App\Models\SyncRun;
 use App\Models\User;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Notification;
@@ -408,4 +411,74 @@ it('does not dispatch ProbeChannelStreams when auto_probe_streams is null', func
     event(new SyncCompleted($this->playlist));
 
     Bus::assertNotDispatched(ProbeChannelStreams::class);
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Pipeline-skip guard: phases already handled by SyncPipelineService
+// ──────────────────────────────────────────────────────────────────────────────
+
+it('skips find-replace when the SyncRun already completed that phase', function () {
+    $this->playlist->update([
+        'find_replace_rules' => [['enabled' => true, 'find_replace' => '^US- ', 'replace_with' => '']],
+    ]);
+
+    $run = SyncRun::factory()
+        ->for($this->playlist)
+        ->for($this->user)
+        ->withPhasesCompleted(SyncRunPhase::FindReplace)
+        ->create();
+
+    event(new SyncCompleted($this->playlist, 'playlist', $run->id));
+
+    Bus::assertNotDispatched(RunPlaylistFindReplaceRules::class);
+    Bus::assertNotDispatched(RunPlaylistSortAlpha::class);
+});
+
+it('still runs find-replace when the SyncRun did NOT complete that phase', function () {
+    $this->playlist->update([
+        'find_replace_rules' => [['enabled' => true, 'find_replace' => '^US- ', 'replace_with' => '']],
+    ]);
+
+    // SyncRun with no FindReplace phase completed
+    $run = SyncRun::factory()->for($this->playlist)->for($this->user)->create();
+
+    event(new SyncCompleted($this->playlist, 'playlist', $run->id));
+
+    Bus::assertDispatched(RunPlaylistFindReplaceRules::class);
+});
+
+it('skips find-replace when fired without a syncRunId (legacy path)', function () {
+    // No syncRunId → $syncRun is null → isPhaseComplete() returns null → listener dispatches
+    $this->playlist->update([
+        'find_replace_rules' => [['enabled' => true, 'find_replace' => '^US- ', 'replace_with' => '']],
+    ]);
+
+    event(new SyncCompleted($this->playlist, 'playlist', null));
+
+    Bus::assertDispatched(RunPlaylistFindReplaceRules::class);
+});
+
+it('skips custom playlist sync when the SyncRun already completed that phase', function () {
+    $this->playlist->update([
+        'auto_sync_to_custom_config' => [[
+            'enabled' => true,
+            'custom_playlist_id' => 99,
+            'groups' => [1, 2],
+            'type' => 'channel',
+            'sync_mode' => 'full_sync',
+            'mode' => 'original',
+            'category' => null,
+            'new_category' => null,
+        ]],
+    ]);
+
+    $run = SyncRun::factory()
+        ->for($this->playlist)
+        ->for($this->user)
+        ->withPhasesCompleted(SyncRunPhase::CustomPlaylistSync)
+        ->create();
+
+    event(new SyncCompleted($this->playlist, 'playlist', $run->id));
+
+    Bus::assertNotDispatched(AutoSyncGroupsToCustomPlaylist::class);
 });
