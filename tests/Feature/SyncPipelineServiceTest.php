@@ -211,6 +211,27 @@ it('places FindReplace before STRM phases so filenames embed corrected titles', 
     expect($findReplacePos)->toBeLessThan($strmPos);
 });
 
+it('places FindReplace before SeriesStrm so series filenames embed corrected titles', function () {
+    // Regression: series chunks must run earlier in the chain so series rows exist
+    // before FindReplace runs and rewrites their titles, ensuring SeriesStrm picks
+    // up the corrected names. See: ProcessM3uImport chain reorder.
+    mockPipelineSettings();
+    $playlist = makePlaylistWithBoth($this->user, [
+        'auto_fetch_vod_metadata' => true,
+        'auto_sync_series_stream_files' => true,
+        'find_replace_rules' => [['enabled' => true, 'search' => 'HD', 'replace' => '']],
+    ]);
+
+    $run = $this->service->buildPipeline($playlist, app(GeneralSettings::class));
+
+    $findReplacePos = array_search(SyncRunPhase::FindReplace->value, $run->phases);
+    $seriesStrmPos = array_search(SyncRunPhase::SeriesStrm->value, $run->phases);
+
+    expect($findReplacePos)->not->toBeFalse()
+        ->and($seriesStrmPos)->not->toBeFalse()
+        ->and($findReplacePos)->toBeLessThan($seriesStrmPos);
+});
+
 // ── startRun: dispatches first phase ────────────────────────────────────────
 
 it('startRun dispatches ProcessVodChannels when first phase is VodMetadata', function () {
@@ -340,39 +361,6 @@ it('completePhase is idempotent — ignores already-completed run', function () 
 
     Bus::assertNothingDispatched();
     Event::assertNotDispatched(SyncCompleted::class);
-});
-
-// ── buildStandalonePipeline ──────────────────────────────────────────────────
-
-it('buildStandalonePipeline creates a run with the requested phases plus SyncCompleted', function () {
-    $playlist = Playlist::factory()->for($this->user)->create();
-
-    $run = $this->service->buildStandalonePipeline(
-        $playlist,
-        [SyncRunPhase::VodStrm],
-        'manual_strm_sync'
-    );
-
-    expect($run->trigger)->toBe('manual_strm_sync')
-        ->and($run->phases)->toBe([
-            SyncRunPhase::VodStrm->value,
-            SyncRunPhase::SyncCompleted->value,
-        ]);
-});
-
-it('buildStandalonePipeline does not duplicate SyncCompleted when it is already in requestedPhases', function () {
-    $playlist = Playlist::factory()->for($this->user)->create();
-
-    $run = $this->service->buildStandalonePipeline(
-        $playlist,
-        [SyncRunPhase::VodStrm, SyncRunPhase::SyncCompleted],
-        'manual_strm_sync'
-    );
-
-    expect($run->phases)->toBe([
-        SyncRunPhase::VodStrm->value,
-        SyncRunPhase::SyncCompleted->value,
-    ]);
 });
 
 // ── SyncRun model helpers ────────────────────────────────────────────────────

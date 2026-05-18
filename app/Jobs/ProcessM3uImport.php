@@ -1462,21 +1462,10 @@ class ProcessM3uImport implements ShouldQueue
             });
         }
 
-        // Last job in the batch
-        $jobs[] = new ProcessM3uImportComplete(
-            userId: $userId,
-            playlistId: $playlistId,
-            batchNo: $batchNo,
-            start: $start,
-            maxHit: $this->maxItemsHit,
-            isNew: $this->isNew,
-            runningSeriesImport: $seriesCategories && $seriesCategories->count() > 0,
-            runningLiveImport: $liveStreamsEnabled,
-            runningVodImport: $vodStreamsEnabled,
-        );
-
-        // Add series processing to the chain, if passed in
-        // This will run after the main channel import is complete
+        // Run series-discovery chunks BEFORE ProcessM3uImportComplete so that Series rows
+        // exist in the DB by the time the SyncPipeline is built. This guarantees the
+        // FindReplace phase can see (and rewrite) series titles before STRM filenames are
+        // generated. See SYNC_RUN_SUMMARY.md for full pipeline ordering rationale.
         if ($seriesCategories) {
             $categoryCount = $seriesCategories->count();
             $seriesCategories->each(function ($category, $index) use (&$jobs, $playlistId, $batchNo, $categoryCount) {
@@ -1499,13 +1488,19 @@ class ProcessM3uImport implements ShouldQueue
                     );
                 }
             });
-
-            // Add series processing to the chain
-            $jobs[] = new ProcessM3uImportSeriesComplete(
-                playlist: $playlist,
-                batchNo: $batchNo
-            );
         }
+
+        // Last job in the batch — builds and starts the SyncPipeline using the populated DB.
+        $jobs[] = new ProcessM3uImportComplete(
+            userId: $userId,
+            playlistId: $playlistId,
+            batchNo: $batchNo,
+            start: $start,
+            maxHit: $this->maxItemsHit,
+            isNew: $this->isNew,
+            runningLiveImport: $liveStreamsEnabled,
+            runningVodImport: $vodStreamsEnabled,
+        );
 
         // Start the chain!
         Bus::chain($jobs)
@@ -1739,7 +1734,6 @@ class ProcessM3uImport implements ShouldQueue
             start: $start,
             maxHit: $this->maxItemsHit,
             isNew: $this->isNew,
-            runningSeriesImport: false, // No series import for M3U imports
         );
 
         // Start the chain!

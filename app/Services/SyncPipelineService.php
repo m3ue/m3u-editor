@@ -35,9 +35,8 @@ class SyncPipelineService
         Playlist $playlist,
         GeneralSettings $settings,
         string $trigger = 'full_sync',
-        bool $skipSeriesMetadata = false,
     ): SyncRun {
-        $phases = $this->resolvePipeline($playlist, $settings, $skipSeriesMetadata);
+        $phases = $this->resolvePipeline($playlist, $settings);
         $phaseValues = array_map(fn (SyncRunPhase $p) => $p->value, $phases);
 
         return SyncRun::create([
@@ -46,38 +45,6 @@ class SyncPipelineService
             'trigger' => $trigger,
             'status' => SyncRunStatus::Pending->value,
             'phases' => $phaseValues,
-            'phase_statuses' => (object) [],
-            'context' => [
-                'playlist_id' => $playlist->id,
-                'user_id' => $playlist->user_id,
-            ],
-        ]);
-    }
-
-    /**
-     * Build a SyncRun for a standalone/manual trigger (e.g. UI button press).
-     *
-     * @param  SyncRunPhase[]  $requestedPhases
-     */
-    public function buildStandalonePipeline(
-        Playlist $playlist,
-        array $requestedPhases,
-        string $trigger,
-    ): SyncRun {
-        $phases = array_merge(
-            array_map(
-                fn (SyncRunPhase $p) => $p->value,
-                array_filter($requestedPhases, fn (SyncRunPhase $p) => $p !== SyncRunPhase::SyncCompleted),
-            ),
-            [SyncRunPhase::SyncCompleted->value],
-        );
-
-        return SyncRun::create([
-            'playlist_id' => $playlist->id,
-            'user_id' => $playlist->user_id,
-            'trigger' => $trigger,
-            'status' => SyncRunStatus::Pending->value,
-            'phases' => $phases,
             'phase_statuses' => (object) [],
             'context' => [
                 'playlist_id' => $playlist->id,
@@ -377,14 +344,6 @@ class SyncPipelineService
 
         Log::info("SyncPipeline: Run {$run->id} completed.");
 
-        // Series-discovery mini-pipelines track post-processing phases only.
-        // The SyncCompleted event was already fired by ProcessM3uImportSeriesComplete
-        // before this pipeline ran, so we must not fire it again — doing so would
-        // re-trigger find-replace, custom-playlist-sync, and post-processes.
-        if ($run->trigger === 'series_discovery_complete') {
-            return;
-        }
-
         $playlist = Playlist::find($run->context['playlist_id']);
         if ($playlist) {
             event(new SyncCompleted($playlist, 'playlist', $run->id));
@@ -411,32 +370,8 @@ class SyncPipelineService
 
     // ── Pipeline builder ─────────────────────────────────────────────────────
 
-    /**
-     * Resolve the ordered list of series post-discovery phases for a playlist.
-     *
-     * Exposed for callers (e.g. ProcessM3uImportSeriesComplete) that need to
-     * build a standalone series-only mini-pipeline after the discovery chunks
-     * have populated the DB.
-     *
-     * @return SyncRunPhase[]
-     */
-    public function resolveSeriesPhases(Playlist $playlist, GeneralSettings $settings): array
-    {
-        return $this->resolveMediaPhases(
-            metadataEnabled: (bool) $playlist->auto_fetch_series_metadata,
-            tmdbEnabled: (bool) $settings->tmdb_auto_lookup_on_import,
-            strmEnabled: (bool) $playlist->auto_sync_series_stream_files,
-            probeEnabled: (bool) $playlist->auto_probe_vod_streams,
-            metadataPhase: SyncRunPhase::SeriesMetadata,
-            tmdbPhase: SyncRunPhase::SeriesTmdb,
-            strmPhase: SyncRunPhase::SeriesStrm,
-            probePhase: SyncRunPhase::SeriesProbe,
-            strmPostProbePhase: SyncRunPhase::SeriesStrmPostProbe,
-        );
-    }
-
     /** @return SyncRunPhase[] */
-    private function resolvePipeline(Playlist $playlist, GeneralSettings $settings, bool $skipSeriesMetadata = false): array
+    private function resolvePipeline(Playlist $playlist, GeneralSettings $settings): array
     {
         $phases = [];
 
@@ -444,8 +379,7 @@ class SyncPipelineService
             ->where([['enabled', true], ['is_vod', true]])
             ->exists();
 
-        $hasSeries = ! $skipSeriesMetadata
-            && $playlist->series()->where('enabled', true)->exists();
+        $hasSeries = $playlist->series()->where('enabled', true)->exists();
 
         // Group 1: metadata + TMDB + probe (must complete before find-replace and STRM)
         if ($hasVod) {
@@ -561,31 +495,6 @@ class SyncPipelineService
         return $probeEnabled
             ? [$strmPostProbePhase]
             : [$strmPhase];
-    }
-
-    /**
-     * Build the ordered phase list for a single media type (VOD or Series).
-     *
-     * Used by resolveSeriesPhases() for the series-discovery mini-pipeline,
-     * where FindReplace is not included (it runs via the main sync event).
-     *
-     * @return SyncRunPhase[]
-     */
-    private function resolveMediaPhases(
-        bool $metadataEnabled,
-        bool $tmdbEnabled,
-        bool $strmEnabled,
-        bool $probeEnabled,
-        SyncRunPhase $metadataPhase,
-        SyncRunPhase $tmdbPhase,
-        SyncRunPhase $strmPhase,
-        SyncRunPhase $probePhase,
-        SyncRunPhase $strmPostProbePhase,
-    ): array {
-        return array_merge(
-            $this->resolvePreStrmPhases($metadataEnabled, $tmdbEnabled, $probeEnabled, $metadataPhase, $tmdbPhase, $probePhase),
-            $this->resolveStrmPhases($strmEnabled, $probeEnabled, $strmPhase, $strmPostProbePhase),
-        );
     }
 
     /**

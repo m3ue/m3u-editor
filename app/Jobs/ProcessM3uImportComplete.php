@@ -3,7 +3,6 @@
 namespace App\Jobs;
 
 use App\Enums\Status;
-use App\Events\SyncCompleted;
 use App\Models\Channel;
 use App\Models\Group;
 use App\Models\Job;
@@ -54,7 +53,6 @@ class ProcessM3uImportComplete implements ShouldQueue
         public Carbon $start,
         public bool $maxHit = false,
         public bool $isNew = false,
-        public bool $runningSeriesImport = false,
         public bool $runningLiveImport = true, // Default to true for live imports
         public bool $runningVodImport = true, // Default to true for VOD imports
     ) {
@@ -356,14 +354,11 @@ class ProcessM3uImportComplete implements ShouldQueue
         // resolvePipeline() returns only [SyncCompleted] and startRun() finishes immediately.
         // This guarantees a SyncRun record exists for every sync operation.
         //
-        // Skip series metadata when runningSeriesImport is true: the series discovery
-        // chunks run AFTER this job in the same chain, so series dispatch must wait.
+        // By the time this job runs, both VOD channels and Series rows are populated
+        // (series-discovery chunks run earlier in the chain), so FindReplace can safely
+        // target series titles before STRM filenames are generated.
         $pipeline = app(SyncPipelineService::class);
-        $run = $pipeline->buildPipeline(
-            $playlist,
-            $settings,
-            skipSeriesMetadata: $this->runningSeriesImport,
-        );
+        $run = $pipeline->buildPipeline($playlist, $settings);
         $pipeline->startRun($run);
     }
 
