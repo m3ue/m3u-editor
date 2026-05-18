@@ -138,7 +138,7 @@ RUN echo "@edge https://dl-cdn.alpinelinux.org/alpine/edge/main" >> /etc/apk/rep
     autoconf automake libtool git wget tar build-base && \
     wget -q http://prdownloads.sourceforge.net/argtable/argtable2-13.tar.gz && \
     tar xzf argtable2-13.tar.gz && \
-    cd argtable2-13/ && ./configure CFLAGS="-Wno-implicit-function-declaration" && make && make install && \
+    cd argtable2-13/ && ./configure --build=$(gcc -dumpmachine) CFLAGS="-Wno-implicit-function-declaration" && make && make install && \
     cd /tmp && \
     git clone --depth 1 --branch V0.83 https://github.com/erikkaashoek/Comskip && \
     cd Comskip && ./autogen.sh && ./configure && \
