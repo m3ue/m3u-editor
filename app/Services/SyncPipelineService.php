@@ -51,7 +51,6 @@ class SyncPipelineService
                 'playlist_id' => $playlist->id,
                 'user_id' => $playlist->user_id,
             ],
-            'started_at' => now(),
         ]);
     }
 
@@ -84,7 +83,6 @@ class SyncPipelineService
                 'playlist_id' => $playlist->id,
                 'user_id' => $playlist->user_id,
             ],
-            'started_at' => now(),
         ]);
     }
 
@@ -104,6 +102,7 @@ class SyncPipelineService
         $run->update([
             'status' => SyncRunStatus::Running->value,
             'current_phase' => $first->value,
+            'started_at' => now(),
         ]);
 
         $this->dispatchPhase($run, $first);
@@ -394,6 +393,13 @@ class SyncPipelineService
 
     public function fail(SyncRun $run, string $reason): void
     {
+        // Mark the current phase as failed in phase_statuses so the timeline
+        // shows the failure point rather than leaving the phase as 'pending'.
+        $currentPhase = $run->current_phase;
+        if ($currentPhase) {
+            $run->markPhase(SyncRunPhase::from($currentPhase), 'failed');
+        }
+
         $run->update([
             'status' => SyncRunStatus::Failed->value,
             'finished_at' => now(),

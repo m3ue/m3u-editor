@@ -45,7 +45,9 @@ class SyncRunResource extends Resource
         }
 
         if ($seconds >= 60) {
-            return floor($seconds / 60).'m '.($seconds % 60).'s';
+            $totalSeconds = (int) $seconds;
+
+            return intdiv($totalSeconds, 60).'m '.($totalSeconds % 60).'s';
         }
 
         return round($seconds, 1).'s';

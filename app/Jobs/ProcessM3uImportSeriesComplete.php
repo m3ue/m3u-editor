@@ -107,6 +107,7 @@ class ProcessM3uImportSeriesComplete implements ShouldQueue
             $run->update([
                 'status' => SyncRunStatus::Running->value,
                 'current_phase' => SyncRunPhase::SeriesMetadata->value,
+                'started_at' => now(),
             ]);
 
             return;

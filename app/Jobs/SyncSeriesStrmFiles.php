@@ -13,6 +13,7 @@ use App\Models\User;
 use App\Services\NfoService;
 use App\Services\PlaylistService;
 use App\Services\SerieFileNameService;
+use App\Services\SyncPipelineService;
 use App\Settings\GeneralSettings;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -302,6 +303,12 @@ class SyncSeriesStrmFiles implements ShouldQueue
             if ($playlist) {
                 dispatch(new FireStreamFilesSyncedEvent($playlist, 'series_stream_files_synced'));
             }
+        }
+
+        // Advance the pipeline now that all cleanup work (orphan removal, media-server
+        // refresh, post-process events) has completed.
+        if ($this->syncRunId && $this->completionPhase) {
+            app(SyncPipelineService::class)->completePhase($this->syncRunId, $this->completionPhase);
         }
     }
 
