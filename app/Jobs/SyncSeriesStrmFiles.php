@@ -169,7 +169,7 @@ class SyncSeriesStrmFiles implements ShouldQueue
         // Add checker job at the end of the chain
         // Last chain will trigger cleanup
         $jobs[] = new CheckSeriesStrmProgress(
-            currentOffset: $jobsInFirstChain * $batchSize,
+            currentOffset: min($jobsInFirstChain * $batchSize, $totalCount),
             totalSeries: $totalCount,
             notify: $this->notify,
             all_playlists: $this->all_playlists,

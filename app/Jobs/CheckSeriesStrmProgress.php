@@ -127,7 +127,7 @@ class CheckSeriesStrmProgress implements ShouldQueue
         }
 
         // Add checker as last job in chain
-        $nextOffset = $seriesProcessed + ($jobsInThisChain * $batchSize);
+        $nextOffset = min($seriesProcessed + ($jobsInThisChain * $batchSize), $this->totalSeries);
         $jobs[] = new self(
             currentOffset: $nextOffset,
             totalSeries: $this->totalSeries,

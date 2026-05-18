@@ -120,7 +120,7 @@ class CheckVodStrmProgress implements ShouldQueue
             );
         }
 
-        $nextOffset = $channelsProcessed + ($jobsInThisChain * $batchSize);
+        $nextOffset = min($channelsProcessed + ($jobsInThisChain * $batchSize), $this->totalChannels);
         $jobs[] = new self(
             currentOffset: $nextOffset,
             totalChannels: $this->totalChannels,

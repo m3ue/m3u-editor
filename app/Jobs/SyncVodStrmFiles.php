@@ -177,7 +177,7 @@ class SyncVodStrmFiles implements ShouldQueue
 
         // Add checker job at the end of the chain
         $jobs[] = new CheckVodStrmProgress(
-            currentOffset: $jobsInFirstChain * $batchSize,
+            currentOffset: min($jobsInFirstChain * $batchSize, $totalCount),
             totalChannels: $totalCount,
             notify: $this->notify,
             all_playlists: $this->all_playlists,
