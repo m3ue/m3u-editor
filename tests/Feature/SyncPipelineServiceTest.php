@@ -180,17 +180,35 @@ it('builds a full pipeline with all phases for vod-and-series playlist', functio
 
     $run = $this->service->buildPipeline($playlist, app(GeneralSettings::class));
 
+    // All pre-STRM phases (metadata + probe) run first for both media types,
+    // then STRM phases run after, so filenames can embed any corrected titles.
     expect($run->phases)->toBe([
         SyncRunPhase::VodMetadata->value,
         SyncRunPhase::VodTmdb->value,
         SyncRunPhase::VodProbe->value,
-        SyncRunPhase::VodStrmPostProbe->value,
         SyncRunPhase::SeriesMetadata->value,
         SyncRunPhase::SeriesTmdb->value,
         SyncRunPhase::SeriesProbe->value,
+        SyncRunPhase::VodStrmPostProbe->value,
         SyncRunPhase::SeriesStrmPostProbe->value,
         SyncRunPhase::SyncCompleted->value,
     ]);
+});
+
+it('places FindReplace before STRM phases so filenames embed corrected titles', function () {
+    mockPipelineSettings();
+    $playlist = makePlaylistWithVod($this->user, [
+        'auto_fetch_vod_metadata' => true,
+        'auto_sync_vod_stream_files' => true,
+        'find_replace_rules' => [['enabled' => true, 'search' => 'HD', 'replace' => '']],
+    ]);
+
+    $run = $this->service->buildPipeline($playlist, app(GeneralSettings::class));
+
+    $findReplacePos = array_search(SyncRunPhase::FindReplace->value, $run->phases);
+    $strmPos = array_search(SyncRunPhase::VodStrm->value, $run->phases);
+
+    expect($findReplacePos)->toBeLessThan($strmPos);
 });
 
 // ── startRun: dispatches first phase ────────────────────────────────────────
@@ -340,6 +358,21 @@ it('buildStandalonePipeline creates a run with the requested phases plus SyncCom
             SyncRunPhase::VodStrm->value,
             SyncRunPhase::SyncCompleted->value,
         ]);
+});
+
+it('buildStandalonePipeline does not duplicate SyncCompleted when it is already in requestedPhases', function () {
+    $playlist = Playlist::factory()->for($this->user)->create();
+
+    $run = $this->service->buildStandalonePipeline(
+        $playlist,
+        [SyncRunPhase::VodStrm, SyncRunPhase::SyncCompleted],
+        'manual_strm_sync'
+    );
+
+    expect($run->phases)->toBe([
+        SyncRunPhase::VodStrm->value,
+        SyncRunPhase::SyncCompleted->value,
+    ]);
 });
 
 // ── SyncRun model helpers ────────────────────────────────────────────────────

@@ -66,7 +66,10 @@ class SyncPipelineService
         string $trigger,
     ): SyncRun {
         $phases = array_merge(
-            array_map(fn (SyncRunPhase $p) => $p->value, $requestedPhases),
+            array_map(
+                fn (SyncRunPhase $p) => $p->value,
+                array_filter($requestedPhases, fn (SyncRunPhase $p) => $p !== SyncRunPhase::SyncCompleted),
+            ),
             [SyncRunPhase::SyncCompleted->value],
         );
 
@@ -438,29 +441,55 @@ class SyncPipelineService
         $hasSeries = ! $skipSeriesMetadata
             && $playlist->series()->where('enabled', true)->exists();
 
+        // Group 1: metadata + TMDB + probe (must complete before find-replace and STRM)
         if ($hasVod) {
-            $phases = array_merge($phases, $this->resolveMediaPhases(
+            $phases = array_merge($phases, $this->resolvePreStrmPhases(
                 metadataEnabled: (bool) $playlist->auto_fetch_vod_metadata,
                 tmdbEnabled: (bool) $settings->tmdb_auto_lookup_on_import,
-                strmEnabled: (bool) $playlist->auto_sync_vod_stream_files,
                 probeEnabled: (bool) $playlist->auto_probe_vod_streams,
                 metadataPhase: SyncRunPhase::VodMetadata,
                 tmdbPhase: SyncRunPhase::VodTmdb,
-                strmPhase: SyncRunPhase::VodStrm,
                 probePhase: SyncRunPhase::VodProbe,
-                strmPostProbePhase: SyncRunPhase::VodStrmPostProbe,
             ));
         }
 
         if ($hasSeries) {
-            $phases = array_merge($phases, $this->resolveSeriesPhases($playlist, $settings));
+            $phases = array_merge($phases, $this->resolvePreStrmPhases(
+                metadataEnabled: (bool) $playlist->auto_fetch_series_metadata,
+                tmdbEnabled: (bool) $settings->tmdb_auto_lookup_on_import,
+                probeEnabled: (bool) $playlist->auto_probe_vod_streams,
+                metadataPhase: SyncRunPhase::SeriesMetadata,
+                tmdbPhase: SyncRunPhase::SeriesTmdb,
+                probePhase: SyncRunPhase::SeriesProbe,
+            ));
         }
 
+        // Group 2: find-replace (after metadata/probe so stream_stats are populated;
+        // before STRM so title_custom is already corrected when filenames are written)
         $hasFindReplaceWork = $this->hasEnabledRule($playlist->find_replace_rules)
             || $this->hasEnabledRule($playlist->sort_alpha_config);
 
         if ($hasFindReplaceWork) {
             $phases[] = SyncRunPhase::FindReplace;
+        }
+
+        // Group 3: STRM generation (runs after find-replace so filenames embed corrected titles)
+        if ($hasVod) {
+            $phases = array_merge($phases, $this->resolveStrmPhases(
+                strmEnabled: (bool) $playlist->auto_sync_vod_stream_files,
+                probeEnabled: (bool) $playlist->auto_probe_vod_streams,
+                strmPhase: SyncRunPhase::VodStrm,
+                strmPostProbePhase: SyncRunPhase::VodStrmPostProbe,
+            ));
+        }
+
+        if ($hasSeries) {
+            $phases = array_merge($phases, $this->resolveStrmPhases(
+                strmEnabled: (bool) $playlist->auto_sync_series_stream_files,
+                probeEnabled: (bool) $playlist->auto_probe_vod_streams,
+                strmPhase: SyncRunPhase::SeriesStrm,
+                strmPostProbePhase: SyncRunPhase::SeriesStrmPostProbe,
+            ));
         }
 
         if ($this->hasEnabledRule($playlist->auto_sync_to_custom_config)) {
@@ -473,11 +502,66 @@ class SyncPipelineService
     }
 
     /**
+     * Metadata + TMDB + probe phases for a single media type — no STRM.
+     *
+     * Used by resolvePipeline() so FindReplace can be inserted between this
+     * group and the STRM group.
+     *
+     * @return SyncRunPhase[]
+     */
+    private function resolvePreStrmPhases(
+        bool $metadataEnabled,
+        bool $tmdbEnabled,
+        bool $probeEnabled,
+        SyncRunPhase $metadataPhase,
+        SyncRunPhase $tmdbPhase,
+        SyncRunPhase $probePhase,
+    ): array {
+        $phases = [];
+
+        if ($metadataEnabled) {
+            $phases[] = $metadataPhase;
+        }
+
+        if ($tmdbEnabled) {
+            $phases[] = $tmdbPhase;
+        }
+
+        if ($probeEnabled) {
+            $phases[] = $probePhase;
+        }
+
+        return $phases;
+    }
+
+    /**
+     * STRM phases for a single media type — no metadata/probe.
+     *
+     * Kept separate from resolvePreStrmPhases() so resolvePipeline() can place
+     * FindReplace between the two groups.
+     *
+     * @return SyncRunPhase[]
+     */
+    private function resolveStrmPhases(
+        bool $strmEnabled,
+        bool $probeEnabled,
+        SyncRunPhase $strmPhase,
+        SyncRunPhase $strmPostProbePhase,
+    ): array {
+        if (! $strmEnabled) {
+            return [];
+        }
+
+        return $probeEnabled
+            ? [$strmPostProbePhase]
+            : [$strmPhase];
+    }
+
+    /**
      * Build the ordered phase list for a single media type (VOD or Series).
      *
-     * The structure is identical for both — only the playlist flags and target
-     * phase enum values differ — so it is parameterised here to keep
-     * resolvePipeline() readable.
+     * Used by resolveSeriesPhases() for the series-discovery mini-pipeline,
+     * where FindReplace is not included (it runs via the main sync event).
      *
      * @return SyncRunPhase[]
      */
@@ -492,29 +576,10 @@ class SyncPipelineService
         SyncRunPhase $probePhase,
         SyncRunPhase $strmPostProbePhase,
     ): array {
-        $phases = [];
-
-        if ($metadataEnabled) {
-            $phases[] = $metadataPhase;
-        }
-
-        if ($tmdbEnabled) {
-            $phases[] = $tmdbPhase;
-        }
-
-        if ($strmEnabled && ! $probeEnabled) {
-            $phases[] = $strmPhase;
-        }
-
-        if ($probeEnabled) {
-            $phases[] = $probePhase;
-
-            if ($strmEnabled) {
-                $phases[] = $strmPostProbePhase;
-            }
-        }
-
-        return $phases;
+        return array_merge(
+            $this->resolvePreStrmPhases($metadataEnabled, $tmdbEnabled, $probeEnabled, $metadataPhase, $tmdbPhase, $probePhase),
+            $this->resolveStrmPhases($strmEnabled, $probeEnabled, $strmPhase, $strmPostProbePhase),
+        );
     }
 
     /**

@@ -17,19 +17,30 @@ class SyncRunFactory extends Factory
 
     public function definition(): array
     {
-        $playlist = Playlist::factory()->create();
-
         return [
-            'playlist_id' => $playlist->id,
-            'user_id' => $playlist->user_id,
+            'playlist_id' => Playlist::factory(),
+            'user_id' => null,
             'trigger' => 'full_sync',
             'status' => SyncRunStatus::Completed->value,
             'phases' => [SyncRunPhase::SyncCompleted->value],
             'phase_statuses' => [SyncRunPhase::SyncCompleted->value => 'completed'],
-            'context' => ['playlist_id' => $playlist->id, 'user_id' => $playlist->user_id],
+            'context' => [],
             'started_at' => now()->subSeconds(5),
             'finished_at' => now(),
         ];
+    }
+
+    public function configure(): static
+    {
+        return $this->afterCreating(function (SyncRun $syncRun): void {
+            $playlist = Playlist::find($syncRun->playlist_id);
+            if ($playlist) {
+                $syncRun->forceFill([
+                    'user_id' => $playlist->user_id,
+                    'context' => ['playlist_id' => $syncRun->playlist_id, 'user_id' => $playlist->user_id],
+                ])->save();
+            }
+        });
     }
 
     public function withPhasesCompleted(SyncRunPhase ...$phases): static
