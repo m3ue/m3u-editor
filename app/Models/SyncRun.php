@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\SyncRunPhase;
 use App\Enums\SyncRunStatus;
+use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\MassPrunable;
@@ -51,7 +52,26 @@ class SyncRun extends Model
 
     public function getStatusForPhase(SyncRunPhase $phase): string
     {
-        return ($this->phase_statuses ?? [])[$phase->value] ?? 'pending';
+        $value = ($this->phase_statuses ?? [])[$phase->value] ?? null;
+
+        if ($value === null) {
+            return 'pending';
+        }
+
+        // Support both legacy string format ('completed') and enriched array format
+        // (['status' => 'completed', 'at' => '2026-05-18T10:00:00Z']).
+        return is_array($value) ? ($value['status'] ?? 'pending') : $value;
+    }
+
+    public function getPhaseCompletedAt(SyncRunPhase $phase): ?Carbon
+    {
+        $value = ($this->phase_statuses ?? [])[$phase->value] ?? null;
+
+        if (! is_array($value) || empty($value['at'])) {
+            return null;
+        }
+
+        return Carbon::parse($value['at']);
     }
 
     public function isPhaseComplete(SyncRunPhase $phase): bool
@@ -73,24 +93,50 @@ class SyncRun extends Model
     public function markPhase(SyncRunPhase $phase, string $status): void
     {
         $statuses = $this->phase_statuses ?? [];
-        $statuses[$phase->value] = $status;
+        $statuses[$phase->value] = ['status' => $status, 'at' => now()->toIso8601String()];
         $this->update([
             'phase_statuses' => $statuses,
             'current_phase' => $phase->value,
         ]);
     }
 
-    /** @return array<int, array{phase: string, label: string, status: string}> */
+    /**
+     * @return array<int, array{phase: string, label: string, status: string, duration: string|null}>
+     */
     public function getPhaseTimelineAttribute(): array
     {
-        return array_map(
-            fn (SyncRunPhase $phase) => [
+        $isRunning = $this->status === SyncRunStatus::Running->value;
+        $prevTime = $this->started_at;
+        $result = [];
+
+        foreach ($this->getOrderedPhases() as $phase) {
+            $rawStatus = $this->getStatusForPhase($phase);
+            $completedAt = $this->getPhaseCompletedAt($phase);
+
+            // Derive duration from successive completion timestamps.
+            $duration = null;
+            if ($completedAt && $prevTime) {
+                $seconds = (int) $prevTime->diffInSeconds($completedAt);
+                $duration = $seconds >= 60
+                    ? intdiv($seconds, 60).'m '.($seconds % 60).'s'
+                    : $seconds.'s';
+            }
+
+            if ($completedAt) {
+                $prevTime = $completedAt;
+            }
+
+            $result[] = [
                 'phase' => $phase->value,
                 'label' => $phase->getLabel(),
-                'status' => $this->getStatusForPhase($phase),
-            ],
-            $this->getOrderedPhases()
-        );
+                'status' => ($isRunning && $this->current_phase === $phase->value)
+                    ? 'running'
+                    : $rawStatus,
+                'duration' => $duration,
+            ];
+        }
+
+        return $result;
     }
 
     public function getDurationAttribute(): ?float

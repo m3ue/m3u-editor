@@ -9,6 +9,7 @@ use App\Models\SyncRun;
 use App\Services\DateFormatService;
 use Filament\Actions;
 use Filament\Infolists;
+use Filament\Infolists\Components\ViewEntry;
 use Filament\Resources\ParentResourceRegistration;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Section;
@@ -129,23 +130,9 @@ class SyncRunResource extends Resource
                 Section::make(__('Phase Timeline'))
                     ->columnSpanFull()
                     ->schema([
-                        Infolists\Components\RepeatableEntry::make('phase_timeline')
+                        ViewEntry::make('phase_timeline')
                             ->label('')
-                            ->schema([
-                                Infolists\Components\TextEntry::make('label')
-                                    ->label(__('Phase')),
-                                Infolists\Components\TextEntry::make('status')
-                                    ->label(__('Status'))
-                                    ->badge()
-                                    ->color(fn (string $state): string => match ($state) {
-                                        'completed' => 'success',
-                                        'running' => 'warning',
-                                        'failed' => 'danger',
-                                        'skipped' => 'gray',
-                                        default => 'info',
-                                    }),
-                            ])
-                            ->columns(2),
+                            ->view('filament.infolists.sync-run-timeline'),
                     ]),
             ]);
     }
