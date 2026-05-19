@@ -57,6 +57,19 @@ class DvrSchedulerService
     }
 
     /**
+     * Schedule all upcoming matching programmes for a rule immediately,
+     * bypassing the 30-minute lookahead window. Used when a series rule is
+     * first created or re-enabled so users see scheduled recordings right away.
+     */
+    public function scheduleRuleImmediately(DvrRecordingRule $rule): void
+    {
+        $lookaheadDays = (int) config('dvr.initial_lookahead_days', 14);
+        $lookaheadMinutes = $lookaheadDays * 24 * 60;
+
+        $this->matchRule($rule, $lookaheadMinutes);
+    }
+
+    /**
      * Match all enabled rules against upcoming programmes and create SCHEDULED rows.
      *
      * @param  int  $lookaheadMinutes  How many minutes ahead to search

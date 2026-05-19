@@ -39,6 +39,19 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | DVR — Initial schedule scan
+    |--------------------------------------------------------------------------
+    |
+    | How many days ahead to scan when a series rule is created or re-enabled.
+    | This is a one-time full scan so users see upcoming scheduled recordings
+    | immediately instead of waiting up to 30 minutes for the tick to find them.
+    |
+    */
+
+    'initial_lookahead_days' => (int) env('DVR_INITIAL_LOOKAHEAD_DAYS', 14),
+
+    /*
+    |--------------------------------------------------------------------------
     | DVR — Recording defaults
     |--------------------------------------------------------------------------
     */
