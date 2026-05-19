@@ -78,7 +78,8 @@ class RefreshPlaylist extends Command
             $failedRetryCooldown = (int) config('dev.failed_retry_cooldown_minutes', 30);
             $pipeline = app(SyncPipelineService::class);
             $playlists->get()->each(function (Playlist $playlist) use (&$count, $failedRetryCooldown, $pipeline) {
-                $cronExpression = new CronExpression($playlist->sync_interval);
+                $interval = $playlist->sync_interval === '24hr' ? '0 0 * * *' : $playlist->sync_interval;
+                $cronExpression = new CronExpression($interval);
 
                 // Gate failed retries behind a cooldown to prevent CPU runaway
                 $isFailed = $playlist->status === Status::Failed;

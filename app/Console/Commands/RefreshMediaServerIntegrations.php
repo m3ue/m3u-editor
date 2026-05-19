@@ -63,7 +63,8 @@ class RefreshMediaServerIntegrations extends Command
 
         $count = 0;
         foreach ($integrations as $integration) {
-            $cronExpression = new CronExpression($integration->sync_interval);
+            $interval = $integration->sync_interval === '24hr' ? '0 0 * * *' : $integration->sync_interval;
+            $cronExpression = new CronExpression($interval);
 
             // Check if sync is due (with a 1-minute buffer)
             $lastRun = $integration->last_synced_at ?? now()->subYears(1);
