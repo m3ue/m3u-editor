@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\DvrRecordingStatus;
+use App\Enums\DvrSeriesMode;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -29,6 +30,8 @@ class DvrSetting extends Model
             'tmdb_api_key' => 'encrypted',
             'global_disk_quota_gb' => 'integer',
             'retention_days' => 'integer',
+            'default_series_mode' => DvrSeriesMode::class,
+            'default_series_keep_last' => 'integer',
         ];
     }
 

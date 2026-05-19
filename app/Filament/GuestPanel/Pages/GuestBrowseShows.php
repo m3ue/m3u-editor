@@ -309,8 +309,13 @@ class GuestBrowseShows extends Page
 
     public function recordSeriesDefaults(string $title): void
     {
+        $dvrSetting = static::getDvrSetting();
+        $seriesMode = $dvrSetting?->default_series_mode ?? DvrSeriesMode::UniqueSe;
+
         $this->createSeriesRule($title, [
-            'series_mode' => DvrSeriesMode::All,
+            'series_mode' => $seriesMode,
+            'new_only' => $seriesMode === DvrSeriesMode::NewFlag,
+            'keep_last' => $dvrSetting?->default_series_keep_last,
             'priority' => 50,
             'source_channel_id' => $this->sourceChannelId,
         ]);

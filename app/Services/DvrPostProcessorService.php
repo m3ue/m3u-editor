@@ -233,12 +233,12 @@ class DvrPostProcessorService
             'proxy_network_id' => null,
         ]);
 
-        // Disable "once" rules after a successful recording so they don't re-schedule
+        // Delete "once" rules after a successful recording — they're one-shot
         $rule = $recording->recordingRule;
         if ($rule && $rule->type === DvrRuleType::Once) {
-            $rule->update(['enabled' => false]);
+            $rule->delete();
 
-            Log::debug('DVR post-processing: disabled once-rule after successful recording', [
+            Log::debug('DVR post-processing: deleted once-rule after successful recording', [
                 'recording_id' => $recording->id,
                 'rule_id' => $rule->id,
             ]);

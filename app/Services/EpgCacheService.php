@@ -1540,7 +1540,7 @@ class EpgCacheService
 
         $now = now();
         $from = $now->copy()->subDay()->startOfDay();
-        $to = $now->copy()->addDays(7)->endOfDay();
+        $to = $now->copy()->addDays(30)->endOfDay();
 
         $batch = [];
         $batchSize = 500;

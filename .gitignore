@@ -73,3 +73,5 @@ compose.services.yaml
 mediaserver.env
 .env.testing
 debug*.md
+up.sh
+up-fresh.sh
