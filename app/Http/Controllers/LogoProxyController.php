@@ -124,18 +124,24 @@ class LogoProxyController extends Controller
                 return null;
             }
 
-            $contentType = $response->header('Content-Type');
-
-            // Validate that it's an image
-            if (! str_starts_with($contentType, 'image/')) {
-                return null;
-            }
-
             $content = $response->body();
 
             // Check file size (limit to 5MB)
             if (strlen($content) > 5 * 1024 * 1024) {
                 return null;
+            }
+
+            $contentType = $response->header('Content-Type');
+
+            // Some CDNs/origins (notably Cloudflare workers and Express-based image
+            // servers) return image bytes without a Content-Type header. Fall back
+            // to sniffing the body so those logos still proxy correctly.
+            if (! $contentType || ! str_starts_with($contentType, 'image/')) {
+                $sniffed = $this->sniffImageMimeType($content);
+                if (! $sniffed) {
+                    return null;
+                }
+                $contentType = $sniffed;
             }
 
             return [
@@ -222,6 +228,32 @@ class LogoProxyController extends Controller
         $ip = gethostbyname($host);
 
         return ! filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE);
+    }
+
+    /**
+     * Detect image MIME type from raw bytes. Returns null if not a recognised image.
+     */
+    private function sniffImageMimeType(string $content): ?string
+    {
+        if ($content === '') {
+            return null;
+        }
+
+        $info = @getimagesizefromstring($content);
+        if (is_array($info) && ! empty($info['mime']) && str_starts_with($info['mime'], 'image/')) {
+            return $info['mime'];
+        }
+
+        // getimagesizefromstring does not recognise SVG. Detect it manually so
+        // SVG logos with missing/incorrect Content-Type still pass.
+        $head = ltrim(substr($content, 0, 1024));
+        if ($head !== '' && (str_starts_with($head, '<?xml') || str_starts_with($head, '<svg'))) {
+            if (stripos($head, '<svg') !== false) {
+                return 'image/svg+xml';
+            }
+        }
+
+        return null;
     }
 
     /**
