@@ -190,7 +190,7 @@ class DvrRecordingResource extends Resource
                         ->requiresConfirmation()
                         ->action(function (DvrRecording $record): void {
                             $record->update(['status' => DvrRecordingStatus::PostProcessing, 'error_message' => null]);
-                            PostProcessDvrRecording::dispatch($record);
+                            PostProcessDvrRecording::dispatch($record->id);
 
                             Notification::make()
                                 ->success()
