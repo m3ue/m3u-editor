@@ -8,6 +8,11 @@ beforeEach(function () {
     Storage::fake('local');
 });
 
+function svgBytes(): string
+{
+    return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10"/></svg>';
+}
+
 function pngBytes(): string
 {
     // Minimal valid 1x1 PNG so getimagesizefromstring recognises it.
@@ -62,6 +67,35 @@ it('serves a remote logo when Content-Type is a generic non-image type but bytes
 
     $response->assertOk();
     expect($response->headers->get('Content-Type'))->toStartWith('image/');
+});
+
+it('serves a remote SVG logo when the response has no Content-Type header', function () {
+    $remoteUrl = 'https://example.com/logo.svg';
+
+    Http::fake([
+        $remoteUrl => Http::response(svgBytes(), 200),
+    ]);
+
+    $response = $this->get(proxyPathFor($remoteUrl));
+
+    $response->assertOk();
+    expect($response->headers->get('Content-Type'))->toStartWith('image/svg');
+});
+
+it('strips script tags and event handlers from proxied SVG logos', function () {
+    $remoteUrl = 'https://example.com/xss.svg';
+    $maliciousSvg = '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script><rect onclick="evil()" width="10" height="10"/></svg>';
+
+    Http::fake([
+        $remoteUrl => Http::response($maliciousSvg, 200, ['Content-Type' => 'image/svg+xml']),
+    ]);
+
+    $response = $this->get(proxyPathFor($remoteUrl));
+
+    $response->assertOk();
+    $response->assertDontSee('<script>', false);
+    $response->assertDontSee('onclick', false);
+    expect($response->headers->get('Content-Type'))->toStartWith('image/svg');
 });
 
 it('falls back to the placeholder when the body is not an image', function () {
