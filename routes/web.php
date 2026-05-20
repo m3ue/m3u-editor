@@ -233,6 +233,8 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         ->name('api.channels.failovers.clear');
     Route::post('channel/bulk-set-failovers', [ChannelController::class, 'bulkSetFailovers'])
         ->name('api.channels.failovers.bulk-set');
+    Route::post('channel/trigger-failover', [ChannelController::class, 'triggerFailover'])
+        ->name('api.channels.failover.trigger');
 
     // Group API routes
     Route::group(['prefix' => 'group'], function () {

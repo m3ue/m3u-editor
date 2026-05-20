@@ -68,7 +68,8 @@ class RefreshEpg extends Command
             $count = 0;
             $failedRetryCooldown = (int) config('dev.failed_retry_cooldown_minutes', 30);
             $epgs->get()->each(function (Epg $epg) use (&$count, $failedRetryCooldown) {
-                $cronExpression = new CronExpression($epg->sync_interval);
+                $interval = $epg->sync_interval === '24hr' ? '0 0 * * *' : $epg->sync_interval;
+                $cronExpression = new CronExpression($interval);
 
                 // Gate failed retries behind a cooldown to prevent CPU runaway
                 $isFailed = $epg->status === Status::Failed;

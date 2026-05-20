@@ -7,10 +7,13 @@ use App\Facades\PlaylistFacade;
 use App\Models\Channel;
 use App\Models\ChannelFailover;
 use App\Models\Group;
+use App\Services\M3uProxyService;
+use Exception;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
 use Symfony\Component\Process\Process;
 
@@ -292,7 +295,7 @@ class ChannelController extends Controller
         $streamStats = [];
         try {
             $streamStats = $channel->probeStreamStats();
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
             $streamStats = [
                 'error' => 'Unable to retrieve stream statistics',
             ];
@@ -391,7 +394,7 @@ class ChannelController extends Controller
             $stats = [];
             try {
                 $stats = $channel->probeStreamStats();
-            } catch (\Exception $e) {
+            } catch (Exception $e) {
                 $stats = [
                     'error' => 'Unable to retrieve stream statistics',
                 ];
@@ -1002,7 +1005,7 @@ class ChannelController extends Controller
                     'http_status' => $httpStatus,
                 ],
             ]);
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
             $responseTime = round((microtime(true) - $startTime) * 1000);
 
             return response()->json([
@@ -1094,7 +1097,7 @@ class ChannelController extends Controller
                     'response_time_ms' => $responseTime,
                     'http_status' => $httpStatus,
                 ];
-            } catch (\Exception $e) {
+            } catch (Exception $e) {
                 $responseTime = round((microtime(true) - $startTime) * 1000);
                 $offlineCount++;
 
@@ -1314,7 +1317,7 @@ class ChannelController extends Controller
                 ->withHeaders(['User-Agent' => 'Mozilla/5.0 (m3u-editor stability test)'])
                 ->head($url);
             $connectTime = round((microtime(true) - $connectStart) * 1000);
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
             return response()->json([
                 'success' => true,
                 'data' => [
@@ -1367,7 +1370,7 @@ class ChannelController extends Controller
                 } else {
                     $failedChecks++;
                 }
-            } catch (\Exception $e) {
+            } catch (Exception $e) {
                 $failedChecks++;
             }
 
@@ -1681,5 +1684,74 @@ class ChannelController extends Controller
                 'deactivated_count' => $deactivatedCount,
             ],
         ]);
+    }
+
+    /**
+     * Trigger failover for a channel
+     *
+     * Instructs the m3u-proxy to immediately switch all active streams for this channel to the next
+     * available failover source. Has no effect if the channel has no active streams on the proxy.
+     *
+     * @bodyParam channel_id integer required The ID of the channel to trigger failover for. Example: 42
+     * @bodyParam active_only boolean When true (default), only streams with connected clients are targeted. Pass false to target all proxy streams for the channel regardless of client activity. Example: true
+     *
+     * @response 200 {
+     *   "success": true,
+     *   "triggered_count": 1,
+     *   "stream_ids": ["abc-def-123"]
+     * }
+     * @response 200 scenario="No active streams" {
+     *   "success": true,
+     *   "triggered_count": 0,
+     *   "stream_ids": []
+     * }
+     * @response 404 {
+     *   "success": false,
+     *   "message": "Channel not found"
+     * }
+     * @response 502 {
+     *   "success": false,
+     *   "message": "M3U Proxy base URL not configured"
+     * }
+     */
+    public function triggerFailover(Request $request): JsonResponse
+    {
+        $user = $request->user();
+
+        $validated = $request->validate([
+            'channel_id' => 'required|integer',
+            'active_only' => 'sometimes|boolean',
+        ]);
+
+        $channel = Channel::where('user_id', $user->id)->find($validated['channel_id']);
+
+        if (! $channel) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Channel not found',
+            ], 404);
+        }
+
+        try {
+            $activeOnly = (bool) ($validated['active_only'] ?? true);
+            $result = app(M3uProxyService::class)->triggerFailoverForChannel($channel->id, $activeOnly);
+
+            if (! $result['success']) {
+                return response()->json([
+                    'success' => false,
+                    'message' => $result['error'] ?? 'Failed to trigger failover',
+                ], 502);
+            }
+
+            return response()->json([
+                'success' => true,
+                'triggered_count' => $result['triggered_count'],
+                'stream_ids' => $result['stream_ids'],
+            ]);
+        } catch (Exception $e) {
+            Log::error("API failover error for channel {$channel->id}: ".$e->getMessage());
+
+            return response()->json(['error' => 'Unexpected error triggering failover'], 500);
+        }
     }
 }

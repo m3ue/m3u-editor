@@ -1503,6 +1503,67 @@ class M3uProxyService
     }
 
     /**
+     * Trigger a failover for all active streams associated with a given channel.
+     *
+     * Queries the proxy for streams where metadata.id matches the channel ID,
+     * then triggers failover for each. Returns a summary of the results.
+     *
+     * @return array{success: bool, triggered_count: int, stream_ids: list<string>, error?: string}
+     */
+    public function triggerFailoverForChannel(int $channelId, bool $activeOnly = true): array
+    {
+        if (empty($this->apiBaseUrl)) {
+            return ['success' => false, 'triggered_count' => 0, 'stream_ids' => [], 'error' => 'M3U Proxy base URL not configured'];
+        }
+
+        try {
+            $endpoint = $this->apiBaseUrl.'/streams/by-metadata';
+            $params = ['field' => 'type', 'value' => 'channel'];
+            if ($activeOnly) {
+                $params['active_only'] = true;
+            }
+
+            $response = Http::timeout(5)->acceptJson()
+                ->withHeaders($this->apiToken ? [
+                    'X-API-Token' => $this->apiToken,
+                ] : [])
+                ->get($endpoint, $params);
+
+            if (! $response->successful()) {
+                return ['success' => false, 'triggered_count' => 0, 'stream_ids' => [], 'error' => 'Failed to fetch streams from proxy'];
+            }
+
+            $data = $response->json();
+            $streamIds = collect($data['matching_streams'] ?? [])
+                ->filter(fn ($stream) => ($stream['metadata']['id'] ?? null) == $channelId)
+                ->pluck('stream_id')
+                ->values()
+                ->all();
+
+            if (empty($streamIds)) {
+                return ['success' => true, 'triggered_count' => 0, 'stream_ids' => []];
+            }
+
+            $triggered = [];
+            foreach ($streamIds as $streamId) {
+                if ($this->triggerFailover($streamId)) {
+                    $triggered[] = $streamId;
+                }
+            }
+
+            return [
+                'success' => true,
+                'triggered_count' => count($triggered),
+                'stream_ids' => $triggered,
+            ];
+        } catch (Exception $e) {
+            Log::error("Error triggering failover for channel {$channelId}: ".$e->getMessage());
+
+            return ['success' => false, 'triggered_count' => 0, 'stream_ids' => [], 'error' => $e->getMessage()];
+        }
+    }
+
+    /**
      * Delete/stop a stream on the external proxy (used by the Filament UI).
      * Returns true on success.
      */
