@@ -88,8 +88,8 @@ class ProcessM3uVodImportChunk implements ShouldQueue
                             ? md5($item['source_key'])
                             : md5($item['source_key'].':dup:'.$count);
                         $seen[$key] = $count + 1;
-                        unset($item['source_key']);
                     }
+                    unset($item['source_key']);
 
                     return $item;
                 })
