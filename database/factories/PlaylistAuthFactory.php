@@ -26,6 +26,8 @@ class PlaylistAuthFactory extends Factory
             'user_id' => User::factory(),
             'username' => fake()->userName(),
             'password' => fake()->password(),
+            'max_connections' => null,
+            'stop_oldest_on_limit' => null,
         ];
     }
 }

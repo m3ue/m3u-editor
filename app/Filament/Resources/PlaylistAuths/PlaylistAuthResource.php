@@ -164,29 +164,57 @@ class PlaylistAuthResource extends Resource implements CopilotResource
                         ->columnSpan(1)
                         ->inline(false)
                         ->default(true),
-                    TextInput::make('username')
-                        ->label(__('Username'))
-                        ->required()
-                        ->rules(function ($record) {
-                            return [
-                                Rule::unique('playlist_auths', 'username')->ignore($record?->id),
-                                Rule::unique('playlist_aliases', 'username'),
-                            ];
-                        })
-                        ->columnSpan(1),
-                    TextInput::make('password')
-                        ->label(__('Password'))
-                        ->password()
-                        ->required()
-                        ->revealable()
-                        ->columnSpan(1),
-                    DateTimePicker::make('expires_at')
-                        ->label(__('Expiration (date & time)'))
-                        ->seconds(false)
-                        ->native(false)
-                        ->helperText(__('If set, this account will stop working at that exact time.'))
+                    Grid::make()
+                        ->columns(3)
+                        ->schema([
+                            TextInput::make('username')
+                                ->label(__('Username'))
+                                ->required()
+                                ->rules(function ($record) {
+                                    return [
+                                        Rule::unique('playlist_auths', 'username')->ignore($record?->id),
+                                        Rule::unique('playlist_aliases', 'username'),
+                                    ];
+                                })
+                                ->columnSpan(1),
+                            TextInput::make('password')
+                                ->label(__('Password'))
+                                ->password()
+                                ->required()
+                                ->revealable()
+                                ->columnSpan(1),
+                            DateTimePicker::make('expires_at')
+                                ->label(__('Expiration (date & time)'))
+                                ->seconds(false)
+                                ->native(false)
+                                ->hintIcon(
+                                    'heroicon-m-question-mark-circle',
+                                    tooltip: __('If set, this account will stop working at that exact time.')
+                                )
+                                ->nullable()
+                                ->columnSpan(1),
+                        ]),
+                    TextInput::make('max_connections')
+                        ->label(__('Max Connections'))
+                        ->hintIcon(
+                            'heroicon-m-question-mark-circle',
+                            tooltip: __('Leave blank for unlimited. Only enforced when the assigned playlist has the proxy enabled.')
+                        )
+                        ->helperText(__('Maximum number of concurrent streams for this auth user.'))
+                        ->numeric()
+                        ->minValue(1)
                         ->nullable()
-                        ->columnSpan(2),
+                        ->columnSpan(1),
+                    Toggle::make('stop_oldest_on_limit')
+                        ->label(__('Stop Oldest Stream on Limit'))
+                        ->inline(false)
+                        ->hintIcon(
+                            'heroicon-m-question-mark-circle',
+                            tooltip: __('Leave unchecked to use the global setting. Only applies when the assigned playlist has the proxy enabled.')
+                        )
+                        ->helperText(__('When at max connections, stop the oldest stream to allow the new one. When off, use the global setting.'))
+                        ->nullable()
+                        ->columnSpan(1),
                     Select::make('assigned_playlist')
                         ->label(__('Assigned to Playlist'))
                         ->options(function ($record) {

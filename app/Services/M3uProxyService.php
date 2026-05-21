@@ -11,6 +11,7 @@ use App\Models\MergedPlaylist;
 use App\Models\Network;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
+use App\Models\PlaylistAuth;
 use App\Models\StreamProfile;
 use App\Settings\GeneralSettings;
 use Exception;
@@ -663,6 +664,123 @@ class M3uProxyService
     }
 
     /**
+     * Delete the oldest stream matching an arbitrary metadata field/value pair.
+     *
+     * Generic sibling of stopOldestPlaylistStream() that works with any metadata field.
+     */
+    public static function stopOldestStreamByMetadata(string $field, string $value, ?int $excludeChannelId = null): array
+    {
+        $service = new self;
+
+        if (empty($service->apiBaseUrl)) {
+            return [
+                'success' => false,
+                'message' => 'M3U Proxy base URL is not configured',
+                'deleted_count' => 0,
+            ];
+        }
+
+        try {
+            $params = ['field' => $field, 'value' => $value];
+
+            if ($excludeChannelId !== null) {
+                $params['exclude_channel_id'] = (string) $excludeChannelId;
+            }
+
+            $endpoint = $service->apiBaseUrl.'/streams/oldest-by-metadata?'.http_build_query($params);
+
+            $response = Http::timeout(5)->acceptJson()
+                ->withHeaders($service->apiToken ? ['X-API-Token' => $service->apiToken] : [])
+                ->delete($endpoint);
+
+            if ($response->successful()) {
+                $data = $response->json();
+
+                if ($data['deleted_count'] > 0) {
+                    self::invalidateMetadataCache($field, $value);
+                }
+
+                return [
+                    'success' => true,
+                    'message' => $data['message'] ?? 'Oldest stream stopped successfully',
+                    'deleted_count' => $data['deleted_count'] ?? 0,
+                    'deleted_stream' => $data['deleted_stream'] ?? null,
+                    'stream_age_seconds' => $data['stream_age_seconds'] ?? null,
+                ];
+            }
+
+            return [
+                'success' => false,
+                'message' => 'HTTP error: '.$response->status(),
+                'deleted_count' => 0,
+            ];
+        } catch (Exception $e) {
+            Log::warning("Failed to stop oldest stream (field={$field}, value={$value}): ".$e->getMessage());
+
+            return [
+                'success' => false,
+                'message' => $e->getMessage(),
+                'deleted_count' => 0,
+            ];
+        }
+    }
+
+    /**
+     * Check whether a PlaylistAuth user is within their per-auth stream limit.
+     *
+     * When the limit is reached and stop-oldest is enabled (per-auth setting takes
+     * precedence over the global setting, with null meaning "use global"), the oldest
+     * stream belonging to this auth is evicted to make room for the new one.
+     *
+     * Returns true if the new stream is allowed, false if it should be blocked.
+     */
+    private function checkAndEnforceAuthStreamLimit(int $playlistAuthId, ?int $excludeChannelId = null): bool
+    {
+        $auth = PlaylistAuth::find($playlistAuthId);
+
+        if (! $auth?->max_connections) {
+            return true;
+        }
+
+        $activeCount = self::getActiveStreamsCountByMetadata('playlist_auth_id', (string) $playlistAuthId);
+
+        if ($activeCount < $auth->max_connections) {
+            return true;
+        }
+
+        // Per-auth setting takes precedence over global; null falls back to global.
+        $stopOldest = $auth->stop_oldest_on_limit ?? $this->stopOldestOnLimit;
+
+        if ($stopOldest) {
+            $result = self::stopOldestStreamByMetadata('playlist_auth_id', (string) $playlistAuthId, $excludeChannelId);
+
+            if ($result['deleted_count'] > 0) {
+                Log::debug('Stopped oldest stream to free per-auth capacity', [
+                    'playlist_auth_id' => $playlistAuthId,
+                    'max_connections' => $auth->max_connections,
+                    'stopped_stream' => $result['deleted_stream'] ?? null,
+                    'stream_age_seconds' => $result['stream_age_seconds'] ?? null,
+                ]);
+
+                usleep(100000); // 100ms — allow proxy to clean up before re-counting
+                $activeCount = self::getActiveStreamsCountByMetadata('playlist_auth_id', (string) $playlistAuthId);
+            }
+        }
+
+        if ($activeCount >= $auth->max_connections) {
+            Log::debug('Per-auth stream limit reached, blocking new stream', [
+                'playlist_auth_id' => $playlistAuthId,
+                'max_connections' => $auth->max_connections,
+                'active_count' => $activeCount,
+            ]);
+
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
      * Check if an episode is currently active (being streamed) via m3u-proxy.
      */
     public static function isEpisodeActive(Episode $episode): bool
@@ -695,7 +813,7 @@ class M3uProxyService
      *
      * @throws Exception when base URL missing or API returns an error
      */
-    public function getChannelUrl($playlist, $channel, ?Request $request = null, ?StreamProfile $profile = null, ?string $username = null): string
+    public function getChannelUrl($playlist, $channel, ?Request $request = null, ?StreamProfile $profile = null, ?string $username = null, ?int $playlistAuthId = null): string
     {
         if (empty($this->apiBaseUrl)) {
             throw new Exception('M3U Proxy base URL is not configured');
@@ -950,6 +1068,11 @@ class M3uProxyService
             }
         }
 
+        // Per-PlaylistAuth stream limit check (only applies when proxy is in use)
+        if ($playlistAuthId && ! $this->checkAndEnforceAuthStreamLimit($playlistAuthId, $id)) {
+            abort(503, 'You have reached your maximum allowed concurrent streams.');
+        }
+
         // Provider Profile selection for Xtream playlists with profiles enabled
         // Note: If we already selected a profile during pooled stream check, skip this
         // Use profileSourcePlaylist which may be the channel's source playlist when streaming via CustomPlaylist
@@ -1089,6 +1212,11 @@ class M3uProxyService
                 $metadata['provider_profile_id'] = $selectedProfile->id;
             }
 
+            // Track PlaylistAuth ID for per-auth stream limit enforcement
+            if ($playlistAuthId) {
+                $metadata['playlist_auth_id'] = (string) $playlistAuthId;
+            }
+
             Log::debug('Creating transcoded stream with provider profile', [
                 'channel_id' => $actualChannel->id,
                 'original_channel_id' => $originalChannelId,
@@ -1152,6 +1280,11 @@ class M3uProxyService
                 $metadata['provider_profile_id'] = $selectedProfile->id;
             }
 
+            // Track PlaylistAuth ID for per-auth stream limit enforcement
+            if ($playlistAuthId) {
+                $metadata['playlist_auth_id'] = (string) $playlistAuthId;
+            }
+
             try {
                 $streamId = $this->createStream($primaryUrl, $failovers, $userAgent, $headers, $metadata);
             } catch (Exception $e) {
@@ -1197,7 +1330,7 @@ class M3uProxyService
      *
      * @throws Exception when base URL missing or API returns an error
      */
-    public function getEpisodeUrl($playlist, $episode, ?StreamProfile $profile = null, ?string $username = null, ?Request $request = null): string
+    public function getEpisodeUrl($playlist, $episode, ?StreamProfile $profile = null, ?string $username = null, ?Request $request = null, ?int $playlistAuthId = null): string
     {
         if (empty($this->apiBaseUrl)) {
             throw new Exception('M3U Proxy base URL is not configured');
@@ -1258,6 +1391,11 @@ class M3uProxyService
                     abort(503, 'Playlist has reached its maximum stream limit. Please try again later.');
                 }
             }
+        }
+
+        // Per-PlaylistAuth stream limit check (only applies when proxy is in use)
+        if ($playlistAuthId && ! $this->checkAndEnforceAuthStreamLimit($playlistAuthId, $id)) {
+            abort(503, 'You have reached your maximum allowed concurrent streams.');
         }
 
         $url = PlaylistUrlService::getEpisodeUrl($episode, $playlist);
@@ -1391,6 +1529,11 @@ class M3uProxyService
                 $metadata['provider_profile_id'] = $selectedProfile->id;
             }
 
+            // Track PlaylistAuth ID for per-auth stream limit enforcement
+            if ($playlistAuthId) {
+                $metadata['playlist_auth_id'] = (string) $playlistAuthId;
+            }
+
             try {
                 $streamId = $this->createTranscodedStream($url, $profile, false, $userAgent, $headers, $metadata);
             } catch (Exception $e) {
@@ -1430,6 +1573,11 @@ class M3uProxyService
             // Add provider profile ID if using profiles
             if ($selectedProfile) {
                 $metadata['provider_profile_id'] = $selectedProfile->id;
+            }
+
+            // Track PlaylistAuth ID for per-auth stream limit enforcement
+            if ($playlistAuthId) {
+                $metadata['playlist_auth_id'] = (string) $playlistAuthId;
             }
 
             try {
