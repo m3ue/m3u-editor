@@ -31,6 +31,8 @@ class CatchupSourceGenerationTest extends TestCase
 
     public function test_catchup_source_points_to_internal_timeshift_when_xtream_format_enabled(): void
     {
+        config(['app.disable_m3u_xtream_format' => false]);
+
         $channel = Channel::factory()->for($this->playlist)->create([
             'enabled' => true,
             'catchup' => 'default',
@@ -61,6 +63,8 @@ class CatchupSourceGenerationTest extends TestCase
 
     public function test_catchup_source_generated_for_xtream_import_channel_with_tv_archive(): void
     {
+        config(['app.disable_m3u_xtream_format' => false]);
+
         // Xtream imports store catchup as integer 1, no catchup_source
         Channel::factory()->for($this->playlist)->create([
             'enabled' => true,
@@ -122,8 +126,35 @@ class CatchupSourceGenerationTest extends TestCase
         $this->assertStringContainsString("catchup-source=\"{$originalSource}\"", $content);
     }
 
+    public function test_playlist_level_disable_m3u_xtream_format_bypasses_internal_url(): void
+    {
+        config(['app.disable_m3u_xtream_format' => false]);
+        $this->playlist->update(['disable_m3u_xtream_format' => true]);
+
+        $originalSource = 'http://provider.com/streaming/timeshift.php?stream={id}&start={utc_start}&duration={duration}';
+
+        Channel::factory()->for($this->playlist)->create([
+            'enabled' => true,
+            'catchup' => 'default',
+            'catchup_source' => $originalSource,
+            'url' => 'http://provider.com/live/user/pass/202.ts',
+        ]);
+
+        $response = $this->get(route('playlist.generate', ['uuid' => $this->playlist->uuid]));
+
+        $response->assertSuccessful();
+        $content = $response->streamedContent();
+
+        // With playlist-level disable, original catchup-source should be used
+        $this->assertStringContainsString("catchup-source=\"{$originalSource}\"", $content);
+        // And the raw provider URL should appear (not the internal Xtream format)
+        $this->assertStringContainsString('provider.com/live/user/pass/202.ts', $content);
+    }
+
     public function test_catchup_source_uses_correct_extension_from_channel_url(): void
     {
+        config(['app.disable_m3u_xtream_format' => false]);
+
         $channel = Channel::factory()->for($this->playlist)->create([
             'enabled' => true,
             'catchup' => 'default',

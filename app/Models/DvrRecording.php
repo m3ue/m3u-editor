@@ -209,6 +209,38 @@ class DvrRecording extends Model
     }
 
     /**
+     * Build the attribute array used to open this recording in the floating player.
+     * Mirrors Episode::getFloatingPlayerAttributes() for consistent dispatch shape.
+     */
+    public function getFloatingPlayerAttributes(): array
+    {
+        $playlist = $this->dvrSetting?->playlist;
+        $username = $this->user->name;
+        $format = $this->status === DvrRecordingStatus::Completed
+            ? ($this->dvrSetting?->dvr_output_format ?? 'mp4')
+            : 'm3u8';
+
+        $routeParams = [
+            'username' => $username,
+            'password' => $playlist->uuid,
+            'uuid' => $this->uuid,
+        ];
+
+        return [
+            'id' => 'dvr-recording-'.$this->id,
+            'stream_id' => $this->id,
+            'content_type' => 'dvr_recording',
+            'playlist_id' => $playlist?->id,
+            'title' => $this->display_title,
+            'display_title' => $this->display_title,
+            'url' => route('dvr.recording.stream', array_merge($routeParams, ['format' => $format])),
+            'format' => $format,
+            'type' => 'channel',
+            'edl_url' => route('dvr.recording.edl', $routeParams),
+        ];
+    }
+
+    /**
      * Whether comskip (commercial detection) should run for this recording.
      *
      * Per-rule setting takes precedence when explicitly set;

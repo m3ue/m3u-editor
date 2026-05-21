@@ -32,6 +32,7 @@ use Filament\Forms\Components\Toggle;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Fieldset;
 use Filament\Schemas\Components\Grid;
+use Filament\Schemas\Components\Group as ComponentsGroup;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Tabs;
 use Filament\Schemas\Components\Tabs\Tab;
@@ -246,13 +247,35 @@ class MergedPlaylistResource extends Resource implements CopilotResource
                 ->collapsed($creating)
                 ->columns(2)
                 ->schema([
-                    Toggle::make('auto_channel_increment')
-                        ->label(__('Auto channel number increment'))
-                        ->columnSpan(1)
-                        ->inline(false)
-                        ->live()
-                        ->default(false)
-                        ->helperText(__('If no channel number is set, output an automatically incrementing number.')),
+                    ComponentsGroup::make()
+                        ->columnSpanFull()
+                        ->columns(2)
+                        ->schema([
+                            Toggle::make('disable_m3u_xtream_format')
+                                ->label(__('Disable Xtream URL format in M3U output'))
+                                ->columnSpan(1)
+                                ->inline(false)
+                                ->default(false)
+                                ->hintIcon(
+                                    'heroicon-m-question-mark-circle',
+                                    tooltip: 'When enabled, the provider\'s original stream URL will be used directly in M3U output instead of the internal Xtream-format URL.'
+                                )
+                                ->afterStateHydrated(function (Toggle $component) {
+                                    if (config('app.disable_m3u_xtream_format', false)) {
+                                        $component->state(true);
+                                    }
+                                })
+                                ->dehydrated(fn (): bool => ! config('app.disable_m3u_xtream_format', false))
+                                ->disabled(fn (): bool => config('app.disable_m3u_xtream_format', false))
+                                ->helperText(config('app.disable_m3u_xtream_format', false) ? 'Already set by environment variable!' : __('Output the provider URL directly in M3U instead of routing through the internal Xtream URL format.')),
+                            Toggle::make('auto_channel_increment')
+                                ->label(__('Auto channel number increment'))
+                                ->columnSpan(1)
+                                ->inline(false)
+                                ->live()
+                                ->default(false)
+                                ->helperText(__('If no channel number is set, output an automatically incrementing number.')),
+                        ]),
                     TextInput::make('channel_start')
                         ->helperText(__('The starting channel number.'))
                         ->columnSpan(1)

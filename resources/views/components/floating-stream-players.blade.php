@@ -99,7 +99,8 @@
                     x-data="{ playerInstance: null }" :data-stream-url="player.url" :data-stream-format="player.format"
                     :data-player-id="player.id" :data-content-type="player.content_type || ''"
                     :data-stream-id="player.stream_id || ''" :data-playlist-id="player.playlist_id || ''"
-                    :data-series-id="player.series_id || ''" :data-season-number="player.season_number || ''" x-init="
+                    :data-series-id="player.series_id || ''" :data-season-number="player.season_number || ''"
+                    :data-edl-url="player.edl_url || ''" x-init="
                         if (window.streamPlayer && $el.dataset.streamUrl && $el.dataset.streamUrl !== '') {
                             playerInstance = window.streamPlayer();
                             const sep = $el.dataset.streamUrl.includes('?') ? '&' : '?';
@@ -204,6 +205,25 @@
                                 <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
                             </svg>
                         </button>
+                    </div>
+                </div>
+
+                <!-- Skip Ad Prompt (DVR recordings with comskip EDL) -->
+                <div :id="player.id + '-video-skipad'"
+                    class="absolute bottom-10 left-0 right-0 flex justify-center px-3 hidden z-20">
+                    <div
+                        class="bg-gray-900/95 text-white rounded-lg px-3 py-2 flex items-center gap-3 shadow-xl text-xs max-w-xs">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 text-yellow-400 flex-shrink-0"
+                            fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round"
+                                d="m3.75 7.5 16.5-4.125M12 6.75c-2.708 0-5.363.224-7.948.655C2.996 7.685 2.25 8.662 2.25 9.75v9a1.5 1.5 0 0 0 1.5 1.5h16.5a1.5 1.5 0 0 0 1.5-1.5v-9c0-1.088-.746-2.065-1.802-2.345A48.507 48.507 0 0 0 12 6.75Z" />
+                        </svg>
+                        <span class="flex-1 truncate">Commercial detected</span>
+                        <button class="px-2 py-1 bg-yellow-500 hover:bg-yellow-400 text-gray-900 font-medium rounded transition-colors flex-shrink-0"
+                            @click.stop="
+                                const v = document.getElementById(player.id + '-video');
+                                if (v && v._streamPlayer) v._streamPlayer.skipCommercial();
+                            ">Skip Ad</button>
                     </div>
                 </div>
 

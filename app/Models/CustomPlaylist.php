@@ -41,6 +41,7 @@ class CustomPlaylist extends Model
         'strict_live_ts' => 'boolean',
         'use_sticky_session' => 'boolean',
         'id_channel_by' => PlaylistChannelId::class,
+        'disable_m3u_xtream_format' => 'boolean',
     ];
 
     public function user(): BelongsTo

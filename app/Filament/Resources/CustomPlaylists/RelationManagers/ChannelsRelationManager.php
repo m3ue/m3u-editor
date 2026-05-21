@@ -161,7 +161,7 @@ class ChannelsRelationManager extends RelationManager
                     ->updateStateUsing(function ($record, $state) use ($ownerRecord): void {
                         $ownerRecord->channels()->updateExistingPivot(
                             $record->id,
-                            ['sort' => ($state !== '' && $state !== null) ? (int) $state : null]
+                            ['sort' => ($state !== '' && $state !== null) ? (float) $state : null]
                         );
                     })
                     ->sortable(query: function (Builder $query, string $direction): Builder {

@@ -442,6 +442,17 @@ class XtreamApiController extends Controller
                 $streams = $playlist->streams ?? 1;
                 $activeConnections = 0;
             }
+            // Override max_connections when the request is authenticated via a PlaylistAuth
+            // that has a specific per-auth limit configured.
+            if ($authMethod === 'playlist_auth') {
+                $authMaxConnections = PlaylistAuth::where('username', $username)
+                    ->where('password', $password)
+                    ->value('max_connections');
+                if ($authMaxConnections) {
+                    $streams = $authMaxConnections;
+                }
+            }
+
             $outputFormats = ['m3u8', 'ts'];
             if ($playlist->enable_proxy) {
                 // For PlaylistAlias, xtream_config is a list of configs — use effective playlist's config for output format

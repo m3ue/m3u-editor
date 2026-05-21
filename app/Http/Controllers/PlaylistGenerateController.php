@@ -203,7 +203,8 @@ class PlaylistGenerateController extends Controller
                     // Format the URL in Xtream Codes format if not disabled
                     // This way we can perform additional stream analysis, check for stream limits, etc.
                     // When disabled, will return the raw URL from the channel (or the proxyfied URL if proxy enabled)
-                    if (! (config('app.disable_m3u_xtream_format') ?? false)) {
+                    $useInternalXtreamFormat = ! ((config('app.disable_m3u_xtream_format') ?? false) || $playlist->disable_m3u_xtream_format);
+                    if ($useInternalXtreamFormat) {
                         $urlPath = 'live';
                         if ($channel->is_vod) {
                             $urlPath = 'movie';
@@ -230,7 +231,6 @@ class PlaylistGenerateController extends Controller
                         // m3u-editor rather than going directly to the provider.
                         // This also ensures catchup works for Xtream-imported channels that have
                         // tv_archive=1 but no catchup_source URL template stored.
-                        $useInternalXtreamFormat = ! (config('app.disable_m3u_xtream_format') ?? false);
                         if (($proxyEnabled || $useInternalXtreamFormat) && $channel->catchup) {
                             $catchupExt = $extension ?: 'ts';
                             $catchupSource = "{$baseUrl}/timeshift/{$username}/{$password}/{duration}/{start}/{$channel->id}.{$catchupExt}";
@@ -302,7 +302,7 @@ class PlaylistGenerateController extends Controller
                             if ($logoProxyEnabled) {
                                 $icon = LogoProxyController::generateProxyUrl($icon);
                             }
-                            if (! (config('app.disable_m3u_xtream_format') ?? false) || $proxyEnabled) {
+                            if (! ((config('app.disable_m3u_xtream_format') ?? false) || $playlist->disable_m3u_xtream_format) || $proxyEnabled) {
                                 $containerExtension = $episode->container_extension ?? 'mp4';
                                 $url = $baseUrl."/series/{$username}/{$password}/".$episode->id.".{$containerExtension}";
                             }

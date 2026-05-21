@@ -12,6 +12,7 @@ use App\Models\PlaylistAuth;
 use App\Models\User;
 use App\Services\M3uProxyService;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -217,6 +218,66 @@ class DvrStreamController extends Controller
         }
 
         return $this->serveLivePlaylist($request, $recording);
+    }
+
+    /**
+     * Return the comskip EDL segments for a completed recording as JSON.
+     *
+     * GET /dvr/{username}/{password}/{uuid}/edl
+     *
+     * Returns an array of commercial segments: [{"start": 1.0, "end": 120.0}, ...]
+     * Returns an empty array when no EDL file exists or comskip was not run.
+     */
+    public function edl(string $username, string $password, string $uuid): JsonResponse
+    {
+        $user = $this->resolveUser($username, $password);
+
+        if (! $user) {
+            abort(401, 'Invalid credentials');
+        }
+
+        $recording = DvrRecording::where('uuid', $uuid)
+            ->where('user_id', $user->id)
+            ->first();
+
+        if (! $recording) {
+            abort(404, 'Recording not found');
+        }
+
+        if (! $recording->hasFilePath()) {
+            return response()->json([]);
+        }
+
+        $setting = $recording->dvrSetting;
+        $disk = $setting?->storage_disk ?: config('dvr.storage_disk');
+
+        $edlPath = pathinfo($recording->file_path, PATHINFO_DIRNAME)
+            .'/'.pathinfo($recording->file_path, PATHINFO_FILENAME).'.edl';
+
+        if (! Storage::disk($disk)->exists($edlPath)) {
+            return response()->json([]);
+        }
+
+        $segments = [];
+
+        foreach (explode("\n", trim(Storage::disk($disk)->get($edlPath) ?? '')) as $line) {
+            $line = trim($line);
+            if ($line === '') {
+                continue;
+            }
+
+            $parts = preg_split('/\s+/', $line);
+            if (count($parts) < 3) {
+                continue;
+            }
+
+            // EDL format: start_time end_time type (type 0 = commercial cut)
+            if ((int) $parts[2] === 0) {
+                $segments[] = ['start' => (float) $parts[0], 'end' => (float) $parts[1]];
+            }
+        }
+
+        return response()->json($segments);
     }
 
     /**

@@ -40,6 +40,7 @@ class M3uProxyApiController extends Controller
         ])->findOrFail($id);
 
         $username = $request->input('username', $request->header('X-Username'));
+        $playlistAuthId = $request->input('playlist_auth_id') ? (int) $request->input('playlist_auth_id') : null;
 
         // If UUID provided, resolve that specific playlist (e.g., merged playlist)
         // Otherwise fall back to the channel's effective playlist
@@ -72,7 +73,8 @@ class M3uProxyApiController extends Controller
                 $channel,
                 $request,
                 $profile,
-                $username
+                $username,
+                $playlistAuthId
             );
 
         return redirect($url);
@@ -92,6 +94,7 @@ class M3uProxyApiController extends Controller
         ])->findOrFail($id);
 
         $username = $request->input('username', $request->header('X-Username'));
+        $playlistAuthId = $request->input('playlist_auth_id') ? (int) $request->input('playlist_auth_id') : null;
 
         // If UUID provided, resolve that specific playlist (e.g., merged playlist)
         // Otherwise fall back to the episode's playlist
@@ -118,7 +121,8 @@ class M3uProxyApiController extends Controller
                 $episode,
                 $profile,
                 $username,
-                $request
+                $request,
+                $playlistAuthId
             );
 
         return redirect($url);
@@ -146,6 +150,7 @@ class M3uProxyApiController extends Controller
         }
 
         $username = $request->input('username', $request->header('X-Username'));
+        $playlistAuthId = $request->input('playlist_auth_id') ? (int) $request->input('playlist_auth_id') : null;
 
         // Channel-level profile takes priority over the global in-app player default.
         // Playlist-level stream profiles are for external clients only — they should not
@@ -165,7 +170,8 @@ class M3uProxyApiController extends Controller
                 $channel,
                 $request,
                 $profile,
-                $username
+                $username,
+                $playlistAuthId
             );
 
         return redirect($this->appendClientId($url, $request));
@@ -191,6 +197,7 @@ class M3uProxyApiController extends Controller
         }
 
         $username = $request->input('username', $request->header('X-Username'));
+        $playlistAuthId = $request->input('playlist_auth_id') ? (int) $request->input('playlist_auth_id') : null;
 
         // Use in-app player VOD transcoding profile (from Preferences > In-App Player Transcoding).
         // Playlist-level stream profiles are for external clients only — they should not
@@ -205,7 +212,8 @@ class M3uProxyApiController extends Controller
                 $episode,
                 $profile,
                 $username,
-                $request
+                $request,
+                $playlistAuthId
             );
 
         return redirect($this->appendClientId($url, $request));

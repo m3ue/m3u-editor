@@ -136,7 +136,7 @@ RUN echo "@edge https://dl-cdn.alpinelinux.org/alpine/edge/main" >> /etc/apk/rep
     apk add --no-cache ffmpeg-dev@edge spirv-tools@edge && \
     apk add --no-cache --virtual=builddeps \
     autoconf automake libtool git wget tar build-base && \
-    wget -q http://prdownloads.sourceforge.net/argtable/argtable2-13.tar.gz && \
+    wget -q https://sourceforge.net/projects/argtable/files/argtable/argtable-2.13/argtable2-13.tar.gz && \
     tar xzf argtable2-13.tar.gz && \
     cd argtable2-13/ && \
     cp $(automake --print-libdir)/config.guess . && \

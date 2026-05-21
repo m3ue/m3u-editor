@@ -175,8 +175,8 @@ it('sorting one custom playlist does not affect another custom playlists pivot s
         ->pluck('sort', 'channel_id')
         ->toArray();
 
-    expect($pivotBSorts[$channelZ->id])->toBe(5)
-        ->and($pivotBSorts[$channelA->id])->toBe(10);
+    expect((float) $pivotBSorts[$channelZ->id])->toBe(5.0)
+        ->and((float) $pivotBSorts[$channelA->id])->toBe(10.0);
 });
 
 it('rejects invalid column for custom playlist sort', function () {

@@ -124,6 +124,7 @@ function multiStreamManager() {
                 playlist_id: channelData.playlist_id ?? null,
                 series_id: channelData.series_id ?? null,
                 season_number: channelData.season_number ?? null,
+                edl_url: channelData.edl_url || '',
                 zIndex: ++this.zIndexCounter,
                 position: this.getRandomPosition(),
                 size: { width: 480, height: 270 }, // 16:9 aspect ratio
@@ -318,6 +319,7 @@ function multiStreamManager() {
                 playlist_id: player.playlist_id ?? '',
                 series_id: player.series_id ?? '',
                 season_number: player.season_number ?? '',
+                edl_url: player.edl_url ?? '',
                 client_id: player.id,
             });
 

@@ -74,6 +74,7 @@ class Playlist extends Model
         'id_channel_by' => PlaylistChannelId::class,
         'source_type' => PlaylistSourceType::class,
         'disable_catchup' => 'boolean',
+        'disable_m3u_xtream_format' => 'boolean',
         'enable_channels' => 'boolean',
         'enable_vod_channels' => 'boolean',
         'enable_series' => 'boolean',

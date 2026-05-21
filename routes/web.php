@@ -367,6 +367,9 @@ Route::get('/webdav-media/{integration}/stream/{item}', [
 Route::get('/dvr/{username}/{password}/{uuid}/live.m3u8', [DvrStreamController::class, 'hlsPlaylist'])
     ->name('dvr.recording.hls.playlist');
 
+Route::get('/dvr/{username}/{password}/{uuid}/edl', [DvrStreamController::class, 'edl'])
+    ->name('dvr.recording.edl');
+
 Route::get('/dvr/{username}/{password}/{uuid}.{format?}', [DvrStreamController::class, 'stream'])
     ->name('dvr.recording.stream');
 
