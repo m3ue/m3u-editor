@@ -2,12 +2,12 @@
 
 namespace App\Filament\Tables;
 
+use App\Models\Group;
 use App\Models\SourceGroup;
 use Filament\Actions\BulkActionGroup;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Database\Query\JoinClause;
 
 class SourceGroupsTable
 {
@@ -18,41 +18,37 @@ class SourceGroupsTable
             ->modifyQueryUsing(function (Builder $query) use ($table): Builder {
                 $arguments = $table->getArguments();
                 $type = $arguments['type'] ?? null;
+                $playlistId = $arguments['playlist_id'] ?? null;
 
-                if ($playlistId = $arguments['playlist_id'] ?? null) {
+                if ($playlistId) {
                     $query->where('source_groups.playlist_id', $playlistId);
                 }
                 if ($type) {
                     $query->where('source_groups.type', $type);
                 }
 
-                // Pull the imported group's custom name (if it exists) so the table
-                // shows the user-facing name rather than the raw source name.
-                return $query
-                    ->leftJoin('groups', function (JoinClause $join) use ($type): void {
-                        $join->on('groups.name_internal', '=', 'source_groups.name')
-                            ->on('groups.playlist_id', '=', 'source_groups.playlist_id')
-                            ->whereNull('groups.deleted_at');
-                        if ($type) {
-                            $join->where('groups.type', '=', $type);
-                        }
-                    })
-                    ->select('source_groups.*')
-                    ->selectRaw('COALESCE(groups.name, source_groups.name) as display_name');
+                // Resolve the imported group's custom name (if any) via a correlated
+                // subquery rather than a join. A join would make the `name` column
+                // ambiguous for search/sort (both tables have one) and could multiply
+                // rows; the subquery keeps search/sort on the real source_groups.name
+                // column, which Filament searches case-insensitively across databases.
+                $customName = Group::query()
+                    ->select('name')
+                    ->whereColumn('groups.name_internal', 'source_groups.name')
+                    ->whereColumn('groups.playlist_id', 'source_groups.playlist_id')
+                    ->when($type, fn (Builder $subQuery) => $subQuery->where('groups.type', $type))
+                    ->whereNull('groups.deleted_at')
+                    ->limit(1);
+
+                return $query->select('source_groups.*')->selectSub($customName, 'display_name');
             })
-            ->defaultSort('display_name', 'asc')
+            ->defaultSort('name', 'asc')
             ->columns([
-                TextColumn::make('display_name')
+                TextColumn::make('name')
                     ->label(__('Group Name'))
-                    ->searchable(query: function (Builder $query, string $search): Builder {
-                        return $query->where(function (Builder $query) use ($search): void {
-                            $query->where('source_groups.name', 'like', "%{$search}%")
-                                ->orWhere('groups.name', 'like', "%{$search}%");
-                        });
-                    })
-                    ->sortable(query: function (Builder $query, string $direction): Builder {
-                        return $query->orderByRaw("COALESCE(groups.name, source_groups.name) {$direction}");
-                    }),
+                    ->formatStateUsing(fn ($state, $record) => filled($record->display_name) ? $record->display_name : $state)
+                    ->searchable()
+                    ->sortable(),
             ])
             ->filters([
                 //
