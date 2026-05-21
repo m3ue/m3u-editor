@@ -1,7 +1,0 @@
-models:
-  StreamProfile:
-    user_id: id foreign
-    name: string
-    description: string nullable
-    args: jsonb nullable
-    sort: unsigned integer
