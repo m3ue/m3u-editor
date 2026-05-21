@@ -110,6 +110,26 @@ class PlaylistAlias extends Model
             || ! empty($this->group_filter['selected_categories']);
     }
 
+    /**
+     * The custom live group order for this alias (internal group names, in order).
+     *
+     * @return array<string>
+     */
+    public function getLiveGroupSortOrder(): array
+    {
+        return $this->group_filter['live_group_order'] ?? [];
+    }
+
+    /**
+     * Whether this alias should deliver its live groups in a custom order rather
+     * than inheriting the source playlist's group ordering.
+     */
+    public function hasCustomLiveGroupSort(): bool
+    {
+        return ! empty($this->group_filter['sort_live_groups_custom'])
+            && ! empty($this->group_filter['live_group_order']);
+    }
+
     public function getPrimaryXtreamConfig(): ?array
     {
         return $this->xtream_config[0] ?? null;
