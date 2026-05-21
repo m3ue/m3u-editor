@@ -60,6 +60,7 @@ class SourceGroupsTable
                                         ->from('groups')
                                         ->whereColumn('groups.name_internal', 'source_groups.name')
                                         ->whereColumn('groups.playlist_id', 'source_groups.playlist_id')
+                                        ->whereColumn('groups.type', 'source_groups.type')
                                         ->whereNull('groups.deleted_at')
                                         ->whereRaw('LOWER(groups.name) LIKE ?', [$term]);
                                 });

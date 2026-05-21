@@ -247,6 +247,22 @@ describe('PlaylistAliasResource live group sort helpers', function () {
         expect($first['label'])->toBe('News');
     });
 
+    it('buildLiveGroupSortItems resolves the live label, ignoring a same-named VOD group', function () {
+        // Live "Sports" renamed to "UK Sports HD"; a VOD group shares name_internal
+        // "Sports" but is renamed differently. The live label must win.
+        makeLiveGroup($this->user, $this->playlist, 'Sports', 1, customName: 'UK Sports HD');
+        Group::factory()->for($this->playlist)->for($this->user)->create([
+            'name' => 'Movie Sports',
+            'name_internal' => 'Sports',
+            'type' => 'vod',
+        ]);
+
+        $items = PlaylistAliasResource::buildLiveGroupSortItems([], ['Sports'], $this->playlist->id);
+        $first = array_values($items)[0];
+
+        expect($first['label'])->toBe('UK Sports HD');
+    });
+
     it('liveGroupSortNames reads both item and flat-string shapes', function () {
         $itemShape = [
             'uuid-1' => ['name' => 'Sports', 'label' => 'UK Sports HD'],

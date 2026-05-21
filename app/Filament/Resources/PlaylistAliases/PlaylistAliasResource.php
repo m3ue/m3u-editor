@@ -926,10 +926,14 @@ class PlaylistAliasResource extends Resource implements CopilotResource
             return [];
         }
 
-        // Resolve display (custom) names in a single query to avoid N+1.
+        // Resolve display (custom) names in a single query to avoid N+1. Constrain
+        // to live groups (this pane is live-only) so a VOD group sharing a
+        // name_internal can't supply the label; soft-deleted rows are excluded by
+        // the Group model's SoftDeletes global scope.
         $labels = [];
         if ($playlistId) {
             $labels = Group::where('playlist_id', $playlistId)
+                ->where('type', 'live')
                 ->whereIn('name_internal', $finalNames)
                 ->pluck('name', 'name_internal')
                 ->toArray();

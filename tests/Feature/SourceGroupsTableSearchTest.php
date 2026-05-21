@@ -143,3 +143,17 @@ it('matches both the custom name and the source name for a renamed group', funct
     // …and the original source name still matches.
     searchGroups($this->playlist, 'general')->assertCanSeeTableRecords([$general]);
 });
+
+it('does not match a custom name belonging to a group of a different type', function () {
+    // A VOD group shares name_internal "Sports" with the live source group. Its custom
+    // name ("Movie Marathon") must not surface the *live* "Sports" group when searching
+    // the live table — the custom-name match is constrained to the same type.
+    Group::factory()->for($this->playlist)->for($this->user)->create([
+        'name' => 'Movie Marathon',
+        'name_internal' => 'Sports',
+        'type' => 'vod',
+    ]);
+
+    searchGroups($this->playlist, 'marathon')
+        ->assertCanNotSeeTableRecords([$this->ent, $this->doc, $this->sport]);
+});
