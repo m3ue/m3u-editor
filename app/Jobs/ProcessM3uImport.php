@@ -1425,12 +1425,12 @@ class ProcessM3uImport implements ShouldQueue
             return;
         }
 
-        // Create the jobs array
-        $jobs = [];
-
         // Flag any previously marked new items as not new
         $playlist->groups()->where('new', true)->update(['new' => false]);
         $playlist->channels()->where('new', true)->update(['new' => false]);
+
+        // Create the jobs array
+        $jobs = [];
 
         // Check if we need to create a backup first (don't include first time syncs)
         if (! $this->isNew && $playlist->backup_before_sync) {
@@ -1716,6 +1716,11 @@ class ProcessM3uImport implements ShouldQueue
 
             return;
         }
+
+        // Flag any previously marked new items as not new, so only genuinely
+        // new channels (inserted, not updated) carry new=true after this run.
+        $playlist->groups()->where('new', true)->update(['new' => false]);
+        $playlist->channels()->where('new', true)->update(['new' => false]);
 
         // Create the jobs array
         $jobs = [];
