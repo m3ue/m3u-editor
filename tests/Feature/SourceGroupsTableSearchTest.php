@@ -115,3 +115,31 @@ it('falls back to the source name when no group has been imported', function () 
         ->assertCanSeeTableRecords([$this->doc])
         ->assertSee('Documentaries');
 });
+
+it('finds a group by a term that only appears in its custom name', function () {
+    // Source "Sports" renamed to "UK Sports HD" — "UK" only appears in the custom name.
+    Group::factory()->for($this->playlist)->for($this->user)->create([
+        'name' => 'UK Sports HD',
+        'name_internal' => 'Sports',
+        'type' => 'live',
+    ]);
+
+    searchGroups($this->playlist, 'UK')
+        ->assertCanSeeTableRecords([$this->sport])
+        ->assertCanNotSeeTableRecords([$this->ent, $this->doc]);
+});
+
+it('matches both the custom name and the source name for a renamed group', function () {
+    // The reported case: a source group whose name contains "general", renamed to "Entertainment".
+    $general = SourceGroup::create(['playlist_id' => $this->playlist->id, 'name' => 'GENERAL hevc', 'type' => 'live']);
+    Group::factory()->for($this->playlist)->for($this->user)->create([
+        'name' => 'Entertainment',
+        'name_internal' => 'GENERAL hevc',
+        'type' => 'live',
+    ]);
+
+    // The display (custom) name is searchable…
+    searchGroups($this->playlist, 'entertainment')->assertCanSeeTableRecords([$general]);
+    // …and the original source name still matches.
+    searchGroups($this->playlist, 'general')->assertCanSeeTableRecords([$general]);
+});

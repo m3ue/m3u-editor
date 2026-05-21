@@ -47,7 +47,24 @@ class SourceGroupsTable
                 TextColumn::make('name')
                     ->label(__('Group Name'))
                     ->formatStateUsing(fn ($state, $record) => filled($record->display_name) ? $record->display_name : $state)
-                    ->searchable()
+                    // Match the displayed (custom) name as well as the source name. Uses
+                    // LOWER(...) on both sides so it stays case-insensitive on PostgreSQL,
+                    // whose LIKE is case-sensitive (unlike SQLite/MySQL).
+                    ->searchable(query: function (Builder $query, string $search): Builder {
+                        $term = '%'.mb_strtolower($search).'%';
+
+                        return $query->where(function (Builder $query) use ($term): void {
+                            $query->whereRaw('LOWER(source_groups.name) LIKE ?', [$term])
+                                ->orWhereExists(function ($subQuery) use ($term): void {
+                                    $subQuery->selectRaw('1')
+                                        ->from('groups')
+                                        ->whereColumn('groups.name_internal', 'source_groups.name')
+                                        ->whereColumn('groups.playlist_id', 'source_groups.playlist_id')
+                                        ->whereNull('groups.deleted_at')
+                                        ->whereRaw('LOWER(groups.name) LIKE ?', [$term]);
+                                });
+                        });
+                    })
                     ->sortable(),
             ])
             ->filters([
