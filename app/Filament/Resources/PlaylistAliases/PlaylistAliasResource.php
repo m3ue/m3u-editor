@@ -930,6 +930,7 @@ class PlaylistAliasResource extends Resource implements CopilotResource
         $labels = [];
         if ($playlistId) {
             $labels = Group::where('playlist_id', $playlistId)
+                ->where('type', 'live')
                 ->whereIn('name_internal', $finalNames)
                 ->pluck('name', 'name_internal')
                 ->toArray();

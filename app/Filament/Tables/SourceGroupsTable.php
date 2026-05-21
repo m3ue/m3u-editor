@@ -50,17 +50,19 @@ class SourceGroupsTable
                     // Match the displayed (custom) name as well as the source name. Uses
                     // LOWER(...) on both sides so it stays case-insensitive on PostgreSQL,
                     // whose LIKE is case-sensitive (unlike SQLite/MySQL).
-                    ->searchable(query: function (Builder $query, string $search): Builder {
+                    ->searchable(query: function (Builder $query, string $search) use ($table): Builder {
+                        $type = $table->getArguments()['type'] ?? null;
                         $term = '%'.mb_strtolower($search).'%';
 
-                        return $query->where(function (Builder $query) use ($term): void {
+                        return $query->where(function (Builder $query) use ($term, $type): void {
                             $query->whereRaw('LOWER(source_groups.name) LIKE ?', [$term])
-                                ->orWhereExists(function ($subQuery) use ($term): void {
+                                ->orWhereExists(function ($subQuery) use ($term, $type): void {
                                     $subQuery->selectRaw('1')
                                         ->from('groups')
                                         ->whereColumn('groups.name_internal', 'source_groups.name')
                                         ->whereColumn('groups.playlist_id', 'source_groups.playlist_id')
                                         ->whereNull('groups.deleted_at')
+                                        ->when($type, fn ($subQuery) => $subQuery->where('groups.type', $type))
                                         ->whereRaw('LOWER(groups.name) LIKE ?', [$term]);
                                 });
                         });
