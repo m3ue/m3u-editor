@@ -2168,6 +2168,8 @@
     "Submit for Review": "Soumettre pour examen",
     "Submit for review": "Soumettre pour examen",
     "Subscribe to host events that will automatically run your plugin in the background.": "Abonnez-vous pour héberger des événements qui exécuteront automatiquement votre plugin en arrière-plan.",
+    "Suppress success notifications": "Supprimer les notifications de succès",
+    "Hide success notifications from background tasks. Errors and warnings are always shown.": "Masquer les notifications de succès des tâches en arrière-plan. Les erreurs et avertissements sont toujours affichés.",
     "Subtitles": "Sous-titres",
     "Successfully connected to TMDB API!": "Connexion réussie à l'API TMDB !",
     "Summary": "Résumé",

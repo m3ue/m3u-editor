@@ -2168,6 +2168,8 @@
     "Submit for Review": "提交审核",
     "Submit for review": "提交审核",
     "Subscribe to host events that will automatically run your plugin in the background.": "订阅主机事件以便在后台自动运行您的插件。",
+    "Suppress success notifications": "屏蔽成功通知",
+    "Hide success notifications from background tasks. Errors and warnings are always shown.": "隐藏后台任务的成功通知，错误和警告始终显示。",
     "Subtitles": "字幕",
     "Successfully connected to TMDB API!": "成功连接至 TMDB API！",
     "Summary": "摘要",

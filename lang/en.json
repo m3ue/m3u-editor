@@ -2168,6 +2168,8 @@
     "Submit for Review": "Submit for Review",
     "Submit for review": "Submit for review",
     "Subscribe to host events that will automatically run your plugin in the background.": "Subscribe to host events that will automatically run your plugin in the background.",
+    "Suppress success notifications": "Suppress success notifications",
+    "Hide success notifications from background tasks. Errors and warnings are always shown.": "Hide success notifications from background tasks. Errors and warnings are always shown.",
     "Subtitles": "Subtitles",
     "Successfully connected to TMDB API!": "Successfully connected to TMDB API!",
     "Summary": "Summary",

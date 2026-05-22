@@ -34,6 +34,7 @@ use App\Models\PlaylistViewer;
 use App\Models\StreamFileSetting;
 use App\Models\StreamProfile;
 use App\Models\User;
+use App\Notifications\Notification as AppNotification;
 use App\Services\DateFormatService;
 use App\Services\EpgCacheService;
 use App\Services\GitInfoService;
@@ -51,6 +52,7 @@ use Exception;
 use Filament\Forms\Components\Field;
 use Filament\Forms\Components\FileUpload;
 use Filament\Infolists\Components\ImageEntry;
+use Filament\Notifications\Notification as FilamentNotification;
 use Filament\Schemas\Components\Fieldset;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
@@ -90,6 +92,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
+        $this->app->bind(FilamentNotification::class, AppNotification::class);
+
         // Override the Laravel AI manager to fix a strict-mode tool schema bug
         // where tools with no parameters are missing the required `parameters`
         // object, causing OpenAI to return a 400 invalid_function_parameters error.
