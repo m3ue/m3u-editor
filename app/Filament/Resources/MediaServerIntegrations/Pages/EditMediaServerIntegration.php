@@ -67,6 +67,46 @@ class EditMediaServerIntegration extends EditRecord
                         }
                     }),
 
+                Action::make('refreshLibraries')
+                    ->label(__('Refresh Libraries'))
+                    ->icon('heroicon-o-arrow-path')
+                    ->action(function (MediaServerIntegration $record) {
+                        $service = MediaServerService::make($record);
+                        $libraries = $service->fetchLibraries();
+
+                        if ($libraries->isNotEmpty()) {
+                            // Preserve existing selections where possible
+                            $existingSelections = $record->selected_library_ids ?? [];
+                            $newLibraryIds = $libraries->pluck('id')->toArray();
+
+                            // Filter selections to only include libraries that still exist
+                            $validSelections = array_intersect($existingSelections, $newLibraryIds);
+
+                            $record->update([
+                                'available_libraries' => $libraries->toArray(),
+                                'selected_library_ids' => array_values($validSelections),
+                            ]);
+
+                            $removedCount = count($existingSelections) - count($validSelections);
+                            $message = "Found {$libraries->count()} libraries.";
+                            if ($removedCount > 0) {
+                                $message .= " {$removedCount} previously selected libraries no longer exist.";
+                            }
+
+                            Notification::make()
+                                ->success()
+                                ->title(__('Libraries Refreshed'))
+                                ->body($message)
+                                ->send();
+                        } else {
+                            Notification::make()
+                                ->warning()
+                                ->title(__('No Libraries Found'))
+                                ->body(__('No movie or TV show libraries were found on the server.'))
+                                ->send();
+                        }
+                    }),
+
                 Action::make('viewPlaylist')
                     ->label(__('View Playlist'))
                     ->icon('heroicon-o-eye')

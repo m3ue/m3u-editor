@@ -26,11 +26,11 @@ class TorrentTitleParser
               HDTV|PDTV|DVDRip|DVD-Rip|DVDSCR|VODRip|CAM)\b
         # Codec
         |\b(?:x264|x265|H\.264|H\.265|H264|H265|HEVC|AVC|xvid|divx|AV1)\b
-        # Streaming service tags (short uppercase only — unlikely to be in titles)
+        # Streaming service tags (short uppercase only, unlikely to appear in titles)
         |\b(?:NF|AMZN|ATVP|DSNP|PCOK|STAN)\b
         # Audio
         |\b(?:TrueHD|DTS-HD|DTS-ES|DTS|EAC3|E-AC-3|AC3|AAC|Atmos|DDP)\b
-        # HDR / colour volume
+        # HDR and colour volume
         |\b(?:HDR10\+|HDR10|HDR|DoVi|DV)\b
         # Bit depth
         |\b(?:10Bit|10bit|8Bit|8bit|Hi10)\b

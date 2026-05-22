@@ -1134,6 +1134,20 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
             ->filtersTriggerAction(function ($action) {
                 return $action->button()->label(__('Filters'));
             })
+            ->modifyQueryUsing(function (Builder $query) {
+                $query->addSelect([
+                    'channels_count' => Channel::selectRaw('count(*)')
+                        ->whereColumn('channels.playlist_id', 'media_server_integrations.playlist_id'),
+                    'enabled_channels_count' => Channel::selectRaw('count(*)')
+                        ->whereColumn('channels.playlist_id', 'media_server_integrations.playlist_id')
+                        ->where('enabled', true),
+                    'series_count' => Series::selectRaw('count(*)')
+                        ->whereColumn('series.playlist_id', 'media_server_integrations.playlist_id'),
+                    'enabled_series_count' => Series::selectRaw('count(*)')
+                        ->whereColumn('series.playlist_id', 'media_server_integrations.playlist_id')
+                        ->where('enabled', true),
+                ]);
+            })
             ->columns([
                 TextColumn::make('name')
                     ->label(__('Name'))
@@ -1211,6 +1225,20 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                         'failed' => 'danger',
                         default => 'gray',
                     })
+                    ->sortable(),
+
+                TextColumn::make('channels_count')
+                    ->label(__('Movies'))
+                    ->state(fn ($record) => $record->channels_count ?? 0)
+                    ->description(fn ($record): string => 'Active: '.($record->enabled_channels_count ?? 0))
+                    ->toggleable()
+                    ->sortable(),
+
+                TextColumn::make('series_count')
+                    ->label(__('Series'))
+                    ->state(fn ($record) => $record->series_count ?? 0)
+                    ->description(fn ($record): string => 'Active: '.($record->enabled_series_count ?? 0))
+                    ->toggleable()
                     ->sortable(),
 
                 ProgressColumn::make('movie_progress')
