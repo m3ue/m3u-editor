@@ -32,6 +32,13 @@ class WebDavMediaService implements MediaServer
     protected array $torrentSeriesCache = [];
 
     /**
+     * Optional callback invoked during the scan/fetch phases with the running item count.
+     * Used by the sync job to report incremental progress while WebDAV directories are
+     * being scanned (before DB writes begin).
+     */
+    protected ?\Closure $scanProgressCallback = null;
+
+    /**
      * Common video file extensions.
      */
     protected array $defaultVideoExtensions = [
@@ -70,6 +77,15 @@ class WebDavMediaService implements MediaServer
     public static function make(MediaServerIntegration $integration): self
     {
         return new self($integration);
+    }
+
+    /**
+     * Register a callback invoked during directory scanning with the running found-item count.
+     * The job uses this to show incremental progress while WebDAV is being scanned.
+     */
+    public function setScanProgressCallback(\Closure $fn): void
+    {
+        $this->scanProgressCallback = $fn;
     }
 
     /**
@@ -302,7 +318,25 @@ class WebDavMediaService implements MediaServer
                 $this->integration->scan_recursive
             );
 
+            $normalizedScanPath = rtrim($path, '/');
+
             foreach ($files as $file) {
+                // Skip files that live inside a subdirectory which looks like a season/series pack.
+                // This prevents junk files (promo .mkv, sample, etc.) bundled inside a series torrent
+                // from appearing as standalone movies.
+                $fileDir = rtrim(dirname($file['path']), '/');
+                if ($fileDir !== $normalizedScanPath) {
+                    $parentName = basename($fileDir);
+                    if ($parser) {
+                        $parentParsed = $parser->parse($parentName);
+                        if ($parentParsed['is_episode'] || $parentParsed['is_pack']) {
+                            continue;
+                        }
+                    } elseif (preg_match('/\b[Ss]\d{1,2}\b/u', $parentName)) {
+                        continue;
+                    }
+                }
+
                 $isEpisode = $parser
                     ? $parser->parse($file['name'])['is_episode']
                     : ($isBothPath && $this->looksLikeEpisode($file['name']));
@@ -318,6 +352,10 @@ class WebDavMediaService implements MediaServer
 
                 if ($movieData) {
                     $movies->push($movieData);
+
+                    if ($this->scanProgressCallback) {
+                        ($this->scanProgressCallback)($movies->count());
+                    }
                 }
             }
         }
@@ -430,34 +468,32 @@ class WebDavMediaService implements MediaServer
                 }
 
                 $seriesName = basename($seriesDir['path']);
+                $torrentParser = $this->integration->use_torrent_parser ? new TorrentTitleParser : null;
 
-                if ($seasonId !== null) {
-                    $seasonPath = $this->resolveSeasonPath($seriesDir['path'], $seasonId);
-                    if ($seasonPath) {
-                        $files = $this->scanWebDavDirectoryForVideoFiles($seasonPath, false);
-                        foreach ($files as $file) {
-                            $episodeData = $this->parseEpisodeFile($file, $seriesName);
-                            if ($episodeData) {
-                                $episodes->push($episodeData);
-                            }
-                        }
-                    } else {
-                        $files = $this->scanWebDavDirectoryForVideoFiles($seriesDir['path'], true);
-                        foreach ($files as $file) {
-                            $episodeData = $this->parseEpisodeFile($file, $seriesName);
-                            if ($episodeData) {
-                                $episodes->push($episodeData);
-                            }
-                        }
-                    }
-                } else {
-                    $files = $this->scanWebDavDirectoryForVideoFiles($seriesDir['path'], true);
+                $parseFiles = function (array $files) use (&$episodes, $seriesName, $torrentParser): void {
                     foreach ($files as $file) {
+                        // When the torrent parser is active, skip files that clearly aren't episodes
+                        // (junk promo/sample files included in series torrents) without emitting a log.
+                        if ($torrentParser && ! $torrentParser->parse($file['name'])['is_episode']) {
+                            continue;
+                        }
+
                         $episodeData = $this->parseEpisodeFile($file, $seriesName);
                         if ($episodeData) {
                             $episodes->push($episodeData);
                         }
                     }
+                };
+
+                if ($seasonId !== null) {
+                    $seasonPath = $this->resolveSeasonPath($seriesDir['path'], $seasonId);
+                    if ($seasonPath) {
+                        $parseFiles($this->scanWebDavDirectoryForVideoFiles($seasonPath, false));
+                    } else {
+                        $parseFiles($this->scanWebDavDirectoryForVideoFiles($seriesDir['path'], true));
+                    }
+                } else {
+                    $parseFiles($this->scanWebDavDirectoryForVideoFiles($seriesDir['path'], true));
                 }
             }
         }
@@ -895,6 +931,10 @@ class WebDavMediaService implements MediaServer
                 continue;
             }
 
+            // TorrentTitleParser already strips site watermarks (www.UIndex.org, [XTORRENTY.ORG], …)
+            // from the directory name before pattern matching, so we parse the raw directory name
+            // directly. Do NOT replace it with the NFO "Title:" field here — episode-title strings
+            // like "This Is Art, This Is Spirituality" would fail episode detection.
             $parsed = $parser->parse($dir['name']);
 
             if ($parsed['is_episode']) {
@@ -915,7 +955,15 @@ class WebDavMediaService implements MediaServer
                     'episode' => $parsed['episode'],
                 ];
             } else {
-                // Regular series directory or multi-season pack — use directory path as ID
+                // Regular series directory or multi-season pack — use directory path as ID.
+                // If no season/pack markers are present, do a shallow check to avoid treating
+                // a single-movie directory (e.g. Remarkably Bright Creatures/) as a series.
+                if (! $parsed['is_pack'] && $parsed['season'] === null) {
+                    if ($this->looksLikeMovieDirectory($dir['path'], $parser)) {
+                        continue;
+                    }
+                }
+
                 $seriesTitle = $parsed['title'] ?: $dir['name'];
                 $seriesId = md5($dir['path']);
 
@@ -951,6 +999,10 @@ class WebDavMediaService implements MediaServer
                 'CommunityRating' => null,
                 '_torrent_episode_dirs' => $data['dirs'],
             ];
+
+            if ($this->scanProgressCallback) {
+                ($this->scanProgressCallback)(count($seriesMap));
+            }
         }
     }
 
@@ -992,6 +1044,7 @@ class WebDavMediaService implements MediaServer
         $episodes = collect();
         $seriesName = $seriesData['Name'];
         $parser = new TorrentTitleParser;
+        $videoExtensions = $this->integration->getVideoExtensions();
 
         foreach ($seriesData['_torrent_episode_dirs'] as $entry) {
             $season = $entry['season'];
@@ -1001,7 +1054,25 @@ class WebDavMediaService implements MediaServer
                 continue;
             }
 
-            $files = $this->scanWebDavDirectoryForVideoFiles($entry['dir']['path'], false);
+            // List the episode container directory once to collect both video files and the NFO.
+            // The NFO "Title:" field provides the human-readable episode name.
+            $allItems = $this->listWebDavDirectory($entry['dir']['path']);
+            $files = [];
+            $nfoTitle = null;
+
+            foreach ($allItems as $item) {
+                if ($item['isDirectory']) {
+                    continue;
+                }
+
+                $ext = strtolower(pathinfo($item['name'], PATHINFO_EXTENSION));
+
+                if (in_array($ext, $videoExtensions, true)) {
+                    $files[] = $item;
+                } elseif ($ext === 'nfo' && $nfoTitle === null) {
+                    $nfoTitle = $this->fetchNfoDisplayTitle($item['path']);
+                }
+            }
 
             foreach ($files as $file) {
                 // Try torrent parser first, fall back to regex parseEpisodeFile
@@ -1013,7 +1084,7 @@ class WebDavMediaService implements MediaServer
                     $episodes->push([
                         'Id' => $itemId,
                         'SeriesName' => $seriesName,
-                        'Name' => "Episode {$fileParsed['episode']}",
+                        'Name' => $nfoTitle ?? "Episode {$fileParsed['episode']}",
                         'IndexNumber' => $fileParsed['episode'],
                         'ParentIndexNumber' => $fileParsed['season'] ?? $season,
                         'Path' => $file['path'],
@@ -1077,6 +1148,79 @@ class WebDavMediaService implements MediaServer
                 'Size' => $file['size'],
             ]],
         ];
+    }
+
+    /**
+     * Fetch the human-readable "Title:" field from an NFO file at a known path.
+     * Used inside episode container directories to get the proper episode title
+     * (e.g. "This Is Art, This Is Spirituality" rather than "Episode 3").
+     */
+    protected function fetchNfoDisplayTitle(string $nfoPath): ?string
+    {
+        try {
+            $response = $this->getHttpClient()->get($this->pathToUrl($nfoPath));
+
+            if (! $response->successful()) {
+                return null;
+            }
+
+            $content = $response->body();
+
+            // Parse "Title           : Some Title..." format (NFO info files)
+            if (preg_match('/^Title\s*:\s*(.+)$/mi', $content, $m)) {
+                $title = trim($m[1]);
+
+                return $title !== '' ? $this->sanitizeUtf8($title) : null;
+            }
+        } catch (Exception $e) {
+            // NFO fetch is best-effort; continue without it
+        }
+
+        return null;
+    }
+
+    /**
+     * Return true if a directory appears to contain a single movie file rather than
+     * a TV series (no season subdirectories, no episode-pattern video files).
+     * Uses a single shallow PROPFIND — called only when the directory name lacks
+     * any season/episode markers.
+     */
+    protected function looksLikeMovieDirectory(string $dirPath, TorrentTitleParser $parser): bool
+    {
+        $extensions = $this->integration->getVideoExtensions();
+        $items = $this->listWebDavDirectory($dirPath);
+
+        $videoFiles = [];
+        $hasSubDirs = false;
+
+        foreach ($items as $item) {
+            if ($item['isDirectory']) {
+                $hasSubDirs = true;
+                break;
+            }
+
+            $ext = strtolower(pathinfo($item['name'], PATHINFO_EXTENSION));
+            if (in_array($ext, $extensions, true)) {
+                $videoFiles[] = $item;
+            }
+        }
+
+        if ($hasSubDirs) {
+            return false;
+        }
+
+        // If there are video files but none match episode patterns, it's a movie directory
+        if (! empty($videoFiles)) {
+            foreach ($videoFiles as $vf) {
+                if ($parser->parse($vf['name'])['is_episode']) {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        return false;
     }
 
     /**

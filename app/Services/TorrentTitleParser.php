@@ -36,6 +36,8 @@ class TorrentTitleParser
         |\b(?:10Bit|10bit|8Bit|8bit|Hi10)\b
         # Release flags
         |\b(?:PROPER|REPACK|INTERNAL|RETAIL|EXTENDED|UNRATED|THEATRICAL|IMAX)\b
+        # Multi-language release tags
+        |\b(?:MULTi|MULTI|VFI|VFF|VFQ|VF2|VOSTFR|TRUEFRENCH|FRENCH)\b
         # Language release tags
         |\b(?:Lektor|Napisy|Lector|Dubbing)\b
     )/ixu';
@@ -54,10 +56,17 @@ class TorrentTitleParser
      */
     public function parse(string $filename): array
     {
-        // Strip extension if present
+        // Strip extension only when it looks like a real file extension (short, alphanumeric).
+        // Directory names can contain dots (e.g. www.UIndex.org - …) which pathinfo would
+        // otherwise misidentify as an extension and swallow the rest of the string.
         $ext = pathinfo($filename, PATHINFO_EXTENSION);
-        $base = $ext !== '' ? pathinfo($filename, PATHINFO_FILENAME) : $filename;
+        $base = ($ext !== '' && strlen($ext) <= 5 && ctype_alnum($ext))
+            ? pathinfo($filename, PATHINFO_FILENAME)
+            : $filename;
         $base = trim($base);
+
+        // Remove torrent-site watermarks before any pattern matching
+        $base = $this->stripSiteWatermarks($base);
 
         // 1 — Multi-season pack: [S01-S07], S01-S07
         if (preg_match('/[\[(]?[Ss](\d{1,2})\s*[-–]\s*[Ss](\d{1,2})[\])]?/u', $base, $m, PREG_OFFSET_CAPTURE)) {
@@ -95,9 +104,9 @@ class TorrentTitleParser
             ];
         }
 
-        // 4 — Standalone season pack: "Season 2", "S02" at/near end (no episode number)
+        // 4 — Standalone season pack: "Season 2", "S02" not followed by an episode number
         if (preg_match('/\b(?:Season|Saison)\s?(\d{1,2})\b/iu', $base, $m, PREG_OFFSET_CAPTURE) ||
-            preg_match('/\bS(\d{1,2})\s*[\])\s]?\s*$/u', $base, $m, PREG_OFFSET_CAPTURE)) {
+            preg_match('/\bS(\d{1,2})(?![Ee]\d)(?=[\s._\[(\-]|$)/iu', $base, $m, PREG_OFFSET_CAPTURE)) {
             return [
                 'title' => $this->cleanTitle(substr($base, 0, $m[0][1])),
                 'year' => $this->extractYear($base),
@@ -122,6 +131,26 @@ class TorrentTitleParser
     }
 
     /**
+     * Strip common torrent-site watermark prefixes from directory and file names.
+     *
+     * Handles patterns like:
+     *   [XTORRENTY.ORG] Movie Name...
+     *   www.UIndex.org    -    Movie Name...
+     *   www.SomeSite.com - Movie Name...
+     */
+    private function stripSiteWatermarks(string $str): string
+    {
+        // Strip leading [SOMETHING.TLD] bracket (e.g. [XTORRENTY.ORG])
+        $str = preg_replace('/^\s*\[[^\]]{1,50}\.[A-Za-z]{2,6}\]\s*/u', '', $str) ?? $str;
+
+        // Strip leading www.domain.tld followed by any separator and dash
+        // Handles extra spaces like "www.UIndex.org    -    "
+        $str = preg_replace('/^\s*www\.\S+\s*[-–]+\s*/iu', '', $str) ?? $str;
+
+        return trim($str);
+    }
+
+    /**
      * Find the character position where quality/source/codec tokens begin.
      * Everything before this position is candidate title text.
      */
@@ -132,7 +161,7 @@ class TorrentTitleParser
 
         // Year preceded by a delimiter — use last match so title-leading years don't break early
         if (preg_match_all('/(?<=[.\s(\[_-])(?:19|20)\d{2}(?=[.\s)\]_\-]|$)/u', $str, $matches, PREG_OFFSET_CAPTURE)) {
-            foreach ($matches[0] as [$match, $pos]) {
+            foreach ($matches[0] as [, $pos]) {
                 if ($pos > 2) {
                     $min = min($min, $pos);
                     break; // first occurrence after position 2 is enough
@@ -183,15 +212,20 @@ class TorrentTitleParser
         // Strip trailing separators
         $title = rtrim($raw, ' .-_([');
 
-        // Replace dots/underscores used as word separators (not decimal points)
-        $title = preg_replace('/(?<!\d)\.(?!\d)/u', ' ', $title) ?? $title;
+        // Strip leading [TAG] / [SITE.TLD] bracket blocks
+        $title = preg_replace('/^\s*\[[^\]]{0,60}\]\s*/u', '', $title) ?? $title;
+
+        // Replace dots used as word separators. Only true decimal points (digit.digit) are kept.
+        $title = preg_replace('/(?<!\d)\.|\.(?!\d)/u', ' ', $title) ?? $title;
         $title = str_replace('_', ' ', $title);
 
         // Strip trailing year ranges like "2019-2025"
         $title = preg_replace('/\s+\d{4}\s*[-–]\s*\d{4}\s*$/u', '', $title) ?? $title;
 
+        // Strip trailing standalone year — years at the end are metadata, not title
+        $title = preg_replace('/\s+(?:19|20)\d{2}\s*$/u', '', $title) ?? $title;
+
         // Strip trailing standalone year in brackets/parens like "(2024)"
-        // Keep freestanding years since they may be part of the title
         $title = preg_replace('/\s*\(\d{4}\)\s*$/u', '', $title) ?? $title;
 
         // Remove bracket/paren tag blocks from the end
