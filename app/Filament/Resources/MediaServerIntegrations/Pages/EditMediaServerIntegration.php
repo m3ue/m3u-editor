@@ -5,7 +5,13 @@ namespace App\Filament\Resources\MediaServerIntegrations\Pages;
 use App\Filament\Resources\MediaServerIntegrations\MediaServerIntegrationResource;
 use App\Filament\Resources\Playlists\PlaylistResource;
 use App\Jobs\SyncMediaServer;
+use App\Models\Category;
+use App\Models\Channel;
+use App\Models\Episode;
+use App\Models\Group;
 use App\Models\MediaServerIntegration;
+use App\Models\Season;
+use App\Models\Series;
 use App\Services\MediaServerService;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
@@ -95,6 +101,72 @@ class EditMediaServerIntegration extends EditRecord
                         }
                     })
                     ->visible(fn ($record) => $record->playlist_id !== null),
+
+                Action::make('flushLibrary')
+                    ->label(__('Flush Library'))
+                    ->icon('heroicon-o-archive-box-x-mark')
+                    ->color('danger')
+                    ->requiresConfirmation()
+                    ->modalHeading(__('Flush Library'))
+                    ->modalDescription(__('This will permanently delete ALL movies, series, episodes, seasons, and categories from this integration\'s playlist, then start a fresh sync. This cannot be undone.'))
+                    ->modalSubmitActionLabel(__('Yes, flush and re-sync'))
+                    ->action(function () {
+                        $record = $this->record;
+                        $playlist = $record->playlist;
+
+                        if ($playlist) {
+                            Episode::where('playlist_id', $playlist->id)->delete();
+                            Season::where('playlist_id', $playlist->id)->delete();
+                            Series::where('playlist_id', $playlist->id)->delete();
+                            Category::where('playlist_id', $playlist->id)->delete();
+                            Channel::where('playlist_id', $playlist->id)->where('is_custom', false)->delete();
+                            Group::where('playlist_id', $playlist->id)->where('custom', false)->delete();
+                        }
+
+                        $record->update([
+                            'status' => 'idle',
+                            'progress' => 0,
+                            'movie_progress' => 0,
+                            'series_progress' => 0,
+                            'total_movies' => 0,
+                            'total_series' => 0,
+                            'sync_stats' => null,
+                        ]);
+
+                        SyncMediaServer::dispatch($record->id);
+
+                        Notification::make()
+                            ->success()
+                            ->title(__('Library Flushed'))
+                            ->body(__('All library content cleared. A fresh sync has been queued.'))
+                            ->send();
+                    })
+                    ->visible(fn () => $this->record->playlist_id !== null),
+
+                Action::make('reset')
+                    ->label(__('Reset Status'))
+                    ->icon('heroicon-o-arrow-uturn-left')
+                    ->color('warning')
+                    ->requiresConfirmation()
+                    ->modalIcon('heroicon-o-arrow-uturn-left')
+                    ->modalDescription(__('Reset media server status so it can be synced again. Only perform this action if you are having problems with the media server syncing.'))
+                    ->modalSubmitActionLabel(__('Yes, reset now'))
+                    ->action(function () {
+                        $this->record->update([
+                            'status' => 'idle',
+                            'progress' => 0,
+                            'movie_progress' => 0,
+                            'series_progress' => 0,
+                            'total_movies' => 0,
+                            'total_series' => 0,
+                        ]);
+
+                        Notification::make()
+                            ->success()
+                            ->title(__('Status Reset'))
+                            ->body(__('Media server status has been reset.'))
+                            ->send();
+                    }),
 
                 DeleteAction::make(),
             ])->button(),

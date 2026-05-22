@@ -10,7 +10,11 @@ use App\Filament\Resources\MediaServerIntegrations\Pages\EditMediaServerIntegrat
 use App\Filament\Resources\MediaServerIntegrations\Pages\ListMediaServerIntegrations;
 use App\Filament\Resources\Playlists\PlaylistResource;
 use App\Jobs\SyncMediaServer;
+use App\Models\Category;
+use App\Models\Channel;
 use App\Models\CustomPlaylist;
+use App\Models\Episode;
+use App\Models\Group;
 use App\Models\MediaServerIntegration;
 use App\Models\MergedPlaylist;
 use App\Models\Playlist;
@@ -420,7 +424,7 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                             ->collapsible()
                             ->itemLabel(fn (array $state): ?string => $state['name'] ?? 'New Library'),
 
-                        Grid::make(2)->schema([
+                        Grid::make(3)->schema([
                             Toggle::make('scan_recursive')
                                 ->label(__('Scan Recursively'))
                                 ->helperText(__('Scan subdirectories for media files'))
@@ -430,6 +434,16 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                                 ->label(__('Auto-Fetch Metadata'))
                                 ->helperText(__('Automatically lookup TMDB metadata after sync completes (Local & WebDAV)'))
                                 ->default(true),
+
+                            Toggle::make('use_torrent_parser')
+                                ->label(__('Torrent/NZB Title Parsing'))
+                                ->hintIcon(
+                                    'heroicon-m-question-mark-circle',
+                                    tooltip: 'Recommended for TorBox and other remote WebDAV services. Groups individual episode downloads into proper series.'
+                                )
+                                ->helperText(__('Smart parsing of torrent-style filenames.'))
+                                ->inline(false)
+                                ->default(false),
                         ]),
 
                         Grid::make(1)->schema([
@@ -1364,6 +1378,46 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                                     ->body("Merged {$result['duplicates']} duplicate series and deleted {$result['deleted']} orphaned entries.")
                                     ->send();
                             }
+                        })
+                        ->visible(fn ($record) => $record->playlist_id !== null),
+
+                    Action::make('flushLibrary')
+                        ->label(__('Flush Library'))
+                        ->icon('heroicon-o-archive-box-x-mark')
+                        ->color('danger')
+                        ->requiresConfirmation()
+                        ->modalHeading(__('Flush Library'))
+                        ->modalDescription(__('This will permanently delete ALL movies, series, episodes, seasons, and categories from this integration\'s playlist, then start a fresh sync. This cannot be undone.'))
+                        ->modalSubmitActionLabel(__('Yes, flush and re-sync'))
+                        ->action(function (MediaServerIntegration $record) {
+                            $playlist = $record->playlist;
+
+                            if ($playlist) {
+                                Episode::where('playlist_id', $playlist->id)->delete();
+                                Season::where('playlist_id', $playlist->id)->delete();
+                                Series::where('playlist_id', $playlist->id)->delete();
+                                Category::where('playlist_id', $playlist->id)->delete();
+                                Channel::where('playlist_id', $playlist->id)->where('is_custom', false)->delete();
+                                Group::where('playlist_id', $playlist->id)->where('custom', false)->delete();
+                            }
+
+                            $record->update([
+                                'status' => 'idle',
+                                'progress' => 0,
+                                'movie_progress' => 0,
+                                'series_progress' => 0,
+                                'total_movies' => 0,
+                                'total_series' => 0,
+                                'sync_stats' => null,
+                            ]);
+
+                            SyncMediaServer::dispatch($record->id);
+
+                            Notification::make()
+                                ->success()
+                                ->title(__('Library Flushed'))
+                                ->body(__('All library content cleared. A fresh sync has been queued.'))
+                                ->send();
                         })
                         ->visible(fn ($record) => $record->playlist_id !== null),
 

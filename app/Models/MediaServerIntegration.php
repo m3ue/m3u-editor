@@ -35,6 +35,7 @@ class MediaServerIntegration extends Model
         'auto_fetch_metadata' => true,
         'scan_recursive' => true,
         'skip_ssl_verify' => false,
+        'use_torrent_parser' => false,
         'plex_management_enabled' => false,
     ];
 
@@ -66,6 +67,7 @@ class MediaServerIntegration extends Model
         'video_extensions' => 'array',
         'scan_recursive' => 'boolean',
         'skip_ssl_verify' => 'boolean',
+        'use_torrent_parser' => 'boolean',
         'auto_fetch_metadata' => 'boolean',
         'plex_management_enabled' => 'boolean',
         'plex_dvr_tuners' => 'array',

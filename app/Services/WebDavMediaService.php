@@ -23,6 +23,15 @@ class WebDavMediaService implements MediaServer
     protected MediaServerIntegration $integration;
 
     /**
+     * Cache populated by fetchSeries() when torrent parser is active.
+     * Keyed by series ID — allows fetchSeasons() and fetchEpisodes() to find
+     * episode-container grouped series that have no single directory path.
+     *
+     * @var array<string, array>
+     */
+    protected array $torrentSeriesCache = [];
+
+    /**
      * Common video file extensions.
      */
     protected array $defaultVideoExtensions = [
@@ -277,6 +286,7 @@ class WebDavMediaService implements MediaServer
     {
         $movies = collect();
         $paths = $this->integration->getLocalMediaPathsForType('movies');
+        $parser = $this->integration->use_torrent_parser ? new TorrentTitleParser : null;
 
         foreach ($paths as $pathConfig) {
             $path = $pathConfig['path'] ?? '';
@@ -293,10 +303,19 @@ class WebDavMediaService implements MediaServer
             );
 
             foreach ($files as $file) {
-                if ($isBothPath && $this->looksLikeEpisode($file['name'])) {
+                $isEpisode = $parser
+                    ? $parser->parse($file['name'])['is_episode']
+                    : ($isBothPath && $this->looksLikeEpisode($file['name']));
+
+                // When torrent parser is on, skip episodes everywhere (not just 'both' paths)
+                if ($isEpisode) {
                     continue;
                 }
-                $movieData = $this->parseMovieFile($file, $libraryGenre);
+
+                $movieData = $parser
+                    ? $this->parseMovieFileTorrent($file, $parser->parse($file['name']), $libraryGenre)
+                    : $this->parseMovieFile($file, $libraryGenre);
+
                 if ($movieData) {
                     $movies->push($movieData);
                 }
@@ -325,8 +344,15 @@ class WebDavMediaService implements MediaServer
                 continue;
             }
 
-            $this->scanWebDavSeriesDirectory($path, $seriesMap, $libraryGenre);
+            if ($this->integration->use_torrent_parser) {
+                $this->parseTorrentSeriesDirectory($path, $seriesMap, $libraryGenre);
+            } else {
+                $this->scanWebDavSeriesDirectory($path, $seriesMap, $libraryGenre);
+            }
         }
+
+        // Populate instance cache so fetchSeasons / fetchEpisodes can resolve grouped series
+        $this->torrentSeriesCache = $seriesMap;
 
         foreach ($seriesMap as $seriesData) {
             $series->push($seriesData);
@@ -350,6 +376,14 @@ class WebDavMediaService implements MediaServer
      */
     public function fetchSeasons(string $seriesId): Collection
     {
+        // Torrent-grouped series: seasons are derived from the episode containers collected
+        // during fetchSeries() rather than from a single directory on the server.
+        if (isset($this->torrentSeriesCache[$seriesId]['_torrent_episode_dirs'])) {
+            return $this->buildSeasonsFromEpisodeDirs(
+                $this->torrentSeriesCache[$seriesId]['_torrent_episode_dirs']
+            );
+        }
+
         $paths = $this->integration->getLocalMediaPathsForType('tvshows');
         $seasons = collect();
 
@@ -375,6 +409,14 @@ class WebDavMediaService implements MediaServer
      */
     public function fetchEpisodes(string $seriesId, ?string $seasonId = null): Collection
     {
+        // Torrent-grouped series: episodes come from per-episode container directories.
+        if (isset($this->torrentSeriesCache[$seriesId]['_torrent_episode_dirs'])) {
+            return $this->buildEpisodesFromTorrentDirs(
+                $this->torrentSeriesCache[$seriesId],
+                $seasonId
+            );
+        }
+
         $episodes = collect();
         $paths = $this->integration->getLocalMediaPathsForType('tvshows');
 
@@ -824,6 +866,217 @@ class WebDavMediaService implements MediaServer
         }
 
         return null;
+    }
+
+    // -------------------------------------------------------------------------
+    // Torrent-parser mode helpers
+    // -------------------------------------------------------------------------
+
+    /**
+     * Scan a WebDAV directory for series when torrent-style naming is enabled.
+     *
+     * Directories whose names contain SxxExx markers are treated as single-episode
+     * container folders (common for per-torrent downloads). These are grouped by
+     * show title into virtual series so that all episodes of the same show appear
+     * under one entry rather than each getting its own series.
+     *
+     * @param  array<string, array>  $seriesMap
+     */
+    protected function parseTorrentSeriesDirectory(string $basePath, array &$seriesMap, ?string $libraryGenre = null): void
+    {
+        $parser = new TorrentTitleParser;
+        $directories = $this->listWebDavDirectory($basePath);
+
+        // Accumulator for episode-container dirs, keyed by normalised show title
+        $episodeContainers = [];
+
+        foreach ($directories as $dir) {
+            if (! $dir['isDirectory']) {
+                continue;
+            }
+
+            $parsed = $parser->parse($dir['name']);
+
+            if ($parsed['is_episode']) {
+                // Single-episode container: group under the show name
+                $showTitle = $parsed['title'] ?: $dir['name'];
+                $key = strtolower(trim($showTitle));
+
+                if (! isset($episodeContainers[$key])) {
+                    $episodeContainers[$key] = [
+                        'title' => $showTitle,
+                        'dirs' => [],
+                    ];
+                }
+
+                $episodeContainers[$key]['dirs'][] = [
+                    'dir' => $dir,
+                    'season' => $parsed['season'] ?? 1,
+                    'episode' => $parsed['episode'],
+                ];
+            } else {
+                // Regular series directory or multi-season pack — use directory path as ID
+                $seriesTitle = $parsed['title'] ?: $dir['name'];
+                $seriesId = md5($dir['path']);
+
+                if (! isset($seriesMap[$seriesId])) {
+                    $genre = $libraryGenre ? trim($libraryGenre) : '';
+                    $seriesMap[$seriesId] = [
+                        'Id' => $seriesId,
+                        'Name' => $seriesTitle,
+                        'Path' => $dir['path'],
+                        'ProductionYear' => $parsed['year'],
+                        'Type' => 'Series',
+                        'Genres' => $genre !== '' ? [$genre] : ['Uncategorized'],
+                        'Overview' => null,
+                        'CommunityRating' => null,
+                    ];
+                }
+            }
+        }
+
+        // Merge grouped episode-container series into seriesMap
+        foreach ($episodeContainers as $key => $data) {
+            $seriesId = md5('torrent-show:'.$key);
+            $genre = $libraryGenre ? trim($libraryGenre) : '';
+
+            $seriesMap[$seriesId] = [
+                'Id' => $seriesId,
+                'Name' => $data['title'],
+                'Path' => $basePath,
+                'ProductionYear' => null,
+                'Type' => 'Series',
+                'Genres' => $genre !== '' ? [$genre] : ['Uncategorized'],
+                'Overview' => null,
+                'CommunityRating' => null,
+                '_torrent_episode_dirs' => $data['dirs'],
+            ];
+        }
+    }
+
+    /**
+     * Build a seasons collection from episode-container directory metadata.
+     *
+     * @param  array<int, array{dir: array, season: int, episode: int|null}>  $episodeDirs
+     * @return Collection<int, array>
+     */
+    protected function buildSeasonsFromEpisodeDirs(array $episodeDirs): Collection
+    {
+        $seasons = [];
+
+        foreach ($episodeDirs as $entry) {
+            $season = $entry['season'];
+            if (! isset($seasons[$season])) {
+                $seasons[$season] = [
+                    'Id' => md5("torrent-season:{$season}"),
+                    'Name' => "Season {$season}",
+                    'IndexNumber' => $season,
+                    'Path' => '',
+                    'EpisodeCount' => 0,
+                ];
+            }
+            $seasons[$season]['EpisodeCount']++;
+        }
+
+        return collect(array_values($seasons))->sortBy('IndexNumber')->values();
+    }
+
+    /**
+     * Build an episodes collection by scanning the episode-container directories
+     * stored in a torrent-grouped series entry.
+     *
+     * @return Collection<int, array>
+     */
+    protected function buildEpisodesFromTorrentDirs(array $seriesData, ?string $seasonId): Collection
+    {
+        $episodes = collect();
+        $seriesName = $seriesData['Name'];
+        $parser = new TorrentTitleParser;
+
+        foreach ($seriesData['_torrent_episode_dirs'] as $entry) {
+            $season = $entry['season'];
+            $targetSeasonId = md5("torrent-season:{$season}");
+
+            if ($seasonId !== null && $targetSeasonId !== $seasonId) {
+                continue;
+            }
+
+            $files = $this->scanWebDavDirectoryForVideoFiles($entry['dir']['path'], false);
+
+            foreach ($files as $file) {
+                // Try torrent parser first, fall back to regex parseEpisodeFile
+                $fileParsed = $parser->parse($file['name']);
+
+                if ($fileParsed['is_episode']) {
+                    $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+                    $itemId = base64_encode($file['path']);
+                    $episodes->push([
+                        'Id' => $itemId,
+                        'SeriesName' => $seriesName,
+                        'Name' => "Episode {$fileParsed['episode']}",
+                        'IndexNumber' => $fileParsed['episode'],
+                        'ParentIndexNumber' => $fileParsed['season'] ?? $season,
+                        'Path' => $file['path'],
+                        'Container' => $ext,
+                        'Type' => 'Episode',
+                        'Overview' => null,
+                        'CommunityRating' => null,
+                        'RunTimeTicks' => null,
+                        'MediaSources' => [[
+                            'Container' => $ext,
+                            'Path' => $file['path'],
+                            'Size' => $file['size'],
+                        ]],
+                    ]);
+                } else {
+                    // File parser couldn't confirm it's an episode — use dir-level info
+                    $episodeData = $this->parseEpisodeFile($file, $seriesName);
+                    if ($episodeData) {
+                        if (! $episodeData['ParentIndexNumber']) {
+                            $episodeData['ParentIndexNumber'] = $season;
+                        }
+                        if (! $episodeData['IndexNumber']) {
+                            $episodeData['IndexNumber'] = $entry['episode'];
+                        }
+                        $episodes->push($episodeData);
+                    }
+                }
+            }
+        }
+
+        return $episodes;
+    }
+
+    /**
+     * Parse a movie file using pre-computed torrent parser output.
+     */
+    protected function parseMovieFileTorrent(array $file, array $parsed, ?string $libraryGenre = null): ?array
+    {
+        $title = $parsed['title'] ?: pathinfo($file['name'], PATHINFO_FILENAME);
+        $year = $parsed['year'];
+        $extension = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+        $itemId = base64_encode($file['path']);
+        $genre = $libraryGenre ? trim($libraryGenre) : '';
+
+        return [
+            'Id' => $itemId,
+            'Name' => $title,
+            'OriginalTitle' => $title,
+            'ProductionYear' => $year,
+            'Path' => $file['path'],
+            'Container' => $extension,
+            'Type' => 'Movie',
+            'Genres' => $genre !== '' ? [$genre] : ['Uncategorized'],
+            'Overview' => null,
+            'CommunityRating' => null,
+            'RunTimeTicks' => null,
+            'People' => [],
+            'MediaSources' => [[
+                'Container' => $extension,
+                'Path' => $file['path'],
+                'Size' => $file['size'],
+            ]],
+        ];
     }
 
     /**
