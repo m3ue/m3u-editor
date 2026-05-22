@@ -64,7 +64,7 @@ class WebDavMediaService implements MediaServer
     }
 
     /**
-     * Get the base URL for the WebDAV server.
+     * Get the base URL for the WebDAV server, including any configured base path.
      */
     protected function getBaseUrl(): string
     {
@@ -78,6 +78,11 @@ class WebDavMediaService implements MediaServer
             $url .= ":{$port}";
         }
 
+        $basePath = trim($this->integration->webdav_base_path ?? '', '/');
+        if ($basePath !== '') {
+            $url .= "/{$basePath}";
+        }
+
         return $url;
     }
 
@@ -86,8 +91,10 @@ class WebDavMediaService implements MediaServer
      */
     protected function getHttpClient(): PendingRequest
     {
+        $verify = $this->integration->ssl && ! $this->integration->skip_ssl_verify;
+
         $client = Http::timeout(30)
-            ->withOptions(['verify' => false]);
+            ->withOptions(['verify' => $verify]);
 
         $username = $this->integration->webdav_username;
         $password = $this->integration->webdav_password;
@@ -102,75 +109,63 @@ class WebDavMediaService implements MediaServer
     /**
      * Test connection to the WebDAV server.
      *
+     * First verifies root connectivity and auth, then validates any configured library paths.
+     *
      * @return array{success: bool, message: string, paths_found?: int, total_files?: int}
      */
     public function testConnection(): array
     {
         try {
-            $paths = $this->integration->local_media_paths ?? [];
+            $baseUrl = $this->getBaseUrl();
 
-            if (empty($paths)) {
+            // Step 1: test root connectivity regardless of configured paths
+            $rootResult = $this->propfindUrl($baseUrl.'/');
+            if (! $rootResult['success']) {
                 return [
                     'success' => false,
-                    'message' => 'No media paths configured. Please add at least one WebDAV library path.',
+                    'message' => "Cannot reach WebDAV server at {$baseUrl}: {$rootResult['error']}",
                 ];
             }
 
-            $baseUrl = $this->getBaseUrl();
+            // Step 2: validate configured library paths
+            $paths = $this->integration->local_media_paths ?? [];
+            $configuredPaths = array_filter($paths, fn ($p) => ! empty($p['path'] ?? ''));
+
+            if (empty($configuredPaths)) {
+                return [
+                    'success' => true,
+                    'message' => "Connected to WebDAV server at {$baseUrl}.",
+                    'server_name' => 'WebDAV Media',
+                    'version' => '1.0',
+                    'paths_found' => 0,
+                    'total_files' => 0,
+                ];
+            }
+
             $validPaths = 0;
-            $totalFiles = 0;
             $errors = [];
 
-            foreach ($paths as $pathConfig) {
-                $path = $pathConfig['path'] ?? '';
-
-                if (empty($path)) {
-                    continue;
-                }
-
+            foreach ($configuredPaths as $pathConfig) {
+                $path = $pathConfig['path'];
                 $url = rtrim($baseUrl, '/').'/'.ltrim($path, '/');
 
-                try {
-                    $response = $this->getHttpClient()
-                        ->withHeaders([
-                            'Depth' => '1',
-                            'Content-Type' => 'application/xml',
-                        ])
-                        ->send('PROPFIND', $url, [
-                            'body' => '<?xml version="1.0" encoding="utf-8"?>
-                                <D:propfind xmlns:D="DAV:">
-                                    <D:prop>
-                                        <D:resourcetype/>
-                                        <D:getcontentlength/>
-                                        <D:displayname/>
-                                    </D:prop>
-                                </D:propfind>',
-                        ]);
+                $result = $this->propfindUrl($url);
 
-                    if ($response->status() === 207 || $response->successful()) {
-                        $validPaths++;
-
-                        $files = $this->scanWebDavDirectoryForVideoFiles(
-                            $path,
-                            $this->integration->scan_recursive
-                        );
-                        $totalFiles += count($files);
-                    } else {
-                        $errors[] = "Path not accessible: {$path} (HTTP {$response->status()})";
-                    }
-                } catch (Exception $e) {
-                    $errors[] = "Path error: {$path} - {$e->getMessage()}";
+                if ($result['success']) {
+                    $validPaths++;
+                } else {
+                    $errors[] = "Path '{$path}': {$result['error']}";
                 }
             }
 
             if ($validPaths === 0) {
                 return [
                     'success' => false,
-                    'message' => 'No valid paths found. '.implode(' ', $errors),
+                    'message' => 'Server reachable but no library paths are accessible. '.implode('; ', $errors),
                 ];
             }
 
-            $message = "Found {$validPaths} valid path(s) with {$totalFiles} video file(s)";
+            $message = "Connected — {$validPaths} path(s) accessible";
             if (! empty($errors)) {
                 $message .= '. Warnings: '.implode('; ', $errors);
             }
@@ -181,7 +176,7 @@ class WebDavMediaService implements MediaServer
                 'server_name' => 'WebDAV Media',
                 'version' => '1.0',
                 'paths_found' => $validPaths,
-                'total_files' => $totalFiles,
+                'total_files' => 0,
             ];
         } catch (Exception $e) {
             Log::error('WebDavMediaService: Connection test failed', [
@@ -193,6 +188,48 @@ class WebDavMediaService implements MediaServer
                 'success' => false,
                 'message' => 'Error testing paths: '.$e->getMessage(),
             ];
+        }
+    }
+
+    /**
+     * Issue a PROPFIND request to a URL and return success/error.
+     *
+     * @return array{success: bool, error?: string}
+     */
+    protected function propfindUrl(string $url): array
+    {
+        try {
+            $response = $this->getHttpClient()
+                ->withHeaders([
+                    'Depth' => '1',
+                    'Content-Type' => 'application/xml',
+                ])
+                ->send('PROPFIND', $url, [
+                    'body' => '<?xml version="1.0" encoding="utf-8"?>
+                        <D:propfind xmlns:D="DAV:">
+                            <D:prop>
+                                <D:resourcetype/>
+                                <D:getcontentlength/>
+                                <D:displayname/>
+                            </D:prop>
+                        </D:propfind>',
+                ]);
+
+            if ($response->status() === 207 || $response->successful()) {
+                return ['success' => true];
+            }
+
+            $label = match ($response->status()) {
+                401 => 'HTTP 401 Unauthorized — check username/password',
+                403 => 'HTTP 403 Forbidden — credentials valid but access denied',
+                404 => 'HTTP 404 Not Found — path does not exist on the server',
+                405 => 'HTTP 405 Method Not Allowed — server may not support WebDAV',
+                default => "HTTP {$response->status()}",
+            };
+
+            return ['success' => false, 'error' => $label];
+        } catch (Exception $e) {
+            return ['success' => false, 'error' => $e->getMessage()];
         }
     }
 
@@ -215,11 +252,9 @@ class WebDavMediaService implements MediaServer
                 continue;
             }
 
-            $files = $this->scanWebDavDirectoryForVideoFiles(
-                $path,
-                $this->integration->scan_recursive
-            );
-            $itemCount = count($files);
+            // Shallow Depth:1 listing — fast single request, avoids recursive scan on remote servers.
+            // Full file count happens during the actual SyncMediaServer job.
+            $itemCount = count($this->listWebDavDirectory($path));
 
             $libraries[] = [
                 'id' => md5($path),
@@ -246,6 +281,7 @@ class WebDavMediaService implements MediaServer
         foreach ($paths as $pathConfig) {
             $path = $pathConfig['path'] ?? '';
             $libraryGenre = $pathConfig['name'] ?? basename($path);
+            $isBothPath = ($pathConfig['type'] ?? '') === 'both';
 
             if (empty($path)) {
                 continue;
@@ -257,6 +293,9 @@ class WebDavMediaService implements MediaServer
             );
 
             foreach ($files as $file) {
+                if ($isBothPath && $this->looksLikeEpisode($file['name'])) {
+                    continue;
+                }
                 $movieData = $this->parseMovieFile($file, $libraryGenre);
                 if ($movieData) {
                     $movies->push($movieData);
@@ -488,10 +527,21 @@ class WebDavMediaService implements MediaServer
      * @param  string  $path  Directory path on the WebDAV server
      * @return array<array{name: string, path: string, isDirectory: bool, size: int|null}>
      */
+    /**
+     * Build a properly percent-encoded URL from the base URL and a decoded path.
+     * Each path segment is encoded individually so slashes are preserved as separators.
+     */
+    protected function pathToUrl(string $path): string
+    {
+        $segments = explode('/', ltrim($path, '/'));
+        $encoded = implode('/', array_map('rawurlencode', $segments));
+
+        return rtrim($this->getBaseUrl(), '/').'/'.$encoded;
+    }
+
     protected function listWebDavDirectory(string $path): array
     {
-        $baseUrl = $this->getBaseUrl();
-        $url = rtrim($baseUrl, '/').'/'.ltrim($path, '/');
+        $url = $this->pathToUrl($path);
 
         if (! str_ends_with($url, '/')) {
             $url .= '/';
@@ -603,14 +653,14 @@ class WebDavMediaService implements MediaServer
                     continue;
                 }
 
-                $name = basename($normalizedHrefPath);
+                $name = $this->sanitizeUtf8(basename($normalizedHrefPath));
 
                 $isDirectory = $xpath->query('.//d:resourcetype/d:collection', $response)->length > 0;
 
                 $sizeNode = $xpath->query('.//d:getcontentlength', $response)->item(0);
                 $size = $sizeNode ? (int) $sizeNode->nodeValue : null;
 
-                $itemPath = $normalizedHrefPath;
+                $itemPath = $this->sanitizeUtf8($normalizedHrefPath);
 
                 $items[] = [
                     'name' => $name,
@@ -777,6 +827,37 @@ class WebDavMediaService implements MediaServer
     }
 
     /**
+     * Strip invalid UTF-8 bytes from a string so it can be safely stored in the database.
+     * TorBox (and some other WebDAV servers) return filenames that mix Latin-2 bytes
+     * into otherwise UTF-8 content, producing sequences like 0xc5 0x20 that PostgreSQL
+     * and json_encode both reject.
+     */
+    protected function sanitizeUtf8(string $str): string
+    {
+        // iconv with //IGNORE drops any byte that cannot be represented in the target encoding
+        if (\function_exists('iconv')) {
+            return iconv('UTF-8', 'UTF-8//IGNORE', $str) ?: $str;
+        }
+
+        // Fallback: replace any invalid UTF-8 sequences with a replacement character
+        return mb_convert_encoding($str, 'UTF-8', 'UTF-8');
+    }
+
+    /**
+     * Check whether a filename matches known TV episode patterns.
+     */
+    protected function looksLikeEpisode(string $filename): bool
+    {
+        foreach ($this->episodePatterns as $pattern) {
+            if (preg_match($pattern, $filename)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Parse a movie file and extract metadata from filename.
      *
      * @param  array{name: string, path: string, size: int|null}  $file  File information from WebDAV
@@ -926,9 +1007,7 @@ class WebDavMediaService implements MediaServer
      */
     public function getFileUrl(string $filePath): string
     {
-        $baseUrl = $this->getBaseUrl();
-
-        return rtrim($baseUrl, '/').'/'.ltrim($filePath, '/');
+        return $this->pathToUrl($filePath);
     }
 
     /**

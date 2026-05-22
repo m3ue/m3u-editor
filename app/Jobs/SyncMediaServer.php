@@ -161,7 +161,7 @@ class SyncMediaServer implements ShouldBeUnique, ShouldQueue
                 'movie_progress' => 100,
                 'series_progress' => 100,
                 'last_synced_at' => now(),
-                'sync_stats' => $this->stats,
+                'sync_stats' => $this->sanitizeForJson($this->stats),
             ]);
 
             // Update playlist status
@@ -203,7 +203,7 @@ class SyncMediaServer implements ShouldBeUnique, ShouldQueue
             // Update integration with error
             $integration->update([
                 'status' => 'failed',
-                'sync_stats' => $this->stats,
+                'sync_stats' => $this->sanitizeForJson($this->stats),
             ]);
 
             // Update playlist status if it exists
@@ -996,6 +996,26 @@ class SyncMediaServer implements ShouldBeUnique, ShouldQueue
             overwriteExisting: false,
             user: $integration->user
         );
+    }
+
+    /**
+     * Recursively sanitize an array so every string is valid UTF-8.
+     * Filenames from remote WebDAV servers (e.g. TorBox) can contain
+     * non-UTF-8 byte sequences that break JSON encoding when stored in sync_stats.
+     */
+    protected function sanitizeForJson(mixed $value): mixed
+    {
+        if (is_string($value)) {
+            return \function_exists('iconv')
+                ? (iconv('UTF-8', 'UTF-8//IGNORE', $value) ?: $value)
+                : mb_convert_encoding($value, 'UTF-8', 'UTF-8');
+        }
+
+        if (is_array($value)) {
+            return array_map(fn ($v) => $this->sanitizeForJson($v), $value);
+        }
+
+        return $value;
     }
 
     public function failed(\Throwable $exception): void
