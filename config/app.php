@@ -79,7 +79,10 @@ return [
     |
     */
 
-    'timezone' => env('APP_TIMEZONE', 'UTC'),
+    // Single source of truth for timezone: prefer APP_TIMEZONE, but fall back
+    // to TZ (which already controls the OS / PHP system clock) so users only
+    // need to set one variable. Final fallback is UTC.
+    'timezone' => env('APP_TIMEZONE', env('TZ', 'UTC')),
 
     /*
     |--------------------------------------------------------------------------

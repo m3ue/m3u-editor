@@ -251,6 +251,11 @@ class Playlist extends Model
         return $this->hasMany(EpgMap::class);
     }
 
+    public function dvrSetting(): HasOne
+    {
+        return $this->hasOne(DvrSetting::class);
+    }
+
     public function channelScrubbers(): HasMany
     {
         return $this->hasMany(ChannelScrubber::class);

@@ -25,6 +25,7 @@ storage/logs/*
 
 # Data directories
 data/
+local/
 db-dumps/
 database/*.sqlite*
 

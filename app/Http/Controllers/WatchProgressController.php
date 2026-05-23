@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Channel;
+use App\Models\DvrRecording;
 use App\Models\Episode;
 use App\Models\Playlist;
 use App\Models\PlaylistAuth;
@@ -180,11 +181,16 @@ class WatchProgressController extends Controller
 
     private function resolvePlaylistFromContent(string $contentType, int $streamId): ?Playlist
     {
-        if ($contentType === 'episode') {
-            $playlistId = Episode::where('id', $streamId)->value('playlist_id');
-        } else {
-            $playlistId = Channel::where('id', $streamId)->value('playlist_id');
-        }
+        $playlistId = match ($contentType) {
+            'episode' => Episode::where('id', $streamId)->value('playlist_id'),
+            'dvr_recording' => DvrRecording::where('id', $streamId)
+                ->with('dvrSetting.playlist')
+                ->first()
+                ?->dvrSetting
+                ?->playlist
+                ?->id,
+            default => Channel::where('id', $streamId)->value('playlist_id'),
+        };
 
         return $playlistId ? Playlist::find($playlistId) : null;
     }

@@ -36,8 +36,17 @@ class VodResource extends Resource
 
     protected static ?string $slug = 'vod';
 
+    public static function canAccess(): bool
+    {
+        return static::getCurrentAuth() !== null;
+    }
+
     public static function getNavigationBadge(): ?string
     {
+        if (! static::getCurrentAuth()) {
+            return null;
+        }
+
         $playlist = PlaylistFacade::resolvePlaylistByUuid(static::getCurrentUuid());
         if ($playlist) {
             return (string) $playlist->channels()->where([
@@ -46,7 +55,7 @@ class VodResource extends Resource
             ])->count();
         }
 
-        return '';
+        return null;
     }
 
     public static function getUrl(

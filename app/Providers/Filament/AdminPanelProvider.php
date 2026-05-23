@@ -6,6 +6,7 @@ use App\Filament\Auth\EditProfile;
 use App\Filament\Auth\Login;
 use App\Filament\CopilotTools\EpgMappingStateTool;
 use App\Filament\Pages\Backups;
+use App\Filament\Pages\BrowseShows;
 use App\Filament\Pages\CreatePlugin;
 use App\Filament\Pages\CustomDashboard;
 use App\Filament\Pages\LogViewer;
@@ -18,6 +19,8 @@ use App\Filament\Resources\Categories\CategoryResource;
 use App\Filament\Resources\Channels\ChannelResource;
 use App\Filament\Resources\ChannelScrubbers\ChannelScrubberResource;
 use App\Filament\Resources\CustomPlaylists\CustomPlaylistResource;
+use App\Filament\Resources\DvrRecordingRules\DvrRecordingRuleResource;
+use App\Filament\Resources\DvrRecordings\DvrRecordingResource;
 use App\Filament\Resources\EpgChannels\EpgChannelResource;
 use App\Filament\Resources\EpgMaps\EpgMapResource;
 use App\Filament\Resources\Epgs\EpgResource;
@@ -147,7 +150,7 @@ class AdminPanelProvider extends PanelProvider
             ->favicon('/favicon.png')
             ->brandLogoHeight('2.5rem')
             ->databaseNotifications()
-            // ->databaseNotificationsPolling('10s')
+            ->databaseNotificationsPolling('30s')
             ->colors([
                 'primary' => Color::Indigo,
                 'info' => Color::Sky,
@@ -183,6 +186,13 @@ class AdminPanelProvider extends PanelProvider
                                 ...PlaylistAuthResource::getNavigationItems(),
                                 ...StreamFileSettingResource::getNavigationItems(),
                                 ...ChannelScrubberResource::getNavigationItems(),
+                            ]),
+                        NavigationGroup::make(fn () => __('DVR'))
+                            ->icon('heroicon-m-video-camera')
+                            ->items([
+                                ...DvrRecordingResource::getNavigationItems(),
+                                ...DvrRecordingRuleResource::getNavigationItems(),
+                                ...BrowseShows::getNavigationItems(),
                             ]),
                         NavigationGroup::make(fn () => __('Integrations'))
                             ->icon('heroicon-m-server-stack')

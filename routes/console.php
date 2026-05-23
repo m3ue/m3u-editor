@@ -1,5 +1,7 @@
 <?php
 
+use App\Jobs\DvrRetentionCleanup;
+use App\Jobs\DvrSchedulerTick;
 use App\Models\PluginRun;
 use Illuminate\Support\Facades\Schedule;
 
@@ -91,3 +93,9 @@ if (config('plugins.update_check.enabled', true)) {
 }
 
 // Note: HLS broadcast files are managed by m3u-proxy service
+
+// DVR scheduler tick — run every minute to match rules, start, and stop recordings
+Schedule::job(new DvrSchedulerTick)->everyMinute()->withoutOverlapping();
+
+// DVR retention cleanup — run hourly to enforce keepLast, age, and quota policies
+Schedule::job(new DvrRetentionCleanup)->hourly()->withoutOverlapping();

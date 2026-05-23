@@ -1,0 +1,32 @@
+<?php
+
+namespace App\Jobs;
+
+use App\Services\DvrSchedulerService;
+use Illuminate\Contracts\Queue\ShouldBeUnique;
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Foundation\Queue\Queueable;
+
+/**
+ * DvrSchedulerTick — Runs every minute via the Laravel scheduler.
+ *
+ * Dispatches onto the 'dvr' queue so it runs inside the dvr-queue Horizon supervisor.
+ */
+class DvrSchedulerTick implements ShouldBeUnique, ShouldQueue
+{
+    use Queueable;
+
+    public int $tries = 1;
+
+    public int $timeout = 120;
+
+    public function __construct()
+    {
+        $this->onQueue('dvr');
+    }
+
+    public function handle(DvrSchedulerService $scheduler): void
+    {
+        $scheduler->tick();
+    }
+}

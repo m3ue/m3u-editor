@@ -25,6 +25,16 @@ trait HasGuestAuth
 
     public $authError = '';
 
+    public string $currentUrl = '';
+
+    protected static function isSessionAuthenticated(): bool
+    {
+        $uuid = static::getCurrentUuid();
+        $prefix = $uuid ? base64_encode($uuid).'_' : '';
+
+        return (bool) session("{$prefix}guest_auth_username");
+    }
+
     protected static function getCurrentUuid(): ?string
     {
         $referer = request()->header('referer');
@@ -36,6 +46,8 @@ trait HasGuestAuth
 
     public function mount(): void
     {
+        $this->currentUrl = url()->current();
+
         // Load playlist info
         $playlist = PlaylistFacade::resolvePlaylistByUuid(static::getCurrentUuid());
 
@@ -66,8 +78,7 @@ trait HasGuestAuth
         $password = $state['password'] ?? '';
         if ($this->tryAuthenticate($username, $password)) {
             $this->authError = '';
-            // Optionally, clear password from form state for security
-            $this->form->fill(['username' => $username, 'password' => '']);
+            $this->redirect($this->currentUrl, navigate: false);
         } else {
             $this->authError = 'Invalid credentials.';
         }
@@ -78,6 +89,7 @@ trait HasGuestAuth
         $this->logoutGuest();
         $this->form->fill(['username' => '', 'password' => '']);
         $this->authError = '';
+        $this->redirect($this->currentUrl, navigate: false);
     }
 
     public function isGuestAuthenticated(): bool

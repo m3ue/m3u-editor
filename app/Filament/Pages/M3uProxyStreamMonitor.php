@@ -4,6 +4,7 @@ namespace App\Filament\Pages;
 
 use App\Facades\LogoFacade;
 use App\Models\Channel;
+use App\Models\DvrRecording;
 use App\Models\Episode;
 use App\Models\Network;
 use App\Models\Playlist;
@@ -22,6 +23,7 @@ use Filament\Schemas\Contracts\HasSchemas;
 use Filament\Support\Enums\Size;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Throwable;
 
 /**
  * Shared Stream Monitor (External API-backed)
@@ -84,7 +86,17 @@ class M3uProxyStreamMonitor extends Page implements HasActions, HasSchemas
 
     public function refreshData(): void
     {
-        $this->streams = $this->getActiveStreams();
+        try {
+            $this->streams = $this->getActiveStreams();
+        } catch (Throwable $e) {
+            Log::error('Stream Monitor: failed to load streams', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            $this->connectionError = $this->connectionError ?? 'Unexpected error loading stream data: '.$e->getMessage();
+            $this->streams = [];
+        }
 
         $streamCount = count($this->streams);
         $totalClients = array_sum(array_map(fn ($s) => $s['client_count'] ?? 0, $this->streams));
@@ -101,7 +113,7 @@ class M3uProxyStreamMonitor extends Page implements HasActions, HasSchemas
                 : '0.00',
         ];
 
-        $this->systemStats = []; // populate if external API provides system metrics
+        $this->systemStats = [];
 
         $this->lastUpdatedAt = now()->toIso8601String();
     }
@@ -246,7 +258,6 @@ class M3uProxyStreamMonitor extends Page implements HasActions, HasSchemas
         $apiClients = $this->apiService->fetchActiveClients();
         $apiBroadcasts = $this->apiService->fetchBroadcasts();
 
-        // Check for connection errors
         if (! $apiStreams['success']) {
             $this->connectionError = $apiStreams['error'] ?? 'Unknown error connecting to m3u-proxy';
 
@@ -259,7 +270,7 @@ class M3uProxyStreamMonitor extends Page implements HasActions, HasSchemas
             return [];
         }
 
-        // Clear any previous errors
+        $this->connectionError = null;
         $this->connectionError = null;
 
         $streams = [];
@@ -579,39 +590,59 @@ class M3uProxyStreamMonitor extends Page implements HasActions, HasSchemas
             }
         }
 
-        // Append any active network broadcasts (simplified output)
+        // Append any active network and DVR broadcasts (simplified output)
         if (! empty($apiBroadcasts['success']) && ! empty($apiBroadcasts['broadcasts'])) {
-            $broadcastNetworkUuids = collect($apiBroadcasts['broadcasts'])
-                ->pluck('network_id')
-                ->filter()
-                ->unique()
-                ->values();
-            $networksByUuid = Network::whereIn('uuid', $broadcastNetworkUuids)
-                ->get(['uuid', 'name'])
-                ->keyBy('uuid');
+            $broadcastList = collect($apiBroadcasts['broadcasts']);
+
+            // Separate DVR broadcasts from network broadcasts by metadata type
+            $dvrBroadcasts = $broadcastList->filter(fn ($b) => ($b['metadata']['type'] ?? null) === 'dvr');
+            $networkBroadcasts = $broadcastList->filter(fn ($b) => ($b['metadata']['type'] ?? null) !== 'dvr');
+
+            // Pre-fetch Network models for network broadcasts
+            $broadcastNetworkUuids = $networkBroadcasts->pluck('network_id')->filter()->unique()->values();
+            $networksByUuid = $broadcastNetworkUuids->isNotEmpty()
+                ? Network::whereIn('uuid', $broadcastNetworkUuids)->get(['uuid', 'name'])->keyBy('uuid')
+                : collect();
+
+            // Pre-fetch DvrRecording models for DVR broadcasts
+            $dvrRecordingUuids = $dvrBroadcasts->pluck('metadata.recording_id')->filter()->unique()->values();
+            $dvrRecordingsByUuid = $dvrRecordingUuids->isNotEmpty()
+                ? DvrRecording::whereIn('uuid', $dvrRecordingUuids)->get(['uuid', 'title'])->keyBy('uuid')
+                : collect();
 
             foreach ($apiBroadcasts['broadcasts'] as $bcast) {
-                $network = $networksByUuid[$bcast['network_id']] ?? null;
-
+                $isDvr = ($bcast['metadata']['type'] ?? null) === 'dvr';
                 $startedAt = isset($bcast['started_at']) ? Carbon::parse($bcast['started_at'], 'UTC') : null;
                 $uptime = $startedAt ? $startedAt->diffForHumans(null, true) : 'N/A';
 
+                if ($isDvr) {
+                    $recordingUuid = $bcast['metadata']['recording_id'] ?? $bcast['network_id'];
+                    $dvrRecording = $dvrRecordingsByUuid[$recordingUuid] ?? null;
+                    $title = $dvrRecording?->title ?? ($bcast['metadata']['title'] ?? 'DVR Recording');
+                    $model = ['title' => $title, 'logo' => null, 'is_dvr' => true];
+                } else {
+                    $network = $networksByUuid[$bcast['network_id']] ?? null;
+                    $model = [
+                        'title' => $network ? $network->name : ('Network '.$bcast['network_id']),
+                        'logo' => null,
+                    ];
+                }
+
                 $streams[] = [
                     'stream_id' => 'broadcast:'.$bcast['network_id'],
-                    'source_url' => $network ? $network->hls_url : ($bcast['stream_url'] ?? ''),
-                    'current_url' => $network ? $network->hls_url : ($bcast['stream_url'] ?? ''),
+                    'source_url' => $bcast['stream_url'] ?? '',
+                    'current_url' => $bcast['stream_url'] ?? '',
                     'format' => 'HLS',
                     'status' => (($bcast['status'] ?? '') === 'running') ? 'active' : 'idle',
                     'client_count' => 0,
-                    'bandwidth_kbps' => 0,
-                    'bytes_transferred' => 'N/A',
+                    'bandwidth_kbps' => $startedAt && ($durationSecs = $startedAt->diffInSeconds(now())) > 0
+                        ? round((($bcast['bytes_written'] ?? 0) * 8) / $durationSecs / 1000, 2)
+                        : 0,
+                    'bytes_transferred' => $this->formatBytes($bcast['bytes_written'] ?? 0),
                     'uptime' => $uptime,
                     'started_at' => $startedAt ? $startedAt->format('Y-m-d H:i:s') : null,
                     'process_running' => (($bcast['status'] ?? '') === 'running'),
-                    'model' => [
-                        'title' => $network ? $network->name : ('Network '.$bcast['network_id']),
-                        'logo' => null,
-                    ],
+                    'model' => $model,
                     'clients' => [],
                     'has_failover' => false,
                     'error_count' => 0,
@@ -621,6 +652,7 @@ class M3uProxyStreamMonitor extends Page implements HasActions, HasSchemas
                     'using_failover' => false,
                     'failover_channel' => null,
                     'broadcast' => true,
+                    'is_dvr' => $isDvr,
                     'alias_name' => null,
                 ];
             }

@@ -53,6 +53,13 @@ return [
             'throw' => false,
         ],
 
+        'dvr' => [
+            'driver' => 'local',
+            'root' => env('DVR_STORAGE_PATH', storage_path('app/private/dvr')),
+            'serve' => false,
+            'throw' => false,
+        ],
+
         's3' => [
             'driver' => 's3',
             'key' => env('AWS_ACCESS_KEY_ID'),

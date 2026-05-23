@@ -29,14 +29,23 @@ class SeriesResource extends Resource
 
     protected static ?string $slug = 'series';
 
+    public static function canAccess(): bool
+    {
+        return static::getCurrentAuth() !== null;
+    }
+
     public static function getNavigationBadge(): ?string
     {
+        if (! static::getCurrentAuth()) {
+            return null;
+        }
+
         $playlist = PlaylistFacade::resolvePlaylistByUuid(static::getCurrentUuid());
         if ($playlist) {
             return (string) $playlist->series()->where('enabled', true)->count();
         }
 
-        return '';
+        return null;
     }
 
     public static function getUrl(

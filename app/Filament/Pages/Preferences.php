@@ -2,6 +2,8 @@
 
 namespace App\Filament\Pages;
 
+use App\Filament\CopilotTools\DvrOverviewTool;
+use App\Filament\CopilotTools\DvrScheduleTool;
 use App\Filament\CopilotTools\EpgChannelMatcherTool;
 use App\Filament\CopilotTools\EpgMappingApplyTool;
 use App\Filament\CopilotTools\EpgMappingStateTool;
@@ -1497,6 +1499,8 @@ class Preferences extends SettingsPage
                                                 EpgMappingApplyTool::class => __('EPG Mapper: Apply Mappings'),
                                                 GetDatabaseSchemaTool::class => __('Database: Get Schema'),
                                                 ExecuteDatabaseQueryTool::class => __('Database: Execute Query'),
+                                                DvrOverviewTool::class => __('DVR: Overview'),
+                                                DvrScheduleTool::class => __('DVR: Schedule'),
                                             ])
                                             ->afterStateHydrated(function ($component, $state) {
                                                 // Strip built-in tools that were saved by older versions.

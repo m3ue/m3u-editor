@@ -234,9 +234,15 @@
                                     {{ $stream['format'] }}
                                 </x-filament::badge>
                                 @if ($stream['broadcast'] ?? false)
-                                    <x-filament::badge color="info" size="sm" icon="heroicon-s-signal">
-                                        Broadcast
-                                    </x-filament::badge>
+                                    @if ($stream['is_dvr'] ?? false)
+                                        <x-filament::badge color="danger" size="sm" icon="heroicon-s-video-camera">
+                                            DVR Recording
+                                        </x-filament::badge>
+                                    @else
+                                        <x-filament::badge color="info" size="sm" icon="heroicon-s-signal">
+                                            Broadcast
+                                        </x-filament::badge>
+                                    @endif
                                 @endif
                                 @if ($stream['transcoding'])
                                     <x-filament::badge color="info" size="sm">

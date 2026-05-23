@@ -6,10 +6,15 @@ use App\Enums\EpgSourceType;
 use App\Enums\Status;
 use App\Facades\PlaylistFacade;
 use App\Models\CustomPlaylist;
+use App\Models\DvrSetting;
 use App\Models\Epg;
+use App\Models\EpgMap;
+use App\Models\EpgProgramme;
 use App\Models\MergedPlaylist;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
+use App\Support\EpgProgrammeNormalizer;
+use App\Support\EpisodeNumberParser;
 use Carbon\Carbon;
 use Exception;
 use Filament\Actions\Action;
@@ -192,6 +197,9 @@ class EpgCacheService
             ]);
 
             Log::debug('EPG cache generated successfully', $metadata);
+
+            // Populate epg_programmes DB table for DVR-enabled playlists
+            $this->populateDvrProgrammes($epg);
 
             return true;
         } catch (Exception $e) {
@@ -1498,5 +1506,205 @@ class EpgCacheService
                 }
             })
             ->modalSubmitActionLabel('Download EPG');
+    }
+
+    /**
+     * Populate the epg_programmes DB table from the JSONL cache for DVR-enabled playlists.
+     *
+     * Public so it can be called directly (e.g. from an artisan command) when a DVR
+     * mapping is added after an EPG was last cached.
+     */
+    public function populateDvrProgrammes(Epg $epg): void
+    {
+        // Find all DVR-enabled playlists whose EpgMap references this EPG
+        $playlistIds = DvrSetting::where('enabled', true)
+            ->pluck('playlist_id');
+
+        if ($playlistIds->isEmpty()) {
+            return;
+        }
+
+        // Check at least one of those playlists is mapped to this EPG
+        $hasMapping = EpgMap::whereIn('playlist_id', $playlistIds)
+            ->where('epg_id', $epg->id)
+            ->exists();
+
+        if (! $hasMapping) {
+            return;
+        }
+
+        Log::debug("Populating epg_programmes for EPG {$epg->name} (id={$epg->id})");
+
+        // Delete stale rows for this EPG so we do a clean refresh
+        EpgProgramme::where('epg_id', $epg->id)->delete();
+
+        $now = now();
+        $from = $now->copy()->subDay()->startOfDay();
+        $to = $now->copy()->addDays(7)->endOfDay();
+
+        $batch = [];
+        $batchSize = 500;
+        $inserted = 0;
+        $skipped = 0;
+
+        $current = $from->copy();
+        while ($current->lte($to)) {
+            $date = $current->format('Y-m-d');
+
+            // Use the active cache path so legacy v1/root caches are found too
+            $filePath = $this->getActiveCacheFilePath($epg, "programmes-{$date}.jsonl");
+
+            if (! Storage::disk('local')->exists($filePath)) {
+                $current->addDay();
+
+                continue;
+            }
+
+            $fullPath = Storage::disk('local')->path($filePath);
+            $handle = fopen($fullPath, 'r');
+            if (! $handle) {
+                $current->addDay();
+
+                continue;
+            }
+
+            while (($line = fgets($handle)) !== false) {
+                $line = trim($line);
+                if (empty($line)) {
+                    continue;
+                }
+
+                try {
+                    $record = json_decode($line, true);
+                    if (! $record || ! isset($record['channel'], $record['programme'])) {
+                        continue;
+                    }
+
+                    $p = $record['programme'];
+                    $appTz = config('app.timezone', 'UTC');
+                    $startTime = isset($p['start']) ? Carbon::parse($p['start'])->setTimezone($appTz) : null;
+                    $endTime = isset($p['stop']) ? Carbon::parse($p['stop'])->setTimezone($appTz) : null;
+
+                    if (! $startTime || ! $endTime) {
+                        $skipped++;
+
+                        continue;
+                    }
+
+                    // Parse season/episode from all episode-num entries in the programme.
+                    [$season, $episode] = $this->parseEpisodeNumbers($p);
+
+                    // Normalize provider-quirky free-text fields. Some feeds smuggle a
+                    // "ᴺᵉʷ" superscript marker into the title and prefix descriptions
+                    // with "S## E### Subtitle\nDescription" instead of using proper
+                    // <new/> / <episode-num> / <subtitle> elements.
+                    $titleNorm = EpgProgrammeNormalizer::normalizeTitle($p['title'] ?? null);
+                    $subtitle = $this->nullableString($p['subtitle'] ?? null, 500);
+                    $description = $this->nullableString($p['desc'] ?? null);
+                    if ($subtitle === null || $season === null || $episode === null) {
+                        $extracted = EpgProgrammeNormalizer::extractSeasonEpisodeFromDescription($description);
+                        if ($extracted['season'] !== null || $extracted['episode'] !== null) {
+                            $season ??= $extracted['season'];
+                            $episode ??= $extracted['episode'];
+                            if ($subtitle === null && $extracted['subtitle'] !== null) {
+                                $subtitle = mb_substr($extracted['subtitle'], 0, 500);
+                            }
+                            $description = $extracted['description'];
+                        }
+                    }
+
+                    $batch[] = [
+                        'epg_id' => $epg->id,
+                        'epg_channel_id' => mb_substr((string) $record['channel'], 0, 500),
+                        'title' => mb_substr($titleNorm['title'], 0, 500),
+                        'subtitle' => $subtitle,
+                        'description' => $description,
+                        'category' => $this->nullableString($p['category'] ?? null, 255),
+                        // Raw insert bypasses Eloquent casts. The `start_time`/`end_time`
+                        // columns are cast as `datetime` which Eloquent interprets in
+                        // `app.timezone`. We must therefore write the wall-clock of
+                        // `app.timezone` (NOT UTC) so round-tripping yields correct UTC.
+                        'start_time' => $startTime->copy()->tz(config('app.timezone'))->toDateTimeString(),
+                        'end_time' => $endTime->copy()->tz(config('app.timezone'))->toDateTimeString(),
+                        'episode_num' => $this->nullableString($p['episode_num'] ?? null, 255),
+                        'season' => $season,
+                        'episode' => $episode,
+                        'is_new' => (bool) ($p['new'] ?? false) || $titleNorm['isNew'],
+                        'previously_shown' => (bool) ($p['previously_shown'] ?? false),
+                        'premiere' => (bool) ($p['premiere'] ?? false),
+                        'icon' => $this->nullableString($p['icon'] ?? null, 500),
+                        'rating' => $this->nullableString($p['rating'] ?? null, 50),
+                        'created_at' => now()->toDateTimeString(),
+                        'updated_at' => now()->toDateTimeString(),
+                    ];
+                } catch (Exception $e) {
+                    Log::warning("DVR programme parse error (EPG {$epg->id}): {$e->getMessage()}");
+                    $skipped++;
+                }
+
+                // Flush batch outside the per-line try-catch so a failed insert
+                // doesn't leave the batch in a dirty state and cascade failures.
+                if (count($batch) >= $batchSize) {
+                    try {
+                        EpgProgramme::insert($batch);
+                        $inserted += count($batch);
+                    } catch (Exception $e) {
+                        Log::error("DVR programme batch insert failed (EPG {$epg->id}): {$e->getMessage()}");
+                        $skipped += count($batch);
+                    }
+                    $batch = [];
+                }
+            }
+
+            fclose($handle);
+            $current->addDay();
+        }
+
+        // Flush remaining
+        if (! empty($batch)) {
+            try {
+                EpgProgramme::insert($batch);
+                $inserted += count($batch);
+            } catch (Exception $e) {
+                Log::error("DVR programme final batch insert failed (EPG {$epg->id}): {$e->getMessage()}");
+                $skipped += count($batch);
+            }
+        }
+
+        Log::debug("EPG programmes populated for DVR: {$inserted} inserted, {$skipped} skipped", [
+            'epg_id' => $epg->id,
+            'epg_name' => $epg->name,
+        ]);
+    }
+
+    /**
+     * Return null for blank/empty strings, otherwise truncate to the column limit.
+     */
+    private function nullableString(?string $value, ?int $maxLength = null): ?string
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        return $maxLength !== null ? mb_substr($value, 0, $maxLength) : $value;
+    }
+
+    /**
+     * Parse season and episode integers from XMLTV episode-num data.
+     *
+     * Priority order:
+     *   1. Explicit `system="xmltv_ns"` entry — 0-indexed dot notation ("S.E.P"),
+     *      converted to 1-indexed integers (e.g. "1.2." → season 2, episode 3).
+     *   2. Explicit `system="onscreen"` entry — 1-indexed SxxExx literal
+     *      (e.g. "S02E05" → season 2, episode 5).
+     *   3. Heuristic on the raw `episode_num` string when no explicit system tag:
+     *      dots → treated as xmltv_ns (0-indexed); SxxExx → treated as onscreen (1-indexed).
+     *
+     * @param  array<string, mixed>  $programme  Parsed programme payload from parseProgrammesStream
+     * @return array{0: int|null, 1: int|null} [season, episode]
+     */
+    protected function parseEpisodeNumbers(array $programme): array
+    {
+        return EpisodeNumberParser::fromProgramme($programme);
     }
 }

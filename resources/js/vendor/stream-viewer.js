@@ -21,6 +21,10 @@ function streamPlayer() {
         _videoHandlers: {},
         _cleaned: false,
 
+        // ── Comskip ───────────────────────────────────────────────────────
+        comskipSegments: [],    // [{ start: float, end: float }, ...]
+        _activeSegmentEnd: 0,   // tracks end of currently-displayed segment to avoid redundant DOM writes
+
         // ── Watch Progress ────────────────────────────────────────────────
         progressConfig: null,   // { contentType, streamId, playlistId, seriesId, seasonNumber }
         _progressTimer: null,
@@ -164,6 +168,71 @@ function streamPlayer() {
             this.hideResumePrompt();
         },
 
+        // ── Comskip ───────────────────────────────────────────────────────
+
+        async _initComskip() {
+            if (!this.player) return;
+            const edlUrl = this.player.dataset.edlUrl;
+            if (!edlUrl) return;
+            try {
+                const res = await fetch(edlUrl, {
+                    headers: { 'X-CSRF-TOKEN': this._getCsrfToken() },
+                });
+                if (res.ok) {
+                    this.comskipSegments = await res.json();
+                }
+            } catch (e) {
+                console.warn('[Comskip] Failed to fetch EDL:', e);
+            }
+        },
+
+        _checkComskip() {
+            if (!this.player || this.comskipSegments.length === 0) return;
+            const t = this.player.currentTime;
+            const seg = this.comskipSegments.find(s => t >= s.start && t < s.end);
+            if (seg) {
+                this._showSkipAdPrompt(seg);
+            } else {
+                this._hideSkipAdPrompt();
+            }
+        },
+
+        _showSkipAdPrompt(segment) {
+            const playerId = this.player?.id;
+            if (!playerId) return;
+            const el = document.getElementById(playerId + '-skipad');
+            if (!el) return;
+            if (this._activeSegmentEnd !== segment.end) {
+                this._activeSegmentEnd = segment.end;
+                el.dataset.segmentEnd = segment.end;
+            }
+            el.classList.remove('hidden');
+        },
+
+        _hideSkipAdPrompt() {
+            const playerId = this.player?.id;
+            if (!playerId) return;
+            const el = document.getElementById(playerId + '-skipad');
+            if (el) {
+                el.classList.add('hidden');
+                this._activeSegmentEnd = 0;
+            }
+        },
+
+        skipCommercial() {
+            const playerId = this.player?.id;
+            if (!playerId) return;
+            const el = document.getElementById(playerId + '-skipad');
+            const segmentEnd = el ? parseFloat(el.dataset.segmentEnd || '0') : 0;
+            if (this.player && segmentEnd > 0) {
+                this.player.currentTime = segmentEnd;
+                this.player.play();
+            }
+            this._hideSkipAdPrompt();
+        },
+
+        // ─────────────────────────────────────────────────────────────────
+
         formatSeconds(seconds) {
             if (seconds <= 0) return '0:00';
             const h = Math.floor(seconds / 3600);
@@ -205,6 +274,9 @@ function streamPlayer() {
 
             // Initialise progress tracking from data attributes
             this._initProgress();
+
+            // Fetch comskip EDL for DVR recordings (fire-and-forget)
+            this._initComskip();
 
             // Update status
             if (statusEl) statusEl.textContent = 'Connecting...';
@@ -516,6 +588,10 @@ function streamPlayer() {
                 },
                 ended: () => {
                     this._saveProgress(true);
+                    this._hideSkipAdPrompt();
+                },
+                timeupdate: () => {
+                    this._checkComskip();
                 },
                 progress: () => {
                     if (video.buffered.length > 0 && !this.streamMetadata.codec) {
@@ -785,6 +861,11 @@ function streamPlayer() {
             this._lastSavedPosition = -1;
             this._resumePosition = 0;
             this._liveReported = false;
+
+            // Reset comskip state
+            this._hideSkipAdPrompt();
+            this.comskipSegments = [];
+            this._activeSegmentEnd = 0;
 
             // Reset stream metadata
             this.streamMetadata = {

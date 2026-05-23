@@ -5,10 +5,14 @@ use App\Models\Group;
 use App\Models\Playlist;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Routing\Middleware\ThrottleRequestsWithRedis;
+use Illuminate\Support\Facades\Queue;
 
 uses(RefreshDatabase::class);
 
 beforeEach(function () {
+    Queue::fake();
+    $this->withoutMiddleware(ThrottleRequestsWithRedis::class);
     $this->user = User::factory()->create();
     $this->playlist = Playlist::factory()->for($this->user)->create([
         'dummy_epg' => false,
@@ -20,7 +24,7 @@ it('returns distinct sorted groups for a playlist', function () {
     $sportsGroup = Group::factory()->create(['name' => 'Sports', 'user_id' => $this->user->id, 'enabled' => true]);
     $newsGroup = Group::factory()->create(['name' => 'News', 'user_id' => $this->user->id, 'enabled' => true]);
 
-    Channel::factory()->create([
+    Channel::factory()->createQuietly([
         'playlist_id' => $this->playlist->id,
         'user_id' => $this->user->id,
         'group_id' => $sportsGroup->id,
@@ -29,7 +33,7 @@ it('returns distinct sorted groups for a playlist', function () {
         'is_vod' => false,
     ]);
 
-    Channel::factory()->create([
+    Channel::factory()->createQuietly([
         'playlist_id' => $this->playlist->id,
         'user_id' => $this->user->id,
         'group_id' => $newsGroup->id,
@@ -39,7 +43,7 @@ it('returns distinct sorted groups for a playlist', function () {
     ]);
 
     // Second channel in Sports — should not produce a duplicate
-    Channel::factory()->create([
+    Channel::factory()->createQuietly([
         'playlist_id' => $this->playlist->id,
         'user_id' => $this->user->id,
         'group_id' => $sportsGroup->id,
@@ -58,7 +62,7 @@ it('returns distinct sorted groups for a playlist', function () {
 it('excludes disabled channels from groups response', function () {
     $group = Group::factory()->create(['name' => 'Hidden', 'user_id' => $this->user->id, 'enabled' => true]);
 
-    Channel::factory()->create([
+    Channel::factory()->createQuietly([
         'playlist_id' => $this->playlist->id,
         'user_id' => $this->user->id,
         'group_id' => $group->id,
@@ -76,7 +80,7 @@ it('excludes disabled channels from groups response', function () {
 it('excludes disabled groups from groups response', function () {
     $group = Group::factory()->create(['name' => 'Disabled Group', 'user_id' => $this->user->id, 'enabled' => false]);
 
-    Channel::factory()->create([
+    Channel::factory()->createQuietly([
         'playlist_id' => $this->playlist->id,
         'user_id' => $this->user->id,
         'group_id' => $group->id,
@@ -95,7 +99,7 @@ it('excludes vod groups when playlist does not include vod in m3u', function () 
     $liveGroup = Group::factory()->create(['name' => 'Live Sports', 'user_id' => $this->user->id, 'enabled' => true]);
     $vodGroup = Group::factory()->create(['name' => 'VOD Movies', 'user_id' => $this->user->id, 'enabled' => true]);
 
-    Channel::factory()->create([
+    Channel::factory()->createQuietly([
         'playlist_id' => $this->playlist->id,
         'user_id' => $this->user->id,
         'group_id' => $liveGroup->id,
@@ -104,7 +108,7 @@ it('excludes vod groups when playlist does not include vod in m3u', function () 
         'is_vod' => false,
     ]);
 
-    Channel::factory()->create([
+    Channel::factory()->createQuietly([
         'playlist_id' => $this->playlist->id,
         'user_id' => $this->user->id,
         'group_id' => $vodGroup->id,
@@ -127,7 +131,7 @@ it('includes vod groups when playlist includes vod in m3u', function () {
     $liveGroup = Group::factory()->create(['name' => 'Live Sports', 'user_id' => $this->user->id, 'enabled' => true]);
     $vodGroup = Group::factory()->create(['name' => 'VOD Movies', 'user_id' => $this->user->id, 'enabled' => true]);
 
-    Channel::factory()->create([
+    Channel::factory()->createQuietly([
         'playlist_id' => $this->playlist->id,
         'user_id' => $this->user->id,
         'group_id' => $liveGroup->id,
@@ -136,7 +140,7 @@ it('includes vod groups when playlist includes vod in m3u', function () {
         'is_vod' => false,
     ]);
 
-    Channel::factory()->create([
+    Channel::factory()->createQuietly([
         'playlist_id' => $this->playlist->id,
         'user_id' => $this->user->id,
         'group_id' => $vodGroup->id,
@@ -154,7 +158,7 @@ it('includes vod groups when playlist includes vod in m3u', function () {
 });
 
 it('falls back to group_internal when group is null', function () {
-    Channel::factory()->create([
+    Channel::factory()->createQuietly([
         'playlist_id' => $this->playlist->id,
         'user_id' => $this->user->id,
         'group_id' => null,
@@ -179,7 +183,7 @@ it('filters channels by group when group param is provided', function () {
     $sportsGroup = Group::factory()->create(['name' => 'Sports', 'user_id' => $this->user->id, 'enabled' => true]);
     $newsGroup = Group::factory()->create(['name' => 'News', 'user_id' => $this->user->id, 'enabled' => true]);
 
-    $sportsChannel = Channel::factory()->create([
+    $sportsChannel = Channel::factory()->createQuietly([
         'playlist_id' => $this->playlist->id,
         'user_id' => $this->user->id,
         'group_id' => $sportsGroup->id,
@@ -189,7 +193,7 @@ it('filters channels by group when group param is provided', function () {
         'channel' => 101,
     ]);
 
-    $newsChannel = Channel::factory()->create([
+    $newsChannel = Channel::factory()->createQuietly([
         'playlist_id' => $this->playlist->id,
         'user_id' => $this->user->id,
         'group_id' => $newsGroup->id,
@@ -214,7 +218,7 @@ it('returns all channels when no group param is provided', function () {
     $sportsGroup = Group::factory()->create(['name' => 'Sports', 'user_id' => $this->user->id, 'enabled' => true]);
     $newsGroup = Group::factory()->create(['name' => 'News', 'user_id' => $this->user->id, 'enabled' => true]);
 
-    Channel::factory()->create([
+    Channel::factory()->createQuietly([
         'playlist_id' => $this->playlist->id,
         'user_id' => $this->user->id,
         'group_id' => $sportsGroup->id,
@@ -224,7 +228,7 @@ it('returns all channels when no group param is provided', function () {
         'channel' => 201,
     ]);
 
-    Channel::factory()->create([
+    Channel::factory()->createQuietly([
         'playlist_id' => $this->playlist->id,
         'user_id' => $this->user->id,
         'group_id' => $newsGroup->id,
@@ -245,7 +249,7 @@ it('returns all channels when no group param is provided', function () {
 it('group filter is case-insensitive', function () {
     $group = Group::factory()->create(['name' => 'Sports', 'user_id' => $this->user->id, 'enabled' => true]);
 
-    $channel = Channel::factory()->create([
+    $channel = Channel::factory()->createQuietly([
         'playlist_id' => $this->playlist->id,
         'user_id' => $this->user->id,
         'group_id' => $group->id,

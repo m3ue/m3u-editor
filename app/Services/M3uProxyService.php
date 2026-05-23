@@ -2,10 +2,13 @@
 
 namespace App\Services;
 
+use App\Enums\DvrRecordingStatus;
 use App\Facades\PlaylistFacade;
 use App\Facades\ProxyFacade;
 use App\Models\Channel;
 use App\Models\CustomPlaylist;
+use App\Models\DvrRecording;
+use App\Models\DvrSetting;
 use App\Models\Episode;
 use App\Models\MergedPlaylist;
 use App\Models\Network;
@@ -858,6 +861,33 @@ class M3uProxyService
         // so they must NEVER reuse an existing pooled live stream. We detect this early and skip
         // all pool reuse paths when timeshift parameters are present on the request.
         $isTimeshiftRequest = $request && ($request->filled('timeshift_duration') || $request->filled('timeshift_date') || $request->filled('utc'));
+
+        // Before creating a new stream, check if there's an active DVR recording for this channel.
+        // If so, route through the editor's DVR HLS proxy so we piggyback off the existing
+        // broadcast instead of creating a duplicate upstream connection to the provider.
+        if (! $isTimeshiftRequest) {
+            $dvrRecording = DvrRecording::where('channel_id', $channel->id)
+                ->where('status', DvrRecordingStatus::Recording)
+                ->whereNotNull('proxy_network_id')
+                ->latest('created_at')
+                ->first();
+
+            if ($dvrRecording) {
+                Log::debug('DVR recording active for channel — routing through editor HLS proxy', [
+                    'channel_id' => $channel->id,
+                    'recording_id' => $dvrRecording->id,
+                    'proxy_network_id' => $dvrRecording->proxy_network_id,
+                ]);
+
+                $playlist->loadMissing('user');
+
+                return route('dvr.recording.hls.playlist', [
+                    'username' => $playlist->user->name,
+                    'password' => $playlist->uuid,
+                    'uuid' => $dvrRecording->uuid,
+                ]);
+            }
+        }
 
         if ($profile) {
             // Search for pooled stream by ORIGINAL channel ID (handles cross-provider failovers).
@@ -1909,10 +1939,11 @@ class M3uProxyService
             if ($response->successful()) {
                 $data = $response->json() ?: [];
 
-                // Only include broadcasts for networks owned by the current user
+                // Only include broadcasts for networks or DVR recordings owned by the current user
                 $userNetworkUuids = Network::where('user_id', auth()->id())->pluck('uuid')->toArray();
+                $userDvrUuids = DvrRecording::where('user_id', auth()->id())->pluck('uuid')->toArray();
 
-                $broadcasts = array_filter($data['broadcasts'] ?? [], fn ($b) => isset($b['network_id']) && in_array($b['network_id'], $userNetworkUuids));
+                $broadcasts = array_filter($data['broadcasts'] ?? [], fn ($b) => isset($b['network_id']) && (in_array($b['network_id'], $userNetworkUuids) || in_array($b['network_id'], $userDvrUuids)));
 
                 return [
                     'success' => true,
@@ -2462,6 +2493,67 @@ class M3uProxyService
     }
 
     /**
+     * Find an active stream ID for a given channel on the proxy.
+     * Returns the stream ID if found, null otherwise.
+     */
+    public function getActiveStreamIdForChannel(int $channelId, string $playlistUuid): ?string
+    {
+        try {
+            $endpoint = $this->apiBaseUrl.'/streams/by-metadata';
+            $response = Http::timeout(5)->acceptJson()
+                ->withHeaders(array_filter([
+                    'X-API-Token' => $this->apiToken,
+                ]))
+                ->get($endpoint, [
+                    'field' => 'original_channel_id',
+                    'value' => (string) $channelId,
+                    'active_only' => true,
+                ]);
+
+            if (! $response->successful()) {
+                return null;
+            }
+
+            $data = $response->json();
+            $matchingStreams = $data['matching_streams'] ?? [];
+
+            foreach ($matchingStreams as $stream) {
+                $metadata = $stream['metadata'] ?? [];
+
+                if (
+                    ($metadata['original_channel_id'] ?? null) == $channelId &&
+                    ($metadata['original_playlist_uuid'] ?? null) === $playlistUuid
+                ) {
+                    return $stream['stream_id'];
+                }
+            }
+
+            return null;
+        } catch (Exception $e) {
+            Log::warning('Error finding active stream for DVR piggyback: '.$e->getMessage());
+
+            return null;
+        }
+    }
+
+    /**
+     * Build the internal proxy URL for an existing stream (for DVR piggybacking).
+     * Uses the API base URL so the broadcast FFmpeg can reach the stream from within the proxy.
+     */
+    public function getStreamProxyUrl(string $streamId): string
+    {
+        $baseUrl = $this->getApiBaseUrl();
+
+        // The API base URL may be configured without a scheme (e.g. "m3u-proxy:38085").
+        // The proxy requires HTTP/HTTPS protocol for stream_url, so prepend if missing.
+        if (! str_starts_with($baseUrl, 'http://') && ! str_starts_with($baseUrl, 'https://')) {
+            $baseUrl = 'http://'.$baseUrl;
+        }
+
+        return $baseUrl.'/stream/'.$streamId;
+    }
+
+    /**
      * Get m3u-proxy server information including configuration and capabilities
      *
      * @return array Array with 'success', 'info', and optional 'error' keys
@@ -2805,5 +2897,168 @@ class M3uProxyService
 
         // Return null if not configured, as webhooks are optional and may not be needed if the resolver URL is not set
         return null;
+    }
+
+    /**
+     * Start a DVR broadcast on the proxy.
+     *
+     * Uses the proxy's BroadcastManager with dvr_mode=true so all HLS segments
+     * are preserved for post-processing. The recording UUID is used as the
+     * network_id so it is globally unique and traceable.
+     *
+     * Returns the network_id (= recording UUID) on success.
+     *
+     * @throws Exception when the proxy is unreachable or returns an error
+     */
+    public function startDvrBroadcast(DvrRecording $recording, DvrSetting $setting, string $streamUrl): string
+    {
+        if (empty($this->apiBaseUrl)) {
+            throw new Exception('M3U Proxy base URL is not configured');
+        }
+
+        $networkId = $recording->uuid;
+
+        $durationSeconds = 0;
+        if ($recording->scheduled_start && $recording->scheduled_end) {
+            $durationSeconds = (int) abs($recording->scheduled_end->diffInSeconds($recording->scheduled_start));
+            // Add end-late buffer
+            $durationSeconds += (int) $setting->resolveEndLateSeconds(null);
+        }
+
+        $payload = [
+            'stream_url' => $streamUrl,
+            'duration_seconds' => $durationSeconds,
+            'dvr_mode' => true,
+            'hls_list_size' => 0,
+            'output_dir' => config('proxy.broadcast_temp_dir'),
+            'metadata' => [
+                'type' => 'dvr',
+                'recording_id' => $recording->uuid,
+                'recording_db_id' => (string) $recording->id,
+                'title' => $recording->title,
+            ],
+        ];
+
+        $endpoint = $this->apiBaseUrl.'/broadcast/'.rawurlencode($networkId).'/start';
+        $response = Http::timeout(10)
+            ->acceptJson()
+            ->withHeaders($this->apiToken ? ['X-API-Token' => $this->apiToken] : [])
+            ->post($endpoint, $payload);
+
+        if (! $response->successful()) {
+            throw new Exception("Proxy returned HTTP {$response->status()} starting DVR broadcast: ".$response->body());
+        }
+
+        return $networkId;
+    }
+
+    /**
+     * Stop a running DVR broadcast on the proxy.
+     */
+    public function stopDvrBroadcast(string $networkId): bool
+    {
+        if (empty($this->apiBaseUrl)) {
+            Log::warning('DVR stop: M3U Proxy base URL not configured');
+
+            return false;
+        }
+
+        try {
+            $endpoint = $this->apiBaseUrl.'/broadcast/'.rawurlencode($networkId).'/stop';
+            $response = Http::timeout(10)
+                ->acceptJson()
+                ->withHeaders($this->apiToken ? ['X-API-Token' => $this->apiToken] : [])
+                ->post($endpoint);
+
+            if ($response->successful()) {
+                Log::debug("DVR broadcast {$networkId} stopped on proxy");
+
+                return true;
+            }
+
+            Log::warning("Failed to stop DVR broadcast {$networkId}: ".$response->body());
+
+            return false;
+        } catch (Exception $e) {
+            Log::error("Error stopping DVR broadcast {$networkId}: ".$e->getMessage());
+
+            return false;
+        }
+    }
+
+    /**
+     * Get the public live HLS URL for an in-progress DVR recording.
+     * Clients can connect to this URL to watch the recording in real time.
+     */
+    public function getDvrBroadcastLiveUrl(string $networkId): string
+    {
+        return $this->getPublicUrl().'/broadcast/'.rawurlencode($networkId).'/live.m3u8';
+    }
+
+    /**
+     * Get the API-based live HLS URL for an in-progress DVR recording.
+     * Uses the internal API base URL so the editor can reach the proxy from within Docker.
+     */
+    public function getDvrBroadcastLiveApiUrl(string $networkId): string
+    {
+        return $this->getApiBaseUrl().'/broadcast/'.rawurlencode($networkId).'/live.m3u8';
+    }
+
+    /**
+     * Get the API-based segment URL for an in-progress DVR recording.
+     * Uses the internal API base URL for editor→proxy requests within Docker.
+     */
+    public function getDvrBroadcastSegmentApiUrl(string $networkId, string $segment): string
+    {
+        $baseUrl = $this->getApiBaseUrl();
+
+        if (! str_starts_with($baseUrl, 'http://') && ! str_starts_with($baseUrl, 'https://')) {
+            $baseUrl = 'http://'.$baseUrl;
+        }
+
+        return $baseUrl.'/broadcast/'.rawurlencode($networkId).'/segment/'.$segment.'.ts';
+    }
+
+    /**
+     * Get the public segment URL for an in-progress DVR recording.
+     */
+    public function getDvrBroadcastSegmentUrl(string $networkId, string $segment): string
+    {
+        return $this->getPublicUrl().'/broadcast/'.rawurlencode($networkId).'/segment/'.$segment.'.ts';
+    }
+
+    /**
+     * Delete a completed DVR broadcast from the proxy, freeing its HLS segment storage.
+     *
+     * Called by DvrPostProcessorService after segments have been downloaded and concatenated.
+     * Failures are logged and swallowed — the recording is already complete at this point.
+     */
+    public function cleanupDvrBroadcast(string $networkId): bool
+    {
+        if (empty($this->apiBaseUrl)) {
+            return false;
+        }
+
+        try {
+            $endpoint = $this->apiBaseUrl.'/broadcast/'.rawurlencode($networkId);
+            $response = Http::timeout(10)
+                ->acceptJson()
+                ->withHeaders($this->apiToken ? ['X-API-Token' => $this->apiToken] : [])
+                ->delete($endpoint);
+
+            if ($response->successful()) {
+                Log::debug("DVR broadcast {$networkId} cleaned up on proxy");
+
+                return true;
+            }
+
+            Log::warning("Failed to cleanup DVR broadcast {$networkId} on proxy: HTTP {$response->status()}");
+
+            return false;
+        } catch (Exception $e) {
+            Log::warning("DVR: Could not cleanup broadcast {$networkId} on proxy: {$e->getMessage()}");
+
+            return false;
+        }
     }
 }
