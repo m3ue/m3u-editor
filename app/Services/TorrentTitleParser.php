@@ -134,17 +134,17 @@ class TorrentTitleParser
      * Strip common torrent-site watermark prefixes from directory and file names.
      *
      * Handles patterns like:
-     *   [XTORRENTY.ORG] Movie Name...
-     *   www.UIndex.org    -    Movie Name...
+     *   [SOMESITE.ORG] Movie Name...
+     *   www.SiteName.org    -    Movie Name...
      *   www.SomeSite.com - Movie Name...
      */
     private function stripSiteWatermarks(string $str): string
     {
-        // Strip leading [SOMETHING.TLD] bracket (e.g. [XTORRENTY.ORG])
+        // Strip leading [SOMETHING.TLD] bracket (e.g. [SOMESITE.ORG])
         $str = preg_replace('/^\s*\[[^\]]{1,50}\.[A-Za-z]{2,6}\]\s*/u', '', $str) ?? $str;
 
         // Strip leading www.domain.tld followed by any separator and dash
-        // Handles extra spaces like "www.UIndex.org    -    "
+        // Handles extra spaces like "www.SiteName.org    -    "
         $str = preg_replace('/^\s*www\.\S+\s*[-–]+\s*/iu', '', $str) ?? $str;
 
         return trim($str);

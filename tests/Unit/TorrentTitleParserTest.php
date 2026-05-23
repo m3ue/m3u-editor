@@ -117,17 +117,17 @@ it('extracts year from movie filename', function () {
 // -------------------------------------------------------------------------
 
 it('strips leading bracket site watermark', function () {
-    $result = $this->parser->parse('[XTORRENTY.ORG] Show.Name.S01E01.mkv');
+    $result = $this->parser->parse('[SOMESITE.ORG] Show.Name.S01E01.mkv');
 
     expect($result['is_episode'])->toBeTrue()
-        ->and($result['title'])->not->toContain('XTORRENTY');
+        ->and($result['title'])->not->toContain('SOMESITE');
 });
 
 it('strips www.domain.tld watermark with dash separator', function () {
-    $result = $this->parser->parse('www.UIndex.org    -    Show.Name.S02E05.720p.mkv');
+    $result = $this->parser->parse('www.SiteName.org    -    Show.Name.S02E05.720p.mkv');
 
     expect($result['is_episode'])->toBeTrue()
-        ->and($result['title'])->not->toContain('UIndex');
+        ->and($result['title'])->not->toContain('SiteName');
 });
 
 // -------------------------------------------------------------------------

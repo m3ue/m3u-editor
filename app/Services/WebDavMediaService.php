@@ -931,7 +931,7 @@ class WebDavMediaService implements MediaServer
                 continue;
             }
 
-            // TorrentTitleParser already strips site watermarks (www.UIndex.org, [XTORRENTY.ORG], …)
+            // TorrentTitleParser already strips site watermarks (www.SiteName.org, [SOMESITE.ORG], …)
             // from the directory name before pattern matching, so we parse the raw directory name
             // directly. Do NOT replace it with the NFO "Title:" field here — episode-title strings
             // like "This Is Art, This Is Spirituality" would fail episode detection.
