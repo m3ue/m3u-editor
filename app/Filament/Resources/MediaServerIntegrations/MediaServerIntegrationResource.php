@@ -1418,28 +1418,7 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                         ->modalDescription(__('This will permanently delete ALL movies, series, episodes, seasons, and categories from this integration\'s playlist, then start a fresh sync. This cannot be undone.'))
                         ->modalSubmitActionLabel(__('Yes, flush and re-sync'))
                         ->action(function (MediaServerIntegration $record) {
-                            $playlist = $record->playlist;
-
-                            if ($playlist) {
-                                Episode::where('playlist_id', $playlist->id)->delete();
-                                Season::where('playlist_id', $playlist->id)->delete();
-                                Series::where('playlist_id', $playlist->id)->delete();
-                                Category::where('playlist_id', $playlist->id)->delete();
-                                Channel::where('playlist_id', $playlist->id)->where('is_custom', false)->delete();
-                                Group::where('playlist_id', $playlist->id)->where('custom', false)->delete();
-                            }
-
-                            $record->update([
-                                'status' => 'idle',
-                                'progress' => 0,
-                                'movie_progress' => 0,
-                                'series_progress' => 0,
-                                'total_movies' => 0,
-                                'total_series' => 0,
-                                'sync_stats' => null,
-                            ]);
-
-                            SyncMediaServer::dispatch($record->id);
+                            static::flushLibraryContent($record);
 
                             Notification::make()
                                 ->success()
@@ -1560,6 +1539,32 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
     {
         return parent::getEloquentQuery()
             ->where('user_id', Auth::id());
+    }
+
+    public static function flushLibraryContent(MediaServerIntegration $record): void
+    {
+        $playlist = $record->playlist;
+
+        if ($playlist) {
+            Episode::where('playlist_id', $playlist->id)->delete();
+            Season::where('playlist_id', $playlist->id)->delete();
+            Series::where('playlist_id', $playlist->id)->delete();
+            Category::where('playlist_id', $playlist->id)->delete();
+            Channel::where('playlist_id', $playlist->id)->where('is_custom', false)->delete();
+            Group::where('playlist_id', $playlist->id)->where('custom', false)->delete();
+        }
+
+        $record->update([
+            'status' => 'idle',
+            'progress' => 0,
+            'movie_progress' => 0,
+            'series_progress' => 0,
+            'total_movies' => 0,
+            'total_series' => 0,
+            'sync_stats' => null,
+        ]);
+
+        SyncMediaServer::dispatch($record->id);
     }
 
     /**

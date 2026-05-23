@@ -105,7 +105,7 @@ class TorrentTitleParser
         }
 
         // 4 — Standalone season pack: "Season 2", "S02" not followed by an episode number
-        if (preg_match('/\b(?:Season|Saison)\s?(\d{1,2})\b/iu', $base, $m, PREG_OFFSET_CAPTURE) ||
+        if (preg_match('/\b(?:Season|Saison)[\s.]?(\d{1,2})\b/iu', $base, $m, PREG_OFFSET_CAPTURE) ||
             preg_match('/\bS(\d{1,2})(?![Ee]\d)(?=[\s._\[(\-]|$)/iu', $base, $m, PREG_OFFSET_CAPTURE)) {
             return [
                 'title' => $this->cleanTitle(substr($base, 0, $m[0][1])),
