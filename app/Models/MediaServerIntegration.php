@@ -34,6 +34,8 @@ class MediaServerIntegration extends Model
         'metadata_source' => 'tmdb',
         'auto_fetch_metadata' => true,
         'scan_recursive' => true,
+        'skip_ssl_verify' => false,
+        'use_torrent_parser' => false,
         'plex_management_enabled' => false,
     ];
 
@@ -64,6 +66,8 @@ class MediaServerIntegration extends Model
         'local_media_paths' => 'array',
         'video_extensions' => 'array',
         'scan_recursive' => 'boolean',
+        'skip_ssl_verify' => 'boolean',
+        'use_torrent_parser' => 'boolean',
         'auto_fetch_metadata' => 'boolean',
         'plex_management_enabled' => 'boolean',
         'plex_dvr_tuners' => 'array',
@@ -209,7 +213,7 @@ class MediaServerIntegration extends Model
             return $paths;
         }
 
-        return array_filter($paths, fn ($path) => ($path['type'] ?? '') === $type);
+        return array_filter($paths, fn ($path) => in_array($path['type'] ?? '', [$type, 'both'], true));
     }
 
     /**

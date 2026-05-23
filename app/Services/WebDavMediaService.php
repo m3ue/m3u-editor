@@ -23,6 +23,22 @@ class WebDavMediaService implements MediaServer
     protected MediaServerIntegration $integration;
 
     /**
+     * Cache populated by fetchSeries() when torrent parser is active.
+     * Keyed by series ID — allows fetchSeasons() and fetchEpisodes() to find
+     * episode-container grouped series that have no single directory path.
+     *
+     * @var array<string, array>
+     */
+    protected array $torrentSeriesCache = [];
+
+    /**
+     * Optional callback invoked during the scan/fetch phases with the running item count.
+     * Used by the sync job to report incremental progress while WebDAV directories are
+     * being scanned (before DB writes begin).
+     */
+    protected ?\Closure $scanProgressCallback = null;
+
+    /**
      * Common video file extensions.
      */
     protected array $defaultVideoExtensions = [
@@ -64,7 +80,16 @@ class WebDavMediaService implements MediaServer
     }
 
     /**
-     * Get the base URL for the WebDAV server.
+     * Register a callback invoked during directory scanning with the running found-item count.
+     * The job uses this to show incremental progress while WebDAV is being scanned.
+     */
+    public function setScanProgressCallback(\Closure $fn): void
+    {
+        $this->scanProgressCallback = $fn;
+    }
+
+    /**
+     * Get the base URL for the WebDAV server, including any configured base path.
      */
     protected function getBaseUrl(): string
     {
@@ -78,6 +103,11 @@ class WebDavMediaService implements MediaServer
             $url .= ":{$port}";
         }
 
+        $basePath = trim($this->integration->webdav_base_path ?? '', '/');
+        if ($basePath !== '') {
+            $url .= "/{$basePath}";
+        }
+
         return $url;
     }
 
@@ -86,8 +116,10 @@ class WebDavMediaService implements MediaServer
      */
     protected function getHttpClient(): PendingRequest
     {
+        $verify = $this->integration->ssl && ! $this->integration->skip_ssl_verify;
+
         $client = Http::timeout(30)
-            ->withOptions(['verify' => false]);
+            ->withOptions(['verify' => $verify]);
 
         $username = $this->integration->webdav_username;
         $password = $this->integration->webdav_password;
@@ -102,75 +134,63 @@ class WebDavMediaService implements MediaServer
     /**
      * Test connection to the WebDAV server.
      *
+     * First verifies root connectivity and auth, then validates any configured library paths.
+     *
      * @return array{success: bool, message: string, paths_found?: int, total_files?: int}
      */
     public function testConnection(): array
     {
         try {
-            $paths = $this->integration->local_media_paths ?? [];
+            $baseUrl = $this->getBaseUrl();
 
-            if (empty($paths)) {
+            // Step 1: test root connectivity regardless of configured paths
+            $rootResult = $this->propfindUrl($baseUrl.'/');
+            if (! $rootResult['success']) {
                 return [
                     'success' => false,
-                    'message' => 'No media paths configured. Please add at least one WebDAV library path.',
+                    'message' => "Cannot reach WebDAV server at {$baseUrl}: {$rootResult['error']}",
                 ];
             }
 
-            $baseUrl = $this->getBaseUrl();
+            // Step 2: validate configured library paths
+            $paths = $this->integration->local_media_paths ?? [];
+            $configuredPaths = array_filter($paths, fn ($p) => ! empty($p['path'] ?? ''));
+
+            if (empty($configuredPaths)) {
+                return [
+                    'success' => true,
+                    'message' => "Connected to WebDAV server at {$baseUrl}.",
+                    'server_name' => 'WebDAV Media',
+                    'version' => '1.0',
+                    'paths_found' => 0,
+                    'total_files' => 0,
+                ];
+            }
+
             $validPaths = 0;
-            $totalFiles = 0;
             $errors = [];
 
-            foreach ($paths as $pathConfig) {
-                $path = $pathConfig['path'] ?? '';
-
-                if (empty($path)) {
-                    continue;
-                }
-
+            foreach ($configuredPaths as $pathConfig) {
+                $path = $pathConfig['path'];
                 $url = rtrim($baseUrl, '/').'/'.ltrim($path, '/');
 
-                try {
-                    $response = $this->getHttpClient()
-                        ->withHeaders([
-                            'Depth' => '1',
-                            'Content-Type' => 'application/xml',
-                        ])
-                        ->send('PROPFIND', $url, [
-                            'body' => '<?xml version="1.0" encoding="utf-8"?>
-                                <D:propfind xmlns:D="DAV:">
-                                    <D:prop>
-                                        <D:resourcetype/>
-                                        <D:getcontentlength/>
-                                        <D:displayname/>
-                                    </D:prop>
-                                </D:propfind>',
-                        ]);
+                $result = $this->propfindUrl($url);
 
-                    if ($response->status() === 207 || $response->successful()) {
-                        $validPaths++;
-
-                        $files = $this->scanWebDavDirectoryForVideoFiles(
-                            $path,
-                            $this->integration->scan_recursive
-                        );
-                        $totalFiles += count($files);
-                    } else {
-                        $errors[] = "Path not accessible: {$path} (HTTP {$response->status()})";
-                    }
-                } catch (Exception $e) {
-                    $errors[] = "Path error: {$path} - {$e->getMessage()}";
+                if ($result['success']) {
+                    $validPaths++;
+                } else {
+                    $errors[] = "Path '{$path}': {$result['error']}";
                 }
             }
 
             if ($validPaths === 0) {
                 return [
                     'success' => false,
-                    'message' => 'No valid paths found. '.implode(' ', $errors),
+                    'message' => 'Server reachable but no library paths are accessible. '.implode('; ', $errors),
                 ];
             }
 
-            $message = "Found {$validPaths} valid path(s) with {$totalFiles} video file(s)";
+            $message = "Connected — {$validPaths} path(s) accessible";
             if (! empty($errors)) {
                 $message .= '. Warnings: '.implode('; ', $errors);
             }
@@ -181,7 +201,7 @@ class WebDavMediaService implements MediaServer
                 'server_name' => 'WebDAV Media',
                 'version' => '1.0',
                 'paths_found' => $validPaths,
-                'total_files' => $totalFiles,
+                'total_files' => 0,
             ];
         } catch (Exception $e) {
             Log::error('WebDavMediaService: Connection test failed', [
@@ -193,6 +213,48 @@ class WebDavMediaService implements MediaServer
                 'success' => false,
                 'message' => 'Error testing paths: '.$e->getMessage(),
             ];
+        }
+    }
+
+    /**
+     * Issue a PROPFIND request to a URL and return success/error.
+     *
+     * @return array{success: bool, error?: string}
+     */
+    protected function propfindUrl(string $url): array
+    {
+        try {
+            $response = $this->getHttpClient()
+                ->withHeaders([
+                    'Depth' => '1',
+                    'Content-Type' => 'application/xml',
+                ])
+                ->send('PROPFIND', $url, [
+                    'body' => '<?xml version="1.0" encoding="utf-8"?>
+                        <D:propfind xmlns:D="DAV:">
+                            <D:prop>
+                                <D:resourcetype/>
+                                <D:getcontentlength/>
+                                <D:displayname/>
+                            </D:prop>
+                        </D:propfind>',
+                ]);
+
+            if ($response->status() === 207 || $response->successful()) {
+                return ['success' => true];
+            }
+
+            $label = match ($response->status()) {
+                401 => 'HTTP 401 Unauthorized — check username/password',
+                403 => 'HTTP 403 Forbidden — credentials valid but access denied',
+                404 => 'HTTP 404 Not Found — path does not exist on the server',
+                405 => 'HTTP 405 Method Not Allowed — server may not support WebDAV',
+                default => "HTTP {$response->status()}",
+            };
+
+            return ['success' => false, 'error' => $label];
+        } catch (Exception $e) {
+            return ['success' => false, 'error' => $e->getMessage()];
         }
     }
 
@@ -215,11 +277,9 @@ class WebDavMediaService implements MediaServer
                 continue;
             }
 
-            $files = $this->scanWebDavDirectoryForVideoFiles(
-                $path,
-                $this->integration->scan_recursive
-            );
-            $itemCount = count($files);
+            // Shallow Depth:1 listing — fast single request, avoids recursive scan on remote servers.
+            // Full file count happens during the actual SyncMediaServer job.
+            $itemCount = count($this->listWebDavDirectory($path));
 
             $libraries[] = [
                 'id' => md5($path),
@@ -242,10 +302,12 @@ class WebDavMediaService implements MediaServer
     {
         $movies = collect();
         $paths = $this->integration->getLocalMediaPathsForType('movies');
+        $parser = $this->integration->use_torrent_parser ? new TorrentTitleParser : null;
 
         foreach ($paths as $pathConfig) {
             $path = $pathConfig['path'] ?? '';
             $libraryGenre = $pathConfig['name'] ?? basename($path);
+            $isBothPath = ($pathConfig['type'] ?? '') === 'both';
 
             if (empty($path)) {
                 continue;
@@ -256,10 +318,44 @@ class WebDavMediaService implements MediaServer
                 $this->integration->scan_recursive
             );
 
+            $normalizedScanPath = rtrim($path, '/');
+
             foreach ($files as $file) {
-                $movieData = $this->parseMovieFile($file, $libraryGenre);
+                // Skip files that live inside a subdirectory which looks like a season/series pack.
+                // This prevents junk files (promo .mkv, sample, etc.) bundled inside a series torrent
+                // from appearing as standalone movies.
+                $fileDir = rtrim(dirname($file['path']), '/');
+                if ($fileDir !== $normalizedScanPath) {
+                    $parentName = basename($fileDir);
+                    if ($parser) {
+                        $parentParsed = $parser->parse($parentName);
+                        if ($parentParsed['is_episode'] || $parentParsed['is_pack']) {
+                            continue;
+                        }
+                    } elseif (preg_match('/\b[Ss]\d{1,2}\b/u', $parentName)) {
+                        continue;
+                    }
+                }
+
+                $isEpisode = $parser
+                    ? $parser->parse($file['name'])['is_episode']
+                    : ($isBothPath && $this->looksLikeEpisode($file['name']));
+
+                // When torrent parser is on, skip episodes everywhere (not just 'both' paths)
+                if ($isEpisode) {
+                    continue;
+                }
+
+                $movieData = $parser
+                    ? $this->parseMovieFileTorrent($file, $parser->parse($file['name']), $libraryGenre)
+                    : $this->parseMovieFile($file, $libraryGenre);
+
                 if ($movieData) {
                     $movies->push($movieData);
+
+                    if ($this->scanProgressCallback) {
+                        ($this->scanProgressCallback)($movies->count());
+                    }
                 }
             }
         }
@@ -286,8 +382,15 @@ class WebDavMediaService implements MediaServer
                 continue;
             }
 
-            $this->scanWebDavSeriesDirectory($path, $seriesMap, $libraryGenre);
+            if ($this->integration->use_torrent_parser) {
+                $this->parseTorrentSeriesDirectory($path, $seriesMap, $libraryGenre);
+            } else {
+                $this->scanWebDavSeriesDirectory($path, $seriesMap, $libraryGenre);
+            }
         }
+
+        // Populate instance cache so fetchSeasons / fetchEpisodes can resolve grouped series
+        $this->torrentSeriesCache = $seriesMap;
 
         foreach ($seriesMap as $seriesData) {
             $series->push($seriesData);
@@ -311,6 +414,14 @@ class WebDavMediaService implements MediaServer
      */
     public function fetchSeasons(string $seriesId): Collection
     {
+        // Torrent-grouped series: seasons are derived from the episode containers collected
+        // during fetchSeries() rather than from a single directory on the server.
+        if (isset($this->torrentSeriesCache[$seriesId]['_torrent_episode_dirs'])) {
+            return $this->buildSeasonsFromEpisodeDirs(
+                $this->torrentSeriesCache[$seriesId]['_torrent_episode_dirs']
+            );
+        }
+
         $paths = $this->integration->getLocalMediaPathsForType('tvshows');
         $seasons = collect();
 
@@ -336,6 +447,14 @@ class WebDavMediaService implements MediaServer
      */
     public function fetchEpisodes(string $seriesId, ?string $seasonId = null): Collection
     {
+        // Torrent-grouped series: episodes come from per-episode container directories.
+        if (isset($this->torrentSeriesCache[$seriesId]['_torrent_episode_dirs'])) {
+            return $this->buildEpisodesFromTorrentDirs(
+                $this->torrentSeriesCache[$seriesId],
+                $seasonId
+            );
+        }
+
         $episodes = collect();
         $paths = $this->integration->getLocalMediaPathsForType('tvshows');
 
@@ -349,34 +468,32 @@ class WebDavMediaService implements MediaServer
                 }
 
                 $seriesName = basename($seriesDir['path']);
+                $torrentParser = $this->integration->use_torrent_parser ? new TorrentTitleParser : null;
 
-                if ($seasonId !== null) {
-                    $seasonPath = $this->resolveSeasonPath($seriesDir['path'], $seasonId);
-                    if ($seasonPath) {
-                        $files = $this->scanWebDavDirectoryForVideoFiles($seasonPath, false);
-                        foreach ($files as $file) {
-                            $episodeData = $this->parseEpisodeFile($file, $seriesName);
-                            if ($episodeData) {
-                                $episodes->push($episodeData);
-                            }
-                        }
-                    } else {
-                        $files = $this->scanWebDavDirectoryForVideoFiles($seriesDir['path'], true);
-                        foreach ($files as $file) {
-                            $episodeData = $this->parseEpisodeFile($file, $seriesName);
-                            if ($episodeData) {
-                                $episodes->push($episodeData);
-                            }
-                        }
-                    }
-                } else {
-                    $files = $this->scanWebDavDirectoryForVideoFiles($seriesDir['path'], true);
+                $parseFiles = function (array $files) use (&$episodes, $seriesName, $torrentParser): void {
                     foreach ($files as $file) {
+                        // When the torrent parser is active, skip files that clearly aren't episodes
+                        // (junk promo/sample files included in series torrents) without emitting a log.
+                        if ($torrentParser && ! $torrentParser->parse($file['name'])['is_episode']) {
+                            continue;
+                        }
+
                         $episodeData = $this->parseEpisodeFile($file, $seriesName);
                         if ($episodeData) {
                             $episodes->push($episodeData);
                         }
                     }
+                };
+
+                if ($seasonId !== null) {
+                    $seasonPath = $this->resolveSeasonPath($seriesDir['path'], $seasonId);
+                    if ($seasonPath) {
+                        $parseFiles($this->scanWebDavDirectoryForVideoFiles($seasonPath, false));
+                    } else {
+                        $parseFiles($this->scanWebDavDirectoryForVideoFiles($seriesDir['path'], true));
+                    }
+                } else {
+                    $parseFiles($this->scanWebDavDirectoryForVideoFiles($seriesDir['path'], true));
                 }
             }
         }
@@ -488,10 +605,21 @@ class WebDavMediaService implements MediaServer
      * @param  string  $path  Directory path on the WebDAV server
      * @return array<array{name: string, path: string, isDirectory: bool, size: int|null}>
      */
+    /**
+     * Build a properly percent-encoded URL from the base URL and a decoded path.
+     * Each path segment is encoded individually so slashes are preserved as separators.
+     */
+    protected function pathToUrl(string $path): string
+    {
+        $segments = explode('/', ltrim($path, '/'));
+        $encoded = implode('/', array_map('rawurlencode', $segments));
+
+        return rtrim($this->getBaseUrl(), '/').'/'.$encoded;
+    }
+
     protected function listWebDavDirectory(string $path): array
     {
-        $baseUrl = $this->getBaseUrl();
-        $url = rtrim($baseUrl, '/').'/'.ltrim($path, '/');
+        $url = $this->pathToUrl($path);
 
         if (! str_ends_with($url, '/')) {
             $url .= '/';
@@ -603,14 +731,14 @@ class WebDavMediaService implements MediaServer
                     continue;
                 }
 
-                $name = basename($normalizedHrefPath);
+                $name = $this->sanitizeUtf8(basename($normalizedHrefPath));
 
                 $isDirectory = $xpath->query('.//d:resourcetype/d:collection', $response)->length > 0;
 
                 $sizeNode = $xpath->query('.//d:getcontentlength', $response)->item(0);
                 $size = $sizeNode ? (int) $sizeNode->nodeValue : null;
 
-                $itemPath = $normalizedHrefPath;
+                $itemPath = $this->sanitizeUtf8($normalizedHrefPath);
 
                 $items[] = [
                     'name' => $name,
@@ -776,6 +904,356 @@ class WebDavMediaService implements MediaServer
         return null;
     }
 
+    // -------------------------------------------------------------------------
+    // Torrent-parser mode helpers
+    // -------------------------------------------------------------------------
+
+    /**
+     * Scan a WebDAV directory for series when torrent-style naming is enabled.
+     *
+     * Directories whose names contain SxxExx markers are treated as single-episode
+     * container folders (common for per-torrent downloads). These are grouped by
+     * show title into virtual series so that all episodes of the same show appear
+     * under one entry rather than each getting its own series.
+     *
+     * @param  array<string, array>  $seriesMap
+     */
+    protected function parseTorrentSeriesDirectory(string $basePath, array &$seriesMap, ?string $libraryGenre = null): void
+    {
+        $parser = new TorrentTitleParser;
+        $directories = $this->listWebDavDirectory($basePath);
+
+        // Accumulator for episode-container dirs, keyed by normalised show title
+        $episodeContainers = [];
+
+        foreach ($directories as $dir) {
+            if (! $dir['isDirectory']) {
+                continue;
+            }
+
+            // TorrentTitleParser already strips site watermarks (www.SiteName.org, [SOMESITE.ORG], …)
+            // from the directory name before pattern matching, so we parse the raw directory name
+            // directly. Do NOT replace it with the NFO "Title:" field here — episode-title strings
+            // like "This Is Art, This Is Spirituality" would fail episode detection.
+            $parsed = $parser->parse($dir['name']);
+
+            if ($parsed['is_episode']) {
+                // Single-episode container: group under the show name
+                $showTitle = $parsed['title'] ?: $dir['name'];
+                $key = strtolower(trim($showTitle));
+
+                if (! isset($episodeContainers[$key])) {
+                    $episodeContainers[$key] = [
+                        'title' => $showTitle,
+                        'dirs' => [],
+                    ];
+                }
+
+                $episodeContainers[$key]['dirs'][] = [
+                    'dir' => $dir,
+                    'season' => $parsed['season'] ?? 1,
+                    'episode' => $parsed['episode'],
+                ];
+            } else {
+                // Regular series directory or multi-season pack — use directory path as ID.
+                // If no season/pack markers are present, do a shallow check to avoid treating
+                // a single-movie directory (e.g. Remarkably Bright Creatures/) as a series.
+                if (! $parsed['is_pack'] && $parsed['season'] === null) {
+                    if ($this->looksLikeMovieDirectory($dir['path'], $parser)) {
+                        continue;
+                    }
+                }
+
+                $seriesTitle = $parsed['title'] ?: $dir['name'];
+                $seriesId = md5($dir['path']);
+
+                if (! isset($seriesMap[$seriesId])) {
+                    $genre = $libraryGenre ? trim($libraryGenre) : '';
+                    $seriesMap[$seriesId] = [
+                        'Id' => $seriesId,
+                        'Name' => $seriesTitle,
+                        'Path' => $dir['path'],
+                        'ProductionYear' => $parsed['year'],
+                        'Type' => 'Series',
+                        'Genres' => $genre !== '' ? [$genre] : ['Uncategorized'],
+                        'Overview' => null,
+                        'CommunityRating' => null,
+                    ];
+                }
+            }
+        }
+
+        // Merge grouped episode-container series into seriesMap
+        foreach ($episodeContainers as $key => $data) {
+            $seriesId = md5('torrent-show:'.$key);
+            $genre = $libraryGenre ? trim($libraryGenre) : '';
+
+            $seriesMap[$seriesId] = [
+                'Id' => $seriesId,
+                'Name' => $data['title'],
+                'Path' => $basePath,
+                'ProductionYear' => null,
+                'Type' => 'Series',
+                'Genres' => $genre !== '' ? [$genre] : ['Uncategorized'],
+                'Overview' => null,
+                'CommunityRating' => null,
+                '_torrent_episode_dirs' => $data['dirs'],
+            ];
+
+            if ($this->scanProgressCallback) {
+                ($this->scanProgressCallback)(count($seriesMap));
+            }
+        }
+    }
+
+    /**
+     * Build a seasons collection from episode-container directory metadata.
+     *
+     * @param  array<int, array{dir: array, season: int, episode: int|null}>  $episodeDirs
+     * @return Collection<int, array>
+     */
+    protected function buildSeasonsFromEpisodeDirs(array $episodeDirs): Collection
+    {
+        $seasons = [];
+
+        foreach ($episodeDirs as $entry) {
+            $season = $entry['season'];
+            if (! isset($seasons[$season])) {
+                $seasons[$season] = [
+                    'Id' => md5("torrent-season:{$season}"),
+                    'Name' => "Season {$season}",
+                    'IndexNumber' => $season,
+                    'Path' => '',
+                    'EpisodeCount' => 0,
+                ];
+            }
+            $seasons[$season]['EpisodeCount']++;
+        }
+
+        return collect(array_values($seasons))->sortBy('IndexNumber')->values();
+    }
+
+    /**
+     * Build an episodes collection by scanning the episode-container directories
+     * stored in a torrent-grouped series entry.
+     *
+     * @return Collection<int, array>
+     */
+    protected function buildEpisodesFromTorrentDirs(array $seriesData, ?string $seasonId): Collection
+    {
+        $episodes = collect();
+        $seriesName = $seriesData['Name'];
+        $parser = new TorrentTitleParser;
+        $videoExtensions = $this->integration->getVideoExtensions();
+
+        foreach ($seriesData['_torrent_episode_dirs'] as $entry) {
+            $season = $entry['season'];
+            $targetSeasonId = md5("torrent-season:{$season}");
+
+            if ($seasonId !== null && $targetSeasonId !== $seasonId) {
+                continue;
+            }
+
+            // List the episode container directory once to collect both video files and the NFO.
+            // The NFO "Title:" field provides the human-readable episode name.
+            $allItems = $this->listWebDavDirectory($entry['dir']['path']);
+            $files = [];
+            $nfoTitle = null;
+
+            foreach ($allItems as $item) {
+                if ($item['isDirectory']) {
+                    continue;
+                }
+
+                $ext = strtolower(pathinfo($item['name'], PATHINFO_EXTENSION));
+
+                if (in_array($ext, $videoExtensions, true)) {
+                    $files[] = $item;
+                } elseif ($ext === 'nfo' && $nfoTitle === null) {
+                    $nfoTitle = $this->fetchNfoDisplayTitle($item['path']);
+                }
+            }
+
+            foreach ($files as $file) {
+                // Try torrent parser first, fall back to regex parseEpisodeFile
+                $fileParsed = $parser->parse($file['name']);
+
+                if ($fileParsed['is_episode']) {
+                    $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+                    $itemId = base64_encode($file['path']);
+                    $episodes->push([
+                        'Id' => $itemId,
+                        'SeriesName' => $seriesName,
+                        'Name' => $nfoTitle ?? "Episode {$fileParsed['episode']}",
+                        'IndexNumber' => $fileParsed['episode'],
+                        'ParentIndexNumber' => $fileParsed['season'] ?? $season,
+                        'Path' => $file['path'],
+                        'Container' => $ext,
+                        'Type' => 'Episode',
+                        'Overview' => null,
+                        'CommunityRating' => null,
+                        'RunTimeTicks' => null,
+                        'MediaSources' => [[
+                            'Container' => $ext,
+                            'Path' => $file['path'],
+                            'Size' => $file['size'],
+                        ]],
+                    ]);
+                } else {
+                    // File parser couldn't confirm it's an episode — use dir-level info
+                    $episodeData = $this->parseEpisodeFile($file, $seriesName);
+                    if ($episodeData) {
+                        if (! $episodeData['ParentIndexNumber']) {
+                            $episodeData['ParentIndexNumber'] = $season;
+                        }
+                        if (! $episodeData['IndexNumber']) {
+                            $episodeData['IndexNumber'] = $entry['episode'];
+                        }
+                        $episodes->push($episodeData);
+                    }
+                }
+            }
+        }
+
+        return $episodes;
+    }
+
+    /**
+     * Parse a movie file using pre-computed torrent parser output.
+     */
+    protected function parseMovieFileTorrent(array $file, array $parsed, ?string $libraryGenre = null): ?array
+    {
+        $title = $parsed['title'] ?: pathinfo($file['name'], PATHINFO_FILENAME);
+        $year = $parsed['year'];
+        $extension = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+        $itemId = base64_encode($file['path']);
+        $genre = $libraryGenre ? trim($libraryGenre) : '';
+
+        return [
+            'Id' => $itemId,
+            'Name' => $title,
+            'OriginalTitle' => $title,
+            'ProductionYear' => $year,
+            'Path' => $file['path'],
+            'Container' => $extension,
+            'Type' => 'Movie',
+            'Genres' => $genre !== '' ? [$genre] : ['Uncategorized'],
+            'Overview' => null,
+            'CommunityRating' => null,
+            'RunTimeTicks' => null,
+            'People' => [],
+            'MediaSources' => [[
+                'Container' => $extension,
+                'Path' => $file['path'],
+                'Size' => $file['size'],
+            ]],
+        ];
+    }
+
+    /**
+     * Fetch the human-readable "Title:" field from an NFO file at a known path.
+     * Used inside episode container directories to get the proper episode title
+     * (e.g. "This Is Art, This Is Spirituality" rather than "Episode 3").
+     */
+    protected function fetchNfoDisplayTitle(string $nfoPath): ?string
+    {
+        try {
+            $response = $this->getHttpClient()->get($this->pathToUrl($nfoPath));
+
+            if (! $response->successful()) {
+                return null;
+            }
+
+            $content = $response->body();
+
+            // Parse "Title           : Some Title..." format (NFO info files)
+            if (preg_match('/^Title\s*:\s*(.+)$/mi', $content, $m)) {
+                $title = trim($m[1]);
+
+                return $title !== '' ? $this->sanitizeUtf8($title) : null;
+            }
+        } catch (Exception $e) {
+            // NFO fetch is best-effort; continue without it
+        }
+
+        return null;
+    }
+
+    /**
+     * Return true if a directory appears to contain a single movie file rather than
+     * a TV series (no season subdirectories, no episode-pattern video files).
+     * Uses a single shallow PROPFIND — called only when the directory name lacks
+     * any season/episode markers.
+     */
+    protected function looksLikeMovieDirectory(string $dirPath, TorrentTitleParser $parser): bool
+    {
+        $extensions = $this->integration->getVideoExtensions();
+        $items = $this->listWebDavDirectory($dirPath);
+
+        $videoFiles = [];
+        $hasSubDirs = false;
+
+        foreach ($items as $item) {
+            if ($item['isDirectory']) {
+                $hasSubDirs = true;
+                break;
+            }
+
+            $ext = strtolower(pathinfo($item['name'], PATHINFO_EXTENSION));
+            if (in_array($ext, $extensions, true)) {
+                $videoFiles[] = $item;
+            }
+        }
+
+        if ($hasSubDirs) {
+            return false;
+        }
+
+        // If there are video files but none match episode patterns, it's a movie directory
+        if (! empty($videoFiles)) {
+            foreach ($videoFiles as $vf) {
+                if ($parser->parse($vf['name'])['is_episode']) {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Strip invalid UTF-8 bytes from a string so it can be safely stored in the database.
+     * TorBox (and some other WebDAV servers) return filenames that mix Latin-2 bytes
+     * into otherwise UTF-8 content, producing sequences like 0xc5 0x20 that PostgreSQL
+     * and json_encode both reject.
+     */
+    protected function sanitizeUtf8(string $str): string
+    {
+        // iconv with //IGNORE drops any byte that cannot be represented in the target encoding
+        if (\function_exists('iconv')) {
+            return iconv('UTF-8', 'UTF-8//IGNORE', $str) ?: $str;
+        }
+
+        // Fallback: replace any invalid UTF-8 sequences with a replacement character
+        return mb_convert_encoding($str, 'UTF-8', 'UTF-8');
+    }
+
+    /**
+     * Check whether a filename matches known TV episode patterns.
+     */
+    protected function looksLikeEpisode(string $filename): bool
+    {
+        foreach ($this->episodePatterns as $pattern) {
+            if (preg_match($pattern, $filename)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /**
      * Parse a movie file and extract metadata from filename.
      *
@@ -926,9 +1404,7 @@ class WebDavMediaService implements MediaServer
      */
     public function getFileUrl(string $filePath): string
     {
-        $baseUrl = $this->getBaseUrl();
-
-        return rtrim($baseUrl, '/').'/'.ltrim($filePath, '/');
+        return $this->pathToUrl($filePath);
     }
 
     /**
