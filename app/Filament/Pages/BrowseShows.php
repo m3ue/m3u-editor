@@ -167,9 +167,13 @@ class BrowseShows extends Page
             return [];
         }
 
-        return Channel::where('playlist_id', $playlistId)
-            ->where('enabled', true)
-            ->orderBy('title')
+        $query = Channel::where('playlist_id', $playlistId);
+
+        if (! $this->shouldIncludeDisabledChannels()) {
+            $query->where('enabled', true);
+        }
+
+        return $query->orderBy('title')
             ->pluck('title', 'id')
             ->all();
     }
@@ -460,6 +464,11 @@ class BrowseShows extends Page
         }
 
         return DvrSetting::where('user_id', Auth::id())->find($this->dvr_setting_id);
+    }
+
+    private function shouldIncludeDisabledChannels(): bool
+    {
+        return $this->resolvedDvrSetting()?->include_disabled_channels ?? false;
     }
 
     /**
@@ -832,23 +841,35 @@ class BrowseShows extends Page
      */
     private function resolveEpgChannelScope(int $playlistId): ?array
     {
+        $includeDisabledChannels = $this->shouldIncludeDisabledChannels();
+
         $epgMapBase = DB::table('channels')
             ->join('epg_channels', 'epg_channels.id', '=', 'channels.epg_channel_id')
             ->where('channels.playlist_id', $playlistId)
-            ->where('channels.enabled', true)
             ->whereNotNull('channels.epg_channel_id');
+
+        if (! $includeDisabledChannels) {
+            $epgMapBase->where('channels.enabled', true);
+        }
 
         $streamIdBase = DB::table('channels')
             ->where('channels.playlist_id', $playlistId)
-            ->where('channels.enabled', true)
             ->whereNotNull('channels.stream_id')
             ->where('channels.stream_id', '!=', '');
 
+        if (! $includeDisabledChannels) {
+            $streamIdBase->where('channels.enabled', true);
+        }
+
         if ($this->channel_id) {
-            $channel = Channel::where('id', $this->channel_id)
-                ->where('enabled', true)
-                ->with('epgChannel')
-                ->first();
+            $channelQuery = Channel::where('id', $this->channel_id)
+                ->with('epgChannel');
+
+            if (! $includeDisabledChannels) {
+                $channelQuery->where('enabled', true);
+            }
+
+            $channel = $channelQuery->first();
             $epgId = $channel?->epgChannel?->channel_id;
 
             return $epgId ? [$epgId] : null;

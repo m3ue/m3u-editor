@@ -4,8 +4,11 @@ declare(strict_types=1);
 
 use App\Enums\DvrRuleType;
 use App\Filament\GuestPanel\Pages\GuestBrowseShows;
+use App\Models\Channel;
 use App\Models\DvrRecordingRule;
 use App\Models\DvrSetting;
+use App\Models\Epg;
+use App\Models\EpgChannel;
 use App\Models\EpgProgramme;
 use App\Models\Playlist;
 use App\Models\PlaylistAuth;
@@ -255,4 +258,64 @@ it('clears selectedShowTitle when closeShowDetail is called', function () {
     $component->closeShowDetail();
 
     expect($component->selectedShowTitle)->toBe('');
+});
+
+it('hides disabled channels in guest channel options when include_disabled_channels is false', function () {
+    $this->dvrSetting->update(['include_disabled_channels' => false]);
+
+    $enabled = Channel::factory()->for($this->user)->for($this->playlist)->create([
+        'title' => 'Enabled Channel',
+        'enabled' => true,
+    ]);
+    Channel::factory()->for($this->user)->for($this->playlist)->create([
+        'title' => 'Disabled Channel',
+        'enabled' => false,
+    ]);
+
+    $component = makeGuestBrowseShows();
+
+    expect($component->channelOptions)
+        ->toHaveKey($enabled->id)
+        ->not->toContain('Disabled Channel');
+});
+
+it('includes disabled channels in guest channel options when include_disabled_channels is true', function () {
+    $this->dvrSetting->update(['include_disabled_channels' => true]);
+
+    $disabled = Channel::factory()->for($this->user)->for($this->playlist)->create([
+        'title' => 'Disabled Channel',
+        'enabled' => false,
+    ]);
+
+    $component = makeGuestBrowseShows();
+
+    expect($component->channelOptions)->toHaveKey($disabled->id);
+});
+
+it('includes programmes from disabled channels for guests when include_disabled_channels is true', function () {
+    $this->dvrSetting->update(['include_disabled_channels' => true]);
+
+    $epg = Epg::factory()->for($this->user)->create();
+    $epgChannel = EpgChannel::factory()->for($epg)->create();
+
+    Channel::factory()->for($this->user)->for($this->playlist)->create([
+        'epg_channel_id' => $epgChannel->id,
+        'enabled' => false,
+        'title' => 'Disabled Source',
+    ]);
+
+    EpgProgramme::factory()->for($epg)->create([
+        'title' => 'Guest Disabled Show',
+        'epg_channel_id' => $epgChannel->channel_id,
+        'start_time' => now()->addHours(2),
+        'end_time' => now()->addHours(3),
+    ]);
+
+    $component = makeGuestBrowseShows();
+    $component->keyword = 'Guest Disabled Show';
+    $component->search();
+
+    expect($component->groupedShows)
+        ->toHaveCount(1)
+        ->and($component->groupedShows[0]['title'])->toBe('Guest Disabled Show');
 });

@@ -12,5 +12,6 @@ abstract class TestCase extends BaseTestCase
 
         config()->set('cache.default', env('CACHE_STORE', 'redis'));
         config()->set('session.driver', env('SESSION_DRIVER', 'redis'));
+        config()->set('broadcasting.default', 'null');
     }
 }

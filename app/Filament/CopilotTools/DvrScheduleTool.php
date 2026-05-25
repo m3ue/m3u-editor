@@ -212,6 +212,13 @@ class DvrScheduleTool extends BaseTool
             }
         }
 
+        if ($channel !== null && ! $channel->enabled && ! $dvrSetting->include_disabled_channels) {
+            $channelTitle = $channel->getAttribute('title') ?: "#{$channel->id}";
+
+            return "Channel '{$channelTitle}' is disabled and your DVR setting excludes disabled channels. "
+                .'Enable the channel or enable "Show Disabled Channels in Browse Shows" in your DVR settings to proceed.';
+        }
+
         DvrRecordingRule::create([
             'user_id' => auth()->id(),
             'dvr_setting_id' => $dvrSettingId,
@@ -285,6 +292,11 @@ class DvrScheduleTool extends BaseTool
 
             if (! $channel) {
                 return "Channel #{$channelId} not found, does not belong to you, or is not in the DVR setting's playlist.";
+            }
+
+            if (! $channel->enabled && ! $dvrSetting->include_disabled_channels) {
+                return "Channel #{$channelId} is disabled and your DVR setting excludes disabled channels. "
+                    .'Enable the channel or enable "Show Disabled Channels in Browse Shows" in your DVR settings to proceed.';
             }
         }
 

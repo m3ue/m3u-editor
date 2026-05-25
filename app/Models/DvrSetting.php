@@ -32,6 +32,7 @@ class DvrSetting extends Model
             'retention_days' => 'integer',
             'default_series_mode' => DvrSeriesMode::class,
             'default_series_keep_last' => 'integer',
+            'include_disabled_channels' => 'boolean',
         ];
     }
 

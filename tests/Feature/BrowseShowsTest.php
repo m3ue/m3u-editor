@@ -2,10 +2,13 @@
 
 use App\Enums\DvrRuleType;
 use App\Filament\Pages\BrowseShows;
+use App\Models\Channel;
 use App\Models\DvrRecordingRule;
 use App\Models\DvrSetting;
 use App\Models\Epg;
+use App\Models\EpgChannel;
 use App\Models\EpgProgramme;
+use App\Models\Playlist;
 use App\Models\User;
 use App\Services\ShowMetadataService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -398,4 +401,75 @@ it('ignores another user dvr_setting_id injected into the component', function (
 
     // Rule must not be created because the setting doesn't belong to the auth user
     expect(DvrRecordingRule::count())->toBe(0);
+});
+
+it('hides disabled channels in channel options when include_disabled_channels is false', function () {
+    $playlist = Playlist::factory()->for($this->user)->create();
+    $this->setting->update([
+        'playlist_id' => $playlist->id,
+        'include_disabled_channels' => false,
+    ]);
+
+    $enabled = Channel::factory()->for($this->user)->for($playlist)->create([
+        'title' => 'Enabled Channel',
+        'enabled' => true,
+    ]);
+    Channel::factory()->for($this->user)->for($playlist)->create([
+        'title' => 'Disabled Channel',
+        'enabled' => false,
+    ]);
+
+    $component = Livewire::test(BrowseShows::class)
+        ->set('dvr_setting_id', $this->setting->id);
+
+    expect($component->get('channelOptions'))
+        ->toHaveKey($enabled->id)
+        ->not->toContain('Disabled Channel');
+});
+
+it('includes disabled channels in channel options when include_disabled_channels is true', function () {
+    $playlist = Playlist::factory()->for($this->user)->create();
+    $this->setting->update([
+        'playlist_id' => $playlist->id,
+        'include_disabled_channels' => true,
+    ]);
+
+    $disabled = Channel::factory()->for($this->user)->for($playlist)->create([
+        'title' => 'Disabled Channel',
+        'enabled' => false,
+    ]);
+
+    $component = Livewire::test(BrowseShows::class)
+        ->set('dvr_setting_id', $this->setting->id);
+
+    expect($component->get('channelOptions'))->toHaveKey($disabled->id);
+});
+
+it('includes programmes from disabled channels when include_disabled_channels is true', function () {
+    $playlist = Playlist::factory()->for($this->user)->create();
+    $this->setting->update([
+        'playlist_id' => $playlist->id,
+        'include_disabled_channels' => true,
+    ]);
+
+    $epgChannel = EpgChannel::factory()->for($this->epg)->create();
+
+    Channel::factory()->for($this->user)->for($playlist)->create([
+        'epg_channel_id' => $epgChannel->id,
+        'enabled' => false,
+        'title' => 'Disabled Source',
+    ]);
+
+    EpgProgramme::factory()->for($this->epg)->create([
+        'title' => 'Disabled Channel Show',
+        'epg_channel_id' => $epgChannel->channel_id,
+        'start_time' => now()->addHours(2),
+        'end_time' => now()->addHours(3),
+    ]);
+
+    Livewire::test(BrowseShows::class)
+        ->set('dvr_setting_id', $this->setting->id)
+        ->set('keyword', 'Disabled Channel Show')
+        ->call('search')
+        ->assertSet('shows', fn (array $shows) => count($shows) === 1 && $shows[0]['title'] === 'Disabled Channel Show');
 });
