@@ -117,7 +117,7 @@ Important fields:
 - `capabilities`: determines which contract interfaces the plugin class must implement
 - `hooks`: optional lifecycle hooks the plugin wants to receive
 - `permissions`: explicit host-facing declaration of what the plugin expects to do
-- `schema`: host-managed plugin-owned table declarations
+- `schema`: host-managed plugin-owned table declarations; `tables` defines the physical schema, `ui_tables` declares admin CRUD UIs rendered by the host
 - `settings`: operator-configurable schema
 - `actions`: manual actions exposed in the plugin edit page
 - `data_ownership`: plugin-owned tables, files, and directories that uninstall may preserve or purge
@@ -353,6 +353,126 @@ Current supported index types:
 - `index`
 - `unique`
 
+## UI Tables
+
+Plugins can declare admin CRUD UIs for their owned tables via `schema.ui_tables`. The host renders these in a dedicated **Data** tab on the plugin edit page. Each entry links to a full create/edit/delete table page — no plugin PHP is required.
+
+Example:
+
+```json
+"schema": {
+  "tables": [
+    {
+      "name": "plugin_sample_plugin_profiles",
+      "columns": [
+        { "type": "id", "name": "id" },
+        { "type": "foreignId", "name": "extension_plugin_id", "references": "extension_plugins", "on_delete": "cascade" },
+        { "type": "string", "name": "name" },
+        { "type": "boolean", "name": "enabled", "default": true },
+        { "type": "timestamps" }
+      ],
+      "indexes": []
+    }
+  ],
+  "ui_tables": [
+    {
+      "id": "profiles",
+      "label": "Profiles",
+      "model_label": "Profile",
+      "table": "plugin_sample_plugin_profiles",
+      "description": "Reusable configuration profiles.",
+      "columns": [
+        { "name": "name", "label": "Name", "searchable": true, "sortable": true },
+        { "name": "enabled", "label": "Enabled", "type": "boolean", "editable": true }
+      ],
+      "fields": [
+        { "id": "name", "label": "Name", "type": "text", "required": true },
+        { "id": "enabled", "label": "Enabled", "type": "boolean", "default": true }
+      ]
+    }
+  ]
+}
+```
+
+### ui_table definition
+
+| Field | Required | Description |
+|---|---|---|
+| `id` | yes | Unique identifier within this plugin (used in the URL) |
+| `label` | yes | Page heading |
+| `table` | yes | Physical table name — must be declared in `schema.tables` |
+| `model_label` | no | Singular noun used in "New …" button (defaults to singular of `label`) |
+| `description` | no | Subheading shown on the table page |
+| `create` | no | Set `false` to hide the create action (default: `true`) |
+| `edit` | no | Set `false` to hide per-row edit action (default: `true`) |
+| `delete` | no | Set `false` to hide per-row delete action (default: `true`) |
+| `columns` | no | Column definitions for the list view |
+| `fields` | no | Field definitions for the create/edit form — uses the same field types as `settings` |
+| `prefill` | no | Auto-populate rows from a source table on page mount |
+
+### Column definitions
+
+| Field | Description |
+|---|---|
+| `name` | Column name in the table; dot-notation supported for `json` columns (e.g. `settings.mode`) |
+| `label` | Column header |
+| `type` | `boolean` renders a check/cross icon; `datetime` formats via the user's date format; omit for plain text |
+| `editable` | `true` makes the column inline-editable: booleans become a toggle, selects become an inline dropdown |
+| `searchable` | Enable full-text search on this column (plain columns only, no dot-notation) |
+| `sortable` | Enable column sort (plain columns only, no dot-notation) |
+| `options` | Static `{ "value": "Label" }` map used for display in a text column |
+| `lookup` | Resolve a foreign-key value to a display label (see below) |
+| `limit` | Character truncation limit for text columns (default: `80`) |
+| `required` | Required rule for inline-editable select columns |
+| `placeholder` | Placeholder for inline-editable select columns |
+
+#### lookup
+
+`lookup` resolves a stored ID/key to a human-readable label from another table.
+
+```json
+{ "table": "playlists", "label_column": "name", "key_column": "id", "scope_plugin": false, "enabled_only": false, "limit": 500 }
+```
+
+- `table`: the table to look up from — may be a plugin-owned table or a host table (e.g. `playlists`)
+- `label_column`: the column to display (default: `name`)
+- `key_column`: the column to match against the stored value (default: `id`)
+- `source_column`: column on the current record to read the FK value from (defaults to `name`)
+- `scope_plugin`: if `true` and the lookup table has `extension_plugin_id`, filter to this plugin's rows
+- `enabled_only`: if `true` and the lookup table has `enabled`, filter to enabled rows
+- `limit`: maximum options returned (capped at `500`)
+
+### Prefill
+
+`prefill` auto-inserts one row per source-table record when the table page loads. Rows that already exist (matched by `target_column`) are skipped.
+
+```json
+"prefill": {
+  "source": {
+    "table": "playlists",
+    "key_column": "id",
+    "user_column": "user_id",
+    "order_column": "name",
+    "scope": "owned"
+  },
+  "target_column": "playlist_id",
+  "defaults": {
+    "enabled": false,
+    "settings.run_sync": true
+  }
+}
+```
+
+- `source.table`: source table to read from — may be a host table
+- `source.key_column`: column whose value is written into `target_column` (default: `id`)
+- `source.user_column`: user ownership column on the source table (default: `user_id`)
+- `source.order_column`: sort column for source rows (default: `key_column`)
+- `source.scope`: `"owned"` filters source rows to the authenticated user
+- `target_column`: column on the target table to populate with the source key value
+- `defaults`: static defaults to write on each new row; dot-notation sets nested `json` keys
+
+The prefill source is capped at `config('plugins.prefill_max_source_rows')` rows (default: 1000).
+
 ## Capabilities
 
 Current capabilities:
@@ -393,20 +513,79 @@ Optional contracts:
 
 ## Field Types
 
-Supported schema field types:
+Field types apply to both `settings` and `ui_tables[*].fields`.
 
-- `boolean`
-- `number`
-- `text`
-- `textarea`
-- `select`
-- `model_select`
+- `boolean` — toggle
+- `number` — numeric input
+- `text` — single-line text input
+- `textarea` — multi-line text input
+- `tags` — free-entry tag list (split on Tab or Return)
+- `select` — static option list
+- `model_select` — Eloquent model-backed select
+- `table_select` — plugin-table-backed select
+- `section` — layout grouping; wraps child fields in a collapsible section, not persisted itself
 
-`model_select` supports:
+Common field keys:
 
-- `model`
-- `label_attribute`
-- `scope: "owned"`
+- `id` — field identifier (used as the form key and settings key)
+- `label` — display label
+- `type` — one of the types above
+- `default` — default value
+- `required` — validation rule
+- `helper_text` — hint shown below the field
+- `multiple` — allow multiple selections (`select`, `model_select`, `table_select`)
+- `placeholder` — select placeholder text
+
+### select
+
+```json
+{ "id": "mode", "type": "select", "options": { "a": "Option A", "b": "Option B" } }
+```
+
+### model_select
+
+```json
+{ "id": "playlist_id", "type": "model_select", "model": "App\\Models\\Playlist", "label_attribute": "name", "scope": "owned" }
+```
+
+Supported options:
+
+- `model`: fully-qualified Eloquent model class
+- `label_attribute`: attribute to display (default: `name`)
+- `scope: "owned"`: filter to records owned by the authenticated user
+
+### table_select
+
+Selects from a plugin-declared table. The table must be declared in `schema.tables`.
+
+```json
+{ "id": "profile_id", "type": "table_select", "table": "plugin_sample_plugin_profiles", "value_column": "id", "label_column": "name", "enabled_only": true, "scope_plugin": true }
+```
+
+Supported options:
+
+- `table`: plugin-owned table to select from
+- `value_column`: stored value column (default: `id`)
+- `label_column`: display label column (default: `name`)
+- `enabled_only`: filter to rows where `enabled = true` (default: `true`)
+- `scope_plugin`: filter to rows where `extension_plugin_id` matches this plugin (default: `false`)
+
+### section
+
+Groups child fields visually. The `id` is optional for sections. Children are declared in `fields`.
+
+```json
+{
+  "type": "section",
+  "label": "Advanced",
+  "icon": "heroicon-m-cog-6-tooth",
+  "collapsible": true,
+  "collapsed": true,
+  "compact": false,
+  "columns": 2,
+  "fields": [ ... ]
+}
+```
 
 ## Commands
 
@@ -454,8 +633,9 @@ Operational rule:
 6. Trust it.
 7. Configure settings.
 8. Enable it.
-9. Run manual actions or let hooks/schedules invoke it.
-10. If you remove the plugin later, choose whether uninstall should preserve or purge the declared plugin-owned data.
+9. If the plugin declares `ui_tables`, open the **Data** tab on the plugin edit page to manage plugin-owned table records.
+10. Run manual actions or let hooks/schedules invoke it.
+11. If you remove the plugin later, choose whether uninstall should preserve or purge the declared plugin-owned data.
 
 ## Scaffold Workflow
 

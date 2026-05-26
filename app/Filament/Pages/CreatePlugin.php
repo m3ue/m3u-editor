@@ -6,6 +6,7 @@ use App\Services\PluginScaffoldService;
 use Filament\Forms\Components\CheckboxList;
 use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Radio;
+use Filament\Forms\Components\TagsInput;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
@@ -63,6 +64,7 @@ class CreatePlugin extends Page
             'cleanup_mode' => 'preserve',
             'lifecycle' => false,
             'bare' => false,
+            'tables' => [],
         ]);
     }
 
@@ -128,6 +130,25 @@ class CreatePlugin extends Page
                                 ]),
                         ]),
 
+                    Step::make(__('Tables'))
+                        ->icon('heroicon-o-table-cells')
+                        ->description(__('Declare plugin-managed data tables'))
+                        ->schema([
+                            Section::make(__('Data Tables'))
+                                ->compact()
+                                ->description(__('Each table gets a physical schema declaration and a full create / edit / delete UI under the plugin\'s Data tab. Add the base name only — the host prefixes it automatically (e.g. profiles → plugin_{id}_profiles).'))
+                                ->schema([
+                                    TagsInput::make('tables')
+                                        ->hiddenLabel()
+                                        ->placeholder(__('Add a table name (e.g. profiles)'))
+                                        ->helperText(fn (): string => filled($this->data['name'] ?? null)
+                                            ? __('Tables will be prefixed: plugin_'.Str::of(Str::slug(trim((string) $this->data['name'])))->replace('-', '_')->value().'_')
+                                            : __('Enter a plugin name first to see the prefix.'))
+                                        ->splitKeys(['Tab', 'Return'])
+                                        ->live(),
+                                ]),
+                        ]),
+
                     Step::make(__('Options'))
                         ->icon('heroicon-o-cog-6-tooth')
                         ->description(__('Configure scaffold options'))
@@ -189,6 +210,7 @@ class CreatePlugin extends Page
                 cleanupMode: $data['cleanup_mode'] ?? 'preserve',
                 lifecycle: (bool) ($data['lifecycle'] ?? false),
                 bare: (bool) ($data['bare'] ?? false),
+                tables: $data['tables'] ?? [],
             );
 
             $pluginId = $scaffoldService->derivePluginId($data['name']);
@@ -223,6 +245,7 @@ class CreatePlugin extends Page
         $description = $data['description'] ?? '';
         $capabilities = $data['capabilities'] ?? [];
         $hooks = $data['hooks'] ?? [];
+        $tables = $data['tables'] ?? [];
         $cleanupMode = $data['cleanup_mode'] ?? 'preserve';
         $lifecycle = $data['lifecycle'] ?? false;
         $bare = $data['bare'] ?? false;
@@ -231,6 +254,8 @@ class CreatePlugin extends Page
             return '<p class="text-sm text-gray-500 dark:text-gray-400">Enter a plugin name in the first step to see a preview.</p>';
         }
 
+        $tablePrefix = 'plugin_'.Str::of($pluginId)->replace('-', '_')->value().'_';
+
         $capList = empty($capabilities)
             ? '<span class="text-gray-400">None</span>'
             : implode(', ', array_map(fn ($c) => '<code>'.e($c).'</code>', $capabilities));
@@ -238,6 +263,10 @@ class CreatePlugin extends Page
         $hookList = empty($hooks)
             ? '<span class="text-gray-400">None</span>'
             : implode(', ', array_map(fn ($h) => '<code>'.e($h).'</code>', $hooks));
+
+        $tableList = empty($tables)
+            ? '<span class="text-gray-400">None</span>'
+            : implode(', ', array_map(fn ($t) => '<code>'.e($tablePrefix.Str::snake(trim($t))).'</code>', array_filter($tables)));
 
         $flags = [];
         if ($lifecycle) {
@@ -267,6 +296,9 @@ class CreatePlugin extends Page
 
                     <div class="font-medium text-gray-600 dark:text-gray-400">Event Triggers</div>
                     <div class="text-gray-900 dark:text-white">{$hookList}</div>
+
+                    <div class="font-medium text-gray-600 dark:text-gray-400">Tables</div>
+                    <div class="text-gray-900 dark:text-white">{$tableList}</div>
 
                     <div class="font-medium text-gray-600 dark:text-gray-400">Cleanup Mode</div>
                     <div class="text-gray-900 dark:text-white">{$cleanupMode}</div>

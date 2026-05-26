@@ -14,6 +14,7 @@ class MakePlugin extends Command
         {--description= : Plugin description written into plugin.json}
         {--capability=* : Capability ids to declare}
         {--hook=* : Hook names to subscribe to}
+        {--table=* : Table base names to scaffold with a UI (e.g. profiles)}
         {--cleanup=preserve : Default cleanup mode for uninstall (preserve|purge)}
         {--lifecycle : Include a lifecycle uninstall hook stub}
         {--bare : Generate only plugin.json and Plugin.php without the starter kit}
@@ -38,6 +39,7 @@ class MakePlugin extends Command
                 lifecycle: (bool) $this->option('lifecycle'),
                 bare: (bool) $this->option('bare'),
                 force: (bool) $this->option('force'),
+                tables: $this->normalizeListOption($this->option('table')),
             );
         } catch (InvalidArgumentException $e) {
             $this->error($e->getMessage());

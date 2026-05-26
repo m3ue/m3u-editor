@@ -269,6 +269,48 @@ it('rejects unknown capabilities before writing any files', function () {
     expect(Plugin::query()->where('plugin_id', $pluginId)->exists())->toBeFalse();
 });
 
+it('scaffolds schema tables and ui_tables when --table options are provided', function () {
+    $name = 'Table Scaffold '.Str::upper(Str::random(4));
+    $pluginId = Str::slug($name);
+    $pluginPath = generatedPluginPath($pluginId);
+    $prefix = 'plugin_'.Str::replace('-', '_', $pluginId).'_';
+
+    cleanupGeneratedPlugin($pluginId);
+
+    try {
+        $this->artisan('make:plugin', [
+            'name' => $name,
+            '--table' => ['profiles', 'items'],
+            '--bare' => true,
+        ])->assertSuccessful();
+
+        $manifest = json_decode(File::get($pluginPath.'/plugin.json'), true, 512, JSON_THROW_ON_ERROR);
+
+        $tableNames = collect(data_get($manifest, 'schema.tables', []))->pluck('name')->all();
+        expect($tableNames)->toBe(["{$prefix}profiles", "{$prefix}items"]);
+
+        $uiTableIds = collect(data_get($manifest, 'schema.ui_tables', []))->pluck('id')->all();
+        expect($uiTableIds)->toBe(['profiles', 'items']);
+
+        expect(data_get($manifest, 'data_ownership.tables'))->toBe(["{$prefix}profiles", "{$prefix}items"]);
+        expect($manifest['permissions'])->toContain('schema_manage', 'db_read', 'db_write');
+
+        $profilesTable = collect(data_get($manifest, 'schema.tables'))->first(fn ($t) => $t['name'] === "{$prefix}profiles");
+        expect(collect($profilesTable['columns'])->pluck('type')->all())->toContain('id', 'foreignId', 'string', 'boolean', 'timestamps');
+
+        $profilesUi = collect(data_get($manifest, 'schema.ui_tables'))->first(fn ($t) => $t['id'] === 'profiles');
+        expect($profilesUi['table'])->toBe("{$prefix}profiles");
+        expect(collect($profilesUi['columns'])->pluck('name')->all())->toContain('name', 'enabled');
+        expect(collect($profilesUi['fields'])->pluck('id')->all())->toContain('name', 'enabled');
+
+        $this->artisan('plugins:validate', ['pluginId' => $pluginId])
+            ->assertSuccessful()
+            ->expectsOutputToContain("{$pluginId}: valid");
+    } finally {
+        cleanupGeneratedPlugin($pluginId);
+    }
+});
+
 it('renders the create plugin wizard page for admin users', function () {
     $admin = User::factory()->admin()->create(['email' => 'create-plugin-admin-'.Str::lower(Str::random(6)).'@example.com']);
 

@@ -5,6 +5,7 @@ namespace App\Filament\Resources\Plugins;
 use App\Filament\Concerns\HasCopilotSupport;
 use App\Filament\Resources\Plugins\Pages\EditPlugin;
 use App\Filament\Resources\Plugins\Pages\ListPlugins;
+use App\Filament\Resources\Plugins\Pages\ManagePluginTable;
 use App\Filament\Resources\Plugins\Pages\ViewPluginRun;
 use App\Filament\Resources\Plugins\RelationManagers\LogsRelationManager;
 use App\Filament\Resources\Plugins\RelationManagers\RunsRelationManager;
@@ -14,6 +15,7 @@ use App\Models\Plugin;
 use App\Models\PluginRun;
 use App\Plugins\PluginManager;
 use App\Plugins\PluginSchemaMapper;
+use App\Plugins\PluginUiTableRegistry;
 use App\Plugins\PluginUpdateChecker;
 use App\Services\DateFormatService;
 use EslamRedaDiv\FilamentCopilot\Contracts\CopilotResource;
@@ -184,6 +186,18 @@ class PluginResource extends Resource implements CopilotResource
                                 ->description(__('These settings are used by hook-triggered runs, scheduled runs, and as defaults for manual actions.'))
                                 ->visible(fn (?Plugin $record) => filled($record?->settings_schema))
                                 ->schema(fn (?Plugin $record) => app(PluginSchemaMapper::class)->settingsComponents($record)),
+                        ]),
+                    Tab::make(__('Data'))
+                        ->icon('heroicon-m-table-cells')
+                        ->visible(fn (?Plugin $record): bool => (auth()->user()?->canManagePlugins() ?? false) && filled(data_get($record?->schema_definition, 'ui_tables')))
+                        ->schema([
+                            Section::make(__('Plugin Tables'))
+                                ->description(__('These tables are declared by the plugin manifest and rendered by m3u-editor.'))
+                                ->schema([
+                                    Placeholder::make('plugin_table_links')
+                                        ->hiddenLabel()
+                                        ->content(fn (?Plugin $record): HtmlString => new HtmlString(self::pluginTableLinks($record))),
+                                ]),
                         ]),
                 ]),
         ]);
@@ -420,8 +434,38 @@ class PluginResource extends Resource implements CopilotResource
         return [
             'index' => ListPlugins::route('/'),
             'edit' => EditPlugin::route('/{record}/edit'),
+            'table' => ManagePluginTable::route('/{record}/tables/{table}'),
             'run' => ViewPluginRun::route('/{record}/runs/{run}'),
         ];
+    }
+
+    protected static function pluginTableLinks(?Plugin $record): string
+    {
+        if (! $record) {
+            return self::mutedMessage(__('No plugin record loaded.'));
+        }
+
+        $tables = app(PluginUiTableRegistry::class)->tablesFor($record);
+        if ($tables === []) {
+            return self::mutedMessage(__('This plugin has not declared any table UIs.'));
+        }
+
+        $links = collect($tables)
+            ->map(function (array $table) use ($record): string {
+                $label = e((string) ($table['label'] ?? Str::headline((string) ($table['id'] ?? 'table'))));
+                $description = e((string) ($table['description'] ?? __('Manage plugin-owned records.')));
+                $url = e(self::getUrl('table', ['record' => $record, 'table' => $table['id']]));
+
+                return <<<HTML
+                    <a href="{$url}" class="block rounded-xl border border-gray-200 bg-white p-4 shadow-sm transition hover:border-primary-300 hover:bg-primary-50/40 dark:border-gray-800 dark:bg-gray-950 dark:hover:border-primary-800 dark:hover:bg-primary-950/30">
+                        <div class="text-sm font-semibold text-gray-950 dark:text-white">{$label}</div>
+                        <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">{$description}</div>
+                    </a>
+                    HTML;
+            })
+            ->implode('');
+
+        return '<div class="grid gap-3 md:grid-cols-2">'.$links.'</div>';
     }
 
     protected static function pluginStatusSnapshot(?Plugin $record): string
