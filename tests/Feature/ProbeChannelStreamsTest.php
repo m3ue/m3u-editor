@@ -2,6 +2,7 @@
 
 use App\Jobs\ProbeChannelStreams;
 use App\Models\Channel;
+use App\Models\Group;
 use App\Models\Playlist;
 use App\Models\User;
 use Illuminate\Support\Facades\Notification;
@@ -11,10 +12,14 @@ beforeEach(function () {
 
     $this->user = User::factory()->create();
     $this->playlist = Playlist::factory()->for($this->user)->createQuietly();
+    $this->group = Group::factory()->createQuietly(['user_id' => $this->user->id]);
 });
 
 it('probes channels by playlist id and persists stats', function () {
-    $channel = Channel::factory()->for($this->playlist)->create([
+    $channel = Channel::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'group_id' => $this->group->id,
         'enabled' => true,
         'is_vod' => false,
         'stream_stats' => null,
@@ -40,13 +45,19 @@ it('probes channels by playlist id and persists stats', function () {
 });
 
 it('skips vod channels when probing by playlist', function () {
-    Channel::factory()->for($this->playlist)->create([
+    Channel::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'group_id' => $this->group->id,
         'enabled' => true,
         'is_vod' => true,
         'stream_stats' => null,
     ]);
 
-    Channel::factory()->for($this->playlist)->create([
+    Channel::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'group_id' => $this->group->id,
         'enabled' => false,
         'is_vod' => false,
         'stream_stats' => null,
@@ -67,9 +78,27 @@ it('skips vod channels when probing by playlist', function () {
 });
 
 it('selects only enabled non-vod channels for playlist probe', function () {
-    $enabledLive = Channel::factory()->for($this->playlist)->create(['enabled' => true, 'is_vod' => false]);
-    Channel::factory()->for($this->playlist)->create(['enabled' => false, 'is_vod' => false]);
-    Channel::factory()->for($this->playlist)->create(['enabled' => true, 'is_vod' => true]);
+    $enabledLive = Channel::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'group_id' => $this->group->id,
+        'enabled' => true,
+        'is_vod' => false,
+    ]);
+    Channel::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'group_id' => $this->group->id,
+        'enabled' => false,
+        'is_vod' => false,
+    ]);
+    Channel::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'group_id' => $this->group->id,
+        'enabled' => true,
+        'is_vod' => true,
+    ]);
 
     $query = Channel::query()
         ->where('playlist_id', $this->playlist->id)
@@ -82,12 +111,18 @@ it('selects only enabled non-vod channels for playlist probe', function () {
 });
 
 it('excludes channels with probe_enabled false from playlist probe', function () {
-    Channel::factory()->for($this->playlist)->create([
+    Channel::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'group_id' => $this->group->id,
         'enabled' => true,
         'is_vod' => false,
         'probe_enabled' => true,
     ]);
-    Channel::factory()->for($this->playlist)->create([
+    Channel::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'group_id' => $this->group->id,
         'enabled' => true,
         'is_vod' => false,
         'probe_enabled' => false,
@@ -103,9 +138,24 @@ it('excludes channels with probe_enabled false from playlist probe', function ()
 });
 
 it('selects specific channels when channelIds are provided', function () {
-    $channel1 = Channel::factory()->for($this->playlist)->create(['enabled' => true]);
-    $channel2 = Channel::factory()->for($this->playlist)->create(['enabled' => false]);
-    Channel::factory()->for($this->playlist)->create(['enabled' => true]);
+    $channel1 = Channel::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'group_id' => $this->group->id,
+        'enabled' => true,
+    ]);
+    $channel2 = Channel::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'group_id' => $this->group->id,
+        'enabled' => false,
+    ]);
+    Channel::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'group_id' => $this->group->id,
+        'enabled' => true,
+    ]);
 
     $ids = [$channel1->id, $channel2->id];
 
@@ -122,13 +172,19 @@ it('logs warning and returns early when no playlist or channel ids given', funct
 });
 
 it('skips already-probed channels by default for playlist probe', function () {
-    Channel::factory()->for($this->playlist)->create([
+    Channel::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'group_id' => $this->group->id,
         'enabled' => true,
         'is_vod' => false,
         'probe_enabled' => true,
         'stream_stats_probed_at' => now()->subDay(),
     ]);
-    $unprobed = Channel::factory()->for($this->playlist)->create([
+    $unprobed = Channel::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'group_id' => $this->group->id,
         'enabled' => true,
         'is_vod' => false,
         'probe_enabled' => true,
@@ -148,7 +204,10 @@ it('skips already-probed channels by default for playlist probe', function () {
 });
 
 it('honours explicit channelIds even when channels are already probed', function () {
-    $probed = Channel::factory()->for($this->playlist)->create([
+    $probed = Channel::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'group_id' => $this->group->id,
         'enabled' => true,
         'is_vod' => false,
         'stream_stats_probed_at' => now()->subDay(),
