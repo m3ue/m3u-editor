@@ -15,9 +15,11 @@ beforeEach(function () {
     $this->playlist = Playlist::factory()->for($this->user)->createQuietly();
     $this->group = Group::factory()->createQuietly(['user_id' => $this->user->id]);
 
+    $this->batchUuid = '00000000-0000-0000-0000-000000000001';
+
     $this->scrubber = ChannelScrubber::createQuietly([
         'name' => 'Test Scrubber',
-        'uuid' => 'test-batch-uuid',
+        'uuid' => $this->batchUuid,
         'status' => Status::Processing,
         'user_id' => $this->user->id,
         'playlist_id' => $this->playlist->id,
