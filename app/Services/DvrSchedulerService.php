@@ -160,9 +160,9 @@ class DvrSchedulerService
             return;
         }
 
-        // For unique_se mode, pre-compute series_key so we can check alreadyHaveEpisode
-        // before attempting to schedule each programme.
-        $seriesKey = $rule->series_mode === DvrSeriesMode::UniqueSe
+        // For unique_se and new_flag modes, pre-compute series_key so we can check
+        // alreadyHaveEpisode before attempting to schedule each programme.
+        $seriesKey = in_array($rule->series_mode, [DvrSeriesMode::UniqueSe, DvrSeriesMode::NewFlag])
             ? SeriesKey::for($rule->dvrSetting->id, $rule->series_title)
             : null;
 
