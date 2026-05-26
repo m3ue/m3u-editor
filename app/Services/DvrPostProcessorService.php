@@ -495,30 +495,33 @@ class DvrPostProcessorService
             $process->run();
 
             $exitCode = $process->getExitCode();
-
-            if ($exitCode !== 0) {
-                $errorOutput = $process->getErrorOutput();
-                Log::warning("Comskip exited with code {$exitCode}", [
-                    'recording_id' => $recording->id,
-                    'output' => $errorOutput,
-                ]);
-            }
+            $stdOut = $process->getOutput();
+            $stdErr = $process->getErrorOutput();
 
             if (file_exists($edlPath)) {
                 Log::info('Comskip complete — .edl generated', [
                     'recording_id' => $recording->id,
                     'edl_path' => $edlPath,
+                    'exit_code' => $exitCode,
+                ]);
+            } elseif ($exitCode === 0) {
+                // Ran successfully but found no commercials
+                Log::info('Comskip ran but found no commercials — no .edl produced', [
+                    'recording_id' => $recording->id,
+                    'exit_code' => $exitCode,
                 ]);
             } else {
-                Log::warning('Comskip completed but no .edl file was produced', [
+                Log::warning("Comskip exited with code {$exitCode} — no .edl produced", [
                     'recording_id' => $recording->id,
-                    'expected_path' => $edlPath,
+                    'exit_code' => $exitCode,
+                    'stderr' => $stdErr ?: null,
+                    'stdout' => $stdOut ? substr($stdOut, 0, 500) : null,
                 ]);
             }
         } catch (Exception $e) {
-            Log::warning("Comskip failed (non-fatal): {$e->getMessage()}", [
+            Log::warning("Comskip binary error (non-fatal): {$e->getMessage()}", [
                 'recording_id' => $recording->id,
-                'exception' => $e,
+                'exception_class' => get_class($e),
             ]);
         }
     }
