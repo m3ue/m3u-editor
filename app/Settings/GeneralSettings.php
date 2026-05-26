@@ -7,6 +7,9 @@ use Spatie\LaravelSettings\Settings;
 
 class GeneralSettings extends Settings
 {
+    // Notification settings
+    public ?bool $suppress_success_notifications = false;
+
     // General UI settings
     public ?string $navigation_position = 'left';
 

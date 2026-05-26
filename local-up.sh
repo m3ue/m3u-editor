@@ -15,11 +15,11 @@ if [ ! -f "${ENV_FILE}" ]; then
 fi
 
 # Ensure m3u-proxy:local exists (pull + retag from Docker Hub if absent)
-if ! docker image inspect sparkison/m3u-proxy:local &>/dev/null; then
-    echo "-- sparkison/m3u-proxy:local not found, pulling latest and retagging..."
-    docker pull sparkison/m3u-proxy:latest
-    docker tag  sparkison/m3u-proxy:latest sparkison/m3u-proxy:local
-    echo "-- Retagged sparkison/m3u-proxy:latest -> sparkison/m3u-proxy:local"
+if ! docker image inspect m3ue/m3u-proxy:local &>/dev/null; then
+    echo "-- m3ue/m3u-proxy:local not found, pulling latest and retagging..."
+    docker pull m3ue/m3u-proxy:latest
+    docker tag  m3ue/m3u-proxy:latest m3ue/m3u-proxy:local
+    echo "-- Retagged m3ue/m3u-proxy:latest -> m3ue/m3u-proxy:local"
 fi
 
 echo "-- Building m3u-editor from source and starting stack..."

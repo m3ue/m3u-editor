@@ -2,6 +2,8 @@
 
 namespace App\Filament\Pages;
 
+use App\Filament\CopilotTools\DvrOverviewTool;
+use App\Filament\CopilotTools\DvrScheduleTool;
 use App\Filament\CopilotTools\EpgChannelMatcherTool;
 use App\Filament\CopilotTools\EpgMappingApplyTool;
 use App\Filament\CopilotTools\EpgMappingStateTool;
@@ -227,11 +229,18 @@ class Preferences extends SettingsPage
                                     ->schema([
                                         Grid::make()
                                             ->columnSpanFull()
-                                            ->columns(2)
+                                            ->columns(3)
                                             ->schema([
                                                 Toggle::make('show_breadcrumbs')
                                                     ->label(__('Show breadcrumbs'))
                                                     ->helperText(__('Show breadcrumbs under the page titles')),
+                                                Toggle::make('suppress_success_notifications')
+                                                    ->label(__('Suppress success notifications'))
+                                                    ->hintIcon(
+                                                        'heroicon-m-question-mark-circle',
+                                                        tooltip: 'When enabled, success notifications from background tasks (e.g. sync completed successfully) will be hidden. Errors and warnings will still be shown regardless of this setting.'
+                                                    )
+                                                    ->helperText(__('Hide success notifications from background tasks (errors and warnings are always shown).')),
                                                 Toggle::make('output_wan_address')
                                                     ->label(__('Output WAN address in menu'))
                                                     ->helperText(__('When enabled, the application will output the WAN address of the server m3u-editor is currently running on.'))
@@ -1490,6 +1499,8 @@ class Preferences extends SettingsPage
                                                 EpgMappingApplyTool::class => __('EPG Mapper: Apply Mappings'),
                                                 GetDatabaseSchemaTool::class => __('Database: Get Schema'),
                                                 ExecuteDatabaseQueryTool::class => __('Database: Execute Query'),
+                                                DvrOverviewTool::class => __('DVR: Overview'),
+                                                DvrScheduleTool::class => __('DVR: Schedule'),
                                             ])
                                             ->afterStateHydrated(function ($component, $state) {
                                                 // Strip built-in tools that were saved by older versions.

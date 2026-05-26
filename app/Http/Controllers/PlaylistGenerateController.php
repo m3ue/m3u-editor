@@ -700,6 +700,23 @@ class PlaylistGenerateController extends Controller
                 ->orderByRaw('COALESCE(channel_custom_playlist.channel_number, channels.channel)')
                 ->orderBy('channels.title');
         } else {
+            // Per-alias custom live group ordering (optional). When enabled, the
+            // selected live groups are ranked by the alias's saved order; any group
+            // not in that list (and VOD groups) falls back to the playlist's own
+            // group sort order below.
+            if ($playlist instanceof PlaylistAlias && $playlist->hasCustomLiveGroupSort()) {
+                $order = array_values($playlist->getLiveGroupSortOrder());
+                $whenClauses = [];
+                foreach ($order as $index => $groupName) {
+                    $whenClauses[] = "WHEN ? THEN {$index}";
+                }
+                $elseValue = count($order);
+                $query->orderByRaw(
+                    'CASE channels.group_internal '.implode(' ', $whenClauses)." ELSE {$elseValue} END",
+                    $order
+                );
+            }
+
             // Standard ordering for non-custom playlists
             $query->orderBy('groups.sort_order')
                 ->orderBy('channels.sort')

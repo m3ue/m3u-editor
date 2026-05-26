@@ -10,7 +10,11 @@ use App\Filament\Resources\MediaServerIntegrations\Pages\EditMediaServerIntegrat
 use App\Filament\Resources\MediaServerIntegrations\Pages\ListMediaServerIntegrations;
 use App\Filament\Resources\Playlists\PlaylistResource;
 use App\Jobs\SyncMediaServer;
+use App\Models\Category;
+use App\Models\Channel;
 use App\Models\CustomPlaylist;
+use App\Models\Episode;
+use App\Models\Group;
 use App\Models\MediaServerIntegration;
 use App\Models\MergedPlaylist;
 use App\Models\Playlist;
@@ -202,7 +206,7 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                                 ->label(__('Display Name'))
                                 ->placeholder(fn (callable $get) => match ($get('type')) {
                                     'local' => 'e.g., My Local Movies',
-                                    'webdav' => 'e.g., My NAS Media',
+                                    'webdav' => 'e.g., TorBox or My NAS Media',
                                     default => 'e.g., Living Room Jellyfin',
                                 })
                                 ->required()
@@ -223,9 +227,10 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                                 ->afterStateUpdated(function (Set $set, ?string $state): void {
                                     $set('port', match ($state) {
                                         'plex' => 32400,
-                                        'webdav' => 5005,
+                                        'webdav' => 443,
                                         default => 8096,
                                     });
+                                    $set('ssl', $state === 'webdav');
                                 })
                                 ->disabledOn('edit')
                                 ->native(false),
@@ -237,7 +242,7 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                                 ->label(__('Host / IP Address'))
                                 ->prefix(fn (callable $get) => $get('ssl') ? 'https://' : 'http://')
                                 ->placeholder(fn (callable $get) => $get('type') === 'webdav'
-                                    ? '192.168.1.100 or nas.example.com'
+                                    ? 'webdav.torbox.app or 192.168.1.100'
                                     : '192.168.1.100 or media.example.com')
                                 ->required(fn (callable $get) => $get('type') !== 'local')
                                 ->maxLength(255),
@@ -247,11 +252,11 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                                 ->numeric()
                                 ->default(fn (callable $get) => match ($get('type')) {
                                     'plex' => 32400,
-                                    'webdav' => 5005,
+                                    'webdav' => 443,
                                     default => 8096,
                                 })
                                 ->helperText(fn (callable $get) => match ($get('type')) {
-                                    'webdav' => 'e.g., 5005 for Synology, 80/443 for standard WebDAV',
+                                    'webdav' => 'e.g., 443 for TorBox/remote WebDAV, 5005 for Synology, 80 for plain HTTP',
                                     default => 'e.g., 8096 for Emby/Jellyfin, 32400 for Plex',
                                 })
                                 ->required(fn (callable $get) => $get('type') !== 'local')
@@ -263,7 +268,18 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                                 ->inline(false)
                                 ->label(__('Use HTTPS'))
                                 ->helperText(__('Enable if your server uses SSL/TLS'))
-                                ->default(false),
+                                ->default(false)
+                                ->afterStateUpdated(function (Set $set, Get $get, bool $state): void {
+                                    if ($get('type') !== 'webdav') {
+                                        return;
+                                    }
+                                    $currentPort = (int) $get('port');
+                                    if ($state && $currentPort === 80) {
+                                        $set('port', 443);
+                                    } elseif (! $state && $currentPort === 443) {
+                                        $set('port', 80);
+                                    }
+                                }),
                         ])->visible(fn (callable $get) => $get('type') !== 'local'),
 
                         // WebDAV authentication (username/password)
@@ -271,21 +287,35 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                             TextInput::make('webdav_username')
                                 ->label(__('WebDAV Username'))
                                 ->placeholder(__('username'))
+                                ->afterStateHydrated(fn ($component, $record) => $component->state($record?->webdav_username))
                                 ->helperText(__('Username for WebDAV authentication')),
 
                             TextInput::make('webdav_password')
                                 ->label(__('WebDAV Password'))
                                 ->password()
                                 ->revealable()
+                                ->afterStateHydrated(fn ($component, $record) => $component->state($record?->webdav_password))
                                 ->dehydrateStateUsing(fn ($state, $record) => filled($state) ? $state : $record?->webdav_password)
-                                ->helperText(function (string $operation) {
-                                    if ($operation === 'edit') {
-                                        return 'Leave blank to keep existing password';
-                                    }
-
-                                    return 'Password for WebDAV authentication';
-                                }),
+                                ->helperText(__('Password for WebDAV authentication')),
                         ])->visible(fn (callable $get) => $get('type') === 'webdav'),
+
+                        // WebDAV advanced settings
+                        Grid::make(2)->schema([
+                            TextInput::make('webdav_base_path')
+                                ->label(__('Base Path'))
+                                ->placeholder(__('/ or /remote.php/webdav'))
+                                ->helperText(__('Optional URL path prefix for the WebDAV root (e.g. / for TorBox, /remote.php/webdav for Nextcloud)')),
+
+                            Toggle::make('skip_ssl_verify')
+                                ->label(__('Skip SSL Verification'))
+                                ->inline(false)
+                                ->helperText(__('Disable certificate verification for self-signed certs (local NAS). Leave off for remote services like TorBox.'))
+                                ->default(false),
+                        ])->visible(fn (callable $get) => $get('type') === 'webdav'),
+
+                        Actions::make(self::getWebDavTestAction())
+                            ->visible(fn (callable $get) => $get('type') === 'webdav')
+                            ->fullWidth(),
 
                         TextInput::make('api_key')
                             ->label(__('API Key/Token'))
@@ -378,11 +408,13 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                                 Select::make('type')
                                     ->label(__('Content Type'))
                                     ->options([
-                                        'movies' => 'Movies',
-                                        'tvshows' => 'TV Shows',
+                                        'movies' => 'Movies only',
+                                        'tvshows' => 'TV Shows only',
+                                        'both' => 'Both (auto-detect)',
                                     ])
                                     ->required()
                                     ->default('movies')
+                                    ->helperText(__('Use "Both" when movies and TV shows are mixed in the same directory'))
                                     ->native(false),
                             ])
                             ->columns(3)
@@ -392,7 +424,7 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                             ->collapsible()
                             ->itemLabel(fn (array $state): ?string => $state['name'] ?? 'New Library'),
 
-                        Grid::make(2)->schema([
+                        Grid::make(3)->schema([
                             Toggle::make('scan_recursive')
                                 ->label(__('Scan Recursively'))
                                 ->helperText(__('Scan subdirectories for media files'))
@@ -402,6 +434,15 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                                 ->label(__('Auto-Fetch Metadata'))
                                 ->helperText(__('Automatically lookup TMDB metadata after sync completes (Local & WebDAV)'))
                                 ->default(true),
+
+                            Toggle::make('use_torrent_parser')
+                                ->label(__('Torrent/NZB Title Parsing'))
+                                ->hintIcon(
+                                    'heroicon-m-question-mark-circle',
+                                    tooltip: 'Recommended for TorBox and other remote WebDAV services. Groups individual episode downloads into proper series.'
+                                )
+                                ->helperText(__('Smart parsing of torrent-style filenames.'))
+                                ->default(false),
                         ]),
 
                         Grid::make(1)->schema([
@@ -1092,6 +1133,20 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
             ->filtersTriggerAction(function ($action) {
                 return $action->button()->label(__('Filters'));
             })
+            ->modifyQueryUsing(function (Builder $query) {
+                $query->addSelect([
+                    'channels_count' => Channel::selectRaw('count(*)')
+                        ->whereColumn('channels.playlist_id', 'media_server_integrations.playlist_id'),
+                    'enabled_channels_count' => Channel::selectRaw('count(*)')
+                        ->whereColumn('channels.playlist_id', 'media_server_integrations.playlist_id')
+                        ->where('enabled', true),
+                    'series_count' => Series::selectRaw('count(*)')
+                        ->whereColumn('series.playlist_id', 'media_server_integrations.playlist_id'),
+                    'enabled_series_count' => Series::selectRaw('count(*)')
+                        ->whereColumn('series.playlist_id', 'media_server_integrations.playlist_id')
+                        ->where('enabled', true),
+                ]);
+            })
             ->columns([
                 TextColumn::make('name')
                     ->label(__('Name'))
@@ -1130,7 +1185,7 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                         'jellyfin' => 'info',
                         'plex' => 'warning',
                         'local' => 'gray',
-                        'webdav' => 'purple',
+                        'webdav' => 'primary',
                         default => 'gray',
                     }),
 
@@ -1141,8 +1196,7 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                         'webdav' => "{$record->host}:{$record->port}",
                         default => "{$record->host}:{$record->port}",
                     })
-                    ->toggleable()
-                    ->copyable(),
+                    ->toggleable(),
 
                 TextColumn::make('selected_library_ids')
                     ->label(__('Libraries'))
@@ -1170,6 +1224,20 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                         'failed' => 'danger',
                         default => 'gray',
                     })
+                    ->sortable(),
+
+                TextColumn::make('channels_count')
+                    ->label(__('Movies'))
+                    ->state(fn ($record) => $record->channels_count ?? 0)
+                    ->description(fn ($record): string => 'Active: '.($record->enabled_channels_count ?? 0))
+                    ->toggleable()
+                    ->sortable(),
+
+                TextColumn::make('series_count')
+                    ->label(__('Series'))
+                    ->state(fn ($record) => $record->series_count ?? 0)
+                    ->description(fn ($record): string => 'Active: '.($record->enabled_series_count ?? 0))
+                    ->toggleable()
                     ->sortable(),
 
                 ProgressColumn::make('movie_progress')
@@ -1340,6 +1408,25 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                         })
                         ->visible(fn ($record) => $record->playlist_id !== null),
 
+                    Action::make('flushLibrary')
+                        ->label(__('Flush Library'))
+                        ->icon('heroicon-o-archive-box-x-mark')
+                        ->color('danger')
+                        ->requiresConfirmation()
+                        ->modalHeading(__('Flush Library'))
+                        ->modalDescription(__('This will permanently delete ALL movies, series, episodes, seasons, and categories from this integration\'s playlist, then start a fresh sync. This cannot be undone.'))
+                        ->modalSubmitActionLabel(__('Yes, flush and re-sync'))
+                        ->action(function (MediaServerIntegration $record) {
+                            static::flushLibraryContent($record);
+
+                            Notification::make()
+                                ->success()
+                                ->title(__('Library Flushed'))
+                                ->body(__('All library content cleared. A fresh sync has been queued.'))
+                                ->send();
+                        })
+                        ->visible(fn ($record) => $record->playlist_id !== null),
+
                     Action::make('reset')
                         ->label(__('Reset status'))
                         ->icon('heroicon-o-arrow-uturn-left')
@@ -1451,6 +1538,32 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
     {
         return parent::getEloquentQuery()
             ->where('user_id', Auth::id());
+    }
+
+    public static function flushLibraryContent(MediaServerIntegration $record): void
+    {
+        $playlist = $record->playlist;
+
+        if ($playlist) {
+            Episode::where('playlist_id', $playlist->id)->delete();
+            Season::where('playlist_id', $playlist->id)->delete();
+            Series::where('playlist_id', $playlist->id)->delete();
+            Category::where('playlist_id', $playlist->id)->delete();
+            Channel::where('playlist_id', $playlist->id)->where('is_custom', false)->delete();
+            Group::where('playlist_id', $playlist->id)->where('custom', false)->delete();
+        }
+
+        $record->update([
+            'status' => 'idle',
+            'progress' => 0,
+            'movie_progress' => 0,
+            'series_progress' => 0,
+            'total_movies' => 0,
+            'total_series' => 0,
+            'sync_stats' => null,
+        ]);
+
+        SyncMediaServer::dispatch($record->id);
     }
 
     /**
@@ -1578,13 +1691,27 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                         return;
                     }
 
-                    // Create temporary model from form state
-                    $tempIntegration = new MediaServerIntegration([
-                        'type' => 'local',
+                    $type = $get('type');
+
+                    // Build a temp integration with the correct type and credentials
+                    $attributes = [
+                        'type' => $type,
                         'local_media_paths' => $paths,
                         'scan_recursive' => $get('scan_recursive') ?? true,
                         'video_extensions' => $get('video_extensions') ?? null,
-                    ]);
+                    ];
+
+                    if ($type === 'webdav') {
+                        $attributes['host'] = $get('host');
+                        $attributes['port'] = $get('port');
+                        $attributes['ssl'] = $get('ssl') ?? false;
+                        $attributes['webdav_username'] = $get('webdav_username') ?: $livewire->record?->webdav_username;
+                        $attributes['webdav_password'] = $get('webdav_password') ?: $livewire->record?->webdav_password;
+                        $attributes['webdav_base_path'] = $get('webdav_base_path');
+                        $attributes['skip_ssl_verify'] = $get('skip_ssl_verify') ?? false;
+                    }
+
+                    $tempIntegration = (new MediaServerIntegration)->forceFill($attributes);
 
                     // Test connection (validates paths)
                     $service = MediaServerService::make($tempIntegration);
@@ -1630,23 +1757,67 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
         ];
     }
 
+    private static function getWebDavTestAction(): array
+    {
+        return [
+            Action::make('testWebDavConnection')
+                ->label(__('Test Connection'))
+                ->icon('heroicon-o-signal')
+                ->action(function (callable $get, $livewire) {
+                    $tempIntegration = (new MediaServerIntegration)->forceFill([
+                        'type' => 'webdav',
+                        'host' => $get('host'),
+                        'port' => $get('port'),
+                        'ssl' => $get('ssl') ?? false,
+                        'webdav_username' => $get('webdav_username') ?: $livewire->record?->webdav_username,
+                        'webdav_password' => $get('webdav_password') ?: $livewire->record?->webdav_password,
+                        'webdav_base_path' => $get('webdav_base_path'),
+                        'skip_ssl_verify' => $get('skip_ssl_verify') ?? false,
+                        'local_media_paths' => [],
+                    ]);
+
+                    $result = MediaServerService::make($tempIntegration)->testConnection();
+
+                    if ($result['success']) {
+                        Notification::make()
+                            ->success()
+                            ->title(__('Connection Successful'))
+                            ->body($result['message'])
+                            ->send();
+                    } else {
+                        Notification::make()
+                            ->danger()
+                            ->title(__('Connection Failed'))
+                            ->body($result['message'])
+                            ->send();
+                    }
+                }),
+        ];
+    }
+
     private static function getServerActions(): array
     {
         return [
             Action::make('testAndDiscover')
-                ->label(__('Test Connection & Discover Libraries'))
+                ->label(fn (callable $get) => in_array($get('type'), ['local', 'webdav'])
+                    ? __('Scan & Discover Libraries')
+                    : __('Test Connection & Discover Libraries')
+                )
                 ->icon('heroicon-o-signal')
                 ->action(function (callable $get, callable $set, $livewire) {
+                    $type = $get('type');
+                    $isWebDav = $type === 'webdav';
+
                     // Create temporary model from form state
                     $values = [
-                        'type' => $get('type'),
+                        'type' => $type,
                         'host' => $get('host'),
                         'port' => $get('port'),
                         'ssl' => $get('ssl') ?? false,
-                        'api_key' => $get('api_key') ?: $livewire->record?->api_key,
+                        'api_key' => $isWebDav ? null : ($get('api_key') ?: $livewire->record?->api_key),
                     ];
 
-                    if (array_filter($values, fn ($value) => empty($value) && ! is_bool($value))) {
+                    if (! $isWebDav && array_filter($values, fn ($value) => empty($value) && ! is_bool($value))) {
                         Notification::make()
                             ->danger()
                             ->title(__('Validation Error'))
@@ -1656,7 +1827,17 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                         return;
                     }
 
-                    $tempIntegration = new MediaServerIntegration($values);
+                    if ($isWebDav) {
+                        $values['webdav_username'] = $get('webdav_username') ?: $livewire->record?->webdav_username;
+                        $values['webdav_password'] = $get('webdav_password') ?: $livewire->record?->webdav_password;
+                        $values['webdav_base_path'] = $get('webdav_base_path');
+                        $values['skip_ssl_verify'] = $get('skip_ssl_verify') ?? false;
+                        $values['local_media_paths'] = $get('local_media_paths') ?? [];
+                        $values['scan_recursive'] = $get('scan_recursive') ?? true;
+                        $values['video_extensions'] = $get('video_extensions') ?? [];
+                    }
+
+                    $tempIntegration = (new MediaServerIntegration)->forceFill($values);
 
                     // Test connection
                     $service = MediaServerService::make($tempIntegration);

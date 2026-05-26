@@ -242,12 +242,7 @@ class PlaylistProfile extends Model
      */
     public function transformChannelUrl(Channel $channel): string
     {
-        $originalUrl = $channel->url ?? '';
-
-        // Don't transform custom URLs
-        if ($channel->url_custom) {
-            return $channel->url_custom;
-        }
+        $originalUrl = $channel->url_custom ?? $channel->url ?? '';
 
         return $this->transformUrl($originalUrl);
     }

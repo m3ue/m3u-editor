@@ -22,11 +22,6 @@ class PlaylistUrlService
      */
     public static function getChannelUrl(Channel $channel, $context = null): string
     {
-        // Always prefer custom URL if set (should not be transformed)
-        if ($channel->url_custom) {
-            return $channel->url_custom;
-        }
-
         // Check if custom channel
         if ($channel->is_custom) {
             // If the URLs are empty, then set the channel to the first failover (if any assigned)
@@ -45,7 +40,7 @@ class PlaylistUrlService
             return $context->transformChannelUrl($channel);
         }
 
-        return $channel->url ?? '';
+        return $channel->url_custom ?? $channel->url ?? '';
     }
 
     /**
