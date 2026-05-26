@@ -15,6 +15,7 @@ use Filament\Notifications\Notification;
 use Illuminate\Bus\Batch;
 use Illuminate\Bus\Batchable;
 use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Bus;
@@ -69,6 +70,7 @@ class FetchTmdbIds implements ShouldQueue
         public bool $allVodPlaylists = false,
         public bool $allSeriesPlaylists = false,
         public bool $overwriteExisting = false,
+        public string $lookupScope = 'enabled',
         public ?User $user = null,
         public bool $isChunkJob = false,
         public bool $sendCompletionNotification = true,
@@ -263,6 +265,7 @@ class FetchTmdbIds implements ShouldQueue
                     vodChannelIds: $ids,
                     seriesIds: null,
                     overwriteExisting: $this->overwriteExisting,
+                    lookupScope: $this->lookupScope,
                     user: $this->user,
                     isChunkJob: true,
                     sendCompletionNotification: false,
@@ -294,6 +297,7 @@ class FetchTmdbIds implements ShouldQueue
                     vodChannelIds: null,
                     seriesIds: $ids,
                     overwriteExisting: $this->overwriteExisting,
+                    lookupScope: $this->lookupScope,
                     user: $this->user,
                     isChunkJob: true,
                     sendCompletionNotification: false,
@@ -302,21 +306,34 @@ class FetchTmdbIds implements ShouldQueue
     }
 
     /**
+     * Apply the configured scope filter (enabled / new / both) to a query.
+     */
+    protected function applyScopeFilter(Builder $query): void
+    {
+        match ($this->lookupScope) {
+            'new' => $query->where('new', true),
+            'both' => $query->where(fn ($q) => $q->where('enabled', true)->orWhere('new', true)),
+            default => $query->where('enabled', true),
+        };
+    }
+
+    /**
      * Build filtered VOD query based on job arguments.
      */
-    protected function buildVodQuery()
+    protected function buildVodQuery(): ?Builder
     {
-        $query = Channel::where('is_vod', true);
+        $query = Channel::query()->where('is_vod', true);
 
         // Use playlist-based filtering if provided
         if ($this->vodPlaylistId) {
             $query->where('playlist_id', $this->vodPlaylistId)
-                ->when($this->user, fn ($q) => $q->where('user_id', $this->user->id))
-                ->where('enabled', true);
+                ->when($this->user, fn ($q) => $q->where('user_id', $this->user->id));
+            $this->applyScopeFilter($query);
         } elseif ($this->allVodPlaylists && $this->user) {
             $query->whereHas('playlist', function ($q) {
                 $q->where('user_id', $this->user->id);
-            })->where('enabled', true);
+            });
+            $this->applyScopeFilter($query);
         } elseif (! empty($this->vodChannelIds)) {
             // Legacy: direct ID array support
             $query->whereIn('id', $this->vodChannelIds)
@@ -337,18 +354,18 @@ class FetchTmdbIds implements ShouldQueue
     /**
      * Build filtered series query based on job arguments.
      */
-    protected function buildSeriesQuery()
+    protected function buildSeriesQuery(): ?Builder
     {
         $query = Series::query();
 
         // Use playlist-based filtering if provided
         if ($this->seriesPlaylistId) {
             $query->where('playlist_id', $this->seriesPlaylistId)
-                ->when($this->user, fn ($q) => $q->where('user_id', $this->user->id))
-                ->where('enabled', true);
+                ->when($this->user, fn ($q) => $q->where('user_id', $this->user->id));
+            $this->applyScopeFilter($query);
         } elseif ($this->allSeriesPlaylists && $this->user) {
-            $query->where('user_id', $this->user->id)
-                ->where('enabled', true);
+            $query->where('user_id', $this->user->id);
+            $this->applyScopeFilter($query);
         } elseif (! empty($this->seriesIds)) {
             // Legacy: direct ID array support
             $query->whereIn('id', $this->seriesIds)

@@ -34,6 +34,7 @@ use Filament\Forms\Components\TagsInput;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
+use Filament\Forms\Components\ToggleButtons;
 use Filament\Notifications\Notification;
 use Filament\Pages\SettingsPage;
 use Filament\Schemas\Components\Fieldset;
@@ -1352,12 +1353,38 @@ class Preferences extends SettingsPage
                                             ->helperText(__('Preferred language for TMDB searches.')),
                                         Toggle::make('tmdb_auto_lookup_on_import')
                                             ->label(__('Auto-lookup on metadata fetch'))
-                                            ->helperText(__('Automatically lookup TMDB IDs when fetching metadata for VOD and Series. This may slow down imports and metadata fetching for large playlists. Will only be fetched for enabled items.'))
+                                            ->helperText(__('Automatically lookup TMDB IDs when fetching metadata for VOD and Series. This may slow down imports and metadata fetching for large playlists.'))
+                                            ->live()
                                             ->default(false),
                                         Toggle::make('tmdb_auto_create_groups')
                                             ->label(__('Auto-create groups/categories from TMDB genres'))
                                             ->helperText(__('When enabled, TMDB metadata fetching will automatically create new groups (for VOD) and categories (for Series) based on TMDB genres. When disabled, only existing groups/categories will be used.'))
                                             ->default(false),
+                                        Fieldset::make(__('TMDB Auto-lookup Settings'))
+                                            ->columnSpanFull()
+                                            ->schema([
+                                                ToggleButtons::make('tmdb_auto_lookup_all_new')
+                                                    ->options([
+                                                        'enabled' => __('Only enabled channels'),
+                                                        'new' => __('All new channels'),
+                                                        'both' => __('Both'),
+                                                    ])
+                                                    ->icons([
+                                                        'enabled' => 'heroicon-s-check',
+                                                        'new' => 'heroicon-s-plus',
+                                                        'both' => 'heroicon-s-squares-plus',
+                                                    ])
+                                                    ->colors([
+                                                        'enabled' => 'primary',
+                                                        'new' => 'primary',
+                                                        'both' => 'primary',
+                                                    ])
+                                                    ->columnSpanFull()
+                                                    ->grouped()
+                                                    ->label(__('Auto-lookup scope'))
+                                                    ->helperText(__('Whether to automatically lookup TMDB IDs for all new channels, or only those that are enabled. Applies to both VOD and Series.'))
+                                                    ->default('enabled'),
+                                            ])->hidden(fn (Get $get): bool => ! (bool) $get('tmdb_auto_lookup_on_import')),
                                         TextInput::make('tmdb_rate_limit')
                                             ->label(__('Rate Limit (requests/second)'))
                                             ->placeholder(__('40'))

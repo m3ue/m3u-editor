@@ -253,6 +253,7 @@ class SyncPipelineService
     {
         FetchTmdbIds::dispatch(
             vodPlaylistId: $playlist->id,
+            lookupScope: $this->resolveLookupScope(),
             user: $playlist->user,
             sendCompletionNotification: false,
             syncRunId: $run->id,
@@ -301,11 +302,17 @@ class SyncPipelineService
     {
         FetchTmdbIds::dispatch(
             seriesPlaylistId: $playlist->id,
+            lookupScope: $this->resolveLookupScope(),
             user: $playlist->user,
             sendCompletionNotification: false,
             syncRunId: $run->id,
             completionPhase: SyncRunPhase::SeriesTmdb,
         );
+    }
+
+    private function resolveLookupScope(): string
+    {
+        return app(GeneralSettings::class)->tmdb_auto_lookup_all_new ?? 'enabled';
     }
 
     private function dispatchSeriesStrm(SyncRun $run, Playlist $playlist): void
@@ -498,27 +505,52 @@ class SyncPipelineService
 
         $hasSeries = $playlist->series()->where('enabled', true)->exists();
 
+        $tmdbEnabled = (bool) $settings->tmdb_auto_lookup_on_import;
+        $lookupScope = $settings->tmdb_auto_lookup_all_new ?? 'enabled';
+
+        $hasNewVod = $lookupScope !== 'enabled' && $playlist->channels()
+            ->where([['new', true], ['is_vod', true]])
+            ->exists();
+
+        $hasNewSeries = $lookupScope !== 'enabled' && $playlist->series()
+            ->where('new', true)
+            ->exists();
+
         // Group 1: metadata + TMDB + probe (must complete before find-replace and STRM)
+        //
+        // Two paths per content type:
+        // 1. Enabled items exist → full pipeline (metadata, TMDB, probe) via resolvePreStrmPhases.
+        //    The lookupScope ('enabled', 'new', 'both') is applied at dispatch time inside
+        //    dispatchVodTmdb/dispatchSeriesTmdb, so the TMDB job targets the right records.
+        // 2. No enabled items, but new (disabled) items were just imported → TMDB only.
+        //    Metadata and probe are skipped because they are only meaningful for enabled content.
+        //    This path fires exclusively when lookupScope !== 'enabled' and new items exist.
         if ($hasVod) {
             $phases = array_merge($phases, $this->resolvePreStrmPhases(
                 metadataEnabled: (bool) $playlist->auto_fetch_vod_metadata,
-                tmdbEnabled: (bool) $settings->tmdb_auto_lookup_on_import,
+                tmdbEnabled: $tmdbEnabled,
                 probeEnabled: (bool) $playlist->auto_probe_vod_streams,
                 metadataPhase: SyncRunPhase::VodMetadata,
                 tmdbPhase: SyncRunPhase::VodTmdb,
                 probePhase: SyncRunPhase::VodProbe,
             ));
+        } elseif ($hasNewVod && $tmdbEnabled) {
+            // No enabled VOD, but new disabled VOD was imported — run TMDB lookup only.
+            $phases[] = SyncRunPhase::VodTmdb;
         }
 
         if ($hasSeries) {
             $phases = array_merge($phases, $this->resolvePreStrmPhases(
                 metadataEnabled: (bool) $playlist->auto_fetch_series_metadata,
-                tmdbEnabled: (bool) $settings->tmdb_auto_lookup_on_import,
+                tmdbEnabled: $tmdbEnabled,
                 probeEnabled: (bool) $playlist->auto_probe_vod_streams,
                 metadataPhase: SyncRunPhase::SeriesMetadata,
                 tmdbPhase: SyncRunPhase::SeriesTmdb,
                 probePhase: SyncRunPhase::SeriesProbe,
             ));
+        } elseif ($hasNewSeries && $tmdbEnabled) {
+            // No enabled series, but new disabled series were imported — run TMDB lookup only.
+            $phases[] = SyncRunPhase::SeriesTmdb;
         }
 
         // Group 2: find-replace (after metadata/probe so stream_stats are populated;

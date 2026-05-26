@@ -1380,6 +1380,179 @@ it('retries a previously-attempted series when overwriteExisting is true (single
     expect($series->metadata['tmdb_id'])->toBe(4592);
 });
 
+it('with lookupScope new, only processes VOD channels with new=true regardless of enabled status', function () {
+    $tmdb = Mockery::mock(TmdbService::class);
+    $tmdb->shouldReceive('isConfigured')->andReturn(true);
+
+    // New + disabled — should be processed
+    Channel::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'is_vod' => true,
+        'enabled' => false,
+        'new' => true,
+        'title' => 'New Disabled Movie',
+        'tmdb_id' => null,
+        'last_metadata_fetch' => null,
+    ]);
+
+    // Old + enabled — should be skipped (new=false)
+    Channel::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'is_vod' => true,
+        'enabled' => true,
+        'new' => false,
+        'title' => 'Old Enabled Movie',
+        'tmdb_id' => null,
+        'last_metadata_fetch' => null,
+    ]);
+
+    $tmdb->shouldReceive('searchMovie')->once()->with('New Disabled Movie', Mockery::any())->andReturn(null);
+    $tmdb->shouldNotReceive('getMovieDetails');
+
+    $job = new TestableFetchTmdbIds(
+        vodPlaylistId: $this->playlist->id,
+        lookupScope: 'new',
+        user: $this->user,
+    );
+    $job->handle($tmdb);
+});
+
+it('with lookupScope new, only processes series with new=true regardless of enabled status', function () {
+    $tmdb = Mockery::mock(TmdbService::class);
+    $tmdb->shouldReceive('isConfigured')->andReturn(true);
+
+    // New + disabled — should be processed
+    Series::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'enabled' => false,
+        'new' => true,
+        'name' => 'New Disabled Show',
+        'tmdb_id' => null,
+        'last_metadata_fetch' => null,
+    ]);
+
+    // Old + enabled — should be skipped (new=false)
+    Series::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'enabled' => true,
+        'new' => false,
+        'name' => 'Old Enabled Show',
+        'tmdb_id' => null,
+        'last_metadata_fetch' => null,
+    ]);
+
+    $tmdb->shouldReceive('searchTvSeries')->once()->with('New Disabled Show', Mockery::any())->andReturn(null);
+    $tmdb->shouldNotReceive('getTvSeriesDetails');
+
+    $job = new TestableFetchTmdbIds(
+        seriesPlaylistId: $this->playlist->id,
+        lookupScope: 'new',
+        user: $this->user,
+    );
+    $job->handle($tmdb);
+});
+
+it('with lookupScope both, processes VOD channels that are enabled OR new', function () {
+    $tmdb = Mockery::mock(TmdbService::class);
+    $tmdb->shouldReceive('isConfigured')->andReturn(true);
+
+    // New + disabled — should be processed
+    Channel::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'is_vod' => true,
+        'enabled' => false,
+        'new' => true,
+        'title' => 'New Disabled Movie',
+        'tmdb_id' => null,
+        'last_metadata_fetch' => null,
+    ]);
+
+    // Old + enabled — should be processed (enabled=true)
+    Channel::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'is_vod' => true,
+        'enabled' => true,
+        'new' => false,
+        'title' => 'Old Enabled Movie',
+        'tmdb_id' => null,
+        'last_metadata_fetch' => null,
+    ]);
+
+    // Old + disabled — should be skipped (enabled=false, new=false)
+    Channel::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'is_vod' => true,
+        'enabled' => false,
+        'new' => false,
+        'title' => 'Old Disabled Movie',
+        'tmdb_id' => null,
+        'last_metadata_fetch' => null,
+    ]);
+
+    $tmdb->shouldReceive('searchMovie')->twice()->andReturn(null);
+
+    $job = new TestableFetchTmdbIds(
+        vodPlaylistId: $this->playlist->id,
+        lookupScope: 'both',
+        user: $this->user,
+    );
+    $job->handle($tmdb);
+});
+
+it('with lookupScope both, processes series that are enabled OR new', function () {
+    $tmdb = Mockery::mock(TmdbService::class);
+    $tmdb->shouldReceive('isConfigured')->andReturn(true);
+
+    // New + disabled — should be processed
+    Series::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'enabled' => false,
+        'new' => true,
+        'name' => 'New Disabled Show',
+        'tmdb_id' => null,
+        'last_metadata_fetch' => null,
+    ]);
+
+    // Old + enabled — should be processed
+    Series::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'enabled' => true,
+        'new' => false,
+        'name' => 'Old Enabled Show',
+        'tmdb_id' => null,
+        'last_metadata_fetch' => null,
+    ]);
+
+    // Old + disabled — should be skipped
+    Series::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'enabled' => false,
+        'new' => false,
+        'name' => 'Old Disabled Show',
+        'tmdb_id' => null,
+        'last_metadata_fetch' => null,
+    ]);
+
+    $tmdb->shouldReceive('searchTvSeries')->twice()->andReturn(null);
+
+    $job = new TestableFetchTmdbIds(
+        seriesPlaylistId: $this->playlist->id,
+        lookupScope: 'both',
+        user: $this->user,
+    );
+    $job->handle($tmdb);
+});
+
 class TestableFetchTmdbIds extends FetchTmdbIds
 {
     protected function sendCompletionNotification(): void {}

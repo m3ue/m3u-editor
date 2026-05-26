@@ -23,10 +23,11 @@ use Illuminate\Support\Facades\Event;
 
 uses(RefreshDatabase::class);
 
-function mockPipelineSettings(bool $tmdb = false): void
+function mockPipelineSettings(bool $tmdb = false, string $lookupScope = 'enabled'): void
 {
     $mock = Mockery::mock(GeneralSettings::class);
     $mock->tmdb_auto_lookup_on_import = $tmdb;
+    $mock->tmdb_auto_lookup_all_new = $lookupScope;
 
     app()->instance(GeneralSettings::class, $mock);
 }
@@ -604,4 +605,114 @@ it('dispatchLiveProbe short-circuits to completePhase if auto_probe_streams was 
 
     Bus::assertNotDispatched(ProbeChannelStreams::class);
     expect($run->fresh()->isPhaseComplete(SyncRunPhase::LiveProbe))->toBeTrue();
+});
+
+it('includes VodTmdb for new disabled channels when tmdb_auto_lookup_all_new is new', function () {
+    mockPipelineSettings(tmdb: true, lookupScope: 'new');
+
+    $playlist = Playlist::factory()->for($this->user)->create();
+    Channel::factory()->for($playlist)->for($this->user)->create(['enabled' => false, 'is_vod' => true, 'new' => true]);
+
+    $run = $this->service->buildPipeline($playlist, app(GeneralSettings::class));
+
+    expect($run->phases)->toContain(SyncRunPhase::VodTmdb->value);
+});
+
+it('excludes VodTmdb for new disabled channels when tmdb_auto_lookup_all_new is enabled', function () {
+    mockPipelineSettings(tmdb: true, lookupScope: 'enabled');
+
+    $playlist = Playlist::factory()->for($this->user)->create();
+    Channel::factory()->for($playlist)->for($this->user)->create(['enabled' => false, 'is_vod' => true, 'new' => true]);
+
+    $run = $this->service->buildPipeline($playlist, app(GeneralSettings::class));
+
+    expect($run->phases)->not->toContain(SyncRunPhase::VodTmdb->value);
+});
+
+it('includes SeriesTmdb for new disabled series when tmdb_auto_lookup_all_new is new', function () {
+    mockPipelineSettings(tmdb: true, lookupScope: 'new');
+
+    $playlist = Playlist::factory()->for($this->user)->create();
+    Series::factory()->for($playlist)->for($this->user)->create(['enabled' => false, 'new' => true]);
+
+    $run = $this->service->buildPipeline($playlist, app(GeneralSettings::class));
+
+    expect($run->phases)->toContain(SyncRunPhase::SeriesTmdb->value);
+});
+
+it('dispatches FetchTmdbIds with lookupScope new when tmdb_auto_lookup_all_new is new', function () {
+    mockPipelineSettings(tmdb: true, lookupScope: 'new');
+    $playlist = makePlaylistWithVod($this->user);
+
+    $run = SyncRun::create([
+        'playlist_id' => $playlist->id,
+        'user_id' => $this->user->id,
+        'trigger' => 'test',
+        'status' => SyncRunStatus::Running->value,
+        'phases' => [SyncRunPhase::VodTmdb->value, SyncRunPhase::SyncCompleted->value],
+        'phase_statuses' => (object) [],
+        'context' => ['playlist_id' => $playlist->id],
+        'started_at' => now(),
+    ]);
+
+    $this->service->startRun($run);
+
+    Bus::assertDispatched(FetchTmdbIds::class, fn ($job) => $job->syncRunId === $run->id
+        && $job->completionPhase === SyncRunPhase::VodTmdb
+        && $job->lookupScope === 'new');
+});
+
+it('dispatches FetchTmdbIds with lookupScope enabled when tmdb_auto_lookup_all_new is enabled', function () {
+    mockPipelineSettings(tmdb: true, lookupScope: 'enabled');
+    $playlist = makePlaylistWithVod($this->user);
+
+    $run = SyncRun::create([
+        'playlist_id' => $playlist->id,
+        'user_id' => $this->user->id,
+        'trigger' => 'test',
+        'status' => SyncRunStatus::Running->value,
+        'phases' => [SyncRunPhase::VodTmdb->value, SyncRunPhase::SyncCompleted->value],
+        'phase_statuses' => (object) [],
+        'context' => ['playlist_id' => $playlist->id],
+        'started_at' => now(),
+    ]);
+
+    $this->service->startRun($run);
+
+    Bus::assertDispatched(FetchTmdbIds::class, fn ($job) => $job->syncRunId === $run->id
+        && $job->completionPhase === SyncRunPhase::VodTmdb
+        && $job->lookupScope === 'enabled');
+});
+
+it('includes VodTmdb for new disabled channels when tmdb_auto_lookup_all_new is both', function () {
+    mockPipelineSettings(tmdb: true, lookupScope: 'both');
+
+    $playlist = Playlist::factory()->for($this->user)->create();
+    Channel::factory()->for($playlist)->for($this->user)->create(['enabled' => false, 'is_vod' => true, 'new' => true]);
+
+    $run = $this->service->buildPipeline($playlist, app(GeneralSettings::class));
+
+    expect($run->phases)->toContain(SyncRunPhase::VodTmdb->value);
+});
+
+it('dispatches FetchTmdbIds with lookupScope both when tmdb_auto_lookup_all_new is both', function () {
+    mockPipelineSettings(tmdb: true, lookupScope: 'both');
+    $playlist = makePlaylistWithVod($this->user);
+
+    $run = SyncRun::create([
+        'playlist_id' => $playlist->id,
+        'user_id' => $this->user->id,
+        'trigger' => 'test',
+        'status' => SyncRunStatus::Running->value,
+        'phases' => [SyncRunPhase::VodTmdb->value, SyncRunPhase::SyncCompleted->value],
+        'phase_statuses' => (object) [],
+        'context' => ['playlist_id' => $playlist->id],
+        'started_at' => now(),
+    ]);
+
+    $this->service->startRun($run);
+
+    Bus::assertDispatched(FetchTmdbIds::class, fn ($job) => $job->syncRunId === $run->id
+        && $job->completionPhase === SyncRunPhase::VodTmdb
+        && $job->lookupScope === 'both');
 });

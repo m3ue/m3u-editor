@@ -216,6 +216,8 @@ class GeneralSettings extends Settings
 
     public ?bool $tmdb_auto_lookup_on_import = false;
 
+    public ?string $tmdb_auto_lookup_all_new = 'enabled';
+
     public ?int $tmdb_rate_limit = 40;
 
     public ?string $tmdb_language = 'en-US';
