@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\DispatcharrController;
 use App\Http\Controllers\Api\EpgApiController;
 use App\Http\Controllers\Api\M3uProxyApiController;
+use App\Http\Controllers\DvrCallbackController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -69,3 +70,10 @@ Route::prefix('vod')->middleware('dispatcharr.auth')->group(function () {
         ->name('dispatcharr.vod.movie.providers')
         ->whereNumber('streamId');
 });
+
+/*
+ * DVR callback — called by the m3u-proxy when a recording completes or fails.
+ * Must live in api.php (not web.php) to avoid CSRF verification.
+ */
+Route::post('dvr/callback', [DvrCallbackController::class, 'handle'])
+    ->name('dvr.callback');

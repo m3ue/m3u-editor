@@ -4,7 +4,6 @@ use App\Http\Controllers\Api\DispatcharrController;
 use App\Http\Controllers\AssetPreviewController;
 use App\Http\Controllers\Auth\OidcController;
 use App\Http\Controllers\ChannelController;
-use App\Http\Controllers\DvrCallbackController;
 use App\Http\Controllers\DvrStreamController;
 use App\Http\Controllers\EpgController;
 use App\Http\Controllers\EpgFileController;
@@ -372,6 +371,3 @@ Route::get('/dvr/{username}/{password}/{uuid}/edl', [DvrStreamController::class,
 
 Route::get('/dvr/{username}/{password}/{uuid}.{format?}', [DvrStreamController::class, 'stream'])
     ->name('dvr.recording.stream');
-
-Route::post('/api/dvr/callback', [DvrCallbackController::class, 'handle'])
-    ->name('dvr.callback');
