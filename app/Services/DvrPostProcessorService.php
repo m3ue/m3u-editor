@@ -233,12 +233,12 @@ class DvrPostProcessorService
             'proxy_network_id' => null,
         ]);
 
-        // Disable "once" rules after a successful recording so they don't re-schedule
+        // Delete "once" rules after a successful recording — they're one-shot
         $rule = $recording->recordingRule;
         if ($rule && $rule->type === DvrRuleType::Once) {
-            $rule->update(['enabled' => false]);
+            $rule->delete();
 
-            Log::debug('DVR post-processing: disabled once-rule after successful recording', [
+            Log::debug('DVR post-processing: deleted once-rule after successful recording', [
                 'recording_id' => $recording->id,
                 'rule_id' => $rule->id,
             ]);
@@ -495,30 +495,33 @@ class DvrPostProcessorService
             $process->run();
 
             $exitCode = $process->getExitCode();
-
-            if ($exitCode !== 0) {
-                $errorOutput = $process->getErrorOutput();
-                Log::warning("Comskip exited with code {$exitCode}", [
-                    'recording_id' => $recording->id,
-                    'output' => $errorOutput,
-                ]);
-            }
+            $stdOut = $process->getOutput();
+            $stdErr = $process->getErrorOutput();
 
             if (file_exists($edlPath)) {
                 Log::info('Comskip complete — .edl generated', [
                     'recording_id' => $recording->id,
                     'edl_path' => $edlPath,
+                    'exit_code' => $exitCode,
+                ]);
+            } elseif ($exitCode === 0) {
+                // Ran successfully but found no commercials
+                Log::info('Comskip ran but found no commercials — no .edl produced', [
+                    'recording_id' => $recording->id,
+                    'exit_code' => $exitCode,
                 ]);
             } else {
-                Log::warning('Comskip completed but no .edl file was produced', [
+                Log::warning("Comskip exited with code {$exitCode} — no .edl produced", [
                     'recording_id' => $recording->id,
-                    'expected_path' => $edlPath,
+                    'exit_code' => $exitCode,
+                    'stderr' => $stdErr ?: null,
+                    'stdout' => $stdOut ? substr($stdOut, 0, 500) : null,
                 ]);
             }
         } catch (Exception $e) {
-            Log::warning("Comskip failed (non-fatal): {$e->getMessage()}", [
+            Log::warning("Comskip binary error (non-fatal): {$e->getMessage()}", [
                 'recording_id' => $recording->id,
-                'exception' => $e,
+                'exception_class' => get_class($e),
             ]);
         }
     }

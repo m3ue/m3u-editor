@@ -271,7 +271,6 @@ class M3uProxyStreamMonitor extends Page implements HasActions, HasSchemas
         }
 
         $this->connectionError = null;
-        $this->connectionError = null;
 
         $streams = [];
         if (! empty($apiStreams['streams'])) {

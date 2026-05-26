@@ -155,6 +155,7 @@ it('schedule_once creates a Once rule and dispatches DvrSchedulerTick', function
     ]);
     $channel = Channel::factory()->for($user)->for($playlist)->create([
         'epg_channel_id' => $epgChannel->id,
+        'enabled' => true,
     ]);
 
     $programme = makeEpgProgramme($epgChannel, $user, [
@@ -230,6 +231,82 @@ it('schedule_once without dvr_setting_id lists settings', function () {
         ->toContain('Available DVR settings')
         ->toContain('My Playlist')
         ->toContain("#{$setting->id}");
+});
+
+it('schedule_once blocks disabled channel when include_disabled_channels is false', function () {
+    $user = User::factory()->create();
+    $playlist = Playlist::factory()->for($user)->create();
+    $setting = DvrSetting::factory()->for($user)->for($playlist)->create([
+        'include_disabled_channels' => false,
+    ]);
+    $epg = Epg::factory()->for($user)->create();
+    $epgChannel = EpgChannel::factory()->for($epg)->for($user)->create([
+        'channel_id' => 'channel.disabled.once',
+    ]);
+    Channel::factory()->for($user)->for($playlist)->create([
+        'epg_channel_id' => $epgChannel->id,
+        'enabled' => false,
+        'title' => 'Disabled Once Channel',
+    ]);
+
+    $programme = makeEpgProgramme($epgChannel, $user, [
+        'title' => 'Disabled Once Programme',
+    ]);
+
+    $this->actingAs($user);
+
+    $tool = makeScheduleTool();
+    $result = $tool->handle(new Request([
+        'action' => 'schedule_once',
+        'programme_id' => $programme->id,
+        'dvr_setting_id' => $setting->id,
+    ]));
+
+    expect((string) $result)->toContain('is disabled')
+        ->and((string) $result)->toContain('excludes disabled channels');
+
+    expect(DvrRecordingRule::where('user_id', $user->id)
+        ->where('type', DvrRuleType::Once)
+        ->where('programme_id', $programme->id)
+        ->exists())->toBeFalse();
+});
+
+it('schedule_once allows disabled channel when include_disabled_channels is true', function () {
+    $user = User::factory()->create();
+    $playlist = Playlist::factory()->for($user)->create();
+    $setting = DvrSetting::factory()->for($user)->for($playlist)->create([
+        'include_disabled_channels' => true,
+    ]);
+    $epg = Epg::factory()->for($user)->create();
+    $epgChannel = EpgChannel::factory()->for($epg)->for($user)->create([
+        'channel_id' => 'channel.disabled.once.allowed',
+    ]);
+    $channel = Channel::factory()->for($user)->for($playlist)->create([
+        'epg_channel_id' => $epgChannel->id,
+        'enabled' => false,
+        'title' => 'Disabled Allowed Channel',
+    ]);
+
+    $programme = makeEpgProgramme($epgChannel, $user, [
+        'title' => 'Disabled Allowed Programme',
+    ]);
+
+    $this->actingAs($user);
+
+    $tool = makeScheduleTool();
+    $result = $tool->handle(new Request([
+        'action' => 'schedule_once',
+        'programme_id' => $programme->id,
+        'dvr_setting_id' => $setting->id,
+    ]));
+
+    expect((string) $result)->toContain('Once rule created');
+
+    expect(DvrRecordingRule::where('user_id', $user->id)
+        ->where('type', DvrRuleType::Once)
+        ->where('programme_id', $programme->id)
+        ->where('channel_id', $channel->id)
+        ->exists())->toBeTrue();
 });
 
 // ── Schedule Series Action ───────────────────────────────────────────────────────
@@ -328,4 +405,62 @@ it('schedule_series with series_mode new_only sets correct enum', function () {
         ->first();
 
     expect($rule->series_mode)->toBe(DvrSeriesMode::NewFlag);
+});
+
+it('schedule_series blocks disabled pinned channel when include_disabled_channels is false', function () {
+    $user = User::factory()->create();
+    $playlist = Playlist::factory()->for($user)->create();
+    $setting = DvrSetting::factory()->for($user)->for($playlist)->create([
+        'include_disabled_channels' => false,
+    ]);
+    $disabledChannel = Channel::factory()->for($user)->for($playlist)->create([
+        'enabled' => false,
+    ]);
+
+    $this->actingAs($user);
+
+    $tool = makeScheduleTool();
+    $result = $tool->handle(new Request([
+        'action' => 'schedule_series',
+        'title' => 'Disabled Channel Series',
+        'dvr_setting_id' => $setting->id,
+        'channel_id' => $disabledChannel->id,
+    ]));
+
+    expect((string) $result)->toContain('is disabled')
+        ->and((string) $result)->toContain('excludes disabled channels');
+
+    expect(DvrRecordingRule::where('user_id', $user->id)
+        ->where('type', DvrRuleType::Series)
+        ->where('series_title', 'Disabled Channel Series')
+        ->exists())->toBeFalse();
+});
+
+it('schedule_series allows disabled pinned channel when include_disabled_channels is true', function () {
+    $user = User::factory()->create();
+    $playlist = Playlist::factory()->for($user)->create();
+    $setting = DvrSetting::factory()->for($user)->for($playlist)->create([
+        'include_disabled_channels' => true,
+    ]);
+    $disabledChannel = Channel::factory()->for($user)->for($playlist)->create([
+        'enabled' => false,
+    ]);
+
+    $this->actingAs($user);
+
+    $tool = makeScheduleTool();
+    $result = $tool->handle(new Request([
+        'action' => 'schedule_series',
+        'title' => 'Disabled Allowed Series',
+        'dvr_setting_id' => $setting->id,
+        'channel_id' => $disabledChannel->id,
+    ]));
+
+    expect((string) $result)->toContain('Series rule created');
+
+    expect(DvrRecordingRule::where('user_id', $user->id)
+        ->where('type', DvrRuleType::Series)
+        ->where('series_title', 'Disabled Allowed Series')
+        ->where('channel_id', $disabledChannel->id)
+        ->exists())->toBeTrue();
 });

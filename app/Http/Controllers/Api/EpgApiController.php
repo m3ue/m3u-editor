@@ -180,7 +180,7 @@ class EpgApiController extends Controller
         $skip = max(0, ($page - 1) * $perPage);
         $search = $request->get('search', null);
         $group = $request->get('group', null) ?: null;
-        $vod = (bool) $request->get('vod', false);
+        $vod = $request->boolean('vod');
         $username = $request->get('username', null);
         $password = $request->get('password', null);
 
@@ -774,7 +774,7 @@ class EpgApiController extends Controller
             return response()->json(['error' => 'Playlist Not Found'], 404);
         }
 
-        $vod = (bool) $request->get('vod', false);
+        $vod = $request->boolean('vod');
         $includeVod = $vod && $playlist->include_vod_in_m3u;
 
         $channelQuery = $playlist->channels();

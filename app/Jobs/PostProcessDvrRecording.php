@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Enums\DvrRecordingStatus;
+use App\Enums\DvrRuleType;
 use App\Models\DvrRecording;
 use App\Services\DvrPostProcessorService;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -39,6 +40,12 @@ class PostProcessDvrRecording implements ShouldQueue
 
         // Skip cancelled recordings — they should not be post-processed
         if ($recording->status === DvrRecordingStatus::Cancelled) {
+            // Delete "once" rules when the recording was cancelled — they're one-shot
+            $rule = $recording->recordingRule;
+            if ($rule && $rule->type === DvrRuleType::Once) {
+                $rule->delete();
+            }
+
             Log::info("PostProcessDvrRecording: recording {$this->recordingId} is Cancelled — skipping post-processing", [
                 'recording_id' => $this->recordingId,
             ]);

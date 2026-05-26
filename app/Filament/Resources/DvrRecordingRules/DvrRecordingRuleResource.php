@@ -127,7 +127,8 @@ class DvrRecordingRuleResource extends Resource
                 Select::make('series_mode')
                     ->label(__('Record Episodes'))
                     ->options(DvrSeriesMode::class)
-                    ->default(DvrSeriesMode::All->value)
+                    ->default(DvrSeriesMode::UniqueSe->value)
+                    ->helperText(__('Set per-playlist defaults under Playlists → Edit → DVR Settings.'))
                     ->visible(fn (Get $get): bool => self::isRuleType($get('type'), DvrRuleType::Series)),
 
                 Select::make('enable_comskip')

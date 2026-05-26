@@ -31,7 +31,7 @@ class ViewDvrRecording extends ViewRecord
                 ->requiresConfirmation()
                 ->action(function (): void {
                     $this->record->update(['status' => DvrRecordingStatus::PostProcessing, 'error_message' => null]);
-                    PostProcessDvrRecording::dispatch($this->record);
+                    PostProcessDvrRecording::dispatch($this->record->id);
 
                     Notification::make()
                         ->success()

@@ -6,6 +6,7 @@ use App\Enums\DvrMatchMode;
 use App\Enums\DvrRecordingStatus;
 use App\Enums\DvrRuleType;
 use App\Enums\DvrSeriesMode;
+use App\Services\DvrSchedulerService;
 use App\Support\SeriesKey;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -54,6 +55,12 @@ class DvrRecordingRule extends Model
             }
         });
 
+        static::created(function (self $rule): void {
+            if ($rule->enabled && $rule->type === DvrRuleType::Series) {
+                app(DvrSchedulerService::class)->scheduleRuleImmediately($rule);
+            }
+        });
+
         static::saving(function (self $rule): void {
             if (
                 $rule->type === DvrRuleType::Series
@@ -71,6 +78,15 @@ class DvrRecordingRule extends Model
                 $rule->series_mode = DvrSeriesMode::NewFlag;
             } elseif (! $rawNewOnly && $rule->series_mode === DvrSeriesMode::NewFlag) {
                 $rule->series_mode = DvrSeriesMode::All;
+            }
+
+            // Detect enabled transition false → true for series rules and trigger immediate scheduling
+            if (
+                $rule->enabled
+                && $rule->type === DvrRuleType::Series
+                && $rule->getOriginal('enabled') === false
+            ) {
+                app(DvrSchedulerService::class)->scheduleRuleImmediately($rule);
             }
         });
     }

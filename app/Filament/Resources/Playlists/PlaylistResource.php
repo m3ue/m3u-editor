@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Playlists;
 
+use App\Enums\DvrSeriesMode;
 use App\Enums\PlaylistSourceType;
 use App\Enums\Status;
 use App\Facades\PlaylistFacade;
@@ -3029,6 +3030,34 @@ class PlaylistResource extends Resource implements CopilotResource
                                     ->default(false)
                                     ->inline(false)
                                     ->columnSpanFull(),
+                                Toggle::make('dvr_include_disabled_channels')
+                                    ->label(__('Show Disabled Channels in Browse Shows'))
+                                    ->helperText(__('When enabled, Browse Shows will include content from channels that are disabled. Allows scheduling recordings for content on non-enabled channels.'))
+                                    ->default(false)
+                                    ->inline(false),
+                            ]),
+                    ]),
+                Section::make(__('Series Recording Defaults'))
+                    ->icon('heroicon-m-film')
+                    ->description(__('Default settings applied when creating new series recording rules for this playlist. These can be overridden per-rule in the rule\'s advanced settings.'))
+                    ->hidden(fn (Get $get): bool => ! $get('dvr_enabled'))
+                    ->schema([
+                        Grid::make()
+                            ->columns(2)
+                            ->columnSpanFull()
+                            ->schema([
+                                Select::make('dvr_default_series_mode')
+                                    ->label(__('Record Episodes (Default)'))
+                                    ->helperText(__('Default recording strategy for new series rules. "Unique by Season & Episode" avoids re-recording episodes you already have.'))
+                                    ->options(DvrSeriesMode::class)
+                                    ->default(DvrSeriesMode::UniqueSe->value)
+                                    ->required(),
+                                TextInput::make('dvr_default_series_keep_last')
+                                    ->label(__('Keep Last N Recordings (Default)'))
+                                    ->helperText(__('Default number of recordings to keep per series. Leave blank to keep all recordings.'))
+                                    ->numeric()
+                                    ->minValue(1)
+                                    ->placeholder(__('Keep all')),
                             ]),
                     ]),
             ])

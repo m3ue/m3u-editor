@@ -1343,6 +1343,7 @@ it('dedup by programme_uid is case-sensitive for title', function () {
         'title' => 'Late Night Show',
         'epg_channel_id' => 'test.channel',
         'start_time' => now()->addMinutes(5),
+        'end_time' => now()->addMinutes(70),
         'season' => 5,
         'episode' => 13,
     ]);
@@ -1358,4 +1359,62 @@ it('dedup by programme_uid is case-sensitive for title', function () {
     $this->service->tick();
 
     expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(2);
+});
+
+// --- Immediate scheduling on rule creation and re-enablement ---
+
+it('immediately schedules recordings for programmes beyond the 30-min lookahead when a series rule is created', function () {
+    config(['dvr.initial_lookahead_days' => 14]);
+
+    // Programme starts 5 days from now — outside the 30-minute tick window
+    $programme = EpgProgramme::factory()->create([
+        'title' => 'Breaking Bad',
+        'epg_channel_id' => 'test.channel',
+        'start_time' => now()->addDays(5),
+        'end_time' => now()->addDays(5)->addHour(),
+    ]);
+
+    $rule = DvrRecordingRule::factory()
+        ->series()
+        ->for($this->setting, 'dvrSetting')
+        ->for($this->user)
+        ->create(['series_title' => 'Breaking Bad']);
+
+    // tick() must NOT be called — the recording should be scheduled on rule creation
+    expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(1);
+    expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->first()->status)
+        ->toBe(DvrRecordingStatus::Scheduled);
+    expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->first()->programme_start->toDateTimeString())
+        ->toBe($programme->start_time->toDateTimeString());
+});
+
+it('immediately schedules recordings when a disabled series rule is re-enabled', function () {
+    config(['dvr.initial_lookahead_days' => 14]);
+
+    $rule = DvrRecordingRule::factory()
+        ->series()
+        ->disabled()
+        ->for($this->setting, 'dvrSetting')
+        ->for($this->user)
+        ->create(['series_title' => 'Breaking Bad']);
+
+    // No recording yet — rule is disabled
+    expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(0);
+
+    // Programme starts 3 days from now — outside the 30-minute window
+    $programme = EpgProgramme::factory()->create([
+        'title' => 'Breaking Bad',
+        'epg_channel_id' => 'test.channel',
+        'start_time' => now()->addDays(3),
+        'end_time' => now()->addDays(3)->addHour(),
+    ]);
+
+    // Re-enable the rule — recording should be scheduled immediately without tick()
+    $rule->update(['enabled' => true]);
+
+    expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(1);
+    expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->first()->status)
+        ->toBe(DvrRecordingStatus::Scheduled);
+    expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->first()->programme_start->toDateTimeString())
+        ->toBe($programme->start_time->toDateTimeString());
 });

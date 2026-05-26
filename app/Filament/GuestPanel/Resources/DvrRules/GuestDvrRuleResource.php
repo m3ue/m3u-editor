@@ -174,7 +174,10 @@ class GuestDvrRuleResource extends Resource
             Select::make('series_mode')
                 ->label(__('Record Episodes'))
                 ->options(DvrSeriesMode::class)
-                ->default(DvrSeriesMode::All->value)
+                ->default($dvrSetting?->default_series_mode?->value ?? DvrSeriesMode::UniqueSe->value)
+                ->helperText(__('Playlist default: :mode', [
+                    'mode' => $dvrSetting?->default_series_mode?->getLabel() ?? DvrSeriesMode::UniqueSe->getLabel(),
+                ]))
                 ->visible(fn (Get $get): bool => self::isRuleType($get('type'), DvrRuleType::Series)),
 
             Select::make('enable_comskip')
@@ -204,7 +207,12 @@ class GuestDvrRuleResource extends Resource
                 ->label(__('Keep Last N Recordings'))
                 ->numeric()
                 ->minValue(1)
-                ->placeholder(__('Leave blank to keep all')),
+                ->placeholder($dvrSetting?->default_series_keep_last
+                    ? (string) $dvrSetting->default_series_keep_last
+                    : __('Leave blank to keep all'))
+                ->helperText($dvrSetting?->default_series_keep_last
+                    ? __('Playlist default: keep last :n', ['n' => $dvrSetting->default_series_keep_last])
+                    : __('Playlist default: keep all')),
         ];
     }
 

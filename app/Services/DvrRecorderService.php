@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\DvrRecordingStatus;
+use App\Enums\DvrRuleType;
 use App\Jobs\PostProcessDvrRecording;
 use App\Models\DvrRecording;
 use Exception;
@@ -190,6 +191,17 @@ class DvrRecorderService
             'error_message' => 'Cancelled by user',
             'user_cancelled' => true,
         ]);
+
+        // Delete "once" rules when the recording is cancelled — they're one-shot
+        $rule = $recording->recordingRule;
+        if ($rule && $rule->type === DvrRuleType::Once) {
+            $rule->delete();
+
+            Log::info('DVR cancel: deleted once-rule', [
+                'recording_id' => $recording->id,
+                'rule_id' => $rule->id,
+            ]);
+        }
     }
 
     /**

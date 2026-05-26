@@ -2,6 +2,7 @@
 
 namespace Database\Factories;
 
+use App\Enums\DvrSeriesMode;
 use App\Models\DvrSetting;
 use App\Models\Playlist;
 use App\Models\User;
@@ -29,9 +30,12 @@ class DvrSettingFactory extends Factory
             'default_start_early_seconds' => 30,
             'default_end_late_seconds' => 30,
             'enable_metadata_enrichment' => true,
+            'include_disabled_channels' => false,
             'tmdb_api_key' => null,
             'global_disk_quota_gb' => null,
             'retention_days' => null,
+            'default_series_mode' => DvrSeriesMode::UniqueSe,
+            'default_series_keep_last' => null,
         ];
     }
 
