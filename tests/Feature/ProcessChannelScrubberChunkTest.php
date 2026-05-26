@@ -5,6 +5,7 @@ use App\Jobs\ProcessChannelScrubberChunk;
 use App\Models\Channel;
 use App\Models\ChannelScrubber;
 use App\Models\ChannelScrubberLog;
+use App\Models\Group;
 use App\Models\Playlist;
 use App\Models\User;
 use Illuminate\Support\Facades\Http;
@@ -12,8 +13,9 @@ use Illuminate\Support\Facades\Http;
 beforeEach(function () {
     $this->user = User::factory()->create();
     $this->playlist = Playlist::factory()->for($this->user)->createQuietly();
+    $this->group = Group::factory()->createQuietly(['user_id' => $this->user->id]);
 
-    $this->scrubber = ChannelScrubber::create([
+    $this->scrubber = ChannelScrubber::createQuietly([
         'name' => 'Test Scrubber',
         'uuid' => 'test-batch-uuid',
         'status' => Status::Processing,
@@ -36,8 +38,10 @@ beforeEach(function () {
 
 it('marks a channel dead via ffprobe when ensureStreamStats returns empty', function () {
     // No URL and no stream_stats → ensureStreamStats() returns [] → dead
-    $channel = Channel::factory()->for($this->playlist)->create([
+    $channel = Channel::factory()->create([
+        'playlist_id' => $this->playlist->id,
         'user_id' => $this->user->id,
+        'group_id' => $this->group->id,
         'enabled' => true,
         'url' => null,
         'url_custom' => null,
@@ -67,8 +71,10 @@ it('marks a channel dead via ffprobe even when stream_stats are cached', functio
     // producing false negatives for dead streams that had been probed before.
     // The new lightweight ffprobe probe always makes a fresh network call — cached stats
     // are irrelevant. A null URL with cached stats is still dead.
-    $channel = Channel::factory()->for($this->playlist)->create([
+    $channel = Channel::factory()->create([
+        'playlist_id' => $this->playlist->id,
         'user_id' => $this->user->id,
+        'group_id' => $this->group->id,
         'enabled' => true,
         'url' => null,
         'url_custom' => null,
@@ -96,14 +102,18 @@ it('marks a channel dead via ffprobe even when stream_stats are cached', functio
 });
 
 it('increments dead_count on the scrubber for each dead channel', function () {
-    $dead1 = Channel::factory()->for($this->playlist)->create([
+    $dead1 = Channel::factory()->create([
+        'playlist_id' => $this->playlist->id,
         'user_id' => $this->user->id,
+        'group_id' => $this->group->id,
         'url' => null,
         'url_custom' => null,
         'stream_stats' => null,
     ]);
-    $dead2 = Channel::factory()->for($this->playlist)->create([
+    $dead2 = Channel::factory()->create([
+        'playlist_id' => $this->playlist->id,
         'user_id' => $this->user->id,
+        'group_id' => $this->group->id,
         'url' => null,
         'url_custom' => null,
         'stream_stats' => null,
@@ -127,8 +137,10 @@ it('increments dead_count on the scrubber for each dead channel', function () {
 // ──────────────────────────────────────────────────────────────────────────────
 
 it('skips processing when the batch uuid does not match', function () {
-    $channel = Channel::factory()->for($this->playlist)->create([
+    $channel = Channel::factory()->create([
+        'playlist_id' => $this->playlist->id,
         'user_id' => $this->user->id,
+        'group_id' => $this->group->id,
         'enabled' => true,
         'url' => null,
         'stream_stats' => null,
@@ -150,8 +162,10 @@ it('skips processing when the batch uuid does not match', function () {
 it('skips processing when the scrubber is cancelled', function () {
     $this->scrubber->update(['status' => Status::Cancelled]);
 
-    $channel = Channel::factory()->for($this->playlist)->create([
+    $channel = Channel::factory()->create([
+        'playlist_id' => $this->playlist->id,
         'user_id' => $this->user->id,
+        'group_id' => $this->group->id,
         'enabled' => true,
         'url' => null,
         'stream_stats' => null,
@@ -175,8 +189,10 @@ it('skips processing when the scrubber is cancelled', function () {
 // ──────────────────────────────────────────────────────────────────────────────
 
 it('does not disable dead channels when disableDead is false', function () {
-    $channel = Channel::factory()->for($this->playlist)->create([
+    $channel = Channel::factory()->create([
+        'playlist_id' => $this->playlist->id,
         'user_id' => $this->user->id,
+        'group_id' => $this->group->id,
         'enabled' => true,
         'url' => null,
         'url_custom' => null,
@@ -210,8 +226,10 @@ it('does not disable dead channels when disableDead is false', function () {
 // ──────────────────────────────────────────────────────────────────────────────
 
 it('re-enables a previously disabled live channel when enableLive is true', function () {
-    $channel = Channel::factory()->for($this->playlist)->create([
+    $channel = Channel::factory()->create([
+        'playlist_id' => $this->playlist->id,
         'user_id' => $this->user->id,
+        'group_id' => $this->group->id,
         'enabled' => false,
         'url' => 'http://example.invalid/stream',
         'url_custom' => null,
