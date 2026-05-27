@@ -415,10 +415,23 @@ class WebDavMediaService implements MediaServer
     public function fetchSeasons(string $seriesId): Collection
     {
         // Torrent-grouped series (episode containers): build seasons from episode dirs.
+        // Also include any seasons provided by supplementary season-pack dirs (prefix-merged)
+        // that aren't already covered by episode containers.
         if (isset($this->torrentSeriesCache[$seriesId]['_torrent_episode_dirs'])) {
-            return $this->buildSeasonsFromEpisodeDirs(
-                $this->torrentSeriesCache[$seriesId]['_torrent_episode_dirs']
-            );
+            $cache = $this->torrentSeriesCache[$seriesId];
+            $seasons = $this->buildSeasonsFromEpisodeDirs($cache['_torrent_episode_dirs']);
+
+            if (! empty($cache['_supplement_pack_dirs'])) {
+                $packSeasons = $this->buildSeasonsFromSeasonPackDirs($cache['_supplement_pack_dirs']);
+                $existingNums = $seasons->pluck('IndexNumber')->all();
+                foreach ($packSeasons as $ps) {
+                    if (! in_array($ps['IndexNumber'], $existingNums, true)) {
+                        $seasons->push($ps);
+                    }
+                }
+            }
+
+            return $seasons->sortBy('IndexNumber')->values();
         }
 
         // Season-pack-only series: multiple season pack directories merged under one title.
@@ -969,8 +982,6 @@ class WebDavMediaService implements MediaServer
 
             if ($parsed['is_episode']) {
                 // Single-episode container: group under the show name.
-                // Use normalizeSeriesTitle so episode-container keys are compatible with
-                // season-pack keys — enabling cross-reference merging below.
                 $showTitle = $parsed['title'] ?: $dir['name'];
                 $key = $this->normalizeSeriesTitle($showTitle);
 
@@ -988,8 +999,6 @@ class WebDavMediaService implements MediaServer
                 ];
             } elseif ($parsed['is_pack'] && ! $parsed['is_multi_season_pack'] && $parsed['season'] !== null) {
                 // Single-season pack directory (e.g. "Show S01/", "Show.S02.1080p/").
-                // Group by normalised title so multiple season packs for the same show
-                // are merged into one series entry with correctly-numbered seasons.
                 $showTitle = $parsed['title'] ?: $dir['name'];
                 $key = $this->normalizeSeriesTitle($showTitle);
 
@@ -1000,13 +1009,10 @@ class WebDavMediaService implements MediaServer
                         'dirs' => [],
                     ];
                 } elseif ($seasonPackContainers[$key]['year'] === null && $parsed['year'] !== null) {
-                    // Prefer the title variant that carries year metadata (typically better-formatted).
                     $seasonPackContainers[$key]['year'] = $parsed['year'];
                     $seasonPackContainers[$key]['title'] = $showTitle;
                 }
 
-                // Deduplicate: if we already have a pack for this season number (e.g. two
-                // different quality downloads of S03), keep only the first one encountered.
                 $existingSeasons = array_column($seasonPackContainers[$key]['dirs'], 'season');
                 if (! in_array($parsed['season'], $existingSeasons, true)) {
                     $seasonPackContainers[$key]['dirs'][] = [
@@ -1016,8 +1022,6 @@ class WebDavMediaService implements MediaServer
                 }
             } else {
                 // Regular series directory or multi-season pack — use directory path as ID.
-                // If no season/pack markers are present, do a shallow check to avoid treating
-                // a single-movie directory (e.g. Remarkably Bright Creatures/) as a series.
                 if (! $parsed['is_pack'] && $parsed['season'] === null) {
                     if ($this->looksLikeMovieDirectory($dir['path'], $parser)) {
                         continue;
@@ -1043,6 +1047,29 @@ class WebDavMediaService implements MediaServer
             }
         }
 
+        // Prefix-merge: when a season pack's normalised title is a word-level prefix of an
+        // episode container's title (e.g. "euphoria" ⊆ "euphoria us"), fold the pack's dirs
+        // into the episode container as supplementary sources.  The pack fills in any episodes
+        // that don't already have a dedicated episode-container directory.
+        foreach ($seasonPackContainers as $spKey => $spData) {
+            foreach ($episodeContainers as $ecKey => &$ecData) {
+                if ($spKey !== $ecKey && str_starts_with($ecKey, $spKey.' ')) {
+                    Log::debug('WebDavMediaService: prefix-merging season pack into episode container', [
+                        'pack_key' => $spKey,
+                        'container_key' => $ecKey,
+                        'pack_dirs' => array_column($spData['dirs'], 'season'),
+                    ]);
+                    $ecData['_supplement_pack_dirs'] = array_merge(
+                        $ecData['_supplement_pack_dirs'] ?? [],
+                        $spData['dirs']
+                    );
+                    unset($seasonPackContainers[$spKey]);
+                    break;
+                }
+            }
+            unset($ecData);
+        }
+
         // Merge grouped episode-container series into seriesMap
         foreach ($episodeContainers as $key => $data) {
             $seriesId = md5('torrent-show:'.$key);
@@ -1058,6 +1085,7 @@ class WebDavMediaService implements MediaServer
                 'Overview' => null,
                 'CommunityRating' => null,
                 '_torrent_episode_dirs' => $data['dirs'],
+                '_supplement_pack_dirs' => $data['_supplement_pack_dirs'] ?? [],
             ];
 
             if ($this->scanProgressCallback) {
@@ -1297,6 +1325,30 @@ class WebDavMediaService implements MediaServer
                         }
                         $episodes->push($episodeData);
                     }
+                }
+            }
+        }
+
+        // Fill in missing episodes from any supplement season-pack dirs (prefix-merged into
+        // this series because their title is a word-prefix of this series' title).
+        // Episode-container versions take priority; the pack only provides episodes whose
+        // season+episode number doesn't already appear in the episodes collected above.
+        if (! empty($seriesData['_supplement_pack_dirs'])) {
+            // Build a set of (season, episode) pairs already covered by episode containers.
+            $covered = [];
+            foreach ($episodes as $ep) {
+                $covered[$ep['ParentIndexNumber'].':'.$ep['IndexNumber']] = true;
+            }
+
+            $supplementData = $seriesData;
+            $supplementData['_torrent_season_pack_dirs'] = $seriesData['_supplement_pack_dirs'];
+            $packEpisodes = $this->buildEpisodesFromSeasonPackDirs($supplementData, $seasonId);
+
+            foreach ($packEpisodes as $packEp) {
+                $coverKey = $packEp['ParentIndexNumber'].':'.$packEp['IndexNumber'];
+                if (! isset($covered[$coverKey])) {
+                    $episodes->push($packEp);
+                    $covered[$coverKey] = true;
                 }
             }
         }
