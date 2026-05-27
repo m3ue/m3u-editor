@@ -118,6 +118,10 @@ class PluginSchemaMapper
             default => throw new InvalidArgumentException("Unsupported plugin field type [{$type}]"),
         };
 
+        if ($type === 'text' && (bool) ($field['secret'] ?? false)) {
+            $component->password()->revealable();
+        }
+
         return $component
             ->label($label)
             ->default($default)

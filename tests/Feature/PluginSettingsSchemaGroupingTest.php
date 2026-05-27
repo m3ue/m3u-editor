@@ -3,9 +3,50 @@
 use App\Models\Plugin;
 use App\Plugins\PluginSchemaMapper;
 use App\Plugins\PluginValidator;
+use Filament\Forms\Components\TextInput;
 use Filament\Schemas\Components\Section;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Str;
+
+it('renders a text field with secret true as a password input', function () {
+    $plugin = new Plugin([
+        'settings_schema' => [
+            [
+                'id' => 'api_key',
+                'type' => 'text',
+                'label' => 'API Key',
+                'secret' => true,
+            ],
+        ],
+        'settings' => [],
+    ]);
+
+    $components = app(PluginSchemaMapper::class)->settingsComponents($plugin);
+
+    expect($components)->toHaveCount(1);
+    expect($components[0])->toBeInstanceOf(TextInput::class);
+    expect($components[0]->isPassword())->toBeTrue();
+    expect($components[0]->isPasswordRevealable())->toBeTrue();
+});
+
+it('renders a text field without secret as a plain text input', function () {
+    $plugin = new Plugin([
+        'settings_schema' => [
+            [
+                'id' => 'display_name',
+                'type' => 'text',
+                'label' => 'Display Name',
+            ],
+        ],
+        'settings' => [],
+    ]);
+
+    $components = app(PluginSchemaMapper::class)->settingsComponents($plugin);
+
+    expect($components)->toHaveCount(1);
+    expect($components[0])->toBeInstanceOf(TextInput::class);
+    expect($components[0]->isPassword())->toBeFalse();
+});
 
 it('renders grouped plugin settings sections and keeps nested rules flat', function () {
     $plugin = new Plugin([
