@@ -40,6 +40,19 @@ it('parses NxNN episode format', function () {
     ]);
 });
 
+it('parses dot-separated S03.E01 episode format', function () {
+    $result = $this->parser->parse('Euphoria.US.S03.E01.1080p.WEB-DL.mkv');
+
+    expect($result)->toMatchArray([
+        'title' => 'Euphoria US',
+        'season' => 3,
+        'episode' => 1,
+        'is_episode' => true,
+        'is_pack' => false,
+        'is_multi_season_pack' => false,
+    ]);
+});
+
 // -------------------------------------------------------------------------
 // Season packs
 // -------------------------------------------------------------------------
@@ -51,6 +64,7 @@ it('parses multi-season pack with range', function () {
         'season' => 1,
         'is_episode' => false,
         'is_pack' => true,
+        'is_multi_season_pack' => true,
     ]);
 });
 
@@ -61,6 +75,7 @@ it('parses multi-season pack with bracket range', function () {
         'season' => 1,
         'is_episode' => false,
         'is_pack' => true,
+        'is_multi_season_pack' => true,
     ]);
 });
 
@@ -71,6 +86,7 @@ it('parses standalone season pack keyword', function (string $input, int $season
         'season' => $season,
         'is_episode' => false,
         'is_pack' => true,
+        'is_multi_season_pack' => false,
     ]);
 })->with([
     'Season keyword dot-separated' => ['Man.on.Fire.Season.1.MULTi.1080p', 1],
@@ -78,6 +94,54 @@ it('parses standalone season pack keyword', function (string $input, int $season
     'Saison keyword dot-separated' => ['Show.Saison.2.FRENCH', 2],
     'S-only marker' => ['Man.on.Fire.S01.MULTi.1080p', 1],
 ]);
+
+it('parses season pack directory with year and quality suffix (S01)', function () {
+    $result = $this->parser->parse('Georgie & Mandy\'s First Marriage (2024) S01 (1080p AMZN WEB-DL x265 10bit EAC3 5.1 Ghost)');
+
+    expect($result)->toMatchArray([
+        'title' => "Georgie & Mandy's First Marriage",
+        'year' => 2024,
+        'season' => 1,
+        'is_episode' => false,
+        'is_pack' => true,
+        'is_multi_season_pack' => false,
+    ]);
+});
+
+it('parses season pack directory with dot-separated name (S02)', function () {
+    $result = $this->parser->parse('Georgie.and.Mandys.First.Marriage.S02.1080p.x265-ELiTE');
+
+    expect($result)->toMatchArray([
+        'season' => 2,
+        'is_episode' => false,
+        'is_pack' => true,
+        'is_multi_season_pack' => false,
+    ]);
+});
+
+it('normalises differently-formatted S01 and S02 pack directory names to the same show', function () {
+    $s01 = $this->parser->parse('Georgie & Mandy\'s First Marriage (2024) S01 (1080p AMZN WEB-DL x265 10bit EAC3 5.1 Ghost)');
+    $s02 = $this->parser->parse('Georgie.and.Mandys.First.Marriage.S02.1080p.x265-ELiTE');
+
+    // Both must parse as single-season packs
+    expect($s01['is_pack'])->toBeTrue()
+        ->and($s01['is_multi_season_pack'])->toBeFalse()
+        ->and($s02['is_pack'])->toBeTrue()
+        ->and($s02['is_multi_season_pack'])->toBeFalse();
+
+    // The normalised key used for grouping must be identical
+    $normalize = function (string $title): string {
+        $title = mb_strtolower($title);
+        $title = str_replace('&', 'and', $title);
+        $title = preg_replace("/['\x{2019}\x{2018}]/u", '', $title) ?? $title;
+        $title = preg_replace('/[^\p{L}\p{N} ]/u', ' ', $title) ?? $title;
+        $title = preg_replace('/\s+/', ' ', $title) ?? $title;
+
+        return trim($title);
+    };
+
+    expect($normalize($s01['title']))->toBe($normalize($s02['title']));
+});
 
 // -------------------------------------------------------------------------
 // Movies / standalone items

@@ -414,11 +414,17 @@ class WebDavMediaService implements MediaServer
      */
     public function fetchSeasons(string $seriesId): Collection
     {
-        // Torrent-grouped series: seasons are derived from the episode containers collected
-        // during fetchSeries() rather than from a single directory on the server.
+        // Torrent-grouped series (episode containers): build seasons from episode dirs.
         if (isset($this->torrentSeriesCache[$seriesId]['_torrent_episode_dirs'])) {
             return $this->buildSeasonsFromEpisodeDirs(
                 $this->torrentSeriesCache[$seriesId]['_torrent_episode_dirs']
+            );
+        }
+
+        // Season-pack-only series: multiple season pack directories merged under one title.
+        if (isset($this->torrentSeriesCache[$seriesId]['_torrent_season_pack_dirs'])) {
+            return $this->buildSeasonsFromSeasonPackDirs(
+                $this->torrentSeriesCache[$seriesId]['_torrent_season_pack_dirs']
             );
         }
 
@@ -447,9 +453,17 @@ class WebDavMediaService implements MediaServer
      */
     public function fetchEpisodes(string $seriesId, ?string $seasonId = null): Collection
     {
-        // Torrent-grouped series: episodes come from per-episode container directories.
+        // Torrent-grouped series (episode containers): build episodes from episode dirs.
         if (isset($this->torrentSeriesCache[$seriesId]['_torrent_episode_dirs'])) {
             return $this->buildEpisodesFromTorrentDirs(
+                $this->torrentSeriesCache[$seriesId],
+                $seasonId
+            );
+        }
+
+        // Season-pack-only series: episodes are video files inside each season pack dir.
+        if (isset($this->torrentSeriesCache[$seriesId]['_torrent_season_pack_dirs'])) {
+            return $this->buildEpisodesFromSeasonPackDirs(
                 $this->torrentSeriesCache[$seriesId],
                 $seasonId
             );
@@ -926,6 +940,9 @@ class WebDavMediaService implements MediaServer
         // Accumulator for episode-container dirs, keyed by normalised show title
         $episodeContainers = [];
 
+        // Accumulator for single-season pack dirs, keyed by normalised show title
+        $seasonPackContainers = [];
+
         foreach ($directories as $dir) {
             if (! $dir['isDirectory']) {
                 continue;
@@ -937,10 +954,25 @@ class WebDavMediaService implements MediaServer
             // like "This Is Art, This Is Spirituality" would fail episode detection.
             $parsed = $parser->parse($dir['name']);
 
+            // Skip directories whose resolved title contains multiple literal '?' characters —
+            // a reliable sign that the filename was stored with an incompatible encoding
+            // (e.g. Windows-1251) and the filesystem substituted '?' for unrepresentable chars.
+            $resolvedTitle = $parsed['title'] ?: $dir['name'];
+            if (substr_count($resolvedTitle, '?') >= 2) {
+                Log::debug('WebDavMediaService: Skipping directory with garbled title', [
+                    'dir' => $dir['name'],
+                    'title' => $resolvedTitle,
+                ]);
+
+                continue;
+            }
+
             if ($parsed['is_episode']) {
-                // Single-episode container: group under the show name
+                // Single-episode container: group under the show name.
+                // Use normalizeSeriesTitle so episode-container keys are compatible with
+                // season-pack keys — enabling cross-reference merging below.
                 $showTitle = $parsed['title'] ?: $dir['name'];
-                $key = strtolower(trim($showTitle));
+                $key = $this->normalizeSeriesTitle($showTitle);
 
                 if (! isset($episodeContainers[$key])) {
                     $episodeContainers[$key] = [
@@ -954,6 +986,34 @@ class WebDavMediaService implements MediaServer
                     'season' => $parsed['season'] ?? 1,
                     'episode' => $parsed['episode'],
                 ];
+            } elseif ($parsed['is_pack'] && ! $parsed['is_multi_season_pack'] && $parsed['season'] !== null) {
+                // Single-season pack directory (e.g. "Show S01/", "Show.S02.1080p/").
+                // Group by normalised title so multiple season packs for the same show
+                // are merged into one series entry with correctly-numbered seasons.
+                $showTitle = $parsed['title'] ?: $dir['name'];
+                $key = $this->normalizeSeriesTitle($showTitle);
+
+                if (! isset($seasonPackContainers[$key])) {
+                    $seasonPackContainers[$key] = [
+                        'title' => $showTitle,
+                        'year' => $parsed['year'],
+                        'dirs' => [],
+                    ];
+                } elseif ($seasonPackContainers[$key]['year'] === null && $parsed['year'] !== null) {
+                    // Prefer the title variant that carries year metadata (typically better-formatted).
+                    $seasonPackContainers[$key]['year'] = $parsed['year'];
+                    $seasonPackContainers[$key]['title'] = $showTitle;
+                }
+
+                // Deduplicate: if we already have a pack for this season number (e.g. two
+                // different quality downloads of S03), keep only the first one encountered.
+                $existingSeasons = array_column($seasonPackContainers[$key]['dirs'], 'season');
+                if (! in_array($parsed['season'], $existingSeasons, true)) {
+                    $seasonPackContainers[$key]['dirs'][] = [
+                        'dir' => $dir,
+                        'season' => $parsed['season'],
+                    ];
+                }
             } else {
                 // Regular series directory or multi-season pack — use directory path as ID.
                 // If no season/pack markers are present, do a shallow check to avoid treating
@@ -1004,6 +1064,132 @@ class WebDavMediaService implements MediaServer
                 ($this->scanProgressCallback)(count($seriesMap));
             }
         }
+
+        // Merge grouped single-season-pack series into seriesMap
+        foreach ($seasonPackContainers as $key => $data) {
+            $seriesId = md5('torrent-season-pack:'.$key);
+            $genre = $libraryGenre ? trim($libraryGenre) : '';
+
+            $seriesMap[$seriesId] = [
+                'Id' => $seriesId,
+                'Name' => $data['title'],
+                'Path' => $basePath,
+                'ProductionYear' => $data['year'],
+                'Type' => 'Series',
+                'Genres' => $genre !== '' ? [$genre] : ['Uncategorized'],
+                'Overview' => null,
+                'CommunityRating' => null,
+                '_torrent_season_pack_dirs' => $data['dirs'],
+            ];
+
+            if ($this->scanProgressCallback) {
+                ($this->scanProgressCallback)(count($seriesMap));
+            }
+        }
+    }
+
+    /**
+     * Produce a normalised key for series title matching across differently-formatted
+     * directory names for the same show (e.g. "Show & Name" vs "Show and Name",
+     * "Mandy's" vs "Mandys").
+     */
+    private function normalizeSeriesTitle(string $title): string
+    {
+        $title = mb_strtolower($title);
+        $title = str_replace('&', 'and', $title);
+        // Strip ASCII and Unicode apostrophes/single-quotes
+        $title = preg_replace("/['\x{2019}\x{2018}]/u", '', $title) ?? $title;
+        // Replace any remaining non-letter/non-digit characters with a space
+        $title = preg_replace('/[^\p{L}\p{N} ]/u', ' ', $title) ?? $title;
+        $title = preg_replace('/\s+/', ' ', $title) ?? $title;
+
+        return trim($title);
+    }
+
+    /**
+     * Build a seasons collection from season-pack directory metadata.
+     *
+     * Each entry in $packDirs represents one season pack directory and supplies
+     * the season number, so seasons are never incorrectly labelled "Season 1".
+     *
+     * @param  array<int, array{dir: array, season: int}>  $packDirs
+     * @return Collection<int, array>
+     */
+    protected function buildSeasonsFromSeasonPackDirs(array $packDirs): Collection
+    {
+        $seasons = collect();
+
+        foreach ($packDirs as $entry) {
+            $season = $entry['season'];
+            $seasons->push([
+                'Id' => md5("torrent-season:{$season}"),
+                'Name' => "Season {$season}",
+                'IndexNumber' => $season,
+                'Path' => $entry['dir']['path'],
+                'EpisodeCount' => 0,
+            ]);
+        }
+
+        return $seasons->sortBy('IndexNumber')->values();
+    }
+
+    /**
+     * Build an episodes collection by scanning the video files inside each season
+     * pack directory for a season-pack-grouped series entry.
+     *
+     * @return Collection<int, array>
+     */
+    protected function buildEpisodesFromSeasonPackDirs(array $seriesData, ?string $seasonId): Collection
+    {
+        $episodes = collect();
+        $seriesName = $seriesData['Name'];
+        $parser = new TorrentTitleParser;
+
+        foreach ($seriesData['_torrent_season_pack_dirs'] as $entry) {
+            $season = $entry['season'];
+            $targetSeasonId = md5("torrent-season:{$season}");
+
+            if ($seasonId !== null && $targetSeasonId !== $seasonId) {
+                continue;
+            }
+
+            // Scan recursively so episode-container subdirectories inside a season pack
+            // (e.g. Euphoria.S03E01.../  sitting alongside loose E02-E04 .mkv files)
+            // are also included. Season pack subdirs are at most one level deep.
+            $files = $this->scanWebDavDirectoryForVideoFiles($entry['dir']['path'], true);
+
+            foreach ($files as $file) {
+                $fileParsed = $parser->parse($file['name']);
+
+                if (! $fileParsed['is_episode']) {
+                    continue;
+                }
+
+                $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+                $itemId = base64_encode($file['path']);
+
+                $episodes->push([
+                    'Id' => $itemId,
+                    'SeriesName' => $seriesName,
+                    'Name' => "Episode {$fileParsed['episode']}",
+                    'IndexNumber' => $fileParsed['episode'],
+                    'ParentIndexNumber' => $fileParsed['season'] ?? $season,
+                    'Path' => $file['path'],
+                    'Container' => $ext,
+                    'Type' => 'Episode',
+                    'Overview' => null,
+                    'CommunityRating' => null,
+                    'RunTimeTicks' => null,
+                    'MediaSources' => [[
+                        'Container' => $ext,
+                        'Path' => $file['path'],
+                        'Size' => $file['size'],
+                    ]],
+                ]);
+            }
+        }
+
+        return $episodes;
     }
 
     /**

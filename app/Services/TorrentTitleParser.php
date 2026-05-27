@@ -51,7 +51,8 @@ class TorrentTitleParser
      *   season: int|null,
      *   episode: int|null,
      *   is_episode: bool,
-     *   is_pack: bool
+     *   is_pack: bool,
+     *   is_multi_season_pack: bool
      * }
      */
     public function parse(string $filename): array
@@ -68,8 +69,8 @@ class TorrentTitleParser
         // Remove torrent-site watermarks before any pattern matching
         $base = $this->stripSiteWatermarks($base);
 
-        // 1 — Multi-season pack: [S01-S07], S01-S07
-        if (preg_match('/[\[(]?[Ss](\d{1,2})\s*[-–]\s*[Ss](\d{1,2})[\])]?/u', $base, $m, PREG_OFFSET_CAPTURE)) {
+        // 1 — Multi-season pack: [S01-S07], S01-S07, S01-08 (second S optional)
+        if (preg_match('/[\[(]?[Ss](\d{1,2})\s*[-–]\s*[Ss]?(\d{1,2})[\])]?/u', $base, $m, PREG_OFFSET_CAPTURE)) {
             return [
                 'title' => $this->cleanTitle(substr($base, 0, $m[0][1])),
                 'year' => $this->extractYear($base),
@@ -77,11 +78,12 @@ class TorrentTitleParser
                 'episode' => null,
                 'is_episode' => false,
                 'is_pack' => true,
+                'is_multi_season_pack' => true,
             ];
         }
 
-        // 2 — Season + episode: S01E01, S1E1 (with optional space)
-        if (preg_match('/[Ss](\d{1,2})\s?[Ee](\d{1,3})/u', $base, $m, PREG_OFFSET_CAPTURE)) {
+        // 2 — Season + episode: S01E01, S1E1 (with optional space or dot separator, e.g. S03.E01)
+        if (preg_match('/[Ss](\d{1,2})[.\s]?[Ee](\d{1,3})/u', $base, $m, PREG_OFFSET_CAPTURE)) {
             return [
                 'title' => $this->cleanTitle(substr($base, 0, $m[0][1])),
                 'year' => null,
@@ -89,6 +91,7 @@ class TorrentTitleParser
                 'episode' => (int) $m[2][0],
                 'is_episode' => true,
                 'is_pack' => false,
+                'is_multi_season_pack' => false,
             ];
         }
 
@@ -101,6 +104,7 @@ class TorrentTitleParser
                 'episode' => (int) $m[2][0],
                 'is_episode' => true,
                 'is_pack' => false,
+                'is_multi_season_pack' => false,
             ];
         }
 
@@ -114,6 +118,7 @@ class TorrentTitleParser
                 'episode' => null,
                 'is_episode' => false,
                 'is_pack' => true,
+                'is_multi_season_pack' => false,
             ];
         }
 
@@ -127,6 +132,7 @@ class TorrentTitleParser
             'episode' => null,
             'is_episode' => false,
             'is_pack' => false,
+            'is_multi_season_pack' => false,
         ];
     }
 
