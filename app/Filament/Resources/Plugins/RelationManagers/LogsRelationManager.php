@@ -7,7 +7,6 @@ use App\Models\PluginRunLog;
 use App\Services\DateFormatService;
 use Filament\Actions\Action;
 use Filament\Resources\RelationManagers\RelationManager;
-use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\Layout\Panel;
 use Filament\Tables\Columns\Layout\Split;
@@ -136,43 +135,6 @@ class LogsRelationManager extends RelationManager
                         : null),
             ])
             ->toolbarActions([]);
-    }
-
-    public function getTabs(): array
-    {
-        $pluginId = $this->getOwnerRecord()->getKey();
-
-        $allCount = PluginRunLog::query()
-            ->whereHas('run', fn (Builder $query) => $query->where('extension_plugin_id', $pluginId)->visibleTo(auth()->user()))
-            ->count();
-        $runningCount = PluginRunLog::query()
-            ->whereHas('run', fn (Builder $query) => $query->where('extension_plugin_id', $pluginId)->visibleTo(auth()->user())->where('status', 'running'))
-            ->count();
-        $warningCount = PluginRunLog::query()
-            ->whereHas('run', fn (Builder $query) => $query->where('extension_plugin_id', $pluginId)->visibleTo(auth()->user()))
-            ->where('level', 'warning')
-            ->count();
-        $errorCount = PluginRunLog::query()
-            ->whereHas('run', fn (Builder $query) => $query->where('extension_plugin_id', $pluginId)->visibleTo(auth()->user()))
-            ->where('level', 'error')
-            ->count();
-
-        return [
-            'all' => Tab::make(__('All Activity'))
-                ->badge($allCount),
-            'running' => Tab::make(__('Running'))
-                ->badge($runningCount)
-                ->badgeColor('warning')
-                ->modifyQueryUsing(fn (Builder $query) => $query->whereHas('run', fn (Builder $runQuery) => $runQuery->where('status', 'running'))),
-            'warnings' => Tab::make(__('Warnings'))
-                ->badge($warningCount)
-                ->badgeColor('warning')
-                ->modifyQueryUsing(fn (Builder $query) => $query->where('level', 'warning')),
-            'errors' => Tab::make(__('Errors'))
-                ->badge($errorCount)
-                ->badgeColor('danger')
-                ->modifyQueryUsing(fn (Builder $query) => $query->where('level', 'error')),
-        ];
     }
 
     protected static function runLabel(PluginRunLog $record): string

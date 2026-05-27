@@ -138,6 +138,7 @@ class PluginSchemaMapper
         $columns = (int) ($field['columns'] ?? 1);
 
         $section = Section::make($label)
+            ->compact((bool) ($field['compact'] ?? true)) // Sections default to compact mode since they are often used for logical grouping within a form, but allow this to be overridden for more visual separation when needed.
             ->schema($this->componentsForFields($field['fields'] ?? [], $prefix, $existing, $plugin))
             ->columnSpanFull();
 
@@ -147,10 +148,6 @@ class PluginSchemaMapper
 
         if (! empty($field['icon'])) {
             $section->icon((string) $field['icon']);
-        }
-
-        if ((bool) ($field['compact'] ?? false)) {
-            $section->compact();
         }
 
         if ((bool) ($field['collapsible'] ?? false)) {

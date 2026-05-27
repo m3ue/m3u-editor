@@ -9,6 +9,7 @@ use App\Filament\Resources\Plugins\Pages\ManagePluginTable;
 use App\Filament\Resources\Plugins\Pages\ViewPluginRun;
 use App\Filament\Resources\Plugins\RelationManagers\LogsRelationManager;
 use App\Filament\Resources\Plugins\RelationManagers\RunsRelationManager;
+use App\Livewire\PluginTableInline;
 use App\Models\Epg;
 use App\Models\Playlist;
 use App\Models\Plugin;
@@ -28,6 +29,7 @@ use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Grid;
+use Filament\Schemas\Components\Livewire;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Tabs;
 use Filament\Schemas\Components\Tabs\Tab;
@@ -190,15 +192,15 @@ class PluginResource extends Resource implements CopilotResource
                     Tab::make(__('Data'))
                         ->icon('heroicon-m-table-cells')
                         ->visible(fn (?Plugin $record): bool => (auth()->user()?->canManagePlugins() ?? false) && filled(data_get($record?->schema_definition, 'ui_tables')))
-                        ->schema([
-                            Section::make(__('Plugin Tables'))
-                                ->description(__('These tables are declared by the plugin manifest and rendered by m3u-editor.'))
-                                ->schema([
-                                    Placeholder::make('plugin_table_links')
-                                        ->hiddenLabel()
-                                        ->content(fn (?Plugin $record): HtmlString => new HtmlString(self::pluginTableLinks($record))),
-                                ]),
-                        ]),
+                        ->schema(fn (?Plugin $record): array => collect(data_get($record?->schema_definition, 'ui_tables', []))
+                            ->filter(fn (array $def): bool => filled($def['id'] ?? null))
+                            ->map(fn (array $def): Livewire => Livewire::make(PluginTableInline::class, ['tableId' => $def['id']])
+                                ->key('plugin-table-'.$def['id'])
+                                ->columnSpanFull()
+                            )
+                            ->values()
+                            ->all()
+                        ),
                 ]),
         ]);
     }
