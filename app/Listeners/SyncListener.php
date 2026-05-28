@@ -10,10 +10,12 @@ use App\Jobs\GenerateEpgCache;
 use App\Jobs\MergeChannels;
 use App\Jobs\ProbeChannelStreams;
 use App\Jobs\ProcessChannelScrubber;
+use App\Jobs\RunCustomPlaylistProcessing;
 use App\Jobs\RunPlaylistFindReplaceRules;
 use App\Jobs\RunPlaylistSortAlpha;
 use App\Jobs\RunPostProcess;
 use App\Jobs\SyncPlexDvrJob;
+use App\Models\CustomPlaylist;
 use App\Models\Epg;
 use App\Models\Playlist;
 use App\Models\SyncRun;
@@ -73,8 +75,9 @@ class SyncListener
                     'user_id' => $playlist->user_id,
                 ]);
             }
-        }
-        if ($event->model instanceof Epg) {
+        } elseif ($event->model instanceof CustomPlaylist) {
+            $this->dispatchCustomPlaylistProcessing($event->model);
+        } elseif ($event->model instanceof Epg) {
             // Handle EPG post-processes
             $this->dispatchPostProcessJobs($event->model);
 
@@ -93,6 +96,18 @@ class SyncListener
                 dispatch(new SyncPlexDvrJob(trigger: 'epg_sync'));
             }
         }
+    }
+
+    /**
+     * Dispatch custom playlist processing after a completed custom playlist sync.
+     */
+    private function dispatchCustomPlaylistProcessing(CustomPlaylist $customPlaylist): void
+    {
+        if (! $customPlaylist->hasEnabledProcessingRules()) {
+            return;
+        }
+
+        dispatch(new RunCustomPlaylistProcessing($customPlaylist));
     }
 
     /**
@@ -286,7 +301,7 @@ class SyncListener
     /**
      * Post-process an EPG after a successful sync.
      */
-    private function postProcessEpg(Epg $epg)
+    private function postProcessEpg(Epg $epg): void
     {
         // Update status to Processing (so UI components will continue to refresh) and dispatch cache job
         // IMPORTANT: Set is_cached to false to prevent race condition where users

@@ -13,6 +13,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
+use Illuminate\Support\Collection as SupportCollection;
 use Spatie\Tags\HasTags;
 use Spatie\Tags\Tag;
 
@@ -42,7 +43,20 @@ class CustomPlaylist extends Model
         'use_sticky_session' => 'boolean',
         'id_channel_by' => PlaylistChannelId::class,
         'disable_m3u_xtream_format' => 'boolean',
+        'processing_config' => 'array',
     ];
+
+    public function enabledProcessingRules(): SupportCollection
+    {
+        return collect($this->processing_config ?? [])
+            ->filter(fn (array $rule): bool => $rule['enabled'] ?? false)
+            ->values();
+    }
+
+    public function hasEnabledProcessingRules(): bool
+    {
+        return $this->enabledProcessingRules()->isNotEmpty();
+    }
 
     public function user(): BelongsTo
     {
@@ -172,7 +186,7 @@ class CustomPlaylist extends Model
             ->distinct()
             ->pluck('playlist_id');
 
-        return Playlist::whereIn('id', $playlistIds)->get();
+        return Playlist::query()->whereKey($playlistIds)->get();
     }
 
     /**
@@ -205,9 +219,7 @@ class CustomPlaylist extends Model
     {
         return $this->channels()
             ->whereNotNull('playlist_id')
-            ->whereHas('playlist', function ($query) {
-                $query->where('profiles_enabled', true);
-            })
+            ->whereHas('playlist', fn ($query) => $query->where('profiles_enabled', true))
             ->exists();
     }
 
@@ -221,7 +233,7 @@ class CustomPlaylist extends Model
             ->distinct()
             ->pluck('playlist_id');
 
-        return Playlist::whereIn('id', $playlistIds)
+        return Playlist::query()->whereKey($playlistIds)
             ->where('profiles_enabled', true)
             ->get();
     }

@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Events\SyncCompleted;
 use App\Models\Category;
 use App\Models\CustomPlaylist;
 use App\Models\Group;
@@ -51,13 +52,11 @@ class AutoSyncGroupsToCustomPlaylist implements ShouldQueue
         $syncRelation = $isSeries ? 'series' : 'channels';
 
         $mode = $this->data['mode'] ?? 'original';
-        $tagName = null;
-
-        if ($mode === 'select') {
-            $tagName = $this->data['category'] ?? null;
-        } elseif ($mode === 'create') {
-            $tagName = $this->data['new_category'] ?? null;
-        }
+        $tagName = match ($mode) {
+            'select' => $this->data['category'] ?? null,
+            'create' => $this->data['new_category'] ?? null,
+            default => null,
+        };
 
         // For select/create modes, create or find the shared tag once upfront for all groups
         $sharedTag = null;
@@ -145,16 +144,15 @@ class AutoSyncGroupsToCustomPlaylist implements ShouldQueue
                 ->delete();
         }
 
-        Notification::make()
+        $notification = Notification::make()
             ->success()
             ->title(__('Auto-sync to custom playlist completed'))
-            ->body(__('Groups have been synced to the custom playlist for ":playlist".', ['playlist' => $playlist->name]))
-            ->broadcast($user);
+            ->body(__('Groups have been synced to the custom playlist for ":playlist".', ['playlist' => $playlist->name]));
 
-        Notification::make()
-            ->success()
-            ->title(__('Auto-sync to custom playlist completed'))
-            ->body(__('Groups have been synced to the custom playlist for ":playlist".', ['playlist' => $playlist->name]))
-            ->sendToDatabase($user);
+        $notification->broadcast($user)->sendToDatabase($user);
+
+        if ($playlist->hasEnabledProcessingRules()) {
+            SyncCompleted::dispatch($playlist, 'custom_playlist');
+        }
     }
 }

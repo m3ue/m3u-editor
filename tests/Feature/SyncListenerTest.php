@@ -21,16 +21,19 @@ use App\Jobs\GenerateEpgCache;
 use App\Jobs\MergeChannels;
 use App\Jobs\ProbeChannelStreams;
 use App\Jobs\ProcessChannelScrubber;
+use App\Jobs\RunCustomPlaylistProcessing;
 use App\Jobs\RunPlaylistFindReplaceRules;
 use App\Jobs\RunPlaylistSortAlpha;
 use App\Jobs\SyncPlexDvrJob;
 use App\Models\ChannelScrubber;
+use App\Models\CustomPlaylist;
 use App\Models\Epg;
 use App\Models\Playlist;
 use App\Models\SyncRun;
 use App\Models\User;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Str;
 
 beforeEach(function () {
     Bus::fake();
@@ -272,6 +275,45 @@ it('skips pipeline and scan jobs when playlist is still processing', function ()
 
     Bus::assertNotDispatched(RunPlaylistFindReplaceRules::class);
     Bus::assertNotDispatched(MergeChannels::class);
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Custom playlists: post-sync processing
+// ──────────────────────────────────────────────────────────────────────────────
+
+it('dispatches custom playlist processing when an enabled rule exists', function () {
+    $customPlaylist = CustomPlaylist::factory()->for($this->user)->createQuietly([
+        'processing_config' => [[
+            'enabled' => true,
+            'action' => 'sort_alpha',
+            'type' => 'all',
+            'column' => 'title',
+            'sort' => 'ASC',
+        ]],
+    ]);
+
+    event(new SyncCompleted($customPlaylist, 'custom_playlist'));
+
+    Bus::assertDispatched(
+        RunCustomPlaylistProcessing::class,
+        fn (RunCustomPlaylistProcessing $job): bool => $job->customPlaylist->is($customPlaylist)
+    );
+});
+
+it('does not dispatch custom playlist processing when all rules are disabled', function () {
+    $customPlaylist = CustomPlaylist::factory()->for($this->user)->createQuietly([
+        'processing_config' => [[
+            'enabled' => false,
+            'action' => 'sort_alpha',
+            'type' => 'all',
+            'column' => 'title',
+            'sort' => 'ASC',
+        ]],
+    ]);
+
+    event(new SyncCompleted($customPlaylist, 'custom_playlist'));
+
+    Bus::assertNotDispatched(RunCustomPlaylistProcessing::class);
 });
 
 // ──────────────────────────────────────────────────────────────────────────────

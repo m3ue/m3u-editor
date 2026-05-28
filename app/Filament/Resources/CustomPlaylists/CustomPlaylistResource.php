@@ -251,6 +251,16 @@ class CustomPlaylistResource extends Resource implements CopilotResource
 
     public static function getForm($creating = false): array
     {
+        $processingActions = [
+            'sort_alpha' => __('Sort Alpha'),
+            'recount' => __('Recount Channels'),
+        ];
+        $processingTargets = [
+            'all' => __('All Channels'),
+            'live' => __('Live Channels'),
+            'vod' => __('VOD Channels'),
+        ];
+
         $schema = [
             Grid::make()
                 ->columns(2)
@@ -676,6 +686,118 @@ class CustomPlaylistResource extends Resource implements CopilotResource
                                                     }
                                                 })
                                                 ->dehydrated(false), // Don't save this field directly
+                                        ]),
+                                ]),
+                            Tab::make(__('Processing'))
+                                ->icon('heroicon-m-arrow-path')
+                                ->columns(2)
+                                ->schema([
+                                    Section::make(__('Processing Configs'))
+                                        ->description(__('Define processing actions that automatically run after each sync. Actions execute in order.'))
+                                        ->columnSpanFull()
+                                        ->collapsible()
+                                        ->schema([
+                                            Repeater::make('processing_config')
+                                                ->hiddenLabel()
+                                                ->schema([
+                                                    Grid::make()
+                                                        ->columns(10)
+                                                        ->schema([
+                                                            Toggle::make('enabled')
+                                                                ->label(__('Enabled'))
+                                                                ->default(true)
+                                                                ->inline(false)
+                                                                ->columnSpan(1),
+                                                            Grid::make()
+                                                                ->columnSpan(9)
+                                                                ->columns(8)
+                                                                ->schema([
+                                                                    Select::make('action')
+                                                                        ->label(__('Action'))
+                                                                        ->options($processingActions)
+                                                                        ->default('sort_alpha')
+                                                                        ->required()
+                                                                        ->live()
+                                                                        ->columnSpan(2),
+                                                                    Select::make('type')
+                                                                        ->label(__('Target'))
+                                                                        ->options($processingTargets)
+                                                                        ->default('all')
+                                                                        ->required()
+                                                                        ->columnSpan(2),
+                                                                    Select::make('groups')
+                                                                        ->label(__('Groups'))
+                                                                        ->options(fn (?CustomPlaylist $record): array => [
+                                                                            'all' => __('All groups'),
+                                                                            ...($record
+                                                                                ? $record->groupTags()->pluck('name', 'name')->sort()->all()
+                                                                                : []),
+                                                                        ])
+                                                                        ->default(['all'])
+                                                                        ->multiple()
+                                                                        ->searchable()
+                                                                        ->columnSpan(4),
+                                                                    Select::make('column')
+                                                                        ->label(__('Sort By'))
+                                                                        ->options([
+                                                                            'title' => __('Title (or override if set)'),
+                                                                            'name' => __('Name (or override if set)'),
+                                                                            'stream_id' => __('ID (or override if set)'),
+                                                                            'channel' => __('Channel No.'),
+                                                                        ])
+                                                                        ->default('title')
+                                                                        ->required()
+                                                                        ->hidden(fn (Get $get): bool => $get('action') !== 'sort_alpha')
+                                                                        ->columnSpan(4),
+                                                                    Select::make('sort')
+                                                                        ->label(__('Sort Order'))
+                                                                        ->options([
+                                                                            'ASC' => __('A to Z or 0 to 9'),
+                                                                            'DESC' => __('Z to A or 9 to 0'),
+                                                                        ])
+                                                                        ->default('ASC')
+                                                                        ->required()
+                                                                        ->hidden(fn (Get $get): bool => $get('action') !== 'sort_alpha')
+                                                                        ->columnSpan(4),
+                                                                    TextInput::make('start')
+                                                                        ->label(__('Start Number'))
+                                                                        ->numeric()
+                                                                        ->default(1)
+                                                                        ->minValue(0)
+                                                                        ->required()
+                                                                        ->hidden(fn (Get $get): bool => $get('action') !== 'recount')
+                                                                        ->columnSpanFull(),
+                                                                ]),
+                                                        ]),
+                                                ])
+                                                ->columnSpanFull()
+                                                ->reorderable()
+                                                ->reorderableWithButtons()
+                                                ->collapsible()
+                                                ->defaultItems(0)
+                                                ->addActionLabel(__('Add processing action'))
+                                                ->itemLabel(static function (array $state) use ($processingActions): ?string {
+                                                    $action = $state['action'] ?? null;
+
+                                                    if (! $action) {
+                                                        return null;
+                                                    }
+
+                                                    $actionLabel = $processingActions[$action] ?? __('Recount Channels');
+                                                    $typeLabel = match ($state['type'] ?? 'all') {
+                                                        'live' => 'Live',
+                                                        'vod' => 'VOD',
+                                                        default => 'All',
+                                                    };
+
+                                                    $groups = (array) ($state['groups'] ?? ['all']);
+                                                    $groupLabel = \in_array('all', $groups) || empty($groups)
+                                                        ? ''
+                                                        : ' ['.implode(', ', array_diff($groups, ['all'])).']';
+                                                    $disabled = ($state['enabled'] ?? true) ? '' : ' (disabled)';
+
+                                                    return "{$actionLabel} — {$typeLabel}{$groupLabel}{$disabled}";
+                                                }),
                                         ]),
                                 ]),
                             Tab::make(__('Output'))
