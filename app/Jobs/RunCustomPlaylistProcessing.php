@@ -48,8 +48,12 @@ class RunCustomPlaylistProcessing implements ShouldQueue
 
                 if (! $isAllGroups) {
                     $tagType = $this->customPlaylist->uuid;
-                    $query->whereHas('tags', function ($q) use ($selectedGroups, $tagType): void {
-                        $q->whereIn('name', $selectedGroups)->where('type', $tagType);
+                    $query->where(function ($q) use ($selectedGroups, $tagType): void {
+                        foreach ($selectedGroups as $groupName) {
+                            $q->orWhereHas('tags', function ($tagQuery) use ($groupName, $tagType): void {
+                                $tagQuery->where('type', $tagType)->where('name->en', $groupName);
+                            });
+                        }
                     });
                 }
 
