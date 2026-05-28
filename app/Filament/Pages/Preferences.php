@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Filament\Actions\CronHelperAction;
 use App\Filament\CopilotTools\DvrOverviewTool;
 use App\Filament\CopilotTools\DvrScheduleTool;
 use App\Filament\CopilotTools\EpgChannelMatcherTool;
@@ -1126,15 +1127,7 @@ class Preferences extends SettingsPage
                                                     ->suffix(config('app.timezone'))
                                                     ->rules([new Cron])
                                                     ->live()
-                                                    ->hintAction(
-                                                        Action::make('view_cron_example')
-                                                            ->label(__('CRON Example'))
-                                                            ->icon('heroicon-o-arrow-top-right-on-square')
-                                                            ->iconPosition('after')
-                                                            ->size('sm')
-                                                            ->url('https://crontab.guru')
-                                                            ->openUrlInNewTab(true)
-                                                    )
+                                                    ->hintAction(CronHelperAction::make(name: 'backup-cron', cronField: 'auto_backup_database_schedule'))
                                                     ->helperText(fn ($get) => CronExpression::isValidExpression($get('auto_backup_database_schedule'))
                                                         ? 'Next scheduled backup: '.(new CronExpression($get('auto_backup_database_schedule')))->getNextRunDate()->format(app(DateFormatService::class)->getFormat())
                                                         : 'Specify the CRON schedule for automatic backups, e.g. "0 3 * * *".'),

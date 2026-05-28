@@ -4,6 +4,7 @@ namespace App\Filament\Resources\Epgs;
 
 use App\Enums\EpgSourceType;
 use App\Enums\Status;
+use App\Filament\Actions\CronHelperAction;
 use App\Filament\Concerns\HasCopilotSupport;
 use App\Filament\Resources\EpgResource\Pages;
 use App\Filament\Resources\Epgs\Pages\ListEpgs;
@@ -760,15 +761,7 @@ class EpgResource extends Resource implements CopilotResource
                         ->rules([new Cron])
                         ->live()
                         ->placeholder(__('0 */6 * * *'))
-                        ->hintAction(
-                            Action::make('view_cron_example')
-                                ->label(__('CRON Example'))
-                                ->icon('heroicon-o-arrow-top-right-on-square')
-                                ->iconPosition('after')
-                                ->size('sm')
-                                ->url('https://crontab.guru')
-                                ->openUrlInNewTab(true)
-                        )
+                        ->hintAction(CronHelperAction::make(name: 'epg-sync-cron', cronField: 'sync_interval'))
                         ->helperText(fn ($get) => $get('sync_interval') && CronExpression::isValidExpression($get('sync_interval'))
                             ? 'Next scheduled sync: '.(new CronExpression($get('sync_interval')))->getNextRunDate()->format(app(DateFormatService::class)->getFormat())
                             : 'Specify the CRON schedule for automatic sync, e.g. "0 */6 * * *".')
