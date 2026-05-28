@@ -6,6 +6,7 @@ use App\Facades\LogoFacade;
 use App\Facades\SortFacade;
 use App\Filament\Actions\AssetPickerAction;
 use App\Filament\Actions\BulkModalActionGroup;
+use App\Filament\Actions\RegexTesterAction;
 use App\Filament\Concerns\HasCopilotSupport;
 use App\Filament\Resources\ChannelResource\Pages;
 use App\Filament\Resources\Channels\Pages\ListChannels;
@@ -909,6 +910,10 @@ class ChannelResource extends Resource implements CopilotResource
                                     fn (Get $get) => ! $get('use_regex')
                                         ? 'This is the string you want to find and replace.'
                                         : 'This is the regex pattern you want to find. Make sure to use valid regex syntax.'
+                                )
+                                ->suffixAction(
+                                    RegexTesterAction::make(samplesContext: 'channels', patternField: 'find_replace', replacementField: 'replace_with')
+                                        ->visible(fn (Get $get): bool => (bool) $get('use_regex'))
                                 ),
                             TextInput::make('replace_with')
                                 ->label(__('Replace with (optional)'))
