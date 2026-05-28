@@ -693,7 +693,7 @@ class CustomPlaylistResource extends Resource implements CopilotResource
                                 ->columns(2)
                                 ->schema([
                                     Section::make(__('Processing Configs'))
-                                        ->description(__('Define processing actions that automatically run after each sync. Actions execute in order.'))
+                                        ->description(__('Define processing configs that automatically run after each sync. Configs execute in order.'))
                                         ->columnSpanFull()
                                         ->collapsible()
                                         ->schema([
@@ -775,7 +775,7 @@ class CustomPlaylistResource extends Resource implements CopilotResource
                                                 ->reorderableWithButtons()
                                                 ->collapsible()
                                                 ->defaultItems(0)
-                                                ->addActionLabel(__('Add processing action'))
+                                                ->addActionLabel(__('Add processing config'))
                                                 ->itemLabel(static function (array $state) use ($processingActions): ?string {
                                                     $action = $state['action'] ?? null;
 
