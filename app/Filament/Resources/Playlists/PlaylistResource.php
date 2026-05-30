@@ -2284,6 +2284,20 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ->label(__('Replace with'))
                                 ->placeholder(__('Leave empty to remove'))
                                 ->columnSpan(3),
+                            Toggle::make('resolution_filter_enabled')
+                                ->label(__('Only apply to a probed resolution'))
+                                ->live()
+                                ->helperText(__('Optional. This only works for live and VOD channels that were probed first, because it reads the saved stream resolution from stream stats.'))
+                                ->default(false)
+                                ->visible(fn (Get $get): bool => in_array($get('target'), ['channels', 'vod_channels'], true))
+                                ->columnSpan(3),
+                            TextInput::make('required_resolution')
+                                ->label(__('Required probed resolution'))
+                                ->placeholder('1920x1080')
+                                ->helperText(__('Example: 1920x1080. Channels without matching probed stream stats will be skipped.'))
+                                ->required(fn (Get $get): bool => (bool) $get('resolution_filter_enabled'))
+                                ->visible(fn (Get $get): bool => in_array($get('target'), ['channels', 'vod_channels'], true) && (bool) $get('resolution_filter_enabled'))
+                                ->columnSpan(3),
                         ])
                         ->columns(7)
                         ->reorderable()

@@ -177,6 +177,8 @@ class ListChannels extends ListRecords
                                     $set('column', $rule['column'] ?? 'title');
                                     $set('find_replace', $rule['find_replace'] ?? '');
                                     $set('replace_with', $rule['replace_with'] ?? '');
+                                    $set('resolution_filter_enabled', $rule['resolution_filter_enabled'] ?? false);
+                                    $set('required_resolution', $rule['required_resolution'] ?? '');
                                 })
                                 ->dehydrated(false),
                             Toggle::make('all_playlists')
@@ -224,6 +226,17 @@ class ListChannels extends ListRecords
                             TextInput::make('replace_with')
                                 ->label(__('Replace with (optional)'))
                                 ->placeholder(__('Leave empty to remove')),
+                            Toggle::make('resolution_filter_enabled')
+                                ->label(__('Only apply to a probed resolution'))
+                                ->live()
+                                ->helperText(__('Optional. This only works for channels that were probed first, because it reads the saved stream resolution from stream stats.'))
+                                ->default(false),
+                            TextInput::make('required_resolution')
+                                ->label(__('Required probed resolution'))
+                                ->placeholder('1920x1080')
+                                ->helperText(__('Example: 1920x1080. Channels without matching probed stream stats will be skipped.'))
+                                ->required(fn (Get $get): bool => (bool) $get('resolution_filter_enabled'))
+                                ->visible(fn (Get $get): bool => (bool) $get('resolution_filter_enabled')),
                         ];
                     })
                     ->action(function (array $data): void {
@@ -235,7 +248,9 @@ class ListChannels extends ListRecords
                                 use_regex: $data['use_regex'] ?? true,
                                 column: $data['column'] ?? 'title',
                                 find_replace: $data['find_replace'] ?? null,
-                                replace_with: $data['replace_with'] ?? ''
+                                replace_with: $data['replace_with'] ?? '',
+                                resolution_filter_enabled: (bool) ($data['resolution_filter_enabled'] ?? false),
+                                required_resolution: $data['required_resolution'] ?? null,
                             ));
                     })->after(function () {
                         Notification::make()

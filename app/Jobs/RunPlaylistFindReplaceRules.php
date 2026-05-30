@@ -64,6 +64,8 @@ class RunPlaylistFindReplaceRules implements ShouldQueue
                     playlist_id: $this->playlist->id,
                     silent: true,
                     is_vod: false,
+                    resolution_filter_enabled: (bool) ($rule['resolution_filter_enabled'] ?? false),
+                    required_resolution: $rule['required_resolution'] ?? null,
                 ))->handle();
                 $liveChannelRulesRun++;
             } elseif ($target === 'vod_channels') {
@@ -77,6 +79,8 @@ class RunPlaylistFindReplaceRules implements ShouldQueue
                     playlist_id: $this->playlist->id,
                     silent: true,
                     is_vod: true,
+                    resolution_filter_enabled: (bool) ($rule['resolution_filter_enabled'] ?? false),
+                    required_resolution: $rule['required_resolution'] ?? null,
                 ))->handle();
                 $vodChannelRulesRun++;
             } elseif ($target === 'series') {

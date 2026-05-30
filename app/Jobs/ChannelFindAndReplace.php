@@ -28,6 +28,8 @@ class ChannelFindAndReplace implements ShouldQueue
         public ?int $playlist_id = null,
         public bool $silent = false,
         public ?bool $is_vod = null,
+        public bool $resolution_filter_enabled = false,
+        public ?string $required_resolution = null,
     ) {
         //
     }
@@ -109,6 +111,10 @@ class ChannelFindAndReplace implements ShouldQueue
         $replace = $this->replace_with;
 
         foreach ($channels as $channel) {
+            if (! $this->channelMatchesResolutionFilter($channel)) {
+                continue;
+            }
+
             $newValue = null;
 
             // Check if this is a JSON column
@@ -164,6 +170,30 @@ class ChannelFindAndReplace implements ShouldQueue
         }
 
         return 0;
+    }
+
+    private function channelMatchesResolutionFilter(Channel $channel): bool
+    {
+        if (! $this->resolution_filter_enabled) {
+            return true;
+        }
+
+        $requiredResolution = trim((string) $this->required_resolution);
+        if ($requiredResolution === '') {
+            return false;
+        }
+
+        $streamStats = $channel->stream_stats;
+        if (! $channel->stream_stats_probed_at || ! is_array($streamStats)) {
+            return false;
+        }
+
+        $channelResolution = trim((string) ($streamStats['resolution'] ?? ''));
+        if ($channelResolution === '') {
+            return false;
+        }
+
+        return strcasecmp($channelResolution, $requiredResolution) === 0;
     }
 
     /**
