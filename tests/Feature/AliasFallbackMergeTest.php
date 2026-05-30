@@ -28,51 +28,49 @@ beforeEach(function () {
         'user_id' => $this->user->id,
         'playlist_id' => $this->primaryPlaylist->id,
     ]);
+
+    $this->runAliasFallbackMerge = function (array $config, ?int $preferredPlaylistId = null): void {
+        MergeChannels::dispatchSync(
+            $this->user,
+            collect([
+                ['playlist_failover_id' => $this->primaryPlaylist->id],
+                ['playlist_failover_id' => $this->fallbackPlaylist->id],
+            ]),
+            $preferredPlaylistId ?? $this->primaryPlaylist->id,
+            forceCompleteRemerge: true,
+            fallbackMergeConfig: $config,
+        );
+    };
+
+    $this->makeMergeChannel = function (array $attributes): Channel {
+        return Channel::factory()->create(array_merge([
+            'user_id' => $this->user->id,
+            'playlist_id' => $this->primaryPlaylist->id,
+            'group_id' => $this->group->id,
+            'title' => 'Channel',
+            'name' => 'Channel',
+            'stream_id' => null,
+            'stream_id_custom' => null,
+            'can_merge' => true,
+            'enabled' => true,
+        ], $attributes));
+    };
 });
 
-function runAliasFallbackMerge(object $test, array $config, ?int $preferredPlaylistId = null): void
-{
-    MergeChannels::dispatchSync(
-        $test->user,
-        collect([
-            ['playlist_failover_id' => $test->primaryPlaylist->id],
-            ['playlist_failover_id' => $test->fallbackPlaylist->id],
-        ]),
-        $preferredPlaylistId ?? $test->primaryPlaylist->id,
-        forceCompleteRemerge: true,
-        fallbackMergeConfig: $config,
-    );
-}
-
-function makeMergeChannel(object $test, array $attributes): Channel
-{
-    return Channel::factory()->create(array_merge([
-        'user_id' => $test->user->id,
-        'playlist_id' => $test->primaryPlaylist->id,
-        'group_id' => $test->group->id,
-        'title' => 'Channel',
-        'name' => 'Channel',
-        'stream_id' => null,
-        'stream_id_custom' => null,
-        'can_merge' => true,
-        'enabled' => true,
-    ], $attributes));
-}
-
 it('merges channels without stream ids by normalized name fallback', function () {
-    $master = makeMergeChannel($this, [
+    $master = ($this->makeMergeChannel)([
         'playlist_id' => $this->primaryPlaylist->id,
         'title' => 'Das Erste',
         'name' => 'Das Erste',
     ]);
 
-    $fallback = makeMergeChannel($this, [
+    $fallback = ($this->makeMergeChannel)([
         'playlist_id' => $this->fallbackPlaylist->id,
         'title' => 'DASERSTE',
         'name' => 'DASERSTE',
     ]);
 
-    runAliasFallbackMerge($this, [
+    ($this->runAliasFallbackMerge)([
         'enabled' => true,
         'mode' => 'normalized_name',
     ]);
@@ -84,19 +82,19 @@ it('merges channels without stream ids by normalized name fallback', function ()
 });
 
 it('does not strip quality labels during normalized fallback matching', function () {
-    makeMergeChannel($this, [
+    ($this->makeMergeChannel)([
         'playlist_id' => $this->primaryPlaylist->id,
         'title' => '3sat',
         'name' => '3sat',
     ]);
 
-    makeMergeChannel($this, [
+    ($this->makeMergeChannel)([
         'playlist_id' => $this->fallbackPlaylist->id,
         'title' => '3sat HD',
         'name' => '3sat HD',
     ]);
 
-    runAliasFallbackMerge($this, [
+    ($this->runAliasFallbackMerge)([
         'enabled' => true,
         'mode' => 'normalized_name',
     ]);
@@ -105,19 +103,19 @@ it('does not strip quality labels during normalized fallback matching', function
 });
 
 it('merges channels without stream ids by explicit alias rules', function () {
-    $master = makeMergeChannel($this, [
+    $master = ($this->makeMergeChannel)([
         'playlist_id' => $this->primaryPlaylist->id,
         'title' => 'Das Erste HD',
         'name' => 'Das Erste HD',
     ]);
 
-    $fallback = makeMergeChannel($this, [
+    $fallback = ($this->makeMergeChannel)([
         'playlist_id' => $this->fallbackPlaylist->id,
         'title' => 'DASERSTE',
         'name' => 'DASERSTE',
     ]);
 
-    runAliasFallbackMerge($this, [
+    ($this->runAliasFallbackMerge)([
         'enabled' => true,
         'mode' => 'alias_rules',
         'alias_rules' => [
@@ -135,25 +133,25 @@ it('merges channels without stream ids by explicit alias rules', function () {
 });
 
 it('ignores duplicate aliases instead of bridging two alias groups', function () {
-    $dasErste = makeMergeChannel($this, [
+    $dasErste = ($this->makeMergeChannel)([
         'playlist_id' => $this->primaryPlaylist->id,
         'title' => 'Das Erste HD',
         'name' => 'Das Erste HD',
     ]);
 
-    $zdf = makeMergeChannel($this, [
+    $zdf = ($this->makeMergeChannel)([
         'playlist_id' => $this->primaryPlaylist->id,
         'title' => 'ZDF HD',
         'name' => 'ZDF HD',
     ]);
 
-    $fallback = makeMergeChannel($this, [
+    $fallback = ($this->makeMergeChannel)([
         'playlist_id' => $this->fallbackPlaylist->id,
         'title' => 'DASERSTE',
         'name' => 'DASERSTE',
     ]);
 
-    runAliasFallbackMerge($this, [
+    ($this->runAliasFallbackMerge)([
         'enabled' => true,
         'mode' => 'alias_rules',
         'alias_rules' => [
@@ -180,21 +178,21 @@ it('ignores duplicate aliases instead of bridging two alias groups', function ()
 });
 
 it('keeps exact stream id matching separate from fallback matching', function () {
-    $withIdA = makeMergeChannel($this, [
+    $withIdA = ($this->makeMergeChannel)([
         'playlist_id' => $this->primaryPlaylist->id,
         'title' => 'Das Erste',
         'name' => 'Das Erste',
         'stream_id' => 'main-id',
     ]);
 
-    $withIdB = makeMergeChannel($this, [
+    $withIdB = ($this->makeMergeChannel)([
         'playlist_id' => $this->fallbackPlaylist->id,
         'title' => 'DASERSTE',
         'name' => 'DASERSTE',
         'stream_id' => 'other-id',
     ]);
 
-    runAliasFallbackMerge($this, [
+    ($this->runAliasFallbackMerge)([
         'enabled' => true,
         'mode' => 'normalized_name_and_alias_rules',
         'alias_rules' => [
@@ -209,5 +207,54 @@ it('keeps exact stream id matching separate from fallback matching', function ()
     $this->assertDatabaseMissing('channel_failovers', [
         'channel_id' => $withIdA->id,
         'channel_failover_id' => $withIdB->id,
+    ]);
+});
+
+it('merges by both normalized name and alias rules in combined mode', function () {
+    // This channel matches via alias rules
+    $masterAlias = ($this->makeMergeChannel)([
+        'playlist_id' => $this->primaryPlaylist->id,
+        'title' => 'Das Erste HD',
+        'name' => 'Das Erste HD',
+    ]);
+
+    $fallbackAlias = ($this->makeMergeChannel)([
+        'playlist_id' => $this->fallbackPlaylist->id,
+        'title' => 'DASERSTE',
+        'name' => 'DASERSTE',
+    ]);
+
+    // This channel matches via normalized name
+    $masterName = ($this->makeMergeChannel)([
+        'playlist_id' => $this->primaryPlaylist->id,
+        'title' => 'ZDF',
+        'name' => 'ZDF',
+    ]);
+
+    $fallbackName = ($this->makeMergeChannel)([
+        'playlist_id' => $this->fallbackPlaylist->id,
+        'title' => 'zdf',
+        'name' => 'zdf',
+    ]);
+
+    ($this->runAliasFallbackMerge)([
+        'enabled' => true,
+        'mode' => 'normalized_name_and_alias_rules',
+        'alias_rules' => [
+            [
+                'label' => 'Das Erste HD',
+                'aliases' => ['Das Erste HD', 'DASERSTE'],
+            ],
+        ],
+    ]);
+
+    $this->assertDatabaseHas('channel_failovers', [
+        'channel_id' => $masterAlias->id,
+        'channel_failover_id' => $fallbackAlias->id,
+    ]);
+
+    $this->assertDatabaseHas('channel_failovers', [
+        'channel_id' => $masterName->id,
+        'channel_failover_id' => $fallbackName->id,
     ]);
 });

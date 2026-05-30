@@ -538,7 +538,7 @@ class PlaylistController extends Controller
             weightedConfig: $weightedConfig,
             newChannelsOnly: $newChannelsOnly,
             regexPatterns: ! empty($config['regex_patterns']) ? $config['regex_patterns'] : null,
-            fallbackMergeConfig: $config,
+            fallbackMergeConfig: $this->buildMergeFallbackConfig($config),
         ));
 
         return response()->json([
@@ -630,6 +630,25 @@ class PlaylistController extends Controller
             'priority_keywords' => $priorityKeywords,
             'prefer_codec' => $preferCodec,
             'exclude_disabled_groups' => $config['exclude_disabled_groups'] ?? false,
+        ];
+    }
+
+    /**
+     * Build the focused fallback merge config from the merged $config array.
+     *
+     * @param  array<string, mixed>  $config
+     * @return array<string, mixed>|null
+     */
+    private function buildMergeFallbackConfig(array $config): ?array
+    {
+        if (! ($config['fallback_name_matching_enabled'] ?? false)) {
+            return null;
+        }
+
+        return [
+            'enabled' => true,
+            'mode' => $config['fallback_name_matching_mode'] ?? 'normalized_name',
+            'alias_rules' => $config['fallback_alias_rules'] ?? [],
         ];
     }
 

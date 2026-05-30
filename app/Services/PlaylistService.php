@@ -955,33 +955,34 @@ class PlaylistService
                 ])
                 ->columns(2)
                 ->columnSpanFull(),
-            Fieldset::make('Fallback matching for channels without IDs')
+            Fieldset::make(__('Fallback matching for channels without IDs'))
                 ->schema([
                     Toggle::make('fallback_name_matching_enabled')
-                        ->label('Enable name or alias fallback')
+                        ->label(__('Enable name or alias fallback'))
                         ->live()
-                        ->helperText('Only channels without a usable stream ID are matched by name or alias. Quality labels such as HD, FHD, UHD and 4K are not removed automatically to avoid merging SD and HD variants by accident.')
+                        ->helperText(__('Only channels without a usable stream ID are matched by name or alias. Quality labels such as HD, FHD, UHD and 4K are not removed automatically to avoid merging SD and HD variants by accident.'))
                         ->default(false),
                     Select::make('fallback_name_matching_mode')
-                        ->label('Fallback match mode')
+                        ->label(__('Fallback match mode'))
                         ->options([
-                            'normalized_name' => 'Exact normalized name only',
-                            'alias_rules' => 'Alias rules only',
-                            'normalized_name_and_alias_rules' => 'Normalized name and alias rules',
+                            'normalized_name' => __('Exact normalized name only'),
+                            'alias_rules' => __('Alias rules only'),
+                            'normalized_name_and_alias_rules' => __('Normalized name and alias rules'),
                         ])
                         ->default('normalized_name')
                         ->visible(fn (Get $get): bool => (bool) $get('fallback_name_matching_enabled')),
                     Repeater::make('fallback_alias_rules')
-                        ->label('Fallback alias groups')
-                        ->helperText('Add aliases that should deliberately merge together. Duplicate aliases across groups are ignored to avoid bridging groups.')
+                        ->label(__('Fallback alias groups'))
+                        ->helperText(__('Add aliases that should deliberately merge together. Duplicate aliases across groups are ignored to avoid bridging groups.'))
                         ->schema([
                             TextInput::make('label')
-                                ->label('Group label')
+                                ->label(__('Group label'))
+                                ->placeholder('e.g. "BBC One variants"')
                                 ->required(),
                             TagsInput::make('aliases')
-                                ->label('Aliases')
-                                ->placeholder('Das Erste HD')
-                                ->splitKeys(['Tab', 'Return']),
+                                ->label(__('Aliases'))
+                                ->placeholder('e.g. "BBC One, BBC 1, BBC1, BBC One HD"')
+                                ->splitKeys(['Tab', 'Return', ',']),
                         ])
                         ->columns(2)
                         ->columnSpanFull()

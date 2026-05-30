@@ -30,7 +30,7 @@ class ChannelMergeKeyService
         $normalizedNames = $this->normalizedChannelNames($channel);
 
         if ($this->usesAliasRules($mode)) {
-            $aliasMap = $this->buildAliasMap($config['alias_rules'] ?? $config['fallback_alias_rules'] ?? []);
+            $aliasMap = $this->buildAliasMap($config['alias_rules'] ?? []);
             foreach ($normalizedNames as $name) {
                 if (isset($aliasMap[$name])) {
                     return 'alias:'.$aliasMap[$name];
@@ -50,7 +50,7 @@ class ChannelMergeKeyService
      */
     public function isEnabled(array $config): bool
     {
-        return (bool) ($config['enabled'] ?? $config['fallback_name_matching_enabled'] ?? false);
+        return (bool) ($config['enabled'] ?? false);
     }
 
     /**
@@ -58,7 +58,7 @@ class ChannelMergeKeyService
      */
     public function mode(array $config): string
     {
-        $mode = $config['mode'] ?? $config['fallback_name_matching_mode'] ?? self::MODE_NORMALIZED_NAME;
+        $mode = $config['mode'] ?? self::MODE_NORMALIZED_NAME;
 
         return in_array($mode, [
             self::MODE_NORMALIZED_NAME,
