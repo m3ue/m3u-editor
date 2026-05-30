@@ -2096,6 +2096,45 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ->default(false),
                         ]),
 
+                    Fieldset::make(__('Fallback matching for channels without IDs'))
+                        ->columnSpanFull()
+                        ->columns(2)
+                        ->hidden(fn (Get $get): bool => ! $get('auto_merge_channels_enabled'))
+                        ->schema([
+                            Toggle::make('auto_merge_config.fallback_name_matching_enabled')
+                                ->label(__('Enable name or alias fallback'))
+                                ->live()
+                                ->inline(false)
+                                ->default(false)
+                                ->helperText(__('Only channels without a usable stream ID are matched by name or alias. Quality labels such as HD, FHD, UHD and 4K are not removed automatically to avoid merging SD and HD variants by accident.')),
+                            Select::make('auto_merge_config.fallback_name_matching_mode')
+                                ->label(__('Fallback match mode'))
+                                ->options([
+                                    'normalized_name' => __('Exact normalized name only'),
+                                    'alias_rules' => __('Alias rules only'),
+                                    'normalized_name_and_alias_rules' => __('Normalized name and alias rules'),
+                                ])
+                                ->default('normalized_name')
+                                ->visible(fn (Get $get): bool => (bool) $get('auto_merge_config.fallback_name_matching_enabled')),
+                            Repeater::make('auto_merge_config.fallback_alias_rules')
+                                ->label(__('Fallback alias groups'))
+                                ->helperText(__('Add aliases that should deliberately merge together. Duplicate aliases across groups are ignored to avoid bridging groups.'))
+                                ->schema([
+                                    TextInput::make('label')
+                                        ->label(__('Group label'))
+                                        ->placeholder('e.g. "BBC One variants"')
+                                        ->required(),
+                                    TagsInput::make('aliases')
+                                        ->label(__('Aliases'))
+                                        ->placeholder('e.g. "BBC One, BBC 1, BBC1, BBC One HD"')
+                                        ->splitKeys(['Tab', 'Return', ',']),
+                                ])
+                                ->columns(2)
+                                ->columnSpanFull()
+                                ->defaultItems(0)
+                                ->visible(fn (Get $get): bool => (bool) $get('auto_merge_config.fallback_name_matching_enabled')),
+                        ]),
+
                     Fieldset::make(__('Advanced Priority Scoring (optional)'))
                         ->columnSpanFull()
                         ->columns(2)

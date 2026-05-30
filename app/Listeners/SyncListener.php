@@ -20,6 +20,7 @@ use App\Models\Epg;
 use App\Models\Playlist;
 use App\Models\SyncRun;
 use App\Plugins\PluginHookDispatcher;
+use App\Services\PlaylistService;
 use Illuminate\Support\Facades\Bus;
 
 class SyncListener
@@ -231,6 +232,7 @@ class SyncListener
             weightedConfig: self::buildWeightedConfig($config),
             newChannelsOnly: $newChannelsOnly,
             regexPatterns: ! empty($config['regex_patterns'] ?? []) ? $config['regex_patterns'] : null,
+            fallbackMergeConfig: PlaylistService::buildMergeFallbackConfig($config),
         );
     }
 

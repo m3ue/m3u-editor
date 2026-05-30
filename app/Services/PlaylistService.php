@@ -955,6 +955,42 @@ class PlaylistService
                 ])
                 ->columns(2)
                 ->columnSpanFull(),
+            Fieldset::make(__('Fallback matching for channels without IDs'))
+                ->schema([
+                    Toggle::make('fallback_name_matching_enabled')
+                        ->label(__('Enable name or alias fallback'))
+                        ->live()
+                        ->helperText(__('Only channels without a usable stream ID are matched by name or alias. Quality labels such as HD, FHD, UHD and 4K are not removed automatically to avoid merging SD and HD variants by accident.'))
+                        ->default(false),
+                    Select::make('fallback_name_matching_mode')
+                        ->label(__('Fallback match mode'))
+                        ->options([
+                            'normalized_name' => __('Exact normalized name only'),
+                            'alias_rules' => __('Alias rules only'),
+                            'normalized_name_and_alias_rules' => __('Normalized name and alias rules'),
+                        ])
+                        ->default('normalized_name')
+                        ->visible(fn (Get $get): bool => (bool) $get('fallback_name_matching_enabled')),
+                    Repeater::make('fallback_alias_rules')
+                        ->label(__('Fallback alias groups'))
+                        ->helperText(__('Add aliases that should deliberately merge together. Duplicate aliases across groups are ignored to avoid bridging groups.'))
+                        ->schema([
+                            TextInput::make('label')
+                                ->label(__('Group label'))
+                                ->placeholder('e.g. "BBC One variants"')
+                                ->required(),
+                            TagsInput::make('aliases')
+                                ->label(__('Aliases'))
+                                ->placeholder('e.g. "BBC One, BBC 1, BBC1, BBC One HD"')
+                                ->splitKeys(['Tab', 'Return', ',']),
+                        ])
+                        ->columns(2)
+                        ->columnSpanFull()
+                        ->defaultItems(0)
+                        ->visible(fn (Get $get): bool => (bool) $get('fallback_name_matching_enabled')),
+                ])
+                ->columns(2)
+                ->columnSpanFull(),
             Fieldset::make('Advanced Priority Scoring (optional)')
                 ->schema([
                     Select::make('prefer_codec')
@@ -1089,6 +1125,24 @@ class PlaylistService
     }
 
     /**
+     * Build the fallback merge config array from merge form data.
+     *
+     * @return array<string, mixed>|null
+     */
+    public static function buildMergeFallbackConfig(array $data): ?array
+    {
+        if (! ($data['fallback_name_matching_enabled'] ?? false)) {
+            return null;
+        }
+
+        return [
+            'enabled' => true,
+            'mode' => $data['fallback_name_matching_mode'] ?? 'normalized_name',
+            'alias_rules' => $data['fallback_alias_rules'] ?? [],
+        ];
+    }
+
+    /**
      * Get the "Merge Same ID" action.
      *
      * @param  bool  $groupScoped  Whether this action operates on a single group (receives $record as Group)
@@ -1119,6 +1173,7 @@ class PlaylistService
                             preferCatchupAsPrimary: $data['prefer_catchup_as_primary'] ?? false,
                             groupId: $record->id,
                             weightedConfig: self::buildMergeWeightedConfig($data),
+                            fallbackMergeConfig: self::buildMergeFallbackConfig($data),
                         ));
                 });
         } else {
@@ -1135,6 +1190,7 @@ class PlaylistService
                             forceCompleteRemerge: $data['force_complete_remerge'] ?? false,
                             preferCatchupAsPrimary: $data['prefer_catchup_as_primary'] ?? false,
                             weightedConfig: self::buildMergeWeightedConfig($data),
+                            fallbackMergeConfig: self::buildMergeFallbackConfig($data),
                         ));
                 });
         }
