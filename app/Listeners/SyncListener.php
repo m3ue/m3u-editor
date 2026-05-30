@@ -231,6 +231,7 @@ class SyncListener
             weightedConfig: self::buildWeightedConfig($config),
             newChannelsOnly: $newChannelsOnly,
             regexPatterns: ! empty($config['regex_patterns'] ?? []) ? $config['regex_patterns'] : null,
+            fallbackMergeConfig: $config,
         );
     }
 

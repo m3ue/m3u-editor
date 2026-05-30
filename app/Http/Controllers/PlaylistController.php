@@ -406,6 +406,12 @@ class PlaylistController extends Controller
             'group_priorities.*.weight' => 'required_with:group_priorities|integer|min:1|max:1000',
             'priority_attributes' => 'sometimes|array',
             'priority_attributes.*' => 'string|in:playlist_priority,group_priority,catchup_support,resolution,codec,keyword_match',
+            'fallback_name_matching_enabled' => 'sometimes|boolean',
+            'fallback_name_matching_mode' => 'sometimes|string|in:normalized_name,alias_rules,normalized_name_and_alias_rules',
+            'fallback_alias_rules' => 'sometimes|array',
+            'fallback_alias_rules.*.label' => 'required_with:fallback_alias_rules|string|max:255',
+            'fallback_alias_rules.*.aliases' => 'sometimes|array',
+            'fallback_alias_rules.*.aliases.*' => 'string|max:255',
         ]);
 
         $config = $playlist->auto_merge_config ?? [];
@@ -423,6 +429,9 @@ class PlaylistController extends Controller
             'exclude_disabled_groups',
             'group_priorities',
             'priority_attributes',
+            'fallback_name_matching_enabled',
+            'fallback_name_matching_mode',
+            'fallback_alias_rules',
         ] as $key) {
             if (array_key_exists($key, $validated)) {
                 $config[$key] = $validated[$key];
@@ -529,6 +538,7 @@ class PlaylistController extends Controller
             weightedConfig: $weightedConfig,
             newChannelsOnly: $newChannelsOnly,
             regexPatterns: ! empty($config['regex_patterns']) ? $config['regex_patterns'] : null,
+            fallbackMergeConfig: $config,
         ));
 
         return response()->json([
@@ -545,6 +555,7 @@ class PlaylistController extends Controller
                 'prefer_catchup_as_primary' => $preferCatchupAsPrimary,
                 'new_channels_only' => $newChannelsOnly,
                 'weighted_config_enabled' => $weightedConfig !== null,
+                'fallback_name_matching_enabled' => (bool) ($config['fallback_name_matching_enabled'] ?? false),
             ],
         ]);
     }

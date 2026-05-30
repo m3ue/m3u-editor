@@ -6,6 +6,7 @@ use App\Models\Channel;
 use App\Models\ChannelFailover;
 use App\Models\Group;
 use App\Models\Playlist;
+use App\Services\ChannelMergeKeyService;
 use Filament\Notifications\Notification;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -62,6 +63,7 @@ class MergeChannels implements ShouldQueue
         public ?array $weightedConfig = null,
         public ?bool $newChannelsOnly = null,
         public ?array $regexPatterns = null,
+        public ?array $fallbackMergeConfig = null,
     ) {}
 
     /**
@@ -129,32 +131,55 @@ class MergeChannels implements ShouldQueue
             return strtolower(trim($streamId));
         });
 
-        // Process each group of channels with the same stream ID
-        foreach ($groupedChannels as $streamId => $group) {
+        $streamIdResults = $this->processGroupedChannels($groupedChannels, $playlistPriority);
+        $processed += $streamIdResults['processed'];
+        $deactivatedCount += $streamIdResults['deactivated'];
+
+        $fallbackResults = $this->processFallbackNameMerges(
+            $playlistIds,
+            $playlistPriority,
+            $shouldExcludeExistingFailovers,
+            $existingFailoverChannelIds,
+        );
+        $processed += $fallbackResults['processed'];
+        $deactivatedCount += $fallbackResults['deactivated'];
+
+        // Process playlist-level regex merge patterns (second pass)
+        $regexResults = $this->processRegexMerges($playlistIds, $playlistPriority);
+        $processed += $regexResults['processed'];
+        $deactivatedCount += $regexResults['deactivated'];
+
+        $this->sendCompletionNotification($processed, $deactivatedCount);
+    }
+
+    /**
+     * Process groups that were already keyed by a merge strategy.
+     *
+     * @param  iterable<string, Collection>  $groupedChannels
+     * @param  array<int, int>  $playlistPriority
+     * @return array{processed: int, deactivated: int}
+     */
+    protected function processGroupedChannels(iterable $groupedChannels, array $playlistPriority): array
+    {
+        $processed = 0;
+        $deactivatedCount = 0;
+
+        foreach ($groupedChannels as $group) {
             if ($group->count() <= 1) {
-                continue; // Skip single channels
+                continue;
             }
 
-            // Select master channel based on weighted priority or legacy criteria
             $master = $this->selectMasterChannel($group, $playlistPriority);
             if (! $master) {
-                continue; // Skip if no valid master found
+                continue;
             }
 
-            // Ensure master is enabled in case it was previously disabled,
-            // but never silently re-enable a master that lives in a disabled group
-            // when the user opted in to exclude_disabled_groups.
             if (! $master->enabled && ! in_array($master->group_id, $this->disabledGroupIds, true)) {
                 $master->update(['enabled' => true]);
             }
 
-            // Create failover relationships for remaining channels
-            $failoverChannels = $group->where('id', '!=', $master->id);
+            $failoverChannels = $this->sortChannelsByScore($group->where('id', '!=', $master->id), $playlistPriority);
 
-            // Sort failovers using the same scoring system (descending score)
-            $failoverChannels = $this->sortChannelsByScore($failoverChannels, $playlistPriority);
-
-            // Create failover relationships using updateOrCreate for compatibility
             $sortOrder = 1;
             foreach ($failoverChannels as $failover) {
                 ChannelFailover::updateOrCreate(
@@ -168,7 +193,6 @@ class MergeChannels implements ShouldQueue
                     ]
                 );
 
-                // Deactivate failover channel if requested
                 if ($this->deactivateFailoverChannels && $failover->enabled) {
                     $failover->update(['enabled' => false]);
                     $deactivatedCount++;
@@ -178,12 +202,60 @@ class MergeChannels implements ShouldQueue
             }
         }
 
-        // Process playlist-level regex merge patterns (second pass)
-        $regexResults = $this->processRegexMerges($playlistIds, $playlistPriority);
-        $processed += $regexResults['processed'];
-        $deactivatedCount += $regexResults['deactivated'];
+        return ['processed' => $processed, 'deactivated' => $deactivatedCount];
+    }
 
-        $this->sendCompletionNotification($processed, $deactivatedCount);
+    /**
+     * Process opt-in fallback merge matching for channels without stream IDs.
+     *
+     * @param  array<int>  $playlistIds
+     * @param  array<int, int>  $playlistPriority
+     * @param  array<int>  $existingFailoverChannelIds
+     * @return array{processed: int, deactivated: int}
+     */
+    protected function processFallbackNameMerges(
+        array $playlistIds,
+        array $playlistPriority,
+        bool $shouldExcludeExistingFailovers,
+        array $existingFailoverChannelIds,
+    ): array {
+        $config = $this->fallbackMergeConfig ?? [];
+        $matcher = app(ChannelMergeKeyService::class);
+
+        if (! $matcher->isEnabled($config)) {
+            return ['processed' => 0, 'deactivated' => 0];
+        }
+
+        $channels = Channel::where([
+            ['user_id', $this->user->id],
+            ['can_merge', true],
+        ])->whereIn('playlist_id', $playlistIds)
+            ->where(function ($query) {
+                $query->whereNull('stream_id_custom')
+                    ->orWhere('stream_id_custom', '');
+            })
+            ->where(function ($query) {
+                $query->whereNull('stream_id')
+                    ->orWhere('stream_id', '');
+            })
+            ->when($this->groupId, fn ($query) => $query->where('group_id', $this->groupId))
+            ->when($shouldExcludeExistingFailovers, fn ($query) => $query->whereNotIn('id', $existingFailoverChannelIds))
+            ->when($this->newChannelsOnly, fn ($query) => $query->where('new', true))
+            ->select(['id', 'user_id', 'playlist_id', 'group_id', 'title', 'title_custom',
+                'name', 'name_custom', 'stream_id', 'stream_id_custom', 'sort',
+                'catchup', 'enabled', 'stream_stats'])
+            ->cursor();
+
+        $groupedChannels = $channels
+            ->mapWithKeys(function ($channel) use ($matcher, $config) {
+                $key = $matcher->fallbackKeyFor($channel, $config);
+
+                return $key ? [$channel->id => ['key' => $key, 'channel' => $channel]] : [];
+            })
+            ->groupBy('key')
+            ->map(fn ($items) => $items->pluck('channel'));
+
+        return $this->processGroupedChannels($groupedChannels, $playlistPriority);
     }
 
     /**
