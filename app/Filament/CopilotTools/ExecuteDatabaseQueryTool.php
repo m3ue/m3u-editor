@@ -82,11 +82,13 @@ class ExecuteDatabaseQueryTool extends BaseTool
             $query->where('user_id', auth()->id());
         }
 
-        // Apply where conditions
+        // Apply where conditions — validate each condition before building the query
+        $whereConditions = [];
+
         if (is_array($where)) {
-            foreach ($where as $condition) {
+            foreach ($where as $i => $condition) {
                 if (! isset($condition['column'], $condition['operator'], $condition['value'])) {
-                    continue;
+                    return "Error: WHERE condition at index {$i} is missing required keys (column, operator, value).";
                 }
 
                 $col = (string) $condition['column'];
@@ -94,7 +96,7 @@ class ExecuteDatabaseQueryTool extends BaseTool
                     return "Error: Column '{$col}' does not exist in table '{$table}'.";
                 }
 
-                $query->where($col, (string) $condition['operator'], $condition['value']);
+                $whereConditions[] = $condition;
             }
         }
 
@@ -103,7 +105,11 @@ class ExecuteDatabaseQueryTool extends BaseTool
                 if (! is_array($columns) || empty($columns)) {
                     $columns = ['*'];
                 }
-                $results = $query->limit($limit)->get($columns);
+                $results = $query->where(function ($q) use ($whereConditions): void {
+                    foreach ($whereConditions as $cond) {
+                        $q->where((string) $cond['column'], (string) $cond['operator'], $cond['value']);
+                    }
+                })->limit($limit)->get($columns);
                 $json = json_encode($results, JSON_PRETTY_PRINT);
 
                 if (strlen($json) > 15000) {
@@ -123,13 +129,31 @@ class ExecuteDatabaseQueryTool extends BaseTool
                     unset($updateData['user_id']);
                 }
 
-                $affected = $query->update($updateData);
+                // Require WHERE conditions for update/delete to prevent accidental mass operations
+                if (empty($whereConditions)) {
+                    return 'Error: WHERE conditions are required for update action to prevent accidental mass updates. Use a select query first to verify the rows you intend to update.';
+                }
+
+                $affected = $query->where(function ($q) use ($whereConditions): void {
+                    foreach ($whereConditions as $cond) {
+                        $q->where((string) $cond['column'], (string) $cond['operator'], $cond['value']);
+                    }
+                })->update($updateData);
 
                 return "Successfully updated {$affected} rows.";
             }
 
             if ($action === 'delete') {
-                $affected = $query->delete();
+                // Require WHERE conditions for delete to prevent accidental mass deletion
+                if (empty($whereConditions)) {
+                    return 'Error: WHERE conditions are required for delete action to prevent accidental mass deletion. Use a select query first to verify the rows you intend to delete.';
+                }
+
+                $affected = $query->where(function ($q) use ($whereConditions): void {
+                    foreach ($whereConditions as $cond) {
+                        $q->where((string) $cond['column'], (string) $cond['operator'], $cond['value']);
+                    }
+                })->delete();
 
                 return "Successfully deleted {$affected} rows.";
             }

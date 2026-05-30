@@ -187,7 +187,10 @@ class EpgChannelMatcherTool extends BaseTool
         // Strip suffix: "| HD", "| FHD", "| UHD", "| 4K", "| CA", "| EAST", "| WEST", "| BACKUP"
         $name = preg_replace('/\s*\|\s*(UHD|FHD|HD|SD|4K|CA|EAST|WEST|BACKUP|\d+K)\s*$/i', '', $name) ?? $name;
 
-        return trim($name);
+        // Strip parenthetical location markers: "(MX)", "(IZ)", "(US)", "(Prime)", etc.
+        $name = preg_replace('/\s*\([A-Za-z0-9]+\)\s*/', ' ', $name) ?? $name;
+
+        return trim(preg_replace('/\s+/', ' ', $name) ?? $name);
     }
 
     /**
@@ -268,8 +271,10 @@ class EpgChannelMatcherTool extends BaseTool
     /**
      * Returns a 0–100 similarity score between two lowercase strings.
      *
-     * Uses similar_text as the base, with a bonus when one string fully
-     * contains the other (e.g. "cinemax" inside "cinemax action max").
+     * Uses Levenshtein distance, with a modest containment bonus when the
+     * shorter string is at least 4 characters and the longer fully contains it
+     * (e.g. "cinemax" inside "cinemax action max"). This avoids false positives
+     * from short substrings like "v" or "tv" being contained in unrelated names.
      */
     private function similarity(string $a, string $b): int
     {
@@ -280,12 +285,14 @@ class EpgChannelMatcherTool extends BaseTool
         $lenA = strlen($a);
         $lenB = strlen($b);
         $maxLen = max($lenA, $lenB);
+        $minLen = min($lenA, $lenB);
 
         $dist = levenshtein($a, $b);
         $score = (int) round((1 - $dist / $maxLen) * 100);
 
-        if (str_contains($b, $a) || str_contains($a, $b)) {
-            $score = max($score, 80);
+        // Only apply containment bonus when the shorter name is meaningful (>= 4 chars)
+        if ($minLen >= 4 && (str_contains($b, $a) || str_contains($a, $b))) {
+            $score = max($score, 70);
         }
 
         return $score;

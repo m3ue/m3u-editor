@@ -161,6 +161,46 @@ class LogoCacheService
         return $name.'.'.strtolower((string) $extension);
     }
 
+    public static function isPlaceholderUrl(?string $url, string $type = 'logo'): bool
+    {
+        if (empty($url)) {
+            return true;
+        }
+
+        $defaultPath = match ($type) {
+            'episode' => '/episode-placeholder.png',
+            'poster' => '/vod-series-poster-placeholder.png',
+            default => '/placeholder.png',
+        };
+
+        try {
+            $settings = app(GeneralSettings::class);
+            $configured = match ($type) {
+                'episode' => $settings->episode_placeholder_url,
+                'poster' => $settings->vod_series_poster_placeholder_url,
+                default => $settings->logo_placeholder_url,
+            };
+        } catch (\Exception $e) {
+            $configured = null;
+        }
+
+        $defaultUrl = url($defaultPath);
+        if ($url === $defaultUrl) {
+            return true;
+        }
+
+        if (! empty($configured)) {
+            $configuredUrl = filter_var($configured, FILTER_VALIDATE_URL)
+                ? $configured
+                : (str_starts_with($configured, '/') ? url($configured) : url('/storage/'.ltrim($configured, '/')));
+            if ($url === $configuredUrl) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public static function getPlaceholderUrl(string $type = 'logo'): string
     {
         $defaultPath = match ($type) {

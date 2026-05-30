@@ -63,7 +63,7 @@ class ShowMetadataService
 
         foreach ($series as $row) {
             $title = (string) $row->name;
-            if (isset($remaining[$title])) {
+            if (isset($remaining[$title]) && ! LogoCacheService::isPlaceholderUrl($row->cover, 'poster')) {
                 $results[$title] = $row->cover;
                 unset($remaining[$title]);
             }

@@ -8,6 +8,7 @@ use App\Filament\GuestPanel\Pages\Concerns\HasGuestDvr;
 use App\Models\Channel;
 use App\Models\DvrRecordingRule;
 use App\Settings\GeneralSettings;
+use App\Traits\HasDvrMatchedAirings;
 use Filament\Actions\Action;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\EditAction;
@@ -18,6 +19,7 @@ use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Utilities\Get;
+use Filament\Schemas\Components\View;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Columns\ToggleColumn;
@@ -29,6 +31,7 @@ use Illuminate\Database\Eloquent\Model;
 
 class GuestDvrRuleResource extends Resource
 {
+    use HasDvrMatchedAirings;
     use HasGuestDvr;
 
     protected static ?string $model = DvrRecordingRule::class;
@@ -213,6 +216,13 @@ class GuestDvrRuleResource extends Resource
                 ->helperText($dvrSetting?->default_series_keep_last
                     ? __('Playlist default: keep last :n', ['n' => $dvrSetting->default_series_keep_last])
                     : __('Playlist default: keep all')),
+
+            View::make('filament.forms.dvr-matched-airings')
+                ->viewData(fn (?DvrRecordingRule $record): array => [
+                    'airings' => $record ? static::resolveMatchedAirings($record) : [],
+                ])
+                ->visible(fn (?DvrRecordingRule $record, Get $get): bool => $record !== null && self::isRuleType($get('type'), DvrRuleType::Series))
+                ->columnSpanFull(),
         ];
     }
 

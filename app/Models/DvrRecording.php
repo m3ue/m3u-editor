@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\DvrRecordingStatus;
 use App\Enums\DvrRuleType;
+use App\Services\ShowMetadataService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -115,6 +116,75 @@ class DvrRecording extends Model
                 self::pruneEmptyParentDirs($disk, $recording->file_path, 'library');
             }
         });
+    }
+
+    /**
+     * Resolve the EPG programme icon URL from the stored programme data.
+     */
+    public function getEpgProgrammeIconAttribute(): ?string
+    {
+        $data = $this->epg_programme_data;
+
+        if (! empty($data['icon'])) {
+            return $data['icon'];
+        }
+
+        return null;
+    }
+
+    /**
+     * Resolve the series poster URL.
+     * Prefers the VOD episode's series cover, falls back to ShowMetadataService.
+     */
+    public function getSeriesPosterAttribute(): ?string
+    {
+        $episode = $this->vodEpisode;
+        if ($episode && $episode->series && ! empty($episode->series->cover)) {
+            return $episode->series->cover;
+        }
+
+        if (! empty($this->title)) {
+            $posters = app(ShowMetadataService::class)->resolvePosters([$this->title]);
+
+            return $posters[$this->title] ?? null;
+        }
+
+        return null;
+    }
+
+    /**
+     * Resolve the episode cover URL from the VOD episode, if present.
+     */
+    public function getEpisodeCoverAttribute(): ?string
+    {
+        $episode = $this->vodEpisode;
+
+        return $episode && ! empty($episode->cover) ? $episode->cover : null;
+    }
+
+    /**
+     * Resolve the channel icon URL.
+     * Prefers custom EPG icon, then standard EPG icon, then channel logo.
+     */
+    public function getChannelIconAttribute(): ?string
+    {
+        $channel = $this->channel;
+        if (! $channel) {
+            return null;
+        }
+
+        $epgChannel = $channel->epgChannel;
+        if ($epgChannel) {
+            if (! empty($epgChannel->icon_custom)) {
+                return $epgChannel->icon_custom;
+            }
+
+            if (! empty($epgChannel->icon)) {
+                return $epgChannel->icon;
+            }
+        }
+
+        return $channel->logo ?: null;
     }
 
     public function user(): BelongsTo
