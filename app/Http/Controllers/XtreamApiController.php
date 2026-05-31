@@ -3,12 +3,19 @@
 namespace App\Http\Controllers;
 
 use App\Enums\ChannelLogoType;
+use App\Enums\DvrMatchMode;
+use App\Enums\DvrRecordingStatus;
+use App\Enums\DvrRuleType;
+use App\Enums\DvrSeriesMode;
 use App\Enums\PlaylistChannelId;
 use App\Facades\PlaylistFacade;
 use App\Facades\ProxyFacade;
 use App\Models\Category;
 use App\Models\Channel;
 use App\Models\CustomPlaylist;
+use App\Models\DvrRecording;
+use App\Models\DvrRecordingRule;
+use App\Models\DvrSetting;
 use App\Models\Epg;
 use App\Models\Group;
 use App\Models\MergedPlaylist;
@@ -19,6 +26,7 @@ use App\Models\PlaylistAuth;
 use App\Models\PlaylistViewer;
 use App\Models\Series;
 use App\Models\ViewerWatchProgress;
+use App\Services\DvrRecorderService;
 use App\Services\EpgCacheService;
 use App\Services\LogoCacheService;
 use App\Services\M3uProxyService;
@@ -1861,6 +1869,18 @@ class XtreamApiController extends Controller
             return $this->getSeriesProgress($request, $playlist, $authMethod, $username, $password);
         } elseif ($action === 'get_recently_watched') {
             return $this->getRecentlyWatched($request, $playlist, $authMethod, $username, $password);
+        } elseif ($action === 'get_dvr_recordings') {
+            return $this->getDvrRecordings($request, $playlist, $username, $password);
+        } elseif ($action === 'get_dvr_recording') {
+            return $this->getDvrRecording($request, $playlist, $username, $password);
+        } elseif ($action === 'schedule_dvr') {
+            return $this->scheduleDvr($request, $playlist);
+        } elseif ($action === 'create_dvr_series_rule') {
+            return $this->createDvrSeriesRule($request, $playlist);
+        } elseif ($action === 'cancel_dvr_recording') {
+            return $this->cancelDvrRecording($request, $playlist);
+        } elseif ($action === 'delete_dvr_recording') {
+            return $this->deleteDvrRecording($request, $playlist);
         } else {
             return response()->json(['error' => 'Invalid action parameter'], 400);
         }
@@ -2447,6 +2467,271 @@ class XtreamApiController extends Controller
         }
 
         return response()->json(['epg_listings' => $epgListings]);
+    }
+
+    /**
+     * List DVR recordings for the authenticated playlist, optionally filtered by status.
+     */
+    private function getDvrRecordings(Request $request, $playlist, string $username, string $password): \Illuminate\Http\JsonResponse
+    {
+        $dvrSetting = DvrSetting::where('playlist_id', $playlist->id)->first();
+
+        if (! $dvrSetting) {
+            return response()->json([]);
+        }
+
+        $status = $request->input('status');
+        $limit = min((int) $request->input('limit', 50), 200);
+        $offset = (int) $request->input('offset', 0);
+
+        $query = DvrRecording::where('dvr_setting_id', $dvrSetting->id)
+            ->with('channel')
+            ->orderByDesc('scheduled_start');
+
+        if ($status) {
+            $statusEnum = DvrRecordingStatus::tryFrom($status);
+            if ($statusEnum) {
+                $query->where('status', $statusEnum);
+            }
+        }
+
+        $recordings = $query->skip($offset)->take($limit)->get();
+
+        return response()->json($recordings->map(fn (DvrRecording $r) => $this->formatDvrRecording($r, $username, $password)));
+    }
+
+    /**
+     * Get a single DVR recording by UUID.
+     */
+    private function getDvrRecording(Request $request, $playlist, string $username, string $password): \Illuminate\Http\JsonResponse
+    {
+        $uuid = $request->input('recording_id');
+
+        if (! $uuid) {
+            return response()->json(['error' => 'recording_id parameter is required'], 400);
+        }
+
+        $dvrSetting = DvrSetting::where('playlist_id', $playlist->id)->first();
+
+        if (! $dvrSetting) {
+            return response()->json(['error' => 'DVR not configured for this playlist'], 404);
+        }
+
+        $recording = DvrRecording::where('dvr_setting_id', $dvrSetting->id)
+            ->where('uuid', $uuid)
+            ->with('channel')
+            ->first();
+
+        if (! $recording) {
+            return response()->json(['error' => 'Recording not found'], 404);
+        }
+
+        return response()->json($this->formatDvrRecording($recording, $username, $password, true));
+    }
+
+    /**
+     * Schedule a one-shot DVR recording rule from the TV app.
+     */
+    private function scheduleDvr(Request $request, $playlist): \Illuminate\Http\JsonResponse
+    {
+        $channelId = (int) $request->input('channel_id');
+        $title = trim((string) $request->input('title', ''));
+        $startTime = $request->input('start_time');
+        $endTime = $request->input('end_time');
+
+        if (! $channelId || ! $title || ! $startTime || ! $endTime) {
+            return response()->json(['error' => 'channel_id, title, start_time, and end_time are required'], 400);
+        }
+
+        $dvrSetting = DvrSetting::where('playlist_id', $playlist->id)->where('enabled', true)->first();
+
+        if (! $dvrSetting) {
+            return response()->json(['error' => 'DVR is not enabled for this playlist'], 422);
+        }
+
+        $channel = Channel::find($channelId);
+        if (! $channel) {
+            return response()->json(['error' => 'Channel not found'], 404);
+        }
+
+        $rule = DvrRecordingRule::create([
+            'user_id' => $dvrSetting->user_id,
+            'dvr_setting_id' => $dvrSetting->id,
+            'type' => DvrRuleType::Once,
+            'channel_id' => $channelId,
+            'series_title' => $title,
+            'match_mode' => DvrMatchMode::Exact,
+            'manual_start' => Carbon::parse($startTime),
+            'manual_end' => Carbon::parse($endTime),
+            'start_early_seconds' => (int) $request->input('start_early_seconds', $dvrSetting->default_start_early_seconds ?? 0),
+            'end_late_seconds' => (int) $request->input('end_late_seconds', $dvrSetting->default_end_late_seconds ?? 0),
+            'enabled' => true,
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'rule_id' => $rule->id,
+            'message' => "Recording scheduled: {$title}",
+        ]);
+    }
+
+    /**
+     * Create a series recording rule.
+     */
+    private function createDvrSeriesRule(Request $request, $playlist): \Illuminate\Http\JsonResponse
+    {
+        $channelId = (int) $request->input('channel_id');
+        $title = trim((string) $request->input('title', ''));
+
+        if (! $channelId || ! $title) {
+            return response()->json(['error' => 'channel_id and title are required'], 400);
+        }
+
+        $dvrSetting = DvrSetting::where('playlist_id', $playlist->id)->where('enabled', true)->first();
+
+        if (! $dvrSetting) {
+            return response()->json(['error' => 'DVR is not enabled for this playlist'], 422);
+        }
+
+        $matchMode = DvrMatchMode::tryFrom($request->input('match_mode', 'contains')) ?? DvrMatchMode::Contains;
+        $seriesMode = DvrSeriesMode::tryFrom($request->input('series_mode', $dvrSetting->default_series_mode?->value ?? 'all')) ?? DvrSeriesMode::All;
+        $keepLast = $request->input('keep_last') !== null ? (int) $request->input('keep_last') : $dvrSetting->default_series_keep_last;
+
+        $rule = DvrRecordingRule::create([
+            'user_id' => $dvrSetting->user_id,
+            'dvr_setting_id' => $dvrSetting->id,
+            'type' => DvrRuleType::Series,
+            'channel_id' => $channelId,
+            'series_title' => $title,
+            'match_mode' => $matchMode,
+            'series_mode' => $seriesMode,
+            'keep_last' => $keepLast,
+            'enabled' => true,
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'rule_id' => $rule->id,
+        ]);
+    }
+
+    /**
+     * Cancel a scheduled or in-progress DVR recording.
+     */
+    private function cancelDvrRecording(Request $request, $playlist): \Illuminate\Http\JsonResponse
+    {
+        $uuid = $request->input('recording_id');
+
+        if (! $uuid) {
+            return response()->json(['error' => 'recording_id parameter is required'], 400);
+        }
+
+        $dvrSetting = DvrSetting::where('playlist_id', $playlist->id)->first();
+
+        if (! $dvrSetting) {
+            return response()->json(['error' => 'DVR not configured for this playlist'], 404);
+        }
+
+        $recording = DvrRecording::where('dvr_setting_id', $dvrSetting->id)
+            ->where('uuid', $uuid)
+            ->whereIn('status', [DvrRecordingStatus::Scheduled, DvrRecordingStatus::Recording])
+            ->first();
+
+        if (! $recording) {
+            return response()->json(['error' => 'Recording not found or not cancellable'], 404);
+        }
+
+        app(DvrRecorderService::class)->cancel($recording);
+
+        return response()->json(['success' => true]);
+    }
+
+    /**
+     * Delete a completed or failed DVR recording.
+     */
+    private function deleteDvrRecording(Request $request, $playlist): \Illuminate\Http\JsonResponse
+    {
+        $uuid = $request->input('recording_id');
+
+        if (! $uuid) {
+            return response()->json(['error' => 'recording_id parameter is required'], 400);
+        }
+
+        $dvrSetting = DvrSetting::where('playlist_id', $playlist->id)->first();
+
+        if (! $dvrSetting) {
+            return response()->json(['error' => 'DVR not configured for this playlist'], 404);
+        }
+
+        $recording = DvrRecording::where('dvr_setting_id', $dvrSetting->id)
+            ->where('uuid', $uuid)
+            ->whereIn('status', [DvrRecordingStatus::Completed, DvrRecordingStatus::Failed, DvrRecordingStatus::Cancelled])
+            ->first();
+
+        if (! $recording) {
+            return response()->json(['error' => 'Recording not found or not deletable'], 404);
+        }
+
+        $recording->delete();
+
+        return response()->json(['success' => true]);
+    }
+
+    /**
+     * Format a DvrRecording into the API response shape.
+     */
+    private function formatDvrRecording(DvrRecording $recording, string $username, string $password, bool $full = false): array
+    {
+        $isRecording = $recording->status === DvrRecordingStatus::Recording;
+        $isCompleted = $recording->status === DvrRecordingStatus::Completed;
+
+        $format = $isCompleted
+            ? ($recording->dvrSetting?->dvr_output_format ?? 'mp4')
+            : 'mp4';
+
+        $baseUrl = config('app.url');
+
+        $streamUrl = $isCompleted
+            ? "{$baseUrl}/dvr/{$username}/{$password}/{$recording->uuid}.{$format}"
+            : null;
+
+        $liveUrl = $isRecording
+            ? "{$baseUrl}/dvr/{$username}/{$password}/{$recording->uuid}/live.m3u8"
+            : null;
+
+        $hasEdl = $isCompleted && ($recording->dvrSetting?->enable_comskip ?? false);
+        $edlUrl = $hasEdl
+            ? "{$baseUrl}/dvr/{$username}/{$password}/{$recording->uuid}/edl"
+            : null;
+
+        $data = [
+            'uuid' => $recording->uuid,
+            'title' => $recording->title,
+            'subtitle' => $recording->subtitle,
+            'status' => $recording->status->value,
+            'channel_name' => $recording->channel?->title ?? $recording->channel?->name,
+            'channel_id' => $recording->channel_id,
+            'scheduled_start' => $recording->scheduled_start?->toIso8601String(),
+            'scheduled_end' => $recording->scheduled_end?->toIso8601String(),
+            'actual_start' => $recording->actual_start?->toIso8601String(),
+            'actual_end' => $recording->actual_end?->toIso8601String(),
+            'duration_seconds' => $recording->duration_seconds,
+            'file_size_bytes' => $recording->file_size_bytes,
+            'season' => $recording->season,
+            'episode' => $recording->episode,
+            'stream_url' => $streamUrl,
+            'live_url' => $liveUrl,
+            'edl_url' => $edlUrl,
+            'has_edl' => $hasEdl,
+        ];
+
+        if ($full) {
+            $data['metadata'] = $recording->metadata;
+            $data['epg_programme_data'] = $recording->epg_programme_data;
+            $data['error_message'] = $recording->error_message;
+        }
+
+        return $data;
     }
 
     /**
