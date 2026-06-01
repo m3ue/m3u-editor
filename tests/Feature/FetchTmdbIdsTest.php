@@ -1215,9 +1215,11 @@ it('includes VOD channels with tmdb_id but missing metadata even when overwrite 
     expect($needsMetadata->info)->toHaveKey('plot');
 });
 
-it('excludes series that were attempted but had no match from query when overwrite is false', function () {
-    // This series was already attempted but no TMDB/TVDB match was found
-    Series::factory()->create([
+it('retries series that have last_metadata_fetch set but no movie DB IDs', function () {
+    // last_metadata_fetch is stamped by the provider episode-data fetch (SeriesMetadata phase),
+    // not by TMDB lookup. Series without any movie DB IDs must always be eligible for lookup
+    // regardless of last_metadata_fetch, because the two concerns are independent.
+    $series = Series::factory()->create([
         'playlist_id' => $this->playlist->id,
         'user_id' => $this->user->id,
         'enabled' => true,
@@ -1230,8 +1232,7 @@ it('excludes series that were attempted but had no match from query when overwri
 
     $tmdb = Mockery::mock(TmdbService::class);
     $tmdb->shouldReceive('isConfigured')->andReturn(true);
-    $tmdb->shouldNotReceive('searchTvSeries');
-    $tmdb->shouldNotReceive('getTvSeriesDetails');
+    $tmdb->shouldReceive('searchTvSeries')->once()->andReturn(null);
 
     $job = new TestableFetchTmdbIds(
         seriesPlaylistId: $this->playlist->id,

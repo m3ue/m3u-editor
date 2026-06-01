@@ -730,10 +730,8 @@ class FetchTmdbIds implements ShouldQueue
      */
     protected function processSingleSeries(TmdbService $tmdb, Series $series): void
     {
-        // Check if already has IDs and we're not overwriting
-        // Check both the dedicated columns and the legacy metadata field
-        $existingTvdbId = $series->tvdb_id ?? $series->metadata['tvdb_id'] ?? null;
-        $existingTmdbId = $series->tmdb_id ?? $series->metadata['tmdb_id'] ?? null;
+        // Resolve IDs from all storage locations (dedicated columns + legacy metadata array).
+        ['tmdb' => $existingTmdbId, 'tvdb' => $existingTvdbId] = $series->getMovieDbIds();
 
         // Only skip if we have IDs AND the metadata is populated
         $hasMetadata = ! empty($series->plot) && ! empty($series->cover);
@@ -807,13 +805,6 @@ class FetchTmdbIds implements ShouldQueue
                     'overwrite_existing' => $this->overwriteExisting,
                 ]);
             }
-            $this->skippedCount++;
-
-            return;
-        }
-
-        // If previously attempted but no match was found, skip unless overwriting
-        if (! $existingTmdbId && ! $existingTvdbId && $series->last_metadata_fetch && ! $this->overwriteExisting) {
             $this->skippedCount++;
 
             return;

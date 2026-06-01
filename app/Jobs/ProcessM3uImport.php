@@ -1428,6 +1428,7 @@ class ProcessM3uImport implements ShouldQueue
         // Flag any previously marked new items as not new
         $playlist->groups()->where('new', true)->update(['new' => false]);
         $playlist->channels()->where('new', true)->update(['new' => false]);
+        $playlist->series()->where('new', true)->update(['new' => false]);
 
         // Create the jobs array
         $jobs = [];
@@ -1721,6 +1722,7 @@ class ProcessM3uImport implements ShouldQueue
         // new channels (inserted, not updated) carry new=true after this run.
         $playlist->groups()->where('new', true)->update(['new' => false]);
         $playlist->channels()->where('new', true)->update(['new' => false]);
+        $playlist->series()->where('new', true)->update(['new' => false]);
 
         // Create the jobs array
         $jobs = [];
