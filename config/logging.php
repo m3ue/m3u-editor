@@ -1,6 +1,7 @@
 <?php
 
 use App\Logging\AlertsHandler;
+use App\Logging\AnonymizingProcessor;
 use Monolog\Handler\NullHandler;
 use Monolog\Handler\StreamHandler;
 use Monolog\Handler\SyslogUdpHandler;
@@ -67,7 +68,7 @@ return [
             'with' => [
                 'stream' => 'php://stdout',
             ],
-            'processors' => [PsrLogMessageProcessor::class],
+            'processors' => [AnonymizingProcessor::class, PsrLogMessageProcessor::class],
         ],
 
         'single' => [
@@ -83,6 +84,7 @@ return [
             'level' => env('LOG_LEVEL', 'error'),
             'days' => env('LOG_DAILY_DAYS', 3),
             'replace_placeholders' => true,
+            'processors' => [AnonymizingProcessor::class],
         ],
 
         'slack' => [
@@ -144,6 +146,7 @@ return [
             'path' => storage_path('logs/ffmpeg.log'),
             'level' => 'debug', // env('LOG_LEVEL', 'error'),
             'days' => env('LOG_DAILY_DAYS', 3),
+            'processors' => [AnonymizingProcessor::class],
         ],
 
         // Forwards error-level+ entries to Discord/Slack when configured in Settings.
