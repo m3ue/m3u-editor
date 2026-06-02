@@ -729,6 +729,53 @@ class M3uProxyService
     }
 
     /**
+     * Enforce the per-profile connection limit for resolver backends (Streamlink / yt-dlp).
+     *
+     * When a stream profile has max_connections set, the total number of active proxy
+     * streams using that profile may not exceed the limit. If the limit is already
+     * reached, the oldest stream(s) are evicted to make room for the new one.
+     *
+     * The limit is global across all channels that share this profile — this matches
+     * the upstream platform constraint (e.g. a Streamlink account that only allows
+     * one concurrent connection, regardless of which channel is being watched).
+     */
+    private function enforceResolverConnectionLimit(StreamProfile $profile): void
+    {
+        if (! $profile->isResolver() || $profile->max_connections === null) {
+            return;
+        }
+
+        $activeCount = self::getActiveStreamsCountByMetadata('profile_id', (string) $profile->id);
+
+        if ($activeCount < $profile->max_connections) {
+            return;
+        }
+
+        $stopped = 0;
+
+        while ($activeCount >= $profile->max_connections) {
+            $result = self::stopOldestStreamByMetadata('profile_id', (string) $profile->id);
+
+            if ($result['deleted_count'] === 0) {
+                break;
+            }
+
+            $stopped++;
+            usleep(100000); // 100ms — allow proxy to clean up before re-counting
+            $activeCount = self::getActiveStreamsCountByMetadata('profile_id', (string) $profile->id);
+        }
+
+        if ($stopped > 0) {
+            Log::debug('Evicted old resolver stream(s) to enforce profile connection limit', [
+                'profile_id' => $profile->id,
+                'profile_name' => $profile->name,
+                'max_connections' => $profile->max_connections,
+                'stopped_count' => $stopped,
+            ]);
+        }
+    }
+
+    /**
      * Check whether a PlaylistAuth user is within their per-auth stream limit.
      *
      * When the limit is reached and stop-oldest is enabled (per-auth setting takes
@@ -1258,6 +1305,8 @@ class M3uProxyService
                 'primary_url' => $primaryUrl,
                 'failover_count' => is_array($failovers) ? count($failovers) : ($failovers ? 'using_resolver' : 0),
             ]);
+
+            $this->enforceResolverConnectionLimit($profile);
 
             try {
                 $streamId = $this->createTranscodedStream($primaryUrl, $profile, $failovers, $userAgent, $headers, $metadata);
