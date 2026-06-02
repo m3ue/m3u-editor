@@ -38,17 +38,31 @@ class RefreshEpg extends Command
             $this->info('Dispatched EPG for refresh');
         } else {
             $this->info('Refreshing all EPGs');
-            // Auto-reset stuck EPGs (processing for too long)
+            // Auto-reset stuck EPGs (processing for too long).
+            //
+            // Use processing_started_at rather than updated_at because import jobs
+            // continuously refresh updated_at via progress updates, preventing the
+            // updated_at check from ever triggering on actively-running stuck jobs.
+            // Fall back to updated_at when processing_started_at is null (legacy runs).
             $stuckMinutes = (int) config('dev.stuck_processing_minutes', 120);
+            $stuckThreshold = now()->subMinutes($stuckMinutes);
 
             Epg::query()
                 ->where('status', Status::Processing)
-                ->where('updated_at', '<', now()->subMinutes($stuckMinutes))
+                ->where(function ($query) use ($stuckThreshold) {
+                    $query
+                        ->where('processing_started_at', '<', $stuckThreshold)
+                        ->orWhere(function ($q) use ($stuckThreshold) {
+                            $q->whereNull('processing_started_at')
+                                ->where('updated_at', '<', $stuckThreshold);
+                        });
+                })
                 ->each(function (Epg $epg) {
                     $epg->update([
                         'status' => Status::Pending,
                         'synced' => null,
                         'processing' => false,
+                        'processing_started_at' => null,
                     ]);
                 });
 

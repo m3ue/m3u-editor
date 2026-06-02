@@ -1,5 +1,7 @@
 <?php
 
+use App\Enums\SyncRunPhase;
+use App\Enums\SyncRunStatus;
 use App\Jobs\FetchTmdbIds;
 use App\Models\Category;
 use App\Models\Channel;
@@ -8,7 +10,9 @@ use App\Models\Group;
 use App\Models\Playlist;
 use App\Models\Season;
 use App\Models\Series;
+use App\Models\SyncRun;
 use App\Models\User;
+use App\Services\SyncPipelineService;
 use App\Services\TmdbService;
 use App\Settings\GeneralSettings;
 use Illuminate\Cache\ArrayStore;
@@ -1558,26 +1562,26 @@ it('advances the sync pipeline when TMDB is not configured', function () {
     $tmdb = Mockery::mock(TmdbService::class);
     $tmdb->shouldReceive('isConfigured')->andReturn(false);
 
-    $syncRun = \App\Models\SyncRun::factory()->create([
+    $syncRun = SyncRun::factory()->create([
         'playlist_id' => $this->playlist->id,
         'user_id' => $this->user->id,
         'phases' => ['vod_tmdb', 'find_replace'],
         'phase_statuses' => (object) [],
-        'status' => \App\Enums\SyncRunStatus::Running->value,
+        'status' => SyncRunStatus::Running->value,
         'current_phase' => 'vod_tmdb',
     ]);
 
-    $pipeline = Mockery::mock(\App\Services\SyncPipelineService::class)->makePartial();
+    $pipeline = Mockery::mock(SyncPipelineService::class)->makePartial();
     $pipeline->shouldReceive('completePhase')
         ->once()
-        ->with($syncRun->id, \App\Enums\SyncRunPhase::VodTmdb);
-    app()->instance(\App\Services\SyncPipelineService::class, $pipeline);
+        ->with($syncRun->id, SyncRunPhase::VodTmdb);
+    app()->instance(SyncPipelineService::class, $pipeline);
 
     $job = new TestableFetchTmdbIds(
         vodPlaylistId: $this->playlist->id,
         user: $this->user,
         syncRunId: $syncRun->id,
-        completionPhase: \App\Enums\SyncRunPhase::VodTmdb,
+        completionPhase: SyncRunPhase::VodTmdb,
     );
     $job->handle($tmdb);
 });
