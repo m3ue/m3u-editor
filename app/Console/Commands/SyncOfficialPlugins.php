@@ -73,7 +73,7 @@ class SyncOfficialPlugins extends Command
             $seeded++;
         }
 
-        $this->line("Done. Seeded: {$seeded}.");
+        $this->line("🔌 Done. Seeded: {$seeded}.");
 
         return self::SUCCESS;
     }

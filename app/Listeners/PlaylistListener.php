@@ -9,6 +9,7 @@ use App\Events\PlaylistUpdated;
 use App\Jobs\ProcessM3uImport;
 use App\Jobs\RunPostProcess;
 use App\Services\ProfileService;
+use App\Services\SyncPipelineService;
 use Illuminate\Support\Facades\Log;
 
 class PlaylistListener
@@ -54,7 +55,8 @@ class PlaylistListener
             $this->ensurePrimaryProfileExists($playlist);
         }
 
-        dispatch(new ProcessM3uImport(playlist: $playlist, isNew: true));
+        $syncRun = app(SyncPipelineService::class)->startImport($playlist, trigger: 'playlist_created');
+        dispatch(new ProcessM3uImport(playlist: $playlist, isNew: true, syncRunId: $syncRun->id));
         $playlist->postProcesses()->where([
             ['event', 'created'],
             ['enabled', true],

@@ -2,8 +2,10 @@
 
 namespace App\Jobs;
 
+use App\Enums\SyncRunPhase;
 use App\Models\Playlist;
 use App\Models\User;
+use App\Services\SyncPipelineService;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -30,6 +32,8 @@ class CheckVodStrmProgress implements ShouldQueue
         public ?int $user_id = null,
         public bool $needsCleanup = false,
         public ?array $channel_ids = null,
+        public ?int $syncRunId = null,
+        public ?SyncRunPhase $completionPhase = null,
     ) {
         $this->onQueue('file_sync');
     }
@@ -54,6 +58,8 @@ class CheckVodStrmProgress implements ShouldQueue
 
             if ($this->needsCleanup) {
                 Log::info('STRM Sync: Dispatching VOD cleanup job');
+                // Pass syncRunId/completionPhase to the cleanup job so it can advance the
+                // pipeline only after media-server refresh and post-process events have fired.
                 dispatch(new SyncVodStrmFiles(
                     notify: $this->notify,
                     all_playlists: $this->all_playlists,
@@ -61,22 +67,35 @@ class CheckVodStrmProgress implements ShouldQueue
                     user_id: $this->user_id,
                     isCleanupJob: true,
                     channel_ids: $this->channel_ids,
+                    syncRunId: $this->syncRunId,
+                    completionPhase: $this->completionPhase,
                 ));
-            } else {
-                if ($this->notify && $this->user_id) {
-                    $user = User::find($this->user_id);
-                    if ($user) {
-                        Notification::make()
-                            ->success()
-                            ->title('STRM File Sync Complete')
-                            ->body("Successfully synced {$this->totalChannels} VOD channels.")
-                            ->broadcast($user)
-                            ->sendToDatabase($user);
-                    }
+
+                // Legacy path only — pipeline path is advanced by the cleanup job itself.
+                if (! ($this->syncRunId && $this->completionPhase)) {
+                    $this->dispatchVodProbe();
+                }
+
+                return;
+            }
+
+            if ($this->notify && $this->user_id) {
+                $user = User::find($this->user_id);
+                if ($user) {
+                    Notification::make()
+                        ->success()
+                        ->title('STRM File Sync Complete')
+                        ->body("Successfully synced {$this->totalChannels} VOD channels.")
+                        ->broadcast($user)
+                        ->sendToDatabase($user);
                 }
             }
 
-            $this->dispatchVodProbe();
+            if ($this->syncRunId && $this->completionPhase) {
+                app(SyncPipelineService::class)->completePhase($this->syncRunId, $this->completionPhase);
+            } else {
+                $this->dispatchVodProbe();
+            }
 
             return;
         }
@@ -101,7 +120,7 @@ class CheckVodStrmProgress implements ShouldQueue
             );
         }
 
-        $nextOffset = $channelsProcessed + ($jobsInThisChain * $batchSize);
+        $nextOffset = min($channelsProcessed + ($jobsInThisChain * $batchSize), $this->totalChannels);
         $jobs[] = new self(
             currentOffset: $nextOffset,
             totalChannels: $this->totalChannels,
@@ -111,6 +130,8 @@ class CheckVodStrmProgress implements ShouldQueue
             user_id: $this->user_id,
             needsCleanup: $this->needsCleanup,
             channel_ids: $this->channel_ids,
+            syncRunId: $this->syncRunId,
+            completionPhase: $this->completionPhase,
         );
 
         Log::info('STRM Sync: Dispatching next VOD chain', [

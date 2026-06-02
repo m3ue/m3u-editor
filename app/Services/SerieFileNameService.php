@@ -27,11 +27,11 @@ class SerieFileNameService
         $stats = StreamStatsService::normalize($episode->stream_stats ?? []);
         $episodeTitle = $this->safeName($episode->title);
 
-        $titleHaystack = trim((string) ($episode->title ?? '').' '.($episode->name ?? ''));
-        $quality = $this->safeName(StreamStatsService::detectQuality($stats)) ?: $this->safeName(TitleMetadataParser::detectQuality($titleHaystack));
-        $audio = $this->safeName(StreamStatsService::detectAudio($stats)) ?: $this->safeName(TitleMetadataParser::detectAudio($titleHaystack));
+        // Provider/probe data only - no title-parser fallback (avoids false positives)
+        $quality = $this->safeName(StreamStatsService::detectQuality($stats));
+        $audio = $this->safeName(StreamStatsService::detectAudio($stats));
         $video = $this->safeName(StreamStatsService::detectVideoCodec($stats));
-        $hdr = $this->safeName(StreamStatsService::detectHdr($stats)) ?: $this->safeName(TitleMetadataParser::detectHdr($titleHaystack));
+        $hdr = $this->safeName(StreamStatsService::detectHdr($stats));
         $fileName = strtr($format, [
             '{title}' => $this->safeName($this->serieName($episode)),
             '{season}' => $this->padNumber($episode->season ?? $episode->season_number ?? $episode->season?->season_number),
@@ -62,6 +62,37 @@ class SerieFileNameService
         }
 
         return $this->cleanGeneratedName($fileName);
+    }
+
+    /**
+     * Generate ONLY the trash-guide extras bracket (e.g. "[1080p H.264 AAC 2.0]") to be
+     * appended additively to a legacy episode filename. Returns '' when stream_stats are
+     * absent or no configured components produce a value.
+     */
+    public function generateEpisodeExtras(Episode $episode, StreamFileSetting $setting): string
+    {
+        $stats = StreamStatsService::normalize($episode->stream_stats ?? []);
+
+        if (empty($stats)) {
+            return '';
+        }
+
+        $components = $setting->trash_episode_components ?? ['quality', 'video', 'audio', 'hdr'];
+        $map = [
+            'quality' => StreamStatsService::detectQuality($stats),
+            'video' => StreamStatsService::detectVideoCodec($stats),
+            'audio' => StreamStatsService::detectAudio($stats),
+            'hdr' => StreamStatsService::detectHdr($stats),
+        ];
+
+        $parts = [];
+        foreach (['quality', 'video', 'audio', 'hdr'] as $key) {
+            if (in_array($key, $components, true) && ! empty($map[$key])) {
+                $parts[] = $map[$key];
+            }
+        }
+
+        return $parts ? '['.implode(' ', $parts).']' : '';
     }
 
     public function generateSeasonFolderName(Season $season): string

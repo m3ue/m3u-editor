@@ -8,7 +8,6 @@ use App\Services\DateFormatService;
 use Filament\Actions\Action;
 use Filament\Actions\BulkAction;
 use Filament\Resources\RelationManagers\RelationManager;
-use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\Layout\Panel;
 use Filament\Tables\Columns\Layout\Split;
@@ -187,66 +186,6 @@ class RunsRelationManager extends RelationManager
                     ->deselectRecordsAfterCompletion()
                     ->action(fn (Collection $records) => $records->each->delete()),
             ]);
-    }
-
-    public function getTabs(): array
-    {
-        $pluginId = $this->getOwnerRecord()->getKey();
-
-        $allCount = PluginRun::query()
-            ->where('extension_plugin_id', $pluginId)
-            ->visibleTo(auth()->user())
-            ->count();
-        $runningCount = PluginRun::query()
-            ->where('extension_plugin_id', $pluginId)
-            ->visibleTo(auth()->user())
-            ->where('status', 'running')
-            ->count();
-        $failedCount = PluginRun::query()
-            ->where('extension_plugin_id', $pluginId)
-            ->visibleTo(auth()->user())
-            ->whereIn('status', ['failed', 'stale', 'cancelled'])
-            ->count();
-        $manualCount = PluginRun::query()
-            ->where('extension_plugin_id', $pluginId)
-            ->visibleTo(auth()->user())
-            ->where('trigger', 'manual')
-            ->count();
-        $hookCount = PluginRun::query()
-            ->where('extension_plugin_id', $pluginId)
-            ->visibleTo(auth()->user())
-            ->where('trigger', 'hook')
-            ->count();
-        $scheduledCount = PluginRun::query()
-            ->where('extension_plugin_id', $pluginId)
-            ->visibleTo(auth()->user())
-            ->where('trigger', 'schedule')
-            ->count();
-
-        return [
-            'all' => Tab::make(__('All Runs'))
-                ->badge($allCount),
-            'running' => Tab::make(__('Running'))
-                ->badge($runningCount)
-                ->badgeColor('warning')
-                ->modifyQueryUsing(fn (Builder $query) => $query->where('status', 'running')),
-            'failed' => Tab::make(__('Failed'))
-                ->badge($failedCount)
-                ->badgeColor('danger')
-                ->modifyQueryUsing(fn (Builder $query) => $query->where('status', 'failed')),
-            'manual' => Tab::make(__('Manual'))
-                ->badge($manualCount)
-                ->badgeColor('primary')
-                ->modifyQueryUsing(fn (Builder $query) => $query->where('trigger', 'manual')),
-            'hooks' => Tab::make(__('Hooks'))
-                ->badge($hookCount)
-                ->badgeColor('info')
-                ->modifyQueryUsing(fn (Builder $query) => $query->where('trigger', 'hook')),
-            'scheduled' => Tab::make(__('Scheduled'))
-                ->badge($scheduledCount)
-                ->badgeColor('gray')
-                ->modifyQueryUsing(fn (Builder $query) => $query->where('trigger', 'schedule')),
-        ];
     }
 
     protected static function runLabel(PluginRun $record): string

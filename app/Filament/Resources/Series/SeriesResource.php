@@ -5,6 +5,7 @@ namespace App\Filament\Resources\Series;
 use App\Facades\LogoFacade;
 use App\Filament\Actions\AssetPickerAction;
 use App\Filament\Actions\BulkModalActionGroup;
+use App\Filament\Actions\RegexTesterAction;
 use App\Filament\Concerns\HasCopilotSupport;
 use App\Filament\Resources\Playlists\PlaylistResource;
 use App\Filament\Resources\Series\Pages\CreateSeries;
@@ -15,6 +16,7 @@ use App\Filament\Resources\Series\RelationManagers\EpisodesRelationManager;
 use App\Forms\Components\TmdbSearchResults;
 use App\Jobs\FetchTmdbIds;
 use App\Jobs\ProbeVodStreamsChunk;
+use App\Jobs\ProbeVodStreamsComplete;
 use App\Jobs\ProcessM3uImportSeriesEpisodes;
 use App\Jobs\SeriesFindAndReplace;
 use App\Jobs\SyncSeriesStrmFiles;
@@ -67,6 +69,7 @@ use Filament\Tables\Filters\Filter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
 
@@ -531,18 +534,25 @@ class SeriesResource extends Resource implements CopilotResource
                             ->pluck('id')
                             ->all();
                         if (! empty($episodeIds)) {
-                            $total = count($episodeIds);
-                            $chunks = array_chunk($episodeIds, 50);
-                            $last = count($chunks) - 1;
-                            foreach ($chunks as $i => $chunk) {
-                                dispatch(new ProbeVodStreamsChunk(
-                                    episodeIds: $chunk,
-                                    probeTimeout: 15,
-                                    notifyUserId: $i === $last ? auth()->id() : null,
-                                    notifyLabel: $i === $last ? __('Series stream probing') : null,
-                                    notifyTotal: $i === $last ? $total : null,
-                                ));
-                            }
+                            $start = now();
+
+                            $chunks = collect(array_chunk($episodeIds, 50))
+                                ->map(fn ($chunk) => new ProbeVodStreamsChunk(episodeIds: $chunk, probeTimeout: 15))
+                                ->all();
+
+                            Bus::chain([
+                                ...$chunks,
+                                new ProbeVodStreamsComplete(
+                                    playlistId: null,
+                                    total: count($episodeIds),
+                                    start: $start,
+                                    episodeIds: $episodeIds,
+                                    notifyUserId: auth()->id(),
+                                ),
+                            ])
+                                ->onConnection('redis')
+                                ->onQueue('import')
+                                ->dispatch();
                         }
                     })->after(function () {
                         Notification::make()
@@ -874,6 +884,10 @@ class SeriesResource extends Resource implements CopilotResource
                                     fn (Get $get) => ! $get('use_regex')
                                         ? 'This is the string you want to find and replace.'
                                         : 'This is the regex pattern you want to find. Make sure to use valid regex syntax.'
+                                )
+                                ->suffixAction(
+                                    RegexTesterAction::make(samplesContext: 'series', patternField: 'find_replace', replacementField: 'replace_with')
+                                        ->visible(fn (Get $get): bool => (bool) $get('use_regex'))
                                 ),
                             TextInput::make('replace_with')
                                 ->label(__('Replace with (optional)'))
@@ -953,18 +967,25 @@ class SeriesResource extends Resource implements CopilotResource
                             ->pluck('id')
                             ->all();
                         if (! empty($episodeIds)) {
-                            $total = count($episodeIds);
-                            $chunks = array_chunk($episodeIds, 50);
-                            $last = count($chunks) - 1;
-                            foreach ($chunks as $i => $chunk) {
-                                dispatch(new ProbeVodStreamsChunk(
-                                    episodeIds: $chunk,
-                                    probeTimeout: 15,
-                                    notifyUserId: $i === $last ? auth()->id() : null,
-                                    notifyLabel: $i === $last ? __('Series stream probing') : null,
-                                    notifyTotal: $i === $last ? $total : null,
-                                ));
-                            }
+                            $start = now();
+
+                            $chunks = collect(array_chunk($episodeIds, 50))
+                                ->map(fn ($chunk) => new ProbeVodStreamsChunk(episodeIds: $chunk, probeTimeout: 15))
+                                ->all();
+
+                            Bus::chain([
+                                ...$chunks,
+                                new ProbeVodStreamsComplete(
+                                    playlistId: null,
+                                    total: count($episodeIds),
+                                    start: $start,
+                                    episodeIds: $episodeIds,
+                                    notifyUserId: auth()->id(),
+                                ),
+                            ])
+                                ->onConnection('redis')
+                                ->onQueue('import')
+                                ->dispatch();
                         }
                     })->after(function () {
                         Notification::make()

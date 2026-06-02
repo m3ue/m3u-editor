@@ -38,6 +38,7 @@ class PluginScaffoldService
         string $cleanupMode = 'preserve',
         bool $lifecycle = false,
         bool $bare = false,
+        array $tables = [],
     ): array {
         $ids = $this->deriveIdentifiers($name);
 
@@ -62,6 +63,7 @@ class PluginScaffoldService
             capabilities: $capabilities,
             hooks: $hooks,
             cleanupMode: $cleanupMode,
+            tables: $tables,
         );
         $files['plugin.json'] = json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES).PHP_EOL;
 
@@ -106,6 +108,7 @@ class PluginScaffoldService
         bool $lifecycle = false,
         bool $bare = false,
         bool $force = false,
+        array $tables = [],
     ): string {
         $pluginId = Str::slug(trim($name));
         $pluginPath = rtrim($targetDirectory, DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR.$pluginId;
@@ -117,7 +120,7 @@ class PluginScaffoldService
             File::deleteDirectory($pluginPath);
         }
 
-        $files = $this->scaffold($name, $description, $capabilities, $hooks, $cleanupMode, $lifecycle, $bare);
+        $files = $this->scaffold($name, $description, $capabilities, $hooks, $cleanupMode, $lifecycle, $bare, $tables);
 
         File::ensureDirectoryExists($pluginPath);
 
@@ -147,9 +150,10 @@ class PluginScaffoldService
         string $cleanupMode = 'preserve',
         bool $lifecycle = false,
         bool $bare = false,
+        array $tables = [],
     ): string {
         $pluginId = Str::slug(trim($name));
-        $files = $this->scaffold($name, $description, $capabilities, $hooks, $cleanupMode, $lifecycle, $bare);
+        $files = $this->scaffold($name, $description, $capabilities, $hooks, $cleanupMode, $lifecycle, $bare, $tables);
 
         $zipPath = sys_get_temp_dir().DIRECTORY_SEPARATOR.$pluginId.'-'.Str::random(8).'.zip';
         $zip = new ZipArchive;
@@ -254,6 +258,7 @@ class PluginScaffoldService
         array $capabilities,
         array $hooks,
         string $cleanupMode,
+        array $tables = [],
     ): array {
         $settings = [];
 
@@ -280,6 +285,17 @@ class PluginScaffoldService
             $permissions[] = 'scheduled_runs';
         }
 
+        [$schemaTables, $uiTables, $ownedTableNames] = $this->buildTableSchema($pluginId, $tables);
+
+        if ($schemaTables !== []) {
+            array_push($permissions, 'schema_manage', 'db_read', 'db_write');
+        }
+
+        $schema = ['tables' => $schemaTables];
+        if ($uiTables !== []) {
+            $schema['ui_tables'] = $uiTables;
+        }
+
         return [
             'id' => $pluginId,
             'name' => $displayName,
@@ -291,11 +307,9 @@ class PluginScaffoldService
             'capabilities' => $capabilities,
             'hooks' => $hooks,
             'permissions' => array_values(array_unique($permissions)),
-            'schema' => [
-                'tables' => [],
-            ],
+            'schema' => $schema,
             'data_ownership' => [
-                'tables' => [],
+                'tables' => $ownedTableNames,
                 'directories' => [
                     "plugin-data/{$pluginId}",
                     "plugin-reports/{$pluginId}",
@@ -311,6 +325,63 @@ class PluginScaffoldService
                 'fields' => [],
             ]],
         ];
+    }
+
+    /**
+     * Build schema.tables, schema.ui_tables, and the owned table name list from bare table slugs.
+     *
+     * @param  array<int, string>  $tables  Base names like ['profiles', 'items']
+     * @return array{0: array<int, array<string, mixed>>, 1: array<int, array<string, mixed>>, 2: array<int, string>}
+     */
+    private function buildTableSchema(string $pluginId, array $tables): array
+    {
+        $prefix = 'plugin_'.Str::of($pluginId)->replace('-', '_')->lower()->value().'_';
+        $slugs = collect($tables)
+            ->map(fn (mixed $t): string => Str::snake(trim((string) $t)))
+            ->filter(fn (string $t): bool => $t !== '')
+            ->unique()
+            ->values()
+            ->all();
+
+        $schemaTables = [];
+        $uiTables = [];
+        $ownedTableNames = [];
+
+        foreach ($slugs as $slug) {
+            $tableName = $prefix.$slug;
+            $label = Str::headline($slug);
+
+            $schemaTables[] = [
+                'name' => $tableName,
+                'columns' => [
+                    ['type' => 'id', 'name' => 'id'],
+                    ['type' => 'foreignId', 'name' => 'extension_plugin_id', 'references' => 'extension_plugins', 'on_delete' => 'cascade'],
+                    ['type' => 'string', 'name' => 'name'],
+                    ['type' => 'boolean', 'name' => 'enabled', 'default' => true],
+                    ['type' => 'timestamps'],
+                ],
+                'indexes' => [],
+            ];
+
+            $uiTables[] = [
+                'id' => $slug,
+                'label' => $label,
+                'model_label' => Str::singular($label),
+                'table' => $tableName,
+                'columns' => [
+                    ['name' => 'name', 'label' => 'Name', 'searchable' => true, 'sortable' => true],
+                    ['name' => 'enabled', 'label' => 'Enabled', 'type' => 'boolean', 'editable' => true],
+                ],
+                'fields' => [
+                    ['id' => 'name', 'label' => 'Name', 'type' => 'text', 'required' => true],
+                    ['id' => 'enabled', 'label' => 'Enabled', 'type' => 'boolean', 'default' => true],
+                ],
+            ];
+
+            $ownedTableNames[] = $tableName;
+        }
+
+        return [$schemaTables, $uiTables, $ownedTableNames];
     }
 
     /**

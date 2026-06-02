@@ -80,27 +80,19 @@ class VodFileNameService
      */
     public function resolveEdition(Channel $channel): string
     {
+        // Edition is provider-driven only. We never guess from title/name, because
+        // a token like "4K UHD" in the title is a quality marker, not an edition.
         $explicit = $this->scalarAttribute($channel, 'edition');
         if ($explicit !== '') {
             return $explicit;
         }
 
-        $haystacks = [
-            $this->scalarAttribute($channel, 'title_custom'),
-            $this->scalarAttribute($channel, 'title'),
-            $this->scalarAttribute($channel, 'name_custom'),
-            $this->scalarAttribute($channel, 'name'),
-            $this->scalarFromArray($channel->info ?? [], ['edition', 'movie_edition', 'release_name']),
-            $this->scalarFromArray($channel->movie_data ?? [], ['edition', 'movie_edition', 'release_name']),
-        ];
-        foreach ($haystacks as $h) {
-            $found = self::detectEdition($h);
-            if ($found !== '') {
-                return $found;
-            }
+        $info = $this->scalarFromArray($channel->info ?? [], ['edition', 'movie_edition', 'release_name']);
+        if ($info !== '') {
+            return $info;
         }
 
-        return '';
+        return $this->scalarFromArray($channel->movie_data ?? [], ['edition', 'movie_edition', 'release_name']);
     }
 
     /**
@@ -119,8 +111,8 @@ class VodFileNameService
             'edition' => $this->resolveEdition($channel),
             'quality' => $this->quality($channel, $setting, $streamStats, $hasStats),
             'video' => $this->preferStatsOrManual($hasStats ? StreamStatsService::detectVideoCodec($streamStats) : '', fn () => $this->manualValue($channel, $setting, ['video', 'video_format', 'video_codec'])),
-            'audio' => $this->preferStatsManualOrTitle($hasStats ? StreamStatsService::detectAudio($streamStats) : '', fn () => $this->manualValue($channel, $setting, ['audio', 'audio_format', 'audio_codec']), fn () => TitleMetadataParser::detectAudio($this->rawTitle($channel))),
-            'hdr' => $this->preferStatsManualOrTitle($hasStats ? StreamStatsService::detectHdr($streamStats) : '', fn () => $this->manualValue($channel, $setting, ['hdr', 'hdr_format']), fn () => TitleMetadataParser::detectHdr($this->rawTitle($channel))),
+            'audio' => $this->preferStatsOrManual($hasStats ? StreamStatsService::detectAudio($streamStats) : '', fn () => $this->manualValue($channel, $setting, ['audio', 'audio_format', 'audio_codec'])),
+            'hdr' => $this->preferStatsOrManual($hasStats ? StreamStatsService::detectHdr($streamStats) : '', fn () => $this->manualValue($channel, $setting, ['hdr', 'hdr_format'])),
         ];
 
         $out = '';
@@ -167,9 +159,9 @@ class VodFileNameService
             '{year}' => ($year !== '' && strpos($title, "({$year})") !== false) ? '' : $year,
             '{edition}' => $this->formatOptional($this->scalarAttribute($channel, 'edition'), prefix: ' '),
             '{quality}' => $this->quality($channel, $setting, $streamStats, $hasStats),
-            '{audio}' => $this->preferStatsManualOrTitle($hasStats ? StreamStatsService::detectAudio($streamStats) : '', fn () => $this->manualValue($channel, $setting, ['audio', 'audio_format', 'audio_codec']), fn () => TitleMetadataParser::detectAudio($this->rawTitle($channel))),
+            '{audio}' => $this->preferStatsOrManual($hasStats ? StreamStatsService::detectAudio($streamStats) : '', fn () => $this->manualValue($channel, $setting, ['audio', 'audio_format', 'audio_codec'])),
             '{video}' => $this->preferStatsOrManual($hasStats ? StreamStatsService::detectVideoCodec($streamStats) : '', fn () => $this->manualValue($channel, $setting, ['video', 'video_format', 'video_codec'])),
-            '{hdr}' => $this->preferStatsManualOrTitle($hasStats ? StreamStatsService::detectHdr($streamStats) : '', fn () => $this->manualValue($channel, $setting, ['hdr', 'hdr_format']), fn () => TitleMetadataParser::detectHdr($this->rawTitle($channel))),
+            '{hdr}' => $this->preferStatsOrManual($hasStats ? StreamStatsService::detectHdr($streamStats) : '', fn () => $this->manualValue($channel, $setting, ['hdr', 'hdr_format'])),
             '{group}' => '',
             '{-group}' => '',
         ];
@@ -222,40 +214,8 @@ class VodFileNameService
             }
         }
 
-        $manual = $this->manualValue($channel, $setting, ['quality', 'resolution']);
-        if ($manual !== '') {
-            return $manual;
-        }
-
-        return TitleMetadataParser::detectQuality($this->rawTitle($channel));
-    }
-
-    /**
-     * Get the channel's raw title-like fields for title-based metadata extraction.
-     */
-    private function rawTitle(Channel $channel): string
-    {
-        return trim(implode(' ', array_filter([
-            $this->scalarAttribute($channel, 'title'),
-            $this->scalarAttribute($channel, 'name'),
-            $this->scalarAttribute($channel, 'title_custom'),
-        ])));
-    }
-
-    /**
-     * Stats → manual → title-based fallback chain.
-     */
-    private function preferStatsManualOrTitle(string $statsValue, \Closure $manualFallback, \Closure $titleFallback): string
-    {
-        if ($statsValue !== '') {
-            return $statsValue;
-        }
-        $manual = $manualFallback();
-        if ($manual !== '') {
-            return $manual;
-        }
-
-        return $titleFallback();
+        // No title-based fallback: only probed stats or explicit manual value.
+        return $this->manualValue($channel, $setting, ['quality', 'resolution']);
     }
 
     private function preferStatsOrManual(string $statsValue, \Closure $manualFallback): string

@@ -7,6 +7,9 @@ use Spatie\LaravelSettings\Settings;
 
 class GeneralSettings extends Settings
 {
+    // Notification settings
+    public ?bool $suppress_success_notifications = false;
+
     // General UI settings
     public ?string $navigation_position = 'left';
 
@@ -213,6 +216,8 @@ class GeneralSettings extends Settings
 
     public ?bool $tmdb_auto_lookup_on_import = false;
 
+    public ?string $tmdb_auto_lookup_all_new = 'enabled';
+
     public ?int $tmdb_rate_limit = 40;
 
     public ?string $tmdb_language = 'en-US';
@@ -250,6 +255,21 @@ class GeneralSettings extends Settings
     public ?array $copilot_global_tools = null;
 
     public ?array $copilot_quick_actions = null;
+
+    // Alerts - Slack / Discord integration
+    public ?bool $discord_alerts_enabled = false;
+
+    public ?string $discord_webhook_url = null;
+
+    public ?bool $slack_alerts_enabled = false;
+
+    public ?string $slack_webhook_url = null;
+
+    /** Forward queued job failures to enabled alert channels */
+    public ?bool $alerts_on_job_failed = false;
+
+    /** Forward playlist import failures to enabled alert channels */
+    public ?bool $alerts_on_import_failed = false;
 
     public static function group(): string
     {

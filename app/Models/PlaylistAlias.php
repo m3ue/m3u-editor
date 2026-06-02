@@ -110,6 +110,26 @@ class PlaylistAlias extends Model
             || ! empty($this->group_filter['selected_categories']);
     }
 
+    /**
+     * The custom live group order for this alias (internal group names, in order).
+     *
+     * @return array<string>
+     */
+    public function getLiveGroupSortOrder(): array
+    {
+        return $this->group_filter['live_group_order'] ?? [];
+    }
+
+    /**
+     * Whether this alias should deliver its live groups in a custom order rather
+     * than inheriting the source playlist's group ordering.
+     */
+    public function hasCustomLiveGroupSort(): bool
+    {
+        return ! empty($this->group_filter['sort_live_groups_custom'])
+            && ! empty($this->group_filter['live_group_order']);
+    }
+
     public function getPrimaryXtreamConfig(): ?array
     {
         return $this->xtream_config[0] ?? null;
@@ -326,20 +346,42 @@ class PlaylistAlias extends Model
         // (Xtream API, M3U generation, EPG, counts, etc.) without duplication.
         // group_internal is the provider-supplied name updated on every sync and is never
         // overridden by the user, unlike the user-facing group name.
+        //
+        // Custom channels (is_custom = true) never have group_internal set — it is only
+        // populated during provider sync. For custom channels we fall back to comparing
+        // channels.group (the user-assigned display name) against the filter list.
+        // Custom channels with no group assigned (group IS NULL) always pass through
+        // because they cannot be meaningfully filtered by a provider group name.
         $liveGroups = $this->getAllowedLiveGroupNames();
         $vodGroups = $this->getAllowedVodGroupNames();
 
         if (! empty($liveGroups)) {
             $relation->where(function ($q) use ($liveGroups): void {
                 $q->where('channels.is_vod', true)
-                    ->orWhereIn('channels.group_internal', $liveGroups);
+                    ->orWhereIn('channels.group_internal', $liveGroups)
+                    ->orWhere(function ($q) use ($liveGroups): void {
+                        // Custom channels: match on user-assigned group name, or pass through if ungrouped
+                        $q->where('channels.is_custom', true)
+                            ->where(function ($q) use ($liveGroups): void {
+                                $q->whereNull('channels.group')
+                                    ->orWhereIn('channels.group', $liveGroups);
+                            });
+                    });
             });
         }
 
         if (! empty($vodGroups)) {
             $relation->where(function ($q) use ($vodGroups): void {
                 $q->where('channels.is_vod', false)
-                    ->orWhereIn('channels.group_internal', $vodGroups);
+                    ->orWhereIn('channels.group_internal', $vodGroups)
+                    ->orWhere(function ($q) use ($vodGroups): void {
+                        // Custom channels: match on user-assigned group name, or pass through if ungrouped
+                        $q->where('channels.is_custom', true)
+                            ->where(function ($q) use ($vodGroups): void {
+                                $q->whereNull('channels.group')
+                                    ->orWhereIn('channels.group', $vodGroups);
+                            });
+                    });
             });
         }
 
@@ -504,11 +546,10 @@ class PlaylistAlias extends Model
 
     /**
      * Transform channel URL to use this alias's provider config
-     * Only transforms the standard URL, not custom URLs
      */
     public function transformChannelUrl(Channel $channel): string
     {
-        $originalUrl = $channel->url ?? '';
+        $originalUrl = $channel->url_custom ?: ($channel->url ?? '');
 
         // We need at least one alias xtream config to do any transformation.
         $primaryAliasConfig = $this->getPrimaryXtreamConfig();

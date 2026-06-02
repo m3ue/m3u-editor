@@ -256,6 +256,7 @@ class ProfileService
         ?string $channelPlaylistUuid = null,
         bool $forceSelect = false,
         ?string $clientIdentifier = null,
+        string $streamType = 'channel',
     ): array {
         if (! $playlist->profiles_enabled) {
             return [null, null];
@@ -283,13 +284,14 @@ class ProfileService
             // allocating a slot during the window before the first stream is visible
             // in m3u-proxy (i.e. before findExistingPooledStream would find it).
             if ($channelId !== null && $channelPlaylistUuid !== null) {
-                $channelStreamKey = static::getChannelStreamKey($channelId, $channelPlaylistUuid);
+                $channelStreamKey = static::getChannelStreamKey($channelId, $channelPlaylistUuid, $streamType);
 
                 if (Redis::exists($channelStreamKey)) {
                     Log::debug('Channel reuse detected inside lock — skipping profile allocation', [
                         'channel_id' => $channelId,
                         'playlist_uuid' => $channelPlaylistUuid,
                         'playlist_id' => $playlist->id,
+                        'stream_type' => $streamType,
                     ]);
 
                     // Return [null, null]. Caller should check isChannelStreamActive()
@@ -309,12 +311,12 @@ class ProfileService
                 // Mark this channel as having a pending reservation (short TTL so
                 // it self-expires if stream creation fails before finalizeReservation).
                 if ($channelId !== null && $channelPlaylistUuid !== null) {
-                    $channelStreamKey = static::getChannelStreamKey($channelId, $channelPlaylistUuid);
+                    $channelStreamKey = static::getChannelStreamKey($channelId, $channelPlaylistUuid, $streamType);
                     $reverseKey = static::getStreamChannelKey($reservationId);
 
-                    Redis::pipeline(function ($pipe) use ($channelStreamKey, $reverseKey, $reservationId, $channelId, $channelPlaylistUuid) {
+                    Redis::pipeline(function ($pipe) use ($channelStreamKey, $reverseKey, $reservationId, $channelId, $channelPlaylistUuid, $streamType) {
                         $pipe->setex($channelStreamKey, static::CHANNEL_STREAM_PENDING_TTL, $reservationId);
-                        $pipe->setex($reverseKey, static::CHANNEL_STREAM_PENDING_TTL, "{$channelId}:{$channelPlaylistUuid}");
+                        $pipe->setex($reverseKey, static::CHANNEL_STREAM_PENDING_TTL, "{$streamType}:{$channelId}:{$channelPlaylistUuid}");
                     });
                 }
 
@@ -355,6 +357,7 @@ class ProfileService
         string $realStreamId,
         ?int $channelId = null,
         ?string $channelPlaylistUuid = null,
+        string $streamType = 'channel',
     ): void {
         $streamsKey = static::getProfileStreamsKey($profile);
 
@@ -368,10 +371,10 @@ class ProfileService
 
             // Upgrade the channel→stream mapping from pending reservation ID to real stream ID.
             if ($channelId !== null && $channelPlaylistUuid !== null) {
-                $channelStreamKey = static::getChannelStreamKey($channelId, $channelPlaylistUuid);
+                $channelStreamKey = static::getChannelStreamKey($channelId, $channelPlaylistUuid, $streamType);
                 $oldReverseKey = static::getStreamChannelKey($reservationId);
                 $newReverseKey = static::getStreamChannelKey($realStreamId);
-                $channelValue = "{$channelId}:{$channelPlaylistUuid}";
+                $channelValue = "{$streamType}:{$channelId}:{$channelPlaylistUuid}";
 
                 Redis::pipeline(function ($pipe) use ($channelStreamKey, $oldReverseKey, $newReverseKey, $realStreamId, $channelValue) {
                     // Upgrade channel key to real stream ID (long TTL)
@@ -526,12 +529,22 @@ class ProfileService
 
             // Clear the channel→stream key only when it still points to this stream,
             // to avoid clobbering a newer stream on rapid channel switches.
+            // Format: "{streamType}:{channelId}:{playlistUuid}" (legacy: "{channelId}:{playlistUuid}")
             if ($channelValue !== null) {
-                $parts = explode(':', $channelValue, 2);
+                $parts = explode(':', $channelValue, 3);
 
-                if (count($parts) === 2) {
+                if (count($parts) === 3) {
+                    [$streamType, $channelId, $playlistUuid] = $parts;
+                } elseif (count($parts) === 2) {
+                    // Legacy format written before stream-type namespacing was added.
+                    $streamType = 'channel';
                     [$channelId, $playlistUuid] = $parts;
-                    $channelStreamKey = static::getChannelStreamKey((int) $channelId, $playlistUuid);
+                } else {
+                    $streamType = null;
+                }
+
+                if ($streamType !== null) {
+                    $channelStreamKey = static::getChannelStreamKey((int) $channelId, $playlistUuid, $streamType);
 
                     if (Redis::get($channelStreamKey) === $streamId) {
                         Redis::del($channelStreamKey);
@@ -979,9 +992,9 @@ class ProfileService
      * Returns null when the key is absent or only a pending reservation exists
      * (reservation IDs start with the 'reservation:' prefix).
      */
-    public static function getChannelActiveStreamId(int $channelId, string $playlistUuid): ?string
+    public static function getChannelActiveStreamId(int $channelId, string $playlistUuid, string $streamType = 'channel'): ?string
     {
-        $key = static::getChannelStreamKey($channelId, $playlistUuid);
+        $key = static::getChannelStreamKey($channelId, $playlistUuid, $streamType);
 
         try {
             $value = Redis::get($key);
@@ -1003,9 +1016,9 @@ class ProfileService
     /**
      * Check whether a channel has an active stream or pending reservation.
      */
-    public static function isChannelStreamActive(int $channelId, string $playlistUuid): bool
+    public static function isChannelStreamActive(int $channelId, string $playlistUuid, string $streamType = 'channel'): bool
     {
-        $key = static::getChannelStreamKey($channelId, $playlistUuid);
+        $key = static::getChannelStreamKey($channelId, $playlistUuid, $streamType);
 
         try {
             return Redis::exists($key) > 0;
@@ -1019,9 +1032,9 @@ class ProfileService
      *
      * Called when a stale key is detected (e.g. stream died but key was not cleaned up).
      */
-    public static function clearChannelStreamMapping(int $channelId, string $playlistUuid): void
+    public static function clearChannelStreamMapping(int $channelId, string $playlistUuid, string $streamType = 'channel'): void
     {
-        $key = static::getChannelStreamKey($channelId, $playlistUuid);
+        $key = static::getChannelStreamKey($channelId, $playlistUuid, $streamType);
 
         try {
             Redis::del($key);
@@ -1043,9 +1056,9 @@ class ProfileService
     /**
      * Get the Redis key tracking which stream is serving a given channel.
      */
-    protected static function getChannelStreamKey(int $channelId, string $playlistUuid): string
+    protected static function getChannelStreamKey(int $channelId, string $playlistUuid, string $streamType = 'channel'): string
     {
-        return "channel_stream:{$channelId}:{$playlistUuid}";
+        return "{$streamType}_stream:{$channelId}:{$playlistUuid}";
     }
 
     /**

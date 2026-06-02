@@ -5,7 +5,9 @@ namespace App\Filament\Resources\Playlists;
 use App\Enums\PlaylistSourceType;
 use App\Enums\Status;
 use App\Facades\PlaylistFacade;
+use App\Filament\Actions\CronHelperAction;
 use App\Filament\Actions\ModalActionGroup;
+use App\Filament\Actions\RegexTesterAction;
 use App\Filament\Concerns\HasCopilotSupport;
 use App\Filament\Resources\MediaServerIntegrations\MediaServerIntegrationResource;
 use App\Filament\Resources\Playlists\Pages\CreatePlaylist;
@@ -45,6 +47,8 @@ use App\Services\DateFormatService;
 use App\Services\EpgCacheService;
 use App\Services\M3uProxyService;
 use App\Services\ProfileService;
+use App\Services\SyncPipelineService;
+use App\Services\XtreamService;
 use App\Tables\Columns\ProgressColumn;
 use App\Traits\HasUserFiltering;
 use Carbon\Carbon;
@@ -74,6 +78,7 @@ use Filament\Resources\Resource;
 use Filament\Schemas\Components\Actions;
 use Filament\Schemas\Components\Fieldset;
 use Filament\Schemas\Components\Grid;
+use Filament\Schemas\Components\Group as ComponentsGroup;
 use Filament\Schemas\Components\Livewire;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Tabs;
@@ -94,6 +99,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\HtmlString;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
 class PlaylistResource extends Resource implements CopilotResource
@@ -413,8 +419,9 @@ class PlaylistResource extends Resource implements CopilotResource
                                     'status' => Status::Processing,
                                     'progress' => 0,
                                 ]);
+                                $syncRun = app(SyncPipelineService::class)->startImport($record, trigger: 'filament_refresh');
                                 app('Illuminate\Contracts\Bus\Dispatcher')
-                                    ->dispatch(new ProcessM3uImport($record, force: true));
+                                    ->dispatch(new ProcessM3uImport($record, force: true, syncRunId: $syncRun->id));
                             }
                         })->after(function () {
                             Notification::make()
@@ -514,8 +521,9 @@ class PlaylistResource extends Resource implements CopilotResource
                             'status' => Status::Processing,
                             'progress' => 0,
                         ]);
+                        $syncRun = app(SyncPipelineService::class)->startImport($record, trigger: 'filament_refresh');
                         app('Illuminate\Contracts\Bus\Dispatcher')
-                            ->dispatch(new ProcessM3uImport($record, force: true));
+                            ->dispatch(new ProcessM3uImport($record, force: true, syncRunId: $syncRun->id));
                     })->after(function ($record) {
                         $isMediaServer = in_array($record->source_type, [PlaylistSourceType::Emby, PlaylistSourceType::Jellyfin]);
                         $message = $isMediaServer
@@ -843,7 +851,85 @@ class PlaylistResource extends Resource implements CopilotResource
                         ->url()
                         ->columnSpan(2)
                         ->required()
-                        ->hidden(fn (Get $get): bool => ! $get('xtream')),
+                        ->hidden(fn (Get $get): bool => ! $get('xtream'))
+                        ->suffixAction(
+                            Action::make('test_xtream_connection')
+                                ->label(__('Test connection'))
+                                ->icon('heroicon-m-signal')
+                                ->tooltip(__('Test Xtream API connection using the credentials below'))
+                                ->action(function (Get $get): void {
+                                    $url = $get('xtream_config.url');
+                                    $username = $get('xtream_config.username');
+                                    $password = $get('xtream_config.password');
+
+                                    if (empty($url) || empty($username) || empty($password)) {
+                                        Notification::make()
+                                            ->title(__('Missing Credentials'))
+                                            ->body(__('Please fill in the Xtream API URL, username, and password before testing.'))
+                                            ->warning()
+                                            ->send();
+
+                                        return;
+                                    }
+
+                                    try {
+                                        $xtream = XtreamService::make(xtream_config: [
+                                            'url' => $url,
+                                            'username' => $username,
+                                            'password' => $password,
+                                        ]);
+
+                                        $result = $xtream->userInfo(timeout: 10);
+
+                                        if (empty($result) || ! isset($result['user_info'])) {
+                                            Notification::make()
+                                                ->title(__('Connection Failed'))
+                                                ->body(__('No valid response from the Xtream API. Check your URL, username, and password.'))
+                                                ->danger()
+                                                ->send();
+
+                                            return;
+                                        }
+
+                                        $userInfo = $result['user_info'];
+                                        $serverInfo = $result['server_info'] ?? [];
+
+                                        $status = $userInfo['status'] ?? 'Unknown';
+                                        $maxConnections = $userInfo['max_connections'] ?? '?';
+                                        $activeCons = $userInfo['active_cons'] ?? '0';
+                                        $expDate = ! empty($userInfo['exp_date'])
+                                            ? date('Y-m-d', (int) $userInfo['exp_date'])
+                                            : 'Never';
+                                        $serverUrl = $serverInfo['url'] ?? $url;
+                                        $serverTime = ! empty($serverInfo['time_now'])
+                                            ? $serverInfo['time_now']
+                                            : 'Unknown';
+
+                                        $isActive = $status === 'Active';
+                                        $statusIcon = $isActive ? '✅' : '⚠️';
+
+                                        $details = "{$statusIcon} **Status:** {$status}\n\n";
+                                        $details .= "**Max Connections:** {$maxConnections}\n\n";
+                                        $details .= "**Active Connections:** {$activeCons}\n\n";
+                                        $details .= "**Expires:** {$expDate}\n\n";
+                                        $details .= "**Server:** {$serverUrl}\n\n";
+                                        $details .= "**Server Time:** {$serverTime}";
+
+                                        Notification::make()
+                                            ->title(__('Connection Successful'))
+                                            ->body(Str::markdown($details))
+                                            ->success()
+                                            ->persistent()
+                                            ->send();
+                                    } catch (Exception $e) {
+                                        Notification::make()
+                                            ->title(__('Connection Failed'))
+                                            ->body($e->getMessage())
+                                            ->danger()
+                                            ->send();
+                                    }
+                                }),
+                        ),
                     Section::make(__('DNS failover URLs'))
                         ->icon('heroicon-s-globe-alt')
                         ->iconSize('md')
@@ -1391,13 +1477,7 @@ class PlaylistResource extends Resource implements CopilotResource
                         ->placeholder(__('0 0 * * *'))
                         ->columnSpanFull()
                         ->hintAction(
-                            Action::make('view_cron_example')
-                                ->label(__('CRON Example'))
-                                ->icon('heroicon-o-arrow-top-right-on-square')
-                                ->iconPosition('after')
-                                ->size('sm')
-                                ->url('https://crontab.guru')
-                                ->openUrlInNewTab(true)
+                            CronHelperAction::make(name: 'playlist-sync-cron', cronField: 'sync_interval')
                         )
                         ->helperText(fn ($get) => $get('sync_interval') && CronExpression::isValidExpression($get('sync_interval'))
                             ? 'Next scheduled sync: '.(new CronExpression($get('sync_interval')))->getNextRunDate()->format(app(DateFormatService::class)->getFormat())
@@ -1530,7 +1610,11 @@ class PlaylistResource extends Resource implements CopilotResource
                                     'Sports.*HD$',
                                     '\[.*\]',
                                 ])
-                                ->splitKeys(['Tab', 'Return']),
+                                ->splitKeys(['Tab', 'Return'])
+                                ->hintAction(
+                                    RegexTesterAction::make(name: 'test-live-groups', flags: 'u', samplesContext: 'groups')
+                                        ->visible(fn (Get $get): bool => (bool) $get('import_prefs.use_regex'))
+                                ),
                         ])->hidden(fn (Get $get): bool => ! $get('import_prefs.preprocess') || ! $get('status')),
 
                     Fieldset::make(__('VOD processing'))
@@ -1619,7 +1703,11 @@ class PlaylistResource extends Resource implements CopilotResource
                                     'Sports.*HD$',
                                     '\[.*\]',
                                 ])
-                                ->splitKeys(['Tab', 'Return']),
+                                ->splitKeys(['Tab', 'Return'])
+                                ->hintAction(
+                                    RegexTesterAction::make(name: 'test-vod-groups', flags: 'u', samplesContext: 'vod_groups')
+                                        ->visible(fn (Get $get): bool => (bool) $get('import_prefs.use_regex'))
+                                ),
                         ])->hidden(fn (Get $get): bool => ! $get('import_prefs.preprocess') || ! $get('status') || ! $get('xtream')),
 
                     Fieldset::make(__('Series processing'))
@@ -1704,7 +1792,11 @@ class PlaylistResource extends Resource implements CopilotResource
                                     'Sports.*HD$',
                                     '\[.*\]',
                                 ])
-                                ->splitKeys(['Tab', 'Return']),
+                                ->splitKeys(['Tab', 'Return'])
+                                ->hintAction(
+                                    RegexTesterAction::make(name: 'test-categories', flags: 'u', samplesContext: 'categories')
+                                        ->visible(fn (Get $get): bool => (bool) $get('import_prefs.use_regex'))
+                                ),
                         ])->hidden(fn (Get $get): bool => ! $get('import_prefs.preprocess') || ! $get('status') || ! $get('xtream')),
 
                     TagsInput::make('import_prefs.ignored_file_types')
@@ -2013,6 +2105,45 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ->default(false),
                         ]),
 
+                    Fieldset::make(__('Fallback matching for channels without IDs'))
+                        ->columnSpanFull()
+                        ->columns(2)
+                        ->hidden(fn (Get $get): bool => ! $get('auto_merge_channels_enabled'))
+                        ->schema([
+                            Toggle::make('auto_merge_config.fallback_name_matching_enabled')
+                                ->label(__('Enable name or alias fallback'))
+                                ->live()
+                                ->inline(false)
+                                ->default(false)
+                                ->helperText(__('Only channels without a usable stream ID are matched by name or alias. Quality labels such as HD, FHD, UHD and 4K are not removed automatically to avoid merging SD and HD variants by accident.')),
+                            Select::make('auto_merge_config.fallback_name_matching_mode')
+                                ->label(__('Fallback match mode'))
+                                ->options([
+                                    'normalized_name' => __('Exact normalized name only'),
+                                    'alias_rules' => __('Alias rules only'),
+                                    'normalized_name_and_alias_rules' => __('Normalized name and alias rules'),
+                                ])
+                                ->default('normalized_name')
+                                ->visible(fn (Get $get): bool => (bool) $get('auto_merge_config.fallback_name_matching_enabled')),
+                            Repeater::make('auto_merge_config.fallback_alias_rules')
+                                ->label(__('Fallback alias groups'))
+                                ->helperText(__('Add aliases that should deliberately merge together. Duplicate aliases across groups are ignored to avoid bridging groups.'))
+                                ->schema([
+                                    TextInput::make('label')
+                                        ->label(__('Group label'))
+                                        ->placeholder('e.g. "BBC One variants"')
+                                        ->required(),
+                                    TagsInput::make('aliases')
+                                        ->label(__('Aliases'))
+                                        ->placeholder('e.g. "BBC One, BBC 1, BBC1, BBC One HD"')
+                                        ->splitKeys(['Tab', 'Return', ',']),
+                                ])
+                                ->columns(2)
+                                ->columnSpanFull()
+                                ->defaultItems(0)
+                                ->visible(fn (Get $get): bool => (bool) $get('auto_merge_config.fallback_name_matching_enabled')),
+                        ]),
+
                     Fieldset::make(__('Advanced Priority Scoring (optional)'))
                         ->columnSpanFull()
                         ->columns(2)
@@ -2227,6 +2358,13 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ->label(fn (Get $get): string => ($get('use_regex') ?? true) ? 'Pattern to find' : 'String to find')
                                 ->required()
                                 ->placeholder(fn (Get $get): string => ($get('use_regex') ?? true) ? '^(US- |UK- |CA- )' : 'US -')
+                                ->suffixAction(
+                                    RegexTesterAction::make(
+                                        samplesContext: fn (Get $get): string => $get('target') ?? 'channels',
+                                        patternField: 'find_replace',
+                                        replacementField: 'replace_with',
+                                    )->visible(fn (Get $get): bool => (bool) ($get('use_regex') ?? true))
+                                )
                                 ->columnSpan(3),
                             TextInput::make('replace_with')
                                 ->label(__('Replace with'))
@@ -2496,23 +2634,45 @@ class PlaylistResource extends Resource implements CopilotResource
                         ->inline(false)
                         ->default(true)
                         ->helperText(__('NOTE: You will need to re-sync your playlist, or wait for the next scheduled sync, if changing this. This will overwrite any existing channel sort order customization for this playlist.')),
-                    Toggle::make('disable_catchup')
-                        ->label(__('Disable catch-up'))
-                        ->columnSpan(1)
-                        ->inline(false)
-                        ->default(false)
-                        ->hintIcon(
-                            'heroicon-m-question-mark-circle',
-                            tooltip: 'When enabled, catch-up attributes will be stripped from M3U output and Xtream API responses (tv_archive, tv_archive_duration, has_archive).'
-                        )
-                        ->helperText(__('Strip all catch-up related attributes from the playlist output and Xtream API. Useful when your provider\\\'s catch-up doesn\\\'t work or is unreliable.')),
-                    Toggle::make('auto_channel_increment')
-                        ->label(__('Auto channel number increment'))
-                        ->columnSpan(1)
-                        ->inline(false)
-                        ->live()
-                        ->default(false)
-                        ->helperText(__('If no channel number is set, output an automatically incrementing number.')),
+                    ComponentsGroup::make()
+                        ->columnSpanFull()
+                        ->columns(3)
+                        ->schema([
+                            Toggle::make('disable_catchup')
+                                ->label(__('Disable catch-up'))
+                                ->columnSpan(1)
+                                ->inline(false)
+                                ->default(false)
+                                ->hintIcon(
+                                    'heroicon-m-question-mark-circle',
+                                    tooltip: 'When enabled, catch-up attributes will be stripped from M3U output and Xtream API responses (tv_archive, tv_archive_duration, has_archive).'
+                                )
+                                ->helperText(__('Strip all catch-up related attributes from the playlist output and Xtream API. Useful when your provider\\\'s catch-up doesn\\\'t work or is unreliable.')),
+                            Toggle::make('disable_m3u_xtream_format')
+                                ->label(__('Disable Xtream URL format in M3U output'))
+                                ->columnSpan(1)
+                                ->inline(false)
+                                ->default(false)
+                                ->hintIcon(
+                                    'heroicon-m-question-mark-circle',
+                                    tooltip: 'When enabled, the provider\'s original stream URL will be used directly in M3U output instead of the internal Xtream-format URL.'
+                                )
+                                ->afterStateHydrated(function (Toggle $component) {
+                                    if (config('app.disable_m3u_xtream_format', false)) {
+                                        $component->state(true);
+                                    }
+                                })
+                                ->dehydrated(fn (): bool => ! config('app.disable_m3u_xtream_format', false))
+                                ->disabled(fn (): bool => config('app.disable_m3u_xtream_format', false))
+                                ->helperText(config('app.disable_m3u_xtream_format', false) ? __('Already set by environment variable!') : __('Output the provider URL directly in M3U instead of routing through the internal Xtream URL format.')),
+                            Toggle::make('auto_channel_increment')
+                                ->label(__('Auto channel number increment'))
+                                ->columnSpan(1)
+                                ->inline(false)
+                                ->live()
+                                ->default(false)
+                                ->helperText(__('If no channel number is set, output an automatically incrementing number.')),
+                        ]),
                     TextInput::make('channel_start')
                         ->helperText(__('The starting channel number.'))
                         ->columnSpan(1)
@@ -2988,8 +3148,9 @@ class PlaylistResource extends Resource implements CopilotResource
                             'progress' => 0,
                             'vod_progress' => 0,
                         ]);
+                        $syncRun = app(SyncPipelineService::class)->startImport($record, trigger: 'filament_refresh');
                         app('Illuminate\Contracts\Bus\Dispatcher')
-                            ->dispatch(new ProcessM3uImport($record, force: true));
+                            ->dispatch(new ProcessM3uImport($record, force: true, syncRunId: $syncRun->id));
                     })->after(function ($record) {
                         $isMediaServer = in_array($record->source_type, [PlaylistSourceType::Emby, PlaylistSourceType::Jellyfin]);
                         $message = $isMediaServer
@@ -3248,6 +3409,15 @@ class PlaylistResource extends Resource implements CopilotResource
                     ->icon('heroicon-m-arrows-right-left')
                     ->url(function (Playlist $record): string {
                         return "/playlists/{$record->id}/playlist-sync-statuses";
+                    })
+                    ->openUrlInNewTab(false)
+                    ->hidden(fn (Playlist $record): bool => $record->is_network_playlist || $record->isMediaServerPlaylist()),
+                Action::make('view_sync_runs')
+                    ->label(__('View Sync Runs'))
+                    ->color('gray')
+                    ->icon('heroicon-m-queue-list')
+                    ->url(function (Playlist $record): string {
+                        return "/playlists/{$record->id}/sync-runs";
                     })
                     ->openUrlInNewTab(false)
                     ->hidden(fn (Playlist $record): bool => $record->is_network_playlist || $record->isMediaServerPlaylist()),

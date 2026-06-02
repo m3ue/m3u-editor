@@ -3,9 +3,11 @@
 namespace App\Jobs;
 
 use App\Enums\Status;
+use App\Enums\SyncRunPhase;
 use App\Models\Playlist;
 use App\Models\Series;
 use App\Models\User;
+use App\Services\SyncPipelineService;
 use App\Settings\GeneralSettings;
 use App\Traits\ProviderRequestDelay;
 use Filament\Notifications\Notification;
@@ -39,9 +41,10 @@ class ProcessM3uImportSeriesEpisodes implements ShouldQueue
         public bool $overwrite_existing = false,
         public ?int $user_id = null,
         public ?bool $sync_stream_files = true,
-        public ?int $batchOffset = null,  // For batch processing: starting offset
-        public ?int $totalBatches = null, // For tracking progress
-        public ?int $currentBatch = null, // Current batch number (1-indexed)
+        public ?int $batchOffset = null,
+        public ?int $totalBatches = null,
+        public ?int $currentBatch = null,
+        public ?int $syncRunId = null,
     ) {}
 
     /**
@@ -116,6 +119,11 @@ class ProcessM3uImportSeriesEpisodes implements ShouldQueue
                 }
             }
 
+            // Advance the pipeline so the run is not left stuck in running.
+            if ($this->syncRunId) {
+                app(SyncPipelineService::class)->completePhase($this->syncRunId, SyncRunPhase::SeriesMetadata);
+            }
+
             return;
         }
 
@@ -165,6 +173,7 @@ class ProcessM3uImportSeriesEpisodes implements ShouldQueue
             overwrite_existing: $this->overwrite_existing,
             user_id: $this->user_id,
             sync_stream_files: $this->sync_stream_files,
+            syncRunId: $this->syncRunId,
         );
 
         // Dispatch the chain

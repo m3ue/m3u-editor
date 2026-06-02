@@ -389,12 +389,16 @@ function streamPlayer() {
                     isLive,
                     enableWorker: true,
                     enableStashBuffer: isLive,
-                    liveBufferLatencyChasing: isLive,
-                    liveSync: isLive,
+                    // Latency chasing triggers seek() → flushSourceBuffer() →
+                    // removeSourceBuffer() while _pump microtasks are still in
+                    // flight, causing InvalidStateError on SourceBuffer access.
+                    // A floating player doesn't need sub-second live latency.
+                    liveBufferLatencyChasing: false,
+                    liveSync: false,
                     cors: true,
                     autoCleanupSourceBuffer: true,
-                    autoCleanupMaxBackwardDuration: isLive ? 10 : 30,
-                    autoCleanupMinBackwardDuration: isLive ? 5 : 15,
+                    autoCleanupMaxBackwardDuration: isLive ? 30 : 60,
+                    autoCleanupMinBackwardDuration: isLive ? 15 : 30,
                     reuseRedirectedURL: true,
                 });
 
@@ -800,6 +804,16 @@ function streamPlayer() {
             this.selectedAudioTrack = null;
             this.baseUrl = null;
 
+            // Track whether an MSE-based library was managing this element.
+            // Both HLS.js and mpegts.js use a MediaSource object URL as the
+            // video src and manage SourceBuffer lifecycle internally. Calling
+            // video.load() after destroy() immediately closes the MediaSource
+            // and removes all SourceBuffers while the library's queued async
+            // operations are still in flight, causing InvalidStateError when
+            // they try to read sourceBuffer.buffered (e.g. _needCleanupSourceBuffer).
+            const wasHls = !!this.hls;
+            const wasMpegts = !!this.mpegts;
+
             if (this.hls) {
                 try {
                     this.hls.destroy();
@@ -821,12 +835,19 @@ function streamPlayer() {
             // Remove video event listeners before clearing the element
             this._removeVideoHandlers(this.player);
 
-            // Also pause and clear any video element that might be playing
+            // Pause and clear any video element that might be playing.
             if (this.player && this.player.tagName === 'VIDEO') {
                 try {
                     this.player.pause();
                     this.player.removeAttribute('src');
-                    this.player.load(); // This will stop any ongoing loading/streaming
+                    // Skip video.load() when an MSE-based library (HLS.js or
+                    // mpegts.js) was active. Their destroy() methods handle MSE
+                    // teardown internally. Calling load() here races with their
+                    // queued async operations and causes InvalidStateError on
+                    // SourceBuffer access (e.g. _needCleanupSourceBuffer).
+                    if (!wasHls && !wasMpegts) {
+                        this.player.load();
+                    }
                     this.player._streamPlayer = null;
                 } catch (error) {
                     console.warn('Error cleaning up video element:', error);

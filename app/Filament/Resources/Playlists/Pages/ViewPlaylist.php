@@ -37,6 +37,13 @@ class ViewPlaylist extends ViewRecord
                 ->url(function (): string {
                     return "/playlists/{$this->getRecord()->id}/playlist-sync-statuses";
                 }),
+            Action::make('view_sync_runs')
+                ->label(__('View Sync Runs'))
+                ->color('gray')
+                ->icon('heroicon-m-queue-list')
+                ->url(function (): string {
+                    return "/playlists/{$this->getRecord()->id}/sync-runs";
+                }),
             // ...PlaylistResource::getHeaderActions()
         ];
     }

@@ -122,8 +122,16 @@ class CopyAttributesToPlaylist implements ShouldQueue
 
         // Preload existing groups for the target playlist into a case-insensitive map
         $groupNameToId = [];
+        $groupNameToTargetId = []; // track existing target group IDs for sort_order updates
         foreach ($targetPlaylist->groups()->get(['id', 'name']) as $g) {
             $groupNameToId[strtolower($g->name ?? '')] = $g->id;
+            $groupNameToTargetId[strtolower($g->name ?? '')] = $g->id;
+        }
+
+        // Preload source group sort orders by name
+        $sourceGroupSortOrders = [];
+        foreach ($sourcePlaylist->groups()->get(['name', 'sort_order']) as $g) {
+            $sourceGroupSortOrders[strtolower($g->name ?? '')] = $g->sort_order ?? 0;
         }
 
         // Build the target fields to select for matching
@@ -135,7 +143,7 @@ class CopyAttributesToPlaylist implements ShouldQueue
             // Process source channels in chunks, creating or updating as needed
             $sourcePlaylist->channels()
                 ->select($sourceFieldsToSelect)
-                ->chunkById($batchSize, function ($sourceChannels) use ($targetPlaylist, $targetFieldsToSelect, $attributeMapping, &$totalUpdated, &$totalCreated, &$groupNameToId) {
+                ->chunkById($batchSize, function ($sourceChannels) use ($targetPlaylist, $targetFieldsToSelect, $attributeMapping, &$totalUpdated, &$totalCreated, &$groupNameToId, $sourceGroupSortOrders) {
                     $updates = [];
                     $channelsToCreate = [];
 
@@ -177,7 +185,7 @@ class CopyAttributesToPlaylist implements ShouldQueue
                         if (isset($targetChannelsByMatchKey[$matchKey])) {
                             // Update existing channel
                             $targetChannel = $targetChannelsByMatchKey[$matchKey];
-                            $updateData = $this->buildUpdateData($sourceChannel, $targetChannel, $attributeMapping, $groupNameToId, $targetPlaylist);
+                            $updateData = $this->buildUpdateData($sourceChannel, $targetChannel, $attributeMapping, $groupNameToId, $targetPlaylist, $sourceGroupSortOrders);
 
                             if (! empty($updateData)) {
                                 $updateData['updated_at'] = now();
@@ -185,7 +193,7 @@ class CopyAttributesToPlaylist implements ShouldQueue
                             }
                         } else {
                             // Create new channel
-                            $channelData = $this->buildChannelData($sourceChannel, $targetPlaylist, $groupNameToId);
+                            $channelData = $this->buildChannelData($sourceChannel, $targetPlaylist, $groupNameToId, $sourceGroupSortOrders);
                             $channelsToCreate[] = $channelData;
                         }
                     }
@@ -223,7 +231,7 @@ class CopyAttributesToPlaylist implements ShouldQueue
                     'station_id',
                     'sort',
                 ])))
-                ->chunkById($batchSize, function ($targetChannels) use ($sourcePlaylist, $sourceFieldsToSelect, $attributeMapping, &$totalUpdated, &$groupNameToId, $targetPlaylist) {
+                ->chunkById($batchSize, function ($targetChannels) use ($sourcePlaylist, $sourceFieldsToSelect, $attributeMapping, &$totalUpdated, &$groupNameToId, $targetPlaylist, $sourceGroupSortOrders) {
                     $updates = [];
 
                     // Build WHERE conditions to find matching source channels
@@ -260,7 +268,7 @@ class CopyAttributesToPlaylist implements ShouldQueue
                         }
 
                         $sourceChannel = $sourceChannelsByMatchKey[$matchKey];
-                        $updateData = $this->buildUpdateData($sourceChannel, $targetChannel, $attributeMapping, $groupNameToId, $targetPlaylist);
+                        $updateData = $this->buildUpdateData($sourceChannel, $targetChannel, $attributeMapping, $groupNameToId, $targetPlaylist, $sourceGroupSortOrders);
 
                         if (! empty($updateData)) {
                             $updateData['updated_at'] = now();
@@ -294,7 +302,8 @@ class CopyAttributesToPlaylist implements ShouldQueue
         $targetChannel,
         array $attributeMapping,
         array &$groupNameToId,
-        Playlist $targetPlaylist
+        Playlist $targetPlaylist,
+        array $sourceGroupSortOrders = []
     ): array {
         $updateData = [];
 
@@ -331,15 +340,21 @@ class CopyAttributesToPlaylist implements ShouldQueue
 
                 $lower = strtolower($desiredName);
 
+                $sortOrder = $sourceGroupSortOrders[$lower] ?? 0;
+
                 if (array_key_exists($lower, $groupNameToId)) {
                     $groupId = $groupNameToId[$lower];
+                    // Update sort_order on the existing target group if overwrite is enabled
+                    if ($this->overwrite && isset($sourceGroupSortOrders[$lower])) {
+                        Group::query()->where('id', $groupId)->update(['sort_order' => $sortOrder]);
+                    }
                 } else {
                     // Create the group for the target playlist and cache the id
                     $customGroup = Group::query()->create([
                         'name' => $desiredName,
                         'playlist_id' => $targetPlaylist->id,
                         'user_id' => $targetPlaylist->user_id ?? null,
-                        'sort_order' => 0,
+                        'sort_order' => $sortOrder,
                         'created_at' => now(),
                         'updated_at' => now(),
                     ]);
@@ -366,7 +381,8 @@ class CopyAttributesToPlaylist implements ShouldQueue
     private function buildChannelData(
         $sourceChannel,
         Playlist $targetPlaylist,
-        array &$groupNameToId
+        array &$groupNameToId,
+        array $sourceGroupSortOrders = []
     ): array {
         $channelData = [
             'is_custom' => true,
@@ -404,6 +420,7 @@ class CopyAttributesToPlaylist implements ShouldQueue
         if (! empty($sourceChannel->group)) {
             $groupName = trim((string) $sourceChannel->group);
             $lower = strtolower($groupName);
+            $sortOrder = $sourceGroupSortOrders[$lower] ?? 0;
 
             if (array_key_exists($lower, $groupNameToId)) {
                 $channelData['group_id'] = $groupNameToId[$lower];
@@ -413,7 +430,7 @@ class CopyAttributesToPlaylist implements ShouldQueue
                     'name' => $groupName,
                     'playlist_id' => $targetPlaylist->id,
                     'user_id' => $targetPlaylist->user_id ?? null,
-                    'sort_order' => 0,
+                    'sort_order' => $sortOrder,
                     'created_at' => now(),
                     'updated_at' => now(),
                 ]);

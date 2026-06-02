@@ -25,6 +25,8 @@ class PlaylistAuth extends Model
         'enabled' => 'boolean',
         'user_id' => 'integer',
         'expires_at' => 'datetime',
+        'max_connections' => 'integer',
+        'stop_oldest_on_limit' => 'boolean',
     ];
 
     public function user(): BelongsTo

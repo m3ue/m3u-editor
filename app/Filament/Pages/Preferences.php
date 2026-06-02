@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Filament\Actions\CronHelperAction;
 use App\Filament\CopilotTools\EpgChannelMatcherTool;
 use App\Filament\CopilotTools\EpgMappingApplyTool;
 use App\Filament\CopilotTools\EpgMappingStateTool;
@@ -25,12 +26,14 @@ use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Forms\Components\CheckboxList;
 use Filament\Forms\Components\FileUpload;
+use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TagsInput;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
+use Filament\Forms\Components\ToggleButtons;
 use Filament\Notifications\Notification;
 use Filament\Pages\SettingsPage;
 use Filament\Schemas\Components\Fieldset;
@@ -50,6 +53,8 @@ use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\HtmlString;
 use Illuminate\Support\Str;
 use Ramsey\Uuid\Guid\Fields;
+use Spatie\DiscordAlerts\Facades\DiscordAlert;
+use Spatie\SlackAlerts\Facades\SlackAlert;
 
 class Preferences extends SettingsPage
 {
@@ -224,11 +229,18 @@ class Preferences extends SettingsPage
                                     ->schema([
                                         Grid::make()
                                             ->columnSpanFull()
-                                            ->columns(2)
+                                            ->columns(3)
                                             ->schema([
                                                 Toggle::make('show_breadcrumbs')
                                                     ->label(__('Show breadcrumbs'))
                                                     ->helperText(__('Show breadcrumbs under the page titles')),
+                                                Toggle::make('suppress_success_notifications')
+                                                    ->label(__('Suppress success notifications'))
+                                                    ->hintIcon(
+                                                        'heroicon-m-question-mark-circle',
+                                                        tooltip: 'When enabled, success notifications from background tasks (e.g. sync completed successfully) will be hidden. Errors and warnings will still be shown regardless of this setting.'
+                                                    )
+                                                    ->helperText(__('Hide success notifications from background tasks (errors and warnings are always shown).')),
                                                 Toggle::make('output_wan_address')
                                                     ->label(__('Output WAN address in menu'))
                                                     ->helperText(__('When enabled, the application will output the WAN address of the server m3u-editor is currently running on.'))
@@ -1113,15 +1125,7 @@ class Preferences extends SettingsPage
                                                     ->suffix(config('app.timezone'))
                                                     ->rules([new Cron])
                                                     ->live()
-                                                    ->hintAction(
-                                                        Action::make('view_cron_example')
-                                                            ->label(__('CRON Example'))
-                                                            ->icon('heroicon-o-arrow-top-right-on-square')
-                                                            ->iconPosition('after')
-                                                            ->size('sm')
-                                                            ->url('https://crontab.guru')
-                                                            ->openUrlInNewTab(true)
-                                                    )
+                                                    ->hintAction(CronHelperAction::make(name: 'backup-cron', cronField: 'auto_backup_database_schedule'))
                                                     ->helperText(fn ($get) => CronExpression::isValidExpression($get('auto_backup_database_schedule'))
                                                         ? 'Next scheduled backup: '.(new CronExpression($get('auto_backup_database_schedule')))->getNextRunDate()->format(app(DateFormatService::class)->getFormat())
                                                         : 'Specify the CRON schedule for automatic backups, e.g. "0 3 * * *".'),
@@ -1340,12 +1344,38 @@ class Preferences extends SettingsPage
                                             ->helperText(__('Preferred language for TMDB searches.')),
                                         Toggle::make('tmdb_auto_lookup_on_import')
                                             ->label(__('Auto-lookup on metadata fetch'))
-                                            ->helperText(__('Automatically lookup TMDB IDs when fetching metadata for VOD and Series. This may slow down imports and metadata fetching for large playlists. Will only be fetched for enabled items.'))
+                                            ->helperText(__('Automatically lookup TMDB IDs when fetching metadata for VOD and Series. This may slow down imports and metadata fetching for large playlists.'))
+                                            ->live()
                                             ->default(false),
                                         Toggle::make('tmdb_auto_create_groups')
                                             ->label(__('Auto-create groups/categories from TMDB genres'))
                                             ->helperText(__('When enabled, TMDB metadata fetching will automatically create new groups (for VOD) and categories (for Series) based on TMDB genres. When disabled, only existing groups/categories will be used.'))
                                             ->default(false),
+                                        Fieldset::make(__('TMDB Auto-lookup Settings'))
+                                            ->columnSpanFull()
+                                            ->schema([
+                                                ToggleButtons::make('tmdb_auto_lookup_all_new')
+                                                    ->options([
+                                                        'enabled' => __('Only enabled'),
+                                                        'new' => __('All new'),
+                                                        'both' => __('Both'),
+                                                    ])
+                                                    ->icons([
+                                                        'enabled' => 'heroicon-s-check',
+                                                        'new' => 'heroicon-s-plus',
+                                                        'both' => 'heroicon-s-squares-plus',
+                                                    ])
+                                                    ->colors([
+                                                        'enabled' => 'success',
+                                                        'new' => 'primary',
+                                                        'both' => 'primary',
+                                                    ])
+                                                    ->columnSpanFull()
+                                                    ->grouped()
+                                                    ->label(__('Auto-lookup scope'))
+                                                    ->helperText(__('Whether to automatically lookup TMDB IDs for all new VOD and Series, or only those that are enabled (default), or both.'))
+                                                    ->default('enabled'),
+                                            ])->hidden(fn (Get $get): bool => ! (bool) $get('tmdb_auto_lookup_on_import')),
                                         TextInput::make('tmdb_rate_limit')
                                             ->label(__('Rate Limit (requests/second)'))
                                             ->placeholder(__('40'))
@@ -1392,7 +1422,7 @@ class Preferences extends SettingsPage
                             ->icon('heroicon-o-sparkles')
                             ->schema([
                                 Section::make(__('AI Copilot'))
-                                    ->description(__('You will need to save and refresh the page after changing settings for them to take effect.'))
+                                    ->description(__('You will need to save and refresh the page after changing settings for them to take effect. Look for the ✨ AI Copilot icon in the top navigation bar after enabling.'))
                                     ->schema([
                                         Toggle::make('copilot_enabled')
                                             ->label(__('Enable AI Copilot'))
@@ -1421,6 +1451,7 @@ class Preferences extends SettingsPage
                                                         'groq' => 'Groq',
                                                         'deepseek' => 'DeepSeek',
                                                         'xai' => 'xAI (Grok)',
+                                                        'minimax' => 'MiniMax',
                                                         'openrouter' => 'OpenRouter',
                                                         'ollama' => 'Ollama (Local)',
                                                     ])
@@ -1430,17 +1461,17 @@ class Preferences extends SettingsPage
                                                 TextInput::make('copilot_model')
                                                     ->label(__('Model'))
                                                     ->placeholder(fn (Get $get): string => match ($get('copilot_provider')) {
-                                                        'anthropic' => 'claude-sonnet-4',
+                                                        'anthropic' => 'claude-sonnet-4-6',
                                                         'gemini' => 'gemini-2.5-flash',
                                                         'mistral' => 'mistral-large-latest',
                                                         'groq' => 'llama-3.3-70b-versatile',
-                                                        'deepseek' => 'deepseek-chat',
+                                                        'deepseek' => 'deepseek-v4-flash',
                                                         'xai' => 'grok-3',
-                                                        'openrouter' => 'openai/gpt-4o',
+                                                        'minimax' => 'MiniMax-M2.7',
+                                                        'openrouter' => 'openai/gpt-5.4',
                                                         'ollama' => 'llama3',
-                                                        default => 'gpt-4o',
+                                                        default => 'gpt-5.4-mini',
                                                     })
-                                                    ->required(fn (Get $get): bool => (bool) $get('copilot_enabled'))
                                                     ->helperText(__('The model to use. Leave blank to use the provider default.')),
                                             ]),
                                         TextInput::make('copilot_api_key')
@@ -1456,9 +1487,10 @@ class Preferences extends SettingsPage
                                             ->url()
                                             ->placeholder(fn (Get $get): string => match ($get('copilot_provider')) {
                                                 'ollama' => 'http://localhost:11434',
+                                                'minimax' => 'https://api.minimax.io/v1',
                                                 default => 'https://api.openai.com/v1',
                                             })
-                                            ->visible(fn (Get $get): bool => in_array($get('copilot_provider'), ['openai', 'ollama']))
+                                            ->visible(fn (Get $get): bool => in_array($get('copilot_provider'), ['openai', 'ollama', 'minimax']))
                                             ->helperText(__('Override the default API base URL. Leave blank to use the provider default. Useful for self-hosted models or proxy endpoints.')),
                                     ]),
                                 Section::make(__('System Prompt'))
@@ -1526,6 +1558,186 @@ class Preferences extends SettingsPage
                                             ->reorderable()
                                             ->collapsible()
                                             ->defaultItems(0),
+                                    ]),
+                            ]),
+                        Tab::make(__('Alerts'))
+                            ->icon('heroicon-o-bell-alert')
+                            ->schema([
+                                Section::make(__('Discord'))
+                                    ->description(__('Send alerts to a Discord channel via an incoming webhook.'))
+                                    ->headerActions([
+                                        Action::make('test_discord_alert')
+                                            ->label(__('Send test alert'))
+                                            ->icon('heroicon-o-paper-airplane')
+                                            ->color('gray')
+                                            ->size('sm')
+                                            ->visible(fn (Get $get): bool => (bool) $get('discord_alerts_enabled') && ! empty($get('discord_webhook_url')))
+                                            ->action(function (Get $get): void {
+                                                $webhookUrl = $get('discord_webhook_url');
+
+                                                if (empty($webhookUrl)) {
+                                                    Notification::make()
+                                                        ->title(__('No Webhook URL'))
+                                                        ->body(__('Please enter a Discord webhook URL first.'))
+                                                        ->warning()
+                                                        ->send();
+
+                                                    return;
+                                                }
+
+                                                try {
+                                                    DiscordAlert::to($webhookUrl)->message('[TEST] This is a test alert from m3u-editor. Your Discord integration is working correctly.');
+
+                                                    Notification::make()
+                                                        ->title(__('Test Alert Sent'))
+                                                        ->body(__('Check your Discord channel for the test message.'))
+                                                        ->success()
+                                                        ->send();
+                                                } catch (Exception $e) {
+                                                    Notification::make()
+                                                        ->title(__('Failed to Send Alert'))
+                                                        ->body($e->getMessage())
+                                                        ->danger()
+                                                        ->send();
+                                                }
+                                            }),
+                                    ])
+                                    ->schema([
+                                        Toggle::make('discord_alerts_enabled')
+                                            ->label(__('Enable Discord alerts'))
+                                            ->helperText(__('When enabled, error-level log entries will be forwarded to your Discord channel.'))
+                                            ->live(),
+                                        TextInput::make('discord_webhook_url')
+                                            ->label(__('Discord Webhook URL'))
+                                            ->url()
+                                            ->placeholder('https://discord.com/api/webhooks/...')
+                                            ->helperText(__('Create an Incoming Webhook in your Discord server settings and paste the URL here.'))
+                                            ->visible(fn (Get $get): bool => (bool) $get('discord_alerts_enabled'))
+                                            ->columnSpanFull(),
+                                    ]),
+                                Section::make(__('Slack'))
+                                    ->description(__('Send alerts to a Slack channel via an incoming webhook.'))
+                                    ->headerActions([
+                                        Action::make('test_slack_alert')
+                                            ->label(__('Send test alert'))
+                                            ->icon('heroicon-o-paper-airplane')
+                                            ->color('gray')
+                                            ->size('sm')
+                                            ->visible(fn (Get $get): bool => (bool) $get('slack_alerts_enabled') && ! empty($get('slack_webhook_url')))
+                                            ->action(function (Get $get): void {
+                                                $webhookUrl = $get('slack_webhook_url');
+
+                                                if (empty($webhookUrl)) {
+                                                    Notification::make()
+                                                        ->title(__('No Webhook URL'))
+                                                        ->body(__('Please enter a Slack webhook URL first.'))
+                                                        ->warning()
+                                                        ->send();
+
+                                                    return;
+                                                }
+
+                                                try {
+                                                    SlackAlert::to($webhookUrl)->sync()->message('[TEST] This is a test alert from m3u-editor. Your Slack integration is working correctly.');
+
+                                                    Notification::make()
+                                                        ->title(__('Test Alert Sent'))
+                                                        ->body(__('Check your Slack channel for the test message.'))
+                                                        ->success()
+                                                        ->send();
+                                                } catch (Exception $e) {
+                                                    Notification::make()
+                                                        ->title(__('Failed to Send Alert'))
+                                                        ->body($e->getMessage())
+                                                        ->danger()
+                                                        ->send();
+                                                }
+                                            }),
+                                    ])
+                                    ->schema([
+                                        Toggle::make('slack_alerts_enabled')
+                                            ->label(__('Enable Slack alerts'))
+                                            ->helperText(__('When enabled, error-level log entries will be forwarded to your Slack channel.'))
+                                            ->live(),
+                                        Placeholder::make('slack_setup_guide')
+                                            ->label(__('Setup Guide'))
+                                            ->content(new HtmlString(<<<'HTML'
+<div class="space-y-3 text-sm text-gray-600 dark:text-gray-400">
+    <p>Create a Slack App using the manifest below, then paste the generated webhook URL into the field below.</p>
+    <ol class="list-decimal list-inside space-y-1.5 ml-1">
+        <li>Go to <a href="https://api.slack.com/apps" target="_blank" class="text-primary-600 dark:text-primary-400 hover:underline font-medium">api.slack.com/apps</a> and click <strong class="text-gray-700 dark:text-gray-300">Create New App</strong></li>
+        <li>Choose <strong class="text-gray-700 dark:text-gray-300">From an app manifest</strong></li>
+        <li>Select your workspace and click <strong class="text-gray-700 dark:text-gray-300">Next</strong></li>
+        <li>Switch to the <strong class="text-gray-700 dark:text-gray-300">JSON</strong> tab, paste the manifest below, then click <strong class="text-gray-700 dark:text-gray-300">Next → Create</strong></li>
+        <li>In the app settings, go to <strong class="text-gray-700 dark:text-gray-300">Incoming Webhooks</strong> and toggle it <strong class="text-gray-700 dark:text-gray-300">On</strong></li>
+        <li>Click <strong class="text-gray-700 dark:text-gray-300">Add New Webhook to Workspace</strong>, select a channel, then click <strong class="text-gray-700 dark:text-gray-300">Allow</strong></li>
+        <li>Copy the <strong class="text-gray-700 dark:text-gray-300">Webhook URL</strong> from the list and paste it into the field below</li>
+        <li><em>Optional:</em> To add the m3u editor icon go to <strong class="text-gray-700 dark:text-gray-300">Basic Information → Display Information</strong> and upload the icon from the URL at the bottom of this guide</li>
+    </ol>
+    <div class="mt-3">
+        <p class="font-medium text-gray-700 dark:text-gray-300 mb-1.5">App Manifest (JSON):</p>
+        <pre class="bg-gray-100 dark:bg-gray-800 rounded-lg p-3 text-xs overflow-x-auto text-gray-700 dark:text-gray-300 select-all">{
+    "display_information": {
+        "name": "m3u editor",
+        "description": "Alerts and notifications from m3u editor",
+        "background_color": "#000000"
+    },
+    "features": {
+        "bot_user": {
+            "display_name": "m3u editor",
+            "always_online": false
+        }
+    },
+    "oauth_config": {
+        "scopes": {
+            "bot": [
+                "incoming-webhook"
+            ]
+        }
+    },
+    "settings": {
+        "org_deploy_enabled": false,
+        "socket_mode_enabled": false,
+        "is_hosted": false,
+        "token_rotation_enabled": false
+    }
+}</pre>
+    </div>
+    <div class="mt-2">
+        <p class="font-medium text-gray-700 dark:text-gray-300 mb-1">Optional App Icon URL:</p>
+        <code class="bg-gray-100 dark:bg-gray-800 rounded px-2 py-1 text-xs text-gray-700 dark:text-gray-300 select-all">https://raw.githubusercontent.com/m3ue/m3u-editor/refs/heads/master/public/logo.png</code>
+    </div>
+</div>
+HTML))
+                                            ->visible(fn (Get $get): bool => (bool) $get('slack_alerts_enabled'))
+                                            ->columnSpanFull(),
+                                        TextInput::make('slack_webhook_url')
+                                            ->label(__('Slack Webhook URL'))
+                                            ->url()
+                                            ->hintAction(
+                                                Action::make('get_slack_webhook_url')
+                                                    ->label(__('Open Slack Apps'))
+                                                    ->icon('heroicon-o-arrow-top-right-on-square')
+                                                    ->iconPosition('after')
+                                                    ->size('sm')
+                                                    ->url('https://api.slack.com/apps')
+                                                    ->openUrlInNewTab(true)
+                                            )
+                                            ->placeholder('https://hooks.slack.com/services/...')
+                                            ->helperText(__('Follow the setup guide above to create a Slack App and generate a webhook URL.'))
+                                            ->visible(fn (Get $get): bool => (bool) $get('slack_alerts_enabled'))
+                                            ->columnSpanFull(),
+                                    ]),
+                                Section::make(__('Additional Notifications'))
+                                    ->description(__('Opt in to targeted notifications beyond the default error log forwarding.'))
+                                    ->visible(fn (Get $get): bool => (bool) $get('discord_alerts_enabled') || (bool) $get('slack_alerts_enabled'))
+                                    ->schema([
+                                        Toggle::make('alerts_on_job_failed')
+                                            ->label(__('Notify on queued job failures'))
+                                            ->helperText(__('Sends an alert whenever a queued job (import, sync, probe, etc.) fails permanently after all retry attempts.')),
+                                        Toggle::make('alerts_on_import_failed')
+                                            ->label(__('Notify on playlist import failures'))
+                                            ->helperText(__('Sends an alert when a playlist sync fails entirely, e.g. all provider URLs were unreachable.')),
                                     ]),
                             ]),
                         Tab::make(__('Debugging'))

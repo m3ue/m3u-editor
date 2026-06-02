@@ -6,6 +6,7 @@ use App\Facades\LogoFacade;
 use App\Facades\SortFacade;
 use App\Filament\Actions\AssetPickerAction;
 use App\Filament\Actions\BulkModalActionGroup;
+use App\Filament\Actions\RegexTesterAction;
 use App\Filament\Concerns\HasCopilotSupport;
 use App\Filament\Resources\VodResource\Pages;
 use App\Filament\Resources\Vods\Pages\ListVod;
@@ -16,6 +17,7 @@ use App\Jobs\ChannelFindAndReplace;
 use App\Jobs\ChannelFindAndReplaceReset;
 use App\Jobs\FetchTmdbIds;
 use App\Jobs\ProbeVodStreamsChunk;
+use App\Jobs\ProbeVodStreamsComplete;
 use App\Jobs\ProcessVodChannels;
 use App\Jobs\SyncPlexDvrJob;
 use App\Jobs\SyncVodStrmFiles;
@@ -73,6 +75,7 @@ use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\HtmlString;
 use Illuminate\Support\Str;
@@ -998,12 +1001,15 @@ class VodResource extends Resource implements CopilotResource
                 BulkAction::make('sync')
                     ->label(__('Sync VOD .strm files'))
                     ->action(function ($records) {
-                        foreach ($records as $record) {
-                            app('Illuminate\Contracts\Bus\Dispatcher')
-                                ->dispatch(new SyncVodStrmFiles(
-                                    channel: $record,
-                                ));
+                        $channelIds = collect($records)->pluck('id')->filter()->unique()->values()->all();
+                        if (empty($channelIds)) {
+                            return;
                         }
+                        app('Illuminate\Contracts\Bus\Dispatcher')
+                            ->dispatch(new SyncVodStrmFiles(
+                                user_id: auth()->id(),
+                                channel_ids: $channelIds,
+                            ));
                     })->after(function () {
                         Notification::make()
                             ->success()
@@ -1086,6 +1092,10 @@ class VodResource extends Resource implements CopilotResource
                                     fn (Get $get) => ! $get('use_regex')
                                         ? 'This is the string you want to find and replace.'
                                         : 'This is the regex pattern you want to find. Make sure to use valid regex syntax.'
+                                )
+                                ->suffixAction(
+                                    RegexTesterAction::make(samplesContext: 'vod_channels', patternField: 'find_replace', replacementField: 'replace_with')
+                                        ->visible(fn (Get $get): bool => (bool) $get('use_regex'))
                                 ),
                             TextInput::make('replace_with')
                                 ->label(__('Replace with (optional)'))
@@ -1379,18 +1389,25 @@ class VodResource extends Resource implements CopilotResource
                     ->label(__('Probe Streams'))
                     ->action(function (Collection $records): void {
                         $ids = $records->pluck('id')->all();
-                        $total = count($ids);
-                        $chunks = array_chunk($ids, 50);
-                        $last = count($chunks) - 1;
-                        foreach ($chunks as $i => $chunk) {
-                            dispatch(new ProbeVodStreamsChunk(
-                                channelIds: $chunk,
-                                probeTimeout: 15,
-                                notifyUserId: $i === $last ? auth()->id() : null,
-                                notifyLabel: $i === $last ? __('VOD stream probing') : null,
-                                notifyTotal: $i === $last ? $total : null,
-                            ));
-                        }
+                        $start = now();
+
+                        $chunks = collect(array_chunk($ids, 50))
+                            ->map(fn ($chunk) => new ProbeVodStreamsChunk(channelIds: $chunk, probeTimeout: 15))
+                            ->all();
+
+                        Bus::chain([
+                            ...$chunks,
+                            new ProbeVodStreamsComplete(
+                                playlistId: null,
+                                total: count($ids),
+                                start: $start,
+                                channelIds: $ids,
+                                notifyUserId: auth()->id(),
+                            ),
+                        ])
+                            ->onConnection('redis')
+                            ->onQueue('import')
+                            ->dispatch();
                     })->after(function () {
                         Notification::make()
                             ->success()

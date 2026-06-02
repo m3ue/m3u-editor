@@ -210,7 +210,31 @@ class MapPlaylistChannelsToEpgChunk implements ShouldQueue
                 }
             }
 
-            // Step 3: If no exact match, attempt a similarity search (only for channels with significant content)
+            // Step 3: Callsign extraction from original (pre-cleaned) channel name
+            // Handles patterns like "US: CBS 13 (KOVR) STOCKTON HD" → extracts "KOVR" and matches "KOVR-DT"
+            if (! $epgChannel) {
+                $originalTitle = $this->sanitizeUtf8(trim($channel->title_custom ?? $channel->title));
+                $originalName = $this->sanitizeUtf8(trim($channel->name_custom ?? $channel->name));
+                $callsign = $this->extractCallsign($originalTitle ?: $originalName);
+
+                if ($callsign) {
+                    $callsignLower = mb_strtolower($callsign, 'UTF-8');
+
+                    $epgChannel = $epg->channels()
+                        ->where(function ($query) use ($callsignLower) {
+                            $query->whereRaw('LOWER(channel_id) = ?', [$callsignLower])
+                                ->orWhereRaw('LOWER(channel_id) LIKE ?', [$callsignLower.'-%'])
+                                ->orWhereRaw('LOWER(name) = ?', [$callsignLower])
+                                ->orWhereRaw('LOWER(name) LIKE ?', [$callsignLower.'-%'])
+                                ->orWhereRaw('LOWER(display_name) = ?', [$callsignLower])
+                                ->orWhereRaw('LOWER(display_name) LIKE ?', [$callsignLower.'-%']);
+                        })
+                        ->select('id', 'channel_id', 'name', 'display_name')
+                        ->first();
+                }
+            }
+
+            // Step 4: If no exact match, attempt a similarity search (only for channels with significant content)
             if (! $epgChannel) {
                 // Only run similarity search if the channel name has enough content
                 $channelNameForSearch = trim($title ?: $name);
@@ -271,6 +295,31 @@ class MapPlaylistChannelsToEpgChunk implements ShouldQueue
         // Update progress
         $progressIncrement = (count($this->channelIds) / $this->totalChannels) * 95; // Reserve 5% for completion
         $map->update(['progress' => min(99, $map->progress + $progressIncrement)]);
+    }
+
+    /**
+     * Extract a North American TV station callsign from parentheses in a channel name.
+     *
+     * Matches FCC-format callsigns (US: K/W prefix) and CRTC-format (Canada: C prefix),
+     * with optional digital suffixes (-DT, -LD, -CD, -HD, -TV and subchannel variants
+     * like -DT2). This allowlist approach avoids maintaining a blocklist of non-callsign
+     * tokens (quality flags, country codes, feed labels, etc.).
+     *
+     * Examples:
+     *   "US: CBS 13 (KOVR) STOCKTON HD"  → "KOVR"
+     *   "US: CBS 6 (WKMG-DT) ORLANDO HD" → "WKMG-DT"
+     *   "US: FOX (WLOX-DT2) BILOXI HD"   → "WLOX-DT2"
+     */
+    protected function extractCallsign(string $name): ?string
+    {
+        // [KW]    = FCC (US); [C] = CRTC (Canada)
+        // [A-Z]{2,3} = 2-3 more letters → 3-4 letter callsign total
+        // (-(?:DT|LD|CD|HD|TV)\d?)? = optional digital suffix with optional subchannel digit
+        if (preg_match('/\(([KWCkwc][A-Z]{2,3}(?:-(?:DT|LD|CD|HD|TV)\d?)?)\)/i', $name, $matches)) {
+            return strtoupper($matches[1]);
+        }
+
+        return null;
     }
 
     /**

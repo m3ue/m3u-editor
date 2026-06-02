@@ -161,6 +161,107 @@ it('falls back to stored probe data when the proxy reports no live media_info', 
         });
 });
 
+it('exposes proxy output_media_info as model.output_media_info on the stream', function () {
+    // Transcoded stream — proxy publishes both source-side media_info and the
+    // encoder-side output_media_info. The output payload should land on the
+    // model as a separate array so the blade can render a distinct Output row.
+    $channel = Channel::factory()->createQuietly([
+        'user_id' => $this->owner->id,
+        'playlist_id' => $this->playlist->id,
+        'name' => 'BBC ONE',
+    ]);
+
+    ($this->bindProxyMock)([
+        [
+            'stream_id' => 'transcoded-stream',
+            'metadata' => [
+                'playlist_uuid' => $this->playlist->uuid,
+                'type' => 'channel',
+                'id' => $channel->id,
+                'transcoding' => true,
+            ],
+            'original_url' => 'http://example.com/s',
+            'current_url' => 'http://example.com/s',
+            'stream_type' => 'mpegts',
+            'is_active' => true,
+            'client_count' => 1,
+            'total_bytes_served' => 1024,
+            'total_segments_served' => 0,
+            'created_at' => now()->toIso8601String(),
+            'has_failover' => false,
+            'error_count' => 0,
+            'media_info' => [
+                'resolution' => '1920x1080',
+                'video_codec' => 'hevc',
+                'audio_codec' => 'ac3',
+                'audio_channels' => '5.1',
+                'container' => 'MPEGTS',
+            ],
+            'output_media_info' => [
+                'resolution' => '1280x720',
+                'video_codec' => 'h264',
+                'audio_codec' => 'aac',
+                'audio_channels' => 'stereo',
+                'container' => 'MPEGTS',
+                'fps' => 25.0,
+                'bitrate_kbps' => 2500.0,
+                'speed' => 1.05,
+            ],
+        ],
+    ]);
+
+    Livewire::test(M3uProxyStreamMonitor::class)
+        ->assertSet('streams', function (array $streams) {
+            $output = $streams[0]['model']['output_media_info'] ?? [];
+
+            return $output['resolution'] === '1280x720'
+                && $output['video_codec'] === 'h264'
+                && $output['audio_codec'] === 'aac'
+                && $output['audio_channels'] === 'stereo'
+                && $output['container'] === 'MPEGTS'
+                && $output['fps'] === 25.0
+                && $output['bitrate_kbps'] === 2500.0
+                && $output['speed'] === 1.05;
+        });
+});
+
+it('omits output_media_info on the model when the proxy reports none', function () {
+    // Plain HTTP-proxy stream — no ffmpeg, no output_media_info from the proxy.
+    // The model must not gain an output_media_info key so the blade keeps the
+    // Output Info row hidden for non-transcoded streams.
+    $channel = Channel::factory()->createQuietly([
+        'user_id' => $this->owner->id,
+        'playlist_id' => $this->playlist->id,
+    ]);
+
+    ($this->bindProxyMock)([
+        [
+            'stream_id' => 'plain-stream',
+            'metadata' => [
+                'playlist_uuid' => $this->playlist->uuid,
+                'type' => 'channel',
+                'id' => $channel->id,
+            ],
+            'original_url' => 'http://example.com/s',
+            'current_url' => 'http://example.com/s',
+            'stream_type' => 'hls',
+            'is_active' => true,
+            'client_count' => 1,
+            'total_bytes_served' => 0,
+            'total_segments_served' => 0,
+            'created_at' => now()->toIso8601String(),
+            'has_failover' => false,
+            'error_count' => 0,
+            'output_media_info' => [],
+        ],
+    ]);
+
+    Livewire::test(M3uProxyStreamMonitor::class)
+        ->assertSet('streams', function (array $streams) {
+            return ! isset($streams[0]['model']['output_media_info']);
+        });
+});
+
 it('omits media_info entirely when neither probe nor live data is available', function () {
     $channel = Channel::factory()->createQuietly([
         'user_id' => $this->owner->id,

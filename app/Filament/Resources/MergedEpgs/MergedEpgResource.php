@@ -4,6 +4,7 @@ namespace App\Filament\Resources\MergedEpgs;
 
 use App\Enums\EpgSourceType;
 use App\Enums\Status;
+use App\Filament\Actions\CronHelperAction;
 use App\Filament\Concerns\HasCopilotSupport;
 use App\Filament\Resources\MergedEpgs\Pages\EditMergedEpg;
 use App\Filament\Resources\MergedEpgs\Pages\ListMergedEpgs;
@@ -357,6 +358,7 @@ class MergedEpgResource extends Resource implements CopilotResource
                         ->live()
                         ->default('0 */6 * * *')
                         ->placeholder(__('0 */6 * * *'))
+                        ->hintAction(CronHelperAction::make(name: 'merged-epg-sync-cron', cronField: 'sync_interval'))
                         ->helperText(fn ($get) => $get('sync_interval') && CronExpression::isValidExpression($get('sync_interval'))
                             ? 'Next scheduled sync: '.(new CronExpression($get('sync_interval')))->getNextRunDate()->format('Y-m-d H:i:s')
                             : 'Specify the CRON schedule for automatic sync, e.g. "0 */6 * * *".')

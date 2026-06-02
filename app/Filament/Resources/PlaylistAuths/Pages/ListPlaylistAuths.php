@@ -24,15 +24,26 @@ class ListPlaylistAuths extends ListRecords
         return [
             CreateAction::make()
                 ->using(function (array $data, string $model): Model {
-                    $data['user_id'] = auth()->id();
+                    $assignedPlaylist = $data['assigned_playlist'] ?? null;
+                    unset($data['assigned_playlist']);
 
-                    return $model::create($data);
+                    $data['user_id'] = auth()->id();
+                    $record = $model::create($data);
+
+                    if ($assignedPlaylist) {
+                        [$modelClass, $modelId] = explode('|', $assignedPlaylist, 2);
+                        $playlistModel = $modelClass::find($modelId);
+                        if ($playlistModel) {
+                            $record->assignTo($playlistModel);
+                        }
+                    }
+
+                    return $record;
                 })
                 ->successNotification(
                     Notification::make()
                         ->success()
-                        ->title(__('Playlist Auth created'))
-                        ->body(__('You can now assign Playlists to this Auth.')),
+                        ->title(__('Playlist Auth created')),
                 ),
         ];
     }

@@ -15,6 +15,7 @@ class StreamProfile extends Model
     protected $casts = [
         'rules' => 'array',
         'else_stream_profile_id' => 'integer',
+        'max_connections' => 'integer',
     ];
 
     public function user(): BelongsTo

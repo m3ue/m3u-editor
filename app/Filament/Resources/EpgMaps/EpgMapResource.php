@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\EpgMaps;
 
 use App\Enums\Status;
+use App\Filament\Actions\RegexTesterAction;
 use App\Filament\Concerns\HasCopilotSupport;
 use App\Filament\Resources\EpgMapResource\Pages;
 use App\Filament\Resources\EpgMaps\Pages\ListEpgMaps;
@@ -308,7 +309,11 @@ class EpgMapResource extends Resource implements CopilotResource
                     '\s+(FHD|HD).*$',
                     '\[.*\]',
                 ])
-                ->splitKeys(['Tab', 'Return']),
+                ->splitKeys(['Tab', 'Return'])
+                ->hintAction(
+                    RegexTesterAction::make(name: 'test-epg-filter', flags: 'u', samplesContext: 'epg_channels')
+                        ->visible(fn (Get $get): bool => (bool) $get('settings.use_regex'))
+                ),
             Section::make(__('Advanced Settings'))
                 ->columns(2)
                 ->icon('heroicon-s-cog-6-tooth')

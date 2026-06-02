@@ -2,9 +2,11 @@
 
 namespace App\Jobs;
 
+use App\Enums\SyncRunPhase;
 use App\Models\Channel;
 use App\Models\Playlist;
 use App\Models\User;
+use App\Services\SyncPipelineService;
 use Carbon\Carbon;
 use Filament\Notifications\Notification;
 use Illuminate\Bus\Batch;
@@ -27,10 +29,17 @@ class ProbeChannelStreams implements ShouldQueue
     /**
      * @param  int|null  $playlistId  Probe all enabled live channels for this playlist
      * @param  array<int>|null  $channelIds  Probe specific channel IDs (overrides playlistId)
+     * @param  bool  $onlyUnprobed  When true and dispatching by playlistId, only probe channels
+     *                              that have never been probed (stream_stats_probed_at IS NULL).
+     *                              Defaults to true so auto-probe runs after sync stay incremental.
+     *                              Manual re-probe via the channel UI passes explicit channelIds
+     *                              and bypasses this filter.
      */
     public function __construct(
         public ?int $playlistId = null,
         public ?array $channelIds = null,
+        public bool $onlyUnprobed = true,
+        public ?int $syncRunId = null,
     ) {}
 
     /**
@@ -49,8 +58,13 @@ class ProbeChannelStreams implements ShouldQueue
                 ->where('enabled', true)
                 ->where('is_vod', false)
                 ->where('probe_enabled', true);
+
+            if ($this->onlyUnprobed) {
+                $query->whereNull('stream_stats_probed_at');
+            }
         } else {
             Log::warning('ProbeChannelStreams: No playlist or channel IDs provided.');
+            $this->completeLiveProbePhaseIfTracked();
 
             return;
         }
@@ -60,6 +74,7 @@ class ProbeChannelStreams implements ShouldQueue
 
         if ($total === 0) {
             Log::info("ProbeChannelStreams: No probe-eligible channels found for playlist {$this->playlistId}.");
+            $this->completeLiveProbePhaseIfTracked();
 
             return;
         }
@@ -102,6 +117,19 @@ class ProbeChannelStreams implements ShouldQueue
                 'playlist_id' => $this->playlistId,
             ]);
             $this->notifyFailed($playlist, $e->getMessage());
+            $this->completeLiveProbePhaseIfTracked();
+        }
+    }
+
+    /**
+     * Mark the LiveProbe phase complete if this dispatch is part of a tracked SyncRun.
+     * Used by early-return paths (no channels, dispatch failure) so the pipeline
+     * doesn't stall waiting for ProbeChannelStreamsComplete that will never run.
+     */
+    private function completeLiveProbePhaseIfTracked(): void
+    {
+        if ($this->syncRunId) {
+            app(SyncPipelineService::class)->completePhase($this->syncRunId, SyncRunPhase::LiveProbe);
         }
     }
 
@@ -123,14 +151,16 @@ class ProbeChannelStreams implements ShouldQueue
         // job). $this carries an active RedisJob connection via InteractsWithQueue
         // which makes PHP hang when SerializableClosure tries to serialize it.
         $userId = $playlist?->user?->id;
+        $syncRunId = $this->syncRunId;
 
         $batch = Bus::batch($chunkJobs)
-            ->then(function () use ($playlistId, $channelIds, $total, $start) {
+            ->then(function () use ($playlistId, $channelIds, $total, $start, $syncRunId) {
                 dispatch(new ProbeChannelStreamsComplete(
                     playlistId: $playlistId,
                     channelIds: $channelIds,
                     total: $total,
                     start: $start,
+                    syncRunId: $syncRunId,
                 ));
             })
             ->catch(function (Batch $batch, Throwable $e) use ($userId) {
@@ -168,6 +198,7 @@ class ProbeChannelStreams implements ShouldQueue
                 channelIds: $channelIds,
                 total: $total,
                 start: $start,
+                syncRunId: $this->syncRunId,
             ),
         ])
             ->onConnection('redis')
@@ -219,5 +250,6 @@ class ProbeChannelStreams implements ShouldQueue
     public function failed(Throwable $exception): void
     {
         Log::error("ProbeChannelStreams orchestrator failed: {$exception->getMessage()}");
+        $this->completeLiveProbePhaseIfTracked();
     }
 }

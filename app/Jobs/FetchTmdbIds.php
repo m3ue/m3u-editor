@@ -2,17 +2,20 @@
 
 namespace App\Jobs;
 
+use App\Enums\SyncRunPhase;
 use App\Models\Category;
 use App\Models\Channel;
 use App\Models\Group;
 use App\Models\Series;
 use App\Models\User;
+use App\Services\SyncPipelineService;
 use App\Services\TmdbService;
 use App\Settings\GeneralSettings;
 use Filament\Notifications\Notification;
 use Illuminate\Bus\Batch;
 use Illuminate\Bus\Batchable;
 use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Bus;
@@ -67,9 +70,13 @@ class FetchTmdbIds implements ShouldQueue
         public bool $allVodPlaylists = false,
         public bool $allSeriesPlaylists = false,
         public bool $overwriteExisting = false,
+        public string $lookupScope = 'enabled',
         public ?User $user = null,
         public bool $isChunkJob = false,
         public bool $sendCompletionNotification = true,
+        public array $postCompletionJobs = [],
+        public ?int $syncRunId = null,
+        public ?SyncRunPhase $completionPhase = null,
     ) {
         // Legacy support: convert Collections to arrays
         if ($this->vodChannelIds instanceof Collection) {
@@ -127,6 +134,15 @@ class FetchTmdbIds implements ShouldQueue
         if ($this->sendCompletionNotification) {
             $this->sendCompletionNotification();
         }
+
+        // Dispatch downstream jobs after inline processing completes (non-chunk root jobs only)
+        if (! $this->isChunkJob) {
+            if ($this->syncRunId && $this->completionPhase) {
+                app(SyncPipelineService::class)->completePhase($this->syncRunId, $this->completionPhase);
+            } elseif (! empty($this->postCompletionJobs)) {
+                Bus::chain($this->postCompletionJobs)->dispatch();
+            }
+        }
     }
 
     /**
@@ -152,58 +168,69 @@ class FetchTmdbIds implements ShouldQueue
                 $this->sendCompletionNotification();
             }
 
+            if ($this->syncRunId && $this->completionPhase) {
+                app(SyncPipelineService::class)->completePhase($this->syncRunId, $this->completionPhase);
+            } elseif (! empty($this->postCompletionJobs)) {
+                Bus::chain($this->postCompletionJobs)->dispatch();
+            }
+
             return;
         }
 
         $chunkCount = $jobs->count();
         $userId = $this->user?->id;
+        $postCompletionJobs = $this->postCompletionJobs;
+        $syncRunId = $this->syncRunId;
+        $completionPhase = $this->completionPhase;
 
         Bus::batch($jobs->all())
             ->onConnection('redis') // force to use redis connection
             ->onQueue('import')
             ->allowFailures()
-            ->finally(function (Batch $batch) use ($userId): void {
-                if (! $userId) {
-                    return;
+            ->finally(function (Batch $batch) use ($userId, $postCompletionJobs, $syncRunId, $completionPhase): void {
+                if ($userId) {
+                    $user = User::find($userId);
+
+                    if ($user) {
+                        $stats = self::readBatchStats($batch->id);
+                        $failedJobs = $batch->failedJobs;
+                        $total = $stats['found'] + $stats['not_found'] + $stats['skipped'] + $stats['errors'];
+
+                        $body = sprintf(
+                            'Found: %d | Not found: %d | Skipped (already had IDs): %d | Errors: %d',
+                            $stats['found'],
+                            $stats['not_found'],
+                            $stats['skipped'],
+                            $stats['errors']
+                        );
+
+                        if ($failedJobs > 0) {
+                            $body .= " | Failed chunks: {$failedJobs}";
+                        }
+
+                        $notification = Notification::make()
+                            ->title("TMDB ID Lookup Complete ({$total} processed)")
+                            ->body($body);
+
+                        if ($failedJobs > 0 || $stats['errors'] > 0) {
+                            $notification->warning();
+                        } else {
+                            $notification->success();
+                        }
+
+                        $notification
+                            ->broadcast($user)
+                            ->sendToDatabase($user);
+
+                        self::clearBatchStats($batch->id);
+                    }
                 }
 
-                $user = User::find($userId);
-
-                if (! $user) {
-                    return;
+                if ($syncRunId && $completionPhase) {
+                    app(SyncPipelineService::class)->completePhase($syncRunId, $completionPhase);
+                } elseif (! empty($postCompletionJobs)) {
+                    Bus::chain($postCompletionJobs)->dispatch();
                 }
-
-                $stats = self::readBatchStats($batch->id);
-                $failedJobs = $batch->failedJobs;
-                $total = $stats['found'] + $stats['not_found'] + $stats['skipped'] + $stats['errors'];
-
-                $body = sprintf(
-                    'Found: %d | Not found: %d | Skipped (already had IDs): %d | Errors: %d',
-                    $stats['found'],
-                    $stats['not_found'],
-                    $stats['skipped'],
-                    $stats['errors']
-                );
-
-                if ($failedJobs > 0) {
-                    $body .= " | Failed chunks: {$failedJobs}";
-                }
-
-                $notification = Notification::make()
-                    ->title("TMDB ID Lookup Complete ({$total} processed)")
-                    ->body($body);
-
-                if ($failedJobs > 0 || $stats['errors'] > 0) {
-                    $notification->warning();
-                } else {
-                    $notification->success();
-                }
-
-                $notification
-                    ->broadcast($user)
-                    ->sendToDatabase($user);
-
-                self::clearBatchStats($batch->id);
             })
             ->dispatch();
 
@@ -238,6 +265,7 @@ class FetchTmdbIds implements ShouldQueue
                     vodChannelIds: $ids,
                     seriesIds: null,
                     overwriteExisting: $this->overwriteExisting,
+                    lookupScope: $this->lookupScope,
                     user: $this->user,
                     isChunkJob: true,
                     sendCompletionNotification: false,
@@ -269,6 +297,7 @@ class FetchTmdbIds implements ShouldQueue
                     vodChannelIds: null,
                     seriesIds: $ids,
                     overwriteExisting: $this->overwriteExisting,
+                    lookupScope: $this->lookupScope,
                     user: $this->user,
                     isChunkJob: true,
                     sendCompletionNotification: false,
@@ -277,21 +306,34 @@ class FetchTmdbIds implements ShouldQueue
     }
 
     /**
+     * Apply the configured scope filter (enabled / new / both) to a query.
+     */
+    protected function applyScopeFilter(Builder $query): void
+    {
+        match ($this->lookupScope) {
+            'new' => $query->where('new', true),
+            'both' => $query->where(fn ($q) => $q->where('enabled', true)->orWhere('new', true)),
+            default => $query->where('enabled', true),
+        };
+    }
+
+    /**
      * Build filtered VOD query based on job arguments.
      */
-    protected function buildVodQuery()
+    protected function buildVodQuery(): ?Builder
     {
-        $query = Channel::where('is_vod', true);
+        $query = Channel::query()->where('is_vod', true);
 
         // Use playlist-based filtering if provided
         if ($this->vodPlaylistId) {
             $query->where('playlist_id', $this->vodPlaylistId)
-                ->when($this->user, fn ($q) => $q->where('user_id', $this->user->id))
-                ->where('enabled', true);
+                ->when($this->user, fn ($q) => $q->where('user_id', $this->user->id));
+            $this->applyScopeFilter($query);
         } elseif ($this->allVodPlaylists && $this->user) {
             $query->whereHas('playlist', function ($q) {
                 $q->where('user_id', $this->user->id);
-            })->where('enabled', true);
+            });
+            $this->applyScopeFilter($query);
         } elseif (! empty($this->vodChannelIds)) {
             // Legacy: direct ID array support
             $query->whereIn('id', $this->vodChannelIds)
@@ -312,18 +354,18 @@ class FetchTmdbIds implements ShouldQueue
     /**
      * Build filtered series query based on job arguments.
      */
-    protected function buildSeriesQuery()
+    protected function buildSeriesQuery(): ?Builder
     {
         $query = Series::query();
 
         // Use playlist-based filtering if provided
         if ($this->seriesPlaylistId) {
             $query->where('playlist_id', $this->seriesPlaylistId)
-                ->when($this->user, fn ($q) => $q->where('user_id', $this->user->id))
-                ->where('enabled', true);
+                ->when($this->user, fn ($q) => $q->where('user_id', $this->user->id));
+            $this->applyScopeFilter($query);
         } elseif ($this->allSeriesPlaylists && $this->user) {
-            $query->where('user_id', $this->user->id)
-                ->where('enabled', true);
+            $query->where('user_id', $this->user->id);
+            $this->applyScopeFilter($query);
         } elseif (! empty($this->seriesIds)) {
             // Legacy: direct ID array support
             $query->whereIn('id', $this->seriesIds)
@@ -688,10 +730,8 @@ class FetchTmdbIds implements ShouldQueue
      */
     protected function processSingleSeries(TmdbService $tmdb, Series $series): void
     {
-        // Check if already has IDs and we're not overwriting
-        // Check both the dedicated columns and the legacy metadata field
-        $existingTvdbId = $series->tvdb_id ?? $series->metadata['tvdb_id'] ?? null;
-        $existingTmdbId = $series->tmdb_id ?? $series->metadata['tmdb_id'] ?? null;
+        // Resolve IDs from all storage locations (dedicated columns + legacy metadata array).
+        ['tmdb' => $existingTmdbId, 'tvdb' => $existingTvdbId] = $series->getMovieDbIds();
 
         // Only skip if we have IDs AND the metadata is populated
         $hasMetadata = ! empty($series->plot) && ! empty($series->cover);
@@ -765,13 +805,6 @@ class FetchTmdbIds implements ShouldQueue
                     'overwrite_existing' => $this->overwriteExisting,
                 ]);
             }
-            $this->skippedCount++;
-
-            return;
-        }
-
-        // If previously attempted but no match was found, skip unless overwriting
-        if (! $existingTmdbId && ! $existingTvdbId && $series->last_metadata_fetch && ! $this->overwriteExisting) {
             $this->skippedCount++;
 
             return;

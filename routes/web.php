@@ -233,6 +233,8 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         ->name('api.channels.failovers.clear');
     Route::post('channel/bulk-set-failovers', [ChannelController::class, 'bulkSetFailovers'])
         ->name('api.channels.failovers.bulk-set');
+    Route::post('channel/trigger-failover', [ChannelController::class, 'triggerFailover'])
+        ->name('api.channels.failover.trigger');
 
     // Group API routes
     Route::group(['prefix' => 'group'], function () {
@@ -257,6 +259,8 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     // Playlist API routes (authenticated)
     Route::get('playlist/{uuid}/stats', [PlaylistController::class, 'stats'])
         ->name('api.playlist.stats');
+    Route::patch('playlist/{uuid}', [PlaylistController::class, 'update'])
+        ->name('api.playlist.update');
     Route::post('playlist/{uuid}/merge-channels', [PlaylistController::class, 'mergeChannels'])
         ->name('api.playlist.merge-channels');
 

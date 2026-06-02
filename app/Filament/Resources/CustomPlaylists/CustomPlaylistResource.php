@@ -13,6 +13,7 @@ use App\Filament\Resources\CustomPlaylists\RelationManagers\ChannelsRelationMana
 use App\Filament\Resources\CustomPlaylists\RelationManagers\GroupsRelationManager;
 use App\Filament\Resources\CustomPlaylists\RelationManagers\SeriesRelationManager;
 use App\Filament\Resources\CustomPlaylists\RelationManagers\VodRelationManager;
+use App\Jobs\DuplicateCustomPlaylist;
 use App\Models\CustomPlaylist;
 use App\Models\PlaylistAuth;
 use App\Models\StreamProfile;
@@ -32,9 +33,11 @@ use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
+use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Fieldset;
 use Filament\Schemas\Components\Grid;
+use Filament\Schemas\Components\Group as ComponentsGroup;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Tabs;
 use Filament\Schemas\Components\Tabs\Tab;
@@ -187,6 +190,30 @@ class CustomPlaylistResource extends Resource implements CopilotResource
                         ->icon('heroicon-o-arrow-top-right-on-square')
                         ->url(fn ($record) => '/playlist/v/'.$record->uuid)
                         ->openUrlInNewTab(),
+                    Action::make('Duplicate')
+                        ->label(__('Duplicate'))
+                        ->schema([
+                            TextInput::make('name')
+                                ->label(__('Playlist name'))
+                                ->required()
+                                ->helperText(__('This will be the name of the duplicated playlist.')),
+                        ])
+                        ->action(function ($record, $data) {
+                            app('Illuminate\Contracts\Bus\Dispatcher')
+                                ->dispatch(new DuplicateCustomPlaylist($record, $data['name']));
+                        })->after(function () {
+                            Notification::make()
+                                ->success()
+                                ->title(__('Custom playlist is being duplicated'))
+                                ->body(__('The custom playlist is being duplicated in the background. You will be notified on completion.'))
+                                ->duration(3000)
+                                ->send();
+                        })
+                        ->requiresConfirmation()
+                        ->icon('heroicon-o-document-duplicate')
+                        ->modalIcon('heroicon-o-document-duplicate')
+                        ->modalDescription(__('Duplicate custom playlist now?'))
+                        ->modalSubmitActionLabel(__('Yes, duplicate now')),
                     DeleteAction::make(),
                 ])->button()->hiddenLabel()->size('sm'),
                 EditAction::make()
@@ -224,6 +251,16 @@ class CustomPlaylistResource extends Resource implements CopilotResource
 
     public static function getForm($creating = false): array
     {
+        $processingActions = [
+            'sort_alpha' => __('Sort Alpha'),
+            'recount' => __('Recount Channels'),
+        ];
+        $processingTargets = [
+            'all' => __('All Channels'),
+            'live' => __('Live Channels'),
+            'vod' => __('VOD Channels'),
+        ];
+
         $schema = [
             Grid::make()
                 ->columns(2)
@@ -282,13 +319,35 @@ class CustomPlaylistResource extends Resource implements CopilotResource
                 ->collapsed($creating)
                 ->columns(2)
                 ->schema([
-                    Toggle::make('auto_channel_increment')
-                        ->label(__('Auto channel number increment'))
-                        ->columnSpan(1)
-                        ->inline(false)
-                        ->live()
-                        ->default(false)
-                        ->helperText(__('If no channel number is set, output an automatically incrementing number.')),
+                    ComponentsGroup::make()
+                        ->columnSpanFull()
+                        ->columns(2)
+                        ->schema([
+                            Toggle::make('disable_m3u_xtream_format')
+                                ->label(__('Disable Xtream URL format in M3U output'))
+                                ->columnSpan(1)
+                                ->inline(false)
+                                ->default(false)
+                                ->hintIcon(
+                                    'heroicon-m-question-mark-circle',
+                                    tooltip: 'When enabled, the provider\'s original stream URL will be used directly in M3U output instead of the internal Xtream-format URL.'
+                                )
+                                ->afterStateHydrated(function (Toggle $component) {
+                                    if (config('app.disable_m3u_xtream_format', false)) {
+                                        $component->state(true);
+                                    }
+                                })
+                                ->dehydrated(fn (): bool => ! config('app.disable_m3u_xtream_format', false))
+                                ->disabled(fn (): bool => config('app.disable_m3u_xtream_format', false))
+                                ->helperText(config('app.disable_m3u_xtream_format', false) ? 'Already set by environment variable!' : __('Output the provider URL directly in M3U instead of routing through the internal Xtream URL format.')),
+                            Toggle::make('auto_channel_increment')
+                                ->label(__('Auto channel number increment'))
+                                ->columnSpan(1)
+                                ->inline(false)
+                                ->live()
+                                ->default(false)
+                                ->helperText(__('If no channel number is set, output an automatically incrementing number.')),
+                        ]),
                     TextInput::make('channel_start')
                         ->helperText(__('The starting channel number.'))
                         ->columnSpan(1)
@@ -627,6 +686,118 @@ class CustomPlaylistResource extends Resource implements CopilotResource
                                                     }
                                                 })
                                                 ->dehydrated(false), // Don't save this field directly
+                                        ]),
+                                ]),
+                            Tab::make(__('Processing'))
+                                ->icon('heroicon-m-arrow-path')
+                                ->columns(2)
+                                ->schema([
+                                    Section::make(__('Processing Configs'))
+                                        ->description(__('Define processing configs that automatically run after each sync. Configs execute in order.'))
+                                        ->columnSpanFull()
+                                        ->collapsible()
+                                        ->schema([
+                                            Repeater::make('processing_config')
+                                                ->hiddenLabel()
+                                                ->schema([
+                                                    Grid::make()
+                                                        ->columns(10)
+                                                        ->schema([
+                                                            Toggle::make('enabled')
+                                                                ->label(__('Enabled'))
+                                                                ->default(true)
+                                                                ->inline(false)
+                                                                ->columnSpan(1),
+                                                            Grid::make()
+                                                                ->columnSpan(9)
+                                                                ->columns(8)
+                                                                ->schema([
+                                                                    Select::make('action')
+                                                                        ->label(__('Action'))
+                                                                        ->options($processingActions)
+                                                                        ->default('sort_alpha')
+                                                                        ->required()
+                                                                        ->live()
+                                                                        ->columnSpan(2),
+                                                                    Select::make('type')
+                                                                        ->label(__('Target'))
+                                                                        ->options($processingTargets)
+                                                                        ->default('all')
+                                                                        ->required()
+                                                                        ->columnSpan(2),
+                                                                    Select::make('groups')
+                                                                        ->label(__('Groups'))
+                                                                        ->options(fn (?CustomPlaylist $record): array => [
+                                                                            'all' => __('All groups'),
+                                                                            ...($record
+                                                                                ? $record->groupTags()->pluck('name', 'name')->sort()->all()
+                                                                                : []),
+                                                                        ])
+                                                                        ->default(['all'])
+                                                                        ->multiple()
+                                                                        ->searchable()
+                                                                        ->columnSpan(4),
+                                                                    Select::make('column')
+                                                                        ->label(__('Sort By'))
+                                                                        ->options([
+                                                                            'title' => __('Title (or override if set)'),
+                                                                            'name' => __('Name (or override if set)'),
+                                                                            'stream_id' => __('ID (or override if set)'),
+                                                                            'channel' => __('Channel No.'),
+                                                                        ])
+                                                                        ->default('title')
+                                                                        ->required()
+                                                                        ->hidden(fn (Get $get): bool => $get('action') !== 'sort_alpha')
+                                                                        ->columnSpan(4),
+                                                                    Select::make('sort')
+                                                                        ->label(__('Sort Order'))
+                                                                        ->options([
+                                                                            'ASC' => __('A to Z or 0 to 9'),
+                                                                            'DESC' => __('Z to A or 9 to 0'),
+                                                                        ])
+                                                                        ->default('ASC')
+                                                                        ->required()
+                                                                        ->hidden(fn (Get $get): bool => $get('action') !== 'sort_alpha')
+                                                                        ->columnSpan(4),
+                                                                    TextInput::make('start')
+                                                                        ->label(__('Start Number'))
+                                                                        ->numeric()
+                                                                        ->default(1)
+                                                                        ->minValue(0)
+                                                                        ->required()
+                                                                        ->hidden(fn (Get $get): bool => $get('action') !== 'recount')
+                                                                        ->columnSpanFull(),
+                                                                ]),
+                                                        ]),
+                                                ])
+                                                ->columnSpanFull()
+                                                ->reorderable()
+                                                ->reorderableWithButtons()
+                                                ->collapsible()
+                                                ->defaultItems(0)
+                                                ->addActionLabel(__('Add processing config'))
+                                                ->itemLabel(static function (array $state) use ($processingActions): ?string {
+                                                    $action = $state['action'] ?? null;
+
+                                                    if (! $action) {
+                                                        return null;
+                                                    }
+
+                                                    $actionLabel = $processingActions[$action] ?? __('Recount Channels');
+                                                    $typeLabel = match ($state['type'] ?? 'all') {
+                                                        'live' => 'Live',
+                                                        'vod' => 'VOD',
+                                                        default => 'All',
+                                                    };
+
+                                                    $groups = (array) ($state['groups'] ?? ['all']);
+                                                    $groupLabel = \in_array('all', $groups) || empty($groups)
+                                                        ? ''
+                                                        : ' ['.implode(', ', array_diff($groups, ['all'])).']';
+                                                    $disabled = ($state['enabled'] ?? true) ? '' : ' (disabled)';
+
+                                                    return "{$actionLabel} — {$typeLabel}{$groupLabel}{$disabled}";
+                                                }),
                                         ]),
                                 ]),
                             Tab::make(__('Output'))

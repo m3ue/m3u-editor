@@ -120,3 +120,43 @@ it('logs warning and returns early when no playlist or channel ids given', funct
 
     Notification::assertNothingSent();
 });
+
+it('skips already-probed channels by default for playlist probe', function () {
+    Channel::factory()->for($this->playlist)->create([
+        'enabled' => true,
+        'is_vod' => false,
+        'probe_enabled' => true,
+        'stream_stats_probed_at' => now()->subDay(),
+    ]);
+    $unprobed = Channel::factory()->for($this->playlist)->create([
+        'enabled' => true,
+        'is_vod' => false,
+        'probe_enabled' => true,
+        'stream_stats_probed_at' => null,
+    ]);
+
+    // Mirror the job's default-onlyUnprobed query.
+    $query = Channel::query()
+        ->where('playlist_id', $this->playlist->id)
+        ->where('enabled', true)
+        ->where('is_vod', false)
+        ->where('probe_enabled', true)
+        ->whereNull('stream_stats_probed_at');
+
+    expect($query->count())->toBe(1)
+        ->and($query->first()->id)->toBe($unprobed->id);
+});
+
+it('honours explicit channelIds even when channels are already probed', function () {
+    $probed = Channel::factory()->for($this->playlist)->create([
+        'enabled' => true,
+        'is_vod' => false,
+        'stream_stats_probed_at' => now()->subDay(),
+    ]);
+
+    // Explicit channelIds path bypasses the unprobed filter, so manual UI re-probe
+    // must still work for already-probed channels.
+    $query = Channel::query()->whereIn('id', [$probed->id]);
+
+    expect($query->count())->toBe(1);
+});

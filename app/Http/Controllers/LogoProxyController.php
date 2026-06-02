@@ -124,18 +124,32 @@ class LogoProxyController extends Controller
                 return null;
             }
 
-            $contentType = $response->header('Content-Type');
-
-            // Validate that it's an image
-            if (! str_starts_with($contentType, 'image/')) {
-                return null;
-            }
-
             $content = $response->body();
 
             // Check file size (limit to 5MB)
             if (strlen($content) > 5 * 1024 * 1024) {
                 return null;
+            }
+
+            $contentType = $response->header('Content-Type');
+
+            // Some CDNs/origins (notably Cloudflare workers and Express-based image
+            // servers) return image bytes without a Content-Type header. Fall back
+            // to sniffing the body so those logos still proxy correctly.
+            if (! $contentType || ! str_starts_with($contentType, 'image/')) {
+                $sniffed = $this->sniffImageMimeType($content);
+                if (! $sniffed) {
+                    return null;
+                }
+                $contentType = $sniffed;
+            }
+
+            // Sanitize SVG to strip potential XSS vectors before caching.
+            if ($contentType === 'image/svg+xml') {
+                $content = $this->sanitizeSvg($content);
+                if ($content === null) {
+                    return null;
+                }
             }
 
             return [
@@ -222,6 +236,93 @@ class LogoProxyController extends Controller
         $ip = gethostbyname($host);
 
         return ! filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE);
+    }
+
+    /**
+     * Detect image MIME type from raw bytes. Returns null if not a recognised image.
+     */
+    private function sniffImageMimeType(string $content): ?string
+    {
+        if ($content === '') {
+            return null;
+        }
+
+        $info = @getimagesizefromstring($content);
+        if (is_array($info) && ! empty($info['mime']) && str_starts_with($info['mime'], 'image/')) {
+            return $info['mime'];
+        }
+
+        // getimagesizefromstring does not recognise SVG — detect it via the opening tag.
+        $head = ltrim(substr($content, 0, 1024));
+        if ($head !== '' && preg_match('/^(<\?xml[^>]*>\s*)?<svg[\s>\/]/i', $head)) {
+            return 'image/svg+xml';
+        }
+
+        return null;
+    }
+
+    /**
+     * Strip XSS vectors from SVG bytes. Returns null if the SVG cannot be parsed.
+     */
+    private function sanitizeSvg(string $content): ?string
+    {
+        $dom = new \DOMDocument;
+        libxml_use_internal_errors(true);
+        $loaded = $dom->loadXML($content, LIBXML_NONET);
+        libxml_clear_errors();
+        libxml_use_internal_errors(false);
+
+        if (! $loaded || ! $dom->documentElement) {
+            return null;
+        }
+
+        $xpath = new \DOMXPath($dom);
+
+        // Remove elements that can execute code, using case-insensitive local-name matching.
+        $unsafeTagExpr = implode(' or ', array_map(
+            fn (string $tag) => "translate(local-name(),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz')='{$tag}'",
+            ['script', 'foreignobject', 'iframe', 'object', 'embed']
+        ));
+        foreach (iterator_to_array($xpath->query("//*[{$unsafeTagExpr}]") ?: []) as $node) {
+            $node->parentNode?->removeChild($node);
+        }
+
+        // Strip event-handler attributes and dangerous URI values from all remaining elements.
+        foreach (iterator_to_array($dom->getElementsByTagName('*')) as $element) {
+            $toRemove = [];
+
+            foreach ($element->attributes ?? [] as $attr) {
+                if (preg_match('/^on\w+$/i', $attr->localName)) {
+                    $toRemove[] = $attr->nodeName;
+
+                    continue;
+                }
+
+                if (in_array(strtolower($attr->localName), ['href', 'src', 'action', 'formaction'])) {
+                    $normalized = strtolower(preg_replace('/[\x00-\x1f\s]/', '', $attr->value));
+                    if (str_starts_with($normalized, 'javascript:') || str_starts_with($normalized, 'data:text')) {
+                        $toRemove[] = $attr->nodeName;
+                    }
+                }
+            }
+
+            foreach ($toRemove as $attrName) {
+                $element->removeAttribute($attrName);
+            }
+
+            // xlink:href is a namespaced attribute and needs separate handling.
+            $xlinkHref = $element->getAttributeNS('http://www.w3.org/1999/xlink', 'href');
+            if ($xlinkHref !== '') {
+                $normalized = strtolower(preg_replace('/[\x00-\x1f\s]/', '', $xlinkHref));
+                if (str_starts_with($normalized, 'javascript:') || str_starts_with($normalized, 'data:text')) {
+                    $element->removeAttributeNS('http://www.w3.org/1999/xlink', 'href');
+                }
+            }
+        }
+
+        $sanitized = $dom->saveXML();
+
+        return $sanitized !== false ? $sanitized : null;
     }
 
     /**

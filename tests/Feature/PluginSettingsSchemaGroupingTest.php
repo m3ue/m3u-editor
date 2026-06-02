@@ -3,9 +3,50 @@
 use App\Models\Plugin;
 use App\Plugins\PluginSchemaMapper;
 use App\Plugins\PluginValidator;
+use Filament\Forms\Components\TextInput;
 use Filament\Schemas\Components\Section;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Str;
+
+it('renders a text field with secret true as a password input', function () {
+    $plugin = new Plugin([
+        'settings_schema' => [
+            [
+                'id' => 'api_key',
+                'type' => 'text',
+                'label' => 'API Key',
+                'secret' => true,
+            ],
+        ],
+        'settings' => [],
+    ]);
+
+    $components = app(PluginSchemaMapper::class)->settingsComponents($plugin);
+
+    expect($components)->toHaveCount(1);
+    expect($components[0])->toBeInstanceOf(TextInput::class);
+    expect($components[0]->isPassword())->toBeTrue();
+    expect($components[0]->isPasswordRevealable())->toBeTrue();
+});
+
+it('renders a text field without secret as a plain text input', function () {
+    $plugin = new Plugin([
+        'settings_schema' => [
+            [
+                'id' => 'display_name',
+                'type' => 'text',
+                'label' => 'Display Name',
+            ],
+        ],
+        'settings' => [],
+    ]);
+
+    $components = app(PluginSchemaMapper::class)->settingsComponents($plugin);
+
+    expect($components)->toHaveCount(1);
+    expect($components[0])->toBeInstanceOf(TextInput::class);
+    expect($components[0]->isPassword())->toBeFalse();
+});
 
 it('renders grouped plugin settings sections and keeps nested rules flat', function () {
     $plugin = new Plugin([
@@ -169,6 +210,7 @@ it('validates plugin manifests that use grouped settings sections', function () 
     $pluginId = 'grouped-schema-'.Str::lower(Str::random(6));
     $sourcePath = storage_path('app/testing-plugin-sources/'.$pluginId);
     $classSegment = Str::studly(str_replace('-', ' ', $pluginId));
+    $tableName = 'plugin_'.str_replace('-', '_', $pluginId).'_profiles';
 
     File::deleteDirectory($sourcePath);
     File::ensureDirectoryExists($sourcePath);
@@ -183,7 +225,7 @@ it('validates plugin manifests that use grouped settings sections', function () 
         'class' => "AppLocalPlugins\\{$classSegment}\\Plugin",
         'capabilities' => [],
         'hooks' => [],
-        'permissions' => [],
+        'permissions' => ['schema_manage'],
         'settings' => [
             [
                 'id' => 'core_setup',
@@ -209,7 +251,30 @@ it('validates plugin manifests that use grouped settings sections', function () 
         ],
         'actions' => [],
         'schema' => [
-            'tables' => [],
+            'tables' => [
+                [
+                    'name' => $tableName,
+                    'columns' => [
+                        ['type' => 'id', 'name' => 'id'],
+                        ['type' => 'string', 'name' => 'name'],
+                        ['type' => 'json', 'name' => 'settings', 'nullable' => true],
+                        ['type' => 'timestamps'],
+                    ],
+                ],
+            ],
+            'ui_tables' => [
+                [
+                    'id' => 'profiles',
+                    'label' => 'Profiles',
+                    'table' => $tableName,
+                    'columns' => [
+                        ['name' => 'name', 'label' => 'Name'],
+                    ],
+                    'fields' => [
+                        ['id' => 'name', 'label' => 'Name', 'type' => 'text', 'required' => true],
+                    ],
+                ],
+            ],
         ],
         'data_ownership' => [
             'plugin_id' => $pluginId,

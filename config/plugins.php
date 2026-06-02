@@ -188,6 +188,8 @@ return [
         'after.epg.output.generate' => 'After EPG output generation',
     ],
 
+    'prefill_max_source_rows' => 1000,
+
     'field_types' => [
         'section',
         'boolean',
@@ -197,6 +199,7 @@ return [
         'tags',
         'select',
         'model_select',
+        'table_select',
     ],
 
     'schema_column_types' => [

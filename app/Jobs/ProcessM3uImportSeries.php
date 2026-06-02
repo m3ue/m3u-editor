@@ -28,7 +28,7 @@ class ProcessM3uImportSeries implements ShouldQueue
         public ?bool $force = false,
         public ?bool $isNew = false,
         public ?string $batchNo = null,
-
+        public ?int $syncRunId = null,
     ) {}
 
     /**
@@ -82,6 +82,7 @@ class ProcessM3uImportSeries implements ShouldQueue
                 overwrite_existing: false,
                 user_id: $this->playlist->user_id,
                 sync_stream_files: (bool) $this->playlist->auto_sync_series_stream_files,
+                syncRunId: $this->syncRunId,
             ));
 
             Log::info('ProcessM3uImportSeries: Dispatched bulk series sync', [

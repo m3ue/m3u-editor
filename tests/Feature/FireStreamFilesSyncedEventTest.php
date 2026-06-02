@@ -176,7 +176,12 @@ it('chains TMDB fetch before SyncSeriesStrmFiles', function () {
         sync_stream_files: true,
     ))->handle(app(GeneralSettings::class));
 
-    Bus::assertChained([FetchTmdbIds::class, SyncSeriesStrmFiles::class]);
+    // FetchTmdbIds is dispatched directly with SyncSeriesStrmFiles in postCompletionJobs
+    // so it fires after all TMDB chunk jobs complete — not chained alongside them.
+    Bus::assertDispatched(FetchTmdbIds::class, function (FetchTmdbIds $job): bool {
+        return count($job->postCompletionJobs) === 1
+            && $job->postCompletionJobs[0] instanceof SyncSeriesStrmFiles;
+    });
 });
 
 // ──────────────────────────────────────────────────────────────────────────────

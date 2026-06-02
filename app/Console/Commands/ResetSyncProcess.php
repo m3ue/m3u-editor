@@ -8,6 +8,7 @@ use App\Jobs\ProcessEpgImport;
 use App\Jobs\ProcessM3uImport;
 use App\Models\Epg;
 use App\Models\Playlist;
+use App\Services\SyncPipelineService;
 use Filament\Notifications\Notification;
 use Illuminate\Console\Command;
 
@@ -52,7 +53,8 @@ class ResetSyncProcess extends Command
             // Restart the sync process
             if ($playlist->auto_sync) {
                 $this->line("  → Restarting sync for \"{$playlist->name}\"");
-                dispatch(new ProcessM3uImport($playlist, force: true));
+                $syncRun = app(SyncPipelineService::class)->startImport($playlist, trigger: 'reset_sync_process');
+                dispatch(new ProcessM3uImport($playlist, force: true, syncRunId: $syncRun->id));
             } else {
                 $playlist->update([
                     'processing' => [

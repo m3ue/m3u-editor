@@ -380,6 +380,112 @@ describe('PlaylistAlias::channels() live group filter', function () {
     });
 });
 
+// ── group_filter — custom channels bypass / group fallback ───────────────────
+
+describe('PlaylistAlias::channels() custom channel group filter behaviour', function () {
+    beforeEach(function () {
+        $this->user = User::factory()->create();
+        $this->playlist = Playlist::factory()->for($this->user)->create();
+    });
+
+    it('always includes a live custom channel with no group when a live group filter is active', function () {
+        $alias = makeAlias($this->user, $this->playlist, [
+            'group_filter' => ['selected_groups' => ['Sports']],
+        ]);
+
+        // Provider channel in an excluded group — should be filtered out
+        Channel::factory()->for($this->playlist)->for($this->user)->create([
+            'group_internal' => 'News', 'is_vod' => false, 'enabled' => true,
+        ]);
+
+        // Custom channel with no group/group_internal — must always pass through
+        $custom = Channel::factory()->for($this->playlist)->for($this->user)->create([
+            'is_custom' => true, 'group_internal' => null, 'group' => null,
+            'is_vod' => false, 'enabled' => true,
+        ]);
+
+        $ids = $alias->channels()->pluck('channels.id');
+        expect($ids)->toContain($custom->id)
+            ->and($ids)->not->toContain($ids->first() === $custom->id ? null : $ids->first());
+    });
+
+    it('includes a live custom channel whose group matches the live filter', function () {
+        $alias = makeAlias($this->user, $this->playlist, [
+            'group_filter' => ['selected_groups' => ['Sports']],
+        ]);
+
+        $custom = Channel::factory()->for($this->playlist)->for($this->user)->create([
+            'is_custom' => true, 'group_internal' => null, 'group' => 'Sports',
+            'is_vod' => false, 'enabled' => true,
+        ]);
+
+        $ids = $alias->channels()->pluck('channels.id');
+        expect($ids)->toContain($custom->id);
+    });
+
+    it('excludes a live custom channel whose group does not match the live filter', function () {
+        $alias = makeAlias($this->user, $this->playlist, [
+            'group_filter' => ['selected_groups' => ['Sports']],
+        ]);
+
+        $custom = Channel::factory()->for($this->playlist)->for($this->user)->create([
+            'is_custom' => true, 'group_internal' => null, 'group' => 'Comedy',
+            'is_vod' => false, 'enabled' => true,
+        ]);
+
+        $ids = $alias->channels()->pluck('channels.id');
+        expect($ids)->not->toContain($custom->id);
+    });
+
+    it('always includes a VOD custom channel with no group when a VOD group filter is active', function () {
+        $alias = makeAlias($this->user, $this->playlist, [
+            'group_filter' => ['selected_vod_groups' => ['Movies']],
+        ]);
+
+        // Provider VOD channel in an excluded group — should be filtered out
+        Channel::factory()->for($this->playlist)->for($this->user)->create([
+            'group_internal' => 'Documentaries', 'is_vod' => true, 'enabled' => true,
+        ]);
+
+        // Custom VOD channel with no group — must always pass through
+        $custom = Channel::factory()->for($this->playlist)->for($this->user)->create([
+            'is_custom' => true, 'group_internal' => null, 'group' => null,
+            'is_vod' => true, 'enabled' => true,
+        ]);
+
+        $ids = $alias->channels()->where('is_vod', true)->pluck('channels.id');
+        expect($ids)->toContain($custom->id);
+    });
+
+    it('includes a VOD custom channel whose group matches the VOD filter', function () {
+        $alias = makeAlias($this->user, $this->playlist, [
+            'group_filter' => ['selected_vod_groups' => ['Movies']],
+        ]);
+
+        $custom = Channel::factory()->for($this->playlist)->for($this->user)->create([
+            'is_custom' => true, 'group_internal' => null, 'group' => 'Movies',
+            'is_vod' => true, 'enabled' => true,
+        ]);
+
+        $ids = $alias->channels()->where('is_vod', true)->pluck('channels.id');
+        expect($ids)->toContain($custom->id);
+    });
+
+    it('excludes a VOD custom channel whose group does not match the VOD filter', function () {
+        $alias = makeAlias($this->user, $this->playlist, [
+            'group_filter' => ['selected_vod_groups' => ['Movies']],
+        ]);
+
+        $custom = Channel::factory()->for($this->playlist)->for($this->user)->create([
+            'is_custom' => true, 'group_internal' => null, 'group' => 'Documentaries',
+            'is_vod' => true, 'enabled' => true,
+        ]);
+
+        $ids = $alias->channels()->where('is_vod', true)->pluck('channels.id');
+        expect($ids)->not->toContain($custom->id);
+    });
+});
+
 // ── group_filter — channels() VOD filter ─────────────────────────────────────
 
 describe('PlaylistAlias::channels() VOD group filter', function () {

@@ -15,7 +15,7 @@ class CustomDashboard extends Dashboard
 
     public function getHeading(): string
     {
-        return __('Dashboard');
+        return ''; // Return empty string to hide heading
     }
 
     protected function getActions(): array

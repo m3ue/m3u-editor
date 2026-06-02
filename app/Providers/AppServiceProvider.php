@@ -15,6 +15,7 @@ use App\Events\PlaylistUpdated;
 use App\Http\Middleware\EnsureUserCanUseCopilot;
 use App\Jobs\ProcessChannelScrubber;
 use App\Jobs\SyncMediaServer;
+use App\Listeners\AlertOnJobFailed;
 use App\Listeners\PersistUserLocale;
 use App\Livewire\BackupDestinationListRecords;
 use App\Livewire\TmdbSearch;
@@ -33,6 +34,7 @@ use App\Models\PlaylistViewer;
 use App\Models\StreamFileSetting;
 use App\Models\StreamProfile;
 use App\Models\User;
+use App\Notifications\Notification as AppNotification;
 use App\Services\DateFormatService;
 use App\Services\EpgCacheService;
 use App\Services\GitInfoService;
@@ -50,6 +52,7 @@ use Exception;
 use Filament\Forms\Components\Field;
 use Filament\Forms\Components\FileUpload;
 use Filament\Infolists\Components\ImageEntry;
+use Filament\Notifications\Notification as FilamentNotification;
 use Filament\Schemas\Components\Fieldset;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
@@ -61,6 +64,7 @@ use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\Request;
+use Illuminate\Queue\Events\JobFailed;
 use Illuminate\Routing\Route;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
@@ -88,6 +92,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
+        $this->app->bind(FilamentNotification::class, AppNotification::class);
+
         // Override the Laravel AI manager to fix a strict-mode tool schema bug
         // where tools with no parameters are missing the required `parameters`
         // object, causing OpenAI to return a 400 invalid_function_parameters error.
@@ -179,6 +185,9 @@ class AppServiceProvider extends ServiceProvider
 
         // Persist user locale preference when changed via the language switcher
         $this->registerLocaleListener();
+
+        // Forward failed queue jobs to Discord/Slack when configured
+        $this->registerJobFailedAlertListener();
 
         // Livewire components
         $this->registerLivewireComponents();
@@ -1002,6 +1011,14 @@ class AppServiceProvider extends ServiceProvider
         Event::listen(
             LocaleChanged::class,
             PersistUserLocale::class,
+        );
+    }
+
+    private function registerJobFailedAlertListener(): void
+    {
+        Event::listen(
+            JobFailed::class,
+            AlertOnJobFailed::class,
         );
     }
 

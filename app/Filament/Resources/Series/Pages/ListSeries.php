@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Series\Pages;
 
+use App\Filament\Actions\RegexTesterAction;
 use App\Filament\Resources\Series\SeriesResource;
 use App\Jobs\FetchTmdbIds;
 use App\Jobs\ProcessM3uImportSeriesEpisodes;
@@ -313,6 +314,10 @@ class ListSeries extends ListRecords
                                     fn (Get $get) => ! $get('use_regex')
                                         ? 'This is the string you want to find and replace.'
                                         : 'This is the regex pattern you want to find. Make sure to use valid regex syntax.'
+                                )
+                                ->suffixAction(
+                                    RegexTesterAction::make(samplesContext: 'series', patternField: 'find_replace', replacementField: 'replace_with')
+                                        ->visible(fn (Get $get): bool => (bool) $get('use_regex'))
                                 ),
                             TextInput::make('replace_with')
                                 ->label(__('Replace with (optional)'))

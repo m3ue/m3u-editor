@@ -2,11 +2,13 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\PlaylistSourceType;
 use App\Facades\PlaylistFacade;
 use App\Jobs\MergeChannels;
 use App\Jobs\ProcessM3uImport;
 use App\Models\Playlist;
 use App\Services\M3uProxyService;
+use App\Services\SyncPipelineService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -40,10 +42,138 @@ class PlaylistController extends Controller
         }
 
         // Refresh the playlist
-        dispatch(new ProcessM3uImport($playlist, $request->force ?? true));
+        $force = (bool) ($request->force ?? true);
+        $syncRun = app(SyncPipelineService::class)->startImport($playlist, trigger: 'api_refresh');
+        dispatch(new ProcessM3uImport($playlist, $force, syncRunId: $syncRun->id));
 
         return response()->json([
             'message' => "Playlist \"{$playlist->name}\" is currently being synced...",
+        ]);
+    }
+
+    /**
+     * Update the playlist source URL.
+     *
+     * Update the playlist's source URL (and optionally credentials for Xtream playlists).
+     * For M3U playlists the `url` column is updated. For Xtream playlists, `xtream_config.url`
+     * is updated, and `username`/`password` may be provided to rotate credentials.
+     *
+     * Pass `resync=true` to dispatch an immediate import job after saving the changes.
+     *
+     * @response 200 {
+     *   "success": true,
+     *   "message": "Playlist updated successfully",
+     *   "data": {
+     *     "uuid": "abc-123-def",
+     *     "name": "My Provider",
+     *     "url": "https://provider.com:8080",
+     *     "resync_dispatched": true
+     *   }
+     * }
+     * @response 403 {
+     *   "success": false,
+     *   "message": "You do not have permission to update this playlist"
+     * }
+     * @response 404 {
+     *   "success": false,
+     *   "message": "Playlist not found"
+     * }
+     * @response 422 {
+     *   "message": "The given data was invalid.",
+     *   "errors": {
+     *     "url": ["The url must be a valid URL."]
+     *   }
+     * }
+     */
+    public function update(Request $request, string $uuid): JsonResponse
+    {
+        $user = $request->user();
+
+        $playlist = PlaylistFacade::resolvePlaylistByUuid($uuid);
+        if (! $playlist) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Playlist not found',
+            ], 404);
+        }
+
+        if (! $playlist instanceof Playlist) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Only standard playlists support this update endpoint',
+            ], 422);
+        }
+
+        if ($playlist->user_id !== $user->id) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You do not have permission to update this playlist',
+            ], 403);
+        }
+
+        $validated = $request->validate([
+            'url' => 'required|url|max:4000',
+            'username' => 'sometimes|nullable|string|max:255',
+            'password' => 'sometimes|nullable|string|max:255',
+            'resync' => 'sometimes|boolean',
+        ]);
+
+        $normalizedUrl = rtrim($validated['url'], '/');
+
+        if ($playlist->source_type === PlaylistSourceType::Xtream) {
+            $config = $playlist->xtream_config ?? [];
+            $urlChanged = ($config['url'] ?? null) !== $normalizedUrl;
+            $config['url'] = $normalizedUrl;
+
+            if (array_key_exists('username', $validated) && $validated['username'] !== null) {
+                $config['username'] = $validated['username'];
+            }
+
+            if (array_key_exists('password', $validated) && $validated['password'] !== null) {
+                $config['password'] = $validated['password'];
+            }
+
+            $playlist->xtream_config = $config;
+
+            if ($urlChanged) {
+                $playlist->xtream_fallback_urls = [];
+            }
+        } else {
+            if ($request->has('username') || $request->has('password')) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Credentials are only supported for Xtream playlists',
+                ], 422);
+            }
+
+            $playlist->url = $normalizedUrl;
+        }
+
+        $saved = false;
+        if ($playlist->isDirty()) {
+            $playlist->save();
+            $saved = true;
+        }
+
+        $resync = $saved && (bool) ($validated['resync'] ?? false);
+        if ($resync) {
+            $syncRun = app(SyncPipelineService::class)->startImport($playlist, trigger: 'api_save_resync');
+            dispatch(new ProcessM3uImport($playlist, force: true, syncRunId: $syncRun->id));
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => $resync
+                ? 'Playlist updated successfully and resync dispatched'
+                : 'Playlist updated successfully',
+            'data' => [
+                'uuid' => $playlist->uuid,
+                'name' => $playlist->name,
+                'url' => $playlist->source_type === PlaylistSourceType::Xtream
+                    ? ($playlist->xtream_config['url'] ?? null)
+                    : $playlist->url,
+                'resync_dispatched' => $resync,
+            ],
         ]);
     }
 
@@ -276,6 +406,12 @@ class PlaylistController extends Controller
             'group_priorities.*.weight' => 'required_with:group_priorities|integer|min:1|max:1000',
             'priority_attributes' => 'sometimes|array',
             'priority_attributes.*' => 'string|in:playlist_priority,group_priority,catchup_support,resolution,fps,bitrate,codec,keyword_match',
+            'fallback_name_matching_enabled' => 'sometimes|boolean',
+            'fallback_name_matching_mode' => 'sometimes|string|in:normalized_name,alias_rules,normalized_name_and_alias_rules',
+            'fallback_alias_rules' => 'sometimes|array',
+            'fallback_alias_rules.*.label' => 'required_with:fallback_alias_rules|string|max:255',
+            'fallback_alias_rules.*.aliases' => 'sometimes|array',
+            'fallback_alias_rules.*.aliases.*' => 'string|max:255',
         ]);
 
         $config = $playlist->auto_merge_config ?? [];
@@ -293,6 +429,9 @@ class PlaylistController extends Controller
             'exclude_disabled_groups',
             'group_priorities',
             'priority_attributes',
+            'fallback_name_matching_enabled',
+            'fallback_name_matching_mode',
+            'fallback_alias_rules',
         ] as $key) {
             if (array_key_exists($key, $validated)) {
                 $config[$key] = $validated[$key];
@@ -399,6 +538,7 @@ class PlaylistController extends Controller
             weightedConfig: $weightedConfig,
             newChannelsOnly: $newChannelsOnly,
             regexPatterns: ! empty($config['regex_patterns']) ? $config['regex_patterns'] : null,
+            fallbackMergeConfig: $this->buildMergeFallbackConfig($config),
         ));
 
         return response()->json([
@@ -415,6 +555,7 @@ class PlaylistController extends Controller
                 'prefer_catchup_as_primary' => $preferCatchupAsPrimary,
                 'new_channels_only' => $newChannelsOnly,
                 'weighted_config_enabled' => $weightedConfig !== null,
+                'fallback_name_matching_enabled' => (bool) ($config['fallback_name_matching_enabled'] ?? false),
             ],
         ]);
     }
@@ -489,6 +630,25 @@ class PlaylistController extends Controller
             'priority_keywords' => $priorityKeywords,
             'prefer_codec' => $preferCodec,
             'exclude_disabled_groups' => $config['exclude_disabled_groups'] ?? false,
+        ];
+    }
+
+    /**
+     * Build the focused fallback merge config from the merged $config array.
+     *
+     * @param  array<string, mixed>  $config
+     * @return array<string, mixed>|null
+     */
+    private function buildMergeFallbackConfig(array $config): ?array
+    {
+        if (! ($config['fallback_name_matching_enabled'] ?? false)) {
+            return null;
+        }
+
+        return [
+            'enabled' => true,
+            'mode' => $config['fallback_name_matching_mode'] ?? 'normalized_name',
+            'alias_rules' => $config['fallback_alias_rules'] ?? [],
         ];
     }
 

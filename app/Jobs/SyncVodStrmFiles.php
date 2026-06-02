@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Enums\SyncRunPhase;
 use App\Models\Channel;
 use App\Models\MediaServerIntegration;
 use App\Models\Playlist;
@@ -10,7 +11,8 @@ use App\Models\StrmFileMapping;
 use App\Models\User;
 use App\Services\NfoService;
 use App\Services\PlaylistService;
-use App\Services\StrmPathBuilder;
+use App\Services\SyncPipelineService;
+use App\Services\VodFileNameService;
 use App\Settings\GeneralSettings;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -60,6 +62,8 @@ class SyncVodStrmFiles implements ShouldQueue
         public ?int $currentBatch = null,
         public bool $isCleanupJob = false,
         public ?array $channel_ids = null,
+        public ?int $syncRunId = null,
+        public ?SyncRunPhase $completionPhase = null,
     ) {
         // Run file synces on the dedicated queue
         $this->onQueue('file_sync');
@@ -173,7 +177,7 @@ class SyncVodStrmFiles implements ShouldQueue
 
         // Add checker job at the end of the chain
         $jobs[] = new CheckVodStrmProgress(
-            currentOffset: $jobsInFirstChain * $batchSize,
+            currentOffset: min($jobsInFirstChain * $batchSize, $totalCount),
             totalChannels: $totalCount,
             notify: $this->notify,
             all_playlists: $this->all_playlists,
@@ -181,6 +185,8 @@ class SyncVodStrmFiles implements ShouldQueue
             user_id: $this->resolveUserId(),
             needsCleanup: true,
             channel_ids: $this->channel_ids,
+            syncRunId: $this->syncRunId,
+            completionPhase: $this->completionPhase,
         );
 
         Bus::chain($jobs)->dispatch();
@@ -388,6 +394,21 @@ class SyncVodStrmFiles implements ShouldQueue
                 }
             }
 
+            // Trash Guide naming: append edition + quality/video/audio/hdr bracket
+            // additively (after year, before TMDB id and group). Provider-driven only —
+            // missing stream_stats / edition simply produce no extras.
+            if ($streamFileSetting && $streamFileSetting->trash_guide_naming_enabled) {
+                try {
+                    $extras = app(VodFileNameService::class)
+                        ->generateMovieExtras($channel, $streamFileSetting);
+                    if ($extras !== '') {
+                        $fileName .= ' '.$extras;
+                    }
+                } catch (\Throwable $e) {
+                    Log::warning("Trash Guide extras build failed for channel {$channel->id}: ".$e->getMessage());
+                }
+            }
+
             // Add TMDB/IMDB ID to filename if configured in filename_metadata
             // (When a title folder exists, TMDB ID belongs in folder_metadata instead)
             if (in_array('tmdb_id', $filenameMetadata)) {
@@ -442,22 +463,6 @@ class SyncVodStrmFiles implements ShouldQueue
 
             $fileName = "{$fileName}.strm";
             $filePath = $path.'/'.$fileName;
-
-            // Trash Guide naming override: if a StreamFileSetting with vod_format is configured,
-            // delegate the full path/filename construction to StrmPathBuilder.
-            if ($streamFileSetting && $streamFileSetting->trash_guide_naming_enabled) {
-                try {
-                    $trashPath = app(StrmPathBuilder::class)->buildVodPath($channel, $streamFileSetting, $sync_settings);
-                    $trashDir = dirname($trashPath);
-                    if (! is_dir($trashDir)) {
-                        @mkdir($trashDir, 0777, true);
-                    }
-                    $filePath = $trashPath;
-                    $fileName = basename($trashPath);
-                } catch (\Throwable $e) {
-                    Log::warning("Trash Guide VOD path build failed for channel {$channel->id}: ".$e->getMessage());
-                }
-            }
 
             // Generate the url
             $useOriginalUrl = ($sync_settings['url_type'] ?? 'proxy') === 'original';
@@ -589,6 +594,12 @@ class SyncVodStrmFiles implements ShouldQueue
             if ($playlist) {
                 dispatch(new FireStreamFilesSyncedEvent($playlist, 'vod_stream_files_synced'));
             }
+        }
+
+        // Advance the pipeline now that all cleanup work (orphan removal, media-server
+        // refresh, post-process events) has completed.
+        if ($this->syncRunId && $this->completionPhase) {
+            app(SyncPipelineService::class)->completePhase($this->syncRunId, $this->completionPhase);
         }
     }
 

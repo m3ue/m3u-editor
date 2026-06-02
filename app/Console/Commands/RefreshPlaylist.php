@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Enums\Status;
 use App\Jobs\ProcessM3uImport;
 use App\Models\Playlist;
+use App\Services\SyncPipelineService;
 use Cron\CronExpression;
 use Illuminate\Console\Command;
 
@@ -34,7 +35,8 @@ class RefreshPlaylist extends Command
             $force = $this->argument('force') ?? false;
             $this->info("Refreshing playlist with ID: {$playlistId}");
             $playlist = Playlist::findOrFail($playlistId);
-            dispatch(new ProcessM3uImport($playlist, (bool) $force));
+            $syncRun = app(SyncPipelineService::class)->startImport($playlist, trigger: 'console_refresh');
+            dispatch(new ProcessM3uImport($playlist, (bool) $force, syncRunId: $syncRun->id));
             $this->info('Dispatched playlist for refresh');
         } else {
             $this->info('Refreshing all playlists');
@@ -74,8 +76,10 @@ class RefreshPlaylist extends Command
 
             $count = 0;
             $failedRetryCooldown = (int) config('dev.failed_retry_cooldown_minutes', 30);
-            $playlists->get()->each(function (Playlist $playlist) use (&$count, $failedRetryCooldown) {
-                $cronExpression = new CronExpression($playlist->sync_interval);
+            $pipeline = app(SyncPipelineService::class);
+            $playlists->get()->each(function (Playlist $playlist) use (&$count, $failedRetryCooldown, $pipeline) {
+                $interval = $playlist->sync_interval === '24hr' ? '0 0 * * *' : $playlist->sync_interval;
+                $cronExpression = new CronExpression($interval);
 
                 // Gate failed retries behind a cooldown to prevent CPU runaway
                 $isFailed = $playlist->status === Status::Failed;
@@ -91,7 +95,8 @@ class RefreshPlaylist extends Command
 
                 if (now() >= $nextDue) {
                     $count++;
-                    dispatch(new ProcessM3uImport($playlist, $force));
+                    $syncRun = $pipeline->startImport($playlist, trigger: 'scheduled_refresh');
+                    dispatch(new ProcessM3uImport($playlist, $force, syncRunId: $syncRun->id));
                 }
             });
             $this->info('Dispatched '.$count.' playlists for refresh');

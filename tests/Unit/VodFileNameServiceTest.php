@@ -116,3 +116,40 @@ it('normalizes ffprobe style stream stats while generating filenames', function 
 
     expect($fileName)->toBe('Stream Stats Movie [4K H.265 DTS 5.1]');
 });
+
+it('resolves edition from explicit channel edition attribute', function () {
+    $channel = new Channel(['edition' => "Director's Cut"]);
+
+    expect((new VodFileNameService)->resolveEdition($channel))->toBe("Director's Cut");
+});
+
+it('resolves edition from info release_name when no explicit edition', function () {
+    $channel = new Channel([
+        'info' => ['release_name' => 'Extended'],
+    ]);
+
+    expect((new VodFileNameService)->resolveEdition($channel))->toBe('Extended');
+});
+
+it('resolves edition from movie_data release_name as fallback', function () {
+    $channel = new Channel([
+        'movie_data' => ['release_name' => 'IMAX'],
+    ]);
+
+    expect((new VodFileNameService)->resolveEdition($channel))->toBe('IMAX');
+});
+
+it('prefers info edition over movie_data release_name', function () {
+    $channel = new Channel([
+        'info' => ['edition' => 'Theatrical'],
+        'movie_data' => ['release_name' => 'Extended'],
+    ]);
+
+    expect((new VodFileNameService)->resolveEdition($channel))->toBe('Theatrical');
+});
+
+it('returns empty string when no edition data is available', function () {
+    $channel = new Channel(['name' => 'Movie Without Edition']);
+
+    expect((new VodFileNameService)->resolveEdition($channel))->toBe('');
+});

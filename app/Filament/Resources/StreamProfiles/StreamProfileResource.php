@@ -172,6 +172,14 @@ class StreamProfileResource extends Resource implements CopilotResource
                     )
                     ->visible(fn (Get $get): bool => in_array($get('backend'), ['streamlink', 'ytdlp'])),
 
+                TextInput::make('max_connections')
+                    ->label(__('Connection Limit'))
+                    ->integer()
+                    ->minValue(1)
+                    ->placeholder(__('Unlimited'))
+                    ->visible(fn (Get $get): bool => in_array($get('backend'), ['streamlink', 'ytdlp']))
+                    ->helperText(__('Maximum concurrent active streams for this profile across all channels. When the limit is reached the oldest stream is stopped automatically. Leave blank for no limit.')),
+
                 Select::make('format')
                     ->label(__('Stream Format'))
                     ->searchable()

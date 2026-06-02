@@ -283,7 +283,7 @@ class Episode extends Model
             $process->run();
 
             if ($process->getExitCode() !== 0) {
-                Log::error("Error running ffprobe for episode \"{$this->title}\": {$process->getErrorOutput()}");
+                Log::warning("Error running ffprobe for episode \"{$this->title}\": {$process->getErrorOutput()}");
 
                 return [];
             }
@@ -309,6 +309,13 @@ class Episode extends Model
                             'channel_layout' => $stream['channel_layout'] ?? null,
                             'bits_per_raw_sample' => $stream['bits_per_raw_sample'] ?? null,
                             'refs' => $stream['refs'] ?? null,
+                            'pix_fmt' => $stream['pix_fmt'] ?? null,
+                            'color_transfer' => $stream['color_transfer'] ?? null,
+                            'color_space' => $stream['color_space'] ?? null,
+                            'color_primaries' => $stream['color_primaries'] ?? null,
+                            'color_range' => $stream['color_range'] ?? null,
+                            'codec_tag_string' => $stream['codec_tag_string'] ?? null,
+                            'side_data_list' => $stream['side_data_list'] ?? null,
                             'tags' => $stream['tags'] ?? [],
                         ];
                     }
@@ -317,7 +324,7 @@ class Episode extends Model
                 return $streamStats;
             }
         } catch (Exception $e) {
-            Log::error("Error running ffprobe for episode \"{$this->title}\": {$e->getMessage()}");
+            Log::warning("Error running ffprobe for episode \"{$this->title}\": {$e->getMessage()}");
         }
 
         return [];
