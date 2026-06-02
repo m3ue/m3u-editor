@@ -1554,6 +1554,34 @@ it('with lookupScope both, processes series that are enabled OR new', function (
     $job->handle($tmdb);
 });
 
+it('advances the sync pipeline when TMDB is not configured', function () {
+    $tmdb = Mockery::mock(TmdbService::class);
+    $tmdb->shouldReceive('isConfigured')->andReturn(false);
+
+    $syncRun = \App\Models\SyncRun::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'phases' => ['vod_tmdb', 'find_replace'],
+        'phase_statuses' => (object) [],
+        'status' => \App\Enums\SyncRunStatus::Running->value,
+        'current_phase' => 'vod_tmdb',
+    ]);
+
+    $pipeline = Mockery::mock(\App\Services\SyncPipelineService::class)->makePartial();
+    $pipeline->shouldReceive('completePhase')
+        ->once()
+        ->with($syncRun->id, \App\Enums\SyncRunPhase::VodTmdb);
+    app()->instance(\App\Services\SyncPipelineService::class, $pipeline);
+
+    $job = new TestableFetchTmdbIds(
+        vodPlaylistId: $this->playlist->id,
+        user: $this->user,
+        syncRunId: $syncRun->id,
+        completionPhase: \App\Enums\SyncRunPhase::VodTmdb,
+    );
+    $job->handle($tmdb);
+});
+
 class TestableFetchTmdbIds extends FetchTmdbIds
 {
     protected function sendCompletionNotification(): void {}

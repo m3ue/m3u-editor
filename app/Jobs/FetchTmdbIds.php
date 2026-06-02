@@ -107,6 +107,13 @@ class FetchTmdbIds implements ShouldQueue
             Log::warning('FetchTmdbIds: TMDB API key not configured');
             $this->notifyUser('TMDB Lookup Failed', 'TMDB API key is not configured. Please add your API key in Settings.', 'danger');
 
+            // Still advance the pipeline so downstream phases (FindReplace, ChannelMerge, etc.) run.
+            if ($this->syncRunId && $this->completionPhase) {
+                app(SyncPipelineService::class)->completePhase($this->syncRunId, $this->completionPhase);
+            } elseif (! empty($this->postCompletionJobs)) {
+                Bus::chain($this->postCompletionJobs)->dispatch();
+            }
+
             return;
         }
 
