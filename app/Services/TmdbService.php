@@ -1301,9 +1301,11 @@ class TmdbService
         // Only if the subtitle starts with a German article or common German word
         $title = preg_replace('/\s+-\s+(Die|Der|Das|Ein|Eine|Reich|Zeit|Land|Haus)\s+\S+.*$/iu', '', $title);
 
-        // Remove language tags: DE, EN, GER, ENG, German, English, Multi, etc.
+        // Remove language tags: DE, EN, FR, GER, ENG, German, English, French, Multi, etc.
+        // Includes French version markers: VOSTFR, VOSTR, VOST, VFF, VFQ, VF, VO
+        // Order matters: longest French markers must come before shorter ones (e.g., VOSTFR before VOST before VO).
         // Requires whitespace before the tag to avoid stripping parts of words (e.g., "X-Men" losing "en")
-        $title = preg_replace('/\s+[-\s]*(DE|EN|GER|ENG|German|English|Deutsch|Multi|Dual|Audio)\s*$/i', '', $title);
+        $title = preg_replace('/\s+[-\s]*(VOSTFR|VOSTR|VOST|VFF|VFQ|VF|VO|DE|EN|FR|GER|ENG|FRE|FRA|German|English|French|Fran[cç]ais|Deutsch|Multi|Dual|Audio)\s*$/iu', '', $title);
 
         // Remove year at end of title (will be extracted separately): "Atlas 2024" -> "Atlas"
         $title = preg_replace('/\s+\d{4}\s*$/', '', $title);
@@ -1387,6 +1389,14 @@ class TmdbService
             }
         }
 
+        // Match year before language/version tag: "Title 2023 VOSTFR", "Title 1998 GER", "Title 2003 Français"
+        if (preg_match('/\s(\d{4})\s+(?:VOSTFR|VOSTR|VOST|VFF|VFQ|VF|VO|DE|EN|FR|GER|ENG|FRE|FRA|German|English|French|Fran[cç]ais|Deutsch|Multi|Dual|Audio)\s*$/iu', $title, $matches)) {
+            $year = (int) $matches[1];
+            if ($year >= 1900 && $year <= (int) date('Y') + 2) {
+                return $year;
+            }
+        }
+
         // Match year at end: "Title 2023"
         if (preg_match('/\s(\d{4})\s*$/', $title, $matches)) {
             $year = (int) $matches[1];
@@ -1417,6 +1427,12 @@ class TmdbService
         $this->waitForRateLimit();
 
         try {
+            // Auto-extract year from the raw query if none provided, then normalize
+            // the query so localized/quality/language tags don't break the API match.
+            $year = $year ?? self::extractYearFromTitle($query);
+            $rawQuery = $query;
+            $query = $this->normalizeTitle($query);
+
             $params = [
                 'api_key' => $this->apiKey,
                 'query' => $query,
@@ -1429,6 +1445,7 @@ class TmdbService
             }
 
             Log::debug('TMDB: Manual TV search', [
+                'raw_query' => $rawQuery,
                 'query' => $query,
                 'year' => $year,
                 'language' => $params['language'],
@@ -1490,6 +1507,12 @@ class TmdbService
         $this->waitForRateLimit();
 
         try {
+            // Auto-extract year from the raw query if none provided, then normalize
+            // the query so localized/quality/language tags don't break the API match.
+            $year = $year ?? self::extractYearFromTitle($query);
+            $rawQuery = $query;
+            $query = $this->normalizeTitle($query);
+
             $params = [
                 'api_key' => $this->apiKey,
                 'query' => $query,
@@ -1502,6 +1525,7 @@ class TmdbService
             }
 
             Log::debug('TMDB: Manual movie search', [
+                'raw_query' => $rawQuery,
                 'query' => $query,
                 'year' => $year,
                 'language' => $params['language'],

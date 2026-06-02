@@ -478,3 +478,169 @@ it('returns null when searchMulti is not configured', function () {
 
     expect($service->searchMulti('ALF'))->toBeNull();
 });
+
+// ---------------------------------------------------------------------------
+// Manual search normalization (language tags + year extraction)
+// ---------------------------------------------------------------------------
+
+it('strips French language tags and extracts year in searchMovieManual', function (string $rawQuery, string $expectedQuery, ?int $expectedYear) {
+    Http::fake([
+        'https://api.themoviedb.org/3/search/movie*' => Http::response(['results' => []], 200),
+    ]);
+
+    $service = new TmdbService($this->settings);
+    $service->searchMovieManual($rawQuery);
+
+    Http::assertSent(function ($request) use ($expectedQuery, $expectedYear) {
+        $data = $request->data();
+        if (($data['query'] ?? null) !== $expectedQuery) {
+            return false;
+        }
+
+        if ($expectedYear === null) {
+            return ! array_key_exists('primary_release_year', $data);
+        }
+
+        return ($data['primary_release_year'] ?? null) === $expectedYear;
+    });
+})->with([
+    'VOSTFR tag' => ['Le Comte de Monte-Cristo (2024) VOSTFR', 'Le Comte de Monte-Cristo', 2024],
+    'VOST tag' => ['Amelie 2001 VOST', 'Amelie', 2001],
+    'VF tag with hyphen' => ['Intouchables (2011) - VF', 'Intouchables', 2011],
+    'VFF tag' => ['Asterix 2023 VFF', 'Asterix', 2023],
+    'VFQ tag' => ['Les Visiteurs (1993) VFQ', 'Les Visiteurs', 1993],
+    'VO tag' => ['La Haine 1995 VO', 'La Haine', 1995],
+    'French word' => ['Léon (1994) French', 'Léon', 1994],
+    'Francais accented' => ['Taxi (1998) Français', 'Taxi', 1998],
+    'FR short tag' => ['Lucy (2014) FR', 'Lucy', 2014],
+    'FRA tag' => ['Arrival 2016 FRA', 'Arrival', 2016],
+]);
+
+it('strips German language tags and extracts year in searchMovieManual', function (string $rawQuery, string $expectedQuery, ?int $expectedYear) {
+    Http::fake([
+        'https://api.themoviedb.org/3/search/movie*' => Http::response(['results' => []], 200),
+    ]);
+
+    $service = new TmdbService($this->settings);
+    $service->searchMovieManual($rawQuery);
+
+    Http::assertSent(function ($request) use ($expectedQuery, $expectedYear) {
+        $data = $request->data();
+        if (($data['query'] ?? null) !== $expectedQuery) {
+            return false;
+        }
+
+        if ($expectedYear === null) {
+            return ! array_key_exists('primary_release_year', $data);
+        }
+
+        return ($data['primary_release_year'] ?? null) === $expectedYear;
+    });
+})->with([
+    'DE tag' => ['Der Untergang (2004) DE', 'Der Untergang', 2004],
+    'GER tag' => ['Run Lola Run 1998 GER', 'Run Lola Run', 1998],
+    'German word' => ['Das Boot (1981) German', 'Das Boot', 1981],
+    'Deutsch tag' => ['Goodbye Lenin 2003 Deutsch', 'Goodbye Lenin', 2003],
+]);
+
+it('strips English/Multi language tags in searchMovieManual', function (string $rawQuery, string $expectedQuery, ?int $expectedYear) {
+    Http::fake([
+        'https://api.themoviedb.org/3/search/movie*' => Http::response(['results' => []], 200),
+    ]);
+
+    $service = new TmdbService($this->settings);
+    $service->searchMovieManual($rawQuery);
+
+    Http::assertSent(function ($request) use ($expectedQuery, $expectedYear) {
+        $data = $request->data();
+        if (($data['query'] ?? null) !== $expectedQuery) {
+            return false;
+        }
+
+        if ($expectedYear === null) {
+            return ! array_key_exists('primary_release_year', $data);
+        }
+
+        return ($data['primary_release_year'] ?? null) === $expectedYear;
+    });
+})->with([
+    'ENG tag' => ['Inception (2010) ENG', 'Inception', 2010],
+    'EN tag' => ['Heat 1995 EN', 'Heat', 1995],
+    'English word' => ['Memento (2000) English', 'Memento', 2000],
+    'Multi tag' => ['Avatar (2009) Multi', 'Avatar', 2009],
+    'Dual tag' => ['The Matrix (1999) Dual', 'The Matrix', 1999],
+]);
+
+it('strips French language tags and extracts year in searchTvSeriesManual', function (string $rawQuery, string $expectedQuery, ?int $expectedYear) {
+    Http::fake([
+        'https://api.themoviedb.org/3/search/tv*' => Http::response(['results' => []], 200),
+    ]);
+
+    $service = new TmdbService($this->settings);
+    $service->searchTvSeriesManual($rawQuery);
+
+    Http::assertSent(function ($request) use ($expectedQuery, $expectedYear) {
+        $data = $request->data();
+        if (($data['query'] ?? null) !== $expectedQuery) {
+            return false;
+        }
+
+        if ($expectedYear === null) {
+            return ! array_key_exists('first_air_date_year', $data);
+        }
+
+        return ($data['first_air_date_year'] ?? null) === $expectedYear;
+    });
+})->with([
+    'VOSTFR tag' => ['Lupin (2021) VOSTFR', 'Lupin', 2021],
+    'VF tag' => ['Kaamelott 2005 VF', 'Kaamelott', 2005],
+    'French word' => ['Dix pour cent (2015) French', 'Dix pour cent', 2015],
+    'FR short tag' => ['Le Bureau (2015) FR', 'Le Bureau', 2015],
+]);
+
+it('strips German tags in searchTvSeriesManual', function () {
+    Http::fake([
+        'https://api.themoviedb.org/3/search/tv*' => Http::response(['results' => []], 200),
+    ]);
+
+    $service = new TmdbService($this->settings);
+    $service->searchTvSeriesManual('Dark (2017) Deutsch');
+
+    Http::assertSent(function ($request) {
+        $data = $request->data();
+
+        return ($data['query'] ?? null) === 'Dark'
+            && ($data['first_air_date_year'] ?? null) === 2017;
+    });
+});
+
+it('does not strip language tags from the middle of titles in manual search', function () {
+    Http::fake([
+        'https://api.themoviedb.org/3/search/movie*' => Http::response(['results' => []], 200),
+    ]);
+
+    $service = new TmdbService($this->settings);
+    // "X-Men" must not lose "en"; "VF" mid-title must not be stripped.
+    $service->searchMovieManual('X-Men (2000)');
+
+    Http::assertSent(function ($request) {
+        return ($request->data()['query'] ?? null) === 'X-Men';
+    });
+});
+
+it('respects an explicitly provided year over one extracted from the query', function () {
+    Http::fake([
+        'https://api.themoviedb.org/3/search/movie*' => Http::response(['results' => []], 200),
+    ]);
+
+    $service = new TmdbService($this->settings);
+    // Raw query has 2024, but caller explicitly passes 1999 — caller wins.
+    $service->searchMovieManual('The Matrix (2024) VOSTFR', 1999);
+
+    Http::assertSent(function ($request) {
+        $data = $request->data();
+
+        return ($data['query'] ?? null) === 'The Matrix'
+            && ($data['primary_release_year'] ?? null) === 1999;
+    });
+});
