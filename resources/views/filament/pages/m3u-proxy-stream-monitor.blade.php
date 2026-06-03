@@ -5,6 +5,7 @@
     <div x-data="{
         intervalSeconds: (() => { const s = Number(localStorage.getItem('streamMonitor.refreshInterval')); return [0, 3, 5, 10, 30].includes(s) ? s : {{ $refreshInterval }}; })(),
         intervalId: null,
+        showUrls: (() => { const v = localStorage.getItem('streamMonitor.showUrls'); return v === null ? true : v === '1'; })(),
         startPolling() {
             this.stopPolling();
             if (this.intervalSeconds <= 0) return;
@@ -25,6 +26,9 @@
         localStorage.setItem('streamMonitor.refreshInterval', value);
         startPolling();
     });
+    $watch('showUrls', value => {
+        localStorage.setItem('streamMonitor.showUrls', value ? '1' : '0');
+    });
     const onVisibilityChange = () => {
         if (document.visibilityState === 'visible' && intervalSeconds > 0) {
             $wire.refreshData();
@@ -34,15 +38,15 @@
     $el.addEventListener('alpine:destroy', () => document.removeEventListener('visibilitychange', onVisibilityChange));" x-on:beforeunload.window="stopPolling()">
 
         <!-- Global Statistics Cards -->
-        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
             <x-filament::card>
                 <div class="flex items-center">
-                    <div class="p-2 bg-blue-100 dark:bg-blue-900 rounded-lg">
-                        <x-heroicon-s-signal class="h-6 w-6" />
+                    <div class="p-1.5 bg-blue-100 dark:bg-blue-900 rounded-lg">
+                        <x-heroicon-s-signal class="h-5 w-5" />
                     </div>
-                    <div class="ml-4">
-                        <p class="text-sm font-medium text-gray-600 dark:text-gray-400">Active Streams</p>
-                        <p class="text-2xl font-bold text-gray-900 dark:text-white">
+                    <div class="ml-3">
+                        <p class="text-xs font-medium text-gray-600 dark:text-gray-400">Active Streams</p>
+                        <p class="text-xl font-bold text-gray-900 dark:text-white">
                             {{ $globalStats['active_streams'] ?? 0 }}</p>
                     </div>
                 </div>
@@ -50,12 +54,12 @@
 
             <x-filament::card>
                 <div class="flex items-center">
-                    <div class="p-2 bg-green-100 dark:bg-green-900 rounded-lg">
-                        <x-heroicon-s-user-group class="h-6 w-6" />
+                    <div class="p-1.5 bg-green-100 dark:bg-green-900 rounded-lg">
+                        <x-heroicon-s-user-group class="h-5 w-5" />
                     </div>
-                    <div class="ml-4">
-                        <p class="text-sm font-medium text-gray-600 dark:text-gray-400">Total Clients</p>
-                        <p class="text-2xl font-bold text-gray-900 dark:text-white">
+                    <div class="ml-3">
+                        <p class="text-xs font-medium text-gray-600 dark:text-gray-400">Total Clients</p>
+                        <p class="text-xl font-bold text-gray-900 dark:text-white">
                             {{ $globalStats['total_clients'] ?? 0 }}</p>
                     </div>
                 </div>
@@ -63,12 +67,12 @@
 
             <x-filament::card>
                 <div class="flex items-center">
-                    <div class="p-2 bg-purple-100 dark:bg-purple-900 rounded-lg">
-                        <x-heroicon-s-bolt class="h-6 w-6" />
+                    <div class="p-1.5 bg-purple-100 dark:bg-purple-900 rounded-lg">
+                        <x-heroicon-s-bolt class="h-5 w-5" />
                     </div>
-                    <div class="ml-4">
-                        <p class="text-sm font-medium text-gray-600 dark:text-gray-400">Total Bandwidth</p>
-                        <p class="text-2xl font-bold text-gray-900 dark:text-white">
+                    <div class="ml-3">
+                        <p class="text-xs font-medium text-gray-600 dark:text-gray-400">Total Bandwidth</p>
+                        <p class="text-xl font-bold text-gray-900 dark:text-white">
                             @php
                                 $totalBandwidth = $globalStats['total_bandwidth_kbps'] ?? 0;
                                 echo $totalBandwidth > 1000
@@ -82,12 +86,12 @@
 
             <x-filament::card>
                 <div class="flex items-center">
-                    <div class="p-2 bg-indigo-100 dark:bg-indigo-900 rounded-lg">
-                        <x-heroicon-s-chart-bar class="h-6 w-6" />
+                    <div class="p-1.5 bg-indigo-100 dark:bg-indigo-900 rounded-lg">
+                        <x-heroicon-s-chart-bar class="h-5 w-5" />
                     </div>
-                    <div class="ml-4">
-                        <p class="text-sm font-medium text-gray-600 dark:text-gray-400">Avg Clients/Stream</p>
-                        <p class="text-2xl font-bold text-gray-900 dark:text-white">
+                    <div class="ml-3">
+                        <p class="text-xs font-medium text-gray-600 dark:text-gray-400">Avg Clients/Stream</p>
+                        <p class="text-xl font-bold text-gray-900 dark:text-white">
                             {{ $globalStats['avg_clients_per_stream'] ?? '0.00' }}</p>
                     </div>
                 </div>
@@ -95,7 +99,7 @@
         </div>
 
         <!-- Auto-refresh controls -->
-        <div class="mb-4 flex items-center justify-between">
+        <div class="mb-3 flex items-center justify-between">
             <div class="flex items-center space-x-4">
                 <label class="flex items-center space-x-2 text-sm text-gray-600 dark:text-gray-400">
                     <span>Auto-refresh</span>
@@ -113,6 +117,14 @@
                     <span
                         x-text="$wire.lastUpdatedAt ? new Date($wire.lastUpdatedAt).toLocaleTimeString() : '—'"></span>
                 </x-filament::badge>
+            </div>
+
+            <div class="flex items-center">
+                <x-filament::button color="gray" size="sm" @click="showUrls = !showUrls"
+                    x-bind:icon="showUrls ? 'heroicon-o-eye-slash' : 'heroicon-o-eye'"
+                    aria-label="Toggle URL visibility">
+                    <span x-text="showUrls ? 'Hide URLs' : 'Show URLs'"></span>
+                </x-filament::button>
             </div>
         </div>
 
@@ -156,13 +168,13 @@
                 </div>
             </x-filament::card>
         @else
-            <div class="space-y-4">
+            <div class="space-y-3">
                 @foreach ($streams as $stream)
                     <x-filament::card>
                         <div x-data="{ showClients: false, showDetails: false }">
                             <!-- Stream Header -->
-                            <div class="md:flex items-center justify-between mb-4">
-                                <div class="md:flex items-center space-x-0 md:space-x-4 space-y-2 md:space-y-0">
+                            <div class="md:flex items-center justify-between mb-3 overflow-hidden">
+                                <div class="md:flex items-center space-x-0 md:space-x-3 space-y-2 md:space-y-0">
                                     <div class="flex-shrink-0">
                                         @php
                                             $statusIconClass = match ($stream['status']) {
@@ -174,29 +186,27 @@
                                             };
                                         @endphp
                                         <div
-                                            class="h-10 w-10 rounded-full flex items-center justify-center {{ $statusIconClass }}">
+                                            class="h-8 w-8 rounded-full flex items-center justify-center {{ $statusIconClass }}">
                                             @if ($stream['status'] === 'idle')
-                                                <x-heroicon-s-pause class="w-5 h-5" />
+                                                <x-heroicon-s-pause class="w-4 h-4" />
                                             @elseif($stream['status'] === 'active')
-                                                <x-heroicon-s-play class="w-5 h-5" />
+                                                <x-heroicon-s-play class="w-4 h-4" />
                                             @else
-                                                <x-heroicon-s-exclamation-triangle class="w-5 h-5" />
+                                                <x-heroicon-s-exclamation-triangle class="w-4 h-4" />
                                             @endif
                                         </div>
                                     </div>
                                     @if ($stream['model']['logo'] ?? false)
-                                        <div class="flex-1 shrink-0 min-w-0">
-                                            <div>
-                                                <img src="{{ $stream['model']['logo'] }}" alt="Stream Thumbnail"
-                                                    class="h-10 w-auto rounded-md object-cover">
-                                            </div>
+                                        <div class="shrink-0">
+                                            <img src="{{ $stream['model']['logo'] }}" alt="Stream Thumbnail"
+                                                class="h-8 w-auto rounded-md object-cover">
                                         </div>
                                     @endif
-                                    <div class="min-w-0">
-                                        <h3 class="text-lg font-semibold text-gray-900 dark:text-white">
+                                    <div class="flex-1 min-w-0">
+                                        <h3 class="text-base font-semibold text-gray-900 dark:text-white">
                                             Stream {{ substr($stream['stream_id'], -8) }}
                                         </h3>
-                                        <p class="text-sm text-gray-500 dark:text-gray-400 font-mono">
+                                        <p class="text-xs text-gray-500 dark:text-gray-400 font-mono truncate">
                                             {{ $stream['model']['title'] ?? 'N/A' }}
                                             @if (!empty($stream['failover_channel']['title']))
                                                 <span class="text-gray-400 dark:text-gray-500 mx-1">&rarr;</span>
@@ -204,14 +214,16 @@
                                                     class="text-orange-600 dark:text-orange-400 font-medium">{{ $stream['failover_channel']['title'] }}</span>
                                             @endif
                                         </p>
-                                        <p class="text-sm text-gray-500 dark:text-gray-400 font-mono truncate">
-                                            {{ $stream['source_url'] }}</p>
+                                        <p class="text-xs text-gray-500 dark:text-gray-400 font-mono truncate transition-[filter] duration-150"
+                                            :class="{ 'blur-xs select-none': !showUrls }">
+                                            {{ $stream['source_url'] }}
+                                        </p>
                                     </div>
                                 </div>
                             </div>
 
                             <!-- Stream Badges -->
-                            <div class="flex flex-wrap items-center gap-2 mb-4">
+                            <div class="flex flex-wrap items-center gap-1.5 mb-3">
                                 @if ($stream['alias_name'] ?? false)
                                     <x-filament::badge color="primary" size="sm">
                                         Alias: {{ $stream['alias_name'] }}
@@ -276,29 +288,99 @@
                             </div>
 
                             <!-- Stream Stats Grid -->
-                            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-                                <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-3">
+                            <div class="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
+                                <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-2">
                                     <div class="text-xs text-gray-500 dark:text-gray-400">Clients</div>
-                                    <div class="text-lg font-semibold text-gray-900 dark:text-white">
+                                    <div class="text-sm font-semibold text-gray-900 dark:text-white">
                                         {{ $stream['client_count'] }}</div>
                                 </div>
-                                <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-3">
+                                <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-2">
                                     <div class="text-xs text-gray-500 dark:text-gray-400">Bandwidth</div>
-                                    <div class="text-lg font-semibold text-gray-900 dark:text-white">
+                                    <div class="text-sm font-semibold text-gray-900 dark:text-white">
                                         {{ $stream['bandwidth_kbps'] > 1000 ? round($stream['bandwidth_kbps'] / 1000, 1) . ' Mbps' : $stream['bandwidth_kbps'] . ' kbps' }}
                                     </div>
                                 </div>
-                                <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-3">
+                                <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-2">
                                     <div class="text-xs text-gray-500 dark:text-gray-400">Data Transferred</div>
-                                    <div class="text-lg font-semibold text-gray-900 dark:text-white">
+                                    <div class="text-sm font-semibold text-gray-900 dark:text-white">
                                         {{ $stream['bytes_transferred'] }}</div>
                                 </div>
-                                <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-3">
+                                <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-2">
                                     <div class="text-xs text-gray-500 dark:text-gray-400">Uptime</div>
-                                    <div class="text-lg font-semibold text-gray-900 dark:text-white">
+                                    <div class="text-sm font-semibold text-gray-900 dark:text-white">
                                         {{ $stream['uptime'] }}</div>
                                 </div>
                             </div>
+
+                            @php
+                                $epg = $stream['epg'] ?? null;
+                                $epgCurrent = $epg['current'] ?? null;
+                                $epgNext = $epg['next'] ?? null;
+                                $epgProgress = $epgCurrent ? (int) round(($epgCurrent['progress'] ?? 0) * 100) : 0;
+                                $epgStartLabel = null;
+                                $epgStopLabel = null;
+                                if ($epgCurrent) {
+                                    try {
+                                        $epgStartLabel = \Illuminate\Support\Carbon::parse(
+                                            $epgCurrent['start'],
+                                        )->format('g:i A');
+                                        $epgStopLabel = \Illuminate\Support\Carbon::parse($epgCurrent['stop'])->format(
+                                            'g:i A',
+                                        );
+                                    } catch (\Throwable $e) {
+                                        // ignore parse errors; fall back to no label
+                                    }
+                                }
+                            @endphp
+                            @if ($epgCurrent)
+                                <!-- Current Programme + Up Next (mirrors the m3u-tv player overlay) -->
+                                <div
+                                    class="mb-3 rounded-lg border border-gray-200 dark:border-gray-700 p-2 bg-gray-50 dark:bg-gray-800/60">
+                                    <div class="flex flex-wrap items-center gap-1.5 mb-1.5">
+                                        <x-filament::badge color="danger" size="sm" icon="heroicon-s-signal">
+                                            Live
+                                        </x-filament::badge>
+                                        <span class="text-sm font-semibold text-gray-900 dark:text-white truncate">
+                                            {{ $epgCurrent['title'] }}
+                                        </span>
+                                        @if ($epgStartLabel && $epgStopLabel)
+                                            <span class="text-xs text-gray-500 dark:text-gray-400">
+                                                {{ $epgStartLabel }} – {{ $epgStopLabel }}
+                                            </span>
+                                        @endif
+                                        <span class="text-xs text-gray-500 dark:text-gray-400 ml-auto">
+                                            {{ $epgProgress }}%
+                                        </span>
+                                    </div>
+                                    <div
+                                        class="h-1.5 w-full rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
+                                        <div class="h-full rounded-full bg-primary-500 dark:bg-primary-400 transition-[width] duration-500"
+                                            style="width: {{ $epgProgress }}%;"></div>
+                                    </div>
+                                    @if ($epgNext)
+                                        <p class="mt-2 text-xs text-gray-500 dark:text-gray-400 truncate">
+                                            <span class="font-medium text-gray-600 dark:text-gray-300">Next:</span>
+                                            {{ $epgNext['title'] }}
+                                            @if (!empty($epgNext['start']))
+                                                @php
+                                                    try {
+                                                        $nextStartLabel = \Illuminate\Support\Carbon::parse(
+                                                            $epgNext['start'],
+                                                        )->format('g:i A');
+                                                    } catch (\Throwable $e) {
+                                                        $nextStartLabel = null;
+                                                    }
+                                                @endphp
+                                                @if ($nextStartLabel)
+                                                    <span class="text-gray-400 dark:text-gray-500">
+                                                        · {{ $nextStartLabel }}
+                                                    </span>
+                                                @endif
+                                            @endif
+                                        </p>
+                                    @endif
+                                </div>
+                            @endif
 
                             @php
                                 $mediaInfo = $stream['model']['media_info'] ?? null;
@@ -307,10 +389,10 @@
                             @if ($mediaInfo || $outputMediaInfo)
                                 <!-- Stream stats: input row always shown when present, output row added when transcoding -->
                                 <div
-                                    class="mb-4 rounded-lg border border-gray-200 dark:border-gray-700 divide-y divide-gray-200 dark:divide-gray-700 overflow-hidden">
+                                    class="mb-3 rounded-lg border border-gray-200 dark:border-gray-700 divide-y divide-gray-200 dark:divide-gray-700 overflow-hidden">
                                     @if ($mediaInfo)
                                         <div
-                                            class="flex flex-wrap items-center gap-2 p-3 bg-gray-50 dark:bg-gray-800/60">
+                                            class="flex flex-wrap items-center gap-1.5 p-2 bg-gray-50 dark:bg-gray-800/60">
                                             <div
                                                 class="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 mr-1">
                                                 <x-heroicon-s-arrow-down-tray class="w-3.5 h-3.5" />
@@ -374,7 +456,7 @@
                                     @endif
                                     @if ($outputMediaInfo)
                                         <div
-                                            class="flex flex-wrap items-center gap-2 p-3 bg-gray-50 dark:bg-gray-800/60">
+                                            class="flex flex-wrap items-center gap-1.5 p-2 bg-gray-50 dark:bg-gray-800/60">
                                             <div
                                                 class="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 mr-1">
                                                 <x-heroicon-s-arrow-up-tray class="w-3.5 h-3.5" />
@@ -622,12 +704,14 @@
                                                         </p>
                                                         <p class="text-xs text-orange-600 dark:text-orange-300 mt-1">
                                                             Original URL: <span
-                                                                class="font-mono break-all">{{ $stream['source_url'] }}</span>
+                                                                class="font-mono break-all transition-[filter] duration-150"
+                                                                :class="{ 'blur-sm select-none': !showUrls }">{{ $stream['source_url'] }}</span>
                                                         </p>
                                                         @if ($stream['current_url'] && $stream['current_url'] !== $stream['source_url'])
                                                             <p class="text-xs text-orange-600 dark:text-orange-300">
                                                                 Current URL: <span
-                                                                    class="font-mono break-all">{{ $stream['current_url'] }}</span>
+                                                                    class="font-mono break-all transition-[filter] duration-150"
+                                                                    :class="{ 'blur-sm select-none': !showUrls }">{{ $stream['current_url'] }}</span>
                                                             </p>
                                                         @endif
                                                     </div>
@@ -653,7 +737,8 @@
                                                                     {{ $index + 1 }}
                                                                 </x-filament::badge>
                                                                 <span
-                                                                    class="{{ $stream['current_failover_index'] === $index + 1 ? 'text-orange-600 dark:text-orange-400 font-medium' : '' }}">
+                                                                    class="transition-[filter] duration-150 {{ $stream['current_failover_index'] === $index + 1 ? 'text-orange-600 dark:text-orange-400 font-medium' : '' }}"
+                                                                    :class="{ 'blur-sm select-none': !showUrls }">
                                                                     {{ $url }}
                                                                 </span>
                                                                 @if ($stream['current_failover_index'] === $index + 1)
