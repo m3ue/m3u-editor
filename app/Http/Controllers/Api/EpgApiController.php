@@ -9,12 +9,14 @@ use App\Http\Controllers\Controller;
 use App\Http\Controllers\LogoProxyController;
 use App\Http\Controllers\PlaylistGenerateController;
 use App\Models\Epg;
+use App\Models\EpgChannel;
 use App\Models\Playlist;
 use App\Services\EpgCacheService;
 use Carbon\Carbon;
 use Exception;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
@@ -49,29 +51,65 @@ class EpgApiController extends Controller
             'end_date' => $endDate,
         ]);
         try {
-            // Check if cache exists and is valid
-            if (! $epg->is_cached) {
+            // Merged EPGs are never independently cached — their programme data lives in
+            // the source EPGs' individual JSONL files. Allow them through; we fetch
+            // programmes from source caches below.
+            if (! $epg->is_cached && ! $epg->isMerged()) {
                 return response()->json([
                     'error' => 'Failed to retrieve EPG cache. Please try generating the EPG cache.',
                     'suggestion' => 'Try using the "Generate Cache" button to regenerate the data.',
                 ], 500);
             }
 
-            // Use database EpgChannel records for consistent ordering (similar to playlist view)
-            $epgChannels = $epg->channels()
-                ->orderBy('name')  // Consistent alphabetical ordering
-                ->orderBy('channel_id')  // Secondary sort by channel ID
-                ->when($search, function ($queryBuilder) use ($search) {
-                    $search = Str::lower($search);
+            // Merged EPGs have no epg_channels rows of their own — channels live in source EPGs.
+            // Build a deduplicated query across source EPGs (first source in sort_order wins).
+            if ($epg->isMerged()) {
+                $sourceEpgIds = $epg->sourceEpgs()
+                    ->orderBy('merged_epg_epg.sort_order')
+                    ->pluck('epgs.id')
+                    ->toArray();
 
-                    return $queryBuilder->where(function ($query) use ($search) {
-                        $query->whereRaw('LOWER(name) LIKE ?', ['%'.$search.'%'])
-                            ->orWhereRaw('LOWER(display_name) LIKE ?', ['%'.$search.'%']);
-                    });
-                })
-                ->limit($perPage)
-                ->offset($offset)
-                ->get();
+                if (empty($sourceEpgIds)) {
+                    $epgChannels = collect();
+                } else {
+                    $priorityCase = 'CASE epg_id '
+                        .collect($sourceEpgIds)->map(fn ($id, $i) => "WHEN {$id} THEN {$i}")->implode(' ')
+                        .' ELSE 999 END';
+                    $idList = implode(',', $sourceEpgIds);
+                    $dedupeSubquery = "SELECT DISTINCT ON (channel_id) * FROM epg_channels WHERE epg_id IN ({$idList}) ORDER BY channel_id, {$priorityCase}";
+
+                    $epgChannels = EpgChannel::from(DB::raw("({$dedupeSubquery}) as epg_channels"))
+                        ->when($search, function ($q) use ($search) {
+                            $s = Str::lower($search);
+
+                            return $q->where(function ($inner) use ($s) {
+                                $inner->whereRaw('LOWER(name) LIKE ?', ['%'.$s.'%'])
+                                    ->orWhereRaw('LOWER(display_name) LIKE ?', ['%'.$s.'%']);
+                            });
+                        })
+                        ->orderBy('name')
+                        ->orderBy('channel_id')
+                        ->limit($perPage)
+                        ->offset($offset)
+                        ->get();
+                }
+            } else {
+                // Use database EpgChannel records for consistent ordering (similar to playlist view)
+                $epgChannels = $epg->channels()
+                    ->orderBy('name')  // Consistent alphabetical ordering
+                    ->orderBy('channel_id')  // Secondary sort by channel ID
+                    ->when($search, function ($queryBuilder) use ($search) {
+                        $search = Str::lower($search);
+
+                        return $queryBuilder->where(function ($query) use ($search) {
+                            $query->whereRaw('LOWER(name) LIKE ?', ['%'.$search.'%'])
+                                ->orWhereRaw('LOWER(display_name) LIKE ?', ['%'.$search.'%']);
+                        });
+                    })
+                    ->limit($perPage)
+                    ->offset($offset)
+                    ->get();
+            }
 
             // Get the channel IDs from database records to fetch cache data
             $channelIds = $epgChannels->pluck('channel_id')->toArray();
@@ -94,26 +132,66 @@ class EpgApiController extends Controller
                 ];
             }
 
-            // Get cached programmes for the requested date range and channels
-            $programmes = $cacheService->getCachedProgrammesRange(
-                $epg,
-                $startDate,
-                $endDate,
-                $channelIds
-            );
+            // For merged EPGs, pull programme data from each source EPG's JSONL cache
+            // in sort_order priority — first source to provide data for a channel wins.
+            if ($epg->isMerged()) {
+                $programmes = [];
+                $sourceEpgs = $epg->sourceEpgs()
+                    ->where('epgs.is_cached', true)
+                    ->orderBy('merged_epg_epg.sort_order')
+                    ->get();
 
-            // Get cache metadata
-            $metadata = $cacheService->getCacheMetadata($epg);
+                foreach ($sourceEpgs as $sourceEpg) {
+                    $sourceProgrammes = $cacheService->getCachedProgrammesRange(
+                        $sourceEpg,
+                        $startDate,
+                        $endDate,
+                        $channelIds
+                    );
+                    foreach ($sourceProgrammes as $channelId => $channelProgrammes) {
+                        if (! isset($programmes[$channelId])) {
+                            $programmes[$channelId] = $channelProgrammes;
+                        }
+                    }
+                }
+            } else {
+                // Get cached programmes for the requested date range and channels
+                $programmes = $cacheService->getCachedProgrammesRange(
+                    $epg,
+                    $startDate,
+                    $endDate,
+                    $channelIds
+                );
+            }
 
-            // Create pagination info using database count for accuracy
-            $totalChannels = $epg->channels()->when($search, function ($queryBuilder) use ($search) {
-                $search = Str::lower($search);
+            // Get cache metadata — merged EPGs have no independent cache, use empty metadata
+            $metadata = $epg->isMerged() ? [] : $cacheService->getCacheMetadata($epg);
 
-                return $queryBuilder->where(function ($query) use ($search) {
-                    $query->whereRaw('LOWER(name) LIKE ?', ['%'.$search.'%'])
-                        ->orWhereRaw('LOWER(display_name) LIKE ?', ['%'.$search.'%']);
-                });
-            })->count();
+            // Create pagination info using database count for accuracy.
+            // Merged EPGs use the stored channel_count (already deduplicated); only
+            // re-count from the subquery when a search filter is active.
+            if ($epg->isMerged()) {
+                if ($search && isset($dedupeSubquery)) {
+                    $s = Str::lower($search);
+                    $totalChannels = EpgChannel::from(DB::raw("({$dedupeSubquery}) as epg_channels"))
+                        ->where(function ($q) use ($s) {
+                            $q->whereRaw('LOWER(name) LIKE ?', ['%'.$s.'%'])
+                                ->orWhereRaw('LOWER(display_name) LIKE ?', ['%'.$s.'%']);
+                        })
+                        ->count();
+                } else {
+                    $totalChannels = (int) $epg->channel_count;
+                }
+            } else {
+                $totalChannels = $epg->channels()->when($search, function ($queryBuilder) use ($search) {
+                    $search = Str::lower($search);
+
+                    return $queryBuilder->where(function ($query) use ($search) {
+                        $query->whereRaw('LOWER(name) LIKE ?', ['%'.$search.'%'])
+                            ->orWhereRaw('LOWER(display_name) LIKE ?', ['%'.$search.'%']);
+                    });
+                })->count();
+            }
             $pagination = [
                 'current_page' => $page,
                 'per_page' => $perPage,

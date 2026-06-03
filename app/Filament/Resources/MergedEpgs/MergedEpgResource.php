@@ -8,6 +8,7 @@ use App\Filament\Actions\CronHelperAction;
 use App\Filament\Concerns\HasCopilotSupport;
 use App\Filament\Resources\MergedEpgs\Pages\EditMergedEpg;
 use App\Filament\Resources\MergedEpgs\Pages\ListMergedEpgs;
+use App\Filament\Resources\MergedEpgs\Pages\ViewMergedEpg;
 use App\Jobs\ProcessEpgImport;
 use App\Models\Epg;
 use App\Rules\Cron;
@@ -22,6 +23,7 @@ use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
+use Filament\Actions\ViewAction;
 use Filament\Forms\Components\DateTimePicker;
 use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\Select;
@@ -214,6 +216,8 @@ class MergedEpgResource extends Resource implements CopilotResource
                 ])->button()->hiddenLabel()->size('sm'),
                 EditAction::make()->slideOver()
                     ->button()->hiddenLabel()->size('sm'),
+                ViewAction::make()
+                    ->button()->hiddenLabel()->size('sm'),
             ], position: RecordActionsPosition::BeforeCells)
             ->toolbarActions([
                 BulkActionGroup::make([
@@ -258,6 +262,7 @@ class MergedEpgResource extends Resource implements CopilotResource
     {
         return [
             'index' => ListMergedEpgs::route('/'),
+            'view' => ViewMergedEpg::route('/{record}'),
             // 'edit' => EditMergedEpg::route('/{record}/edit'),
         ];
     }
