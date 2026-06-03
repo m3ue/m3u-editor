@@ -30,7 +30,9 @@ use Filament\Support\Enums\TextSize;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Filters\SelectFilter;
+use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 
 class DvrRecordingResource extends Resource
 {
@@ -194,7 +196,19 @@ class DvrRecordingResource extends Resource
             ->filtersTriggerAction(function ($action) {
                 return $action->button()->label(__('Filters'));
             })
-            ->defaultSort('scheduled_start', 'desc')
+            ->defaultSort(function (Builder $query): Builder {
+                return $query
+                    ->orderByRaw('CASE
+                        WHEN status IN (?, ?) THEN 1
+                        WHEN status = ? THEN 2
+                        ELSE 3
+                    END', [
+                        DvrRecordingStatus::Recording->value,
+                        DvrRecordingStatus::PostProcessing->value,
+                        DvrRecordingStatus::Scheduled->value,
+                    ])
+                    ->orderByDesc('scheduled_start');
+            })
             ->columns([
                 TextColumn::make('title')
                     ->searchable()
@@ -211,10 +225,12 @@ class DvrRecordingResource extends Resource
                     ->sortable()
                     ->toggleable(),
                 TextColumn::make('scheduled_start')
-                    ->dateTime()
+                    ->since()
+                    ->dateTimeTooltip()
                     ->sortable(),
                 TextColumn::make('scheduled_end')
-                    ->dateTime()
+                    ->since()
+                    ->dateTimeTooltip()
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('duration_seconds')
@@ -226,9 +242,7 @@ class DvrRecordingResource extends Resource
                     ->toggleable(),
                 TextColumn::make('file_size_bytes')
                     ->label(__('Size'))
-                    ->formatStateUsing(fn (?int $state): string => $state
-                        ? number_format($state / 1024 / 1024, 1).' MB'
-                        : '—')
+                    ->formatStateUsing(fn (?int $state): string => self::formatFileSize($state))
                     ->sortable()
                     ->toggleable(),
                 TextColumn::make('created_at')
@@ -239,6 +253,14 @@ class DvrRecordingResource extends Resource
             ->filters([
                 SelectFilter::make('status')
                     ->options(DvrRecordingStatus::class),
+                TernaryFilter::make('has_error')
+                    ->label(__('Has Error'))
+                    ->attribute('error_message')
+                    ->nullable(),
+                TernaryFilter::make('has_file')
+                    ->label(__('Has File'))
+                    ->attribute('file_path')
+                    ->nullable(),
             ])
             ->recordActions([
                 ActionGroup::make([
@@ -350,5 +372,18 @@ class DvrRecordingResource extends Resource
             'index' => Pages\ListDvrRecordings::route('/'),
             'view' => Pages\ViewDvrRecording::route('/{record}'),
         ];
+    }
+
+    private static function formatFileSize(?int $sizeInBytes): string
+    {
+        if (! $sizeInBytes) {
+            return '—';
+        }
+
+        if ($sizeInBytes >= 1024 * 1024 * 1024) {
+            return number_format($sizeInBytes / 1024 / 1024 / 1024, 1).' GB';
+        }
+
+        return number_format($sizeInBytes / 1024 / 1024, 1).' MB';
     }
 }
