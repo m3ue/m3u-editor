@@ -152,11 +152,13 @@ class DvrStreamController extends Controller
         $playlistUrl = $this->proxy->getDvrBroadcastLiveApiUrl($networkId);
 
         try {
-            $response = Http::timeout(10)
-                ->withHeaders([
-                    'X-API-Token' => $this->proxy->getApiToken(),
-                ])
-                ->get($playlistUrl);
+            $httpRequest = Http::timeout(10);
+
+            if ($token = $this->proxy->getApiToken()) {
+                $httpRequest = $httpRequest->withHeaders(['X-API-Token' => $token]);
+            }
+
+            $response = $httpRequest->get($playlistUrl);
 
             if (! $response->successful()) {
                 abort($response->status(), 'Broadcast not available');
