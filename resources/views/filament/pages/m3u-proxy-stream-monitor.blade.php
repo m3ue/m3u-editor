@@ -317,16 +317,13 @@
                                 $epgCurrent = $epg['current'] ?? null;
                                 $epgNext = $epg['next'] ?? null;
                                 $epgProgress = $epgCurrent ? (int) round(($epgCurrent['progress'] ?? 0) * 100) : 0;
+                                $epgTz = config('app.timezone');
                                 $epgStartLabel = null;
                                 $epgStopLabel = null;
                                 if ($epgCurrent) {
                                     try {
-                                        $epgStartLabel = \Illuminate\Support\Carbon::parse(
-                                            $epgCurrent['start'],
-                                        )->format('g:i A');
-                                        $epgStopLabel = \Illuminate\Support\Carbon::parse($epgCurrent['stop'])->format(
-                                            'g:i A',
-                                        );
+                                        $epgStartLabel = \Illuminate\Support\Carbon::parse($epgCurrent['start'])->setTimezone($epgTz)->format('g:i A');
+                                        $epgStopLabel = \Illuminate\Support\Carbon::parse($epgCurrent['stop'])->setTimezone($epgTz)->format('g:i A');
                                     } catch (\Throwable $e) {
                                         // ignore parse errors; fall back to no label
                                     }
@@ -364,9 +361,7 @@
                                             @if (!empty($epgNext['start']))
                                                 @php
                                                     try {
-                                                        $nextStartLabel = \Illuminate\Support\Carbon::parse(
-                                                            $epgNext['start'],
-                                                        )->format('g:i A');
+                                                        $nextStartLabel = \Illuminate\Support\Carbon::parse($epgNext['start'])->setTimezone($epgTz)->format('g:i A');
                                                     } catch (\Throwable $e) {
                                                         $nextStartLabel = null;
                                                     }
