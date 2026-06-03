@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Services\M3uProxyService;
 use Illuminate\Console\Command;
+use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -45,27 +46,14 @@ class RegisterM3uProxyWebhook extends Command
 
         try {
             $apiBaseUrl = $service->getApiBaseUrl();
+            $webhooksEndpoint = $apiBaseUrl.'/webhooks';
 
             // Check if webhook already exists
-            $listEndpoint = $apiBaseUrl.'/webhooks';
-            $listRequest = Http::timeout(5)->acceptJson();
-            if ($apiToken = $service->getApiToken()) {
-                $listRequest = $listRequest->withHeaders(['X-API-Token' => $apiToken]);
-            }
-            $listResponse = $listRequest->get($listEndpoint);
+            $listResponse = $this->buildApiRequest($service, 5)->get($webhooksEndpoint);
 
             if ($listResponse->successful()) {
-                $data = $listResponse->json();
-                $webhooks = $data['webhooks'] ?? [];
-
-                // Check if our webhook is already registered
-                $alreadyRegistered = false;
-                foreach ($webhooks as $webhook) {
-                    if ($webhook['url'] === $webhookUrl) {
-                        $alreadyRegistered = true;
-                        break;
-                    }
-                }
+                $webhooks = $listResponse->json('webhooks', []);
+                $alreadyRegistered = collect($webhooks)->contains('url', $webhookUrl);
 
                 if ($alreadyRegistered && ! $this->option('force')) {
                     $this->info('✅ Webhook already registered');
@@ -73,16 +61,10 @@ class RegisterM3uProxyWebhook extends Command
                     return self::SUCCESS;
                 }
 
-                if ($alreadyRegistered && $this->option('force')) {
+                if ($alreadyRegistered) {
                     $this->warn('⚠️  Webhook already registered, removing and re-registering...');
 
-                    // Remove existing webhook
-                    $deleteEndpoint = $service->getApiBaseUrl().'/webhooks';
-                    $deleteRequest = Http::timeout(5)->acceptJson();
-                    if ($apiToken = $service->getApiToken()) {
-                        $deleteRequest = $deleteRequest->withHeaders(['X-API-Token' => $apiToken]);
-                    }
-                    $deleteResponse = $deleteRequest->delete($deleteEndpoint, [
+                    $deleteResponse = $this->buildApiRequest($service, 5)->delete($webhooksEndpoint, [
                         'webhook_url' => $webhookUrl,
                     ]);
 
@@ -93,7 +75,6 @@ class RegisterM3uProxyWebhook extends Command
             }
 
             // Register webhook
-            $registerEndpoint = $service->getApiBaseUrl().'/webhooks';
             $payload = [
                 'url' => $webhookUrl,
                 'events' => [
@@ -108,11 +89,7 @@ class RegisterM3uProxyWebhook extends Command
 
             $this->info('Registering webhook with events: '.implode(', ', $payload['events']));
 
-            $registerRequest = Http::timeout(10)->acceptJson();
-            if ($apiToken = $service->getApiToken()) {
-                $registerRequest = $registerRequest->withHeaders(['X-API-Token' => $apiToken]);
-            }
-            $response = $registerRequest->post($registerEndpoint, $payload);
+            $response = $this->buildApiRequest($service, 10)->post($webhooksEndpoint, $payload);
 
             if ($response->successful()) {
                 $this->info('✅ Webhook registered successfully!');
@@ -137,5 +114,16 @@ class RegisterM3uProxyWebhook extends Command
 
             return self::FAILURE;
         }
+    }
+
+    private function buildApiRequest(M3uProxyService $service, int $timeout): PendingRequest
+    {
+        $request = Http::timeout($timeout)->acceptJson();
+
+        if ($token = $service->getApiToken()) {
+            $request = $request->withHeaders(['X-API-Token' => $token]);
+        }
+
+        return $request;
     }
 }

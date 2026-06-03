@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Network;
 use App\Services\M3uProxyService;
 use App\Services\NetworkBroadcastService;
+use Illuminate\Http\Client\Response as ClientResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
@@ -119,18 +120,17 @@ class NetworkHlsController extends Controller
         return redirect()->to($proxyUrl);
     }
 
-    protected function fetchPlaylistResponse(Network $network)
+    protected function fetchPlaylistResponse(Network $network): ClientResponse
     {
-        $request = Http::timeout(10);
+        $http = Http::timeout(10);
 
         if ($token = $this->proxyService->getApiToken()) {
-            $request = $request->withHeaders(['X-API-Token' => $token]);
+            $http = $http->withHeaders(['X-API-Token' => $token]);
         }
 
         $playlistUrl = $this->proxyService->getApiBaseUrl()."/broadcast/{$network->uuid}/live.m3u8";
 
-        /** @var \Illuminate\Http\Client\Response $response */
-        $response = $request->get($playlistUrl);
+        $response = $http->get($playlistUrl);
 
         $waitSeconds = max(0, (int) config('proxy.broadcast_on_demand_startup_wait_seconds', 8));
         $pollMs = max(100, (int) config('proxy.broadcast_on_demand_startup_poll_ms', 400));
@@ -158,8 +158,7 @@ class NetworkHlsController extends Controller
 
         for ($i = 0; $i < $maxIterations; $i++) {
             Sleep::for($pollMs)->milliseconds();
-            /** @var \Illuminate\Http\Client\Response $response */
-            $response = $request->get($playlistUrl);
+            $response = $http->get($playlistUrl);
 
             if ($response->successful() && $this->hasMinimumPlaylistSegments($response->body(), $minSegments)) {
                 return $response;

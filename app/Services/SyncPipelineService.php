@@ -516,45 +516,41 @@ class SyncPipelineService
             ->where('new', true)
             ->exists();
 
-        // Group 1: metadata + TMDB + probe (must complete before find-replace and STRM)
+        // Group 1: metadata + probe (TMDB intentionally excluded here).
+        //
+        // TMDB runs in Group 3, after FindReplace, so that any title-cleaning
+        // rules (e.g. stripping "|FR " or "|DE " provider prefixes from series
+        // names) are applied before the TMDB search query is constructed.
         //
         // Two paths per content type:
-        // 1. Enabled items exist → full pipeline (metadata, TMDB, probe) via resolvePreStrmPhases.
-        //    The lookupScope ('enabled', 'new', 'both') is applied at dispatch time inside
-        //    dispatchVodTmdb/dispatchSeriesTmdb, so the TMDB job targets the right records.
-        // 2. No enabled items, but new (disabled) items were just imported → TMDB only.
-        //    Metadata and probe are skipped because they are only meaningful for enabled content.
-        //    This path fires exclusively when lookupScope !== 'enabled' and new items exist.
+        // 1. Enabled items exist → metadata + probe via resolvePreStrmPhases (tmdbEnabled: false).
+        // 2. No enabled items, but new disabled items were imported → no metadata/probe needed;
+        //    TMDB-only path is handled in Group 3 below.
         if ($hasVod) {
             $phases = array_merge($phases, $this->resolvePreStrmPhases(
                 metadataEnabled: (bool) $playlist->auto_fetch_vod_metadata,
-                tmdbEnabled: $tmdbEnabled,
+                tmdbEnabled: false,
                 probeEnabled: (bool) $playlist->auto_probe_vod_streams,
                 metadataPhase: SyncRunPhase::VodMetadata,
                 tmdbPhase: SyncRunPhase::VodTmdb,
                 probePhase: SyncRunPhase::VodProbe,
             ));
-        } elseif ($hasNewVod && $tmdbEnabled) {
-            // No enabled VOD, but new disabled VOD was imported — run TMDB lookup only.
-            $phases[] = SyncRunPhase::VodTmdb;
         }
 
         if ($hasSeries) {
             $phases = array_merge($phases, $this->resolvePreStrmPhases(
                 metadataEnabled: (bool) $playlist->auto_fetch_series_metadata,
-                tmdbEnabled: $tmdbEnabled,
+                tmdbEnabled: false,
                 probeEnabled: (bool) $playlist->auto_probe_vod_streams,
                 metadataPhase: SyncRunPhase::SeriesMetadata,
                 tmdbPhase: SyncRunPhase::SeriesTmdb,
                 probePhase: SyncRunPhase::SeriesProbe,
             ));
-        } elseif ($hasNewSeries && $tmdbEnabled) {
-            // No enabled series, but new disabled series were imported — run TMDB lookup only.
-            $phases[] = SyncRunPhase::SeriesTmdb;
         }
 
-        // Group 2: find-replace (after metadata/probe so stream_stats are populated;
-        // before STRM so title_custom is already corrected when filenames are written)
+        // Group 2: find-replace + live housekeeping.
+        // Runs after metadata/probe so stream stats are populated, and before
+        // TMDB so the search query uses already-cleaned titles.
         $hasFindReplaceWork = $this->hasEnabledRule($playlist->find_replace_rules)
             || $this->hasEnabledRule($playlist->sort_alpha_config);
 
@@ -562,11 +558,8 @@ class SyncPipelineService
             $phases[] = SyncRunPhase::FindReplace;
         }
 
-        // Group 2b: live-channel housekeeping. ChannelMerge resolves failover
-        // priorities/duplicates; LiveProbe (and any recurring scrubbers it
-        // dispatches alongside) then runs against the resulting enabled-channel
-        // set. Placed before STRM generation so the merged/probed view is
-        // current when filenames are written.
+        // ChannelMerge and LiveProbe operate on live channels and are independent
+        // of TMDB; keep them here alongside FindReplace.
         if ($playlist->auto_merge_channels_enabled ?? false) {
             $phases[] = SyncRunPhase::ChannelMerge;
         }
@@ -575,7 +568,21 @@ class SyncPipelineService
             $phases[] = SyncRunPhase::LiveProbe;
         }
 
-        // Group 3: STRM generation (runs after find-replace so filenames embed corrected titles)
+        // Group 3: TMDB (after find-replace so cleaned titles are searched).
+        //
+        // The lookupScope ('enabled', 'new', 'both') is applied at dispatch time
+        // inside dispatchVodTmdb/dispatchSeriesTmdb.
+        if ($tmdbEnabled) {
+            if ($hasVod || $hasNewVod) {
+                $phases[] = SyncRunPhase::VodTmdb;
+            }
+
+            if ($hasSeries || $hasNewSeries) {
+                $phases[] = SyncRunPhase::SeriesTmdb;
+            }
+        }
+
+        // Group 4: STRM generation (runs after find-replace so filenames embed corrected titles)
         if ($hasVod) {
             $phases = array_merge($phases, $this->resolveStrmPhases(
                 strmEnabled: (bool) $playlist->auto_sync_vod_stream_files,

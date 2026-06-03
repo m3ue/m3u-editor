@@ -183,19 +183,37 @@ it('builds a full pipeline with all phases for vod-and-series playlist', functio
 
     $run = $this->service->buildPipeline($playlist, app(GeneralSettings::class));
 
-    // All pre-STRM phases (metadata + probe) run first for both media types,
-    // then STRM phases run after, so filenames can embed any corrected titles.
+    // Metadata + probe run first; TMDB runs after (no FindReplace in this playlist,
+    // so TMDB immediately follows probe); STRM phases close out.
     expect($run->phases)->toBe([
         SyncRunPhase::VodMetadata->value,
-        SyncRunPhase::VodTmdb->value,
         SyncRunPhase::VodProbe->value,
         SyncRunPhase::SeriesMetadata->value,
-        SyncRunPhase::SeriesTmdb->value,
         SyncRunPhase::SeriesProbe->value,
+        SyncRunPhase::VodTmdb->value,
+        SyncRunPhase::SeriesTmdb->value,
         SyncRunPhase::VodStrmPostProbe->value,
         SyncRunPhase::SeriesStrmPostProbe->value,
         SyncRunPhase::SyncCompleted->value,
     ]);
+});
+
+it('places TMDB phases after FindReplace so find-replace title cleaning applies to TMDB search', function () {
+    mockPipelineSettings(tmdb: true);
+    $playlist = makePlaylistWithBoth($this->user, [
+        'auto_fetch_series_metadata' => true,
+        'auto_sync_series_stream_files' => true,
+        'find_replace_rules' => [['enabled' => true, 'find_replace' => '|FR ', 'replace_with' => '']],
+    ]);
+
+    $run = $this->service->buildPipeline($playlist, app(GeneralSettings::class));
+
+    $findReplacePos = array_search(SyncRunPhase::FindReplace->value, $run->phases);
+    $seriesTmdbPos = array_search(SyncRunPhase::SeriesTmdb->value, $run->phases);
+
+    expect($findReplacePos)->not->toBeFalse()
+        ->and($seriesTmdbPos)->not->toBeFalse()
+        ->and($findReplacePos)->toBeLessThan($seriesTmdbPos);
 });
 
 it('places FindReplace before STRM phases so filenames embed corrected titles', function () {
