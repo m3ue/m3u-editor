@@ -217,6 +217,35 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                         ->icon('heroicon-o-arrow-top-right-on-square')
                         ->url(fn ($record) => '/playlist/v/'.$record->uuid)
                         ->openUrlInNewTab(),
+                    Action::make('duplicate')
+                        ->label(__('Duplicate'))
+                        ->icon('heroicon-o-document-duplicate')
+                        ->schema([
+                            Forms\Components\TextInput::make('name')
+                                ->label(__('Alias name'))
+                                ->required()
+                                ->default(fn ($record) => "{$record->name} (Copy)")
+                                ->helperText(__('This will be the name of the duplicated alias.')),
+                        ])
+                        ->action(function ($record, $data): void {
+                            $new = $record->replicate(except: [
+                                'id', 'name', 'uuid',
+                                'username', 'password', 'expires_at', 'xtream_status',
+                            ]);
+                            $new->name = $data['name'];
+                            $new->uuid = Str::orderedUuid()->toString();
+                            $new->save();
+
+                            Notification::make()
+                                ->success()
+                                ->title(__('Alias duplicated'))
+                                ->body(__("\"{$record->name}\" has been duplicated successfully."))
+                                ->send();
+                        })
+                        ->requiresConfirmation()
+                        ->modalIcon('heroicon-o-document-duplicate')
+                        ->modalDescription(__('Duplicate this alias now?'))
+                        ->modalSubmitActionLabel(__('Yes, duplicate now')),
                     Actions\DeleteAction::make(),
                 ])->button()->hiddenLabel()->size('sm'),
                 Actions\EditAction::make()
