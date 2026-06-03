@@ -121,10 +121,11 @@ class NetworkHlsController extends Controller
 
     protected function fetchPlaylistResponse(Network $network)
     {
-        $request = Http::timeout(10)
-            ->withHeaders([
-                'X-API-Token' => $this->proxyService->getApiToken(),
-            ]);
+        $request = Http::timeout(10);
+
+        if ($token = $this->proxyService->getApiToken()) {
+            $request = $request->withHeaders(['X-API-Token' => $token]);
+        }
 
         $playlistUrl = $this->proxyService->getApiBaseUrl()."/broadcast/{$network->uuid}/live.m3u8";
 

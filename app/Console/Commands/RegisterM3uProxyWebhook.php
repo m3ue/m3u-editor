@@ -48,11 +48,11 @@ class RegisterM3uProxyWebhook extends Command
 
             // Check if webhook already exists
             $listEndpoint = $apiBaseUrl.'/webhooks';
-            $listResponse = Http::timeout(5)->acceptJson()
-                ->withHeaders([
-                    'X-API-Token' => $service->getApiToken(),
-                ])
-                ->get($listEndpoint);
+            $listRequest = Http::timeout(5)->acceptJson();
+            if ($apiToken = $service->getApiToken()) {
+                $listRequest = $listRequest->withHeaders(['X-API-Token' => $apiToken]);
+            }
+            $listResponse = $listRequest->get($listEndpoint);
 
             if ($listResponse->successful()) {
                 $data = $listResponse->json();
@@ -78,13 +78,13 @@ class RegisterM3uProxyWebhook extends Command
 
                     // Remove existing webhook
                     $deleteEndpoint = $service->getApiBaseUrl().'/webhooks';
-                    $deleteResponse = Http::timeout(5)->acceptJson()
-                        ->withHeaders([
-                            'X-API-Token' => $service->getApiToken(),
-                        ])
-                        ->delete($deleteEndpoint, [
-                            'webhook_url' => $webhookUrl,
-                        ]);
+                    $deleteRequest = Http::timeout(5)->acceptJson();
+                    if ($apiToken = $service->getApiToken()) {
+                        $deleteRequest = $deleteRequest->withHeaders(['X-API-Token' => $apiToken]);
+                    }
+                    $deleteResponse = $deleteRequest->delete($deleteEndpoint, [
+                        'webhook_url' => $webhookUrl,
+                    ]);
 
                     if (! $deleteResponse->successful()) {
                         $this->warn('⚠️  Failed to remove existing webhook, continuing anyway...');
@@ -108,11 +108,11 @@ class RegisterM3uProxyWebhook extends Command
 
             $this->info('Registering webhook with events: '.implode(', ', $payload['events']));
 
-            $response = Http::timeout(10)->acceptJson()
-                ->withHeaders([
-                    'X-API-Token' => $service->getApiToken(),
-                ])
-                ->post($registerEndpoint, $payload);
+            $registerRequest = Http::timeout(10)->acceptJson();
+            if ($apiToken = $service->getApiToken()) {
+                $registerRequest = $registerRequest->withHeaders(['X-API-Token' => $apiToken]);
+            }
+            $response = $registerRequest->post($registerEndpoint, $payload);
 
             if ($response->successful()) {
                 $this->info('✅ Webhook registered successfully!');
