@@ -37,7 +37,7 @@ class CronHelperAction
                     TextInput::make('expression')
                         ->label(__('Cron Expression'))
                         ->default($initialExpression)
-                        ->placeholder('0 */6 * * *')
+                        ->placeholder(__('0 */6 * * *'))
                         ->live(debounce: 500)
                         ->helperText(function (Get $get): string {
                             $expression = trim((string) ($get('expression') ?? ''));

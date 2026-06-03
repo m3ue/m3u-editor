@@ -1614,7 +1614,7 @@ class Preferences extends SettingsPage
                                         TextInput::make('discord_webhook_url')
                                             ->label(__('Discord Webhook URL'))
                                             ->url()
-                                            ->placeholder('https://discord.com/api/webhooks/...')
+                                            ->placeholder(__('https://discord.com/api/webhooks/...'))
                                             ->helperText(__('Create an Incoming Webhook in your Discord server settings and paste the URL here.'))
                                             ->visible(fn (Get $get): bool => (bool) $get('discord_alerts_enabled'))
                                             ->columnSpanFull(),
@@ -1727,7 +1727,7 @@ HTML))
                                                     ->url('https://api.slack.com/apps')
                                                     ->openUrlInNewTab(true)
                                             )
-                                            ->placeholder('https://hooks.slack.com/services/...')
+                                            ->placeholder(__('https://hooks.slack.com/services/...'))
                                             ->helperText(__('Follow the setup guide above to create a Slack App and generate a webhook URL.'))
                                             ->visible(fn (Get $get): bool => (bool) $get('slack_alerts_enabled'))
                                             ->columnSpanFull(),

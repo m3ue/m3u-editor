@@ -2122,11 +2122,11 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ->schema([
                                     TextInput::make('label')
                                         ->label(__('Group label'))
-                                        ->placeholder('e.g. "BBC One variants"')
+                                        ->placeholder(__('e.g. "BBC One variants'))
                                         ->required(),
                                     TagsInput::make('aliases')
                                         ->label(__('Aliases'))
-                                        ->placeholder('e.g. "BBC One, BBC 1, BBC1, BBC One HD"')
+                                        ->placeholder(__('e.g. "BBC One, BBC 1, BBC1, BBC One HD'))
                                         ->splitKeys(['Tab', 'Return', ',']),
                                 ])
                                 ->columns(2)

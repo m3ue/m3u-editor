@@ -134,7 +134,7 @@ class StreamProfileResource extends Resource implements CopilotResource
 
                 TextInput::make('cookies_path')
                     ->label(__('Cookies File Path'))
-                    ->placeholder('/app/cookies/cookies.txt')
+                    ->placeholder(__('/app/cookies/cookies.txt'))
                     ->helperText(__('Absolute path to a Netscape-format cookies.txt file on the proxy host. Mount the file into the proxy container and enter its container path here.'))
                     ->columnSpanFull()
                     ->hintAction(

@@ -47,7 +47,7 @@ class RegexTesterAction
                     TextInput::make('pattern')
                         ->label(__('Regex Pattern'))
                         ->default($initialPattern)
-                        ->placeholder('e.g. ^(US|UK|CA):\s*')
+                        ->placeholder(__('e.g. ^(US|UK|CA):\\s*'))
                         ->helperText(__("Do not include delimiters (e.g. write pattern, not /pattern/). Flags used: {$flags}."))
                         ->columnSpanFull(),
 
@@ -59,7 +59,7 @@ class RegexTesterAction
 
                     Textarea::make('samples')
                         ->label(__('Sample data'))
-                        ->placeholder("Paste sample values here, one per line\ne.g.\nUS: BBC One HD\nUK: Sky News\nSport FHD")
+                        ->placeholder(__('Paste sample values here, one per line\\ne.g.\\nUS: BBC One HD\\nUK: Sky News\\nSport FHD'))
                         ->rows(6)
                         ->hintAction(
                             Action::make('load-samples-'.$name)
