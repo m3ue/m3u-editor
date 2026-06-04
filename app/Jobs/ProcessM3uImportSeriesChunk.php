@@ -170,9 +170,10 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
             ];
         }
 
-        // Update progress
+        // Update progress: scale 0→99 across all chunks using index position
+        $chunkProgress = (int) round(($this->index + 1) / max(1, $this->batchCount) * 99);
         $playlist->update([
-            'series_progress' => min(99, $playlist->series_progress + ($this->batchCount / 100) * 5),
+            'series_progress' => min(99, $chunkProgress),
         ]);
 
         // Bulk insert the series in chunks with logging on failure
