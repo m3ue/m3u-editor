@@ -1547,7 +1547,7 @@ class ProcessM3uImport implements ShouldQueue
                 ]);
 
                 // Auto retry on HTTP 503
-                if (self::isHttp503($e)) {
+                if (self::isHttp5xx($e)) {
                     $playlist->update([
                         'processing' => [
                             ...$playlist->processing ?? [],
@@ -1556,7 +1556,7 @@ class ProcessM3uImport implements ShouldQueue
                             'series_processing' => false,
                         ],
                     ]);
-                    self::scheduleRetry503($playlist);
+                    self::scheduleRetry5xx($playlist);
                 }
 
                 event(new SyncCompleted($playlist));
@@ -1792,7 +1792,7 @@ class ProcessM3uImport implements ShouldQueue
                 ]);
 
                 // Auto retry on HTTP 503
-                if (self::isHttp503($e)) {
+                if (self::isHttp5xx($e)) {
                     $playlist->update([
                         'processing' => [
                             ...$playlist->processing ?? [],
@@ -1801,7 +1801,7 @@ class ProcessM3uImport implements ShouldQueue
                             'series_processing' => false,
                         ],
                     ]);
-                    self::scheduleRetry503($playlist);
+                    self::scheduleRetry5xx($playlist);
                 }
 
                 event(new SyncCompleted($playlist));
@@ -1948,24 +1948,34 @@ class ProcessM3uImport implements ShouldQueue
         return false;
     }
 
-    private static function isHttp503(Throwable $e): bool
+    private static function isHttp5xx(Throwable $e): bool
     {
         if ($e instanceof RequestException) {
             $response = $e->response;
             if ($response) {
-                return $response->status() === 503;
+                $status = $response->status();
+
+                return $status >= 500 && $status < 600;
             }
         }
 
         return Str::contains($e->getMessage(), [
+            'status code 502',
             'status code 503',
+            'status code 504',
+            'HTTP request returned status code 502',
             'HTTP request returned status code 503',
+            'HTTP request returned status code 504',
+            '502 Bad Gateway',
             '503 Service Temporarily Unavailable',
+            '504 Gateway Timeout',
+            ' 502:',
             ' 503:',
+            ' 504:',
         ]);
     }
 
-    private static function scheduleRetry503(Playlist $playlist): void
+    private static function scheduleRetry5xx(Playlist $playlist): void
     {
         if (! (bool) config('dev.auto_retry_503_enabled', true)) {
             return;

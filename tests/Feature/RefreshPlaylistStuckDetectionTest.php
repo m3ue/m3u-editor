@@ -14,6 +14,8 @@ uses(RefreshDatabase::class);
 beforeEach(function () {
     Queue::fake();
     $this->user = User::factory()->create();
+    // Pin the threshold to 120 minutes so tests are independent of the env/config value.
+    config(['dev.stuck_processing_minutes' => 120]);
 });
 
 it('resets a stuck playlist whose SyncRun started before the threshold', function () {
@@ -28,6 +30,7 @@ it('resets a stuck playlist whose SyncRun started before the threshold', functio
         'user_id' => $this->user->id,
         'status' => SyncRunStatus::Running->value,
         'started_at' => now()->subMinutes(200),
+        'current_phase' => 'import',
         'phases' => ['import'],
         'phase_statuses' => (object) [],
     ]);
@@ -85,6 +88,27 @@ it('does not reset a playlist with an active SyncRun even when updated_at is sta
     expect($playlist->fresh()->status)->toBe(Status::Processing);
 });
 
+it('does not mark a long-running pipeline-phase SyncRun as failed', function () {
+    $playlist = Playlist::factory()->for($this->user)->create([
+        'status' => Status::Processing->value,
+        'auto_sync' => false,
+    ]);
+
+    $run = SyncRun::factory()->create([
+        'playlist_id' => $playlist->id,
+        'user_id' => $this->user->id,
+        'status' => SyncRunStatus::Running->value,
+        'started_at' => now()->subMinutes(200),
+        'current_phase' => 'series_strm',
+        'phases' => ['import', 'series_metadata', 'series_strm', 'sync_completed'],
+        'phase_statuses' => ['import' => 'completed', 'series_metadata' => 'completed'],
+    ]);
+
+    $this->artisan('app:refresh-playlist')->assertSuccessful();
+
+    expect($run->fresh()->status)->toBe(SyncRunStatus::Running->value);
+});
+
 it('marks stuck SyncRuns as failed', function () {
     $playlist = Playlist::factory()->for($this->user)->create([
         'status' => Status::Processing->value,
@@ -96,6 +120,7 @@ it('marks stuck SyncRuns as failed', function () {
         'user_id' => $this->user->id,
         'status' => SyncRunStatus::Running->value,
         'started_at' => now()->subMinutes(200),
+        'current_phase' => 'import',
         'phases' => ['import'],
         'phase_statuses' => (object) [],
     ]);

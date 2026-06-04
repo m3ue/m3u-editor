@@ -3,6 +3,7 @@
 namespace App\Traits;
 
 use App\Settings\GeneralSettings;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
@@ -150,11 +151,41 @@ trait ProviderRequestDelay
             // Apply delay before the request
             $this->applyProviderRequestDelay();
 
-            // Execute the callback
-            return $callback();
+            // Execute the callback with retry for transient HTTP errors
+            return $this->callWithHttpRetry($callback);
         } finally {
             // Always release the slot
             $this->releaseProviderRequestSlot($slotKey);
         }
+    }
+
+    /**
+     * Execute an HTTP callback with exponential backoff for transient 5xx / 429 errors.
+     * Retries up to $maxAttempts times with delays of 1 s, 2 s, 4 s, …
+     */
+    private function callWithHttpRetry(callable $callback, int $maxAttempts = 3): mixed
+    {
+        $lastException = null;
+
+        for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
+            try {
+                return $callback();
+            } catch (RequestException $e) {
+                $lastException = $e;
+                $status = $e->response?->status();
+
+                if ($attempt < $maxAttempts && in_array($status, [429, 502, 503, 504])) {
+                    $delayMs = 1000 * (2 ** ($attempt - 1)); // 1 000 ms, 2 000 ms
+                    Log::info("HTTP {$status} on attempt {$attempt}/{$maxAttempts}, retrying in {$delayMs}ms");
+                    usleep($delayMs * 1000);
+
+                    continue;
+                }
+
+                throw $e;
+            }
+        }
+
+        throw $lastException; // @phpstan-ignore-line — only reached if $maxAttempts < 1
     }
 }
