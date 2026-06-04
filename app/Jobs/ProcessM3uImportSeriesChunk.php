@@ -109,9 +109,28 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
             return; // skip this category if there's an error
         }
 
+        // Guard against providers that return a non-JSON body (e.g. a PNG error image)
+        // with a 200 OK status. JsonMachine will throw a SyntaxError on the first byte
+        // if the body is not JSON, which would crash the entire import chain.
+        $firstChar = ltrim($seriesStreamsResponse->body())[0] ?? '';
+        if ($firstChar !== '[' && $firstChar !== '{') {
+            Log::warning('ProcessM3uImportSeriesChunk: Non-JSON response for series category, skipping', [
+                'source_category_id' => $sourceCategoryId,
+                'playlist_id' => $playlistId,
+                'content_preview' => substr($seriesStreamsResponse->body(), 0, 12),
+            ]);
+
+            return;
+        }
+
         // Single-pass stream: pluck existing rows once for O(1) lookup, then iterate
         // the JSON stream and immediately route each item to an update or a rolling
         // insert buffer — never accumulating more than 100 rows at a time.
+        //
+        // Keyed by source_series_id → last_modified. Use has() (not get()) for the
+        // existence check so that series whose last_modified is NULL are not mistakenly
+        // treated as new on every sync (get() returns null for both missing keys and
+        // keys with a null value).
         $existingSeriesIds = $playlist->series()
             ->where('source_category_id', $sourceCategoryId)
             ->pluck('last_modified', 'source_series_id');
@@ -128,11 +147,10 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
                 ? Carbon::createFromTimestamp((int) $item->last_modified)->toDateTimeString()
                 : null;
 
-            $existing = $existingSeriesIds->get($item->series_id);
-
-            if ($existing !== null) {
+            if ($existingSeriesIds->has($item->series_id)) {
                 // Already in DB — only update last_modified if it changed
-                if ($lastModified && $lastModified !== $existing) {
+                $storedModified = $existingSeriesIds->get($item->series_id);
+                if ($lastModified && $lastModified !== $storedModified) {
                     $playlist->series()
                         ->where('source_series_id', $item->series_id)
                         ->where('source_category_id', $sourceCategoryId)
