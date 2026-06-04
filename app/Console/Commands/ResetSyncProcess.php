@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Enums\Status;
+use App\Enums\SyncRunStatus;
 use App\Jobs\GenerateEpgCache;
 use App\Jobs\ProcessEpgImport;
 use App\Jobs\ProcessM3uImport;
@@ -33,7 +34,10 @@ class ResetSyncProcess extends Command
      */
     public function handle()
     {
-        $hungPlaylists = Playlist::where('status', '!=', Status::Completed);
+        $hungPlaylists = Playlist::where('status', '!=', Status::Completed)
+            ->whereDoesntHave('syncRuns', function ($q) {
+                $q->where('status', SyncRunStatus::Running->value);
+            });
         $hungEpgs = Epg::where('status', '!=', Status::Completed);
 
         if ($hungPlaylists->count() === 0 && $hungEpgs->count() === 0) {
@@ -42,7 +46,7 @@ class ResetSyncProcess extends Command
             return Command::SUCCESS;
         }
 
-        // Flush the cache to prevent any stale data issues
+        // Clear the queue to prevent any stale data issues
         $this->call('queue:clear', [
             '--force' => true,
         ]);

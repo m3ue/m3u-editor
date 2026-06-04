@@ -23,6 +23,7 @@ use App\Models\Playlist;
 use App\Models\SyncRun;
 use App\Settings\GeneralSettings;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -35,25 +36,48 @@ class SyncPipelineService
      * phase; once the import job chain completes and we know which post-import
      * phases will actually run, expandPipelineAfterImport() replaces the
      * phases array with the full resolved plan.
+     *
+     * If a run is already active for this playlist, the existing run is returned
+     * and no new run is created. A cache-backed lock prevents concurrent callers
+     * from slipping through the guard simultaneously.
      */
     public function startImport(
         Playlist $playlist,
         string $trigger = 'full_sync',
     ): SyncRun {
-        return SyncRun::create([
-            'playlist_id' => $playlist->id,
-            'user_id' => $playlist->user_id,
-            'trigger' => $trigger,
-            'status' => SyncRunStatus::Running->value,
-            'current_phase' => SyncRunPhase::Import->value,
-            'phases' => [SyncRunPhase::Import->value],
-            'phase_statuses' => (object) [],
-            'context' => [
+        $lockKey = "sync_pipeline_start:{$playlist->id}";
+
+        return Cache::lock($lockKey, 10)->block(5, function () use ($playlist, $trigger): SyncRun {
+            $existing = SyncRun::where('playlist_id', $playlist->id)
+                ->where('status', SyncRunStatus::Running->value)
+                ->latest('started_at')
+                ->first();
+
+            if ($existing) {
+                Log::info("SyncPipeline: startImport skipped — run {$existing->id} already active for playlist {$playlist->id}.", [
+                    'existing_run_id' => $existing->id,
+                    'trigger' => $trigger,
+                    'playlist_id' => $playlist->id,
+                ]);
+
+                return $existing;
+            }
+
+            return SyncRun::create([
                 'playlist_id' => $playlist->id,
                 'user_id' => $playlist->user_id,
-            ],
-            'started_at' => now(),
-        ]);
+                'trigger' => $trigger,
+                'status' => SyncRunStatus::Running->value,
+                'current_phase' => SyncRunPhase::Import->value,
+                'phases' => [SyncRunPhase::Import->value],
+                'phase_statuses' => (object) [],
+                'context' => [
+                    'playlist_id' => $playlist->id,
+                    'user_id' => $playlist->user_id,
+                ],
+                'started_at' => now(),
+            ]);
+        });
     }
 
     /**

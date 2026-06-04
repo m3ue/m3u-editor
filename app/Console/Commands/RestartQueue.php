@@ -31,8 +31,10 @@ class RestartQueue extends Command
         // Terminate Horizon to restart the queue workers
         $this->call('horizon:terminate');
 
-        // Flush the queue to clear out any pending jobs that may be stuck
-        $this->call('queue:flush');
+        // Clear the queue to prevent any stale data issues
+        $this->call('queue:clear', [
+            '--force' => true,
+        ]);
 
         // Truncate the jobs table to remove any remaining job records (optional, but helps keep the database clean)
         Job::truncate();

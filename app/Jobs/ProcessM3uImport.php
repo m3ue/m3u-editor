@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Enums\PlaylistSourceType;
 use App\Enums\Status;
+use App\Enums\SyncRunPhase;
 use App\Events\SyncCompleted;
 use App\Models\Category;
 use App\Models\Group;
@@ -208,6 +209,21 @@ class ProcessM3uImport implements ShouldQueue
                 ->sendToDatabase($this->playlist->user);
 
             return;
+        }
+
+        // If a SyncRun ID was provided and that run's import phase is already complete,
+        // this job was dispatched against a recycled run (startImport() returned an
+        // existing active run). Bail out before touching any channel data.
+        if ($this->syncRunId !== null) {
+            $syncRun = SyncRun::find($this->syncRunId);
+            if ($syncRun && $syncRun->isPhaseComplete(SyncRunPhase::Import)) {
+                Log::info('ProcessM3uImport: Skipping — import already complete for run, pipeline still active', [
+                    'playlist_id' => $this->playlist->id,
+                    'sync_run_id' => $this->syncRunId,
+                ]);
+
+                return;
+            }
         }
 
         if (! $this->force) {

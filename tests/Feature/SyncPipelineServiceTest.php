@@ -1,11 +1,13 @@
 <?php
 
+use App\Enums\Status;
 use App\Enums\SyncRunPhase;
 use App\Enums\SyncRunStatus;
 use App\Events\SyncCompleted;
 use App\Jobs\FetchTmdbIds;
 use App\Jobs\MergeChannels;
 use App\Jobs\ProbeChannelStreams;
+use App\Jobs\ProcessM3uImport;
 use App\Jobs\ProcessM3uImportSeries;
 use App\Jobs\ProcessVodChannels;
 use App\Jobs\SyncSeriesStrmFiles;
@@ -733,4 +735,129 @@ it('dispatches FetchTmdbIds with lookupScope both when tmdb_auto_lookup_all_new 
     Bus::assertDispatched(FetchTmdbIds::class, fn ($job) => $job->syncRunId === $run->id
         && $job->completionPhase === SyncRunPhase::VodTmdb
         && $job->lookupScope === 'both');
+});
+
+// ── startImport: concurrency guard ──────────────────────────────────────────
+
+it('returns a new SyncRun when no run is currently active for the playlist', function () {
+    $playlist = Playlist::factory()->for($this->user)->create();
+
+    $run = $this->service->startImport($playlist, 'test');
+
+    expect($run)->toBeInstanceOf(SyncRun::class)
+        ->and($run->playlist_id)->toBe($playlist->id)
+        ->and($run->status)->toBe(SyncRunStatus::Running->value)
+        ->and($run->trigger)->toBe('test');
+
+    $this->assertDatabaseCount('sync_runs', 1);
+});
+
+it('returns the existing run and creates no new run when one is already active', function () {
+    $playlist = Playlist::factory()->for($this->user)->create();
+
+    $existing = SyncRun::create([
+        'playlist_id' => $playlist->id,
+        'user_id' => $this->user->id,
+        'trigger' => 'scheduled_refresh',
+        'status' => SyncRunStatus::Running->value,
+        'current_phase' => SyncRunPhase::Import->value,
+        'phases' => [SyncRunPhase::Import->value],
+        'phase_statuses' => (object) [],
+        'context' => ['playlist_id' => $playlist->id],
+        'started_at' => now(),
+    ]);
+
+    $returned = $this->service->startImport($playlist, 'filament_refresh');
+
+    expect($returned->id)->toBe($existing->id);
+    $this->assertDatabaseCount('sync_runs', 1);
+});
+
+it('creates a new run when a previous run is completed (not running)', function () {
+    $playlist = Playlist::factory()->for($this->user)->create();
+
+    SyncRun::create([
+        'playlist_id' => $playlist->id,
+        'user_id' => $this->user->id,
+        'trigger' => 'scheduled_refresh',
+        'status' => SyncRunStatus::Completed->value,
+        'phases' => [SyncRunPhase::SyncCompleted->value],
+        'phase_statuses' => (object) [],
+        'context' => ['playlist_id' => $playlist->id],
+        'started_at' => now()->subMinutes(10),
+        'finished_at' => now()->subMinutes(5),
+    ]);
+
+    $run = $this->service->startImport($playlist, 'scheduled_refresh');
+
+    expect($run->status)->toBe(SyncRunStatus::Running->value);
+    $this->assertDatabaseCount('sync_runs', 2);
+});
+
+it('creates a new run when a previous run is failed (not running)', function () {
+    $playlist = Playlist::factory()->for($this->user)->create();
+
+    SyncRun::create([
+        'playlist_id' => $playlist->id,
+        'user_id' => $this->user->id,
+        'trigger' => 'scheduled_refresh',
+        'status' => SyncRunStatus::Failed->value,
+        'phases' => [SyncRunPhase::Import->value],
+        'phase_statuses' => (object) [],
+        'context' => ['playlist_id' => $playlist->id],
+        'started_at' => now()->subMinutes(10),
+        'finished_at' => now()->subMinutes(5),
+    ]);
+
+    $run = $this->service->startImport($playlist, 'scheduled_refresh');
+
+    expect($run->status)->toBe(SyncRunStatus::Running->value);
+    $this->assertDatabaseCount('sync_runs', 2);
+});
+
+it('does not create a concurrent run for the same playlist when called simultaneously', function () {
+    $playlist = Playlist::factory()->for($this->user)->create();
+
+    // Simulate two callers at the same time by calling startImport twice in sequence
+    // (the cache lock serialises them and the second should return the existing run).
+    $run1 = $this->service->startImport($playlist, 'scheduler');
+    $run2 = $this->service->startImport($playlist, 'filament_refresh');
+
+    expect($run2->id)->toBe($run1->id);
+    $this->assertDatabaseCount('sync_runs', 1);
+});
+
+// ── ProcessM3uImport: duplicate-import guard ─────────────────────────────────
+
+it('ProcessM3uImport bails out without touching the playlist when the import phase is already complete', function () {
+    $playlist = Playlist::withoutEvents(fn () => Playlist::factory()->for($this->user)->create([
+        'status' => 'completed', // mid-pipeline state (e.g. between VOD and series phases)
+    ]));
+
+    // Simulate a run that has already completed its Import phase (pipeline still Running).
+    $run = SyncRun::create([
+        'playlist_id' => $playlist->id,
+        'user_id' => $this->user->id,
+        'trigger' => 'scheduled_refresh',
+        'status' => SyncRunStatus::Running->value,
+        'current_phase' => SyncRunPhase::VodMetadata->value,
+        'phases' => [
+            SyncRunPhase::Import->value,
+            SyncRunPhase::VodMetadata->value,
+            SyncRunPhase::SyncCompleted->value,
+        ],
+        'phase_statuses' => [
+            SyncRunPhase::Import->value => ['status' => 'completed', 'at' => now()->toIso8601String()],
+        ],
+        'context' => ['playlist_id' => $playlist->id],
+        'started_at' => now()->subMinutes(30),
+    ]);
+
+    // Invoke the job directly (synchronous, no queue needed).
+    (new ProcessM3uImport($playlist, false, $run->id))->handle(
+        app(GeneralSettings::class),
+    );
+
+    // The playlist must not have been set to Processing — the job returned early.
+    expect($playlist->fresh()->status)->toBe(Status::Completed);
 });
