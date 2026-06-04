@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Enums\Status;
+use App\Enums\SyncRunPhase;
 use App\Enums\SyncRunStatus;
 use App\Jobs\ProcessM3uImport;
 use App\Models\Playlist;
@@ -48,13 +49,26 @@ class RefreshPlaylist extends Command
             // long-running import jobs continuously refresh updated_at via progress
             // updates (vod_progress, processing flags, etc.), which prevents the
             // updated_at check from ever triggering for actively-running stuck jobs.
-            $stuckMinutes = (int) config('dev.stuck_processing_minutes', 120);
+            $stuckMinutes = (int) config('dev.stuck_processing_minutes', 240);
             $stuckThreshold = now()->subMinutes($stuckMinutes);
 
-            // Fail any SyncRuns that have been Running since before the threshold.
+            // Fail any SyncRuns that have been stuck in a provider-facing phase for too long.
+            //
+            // Only the import/metadata phases make outbound provider API calls and can
+            // get genuinely "stuck" due to a slow or unresponsive provider. Post-import
+            // pipeline phases (TMDB lookup, STRM file generation, stream probe,
+            // find/replace, etc.) are local processing that can legitimately run for
+            // hours on large libraries — do not interrupt them.
+            $providerPhases = [
+                SyncRunPhase::Import->value,
+                SyncRunPhase::VodMetadata->value,
+                SyncRunPhase::SeriesMetadata->value,
+            ];
+
             SyncRun::query()
                 ->where('status', SyncRunStatus::Running->value)
                 ->where('started_at', '<', $stuckThreshold)
+                ->whereIn('current_phase', $providerPhases)
                 ->each(function (SyncRun $run) {
                     $run->update([
                         'status' => SyncRunStatus::Failed->value,

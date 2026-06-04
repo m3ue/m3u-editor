@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Models\Job;
 use Illuminate\Console\Command;
 
 class RestartQueue extends Command
@@ -26,8 +27,16 @@ class RestartQueue extends Command
     public function handle()
     {
         $this->info("🔄 Restarting Horizon queue...\n");
+
+        // Terminate Horizon to restart the queue workers
         $this->call('horizon:terminate');
+
+        // Flush the queue to clear out any pending jobs that may be stuck
         $this->call('queue:flush');
+
+        // Truncate the jobs table to remove any remaining job records (optional, but helps keep the database clean)
+        Job::truncate();
+
         $this->info("✅ Horizon queue restarted\n");
     }
 }
