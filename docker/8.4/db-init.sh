@@ -90,6 +90,11 @@ echo "[db-init] Resetting sync process..."
 /usr/bin/php /var/www/html/artisan app:reset-sync-process
 echo "[db-init] Sync process reset."
 
+# Cleanup any stale files (Playlist imports, EPG uploads and cache, etc.)
+echo "[db-init] Cleaning up any stale files..."
+php artisan app:cleanup-stale-files --force
+echo "[db-init] Stale file cleanup complete."
+
 # Discover and auto-trust official plugins bundled in this image
 echo "[db-init] Syncing official plugins..."
 /usr/bin/php /var/www/html/artisan plugins:sync-official
