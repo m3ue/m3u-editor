@@ -1976,15 +1976,19 @@ class ProcessM3uImport implements ShouldQueue
         }
 
         return Str::contains($e->getMessage(), [
+            'status code 500',
             'status code 502',
             'status code 503',
             'status code 504',
+            'HTTP request returned status code 500',
             'HTTP request returned status code 502',
             'HTTP request returned status code 503',
             'HTTP request returned status code 504',
+            '500 Internal Server Error',
             '502 Bad Gateway',
             '503 Service Temporarily Unavailable',
             '504 Gateway Timeout',
+            ' 500:',
             ' 502:',
             ' 503:',
             ' 504:',

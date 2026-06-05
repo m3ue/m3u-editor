@@ -174,7 +174,7 @@ trait ProviderRequestDelay
                 $lastException = $e;
                 $status = $e->response?->status();
 
-                if ($attempt < $maxAttempts && in_array($status, [429, 502, 503, 504])) {
+                if ($attempt < $maxAttempts && in_array($status, [429, 500, 502, 503, 504])) {
                     $delayMs = 1000 * (2 ** ($attempt - 1)); // 1 000 ms, 2 000 ms
                     Log::info("HTTP {$status} on attempt {$attempt}/{$maxAttempts}, retrying in {$delayMs}ms");
                     usleep($delayMs * 1000);
