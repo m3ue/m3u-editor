@@ -827,6 +827,31 @@ it('does not create a concurrent run for the same playlist when called simultane
     $this->assertDatabaseCount('sync_runs', 1);
 });
 
+it('fails a stale Running run (import complete, pipeline dead) and creates a fresh run', function () {
+    $playlist = Playlist::factory()->for($this->user)->create();
+
+    $stale = SyncRun::create([
+        'playlist_id' => $playlist->id,
+        'user_id' => $this->user->id,
+        'trigger' => 'scheduled_refresh',
+        'status' => SyncRunStatus::Running->value,
+        'current_phase' => 'vod_tmdb',
+        'phases' => [SyncRunPhase::Import->value, 'vod_tmdb', SyncRunPhase::SyncCompleted->value],
+        'phase_statuses' => ['import' => ['status' => 'completed']], // Import marked complete
+        'context' => ['playlist_id' => $playlist->id],
+        'started_at' => now()->subMinutes(30),
+    ]);
+
+    $fresh = $this->service->startImport($playlist, 'scheduled_refresh');
+
+    // Stale run must be failed, a new run created
+    expect($stale->fresh()->status)->toBe(SyncRunStatus::Failed->value)
+        ->and($fresh->id)->not->toBe($stale->id)
+        ->and($fresh->status)->toBe(SyncRunStatus::Running->value);
+
+    $this->assertDatabaseCount('sync_runs', 2);
+});
+
 // ── ProcessM3uImport: duplicate-import guard ─────────────────────────────────
 
 it('ProcessM3uImport bails out without touching the playlist when the import phase is already complete', function () {

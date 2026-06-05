@@ -34,25 +34,34 @@ class ResetSyncProcess extends Command
      */
     public function handle()
     {
+        // Find any Playlists or EPGs that are not marked as Completed (but should be) and reset their status to allow them to be reprocessed.
         $hungPlaylists = Playlist::where('status', '!=', Status::Completed)
-            ->whereDoesntHave('syncRuns', function ($q) {
-                $q->where('status', SyncRunStatus::Running->value);
+            ->orWhereHas('syncRuns', function ($query) {
+                $query->where('status', SyncRunStatus::Running->value);
             });
         $hungEpgs = Epg::where('status', '!=', Status::Completed);
 
+        // Reset queue to clear out any potentially stuck jobs that may be contributing to the issue
+        $this->resetQueue();
+
+        // If no hung Playlists or EPGs are found, exit early
         if ($hungPlaylists->count() === 0 && $hungEpgs->count() === 0) {
             $this->info('✅ No stuck Playlists or EPGs found.');
 
             return Command::SUCCESS;
         }
 
-        // Clear the queue to prevent any stale data issues
-        $this->call('queue:clear', [
-            '--force' => true,
-        ]);
-
         foreach ($hungPlaylists->cursor() as $playlist) {
             $this->info("🔄 Resetting stuck Playlist(s): {$playlist->name}");
+
+            // Fail any stale Running SyncRuns so startImport() creates a fresh run
+            // rather than attaching to the stale one and silently skipping the import.
+            $playlist->syncRuns()
+                ->where('status', SyncRunStatus::Running->value)
+                ->update([
+                    'status' => SyncRunStatus::Failed->value,
+                    'finished_at' => now(),
+                ]);
 
             // Restart the sync process
             if ($playlist->auto_sync) {
@@ -65,6 +74,7 @@ class ResetSyncProcess extends Command
                         ...$playlist->processing ?? [],
                         'live_processing' => false,
                         'vod_processing' => false,
+                        'series_processing' => false,
                     ],
                     'status' => Status::Pending,
                     'errors' => null,
@@ -132,5 +142,21 @@ class ResetSyncProcess extends Command
         }
 
         return Command::SUCCESS;
+    }
+
+    private function resetQueue()
+    {
+        // Clear the queue to prevent any stale data issues
+        $this->call('queue:clear', [
+            '--force' => true,
+        ]);
+        $this->call('queue:clear', [
+            '--queue' => 'import',
+            '--force' => true,
+        ]);
+        $this->call('queue:clear', [
+            '--queue' => 'file_sync',
+            '--force' => true,
+        ]);
     }
 }

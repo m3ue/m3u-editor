@@ -18,13 +18,13 @@ beforeEach(function () {
     $this->user = User::factory()->create();
 });
 
-it('does not dispatch a new import for a playlist with an active running SyncRun', function () {
+it('fails a Running SyncRun and dispatches a fresh import on reset (container-restart behaviour)', function () {
     $playlist = Playlist::factory()->for($this->user)->create([
         'status' => Status::Processing,
         'auto_sync' => true,
     ]);
 
-    SyncRun::factory()->for($playlist)->create([
+    $run = SyncRun::factory()->for($playlist)->create([
         'status' => SyncRunStatus::Running->value,
         'started_at' => now()->subMinutes(10),
         'finished_at' => null,
@@ -32,7 +32,9 @@ it('does not dispatch a new import for a playlist with an active running SyncRun
 
     $this->artisan('app:reset-sync-process')->assertSuccessful();
 
-    Queue::assertNotPushed(ProcessM3uImport::class);
+    // Stale Running SyncRun must be failed so the fresh import starts clean.
+    expect($run->fresh()->status)->toBe(SyncRunStatus::Failed->value);
+    Queue::assertPushed(ProcessM3uImport::class);
 });
 
 it('dispatches a new import for a stuck playlist with no active SyncRun', function () {

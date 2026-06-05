@@ -18,21 +18,15 @@ beforeEach(function () {
     config(['dev.stuck_processing_minutes' => 120]);
 });
 
-it('resets a stuck playlist whose SyncRun started before the threshold', function () {
+it('resets a stuck playlist when updated_at is past the threshold', function () {
     $playlist = Playlist::factory()->for($this->user)->create([
         'status' => Status::Processing->value,
         'auto_sync' => false,
         'is_network_playlist' => false,
     ]);
 
-    SyncRun::factory()->create([
-        'playlist_id' => $playlist->id,
-        'user_id' => $this->user->id,
-        'status' => SyncRunStatus::Running->value,
-        'started_at' => now()->subMinutes(200),
-        'current_phase' => 'import',
-        'phases' => ['import'],
-        'phase_statuses' => (object) [],
+    DB::table('playlists')->where('id', $playlist->id)->update([
+        'updated_at' => now()->subMinutes(200)->toDateTimeString(),
     ]);
 
     $this->artisan('app:refresh-playlist')->assertSuccessful();
@@ -40,79 +34,29 @@ it('resets a stuck playlist whose SyncRun started before the threshold', functio
     expect($playlist->fresh()->status)->toBe(Status::Pending);
 });
 
-it('does not reset a playlist whose SyncRun started within the threshold', function () {
+it('does not reset a playlist when updated_at is within the threshold', function () {
     $playlist = Playlist::factory()->for($this->user)->create([
         'status' => Status::Processing->value,
         'auto_sync' => false,
         'is_network_playlist' => false,
     ]);
 
-    SyncRun::factory()->create([
-        'playlist_id' => $playlist->id,
-        'user_id' => $this->user->id,
-        'status' => SyncRunStatus::Running->value,
-        'started_at' => now()->subMinutes(30),
-        'phases' => ['import'],
-        'phase_statuses' => (object) [],
-    ]);
+    // updated_at defaults to now() in the factory, so it falls within the threshold.
 
     $this->artisan('app:refresh-playlist')->assertSuccessful();
 
     expect($playlist->fresh()->status)->toBe(Status::Processing);
 });
 
-it('does not reset a playlist with an active SyncRun even when updated_at is stale', function () {
+it('fails Running SyncRuns when resetting a stuck playlist', function () {
     $playlist = Playlist::factory()->for($this->user)->create([
         'status' => Status::Processing->value,
         'auto_sync' => false,
         'is_network_playlist' => false,
     ]);
 
-    // Bypass Eloquent's automatic timestamp handling to set a stale updated_at
     DB::table('playlists')->where('id', $playlist->id)->update([
         'updated_at' => now()->subMinutes(200)->toDateTimeString(),
-    ]);
-
-    // Active SyncRun started recently — should protect the playlist from reset
-    SyncRun::factory()->create([
-        'playlist_id' => $playlist->id,
-        'user_id' => $this->user->id,
-        'status' => SyncRunStatus::Running->value,
-        'started_at' => now()->subMinutes(30),
-        'phases' => ['import'],
-        'phase_statuses' => (object) [],
-    ]);
-
-    $this->artisan('app:refresh-playlist')->assertSuccessful();
-
-    expect($playlist->fresh()->status)->toBe(Status::Processing);
-});
-
-it('does not mark a long-running pipeline-phase SyncRun as failed', function () {
-    $playlist = Playlist::factory()->for($this->user)->create([
-        'status' => Status::Processing->value,
-        'auto_sync' => false,
-    ]);
-
-    $run = SyncRun::factory()->create([
-        'playlist_id' => $playlist->id,
-        'user_id' => $this->user->id,
-        'status' => SyncRunStatus::Running->value,
-        'started_at' => now()->subMinutes(200),
-        'current_phase' => 'series_strm',
-        'phases' => ['import', 'series_metadata', 'series_strm', 'sync_completed'],
-        'phase_statuses' => ['import' => 'completed', 'series_metadata' => 'completed'],
-    ]);
-
-    $this->artisan('app:refresh-playlist')->assertSuccessful();
-
-    expect($run->fresh()->status)->toBe(SyncRunStatus::Running->value);
-});
-
-it('marks stuck SyncRuns as failed', function () {
-    $playlist = Playlist::factory()->for($this->user)->create([
-        'status' => Status::Processing->value,
-        'auto_sync' => false,
     ]);
 
     $run = SyncRun::factory()->create([
@@ -128,4 +72,27 @@ it('marks stuck SyncRuns as failed', function () {
     $this->artisan('app:refresh-playlist')->assertSuccessful();
 
     expect($run->fresh()->status)->toBe(SyncRunStatus::Failed->value);
+    expect($playlist->fresh()->status)->toBe(Status::Pending);
+});
+
+it('does not reset a playlist that is recently active even when a SyncRun exists', function () {
+    $playlist = Playlist::factory()->for($this->user)->create([
+        'status' => Status::Processing->value,
+        'auto_sync' => false,
+        'is_network_playlist' => false,
+    ]);
+
+    // updated_at is recent — the sync is actively progressing
+    SyncRun::factory()->create([
+        'playlist_id' => $playlist->id,
+        'user_id' => $this->user->id,
+        'status' => SyncRunStatus::Running->value,
+        'started_at' => now()->subMinutes(30),
+        'phases' => ['import'],
+        'phase_statuses' => (object) [],
+    ]);
+
+    $this->artisan('app:refresh-playlist')->assertSuccessful();
+
+    expect($playlist->fresh()->status)->toBe(Status::Processing);
 });

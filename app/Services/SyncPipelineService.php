@@ -54,13 +54,32 @@ class SyncPipelineService
                 ->first();
 
             if ($existing) {
-                Log::info("SyncPipeline: startImport skipped — run {$existing->id} already active for playlist {$playlist->id}.", [
-                    'existing_run_id' => $existing->id,
-                    'trigger' => $trigger,
-                    'playlist_id' => $playlist->id,
-                ]);
+                // If the import phase is already complete the pipeline has moved past
+                // Import. This run is stale — the pipeline died mid-way (queue clear,
+                // worker crash, etc.). Fail it so we can start a fresh run below.
+                if ($existing->isPhaseComplete(SyncRunPhase::Import)) {
+                    $existing->update([
+                        'status' => SyncRunStatus::Failed->value,
+                        'finished_at' => now(),
+                    ]);
 
-                return $existing;
+                    Log::info("SyncPipeline: startImport — stale run {$existing->id} detected (import complete, pipeline dead). Failing and creating fresh run.", [
+                        'playlist_id' => $playlist->id,
+                        'trigger' => $trigger,
+                        'stale_run_id' => $existing->id,
+                        'stale_current_phase' => $existing->current_phase,
+                    ]);
+                } else {
+                    // Import is not yet complete — a true concurrent dispatch. Return the
+                    // existing run to prevent a duplicate import.
+                    Log::info("SyncPipeline: startImport skipped — run {$existing->id} already active for playlist {$playlist->id}.", [
+                        'existing_run_id' => $existing->id,
+                        'trigger' => $trigger,
+                        'playlist_id' => $playlist->id,
+                    ]);
+
+                    return $existing;
+                }
             }
 
             return SyncRun::create([

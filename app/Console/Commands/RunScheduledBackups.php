@@ -2,10 +2,14 @@
 
 namespace App\Console\Commands;
 
+use App\Enums\SyncRunStatus;
 use App\Jobs\CreateBackup;
+use App\Models\SyncRun;
 use App\Settings\GeneralSettings;
 use Cron\CronExpression;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use ShuvroRoy\FilamentSpatieLaravelBackup\FilamentSpatieLaravelBackup;
 use Spatie\Backup\BackupDestination\Backup;
 use Spatie\Backup\BackupDestination\BackupDestination as SpatieBackupDestination;
@@ -35,6 +39,19 @@ class RunScheduledBackups extends Command
             // Check if due yet
             $isDue = (new CronExpression($settings->auto_backup_database_schedule))->isDue();
             if ($isDue) {
+                // On SQLite, a concurrent sync write can cause the dump to produce an
+                // empty file (exit 0, no output), which then breaks ZipArchive finalization.
+                // Skip this tick and let the next scheduler run handle it instead.
+                if (DB::connection()->getDriverName() === 'sqlite') {
+                    $hasActiveSyncs = SyncRun::where('status', SyncRunStatus::Running->value)->exists();
+                    if ($hasActiveSyncs) {
+                        Log::info('[backup] Skipped scheduled backup: Sync in progress, will retry on next schedule.');
+                        $this->warn('Skipping backup: Sync is in progress. Will retry on next schedule.');
+
+                        return;
+                    }
+                }
+
                 $this->info('Running scheduled backups...');
 
                 // Check if we'll be over the max backups after execution

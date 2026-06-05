@@ -192,11 +192,23 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
             $this->flushInsertBuffer($insertBuffer, $playlist, $sourceCategoryId, $sourceCategoryName);
         }
 
-        // Update progress: scale 0→99 across all chunks using index position
-        $chunkProgress = (int) round(($this->index + 1) / max(1, $this->batchCount) * 99);
-        $playlist->update([
-            'series_progress' => min(99, $chunkProgress),
-        ]);
+        // Update progress: scale 0→100 across all chunks. Intermediate chunks are
+        // capped at 99 so the UI doesn't show 100% until the final chunk completes.
+        $isLastChunk = $this->index === $this->batchCount - 1;
+        $chunkProgress = $isLastChunk
+            ? 100
+            : (int) round(($this->index + 1) / max(1, $this->batchCount) * 99);
+
+        $update = ['series_progress' => $chunkProgress];
+
+        if ($isLastChunk) {
+            $update['processing'] = [
+                ...$playlist->processing ?? [],
+                'series_processing' => false,
+            ];
+        }
+
+        $playlist->update($update);
     }
 
     /**
