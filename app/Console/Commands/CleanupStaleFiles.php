@@ -31,12 +31,12 @@ class CleanupStaleFiles extends Command
         $disk = Storage::disk('local');
         $counts = ['dirs' => 0, 'files' => 0];
 
-        $playlistUuids = Playlist::query()->pluck('uuid')->all();
+        $playlistUuids = Playlist::query()->pluck('uuid')->filter()->all();
         $counts = $this->cleanupSubdirectories($disk, 'playlist', $playlistUuids, $isDryRun, $counts);
         $counts = $this->cleanupLooseFiles($disk, 'playlist', $playlistUuids, $isDryRun, $counts);
         $counts = $this->cleanupSubdirectories($disk, 'playlist-epg-files', $playlistUuids, $isDryRun, $counts);
 
-        $epgUuids = Epg::query()->pluck('uuid')->all();
+        $epgUuids = Epg::query()->pluck('uuid')->filter()->all();
         $counts = $this->cleanupSubdirectories($disk, 'epg', $epgUuids, $isDryRun, $counts);
         $counts = $this->cleanupLooseFiles($disk, 'epg', $epgUuids, $isDryRun, $counts);
         $counts = $this->cleanupSubdirectories($disk, 'epg-cache', $epgUuids, $isDryRun, $counts);
