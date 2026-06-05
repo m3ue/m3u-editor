@@ -1,10 +1,8 @@
 <?php
 
 /**
- * Test bootstrap — ensures local test runs work even when Docker
- * artefacts (cached config, broken symlinks) are present.
- *
- * Docker itself is unaffected because tests are never executed inside the container.
+ * Test bootstrap, ensures local and Docker test runs work even when Docker
+ * artefacts (cached config, broken symlinks, missing env files) are present.
  */
 
 // 1. Remove cached config so phpunit.xml env vars take effect.
@@ -29,13 +27,25 @@ if (is_link($logsPath) && ! file_exists($logsPath)) {
     mkdir($logsPath, 0755, true);
 }
 
-// 2b. Fix broken .env symlink that points to Docker container path.
-//     Without a valid .env, Laravel can't load env vars and phpunit.xml
-//     env overrides may not work. Falls back to .env.testing.
+// 2b. Fix broken or missing .env files that point to Docker container paths.
+//     Without a valid .env, Laravel emits file_get_contents warnings before
+//     phpunit.xml env overrides are applied.
 $envPath = __DIR__.'/../.env';
-if (is_link($envPath) && ! file_exists($envPath) && file_exists(__DIR__.'/../.env.testing')) {
+$envTestingPath = __DIR__.'/../.env.testing';
+$envExamplePath = __DIR__.'/../.env.example';
+
+if (is_link($envPath) && ! file_exists($envPath)) {
     unlink($envPath);
-    copy(__DIR__.'/../.env.testing', $envPath);
+}
+
+if (! file_exists($envPath)) {
+    if (file_exists($envTestingPath)) {
+        copy($envTestingPath, $envPath);
+    } elseif (file_exists($envExamplePath)) {
+        copy($envExamplePath, $envPath);
+    } else {
+        file_put_contents($envPath, "APP_ENV=testing\nAPP_KEY=base64:uGN0Jq8vBgmV7NMZ2S0Y8XNg3OMRSbe4H1sA0rDkiN0=\n");
+    }
 }
 
 // 3. Fix broken database symlinks that point to Docker container paths.

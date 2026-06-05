@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Admin\QueueIndicatorController;
 use App\Http\Controllers\Api\DispatcharrController;
 use App\Http\Controllers\AssetPreviewController;
 use App\Http\Controllers\Auth\OidcController;
@@ -47,6 +48,10 @@ Route::post('/admin/refresh-external-ip', function (ExternalIpService $ipService
 
     return response()->json(['success' => true, 'external_ip' => $ip]);
 })->middleware(['auth']);
+
+Route::get('/admin/api/queue-indicator', QueueIndicatorController::class)
+    ->middleware(['auth'])
+    ->name('admin.queue-indicator');
 
 /*
  * Short URL forwarding route

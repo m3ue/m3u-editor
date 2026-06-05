@@ -342,6 +342,11 @@ class AdminPanelProvider extends PanelProvider
             );
         }
 
+        FilamentView::registerRenderHook(
+            PanelsRenderHook::TOPBAR_END,
+            fn (): string => (auth()->user()?->isAdmin() && $this->queueManagerEnabled()) ? view('components.queue-indicator')->render() : ''
+        );
+
         // Register OIDC SSO button on the login page
         if (config('services.oidc.enabled')) {
             FilamentView::registerRenderHook(
@@ -350,7 +355,7 @@ class AdminPanelProvider extends PanelProvider
             );
         }
 
-        // Force password change modal — shown to any authenticated user with must_change_password = true
+        // Force password change modal, shown to any authenticated user with must_change_password = true
         FilamentView::registerRenderHook(
             PanelsRenderHook::BODY_START,
             fn (): string => auth()->check() ? Blade::render("@livewire('force-password-change')") : ''
@@ -387,7 +392,7 @@ class AdminPanelProvider extends PanelProvider
      */
     private function buildCopilotPlugin(array $s): ?FilamentCopilotPlugin
     {
-        // Skip during tests — the settings table is not yet created when panel() runs
+        // Skip during tests, the settings table is not yet created when panel() runs
         // (RefreshDatabase migrations happen after service provider registration).
         if (app()->environment('testing')) {
             return null;
@@ -414,7 +419,7 @@ class AdminPanelProvider extends PanelProvider
                 config(["ai.providers.{$provider}.key" => $s['copilot_api_key']]);
             }
 
-            // Custom base URL — supported for OpenAI-compatible, Ollama, and MiniMax endpoints.
+            // Custom base URL, supported for OpenAI-compatible, Ollama, and MiniMax endpoints.
             if (! empty($s['copilot_url']) && in_array($provider, ['openai', 'ollama', 'minimax'], true)) {
                 config(["ai.providers.{$provider}.url" => $s['copilot_url']]);
             }
@@ -435,8 +440,17 @@ class AdminPanelProvider extends PanelProvider
         }
     }
 
+    private function queueManagerEnabled(): bool
+    {
+        try {
+            return (bool) app(GeneralSettings::class)->show_queue_manager;
+        } catch (Throwable) {
+            return false;
+        }
+    }
+
     /**
-     * Tools that ToolRegistry always registers by default — never pass these
+     * Tools that ToolRegistry always registers by default, never pass these
      * via ->globalTools() or they will be duplicated, causing Gemini 400 errors.
      */
     private const COPILOT_BUILTIN_TOOLS = [
@@ -466,7 +480,7 @@ class AdminPanelProvider extends PanelProvider
 
     /**
      * Build the quick actions list, automatically prepending the EPG mapper
-     * quick action when that tool is enabled — without exposing it in the
+     * quick action when that tool is enabled, without exposing it in the
      * user-editable Preferences UI.
      *
      * @param  array<string, mixed>  $s

@@ -35,6 +35,6 @@ class HorizonServiceProvider extends HorizonApplicationServiceProvider
         } catch (Exception $e) {
             $enableQueueManager = false;
         }
-        Gate::define('viewHorizon', fn ($user) => $user && $enableQueueManager);
+        Gate::define('viewHorizon', fn ($user) => (bool) $user && $user->isAdmin() && $enableQueueManager);
     }
 }
