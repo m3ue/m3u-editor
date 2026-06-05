@@ -77,6 +77,8 @@ Settings are persisted in the `settings` table under `GeneralSettings`. The API 
 
 All provider and model options are defined in `config/ai.php` and `AdminPanelProvider::COPILOT_DEFAULT_MODELS`.
 
+The default system prompt tells the AI that it can look up the live TV guide (what is on right now / later today / tomorrow / this week, what is airing around a specific show, and full channel schedules). It also instructs the AI to call **Get Available Tools** whenever a user asks for something it cannot do, identify which tool is missing, and tell the user exactly which checkbox to enable in **Preferences → AI Copilot → Global Tools**. For example, if `DvrScheduleTool` is disabled and the user asks about TV listings, the AI will respond: *"I do not have the TV schedule tool enabled. Enable DVR: Schedule in Preferences → AI Copilot → Global Tools and try again."* Custom system prompts override this default.
+
 ---
 
 ## Global Tools
@@ -93,8 +95,30 @@ Global tools are available to the assistant on every page. They can be toggled o
 | `RememberTool` | Remember | Stores a piece of information in the assistant's memory for the current user. |
 | `RecallTool` | Recall Memories | Retrieves stored memories for the current user. |
 | `SearchDocsTool` | Search Documentation | Searches `https://m3ue.sparkison.dev/docs` for relevant pages and returns excerpts. |
+| `DvrScheduleTool` | DVR: Schedule | Browse the EPG TV guide and schedule recordings. **Default-enabled.** |
 
-The first eight tools (`GetToolsTool` through `RecallTool`) come from the `filament-copilot` package. `SearchDocsTool` is a custom tool defined in `app/Filament/CopilotTools/SearchDocsTool.php`.
+The first eight tools (`GetToolsTool` through `RecallTool`) come from the `filament-copilot` package. `SearchDocsTool` and `DvrScheduleTool` are custom tools defined in `app/Filament/CopilotTools/`.
+
+### DVR Schedule Tool
+
+`DvrScheduleTool` answers questions about what is on TV on the user's mapped channels. The default system prompt explicitly tells the AI it can look up the live TV guide, so questions like *"what is on WE TV around Love After Lockup later today"* are answered without the user having to enable the tool manually.
+
+**Actions:**
+
+| Action | Purpose |
+|---|---|
+| `now_playing` | What is currently airing on a specific channel. |
+| `search` | Upcoming programmes by title/keyword, optionally filtered by channel and time window. |
+| `around` | Programmes airing before and after a specific show on a channel (e.g. *"what is on WE TV around Love After Lockup later today"*). |
+| `channel_schedule` | Full programme schedule for a channel within a time window. |
+| `schedule_once` | Record a specific programme once. |
+| `schedule_series` | Create a series recording rule. |
+| `delete_rule` | Delete a recording rule. |
+| `remind` | Create a one-shot recording (used as a reminder). |
+
+**Time window filter** (`today` / `tomorrow` / `this_week`): the `search`, `around`, and `channel_schedule` actions accept a `time_window` parameter so results can be focused. `today` is from now to end of day; `tomorrow` is the full next day; `this_week` is the next 7 days (default, preserves back-compat).
+
+The `around` action additionally accepts `airing_time` (ISO 8601 datetime) to anchor the match to a specific time — useful for *"what is on around 8 PM tonight"* — plus `context_before` and `context_after` (defaults 2 and 3) to control how many neighbours of the matched programme are returned.
 
 ---
 

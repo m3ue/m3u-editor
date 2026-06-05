@@ -1537,6 +1537,7 @@ class Preferences extends SettingsPage
                                             ->columns(2)
                                             ->default([
                                                 SearchDocsTool::class,
+                                                DvrScheduleTool::class,
                                             ])
                                             ->helperText(__('Select which additional tools the AI assistant can use. Core tools (navigation, memory) are always available.')),
                                     ]),
