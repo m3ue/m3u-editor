@@ -1202,13 +1202,14 @@ class ProcessM3uImport implements ShouldQueue
                             }
                             $group = Group::create($data);
                         } else {
-                            if ($group->trashed()) {
-                                $group->restore();
-                            }
                             $data = [
                                 'import_batch_no' => $batchNo,
                                 'new' => false,
                             ];
+                            if ($group->trashed()) {
+                                $group->restore();
+                                $data['new'] = true; // if restoring, mark as new to trigger any new group logic in downstream processing
+                            }
                             if ($groupOrder !== null) {
                                 $data['sort_order'] = $groupOrder++;
                             }
@@ -1265,13 +1266,14 @@ class ProcessM3uImport implements ShouldQueue
                             }
                             $group = Group::create($data);
                         } else {
-                            if ($group->trashed()) {
-                                $group->restore();
-                            }
                             $data = [
                                 'import_batch_no' => $batchNo,
                                 'new' => false,
                             ];
+                            if ($group->trashed()) {
+                                $group->restore();
+                                $data['new'] = true; // if restoring, mark as new to trigger any new group logic in downstream processing
+                            }
                             if ($groupOrder !== null) {
                                 $data['sort_order'] = $groupOrder++;
                             }
@@ -1634,13 +1636,14 @@ class ProcessM3uImport implements ShouldQueue
                         }
                         $group = Group::create($data);
                     } else {
-                        if ($group->trashed()) {
-                            $group->restore();
-                        }
                         $data = [
                             'import_batch_no' => $batchNo,
                             'new' => false,
                         ];
+                        if ($group->trashed()) {
+                            $group->restore();
+                            $data['new'] = true; // if restoring, mark as new to trigger any new group logic in downstream processing
+                        }
                         if ($groupOrder !== null) {
                             $data['sort_order'] = $groupOrder++;
                         }

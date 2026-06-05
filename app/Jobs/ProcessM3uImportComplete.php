@@ -19,6 +19,7 @@ use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 
 class ProcessM3uImportComplete implements ShouldQueue
 {
@@ -104,6 +105,39 @@ class ProcessM3uImportComplete implements ShouldQueue
             ['is_custom', false],
             ['import_batch_no', '!=', $this->batchNo],
         ]);
+
+        // Safety guard: if VOD was enabled for this run but zero VOD channels landed in the
+        // new batch, the provider API likely returned an empty response rather than genuinely
+        // removing all VOD content. Exclude VOD from the removal queries to prevent mass
+        // churn on a temporary provider glitch. The same guard is applied for live streams.
+        if ($this->runningVodImport) {
+            $hasVodInBatch = $playlist->channels()
+                ->where('is_custom', false)
+                ->where('is_vod', true)
+                ->where('import_batch_no', $this->batchNo)
+                ->exists();
+
+            if (! $hasVodInBatch && $playlist->channels()->where('is_custom', false)->where('is_vod', true)->exists()) {
+                Log::warning("No VOD channels found in batch {$this->batchNo} for playlist {$playlist->id}, excluding VOD from removal to prevent accidental mass deletion.");
+                $removedGroups->where('type', '!=', 'vod');
+                $removedChannels->where('is_vod', false);
+            }
+        }
+
+        // Apply the same safety guard for live channels if the live import was run
+        if ($this->runningLiveImport) {
+            $hasLiveInBatch = $playlist->channels()
+                ->where('is_custom', false)
+                ->where('is_vod', false)
+                ->where('import_batch_no', $this->batchNo)
+                ->exists();
+
+            if (! $hasLiveInBatch && $playlist->channels()->where('is_custom', false)->where('is_vod', false)->exists()) {
+                Log::warning("No live channels found in batch {$this->batchNo} for playlist {$playlist->id}, excluding live from removal to prevent accidental mass deletion.");
+                $removedGroups->where('type', '!=', 'live');
+                $removedChannels->where('is_vod', true);
+            }
+        }
 
         // Get the newly added channels
         $newChannels = $playlist->channels()->where([
