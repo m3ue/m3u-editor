@@ -344,7 +344,7 @@ class AdminPanelProvider extends PanelProvider
 
         FilamentView::registerRenderHook(
             PanelsRenderHook::TOPBAR_END,
-            fn (): string => (auth()->user()?->isAdmin() && $this->queueManagerEnabled()) ? view('components.queue-indicator')->render() : ''
+            fn (): string => auth()->check() ? view('components.queue-indicator')->render() : ''
         );
 
         // Register OIDC SSO button on the login page
@@ -437,15 +437,6 @@ class AdminPanelProvider extends PanelProvider
         } catch (Throwable) {
 
             return null;
-        }
-    }
-
-    private function queueManagerEnabled(): bool
-    {
-        try {
-            return (bool) app(GeneralSettings::class)->show_queue_manager;
-        } catch (Throwable) {
-            return false;
         }
     }
 

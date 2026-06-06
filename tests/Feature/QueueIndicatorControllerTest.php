@@ -24,6 +24,20 @@ function queueIndicatorPayload(array $overrides = []): array
                 'queue' => 'default',
                 'connection' => 'redis',
                 'status' => 'pending',
+                'batch_id' => 'batch-123',
+            ],
+        ],
+        'batches' => [
+            [
+                'id' => 'batch-123',
+                'name' => 'Probe Channels',
+                'total' => 10,
+                'pending' => 4,
+                'processed' => 6,
+                'failed' => 0,
+                'progress' => 60,
+                'status' => 'running',
+                'created_at' => now()->toIso8601String(),
             ],
         ],
         'degraded' => false,
@@ -40,20 +54,44 @@ it('protects the queue indicator endpoint from guests', function () {
     $this->getJson(queueIndicatorEndpoint())->assertUnauthorized();
 });
 
-it('blocks non admin users from queue details', function () {
+it('returns queue details for authenticated non admin users', function () {
     setQueueManagerEnabled(true);
+
+    $payload = queueIndicatorPayload([
+        'running' => 0,
+        'queued' => 1,
+        'batches' => [],
+        'upcoming' => [],
+    ]);
+
+    $this->mock(QueueIndicatorService::class, function ($mock) use ($payload) {
+        $mock->shouldReceive('getSnapshot')->once()->with(10)->andReturn($payload);
+    });
 
     $this->actingAs(User::factory()->create(['is_admin' => false]))
         ->getJson(queueIndicatorEndpoint())
-        ->assertForbidden();
+        ->assertOk()
+        ->assertJson($payload);
 });
 
-it('blocks admins when the queue manager is disabled', function () {
+it('keeps the indicator available for admins when Horizon access is disabled', function () {
     setQueueManagerEnabled(false);
+
+    $payload = queueIndicatorPayload([
+        'running' => 0,
+        'queued' => 2,
+        'batches' => [],
+        'upcoming' => [],
+    ]);
+
+    $this->mock(QueueIndicatorService::class, function ($mock) use ($payload) {
+        $mock->shouldReceive('getSnapshot')->once()->with(10)->andReturn($payload);
+    });
 
     $this->actingAs(User::factory()->create(['is_admin' => true]))
         ->getJson(queueIndicatorEndpoint())
-        ->assertForbidden();
+        ->assertOk()
+        ->assertJson($payload);
 });
 
 it('returns the expected queue indicator json for admins', function () {
@@ -72,8 +110,11 @@ it('returns the expected queue indicator json for admins', function () {
         ->assertJsonStructure([
             'running',
             'queued',
+            'batches' => [
+                ['id', 'name', 'total', 'pending', 'processed', 'failed', 'progress', 'status', 'created_at'],
+            ],
             'upcoming' => [
-                ['id', 'name', 'queue', 'connection', 'status'],
+                ['id', 'name', 'queue', 'connection', 'status', 'batch_id'],
             ],
             'degraded',
             'as_of',
@@ -86,6 +127,7 @@ it('returns a robust empty queue payload', function () {
     $payload = queueIndicatorPayload([
         'running' => 0,
         'queued' => 0,
+        'batches' => [],
         'upcoming' => [],
     ]);
 
@@ -106,6 +148,7 @@ it('keeps the endpoint available when the queue state is degraded', function () 
     $payload = queueIndicatorPayload([
         'running' => 0,
         'queued' => 0,
+        'batches' => [],
         'upcoming' => [],
         'degraded' => true,
         'reason' => 'horizon_unavailable',
@@ -127,6 +170,7 @@ it('keeps the endpoint available when the queue state is degraded', function () 
         ->assertJsonStructure([
             'running',
             'queued',
+            'batches',
             'upcoming',
             'degraded',
             'as_of',
