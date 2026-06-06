@@ -124,10 +124,22 @@ return [
     |--------------------------------------------------------------------------
     | DVR — Comskip (commercial detection)
     |--------------------------------------------------------------------------
+    |
+    | 'comskip_path'      — Full path to the comskip binary.
+    | 'comskip_default_ini' — Bundled default ini used when DvrSetting has none.
+    | 'comskip_timeout_seconds' — Wall-clock cap for a single comskip run.
+    |                           0 (default) disables the inner cap and lets the
+    |                           queue worker / job timeout bound the run instead.
+    |                           A 5-minute inner cap silently killed detection
+    |                           on any recording longer than ~16 minutes of
+    |                           footage (a full episode needs 1+ hours).
+    |
     */
 
     'comskip_path' => env('DVR_COMSKIP_PATH', '/usr/local/bin/comskip'),
 
     'comskip_default_ini' => env('DVR_COMSKIP_INI', config_path('comskip.default.ini')),
+
+    'comskip_timeout_seconds' => (int) env('DVR_COMSKIP_TIMEOUT_SECONDS', 0),
 
 ];

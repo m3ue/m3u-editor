@@ -491,7 +491,12 @@ class DvrPostProcessorService
             ];
 
             $process = new Process($args);
-            $process->setTimeout(300);
+            // Inner cap is opt-in (config('dvr.comskip_timeout_seconds') = 0 by default).
+            // For a full-length recording, comskip needs 1+ hours — anything tighter
+            // silently truncates the analysis and produces no .edl file.
+            // The PostProcessDvrRecording job's 1-hour timeout + Horizon's dvr-queue
+            // timeout bound the overall run.
+            $process->setTimeout((int) config('dvr.comskip_timeout_seconds', 0));
             $process->run();
 
             $exitCode = $process->getExitCode();
