@@ -945,6 +945,7 @@ class Preferences extends SettingsPage
                                     ->schema([
                                         Toggle::make('invalidate_import')
                                             ->label(__('Enable sync invalidation'))
+                                            ->columnSpanFull()
                                             ->disabled(fn () => ! empty(config('dev.invalidate_import')))
                                             ->live()
                                             ->hint(fn () => ! empty(config('dev.invalidate_import')) ? 'Already set by environment variable!' : null)
@@ -958,8 +959,8 @@ class Preferences extends SettingsPage
                                             })
                                             ->dehydrated(fn () => empty(config('dev.invalidate_import'))),
                                         TextInput::make('invalidate_import_threshold')
-                                            ->label(__('Sync invalidation threshold'))
-                                            ->columnSpan(2)
+                                            ->label(__('Channel removal threshold'))
+                                            ->columnSpan(1)
                                             ->hintIcon(
                                                 'heroicon-m-question-mark-circle',
                                                 tooltip: 'Some providers frequently remove and re-add groups/categories, which can lead to channels be removed during sync. This setting helps prevent large-scale removals by canceling the sync if the defined number of channels would be removed.'
@@ -972,6 +973,36 @@ class Preferences extends SettingsPage
                                             ->hidden(fn ($get) => ! empty(config('dev.invalidate_import')) || ! $get('invalidate_import'))
                                             ->numeric()
                                             ->helperText(__('If sync will remove more than this number of channels, the sync will be canceled.')),
+                                        TextInput::make('invalidate_import_series_threshold')
+                                            ->label(__('Series removal threshold'))
+                                            ->columnSpan(1)
+                                            ->hintIcon(
+                                                'heroicon-m-question-mark-circle',
+                                                tooltip: 'Cancel the sync if this many series would be removed. Helps protect against provider API responses that omit series data temporarily.'
+                                            )
+                                            ->suffixIcon(fn () => ! empty(config('dev.invalidate_import_series_threshold')) ? 'heroicon-m-lock-closed' : null)
+                                            ->disabled(fn () => ! empty(config('dev.invalidate_import_series_threshold')))
+                                            ->hint(fn () => ! empty(config('dev.invalidate_import_series_threshold')) ? 'Already set by environment variable!' : null)
+                                            ->dehydrated(fn () => empty(config('dev.invalidate_import_series_threshold')))
+                                            ->placeholder(fn () => empty(config('dev.invalidate_import_series_threshold')) ? 100 : config('dev.invalidate_import_series_threshold'))
+                                            ->hidden(fn ($get) => ! empty(config('dev.invalidate_import')) || ! $get('invalidate_import'))
+                                            ->numeric()
+                                            ->helperText(__('If sync will remove more than this number of series, the sync will be canceled.')),
+                                        TextInput::make('invalidate_import_group_threshold')
+                                            ->label(__('Group/category removal threshold'))
+                                            ->columnSpan(1)
+                                            ->hintIcon(
+                                                'heroicon-m-question-mark-circle',
+                                                tooltip: 'Cancel the sync if this many groups or categories would be removed. Useful for catching provider outages that drop entire category lists.'
+                                            )
+                                            ->suffixIcon(fn () => ! empty(config('dev.invalidate_import_group_threshold')) ? 'heroicon-m-lock-closed' : null)
+                                            ->disabled(fn () => ! empty(config('dev.invalidate_import_group_threshold')))
+                                            ->hint(fn () => ! empty(config('dev.invalidate_import_group_threshold')) ? 'Already set by environment variable!' : null)
+                                            ->dehydrated(fn () => empty(config('dev.invalidate_import_group_threshold')))
+                                            ->placeholder(fn () => empty(config('dev.invalidate_import_group_threshold')) ? 50 : config('dev.invalidate_import_group_threshold'))
+                                            ->hidden(fn ($get) => ! empty(config('dev.invalidate_import')) || ! $get('invalidate_import'))
+                                            ->numeric()
+                                            ->helperText(__('If sync will remove more than this number of groups/categories, the sync will be canceled.')),
                                     ]),
                                 Section::make(__('Series stream file settings'))
                                     ->description(__('Select a Stream File Setting for series .strm file generation.'))

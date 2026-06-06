@@ -197,6 +197,10 @@ class GeneralSettings extends Settings
 
     public ?int $invalidate_import_threshold = 100;
 
+    public ?int $invalidate_import_group_threshold = 50;
+
+    public ?int $invalidate_import_series_threshold = 100;
+
     // Backup options
     public ?bool $auto_backup_database = false;
 
