@@ -1,16 +1,32 @@
 <?php
 
+use App\Events\EpgCreated;
+use App\Events\EpgDeleted;
+use App\Events\EpgUpdated;
+use App\Events\PlaylistCreated;
+use App\Events\PlaylistDeleted;
+use App\Events\PlaylistUpdated;
 use App\Models\Channel;
 use App\Models\Epg;
 use App\Models\EpgChannel;
 use App\Models\Playlist;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Storage;
 
 uses(RefreshDatabase::class);
 
 beforeEach(function () {
+    Event::fake([
+        EpgCreated::class,
+        EpgDeleted::class,
+        EpgUpdated::class,
+        PlaylistCreated::class,
+        PlaylistDeleted::class,
+        PlaylistUpdated::class,
+    ]);
+
     // Clean up any leftover playlist EPG cache files from previous runs
     Storage::disk('local')->deleteDirectory('playlist-epg-files');
 });
@@ -97,4 +113,40 @@ test('epg download does not crash when epg source file is corrupted', function (
 
     // Cleanup
     Storage::disk('local')->delete($epg->file_path);
+});
+
+test('epg xml generation preserves albanian characters with explicit utf8 escaping', function () {
+    $previousCharset = ini_get('default_charset');
+    ini_set('default_charset', 'ISO-8859-1');
+
+    try {
+        $user = User::factory()->create();
+
+        $playlist = Playlist::factory()->for($user)->create([
+            'dummy_epg' => true,
+            'dummy_epg_length' => 60,
+        ]);
+
+        Channel::factory()->create([
+            'playlist_id' => $playlist->id,
+            'user_id' => $user->id,
+            'enabled' => true,
+            'is_vod' => false,
+            'title' => 'Çështje të Ëmbla & "Special"',
+            'name' => 'RTK Çifteli',
+            'stream_id' => 'rtk-cifteli',
+            'channel' => 1,
+        ]);
+
+        $response = $this->get("/{$playlist->uuid}/epg.xml.gz");
+
+        $response->assertStatus(200);
+        $response->assertHeader('Content-Type', 'application/gzip');
+
+        $content = gzdecode($response->getContent());
+
+        expect($content)->toContain('<display-name>Çështje të Ëmbla &amp; &quot;Special&quot;</display-name>');
+    } finally {
+        ini_set('default_charset', $previousCharset ?: 'UTF-8');
+    }
 });
