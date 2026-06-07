@@ -71,7 +71,7 @@ class ListVod extends ListRecords
                 ))
                 ->slideOver(),
             ActionGroup::make([
-                PlaylistService::getMergeAction()
+                PlaylistService::getMergeAction(contentType: 'vod')
                     ->after(function () {
                         Notification::make()
                             ->success()
