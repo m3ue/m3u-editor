@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Jobs\AddGroupsToCustomPlaylist;
 use App\Jobs\MergeChannels;
+use App\Jobs\MergeEpisodes;
 use App\Jobs\UnmergeChannels;
 use App\Models\CustomPlaylist;
 use App\Models\Group;
@@ -898,6 +899,7 @@ class PlaylistService
     public static function getMergeFormSchema(string $contentType = 'live'): array
     {
         $isVod = $contentType === 'vod';
+        $isSeries = $contentType === 'series';
 
         $sourceSchema = [
             Select::make('playlist_id')
@@ -952,7 +954,7 @@ class PlaylistService
                 ->default(false),
         ];
 
-        if (! $isVod) {
+        if (! $isVod && ! $isSeries) {
             array_splice($behaviorSchema, 0, 0, [
                 Toggle::make('by_resolution')
                     ->label('Order by Resolution')
@@ -981,7 +983,7 @@ class PlaylistService
                 ->columnSpanFull(),
         ];
 
-        if (! $isVod) {
+        if (! $isVod && ! $isSeries) {
             $schema[] = Fieldset::make(__('Fallback matching for channels without IDs'))
                 ->schema([
                     Toggle::make('fallback_name_matching_enabled')
@@ -1132,10 +1134,12 @@ class PlaylistService
                 }),
         ];
 
-        $schema[] = Fieldset::make('Advanced Priority Scoring (optional)')
-            ->schema($advancedSchema)
-            ->columns(2)
-            ->columnSpanFull();
+        if (! $isSeries) {
+            $schema[] = Fieldset::make('Advanced Priority Scoring (optional)')
+                ->schema($advancedSchema)
+                ->columns(2)
+                ->columnSpanFull();
+        }
 
         return $schema;
     }
@@ -1223,8 +1227,15 @@ class PlaylistService
             $action
                 ->modalDescription('Merge all channels with the same ID into a single channel with failover.')
                 ->action(function (array $data) use ($contentType): void {
-                    app('Illuminate\Contracts\Bus\Dispatcher')
-                        ->dispatch(new MergeChannels(
+                    $job = $contentType === 'series'
+                        ? new MergeEpisodes(
+                            user: auth()->user(),
+                            playlists: collect($data['failover_playlists']),
+                            playlistId: $data['playlist_id'],
+                            deactivateFailoverEpisodes: $data['deactivate_failover_channels'] ?? false,
+                            forceCompleteRemerge: $data['force_complete_remerge'] ?? false,
+                        )
+                        : new MergeChannels(
                             user: auth()->user(),
                             playlists: collect($data['failover_playlists']),
                             playlistId: $data['playlist_id'],
@@ -1236,7 +1247,9 @@ class PlaylistService
                             fallbackMergeConfig: self::buildMergeFallbackConfig($data),
                             contentType: $contentType,
                             mergeKey: $data['merge_key'] ?? 'stream_id',
-                        ));
+                        );
+
+                    app('Illuminate\Contracts\Bus\Dispatcher')->dispatch($job);
                 });
         }
 

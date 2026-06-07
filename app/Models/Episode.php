@@ -11,6 +11,8 @@ use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\URL;
@@ -84,6 +86,23 @@ class Episode extends Model
     public function strmFileMappings(): MorphMany
     {
         return $this->morphMany(StrmFileMapping::class, 'syncable');
+    }
+
+    public function failovers(): HasMany
+    {
+        return $this->hasMany(EpisodeFailover::class);
+    }
+
+    public function failoverEpisodes(): HasManyThrough
+    {
+        return $this->hasManyThrough(
+            Episode::class,
+            EpisodeFailover::class,
+            'episode_id',
+            'id',
+            'id',
+            'episode_failover_id'
+        )->orderBy('episode_failovers.sort');
     }
 
     /**
