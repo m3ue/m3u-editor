@@ -160,9 +160,13 @@ class SyncListener
                 ->map(fn ($scrubber) => new ProcessChannelScrubber($scrubber->id))
                 ->toArray();
 
-        // Run probe last since it only runs against enabled channels, so should wait for merge + scrubber jobs to complete
+        // Run probe last so it waits for merge and scrubber jobs to complete.
         $probeJob = (! $skipLiveProbe && ($playlist->auto_probe_streams ?? false))
-           ? (new ProbeChannelStreams(playlistId: $playlist->id))
+           ? (new ProbeChannelStreams(
+               playlistId: $playlist->id,
+               onlyUnprobed: (bool) ($playlist->auto_probe_streams_only_unprobed ?? true),
+               includeDisabled: (bool) ($playlist->auto_probe_streams_include_disabled ?? false),
+           ))
            : null;
 
         $chain = [];

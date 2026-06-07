@@ -435,8 +435,24 @@ it('dispatches ProbeChannelStreams when auto_probe_streams is enabled', function
 
     event(new SyncCompleted($this->playlist));
 
-    Bus::assertDispatched(ProbeChannelStreams::class, function ($job) {
+    Bus::assertDispatched(ProbeChannelStreams::class, function (ProbeChannelStreams $job) {
         return $job->playlistId === $this->playlist->id;
+    });
+});
+
+it('dispatches ProbeChannelStreams with playlist probe scope settings', function () {
+    $this->playlist->update([
+        'auto_probe_streams' => true,
+        'auto_probe_streams_only_unprobed' => false,
+        'auto_probe_streams_include_disabled' => true,
+    ]);
+
+    event(new SyncCompleted($this->playlist));
+
+    Bus::assertDispatched(ProbeChannelStreams::class, function (ProbeChannelStreams $job) {
+        return $job->playlistId === $this->playlist->id
+            && $job->onlyUnprobed === false
+            && $job->includeDisabled === true;
     });
 });
 

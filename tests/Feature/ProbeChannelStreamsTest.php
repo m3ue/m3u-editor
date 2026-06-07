@@ -1,12 +1,19 @@
 <?php
 
+use App\Events\PlaylistCreated;
+use App\Events\PlaylistUpdated;
 use App\Jobs\ProbeChannelStreams;
+use App\Jobs\ProbeChannelStreamsChunk;
+use App\Jobs\ProbeChannelStreamsComplete;
 use App\Models\Channel;
 use App\Models\Playlist;
 use App\Models\User;
+use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Notification;
 
 beforeEach(function () {
+    Event::fake([PlaylistCreated::class, PlaylistUpdated::class]);
     Notification::fake();
 
     $this->user = User::factory()->create();
@@ -159,4 +166,66 @@ it('honours explicit channelIds even when channels are already probed', function
     $query = Channel::query()->whereIn('id', [$probed->id]);
 
     expect($query->count())->toBe(1);
+});
+
+it('can include disabled live channels while still honoring probe opt out', function () {
+    Bus::fake();
+
+    $enabled = Channel::factory()->for($this->playlist)->create([
+        'enabled' => true,
+        'is_vod' => false,
+        'probe_enabled' => true,
+        'stream_stats_probed_at' => null,
+    ]);
+    $disabled = Channel::factory()->for($this->playlist)->create([
+        'enabled' => false,
+        'is_vod' => false,
+        'probe_enabled' => true,
+        'stream_stats_probed_at' => null,
+    ]);
+    Channel::factory()->for($this->playlist)->create([
+        'enabled' => false,
+        'is_vod' => false,
+        'probe_enabled' => false,
+        'stream_stats_probed_at' => null,
+    ]);
+
+    (new ProbeChannelStreams(
+        playlistId: $this->playlist->id,
+        includeDisabled: true,
+    ))->handle();
+
+    Bus::assertChained([
+        fn (ProbeChannelStreamsChunk $job) => empty(array_diff([$enabled->id, $disabled->id], $job->channelIds))
+            && count($job->channelIds) === 2,
+        ProbeChannelStreamsComplete::class,
+    ]);
+});
+
+it('can probe already probed live channels when only unprobed is false', function () {
+    Bus::fake();
+
+    $probed = Channel::factory()->for($this->playlist)->create([
+        'enabled' => true,
+        'is_vod' => false,
+        'probe_enabled' => true,
+        'stream_stats_probed_at' => now()->subDay(),
+    ]);
+    $unprobed = Channel::factory()->for($this->playlist)->create([
+        'enabled' => true,
+        'is_vod' => false,
+        'probe_enabled' => true,
+        'stream_stats_probed_at' => null,
+    ]);
+
+    (new ProbeChannelStreams(
+        playlistId: $this->playlist->id,
+        onlyUnprobed: false,
+    ))->handle();
+
+    Bus::assertChained([
+        fn (ProbeChannelStreamsChunk $job) => empty(array_diff([$probed->id, $unprobed->id], $job->channelIds))
+            && count($job->channelIds) === 2,
+        ProbeChannelStreamsComplete::class,
+    ]);
 });

@@ -327,6 +327,8 @@ class SyncPipelineService
     {
         dispatch(new ProbeVodStreams(
             playlistId: $playlist->id,
+            onlyUnprobed: (bool) ($playlist->auto_probe_vod_streams_only_unprobed ?? true),
+            includeDisabled: (bool) ($playlist->auto_probe_vod_streams_include_disabled ?? false),
             syncRunId: $run->id,
             isSeriesProbe: $isSeriesProbe,
         ));
@@ -447,6 +449,8 @@ class SyncPipelineService
 
         dispatch(new ProbeChannelStreams(
             playlistId: $playlist->id,
+            onlyUnprobed: (bool) ($playlist->auto_probe_streams_only_unprobed ?? true),
+            includeDisabled: (bool) ($playlist->auto_probe_streams_include_disabled ?? false),
             syncRunId: $run->id,
         ));
     }
