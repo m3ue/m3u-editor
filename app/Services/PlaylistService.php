@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Jobs\AddGroupsToCustomPlaylist;
 use App\Jobs\MergeChannels;
+use App\Jobs\MergeEpisodes;
 use App\Jobs\UnmergeChannels;
 use App\Models\CustomPlaylist;
 use App\Models\Group;
@@ -895,67 +896,98 @@ class PlaylistService
     /**
      * Get the form schema for the "Merge Same ID" action.
      */
-    public static function getMergeFormSchema(): array
+    public static function getMergeFormSchema(string $contentType = 'live'): array
     {
-        return [
-            Fieldset::make('Merge source configuration')
-                ->schema([
-                    Select::make('playlist_id')
-                        ->required()
-                        ->columnSpanFull()
-                        ->label('Preferred Playlist')
+        $isVod = $contentType === 'vod';
+        $isSeries = $contentType === 'series';
+
+        $sourceSchema = [
+            Select::make('playlist_id')
+                ->required()
+                ->columnSpanFull()
+                ->label('Preferred Playlist')
+                ->options(Playlist::where('user_id', auth()->id())->pluck('name', 'id'))
+                ->live()
+                ->searchable()
+                ->helperText('Select a playlist to prioritize as the master during the merge process.'),
+            Repeater::make('failover_playlists')
+                ->label('')
+                ->helperText('Select one or more playlists to use as failover source(s).')
+                ->reorderable()
+                ->reorderableWithButtons()
+                ->orderColumn('sort')
+                ->simple(
+                    Select::make('playlist_failover_id')
+                        ->label('Failover Playlists')
                         ->options(Playlist::where('user_id', auth()->id())->pluck('name', 'id'))
-                        ->live()
                         ->searchable()
-                        ->helperText('Select a playlist to prioritize as the master during the merge process.'),
-                    Repeater::make('failover_playlists')
-                        ->label('')
-                        ->helperText('Select one or more playlists use as failover source(s).')
-                        ->reorderable()
-                        ->reorderableWithButtons()
-                        ->orderColumn('sort')
-                        ->simple(
-                            Select::make('playlist_failover_id')
-                                ->label('Failover Playlists')
-                                ->options(Playlist::where('user_id', auth()->id())->pluck('name', 'id'))
-                                ->searchable()
-                                ->required()
-                        )
-                        ->distinct()
-                        ->columns(1)
-                        ->addActionLabel('Add failover playlist')
-                        ->columnSpanFull()
-                        ->minItems(1)
-                        ->defaultItems(1),
+                        ->required()
+                )
+                ->distinct()
+                ->columns(1)
+                ->addActionLabel('Add failover playlist')
+                ->columnSpanFull()
+                ->minItems(1)
+                ->defaultItems(1),
+        ];
+
+        if ($isVod) {
+            $sourceSchema[] = Select::make('merge_key')
+                ->label('Merge key')
+                ->options([
+                    'stream_id' => 'Stream ID',
+                    'tmdb_id' => 'TMDB ID',
                 ])
+                ->default('stream_id')
+                ->required()
+                ->helperText('Use TMDB ID to merge the same movie across providers when stream IDs differ. Entries without a TMDB ID are skipped.');
+        }
+
+        $behaviorSchema = [
+            Toggle::make('deactivate_failover_channels')
+                ->label($isSeries ? 'Deactivate Failover Episodes' : 'Deactivate Failover Channels')
+                ->helperText($isSeries
+                    ? 'When enabled, episodes that become failovers will be automatically disabled.'
+                    : 'When enabled, channels that become failovers will be automatically disabled.'
+                )
+                ->default(false),
+            Toggle::make('force_complete_remerge')
+                ->label('Force complete re-merge')
+                ->helperText('Re-evaluate ALL existing failover relationships, not just unmerged channels.')
+                ->default(false),
+        ];
+
+        if (! $isVod && ! $isSeries) {
+            array_splice($behaviorSchema, 0, 0, [
+                Toggle::make('by_resolution')
+                    ->label('Order by Resolution')
+                    ->live()
+                    ->helperText('⚠️ IPTV WARNING: This will analyze each stream to determine resolution, which may cause rate limiting or blocking with IPTV providers. Only enable if your provider allows stream analysis.')
+                    ->default(false),
+            ]);
+
+            $behaviorSchema[] = Toggle::make('prefer_catchup_as_primary')
+                ->label('Prefer catch-up channels as primary')
+                ->helperText('When enabled, catch-up channels will be selected as the master when available.')
+                ->default(false);
+            $behaviorSchema[] = Toggle::make('exclude_disabled_groups')
+                ->label('Exclude disabled groups from master selection')
+                ->helperText('Channels from disabled groups will never be selected as master.')
+                ->default(false);
+        }
+
+        $schema = [
+            Fieldset::make('Merge source configuration')
+                ->schema($sourceSchema)
                 ->columnSpanFull(),
             Fieldset::make('Merge behavior')
-                ->schema([
-                    Toggle::make('by_resolution')
-                        ->label('Order by Resolution')
-                        ->live()
-                        ->helperText('⚠️ IPTV WARNING: This will analyze each stream to determine resolution, which may cause rate limiting or blocking with IPTV providers. Only enable if your provider allows stream analysis.')
-                        ->default(false),
-                    Toggle::make('deactivate_failover_channels')
-                        ->label('Deactivate Failover Channels')
-                        ->helperText('When enabled, channels that become failovers will be automatically disabled.')
-                        ->default(false),
-                    Toggle::make('prefer_catchup_as_primary')
-                        ->label('Prefer catch-up channels as primary')
-                        ->helperText('When enabled, catch-up channels will be selected as the master when available.')
-                        ->default(false),
-                    Toggle::make('exclude_disabled_groups')
-                        ->label('Exclude disabled groups from master selection')
-                        ->helperText('Channels from disabled groups will never be selected as master.')
-                        ->default(false),
-                    Toggle::make('force_complete_remerge')
-                        ->label('Force complete re-merge')
-                        ->helperText('Re-evaluate ALL existing failover relationships, not just unmerged channels.')
-                        ->default(false),
-                ])
+                ->schema($behaviorSchema)
                 ->columns(2)
                 ->columnSpanFull(),
-            Fieldset::make(__('Fallback matching for channels without IDs'))
+        ];
+
+        if (! $isVod && ! $isSeries) {
+            $schema[] = Fieldset::make(__('Fallback matching for channels without IDs'))
                 ->schema([
                     Toggle::make('fallback_name_matching_enabled')
                         ->label(__('Enable name or alias fallback'))
@@ -990,113 +1022,129 @@ class PlaylistService
                         ->visible(fn (Get $get): bool => (bool) $get('fallback_name_matching_enabled')),
                 ])
                 ->columns(2)
-                ->columnSpanFull(),
-            Fieldset::make('Advanced Priority Scoring (optional)')
-                ->schema([
-                    Select::make('prefer_codec')
-                        ->label('Preferred Codec')
-                        ->options([
-                            'hevc' => 'HEVC / H.265 (smaller file size)',
-                            'h264' => 'H.264 / AVC (better compatibility)',
-                        ])
-                        ->placeholder('No preference')
-                        ->helperText('Prioritize channels with a specific video codec.'),
-                    TagsInput::make('priority_keywords')
-                        ->label('Priority Keywords')
-                        ->placeholder('Add keyword...')
-                        ->helperText('Channels with these keywords in their name will be prioritized (e.g., "RAW", "LOCAL", "HD").')
-                        ->splitKeys(['Tab', 'Return']),
-                    Repeater::make('group_priorities')
-                        ->label('Group Priority Weights')
-                        ->helperText('Assign priority weights to specific groups. Higher weight = more preferred as master. Leave empty for default behavior.')
-                        ->columnSpanFull()
-                        ->columns(2)
-                        ->schema([
-                            Select::make('group_id')
-                                ->label('Group')
-                                ->options(fn () => Group::query()
-                                    ->with(['playlist'])
-                                    ->where(['user_id' => auth()->id(), 'type' => 'live'])
-                                    ->get(['name', 'id', 'playlist_id'])
-                                    ->transform(fn ($group) => [
-                                        'id' => $group->id,
-                                        'name' => $group->name.' ('.$group->playlist->name.')',
-                                    ])->pluck('name', 'id')
-                                )
-                                ->searchable()
-                                ->required(),
-                            TextInput::make('weight')
-                                ->label('Weight')
-                                ->numeric()
-                                ->default(100)
-                                ->minValue(1)
-                                ->maxValue(1000)
-                                ->helperText('1-1000, higher = more preferred')
-                                ->required(),
-                        ])
-                        ->reorderable()
-                        ->reorderableWithButtons()
-                        ->addActionLabel('Add group priority')
-                        ->defaultItems(0)
-                        ->dehydrateStateUsing(function ($state) {
-                            if (is_array($state) && ! empty($state)) {
-                                $formatted = [];
-                                foreach ($state as $item) {
-                                    if (is_array($item) && isset($item['weight'])) {
-                                        $groupId = $item['group_id'] ?? null;
-                                        if (! $groupId) {
-                                            continue;
-                                        }
-                                        $formatted[] = [
-                                            'group_id' => $groupId,
-                                            'weight' => (int) $item['weight'],
-                                        ];
-                                    }
-                                }
+                ->columnSpanFull();
+        }
 
-                                return $formatted;
-                            }
+        $priorityAttributeOptions = $isVod
+            ? [
+                'playlist_priority' => '📋 Playlist Priority (from failover list order)',
+                'codec' => '🎬 Codec Preference (HEVC/H264)',
+                'keyword_match' => '🏷️ Keyword Match',
+            ]
+            : [
+                'playlist_priority' => '📋 Playlist Priority (from failover list order)',
+                'group_priority' => '📁 Group Priority (from weights above)',
+                'catchup_support' => '⏪ Catch-up/Replay Support',
+                'resolution' => '📺 Resolution (requires stream analysis)',
+                'codec' => '🎬 Codec Preference (HEVC/H264)',
+                'keyword_match' => '🏷️ Keyword Match',
+            ];
 
-                            return [];
-                        }),
-                    Repeater::make('priority_attributes')
-                        ->label('Priority Order')
-                        ->helperText('Drag to reorder priority attributes. First attribute has highest priority. Leave empty for default order.')
-                        ->columnSpanFull()
-                        ->simple(
-                            Select::make('attribute')
-                                ->options([
-                                    'playlist_priority' => '📋 Playlist Priority (from failover list order)',
-                                    'group_priority' => '📁 Group Priority (from weights above)',
-                                    'catchup_support' => '⏪ Catch-up/Replay Support',
-                                    'resolution' => '📺 Resolution (requires stream analysis)',
-                                    'codec' => '🎬 Codec Preference (HEVC/H264)',
-                                    'keyword_match' => '🏷️ Keyword Match',
-                                ])
-                                ->required()
-                        )
-                        ->reorderable()
-                        ->reorderableWithDragAndDrop()
-                        ->distinct()
-                        ->addActionLabel('Add priority attribute')
-                        ->defaultItems(0)
-                        ->afterStateHydrated(function ($component, $state) {
-                            if (is_array($state) && ! empty($state)) {
-                                $formatted = [];
-                                foreach ($state as $item) {
-                                    if (is_string($item)) {
-                                        $formatted[] = ['attribute' => $item];
-                                    } elseif (is_array($item) && isset($item['attribute'])) {
-                                        $formatted[] = $item;
-                                    }
-                                }
-                                $component->state($formatted);
-                            }
-                        }),
+        $advancedSchema = [
+            Select::make('prefer_codec')
+                ->label('Preferred Codec')
+                ->options([
+                    'hevc' => 'HEVC / H.265 (smaller file size)',
+                    'h264' => 'H.264 / AVC (better compatibility)',
                 ])
+                ->placeholder('No preference')
+                ->helperText('Prioritize channels with a specific video codec.'),
+            TagsInput::make('priority_keywords')
+                ->label('Priority Keywords')
+                ->placeholder('Add keyword...')
+                ->helperText('Channels with these keywords in their name will be prioritized (e.g., "RAW", "LOCAL", "HD").')
+                ->splitKeys(['Tab', 'Return']),
+            Repeater::make('group_priorities')
+                ->label('Group Priority Weights')
+                ->helperText('Assign priority weights to specific groups. Higher weight = more preferred as master. Leave empty for default behavior.')
+                ->visible(! $isVod)
+                ->columnSpanFull()
                 ->columns(2)
-                ->columnSpanFull(),
+                ->schema([
+                    Select::make('group_id')
+                        ->label('Group')
+                        ->options(fn () => Group::query()
+                            ->with(['playlist'])
+                            ->where(['user_id' => auth()->id(), 'type' => 'live'])
+                            ->get(['name', 'id', 'playlist_id'])
+                            ->transform(fn ($group) => [
+                                'id' => $group->id,
+                                'name' => $group->name.' ('.$group->playlist->name.')',
+                            ])->pluck('name', 'id')
+                        )
+                        ->searchable()
+                        ->required(),
+                    TextInput::make('weight')
+                        ->label('Weight')
+                        ->numeric()
+                        ->default(100)
+                        ->minValue(1)
+                        ->maxValue(1000)
+                        ->helperText('1-1000, higher = more preferred')
+                        ->required(),
+                ])
+                ->reorderable()
+                ->reorderableWithButtons()
+                ->addActionLabel('Add group priority')
+                ->defaultItems(0)
+                ->dehydrateStateUsing(function ($state) {
+                    if (is_array($state) && ! empty($state)) {
+                        $formatted = [];
+                        foreach ($state as $item) {
+                            if (is_array($item) && isset($item['weight'])) {
+                                $groupId = $item['group_id'] ?? null;
+                                if (! $groupId) {
+                                    continue;
+                                }
+                                $formatted[] = [
+                                    'group_id' => $groupId,
+                                    'weight' => (int) $item['weight'],
+                                ];
+                            }
+                        }
+
+                        return $formatted;
+                    }
+
+                    return [];
+                }),
+            Repeater::make('priority_attributes')
+                ->label('Priority Order')
+                ->helperText('Drag to reorder priority attributes. First attribute has highest priority. Leave empty for default order.')
+                ->columnSpanFull()
+                ->simple(
+                    Select::make('attribute')
+                        ->options($priorityAttributeOptions)
+                        ->required()
+                )
+                ->reorderable()
+                ->reorderableWithDragAndDrop()
+                ->distinct()
+                ->addActionLabel('Add priority attribute')
+                ->defaultItems(0)
+                ->afterStateHydrated(function ($component, $state) {
+                    if (is_array($state) && ! empty($state)) {
+                        $formatted = [];
+                        foreach ($state as $item) {
+                            if (is_string($item)) {
+                                $formatted[] = ['attribute' => $item];
+                            } elseif (is_array($item) && isset($item['attribute'])) {
+                                $formatted[] = $item;
+                            }
+                        }
+                        $component->state($formatted);
+                    }
+                }),
         ];
+
+        if (! $isSeries) {
+            $schema[] = Fieldset::make('Advanced Priority Scoring (optional)')
+                ->schema($advancedSchema)
+                ->columns(2)
+                ->columnSpanFull();
+        }
+
+        return $schema;
     }
 
     /**
@@ -1147,11 +1195,11 @@ class PlaylistService
      *
      * @param  bool  $groupScoped  Whether this action operates on a single group (receives $record as Group)
      */
-    public static function getMergeAction(bool $groupScoped = false): Action
+    public static function getMergeAction(bool $groupScoped = false, string $contentType = 'live'): Action
     {
         $action = Action::make('merge')
-            ->label('Merge Same ID')
-            ->schema(self::getMergeFormSchema())
+            ->label($contentType === 'series' ? 'Merge Episodes' : 'Merge Same ID')
+            ->schema(self::getMergeFormSchema($contentType))
             ->requiresConfirmation()
             ->icon('heroicon-o-arrows-pointing-in')
             ->modalIcon('heroicon-o-arrows-pointing-in')
@@ -1161,7 +1209,7 @@ class PlaylistService
         if ($groupScoped) {
             $action
                 ->modalDescription('Merge all channels with the same ID in this group into a single channel with failover.')
-                ->action(function (Group $record, array $data): void {
+                ->action(function (Group $record, array $data) use ($contentType): void {
                     app('Illuminate\Contracts\Bus\Dispatcher')
                         ->dispatch(new MergeChannels(
                             user: auth()->user(),
@@ -1174,14 +1222,26 @@ class PlaylistService
                             groupId: $record->id,
                             weightedConfig: self::buildMergeWeightedConfig($data),
                             fallbackMergeConfig: self::buildMergeFallbackConfig($data),
+                            contentType: $contentType,
+                            mergeKey: $data['merge_key'] ?? 'stream_id',
                         ));
                 });
         } else {
             $action
-                ->modalDescription('Merge all channels with the same ID into a single channel with failover.')
-                ->action(function (array $data): void {
-                    app('Illuminate\Contracts\Bus\Dispatcher')
-                        ->dispatch(new MergeChannels(
+                ->modalDescription($contentType === 'series'
+                    ? 'Merge all episodes with the same TMDB ID across playlists into a single episode with failover. Episodes without a TMDB ID are matched by series TMDB ID, season, and episode number.'
+                    : 'Merge all channels with the same ID into a single channel with failover.'
+                )
+                ->action(function (array $data) use ($contentType): void {
+                    $job = $contentType === 'series'
+                        ? new MergeEpisodes(
+                            user: auth()->user(),
+                            playlists: collect($data['failover_playlists']),
+                            playlistId: $data['playlist_id'],
+                            deactivateFailoverEpisodes: $data['deactivate_failover_channels'] ?? false,
+                            forceCompleteRemerge: $data['force_complete_remerge'] ?? false,
+                        )
+                        : new MergeChannels(
                             user: auth()->user(),
                             playlists: collect($data['failover_playlists']),
                             playlistId: $data['playlist_id'],
@@ -1191,7 +1251,11 @@ class PlaylistService
                             preferCatchupAsPrimary: $data['prefer_catchup_as_primary'] ?? false,
                             weightedConfig: self::buildMergeWeightedConfig($data),
                             fallbackMergeConfig: self::buildMergeFallbackConfig($data),
-                        ));
+                            contentType: $contentType,
+                            mergeKey: $data['merge_key'] ?? 'stream_id',
+                        );
+
+                    app('Illuminate\Contracts\Bus\Dispatcher')->dispatch($job);
                 });
         }
 

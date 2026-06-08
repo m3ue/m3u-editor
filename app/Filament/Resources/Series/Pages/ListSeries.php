@@ -14,6 +14,7 @@ use App\Models\Channel;
 use App\Models\Group;
 use App\Models\Playlist;
 use App\Models\Series;
+use App\Services\PlaylistService;
 use App\Services\TmdbService;
 use App\Settings\GeneralSettings;
 use App\Traits\RenderlessColumnUpdates;
@@ -81,6 +82,14 @@ class ListSeries extends ListRecords
                 ->modalDescription(__('Select the playlist Series you would like to add.'))
                 ->modalSubmitActionLabel(__('Import Series Episodes & Metadata')),
             ActionGroup::make([
+                PlaylistService::getMergeAction(contentType: 'series')
+                    ->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title(__('Episode merge started'))
+                            ->body(__('Merging series episodes in the background. You will be notified once the process is complete.'))
+                            ->send();
+                    }),
                 Action::make('process')
                     ->label(__('Fetch Series Metadata'))
                     ->schema([

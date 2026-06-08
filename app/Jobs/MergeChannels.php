@@ -6,6 +6,7 @@ use App\Models\Channel;
 use App\Models\ChannelFailover;
 use App\Models\Group;
 use App\Models\Playlist;
+use App\Models\User;
 use App\Services\ChannelMergeKeyService;
 use Filament\Notifications\Notification;
 use Illuminate\Bus\Queueable;
@@ -52,7 +53,7 @@ class MergeChannels implements ShouldQueue
      * Create a new job instance.
      */
     public function __construct(
-        public $user,
+        public readonly User $user,
         public Collection $playlists,
         public int $playlistId,
         public bool $checkResolution = false,
@@ -64,7 +65,16 @@ class MergeChannels implements ShouldQueue
         public ?bool $newChannelsOnly = null,
         public ?array $regexPatterns = null,
         public ?array $fallbackMergeConfig = null,
-    ) {}
+        public string $contentType = 'live',
+        public string $mergeKey = 'stream_id',
+    ) {
+        $this->contentType = in_array($this->contentType, ['live', 'vod'], true) ? $this->contentType : 'live';
+        $this->mergeKey = in_array($this->mergeKey, ['stream_id', 'tmdb_id'], true) ? $this->mergeKey : 'stream_id';
+
+        if ($this->contentType !== 'vod' && $this->mergeKey === 'tmdb_id') {
+            $this->mergeKey = 'stream_id';
+        }
+    }
 
     /**
      * Execute the job.
@@ -99,18 +109,21 @@ class MergeChannels implements ShouldQueue
             ->pluck('channel_failover_id')
             ->toArray();
 
-        // Get all channels with stream IDs in a single efficient query
-        // Exclude channels that are already configured as failovers (unless we're re-merging everything)
-        $shouldExcludeExistingFailovers = ! empty($existingFailoverChannelIds) && ! $this->forceCompleteRemerge;
+        // Get all channels for the requested content type and merge key.
+        // Exclude channels that are already configured as failovers (unless we're re-merging everything).
+        $shouldExcludeExistingFailovers = ! empty($existingFailoverChannelIds)
+            && ! $this->forceCompleteRemerge
+            && ! $this->deactivateFailoverChannels;
 
-        $allChannels = Channel::where([
+        $allChannelsQuery = Channel::where([
             ['user_id', $this->user->id],
             ['can_merge', true],
-        ])->whereIn('playlist_id', $playlistIds)
-            ->where(function ($query) {
-                $query->where('stream_id_custom', '!=', '')
-                    ->orWhere('stream_id', '!=', '');
-            })
+        ])->whereIn('playlist_id', $playlistIds);
+
+        $this->applyContentTypeScope($allChannelsQuery);
+        $this->applyMergeKeyPresenceScope($allChannelsQuery);
+
+        $allChannels = $allChannelsQuery
             ->when($this->groupId, function ($query) {
                 // Filter by group_id if specified
                 $query->where('group_id', $this->groupId);
@@ -124,12 +137,9 @@ class MergeChannels implements ShouldQueue
                 $query->where('new', true);
             })->cursor();
 
-        // Group channels by stream ID using LazyCollection
-        $groupedChannels = $allChannels->groupBy(function ($channel) {
-            $streamId = $channel->stream_id_custom ?: $channel->stream_id;
-
-            return strtolower(trim($streamId));
-        });
+        $groupedChannels = $allChannels
+            ->filter(fn ($channel) => $this->getChannelMergeKey($channel) !== null)
+            ->groupBy(fn ($channel) => $this->getChannelMergeKey($channel));
 
         $streamIdResults = $this->processGroupedChannels($groupedChannels, $playlistPriority);
         $processed += $streamIdResults['processed'];
@@ -150,6 +160,55 @@ class MergeChannels implements ShouldQueue
         $deactivatedCount += $regexResults['deactivated'];
 
         $this->sendCompletionNotification($processed, $deactivatedCount);
+    }
+
+    /**
+     * Apply live or VOD filtering so failover groups never mix content types.
+     */
+    protected function applyContentTypeScope($query): void
+    {
+        if ($this->contentType === 'vod') {
+            $query->where('is_vod', true);
+
+            return;
+        }
+
+        $query->where(function ($query) {
+            $query->where('is_vod', false)
+                ->orWhereNull('is_vod');
+        });
+    }
+
+    /**
+     * Keep the existing stream ID pre-filter for stream ID mode.
+     */
+    protected function applyMergeKeyPresenceScope($query): void
+    {
+        if ($this->mergeKey === 'tmdb_id') {
+            return;
+        }
+
+        $query->where(function ($query) {
+            $query->where('stream_id_custom', '!=', '')
+                ->orWhere('stream_id', '!=', '');
+        });
+    }
+
+    /**
+     * Resolve the current merge key for a channel.
+     */
+    protected function getChannelMergeKey(Channel $channel): ?string
+    {
+        if ($this->contentType === 'vod' && $this->mergeKey === 'tmdb_id') {
+            $tmdbId = $channel->getTmdbId();
+
+            return $tmdbId ? 'tmdb:'.$tmdbId : null;
+        }
+
+        $streamId = $channel->stream_id_custom ?: $channel->stream_id;
+        $streamId = is_string($streamId) ? trim($streamId) : '';
+
+        return $streamId !== '' ? 'stream:'.strtolower($streamId) : null;
     }
 
     /**
@@ -226,10 +285,14 @@ class MergeChannels implements ShouldQueue
             return ['processed' => 0, 'deactivated' => 0];
         }
 
-        $channels = Channel::where([
+        $channelsQuery = Channel::where([
             ['user_id', $this->user->id],
             ['can_merge', true],
-        ])->whereIn('playlist_id', $playlistIds)
+        ])->whereIn('playlist_id', $playlistIds);
+
+        $this->applyContentTypeScope($channelsQuery);
+
+        $channels = $channelsQuery
             ->where(function ($query) {
                 $query->whereNull('stream_id_custom')
                     ->orWhere('stream_id_custom', '');
@@ -294,9 +357,13 @@ class MergeChannels implements ShouldQueue
         // Memory is bounded by the chunk size regardless of catalogue size.
         $matchesByPattern = array_fill(0, count($validPatterns), []);
 
-        Channel::where('user_id', $this->user->id)
+        $regexChannelsQuery = Channel::where('user_id', $this->user->id)
             ->where('can_merge', true)
-            ->whereIn('playlist_id', $playlistIds)
+            ->whereIn('playlist_id', $playlistIds);
+
+        $this->applyContentTypeScope($regexChannelsQuery);
+
+        $regexChannelsQuery
             ->when($this->groupId, fn ($q) => $q->where('group_id', $this->groupId))
             ->select(['id', 'user_id', 'playlist_id', 'group_id', 'title', 'title_custom',
                 'name', 'name_custom', 'stream_id', 'stream_id_custom', 'sort',
