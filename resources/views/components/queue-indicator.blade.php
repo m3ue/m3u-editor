@@ -41,9 +41,10 @@
 }" x-cloak>
     {{-- Trigger button --}}
     <button type="button" @click="open = !open"
-        class="relative flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm font-medium transition hover:bg-gray-100 dark:hover:bg-white/5"
+        class="relative flex items-center rounded-lg p-1.5 transition duration-75 outline-none"
         :class="snapshot.degraded ? 'text-gray-400 dark:text-gray-500' : (hasActivity ?
-            'text-primary-600 dark:text-primary-400' : 'text-gray-500 dark:text-gray-400')"
+            'text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300' :
+            'text-gray-500 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-400')"
         :title="hasActivity ? `${snapshot.running} running, ${snapshot.queued} queued` : '{{ __('Queue idle') }}'">
         {{-- Spinner when running, otherwise queue icon --}}
         <template x-if="snapshot.running > 0 && !loading">
@@ -58,7 +59,9 @@
         </template>
 
         <template x-if="hasActivity">
-            <span x-text="totalActivity" class="tabular-nums"></span>
+            <div class="absolute start-full top-0.5 z-[1] flex w-max -translate-x-1/2 -translate-y-1/2 rounded-md bg-white dark:bg-gray-900">
+                <span class="fi-badge fi-size-xs fi-color fi-color-primary" x-text="totalActivity"></span>
+            </div>
         </template>
     </button>
 
