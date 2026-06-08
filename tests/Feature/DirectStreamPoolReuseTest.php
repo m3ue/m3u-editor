@@ -397,7 +397,7 @@ test('getEpisodeUrl uses first available episode failover when primary playlist 
             && ($metadata['id'] ?? null) === $failover->id
             && ($metadata['episode_id'] ?? null) === (string) $failover->id
             && ($metadata['playlist_uuid'] ?? null) === $playlistB->uuid
-            && ($metadata['original_channel_id'] ?? null) === $master->id
+            && ($metadata['original_episode_id'] ?? null) === $master->id
             && ($metadata['original_playlist_uuid'] ?? null) === $playlistA->uuid
             && ($metadata['is_failover'] ?? null) === true;
     });
