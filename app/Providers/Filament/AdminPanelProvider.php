@@ -37,6 +37,7 @@ use App\Filament\Resources\PlaylistViewers\PlaylistViewerResource;
 use App\Filament\Resources\PluginInstallReviews\PluginInstallReviewResource;
 use App\Filament\Resources\Plugins\PluginResource;
 use App\Filament\Resources\PostProcesses\PostProcessResource;
+use App\Filament\Resources\QueueMonitor\QueueMonitorResource;
 use App\Filament\Resources\Series\SeriesResource;
 use App\Filament\Resources\StreamFileSettings\StreamFileSettingResource;
 use App\Filament\Resources\StreamProfiles\StreamProfileResource;
@@ -48,6 +49,7 @@ use App\Filament\Widgets\DocumentsWidget;
 use App\Filament\Widgets\DonateCrypto;
 use App\Filament\Widgets\KoFiWidget;
 use App\Filament\Widgets\PluginsOverviewWidget;
+use App\Filament\Widgets\QueueDashboardWidget;
 use App\Filament\Widgets\SharedStreamStatsWidget;
 use App\Filament\Widgets\StatsOverview;
 use App\Filament\Widgets\SystemHealthWidget;
@@ -250,16 +252,11 @@ class AdminPanelProvider extends PanelProvider
                                 ...LogViewer::getNavigationItems(),
                                 ...ReleaseLogs::getNavigationItems(),
                                 ...Backups::getNavigationItems(),
+                                ...QueueMonitorResource::getNavigationItems(),
                                 NavigationItem::make('API Docs')
                                     ->label(fn () => __('API Docs').' ↗')
                                     ->url('/docs/api', shouldOpenInNewTab: true)
                                     ->sort(9)
-                                    ->icon(null)
-                                    ->visible(fn (): bool => auth()->user()?->isAdmin() ?? false),
-                                NavigationItem::make('Queue Manager')
-                                    ->label(fn () => __('Queue Manager').' ↗')
-                                    ->url('/horizon', shouldOpenInNewTab: true)
-                                    ->sort(10)
                                     ->icon(null)
                                     ->visible(fn (): bool => auth()->user()?->isAdmin() ?? false),
                             ]),
@@ -273,6 +270,7 @@ class AdminPanelProvider extends PanelProvider
                 DiscordWidget::class,
                 // PayPalDonateWidget::class,
                 KoFiWidget::class,
+                QueueDashboardWidget::class,
                 PluginsOverviewWidget::class,
                 // DonateCrypto::class,
                 StatsOverview::class,
@@ -351,6 +349,12 @@ class AdminPanelProvider extends PanelProvider
                 fn (): string => view('components.external-ip-display')->render()
             );
         }
+
+        // Queue indicator — live badge in the topbar for all authenticated users
+        FilamentView::registerRenderHook(
+            PanelsRenderHook::USER_MENU_BEFORE, // Place it before the user menu
+            fn (): string => auth()->check() ? view('components.queue-indicator')->render() : '',
+        );
 
         // Register OIDC SSO button on the login page
         if (config('services.oidc.enabled')) {

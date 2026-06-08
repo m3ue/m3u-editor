@@ -30,6 +30,36 @@ it('removes stale playlist directories and loose files', function () {
     Storage::disk('local')->assertMissing('playlist/00000000-0000-0000-0000-000000000002.m3u');
 });
 
+it('preserves manually uploaded playlist files referenced in the uploads column', function () {
+    $uploadedFilename = 'KLmX92nBvY3abcdef.m3u';
+    $playlist = Playlist::factory()->for($this->user)->createQuietly([
+        'uploads' => ["playlist/{$uploadedFilename}"],
+    ]);
+    Storage::disk('local')->put("playlist/{$uploadedFilename}", 'content');
+    Storage::disk('local')->put('playlist/orphaned-non-uuid-file.m3u', 'content');
+
+    $this->artisan('app:cleanup-stale-files', ['--force' => true])
+        ->assertSuccessful();
+
+    Storage::disk('local')->assertExists("playlist/{$uploadedFilename}");
+    Storage::disk('local')->assertMissing('playlist/orphaned-non-uuid-file.m3u');
+});
+
+it('preserves manually uploaded epg files referenced in the uploads column', function () {
+    $uploadedFilename = 'epg-upload-abc123.xml';
+    $epg = Epg::factory()->for($this->user)->createQuietly([
+        'uploads' => ["epg/{$uploadedFilename}"],
+    ]);
+    Storage::disk('local')->put("epg/{$uploadedFilename}", 'content');
+    Storage::disk('local')->put('epg/orphaned-non-uuid-file.xml', 'content');
+
+    $this->artisan('app:cleanup-stale-files', ['--force' => true])
+        ->assertSuccessful();
+
+    Storage::disk('local')->assertExists("epg/{$uploadedFilename}");
+    Storage::disk('local')->assertMissing('epg/orphaned-non-uuid-file.xml');
+});
+
 it('removes stale epg and epg-cache directories', function () {
     $epg = Epg::factory()->for($this->user)->createQuietly();
     Storage::disk('local')->makeDirectory("epg/{$epg->uuid}");

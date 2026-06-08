@@ -32,13 +32,21 @@ class CleanupStaleFiles extends Command
         $counts = ['dirs' => 0, 'files' => 0];
 
         $playlistUuids = Playlist::query()->pluck('uuid')->filter()->all();
+        $playlistUploadedFiles = Playlist::query()->pluck('uploads')->filter()
+            ->flatMap(fn ($paths) => (array) $paths)
+            ->map(fn ($path) => basename($path))
+            ->all();
         $counts = $this->cleanupSubdirectories($disk, 'playlist', $playlistUuids, $isDryRun, $counts);
-        $counts = $this->cleanupLooseFiles($disk, 'playlist', $playlistUuids, $isDryRun, $counts);
+        $counts = $this->cleanupLooseFiles($disk, 'playlist', $playlistUuids, $playlistUploadedFiles, $isDryRun, $counts);
         $counts = $this->cleanupSubdirectories($disk, 'playlist-epg-files', $playlistUuids, $isDryRun, $counts);
 
         $epgUuids = Epg::query()->pluck('uuid')->filter()->all();
+        $epgUploadedFiles = Epg::query()->pluck('uploads')->filter()
+            ->flatMap(fn ($paths) => (array) $paths)
+            ->map(fn ($path) => basename($path))
+            ->all();
         $counts = $this->cleanupSubdirectories($disk, 'epg', $epgUuids, $isDryRun, $counts);
-        $counts = $this->cleanupLooseFiles($disk, 'epg', $epgUuids, $isDryRun, $counts);
+        $counts = $this->cleanupLooseFiles($disk, 'epg', $epgUuids, $epgUploadedFiles, $isDryRun, $counts);
         $counts = $this->cleanupSubdirectories($disk, 'epg-cache', $epgUuids, $isDryRun, $counts);
 
         $label = $isDryRun ? 'Would remove' : 'Removed';
@@ -86,17 +94,19 @@ class CleanupStaleFiles extends Command
      * @param  array{dirs: int, files: int}  $counts
      * @return array{dirs: int, files: int}
      */
-    private function cleanupLooseFiles(Filesystem $disk, string $baseDir, array $knownUuids, bool $isDryRun, array $counts): array
+    private function cleanupLooseFiles(Filesystem $disk, string $baseDir, array $knownUuids, array $knownFilenames, bool $isDryRun, array $counts): array
     {
         if (! $disk->exists($baseDir)) {
             return $counts;
         }
 
-        $knownSet = array_flip($knownUuids);
+        $knownUuidSet = array_flip($knownUuids);
+        $knownFilenameSet = array_flip($knownFilenames);
 
         foreach ($disk->files($baseDir) as $file) {
             $stem = pathinfo($file, PATHINFO_FILENAME);
-            if (! isset($knownSet[$stem])) {
+            $filename = basename($file);
+            if (! isset($knownUuidSet[$stem]) && ! isset($knownFilenameSet[$filename])) {
                 $this->line("  Removing file: {$file}");
                 if (! $isDryRun) {
                     $disk->delete($file);

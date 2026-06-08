@@ -283,11 +283,6 @@ class Playlist extends Model
             ->orderBy('created_at', 'desc');
     }
 
-    public function syncStatusesUnordered(): HasMany
-    {
-        return $this->hasMany(PlaylistSyncStatus::class);
-    }
-
     public function categories(): HasMany
     {
         return $this->hasMany(Category::class);

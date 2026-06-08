@@ -33,9 +33,6 @@ class ProcessM3uImportComplete implements ShouldQueue
     // Giving a timeout of 10 minutes to the Job to process the file
     public $timeout = 60 * 10;
 
-    // Make sure the process logs are cleaned up
-    public int $maxLogs = 25;
-
     // Delete the job when the model is missing
     public $deleteWhenMissingModels = true;
 
@@ -373,15 +370,8 @@ class ProcessM3uImportComplete implements ShouldQueue
         // Cleanup cached EPG files
         EpgCacheService::clearPlaylistEpgCacheFile($playlist);
 
-        // Clean up sync logs
-        $syncStatusQuery = $playlist->syncStatusesUnordered();
-        if ($syncStatusQuery->count() > $this->maxLogs) {
-            $syncStatusQuery
-                ->orderBy('created_at', 'asc')
-                ->limit($syncStatusQuery->count() - $this->maxLogs)
-                ->delete();
-        }
-
+        // Clean up old series/categories from previous imports to prevent orphaned data.
+        // This runs regardless of sync invalidation settings since it's a housekeeping step.
         $this->seriesCleanup($playlist);
 
         // Hand off to the SyncPipeline.
