@@ -8,7 +8,8 @@
     };
 @endphp
 <div x-data="{ copied: false }" class="relative">
-    <button type="button" class="text-gray-400 hover:text-primary-600" x-on:click="
+    <button type="button" class="text-gray-400 hover:text-primary-600"
+        x-on:click="
             if (window.navigator && window.navigator.clipboard && window.navigator.clipboard.writeText) {
                 window.navigator.clipboard.writeText('{{ $text }}')
                     .then(() => { copied = true; setTimeout(() => copied = false, 1500); });
@@ -22,7 +23,8 @@
                 document.body.removeChild(el);
                 copied = true; setTimeout(() => copied = false, 1500);
             }
-        " aria-label="Copy to clipboard">
+        "
+        aria-label="Copy to clipboard">
         <x-heroicon-s-clipboard-document-check class="w-5 h-5" />
     </button>
     <span x-show="copied" x-transition

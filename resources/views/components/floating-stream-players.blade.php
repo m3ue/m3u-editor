@@ -3,32 +3,34 @@
     $maxPlayers = app(\App\Settings\GeneralSettings::class)->max_concurrent_floating_players ?? 0;
 @endphp
 <div data-max-players="{{ $maxPlayers }}" x-data="(() => {
-        // Create a unique instance ID to avoid conflicts
-        const instanceId = 'floating-streams-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9);
-        
-        // Only create a new global manager if none exists, or if it's from a different instance
-        if (!window._globalMultiStreamManager || window._globalMultiStreamManager._instanceId !== instanceId) {
-            // Clean up any existing instance
-            if (window._globalMultiStreamManager && typeof window._globalMultiStreamManager.cleanupAllStreams === 'function') {
-                try {
-                    window._globalMultiStreamManager.cleanupAllStreams();
-                } catch (e) {
-                    console.warn('Error during cleanup:', e);
-                }
+    // Create a unique instance ID to avoid conflicts
+    const instanceId = 'floating-streams-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9);
+
+    // Only create a new global manager if none exists, or if it's from a different instance
+    if (!window._globalMultiStreamManager || window._globalMultiStreamManager._instanceId !== instanceId) {
+        // Clean up any existing instance
+        if (window._globalMultiStreamManager && typeof window._globalMultiStreamManager.cleanupAllStreams === 'function') {
+            try {
+                window._globalMultiStreamManager.cleanupAllStreams();
+            } catch (e) {
+                console.warn('Error during cleanup:', e);
             }
-            
-            // Create new instance with unique ID
-            const manager = multiStreamManager();
-            manager._instanceId = instanceId;
-            window._globalMultiStreamManager = manager;
         }
-        
-        return window._globalMultiStreamManager;
-    })()" x-init="init()" x-on:alpine:destroyed="
+
+        // Create new instance with unique ID
+        const manager = multiStreamManager();
+        manager._instanceId = instanceId;
+        window._globalMultiStreamManager = manager;
+    }
+
+    return window._globalMultiStreamManager;
+})()" x-init="init()"
+    x-on:alpine:destroyed="
         if (typeof cleanupAllStreams === 'function') {
             cleanupAllStreams();
         }
-    " class="fixed inset-0 pointer-events-none z-[9999]">
+    "
+    class="fixed inset-0 pointer-events-none z-[9999]">
     <!-- Multiple Floating Players -->
     <template x-for="player in players" :key="player.id">
         <div :style="getPlayerStyle(player)"
@@ -100,14 +102,12 @@
                     :data-player-id="player.id" :data-content-type="player.content_type || ''"
                     :data-stream-id="player.stream_id || ''" :data-playlist-id="player.playlist_id || ''"
                     :data-series-id="player.series_id || ''" :data-season-number="player.season_number || ''"
-                    :data-edl-url="player.edl_url || ''" x-init="
-                        if (window.streamPlayer && $el.dataset.streamUrl && $el.dataset.streamUrl !== '') {
-                            playerInstance = window.streamPlayer();
-                            const sep = $el.dataset.streamUrl.includes('?') ? '&' : '?';
-                            const urlWithClientId = $el.dataset.streamUrl + sep + 'client_id=' + encodeURIComponent($el.dataset.playerId);
-                            playerInstance.initPlayer(urlWithClientId, $el.dataset.streamFormat, $el.id);
-                        }
-                    ">
+                    :data-edl-url="player.edl_url || ''" x-init="if (window.streamPlayer && $el.dataset.streamUrl && $el.dataset.streamUrl !== '') {
+                        playerInstance = window.streamPlayer();
+                        const sep = $el.dataset.streamUrl.includes('?') ? '&' : '?';
+                        const urlWithClientId = $el.dataset.streamUrl + sep + 'client_id=' + encodeURIComponent($el.dataset.playerId);
+                        playerInstance.initPlayer(urlWithClientId, $el.dataset.streamFormat, $el.id);
+                    }">
                     <p class="text-white p-4">Your browser does not support video playback.</p>
                 </video>
 
@@ -117,7 +117,8 @@
                     <div class="flex items-center space-x-2 text-white">
                         <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none"
                             viewBox="0 0 24 24">
-                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor"
+                                stroke-width="4">
                             </circle>
                             <path class="opacity-75" fill="currentColor"
                                 d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
@@ -149,7 +150,8 @@
 
                 <!-- Stream Details Toggle -->
                 <div class="absolute top-2 left-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-                    <button type="button" @click="
+                    <button type="button"
+                        @click="
                             const overlay = document.getElementById(player.id + '-video-details-overlay');
                             if (overlay) {
                                 overlay.classList.toggle('hidden');
@@ -166,12 +168,14 @@
                     class="absolute top-2 left-2 bg-black bg-opacity-90 text-white text-xs p-3 rounded max-w-xs hidden z-10">
                     <div class="flex justify-between items-center mb-2">
                         <span class="font-medium">Stream Details</span>
-                        <button type="button" @click="
+                        <button type="button"
+                            @click="
                                 const overlay = document.getElementById(player.id + '-video-details-overlay');
                                 if (overlay) {
                                     overlay.classList.add('hidden');
                                 }
-                            " class="text-gray-300 hover:text-white">
+                            "
+                            class="text-gray-300 hover:text-white">
                             <x-heroicon-o-x-mark class="w-3 h-3" />
                         </button>
                     </div>
@@ -185,8 +189,8 @@
                     class="absolute bottom-10 left-0 right-0 flex justify-center px-3 hidden z-20">
                     <div
                         class="bg-gray-900/95 text-white rounded-lg px-3 py-2 flex items-center gap-3 shadow-xl text-xs max-w-xs">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 text-blue-400 flex-shrink-0" fill="none"
-                            viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 text-blue-400 flex-shrink-0"
+                            fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round"
                                 d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
                         </svg>
@@ -196,12 +200,14 @@
                                 const v = document.getElementById(player.id + '-video');
                                 if (v && v._streamPlayer) v._streamPlayer.resumeFromSaved();
                             ">Resume</button>
-                        <button class="text-gray-400 hover:text-white transition-colors flex-shrink-0" @click.stop="
+                        <button class="text-gray-400 hover:text-white transition-colors flex-shrink-0"
+                            @click.stop="
                                 const v = document.getElementById(player.id + '-video');
                                 if (v && v._streamPlayer) v._streamPlayer.startOver();
-                            " title="Start from beginning">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24"
-                                stroke-width="1.5" stroke="currentColor">
+                            "
+                            title="Start from beginning">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none"
+                                viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
                                 <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
                             </svg>
                         </button>
@@ -219,11 +225,13 @@
                                 d="m3.75 7.5 16.5-4.125M12 6.75c-2.708 0-5.363.224-7.948.655C2.996 7.685 2.25 8.662 2.25 9.75v9a1.5 1.5 0 0 0 1.5 1.5h16.5a1.5 1.5 0 0 0 1.5-1.5v-9c0-1.088-.746-2.065-1.802-2.345A48.507 48.507 0 0 0 12 6.75Z" />
                         </svg>
                         <span class="flex-1 truncate">Commercial detected</span>
-                        <button class="px-2 py-1 bg-yellow-500 hover:bg-yellow-400 text-gray-900 font-medium rounded transition-colors flex-shrink-0"
+                        <button
+                            class="px-2 py-1 bg-yellow-500 hover:bg-yellow-400 text-gray-900 font-medium rounded transition-colors flex-shrink-0"
                             @click.stop="
                                 const v = document.getElementById(player.id + '-video');
                                 if (v && v._streamPlayer) v._streamPlayer.skipCommercial();
-                            ">Skip Ad</button>
+                            ">Skip
+                            Ad</button>
                     </div>
                 </div>
 
