@@ -54,6 +54,7 @@ class QueueMonitorResource extends Resource
     public static function table(Table $table): Table
     {
         return $table
+            ->defaultSort('started_at', 'desc')
             ->poll()
             ->filtersTriggerAction(fn ($action) => $action->button()->label(__('Filters')))
             ->columns([
@@ -139,8 +140,6 @@ class QueueMonitorResource extends Resource
                     ->wrap()
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
-            ->defaultSort('started_at', 'desc')
-            ->poll('10s')
             ->filters([
                 SelectFilter::make('queue')
                     ->label(__('Queue'))
