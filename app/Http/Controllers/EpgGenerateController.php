@@ -31,6 +31,14 @@ class EpgGenerateController extends Controller
     private const CACHE_TTL_HOURS = 6; // Cache files for 6 hours
 
     /**
+     * Escape XML text and attribute values using UTF-8 explicitly.
+     */
+    private function escapeXml(mixed $value): string
+    {
+        return htmlspecialchars((string) $value, ENT_XML1 | ENT_QUOTES, 'UTF-8');
+    }
+
+    /**
      * Generate the EPG XML file
      *
      * @return Response
@@ -155,7 +163,7 @@ class EpgGenerateController extends Controller
 
             // Output the <channel> tag
             $title = $channel->title_custom ?? $channel->title;
-            $title = htmlspecialchars($title);
+            $title = $this->escapeXml($title);
 
             // Get the EPG channel data
             $epgData = $channel->epgChannel ?? null;
@@ -198,7 +206,7 @@ class EpgGenerateController extends Controller
                     echo '    <display-name>'.$channelNo.'</display-name>';
                 }
                 if ($icon) {
-                    echo PHP_EOL.'    <icon src="'.htmlspecialchars($icon).'"/>';
+                    echo PHP_EOL.'    <icon src="'.$this->escapeXml($icon).'"/>';
                 }
                 echo PHP_EOL.'  </channel>'.PHP_EOL;
             } elseif ($dummyEpgEnabled) {
@@ -207,10 +215,10 @@ class EpgGenerateController extends Controller
                 if (empty($icon)) {
                     $icon = url('/placeholder.png');
                 }
-                $icon = htmlspecialchars($icon);
                 if ($logoProxyEnabled) {
                     $icon = LogoProxyController::generateProxyUrl($icon);
                 }
+                $icon = $this->escapeXml($icon);
 
                 // Keep track of which channels need a dummy EPG program
                 // Need this to output the <programme> tags later
@@ -313,7 +321,7 @@ class EpgGenerateController extends Controller
                                 }
 
                                 // Build programme XML in buffer for batch output
-                                $progXml = '  <programme channel="'.htmlspecialchars($mappedChannelId).'"';
+                                $progXml = '  <programme channel="'.$this->escapeXml($mappedChannelId).'"';
                                 if ($start) {
                                     $progXml .= ' start="'.$start.'"';
                                 }
@@ -323,47 +331,46 @@ class EpgGenerateController extends Controller
                                 $progXml .= '>'.PHP_EOL;
 
                                 if ($programme['title']) {
-                                    $progXml .= '    <title>'.htmlspecialchars($programme['title']).'</title>'.PHP_EOL;
+                                    $progXml .= '    <title>'.$this->escapeXml($programme['title']).'</title>'.PHP_EOL;
                                 }
                                 if ($programme['subtitle']) {
-                                    $progXml .= '    <sub-title>'.htmlspecialchars($programme['subtitle']).'</sub-title>'.PHP_EOL;
+                                    $progXml .= '    <sub-title>'.$this->escapeXml($programme['subtitle']).'</sub-title>'.PHP_EOL;
                                 }
                                 if ($programme['desc']) {
-                                    $progXml .= '    <desc>'.htmlspecialchars($programme['desc']).'</desc>'.PHP_EOL;
+                                    $progXml .= '    <desc>'.$this->escapeXml($programme['desc']).'</desc>'.PHP_EOL;
                                 }
                                 if ($programme['category']) {
-                                    $progXml .= '    <category>'.htmlspecialchars($programme['category']).'</category>'.PHP_EOL;
+                                    $progXml .= '    <category>'.$this->escapeXml($programme['category']).'</category>'.PHP_EOL;
                                 }
                                 if ($programme['episode_num']) {
-                                    $progXml .= '    <episode-num system="xmltv_ns">'.htmlspecialchars($programme['episode_num']).'</episode-num>'.PHP_EOL;
+                                    $progXml .= '    <episode-num system="xmltv_ns">'.$this->escapeXml($programme['episode_num']).'</episode-num>'.PHP_EOL;
                                 }
                                 if ($programme['icon']) {
-                                    $icon = htmlspecialchars($programme['icon']);
-                                    if ($logoProxyEnabled) {
-                                        $icon = LogoProxyController::generateProxyUrl($icon);
-                                    }
-                                    $progXml .= '    <icon src="'.$icon.'"/>'.PHP_EOL;
+                                    $icon = $logoProxyEnabled
+                                        ? LogoProxyController::generateProxyUrl($programme['icon'])
+                                        : $programme['icon'];
+                                    $progXml .= '    <icon src="'.$this->escapeXml($icon).'"/>'.PHP_EOL;
                                 }
                                 // Program artwork images (NEW)
                                 if (! empty($programme['images'] ?? null) && is_array($programme['images'])) {
                                     foreach ($programme['images'] as $image) {
-                                        $rawUrl = htmlspecialchars($image['url'] ?? '');
+                                        $rawUrl = $image['url'] ?? '';
                                         $proxiedUrl = $logoProxyEnabled && $rawUrl
                                             ? LogoProxyController::generateProxyUrl($rawUrl)
                                             : $rawUrl;
 
-                                        $url = $proxiedUrl;
-                                        $type = htmlspecialchars($image['type'], ENT_XML1);
-                                        $width = htmlspecialchars($image['width'], ENT_XML1);
-                                        $height = htmlspecialchars($image['height'], ENT_XML1);
-                                        $orient = htmlspecialchars($image['orient'], ENT_XML1);
-                                        $size = htmlspecialchars($image['size'], ENT_XML1);
+                                        $url = $this->escapeXml($proxiedUrl);
+                                        $type = $this->escapeXml($image['type']);
+                                        $width = $this->escapeXml($image['width']);
+                                        $height = $this->escapeXml($image['height']);
+                                        $orient = $this->escapeXml($image['orient']);
+                                        $size = $this->escapeXml($image['size']);
 
                                         $progXml .= "    <icon src=\"{$url}\" type=\"{$type}\" width=\"{$width}\" height=\"{$height}\" orient=\"{$orient}\" size=\"{$size}\" />\n";
                                     }
                                 }
                                 if ($programme['rating']) {
-                                    $progXml .= '    <rating><value>'.htmlspecialchars($programme['rating']).'</value></rating>'.PHP_EOL;
+                                    $progXml .= '    <rating><value>'.$this->escapeXml($programme['rating']).'</value></rating>'.PHP_EOL;
                                 }
                                 if (! empty($programme['new']) && $programme['new']) {
                                     $progXml .= '    <new />'.PHP_EOL;
@@ -405,10 +412,10 @@ class EpgGenerateController extends Controller
 
             // Generate programmes for each channel using pre-calculated time slots
             foreach ($dummyEpgChannels as $dummyEpgChannel) {
-                $tvgId = $dummyEpgChannel['tvg_id'];
+                $tvgId = $this->escapeXml($dummyEpgChannel['tvg_id']);
                 $title = $dummyEpgChannel['title'];
                 $icon = $dummyEpgChannel['icon'];
-                $group = $dummyEpgChannel['group'];
+                $group = $this->escapeXml($dummyEpgChannel['group']);
                 $includeCategory = $dummyEpgChannel['include_category'];
 
                 // Build all programmes for this channel in one string buffer
@@ -445,12 +452,12 @@ class EpgGenerateController extends Controller
                 foreach ($network->programmes as $programme) {
                     $start = str_replace(':', '', $programme->start_time->format('YmdHis O'));
                     $stop = str_replace(':', '', $programme->end_time->format('YmdHis O'));
-                    $title = htmlspecialchars($programme->title, ENT_XML1);
-                    $desc = $programme->description ? htmlspecialchars($programme->description, ENT_XML1) : '';
-                    $icon = $programme->image ? htmlspecialchars($programme->image, ENT_XML1) : '';
+                    $title = $this->escapeXml($programme->title);
+                    $desc = $programme->description ? $this->escapeXml($programme->description) : '';
+                    $icon = $programme->image ? $this->escapeXml($programme->image) : '';
                     $category = $programme->contentable_type === 'App\\Models\\Episode' ? 'Series' : 'Movie';
 
-                    echo '  <programme channel="'.$tvgId.'" start="'.$start.'" stop="'.$stop.'">'.PHP_EOL;
+                    echo '  <programme channel="'.$this->escapeXml($tvgId).'" start="'.$start.'" stop="'.$stop.'">'.PHP_EOL;
                     echo '    <title>'.$title.'</title>'.PHP_EOL;
                     if ($desc) {
                         echo '    <desc>'.$desc.'</desc>'.PHP_EOL;

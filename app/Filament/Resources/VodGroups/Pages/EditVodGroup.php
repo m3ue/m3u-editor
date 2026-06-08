@@ -63,7 +63,7 @@ class EditVodGroup extends EditRecord
                     ->modalSubmitActionLabel(__('Move now')),
 
                 Action::make('recount')
-                    ->label(__('Recount Channels'))
+                    ->label(__('Recount This Group'))
                     ->icon('heroicon-o-hashtag')
                     ->schema([
                         TextInput::make('start')
@@ -86,7 +86,7 @@ class EditVodGroup extends EditRecord
                     })
                     ->requiresConfirmation()
                     ->modalIcon('heroicon-o-hashtag')
-                    ->modalDescription(__('Recount all channels in this group sequentially?')),
+                    ->modalDescription(__('Recount channels only in this group sequentially. Channel numbers will be assigned based on the current sort order of this group.')),
                 Action::make('sort_alpha')
                     ->label(__('Sort Alpha'))
                     ->icon('heroicon-o-bars-arrow-down')

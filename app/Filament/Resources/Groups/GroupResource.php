@@ -254,7 +254,7 @@ class GroupResource extends Resource implements CopilotResource
                         ->modalSubmitActionLabel(__('Apply')),
 
                     Action::make('recount')
-                        ->label(__('Recount Channels'))
+                        ->label(__('Recount This Group'))
                         ->icon('heroicon-o-hashtag')
                         ->schema([
                             TextInput::make('start')
@@ -276,7 +276,7 @@ class GroupResource extends Resource implements CopilotResource
                         })
                         ->requiresConfirmation()
                         ->modalIcon('heroicon-o-hashtag')
-                        ->modalDescription(__('Recount all channels in this group sequentially? Channel numbers will be assigned based on the current sort order.')),
+                        ->modalDescription(__('Recount channels only in this group sequentially. Channel numbers will be assigned based on the current sort order of this group.')),
                     Action::make('sort_alpha')
                         ->label(__('Sort Alpha'))
                         ->icon('heroicon-o-bars-arrow-down')
@@ -591,7 +591,7 @@ class GroupResource extends Resource implements CopilotResource
                         ->modalDescription(__('Disable the selected group(s) now?'))
                         ->modalSubmitActionLabel(__('Yes, disable now')),
                     BulkAction::make('recount_channels')
-                        ->label(__('Recount Channels'))
+                        ->label(__('Recount Selected Groups'))
                         ->icon('heroicon-o-hashtag')
                         ->form([
                             TextInput::make('start')
@@ -601,18 +601,10 @@ class GroupResource extends Resource implements CopilotResource
                                 ->required(),
                         ])
                         ->action(function (Collection $records, array $data): void {
-                            // Sort the selected groups by their sort_order to ensure sequential processing
-                            // that matches the visual order in the table (assuming table is sorted by sort_order)
-                            $sortedRecords = $records->sortBy('sort_order');
-                            $start = (int) $data['start'];
-
-                            foreach ($sortedRecords as $record) {
-                                // Get channels for this group ordered by their current sort
-                                $channels = $record->channels()->orderBy('sort')->get();
-                                foreach ($channels as $channel) {
-                                    $channel->update(['channel' => $start++]);
-                                }
-                            }
+                            SortFacade::bulkRecountGroupsByOrder(
+                                $records,
+                                (int) $data['start']
+                            );
                         })
                         ->after(function () {
                             Notification::make()
@@ -624,7 +616,7 @@ class GroupResource extends Resource implements CopilotResource
                         ->deselectRecordsAfterCompletion()
                         ->requiresConfirmation()
                         ->modalIcon('heroicon-o-hashtag')
-                        ->modalDescription(__('Recount channels across selected groups? This will renumber channels sequentially starting from the top-most selected group down to the bottom-most.')),
+                        ->modalDescription(__('Recount channels across the selected groups. Groups are processed by sort order, then name, then id, while channels in each group are processed by sort.')),
                     BulkAction::make('find-replace')
                         ->label(__('Find & Replace'))
                         ->schema(fn () => FindReplaceService::getBulkActionSchema('groups'))
