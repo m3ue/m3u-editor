@@ -30,6 +30,12 @@ class RegisterM3uProxyWebhook extends Command
      */
     public function handle(M3uProxyService $service): int
     {
+        if (! config('proxy.proxy_integration_enabled', true)) {
+            $this->info('ℹ️  Proxy integration is disabled (M3U_PROXY_INTEGRATION_ENABLED=false). Skipping webhook registration.');
+
+            return self::SUCCESS;
+        }
+
         $this->info('🔗 Checking m3u-editor webhook status with m3u-proxy...');
 
         // Construct webhook URL - use APP_URL instead of apiPublicUrl

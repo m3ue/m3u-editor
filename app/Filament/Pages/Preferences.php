@@ -415,6 +415,7 @@ class Preferences extends SettingsPage
                                     ]),
                             ]),
                         Tab::make(__('Proxy'))
+                            ->hidden(fn () => ! config('proxy.proxy_integration_enabled', true))
                             ->schema([
                                 Section::make(__('URL & Connection'))
                                     ->description(__('Configure how the proxy is accessed and how stream URLs are resolved.'))

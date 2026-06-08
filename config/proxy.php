@@ -11,6 +11,11 @@ return [
     // local services (e.g., Jellyfin, Emby) are addressed by a private IP.
     'allow_private_webhook_urls' => env('ALLOW_PRIVATE_WEBHOOK_URLS', false),
 
+    // Master switch to completely disable the proxy integration for all users (including admins).
+    // When false, no user can access proxy features, proxy tabs/nav are hidden,
+    // and webhook registration is prevented from running.
+    'proxy_integration_enabled' => env('M3U_PROXY_INTEGRATION_ENABLED', true),
+
     // If M3U_PROXY_ENABLED=false/null, uses external proxy service
     // If M3U_PROXY_ENABLED=true, uses embedded proxy via nginx reverse proxy
     'embedded_proxy_enabled' => env('M3U_PROXY_ENABLED', true), // true = embedded service, false/null = external service

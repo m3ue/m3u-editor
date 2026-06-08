@@ -215,9 +215,14 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
 
     /**
      * Check if user can use the proxy feature.
+     * Returns false for all users, including admins, when the proxy integration is globally disabled.
      */
     public function canUseProxy(): bool
     {
+        if (! config('proxy.proxy_integration_enabled', true)) {
+            return false;
+        }
+
         return $this->hasPermission('use_proxy');
     }
 

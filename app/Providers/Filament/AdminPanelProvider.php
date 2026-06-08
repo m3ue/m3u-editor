@@ -228,12 +228,14 @@ class AdminPanelProvider extends PanelProvider
                                 ...EpgChannelResource::getNavigationItems(),
                                 ...EpgMapResource::getNavigationItems(),
                             ]),
-                        NavigationGroup::make(fn () => __('Proxy'))
-                            ->icon('heroicon-m-arrows-right-left')
-                            ->items([
-                                ...StreamProfileResource::getNavigationItems(),
-                                ...M3uProxyStreamMonitor::getNavigationItems(),
-                            ]),
+                        ...(config('proxy.proxy_integration_enabled', true) ? [
+                            NavigationGroup::make(fn () => __('Proxy'))
+                                ->icon('heroicon-m-arrows-right-left')
+                                ->items([
+                                    ...StreamProfileResource::getNavigationItems(),
+                                    ...M3uProxyStreamMonitor::getNavigationItems(),
+                                ]),
+                        ] : []),
                         NavigationGroup::make(fn () => __('Plugins'))
                             ->icon('heroicon-m-puzzle-piece')
                             ->items([
