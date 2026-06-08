@@ -17,7 +17,7 @@ use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
-class ProbeVodStreams implements ShouldQueue
+class ProbeStreams implements ShouldQueue
 {
     use Queueable;
 
@@ -32,7 +32,7 @@ class ProbeVodStreams implements ShouldQueue
      *                               never been probed (stream_stats_probed_at IS NULL). Null
      *                               defers to the playlist's auto_probe_vod_streams_only_unprobed
      *                               setting (default true). Manual re-probe via UI bulk actions
-     *                               bypasses this filter by dispatching ProbeVodStreamsChunk
+     *                               bypasses this filter by dispatching ProbeStreamsChunk
      *                               directly with explicit IDs.
      * @param  ?bool  $includeDisabled  When true, include disabled VOD channels and episodes
      *                                  while still honoring probe_enabled. Null defers to the
@@ -53,7 +53,7 @@ class ProbeVodStreams implements ShouldQueue
 
         $playlist = Playlist::find($this->playlistId);
         if (! $playlist) {
-            Log::warning("ProbeVodStreams: Playlist {$this->playlistId} not found.");
+            Log::warning("ProbeStreams: Playlist {$this->playlistId} not found.");
             $this->completeProbePhaseIfTracked();
 
             return;
@@ -96,13 +96,13 @@ class ProbeVodStreams implements ShouldQueue
         $total = $totalChannels + $totalEpisodes;
 
         if ($total === 0) {
-            Log::info("ProbeVodStreams: No probe-eligible VOD channels or episodes found for playlist {$this->playlistId}.");
+            Log::info("ProbeStreams: No probe-eligible VOD channels or episodes found for playlist {$this->playlistId}.");
             $this->completeProbePhaseIfTracked();
 
             return;
         }
 
-        Log::info("ProbeVodStreams: Starting. playlist={$this->playlistId}, channels={$totalChannels}, episodes={$totalEpisodes}, batching=".($useBatching ? 'yes' : 'no'));
+        Log::info("ProbeStreams: Starting. playlist={$this->playlistId}, channels={$totalChannels}, episodes={$totalEpisodes}, batching=".($useBatching ? 'yes' : 'no'));
 
         $user = $playlist->user;
         if ($user) {
@@ -117,7 +117,7 @@ class ProbeVodStreams implements ShouldQueue
         $chunkJobs = [];
 
         foreach (array_chunk($vodChannelIds, 50) as $chunk) {
-            $chunkJobs[] = new ProbeVodStreamsChunk(
+            $chunkJobs[] = new ProbeStreamsChunk(
                 channelIds: $chunk,
                 episodeIds: [],
                 probeTimeout: $probeTimeout,
@@ -125,7 +125,7 @@ class ProbeVodStreams implements ShouldQueue
         }
 
         foreach (array_chunk($episodeIds, 50) as $chunk) {
-            $chunkJobs[] = new ProbeVodStreamsChunk(
+            $chunkJobs[] = new ProbeStreamsChunk(
                 channelIds: [],
                 episodeIds: $chunk,
                 probeTimeout: $probeTimeout,
@@ -139,9 +139,9 @@ class ProbeVodStreams implements ShouldQueue
                 $this->dispatchAsChain($chunkJobs, $this->playlistId, $total, $start, $playlist);
             }
 
-            Log::info('ProbeVodStreams: Dispatch complete.');
+            Log::info('ProbeStreams: Dispatch complete.');
         } catch (Throwable $e) {
-            Log::error("ProbeVodStreams: Dispatch failed — {$e->getMessage()}", [
+            Log::error("ProbeStreams: Dispatch failed — {$e->getMessage()}", [
                 'exception' => $e,
                 'playlist_id' => $this->playlistId,
             ]);
@@ -171,7 +171,7 @@ class ProbeVodStreams implements ShouldQueue
 
         $batch = Bus::batch($chunkJobs)
             ->then(function () use ($playlistId, $total, $start, $syncRunId, $isSeriesProbe) {
-                dispatch(new ProbeVodStreamsComplete(
+                dispatch(new ProbeStreamsComplete(
                     playlistId: $playlistId,
                     total: $total,
                     start: $start,
@@ -180,7 +180,7 @@ class ProbeVodStreams implements ShouldQueue
                 ));
             })
             ->catch(function (Batch $batch, Throwable $e) use ($userId) {
-                Log::error("ProbeVodStreams batch failed: {$e->getMessage()}");
+                Log::error("ProbeStreams batch failed: {$e->getMessage()}");
                 self::notifyUserOfFailure($userId, $e->getMessage());
             })
             ->onConnection('redis')
@@ -188,7 +188,7 @@ class ProbeVodStreams implements ShouldQueue
             ->allowFailures()
             ->dispatch();
 
-        Log::info("ProbeVodStreams: Batch dispatched. id={$batch->id}, total={$batch->totalJobs}");
+        Log::info("ProbeStreams: Batch dispatched. id={$batch->id}, total={$batch->totalJobs}");
     }
 
     private function dispatchAsChain(
@@ -202,7 +202,7 @@ class ProbeVodStreams implements ShouldQueue
 
         Bus::chain([
             ...$chunkJobs,
-            new ProbeVodStreamsComplete(
+            new ProbeStreamsComplete(
                 playlistId: $playlistId,
                 total: $total,
                 start: $start,
@@ -213,17 +213,17 @@ class ProbeVodStreams implements ShouldQueue
             ->onConnection('redis')
             ->onQueue('import')
             ->catch(function (Throwable $e) use ($userId) {
-                Log::error("ProbeVodStreams chain failed: {$e->getMessage()}");
+                Log::error("ProbeStreams chain failed: {$e->getMessage()}");
                 self::notifyUserOfFailure($userId, $e->getMessage());
             })
             ->dispatch();
 
-        Log::info('ProbeVodStreams: Chain dispatched.');
+        Log::info('ProbeStreams: Chain dispatched.');
     }
 
     private function notifyFailed(Playlist $playlist, string $message): void
     {
-        Log::error("ProbeVodStreams failed: {$message}");
+        Log::error("ProbeStreams failed: {$message}");
         self::notifyUserOfFailure($playlist->user?->id, $message);
     }
 
@@ -248,6 +248,6 @@ class ProbeVodStreams implements ShouldQueue
 
     public function failed(Throwable $exception): void
     {
-        Log::error("ProbeVodStreams orchestrator failed: {$exception->getMessage()}");
+        Log::error("ProbeStreams orchestrator failed: {$exception->getMessage()}");
     }
 }

@@ -3,9 +3,9 @@
 use App\Enums\SyncRunPhase;
 use App\Events\PlaylistCreated;
 use App\Events\PlaylistUpdated;
-use App\Jobs\ProbeVodStreams;
-use App\Jobs\ProbeVodStreamsChunk;
-use App\Jobs\ProbeVodStreamsComplete;
+use App\Jobs\ProbeStreams;
+use App\Jobs\ProbeStreamsChunk;
+use App\Jobs\ProbeStreamsComplete;
 use App\Models\Channel;
 use App\Models\Episode;
 use App\Models\Playlist;
@@ -44,16 +44,16 @@ it('can include disabled vod channels while still honoring probe opt out', funct
         'stream_stats_probed_at' => null,
     ]);
 
-    (new ProbeVodStreams(
+    (new ProbeStreams(
         playlistId: $this->playlist->id,
         includeDisabled: true,
     ))->handle();
 
     Bus::assertChained([
-        fn (ProbeVodStreamsChunk $job) => empty(array_diff([$enabled->id, $disabled->id], $job->channelIds))
+        fn (ProbeStreamsChunk $job) => empty(array_diff([$enabled->id, $disabled->id], $job->channelIds))
             && $job->episodeIds === []
             && count($job->channelIds) === 2,
-        ProbeVodStreamsComplete::class,
+        ProbeStreamsComplete::class,
     ]);
 });
 
@@ -71,16 +71,16 @@ it('can probe already probed vod channels when only unprobed is false', function
         'stream_stats_probed_at' => null,
     ]);
 
-    (new ProbeVodStreams(
+    (new ProbeStreams(
         playlistId: $this->playlist->id,
         onlyUnprobed: false,
     ))->handle();
 
     Bus::assertChained([
-        fn (ProbeVodStreamsChunk $job) => empty(array_diff([$probed->id, $unprobed->id], $job->channelIds))
+        fn (ProbeStreamsChunk $job) => empty(array_diff([$probed->id, $unprobed->id], $job->channelIds))
             && $job->episodeIds === []
             && count($job->channelIds) === 2,
-        ProbeVodStreamsComplete::class,
+        ProbeStreamsComplete::class,
     ]);
 });
 
@@ -101,17 +101,17 @@ it('can include disabled series episodes while still honoring probe opt out', fu
         'stream_stats_probed_at' => null,
     ]);
 
-    (new ProbeVodStreams(
+    (new ProbeStreams(
         playlistId: $this->playlist->id,
         includeDisabled: true,
         isSeriesProbe: true,
     ))->handle();
 
     Bus::assertChained([
-        fn (ProbeVodStreamsChunk $job) => $job->channelIds === []
+        fn (ProbeStreamsChunk $job) => $job->channelIds === []
             && empty(array_diff([$enabled->id, $disabled->id], $job->episodeIds))
             && count($job->episodeIds) === 2,
-        ProbeVodStreamsComplete::class,
+        ProbeStreamsComplete::class,
     ]);
 });
 
@@ -127,17 +127,17 @@ it('can probe already probed series episodes when only unprobed is false', funct
         'stream_stats_probed_at' => null,
     ]);
 
-    (new ProbeVodStreams(
+    (new ProbeStreams(
         playlistId: $this->playlist->id,
         onlyUnprobed: false,
         isSeriesProbe: true,
     ))->handle();
 
     Bus::assertChained([
-        fn (ProbeVodStreamsChunk $job) => $job->channelIds === []
+        fn (ProbeStreamsChunk $job) => $job->channelIds === []
             && empty(array_diff([$probed->id, $unprobed->id], $job->episodeIds))
             && count($job->episodeIds) === 2,
-        ProbeVodStreamsComplete::class,
+        ProbeStreamsComplete::class,
     ]);
 });
 
@@ -155,7 +155,7 @@ it('completes vod probe phase when no streams are eligible', function () {
         ->with(123, SyncRunPhase::VodProbe);
     app()->instance(SyncPipelineService::class, $service);
 
-    (new ProbeVodStreams(
+    (new ProbeStreams(
         playlistId: $this->playlist->id,
         syncRunId: 123,
     ))->handle();
@@ -174,7 +174,7 @@ it('completes series probe phase when no streams are eligible', function () {
         ->with(456, SyncRunPhase::SeriesProbe);
     app()->instance(SyncPipelineService::class, $service);
 
-    (new ProbeVodStreams(
+    (new ProbeStreams(
         playlistId: $this->playlist->id,
         syncRunId: 456,
         isSeriesProbe: true,

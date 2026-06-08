@@ -15,8 +15,8 @@ use App\Filament\Resources\Series\Pages\ViewSeries;
 use App\Filament\Resources\Series\RelationManagers\EpisodesRelationManager;
 use App\Forms\Components\TmdbSearchResults;
 use App\Jobs\FetchTmdbIds;
-use App\Jobs\ProbeVodStreamsChunk;
-use App\Jobs\ProbeVodStreamsComplete;
+use App\Jobs\ProbeStreamsChunk;
+use App\Jobs\ProbeStreamsComplete;
 use App\Jobs\ProcessM3uImportSeriesEpisodes;
 use App\Jobs\SeriesFindAndReplace;
 use App\Jobs\SyncSeriesStrmFiles;
@@ -537,12 +537,12 @@ class SeriesResource extends Resource implements CopilotResource
                             $start = now();
 
                             $chunks = collect(array_chunk($episodeIds, 50))
-                                ->map(fn ($chunk) => new ProbeVodStreamsChunk(episodeIds: $chunk, probeTimeout: 15))
+                                ->map(fn ($chunk) => new ProbeStreamsChunk(episodeIds: $chunk, probeTimeout: 15))
                                 ->all();
 
                             Bus::chain([
                                 ...$chunks,
-                                new ProbeVodStreamsComplete(
+                                new ProbeStreamsComplete(
                                     playlistId: null,
                                     total: count($episodeIds),
                                     start: $start,
@@ -970,12 +970,12 @@ class SeriesResource extends Resource implements CopilotResource
                             $start = now();
 
                             $chunks = collect(array_chunk($episodeIds, 50))
-                                ->map(fn ($chunk) => new ProbeVodStreamsChunk(episodeIds: $chunk, probeTimeout: 15))
+                                ->map(fn ($chunk) => new ProbeStreamsChunk(episodeIds: $chunk, probeTimeout: 15))
                                 ->all();
 
                             Bus::chain([
                                 ...$chunks,
-                                new ProbeVodStreamsComplete(
+                                new ProbeStreamsComplete(
                                     playlistId: null,
                                     total: count($episodeIds),
                                     start: $start,

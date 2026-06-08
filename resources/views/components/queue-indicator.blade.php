@@ -59,8 +59,10 @@
         </template>
 
         <template x-if="hasActivity">
-            <div class="absolute start-full top-0.5 z-[1] flex w-max -translate-x-1/2 -translate-y-1/2 rounded-md bg-white dark:bg-gray-900">
-                <span class="fi-badge fi-size-xs fi-color fi-color-primary" x-text="totalActivity"></span>
+            <div
+                class="absolute start-full top-0.5 z-[1] flex w-max -translate-x-1/2 -translate-y-1/2 fi-icon-btn-badge-ctn">
+                <span class="fi-badge fi-size-xs fi-color fi-color-primary fi-text-color-600 dark:fi-text-color-200"
+                    x-text="totalActivity"></span>
             </div>
         </template>
     </button>

@@ -13,7 +13,7 @@ use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
-class ProbeVodStreamsChunk implements ShouldQueue
+class ProbeStreamsChunk implements ShouldQueue
 {
     use Batchable, ProviderRequestDelay, Queueable;
 
@@ -94,7 +94,7 @@ class ProbeVodStreamsChunk implements ShouldQueue
 
     public function failed(Throwable $exception): void
     {
-        Log::error("VOD stream probe chunk job failed: {$exception->getMessage()}");
+        Log::error("Stream probe chunk job failed: {$exception->getMessage()}");
 
         if ($this->notifyUserId) {
             $user = User::find($this->notifyUserId);

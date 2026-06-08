@@ -7,7 +7,7 @@ use App\Events\SyncCompleted;
 use App\Jobs\FetchTmdbIds;
 use App\Jobs\MergeChannels;
 use App\Jobs\ProbeChannelStreams;
-use App\Jobs\ProbeVodStreams;
+use App\Jobs\ProbeStreams;
 use App\Jobs\ProcessM3uImport;
 use App\Jobs\ProcessM3uImportSeries;
 use App\Jobs\ProcessVodChannels;
@@ -940,7 +940,7 @@ it('dispatchProbe forwards playlist vod and series probe scope settings', functi
     $this->service->startRun($vodRun);
 
     Bus::assertDispatched(
-        ProbeVodStreams::class,
+        ProbeStreams::class,
         fn ($job) => $job->syncRunId === $vodRun->id
             && $job->playlistId === $playlist->id
             && $job->onlyUnprobed === false
@@ -963,7 +963,7 @@ it('dispatchProbe forwards playlist vod and series probe scope settings', functi
     $this->service->startRun($seriesRun);
 
     Bus::assertDispatched(
-        ProbeVodStreams::class,
+        ProbeStreams::class,
         fn ($job) => $job->syncRunId === $seriesRun->id
             && $job->playlistId === $playlist->id
             && $job->onlyUnprobed === false

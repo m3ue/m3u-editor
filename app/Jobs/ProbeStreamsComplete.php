@@ -15,7 +15,7 @@ use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
-class ProbeVodStreamsComplete implements ShouldQueue
+class ProbeStreamsComplete implements ShouldQueue
 {
     use Queueable;
 
@@ -50,7 +50,7 @@ class ProbeVodStreamsComplete implements ShouldQueue
         $probed = $channelQuery->count() + $episodeQuery->count();
         $failed = max(0, $this->total - $probed);
 
-        Log::info("ProbeVodStreams: Completed. Probed: {$probed}, Failed: {$failed}, Total: {$this->total}");
+        Log::info("ProbeStreams: Completed. Probed: {$probed}, Failed: {$failed}, Total: {$this->total}");
 
         $user = $this->playlistId
             ? Playlist::find($this->playlistId)?->user
@@ -80,6 +80,6 @@ class ProbeVodStreamsComplete implements ShouldQueue
 
     public function failed(Throwable $exception): void
     {
-        Log::error("VOD stream probe complete job failed: {$exception->getMessage()}");
+        Log::error("Stream probe complete job failed: {$exception->getMessage()}");
     }
 }

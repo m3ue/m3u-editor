@@ -155,7 +155,7 @@ class CheckSeriesStrmProgress implements ShouldQueue
             $playlist = Playlist::find($this->playlist_id);
             if ($playlist?->auto_probe_vod_streams) {
                 Log::info("STRM Sync: Dispatching series/VOD probe for playlist {$this->playlist_id}");
-                dispatch(new ProbeVodStreams(
+                dispatch(new ProbeStreams(
                     playlistId: $this->playlist_id,
                     isSeriesProbe: true,
                 ));
@@ -171,7 +171,7 @@ class CheckSeriesStrmProgress implements ShouldQueue
 
             foreach ($playlistIds as $playlistId) {
                 Log::info("STRM Sync: Dispatching series/VOD probe for playlist {$playlistId}");
-                dispatch(new ProbeVodStreams(
+                dispatch(new ProbeStreams(
                     playlistId: $playlistId,
                     isSeriesProbe: true,
                 ));

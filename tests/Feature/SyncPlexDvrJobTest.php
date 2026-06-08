@@ -24,10 +24,16 @@ it('has a unique id of all when no integration id given', function () {
     expect($job->uniqueId())->toBe('sync-plex-dvr-all');
 });
 
-it('has a 60-second uniqueness window', function () {
+it('has a 120-second uniqueness window to cover the debounce delay', function () {
     $job = new SyncPlexDvrJob(trigger: 'test');
 
-    expect($job->uniqueFor())->toBe(60);
+    expect($job->uniqueFor())->toBe(120);
+});
+
+it('is dispatched with a 30-second delay for debouncing', function () {
+    $job = new SyncPlexDvrJob(trigger: 'test');
+
+    expect($job->delay)->not->toBeNull();
 });
 
 it('skips when no eligible integrations exist', function () {

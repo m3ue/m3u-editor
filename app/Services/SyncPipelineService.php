@@ -10,7 +10,7 @@ use App\Jobs\CompleteSyncPhase;
 use App\Jobs\FetchTmdbIds;
 use App\Jobs\MergeChannels;
 use App\Jobs\ProbeChannelStreams;
-use App\Jobs\ProbeVodStreams;
+use App\Jobs\ProbeStreams;
 use App\Jobs\ProcessChannelScrubber;
 use App\Jobs\ProcessM3uImportSeries;
 use App\Jobs\ProcessVodChannels;
@@ -325,7 +325,7 @@ class SyncPipelineService
 
     private function dispatchProbe(SyncRun $run, Playlist $playlist, bool $isSeriesProbe): void
     {
-        dispatch(new ProbeVodStreams(
+        dispatch(new ProbeStreams(
             playlistId: $playlist->id,
             onlyUnprobed: (bool) ($playlist->auto_probe_vod_streams_only_unprobed ?? true),
             includeDisabled: (bool) ($playlist->auto_probe_vod_streams_include_disabled ?? false),
