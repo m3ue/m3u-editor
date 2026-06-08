@@ -149,7 +149,7 @@ class EpgGenerateController extends Controller
                     $tvgId = $channel->title_custom ?? $channel->title;
                     break;
                 default:
-                    $tvgId = $channel->source_id ?? $channel->stream_id_custom ?? $channel->stream_id;
+                    $tvgId = $channel->stream_id_custom ?? $channel->source_id ?? $channel->stream_id;
                     break;
             }
 
