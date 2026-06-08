@@ -912,7 +912,7 @@ class PlaylistService
                 ->helperText('Select a playlist to prioritize as the master during the merge process.'),
             Repeater::make('failover_playlists')
                 ->label('')
-                ->helperText('Select one or more playlists use as failover source(s).')
+                ->helperText('Select one or more playlists to use as failover source(s).')
                 ->reorderable()
                 ->reorderableWithButtons()
                 ->orderColumn('sort')
@@ -1229,7 +1229,7 @@ class PlaylistService
         } else {
             $action
                 ->modalDescription($contentType === 'series'
-                    ? 'Merge all episodes with the same TMDB ID across playlists into a single episode with failover.'
+                    ? 'Merge all episodes with the same TMDB ID across playlists into a single episode with failover. Episodes without a TMDB ID are matched by series TMDB ID, season, and episode number.'
                     : 'Merge all channels with the same ID into a single channel with failover.'
                 )
                 ->action(function (array $data) use ($contentType): void {

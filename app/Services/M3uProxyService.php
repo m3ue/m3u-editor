@@ -2492,7 +2492,7 @@ class M3uProxyService
      * Supports cross-provider failover pooling by searching based on the ORIGINAL
      * requested channel, not the actual source channel (which may be a failover).
      *
-     * @param  int  $modelId  Original requested channel ID
+     * @param  int  $modelId  Original requested channel or episode ID
      * @param  string  $playlistUuid  Original requested playlist UUID
      * @param  int|null  $profileId  StreamProfile ID (transcoding profile)
      * @param  int|null  $providerProfileId  PlaylistProfile ID (provider profile)
