@@ -34,11 +34,14 @@ class ProbeChannelStreams implements ShouldQueue
      *                              Defaults to true so auto-probe runs after sync stay incremental.
      *                              Manual re-probe via the channel UI passes explicit channelIds
      *                              and bypasses this filter.
+     * @param  bool  $includeDisabled  When true and dispatching by playlistId, include disabled
+     *                                 channels while still honoring probe_enabled.
      */
     public function __construct(
         public ?int $playlistId = null,
         public ?array $channelIds = null,
         public bool $onlyUnprobed = true,
+        public bool $includeDisabled = false,
         public ?int $syncRunId = null,
     ) {}
 
@@ -55,9 +58,12 @@ class ProbeChannelStreams implements ShouldQueue
             $query->whereIn('id', $this->channelIds);
         } elseif ($this->playlistId) {
             $query->where('playlist_id', $this->playlistId)
-                ->where('enabled', true)
                 ->where('is_vod', false)
                 ->where('probe_enabled', true);
+
+            if (! $this->includeDisabled) {
+                $query->where('enabled', true);
+            }
 
             if ($this->onlyUnprobed) {
                 $query->whereNull('stream_stats_probed_at');

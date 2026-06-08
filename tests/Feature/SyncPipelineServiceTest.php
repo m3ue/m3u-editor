@@ -7,6 +7,7 @@ use App\Events\SyncCompleted;
 use App\Jobs\FetchTmdbIds;
 use App\Jobs\MergeChannels;
 use App\Jobs\ProbeChannelStreams;
+use App\Jobs\ProbeVodStreams;
 use App\Jobs\ProcessM3uImport;
 use App\Jobs\ProcessM3uImportSeries;
 use App\Jobs\ProcessVodChannels;
@@ -885,4 +886,88 @@ it('ProcessM3uImport bails out without touching the playlist when the import pha
 
     // The playlist must not have been set to Processing — the job returned early.
     expect($playlist->fresh()->status)->toBe(Status::Completed);
+});
+
+it('dispatchLiveProbe forwards playlist probe scope settings', function () {
+    mockPipelineSettings();
+    $playlist = Playlist::factory()->for($this->user)->create([
+        'auto_probe_streams' => true,
+        'auto_probe_streams_only_unprobed' => false,
+        'auto_probe_streams_include_disabled' => true,
+    ]);
+
+    $run = SyncRun::create([
+        'playlist_id' => $playlist->id,
+        'user_id' => $this->user->id,
+        'trigger' => 'test',
+        'status' => SyncRunStatus::Running->value,
+        'phases' => [SyncRunPhase::LiveProbe->value, SyncRunPhase::SyncCompleted->value],
+        'phase_statuses' => (object) [],
+        'context' => ['playlist_id' => $playlist->id],
+        'started_at' => now(),
+    ]);
+
+    $this->service->startRun($run);
+
+    Bus::assertDispatched(
+        ProbeChannelStreams::class,
+        fn ($job) => $job->syncRunId === $run->id
+            && $job->playlistId === $playlist->id
+            && $job->onlyUnprobed === false
+            && $job->includeDisabled === true,
+    );
+});
+
+it('dispatchProbe forwards playlist vod and series probe scope settings', function () {
+    mockPipelineSettings();
+    $playlist = makePlaylistWithBoth($this->user, [
+        'auto_probe_vod_streams' => true,
+        'auto_probe_vod_streams_only_unprobed' => false,
+        'auto_probe_vod_streams_include_disabled' => true,
+    ]);
+
+    $vodRun = SyncRun::create([
+        'playlist_id' => $playlist->id,
+        'user_id' => $this->user->id,
+        'trigger' => 'test',
+        'status' => SyncRunStatus::Running->value,
+        'phases' => [SyncRunPhase::VodProbe->value, SyncRunPhase::SyncCompleted->value],
+        'phase_statuses' => (object) [],
+        'context' => ['playlist_id' => $playlist->id],
+        'started_at' => now(),
+    ]);
+
+    $this->service->startRun($vodRun);
+
+    Bus::assertDispatched(
+        ProbeVodStreams::class,
+        fn ($job) => $job->syncRunId === $vodRun->id
+            && $job->playlistId === $playlist->id
+            && $job->onlyUnprobed === false
+            && $job->includeDisabled === true
+            && $job->isSeriesProbe === false,
+    );
+
+    Bus::fake();
+    $seriesRun = SyncRun::create([
+        'playlist_id' => $playlist->id,
+        'user_id' => $this->user->id,
+        'trigger' => 'test',
+        'status' => SyncRunStatus::Running->value,
+        'phases' => [SyncRunPhase::SeriesProbe->value, SyncRunPhase::SyncCompleted->value],
+        'phase_statuses' => (object) [],
+        'context' => ['playlist_id' => $playlist->id],
+        'started_at' => now(),
+    ]);
+
+    $this->service->startRun($seriesRun);
+
+    Bus::assertDispatched(
+        ProbeVodStreams::class,
+        fn ($job) => $job->syncRunId === $seriesRun->id
+            && $job->playlistId === $playlist->id
+            && $job->onlyUnprobed === false
+            && $job->includeDisabled === true
+            && $job->isSeriesProbe === true,
+    );
 });

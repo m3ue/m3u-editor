@@ -2,10 +2,12 @@
 
 namespace App\Jobs;
 
+use App\Enums\SyncRunPhase;
 use App\Models\Channel;
 use App\Models\Episode;
 use App\Models\Playlist;
 use App\Models\User;
+use App\Services\SyncPipelineService;
 use Carbon\Carbon;
 use Filament\Notifications\Notification;
 use Illuminate\Bus\Batch;
@@ -26,15 +28,21 @@ class ProbeVodStreams implements ShouldQueue
     public $deleteWhenMissingModels = true;
 
     /**
-     * @param  bool  $onlyUnprobed  When true, only probe VOD channels and episodes that have
-     *                              never been probed (stream_stats_probed_at IS NULL). Defaults
-     *                              to true so auto-probe runs after sync stay incremental.
-     *                              Manual re-probe via UI bulk actions bypasses this filter
-     *                              by dispatching ProbeVodStreamsChunk directly with explicit IDs.
+     * @param  ?bool  $onlyUnprobed  When true, only probe VOD channels and episodes that have
+     *                               never been probed (stream_stats_probed_at IS NULL). Null
+     *                               defers to the playlist's auto_probe_vod_streams_only_unprobed
+     *                               setting (default true). Manual re-probe via UI bulk actions
+     *                               bypasses this filter by dispatching ProbeVodStreamsChunk
+     *                               directly with explicit IDs.
+     * @param  ?bool  $includeDisabled  When true, include disabled VOD channels and episodes
+     *                                  while still honoring probe_enabled. Null defers to the
+     *                                  playlist's auto_probe_vod_streams_include_disabled setting
+     *                                  (default false).
      */
     public function __construct(
         public int $playlistId,
-        public bool $onlyUnprobed = true,
+        public ?bool $onlyUnprobed = null,
+        public ?bool $includeDisabled = null,
         public ?int $syncRunId = null,
         public bool $isSeriesProbe = false,
     ) {}
@@ -46,29 +54,38 @@ class ProbeVodStreams implements ShouldQueue
         $playlist = Playlist::find($this->playlistId);
         if (! $playlist) {
             Log::warning("ProbeVodStreams: Playlist {$this->playlistId} not found.");
+            $this->completeProbePhaseIfTracked();
 
             return;
         }
 
         $probeTimeout = $playlist->probe_timeout ?? 15;
         $useBatching = (bool) ($playlist->probe_use_batching ?? false);
+        $onlyUnprobed = $this->onlyUnprobed ?? (bool) ($playlist->auto_probe_vod_streams_only_unprobed ?? true);
+        $includeDisabled = $this->includeDisabled ?? (bool) ($playlist->auto_probe_vod_streams_include_disabled ?? false);
 
         $vodChannelQuery = Channel::where('playlist_id', $this->playlistId)
-            ->where('enabled', true)
             ->where('is_vod', true)
             ->where('probe_enabled', true);
 
-        if ($this->onlyUnprobed) {
+        if (! $includeDisabled) {
+            $vodChannelQuery->where('enabled', true);
+        }
+
+        if ($onlyUnprobed) {
             $vodChannelQuery->whereNull('stream_stats_probed_at');
         }
 
         $vodChannelIds = $vodChannelQuery->pluck('id')->toArray();
 
         $episodeQuery = Episode::where('playlist_id', $this->playlistId)
-            ->where('enabled', true)
             ->where('probe_enabled', true);
 
-        if ($this->onlyUnprobed) {
+        if (! $includeDisabled) {
+            $episodeQuery->where('enabled', true);
+        }
+
+        if ($onlyUnprobed) {
             $episodeQuery->whereNull('stream_stats_probed_at');
         }
 
@@ -80,6 +97,7 @@ class ProbeVodStreams implements ShouldQueue
 
         if ($total === 0) {
             Log::info("ProbeVodStreams: No probe-eligible VOD channels or episodes found for playlist {$this->playlistId}.");
+            $this->completeProbePhaseIfTracked();
 
             return;
         }
@@ -128,6 +146,15 @@ class ProbeVodStreams implements ShouldQueue
                 'playlist_id' => $this->playlistId,
             ]);
             $this->notifyFailed($playlist, $e->getMessage());
+            $this->completeProbePhaseIfTracked();
+        }
+    }
+
+    private function completeProbePhaseIfTracked(): void
+    {
+        if ($this->syncRunId) {
+            $phase = $this->isSeriesProbe ? SyncRunPhase::SeriesProbe : SyncRunPhase::VodProbe;
+            app(SyncPipelineService::class)->completePhase($this->syncRunId, $phase);
         }
     }
 
