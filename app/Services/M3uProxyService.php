@@ -1408,6 +1408,9 @@ class M3uProxyService
             $profileSourcePlaylist = $episode->playlist;
         }
 
+        // Cached failover episodes so the relationship is only queried once per request
+        $cachedFailoverEpisodes = null;
+
         // Check if playlist has stream limits and if it's at capacity
         // This check applies regardless of whether provider profiles are enabled —
         // available_streams is the authoritative proxy-level limit.
@@ -1436,7 +1439,8 @@ class M3uProxyService
 
                 // If still at capacity (either setting disabled or stop failed), try episode failovers.
                 if ($activeStreams >= $playlist->available_streams) {
-                    foreach ($requestedEpisode->failoverEpisodes()->with('playlist')->get() as $failoverEpisode) {
+                    $cachedFailoverEpisodes = $requestedEpisode->failoverEpisodes()->with('playlist')->get();
+                    foreach ($cachedFailoverEpisodes as $failoverEpisode) {
                         $failoverPlaylist = $failoverEpisode->getEffectivePlaylist();
                         if (! $failoverPlaylist) {
                             continue;
@@ -1496,18 +1500,16 @@ class M3uProxyService
         // Get any custom headers for the current playlist
         $headers = $playlist->custom_headers ?? [];
 
-        $episodeFailoverQuery = $requestedEpisode->failoverEpisodes()
-            ->with('playlist')
-            ->where('episodes.id', '!=', $actualEpisode->id);
+        $allFailoverEpisodes = $cachedFailoverEpisodes ?? $requestedEpisode->failoverEpisodes()->with('playlist')->get();
+        $remainingFailovers = $allFailoverEpisodes->filter(fn ($fe) => $fe->id !== $actualEpisode->id);
 
         $failovers = $this->usingResolver()
-            ? $episodeFailoverQuery->exists()
-            : $episodeFailoverQuery->get()
-                ->map(function ($failoverEpisode) {
-                    $failoverPlaylist = $failoverEpisode->getEffectivePlaylist();
+            ? $remainingFailovers->isNotEmpty()
+            : $remainingFailovers->map(function ($failoverEpisode) {
+                $failoverPlaylist = $failoverEpisode->getEffectivePlaylist();
 
-                    return $failoverPlaylist ? PlaylistUrlService::getEpisodeUrl($failoverEpisode, $failoverPlaylist) : null;
-                })
+                return $failoverPlaylist ? PlaylistUrlService::getEpisodeUrl($failoverEpisode, $failoverPlaylist) : null;
+            })
                 ->filter()
                 ->values()
                 ->toArray();

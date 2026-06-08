@@ -945,8 +945,11 @@ class PlaylistService
 
         $behaviorSchema = [
             Toggle::make('deactivate_failover_channels')
-                ->label('Deactivate Failover Channels')
-                ->helperText('When enabled, channels that become failovers will be automatically disabled.')
+                ->label($isSeries ? 'Deactivate Failover Episodes' : 'Deactivate Failover Channels')
+                ->helperText($isSeries
+                    ? 'When enabled, episodes that become failovers will be automatically disabled.'
+                    : 'When enabled, channels that become failovers will be automatically disabled.'
+                )
                 ->default(false),
             Toggle::make('force_complete_remerge')
                 ->label('Force complete re-merge')
@@ -1195,7 +1198,7 @@ class PlaylistService
     public static function getMergeAction(bool $groupScoped = false, string $contentType = 'live'): Action
     {
         $action = Action::make('merge')
-            ->label('Merge Same ID')
+            ->label($contentType === 'series' ? 'Merge Episodes' : 'Merge Same ID')
             ->schema(self::getMergeFormSchema($contentType))
             ->requiresConfirmation()
             ->icon('heroicon-o-arrows-pointing-in')
@@ -1225,7 +1228,10 @@ class PlaylistService
                 });
         } else {
             $action
-                ->modalDescription('Merge all channels with the same ID into a single channel with failover.')
+                ->modalDescription($contentType === 'series'
+                    ? 'Merge all episodes with the same TMDB ID across playlists into a single episode with failover.'
+                    : 'Merge all channels with the same ID into a single channel with failover.'
+                )
                 ->action(function (array $data) use ($contentType): void {
                     $job = $contentType === 'series'
                         ? new MergeEpisodes(

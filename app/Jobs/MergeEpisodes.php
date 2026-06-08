@@ -4,6 +4,8 @@ namespace App\Jobs;
 
 use App\Models\Episode;
 use App\Models\EpisodeFailover;
+use App\Models\Series;
+use App\Models\User;
 use Filament\Notifications\Notification;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -20,7 +22,7 @@ class MergeEpisodes implements ShouldQueue
      * Create a new job instance.
      */
     public function __construct(
-        public $user,
+        public User $user,
         public Collection $playlists,
         public int $playlistId,
         public bool $deactivateFailoverEpisodes = false,
@@ -50,21 +52,24 @@ class MergeEpisodes implements ShouldQueue
             ->pluck('episode_failover_id')
             ->toArray();
 
+        // Pre-load series TMDB IDs to avoid N+1 when computing merge keys over the cursor
+        $seriesTmdbIdMap = Series::whereIn('playlist_id', $playlistIds)
+            ->pluck('tmdb_id', 'id');
+
         $episodes = Episode::query()
-            ->with(['series', 'playlist'])
             ->where('user_id', $this->user->id)
             ->whereIn('playlist_id', $playlistIds)
             ->when(! empty($existingFailoverEpisodeIds) && ! $this->forceCompleteRemerge && ! $this->deactivateFailoverEpisodes, function ($query) use ($existingFailoverEpisodeIds) {
                 $query->whereNotIn('id', $existingFailoverEpisodeIds);
             })
-            ->get();
+            ->cursor();
 
         $processed = 0;
         $deactivatedCount = 0;
 
         $episodes
-            ->filter(fn (Episode $episode): bool => $this->getEpisodeMergeKey($episode) !== null)
-            ->groupBy(fn (Episode $episode): string => $this->getEpisodeMergeKey($episode))
+            ->filter(fn (Episode $episode): bool => $this->getEpisodeMergeKey($episode, $seriesTmdbIdMap) !== null)
+            ->groupBy(fn (Episode $episode): string => $this->getEpisodeMergeKey($episode, $seriesTmdbIdMap))
             ->each(function (Collection $group) use ($playlistPriority, &$processed, &$deactivatedCount): void {
                 if ($group->count() <= 1) {
                     return;
@@ -89,7 +94,7 @@ class MergeEpisodes implements ShouldQueue
                         ]
                     );
 
-                    if ($this->deactivateFailoverEpisodes && array_key_exists('enabled', $failover->getAttributes()) && $failover->enabled) {
+                    if ($this->deactivateFailoverEpisodes && $failover->enabled) {
                         $failover->update(['enabled' => false]);
                         $deactivatedCount++;
                     }
@@ -106,13 +111,13 @@ class MergeEpisodes implements ShouldQueue
             ->sendToDatabase($this->user);
     }
 
-    protected function getEpisodeMergeKey(Episode $episode): ?string
+    protected function getEpisodeMergeKey(Episode $episode, Collection $seriesTmdbIdMap): ?string
     {
         if (! empty($episode->tmdb_id)) {
             return 'episode:'.(int) $episode->tmdb_id;
         }
 
-        $seriesTmdbId = $episode->series?->tmdb_id;
+        $seriesTmdbId = $seriesTmdbIdMap[$episode->series_id] ?? null;
         $season = $episode->season;
         $episodeNumber = $episode->episode_num;
 
