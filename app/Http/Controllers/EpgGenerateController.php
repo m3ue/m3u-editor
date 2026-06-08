@@ -215,10 +215,10 @@ class EpgGenerateController extends Controller
                 if (empty($icon)) {
                     $icon = url('/placeholder.png');
                 }
-                $icon = $this->escapeXml($icon);
                 if ($logoProxyEnabled) {
                     $icon = LogoProxyController::generateProxyUrl($icon);
                 }
+                $icon = $this->escapeXml($icon);
 
                 // Keep track of which channels need a dummy EPG program
                 // Need this to output the <programme> tags later
@@ -346,21 +346,20 @@ class EpgGenerateController extends Controller
                                     $progXml .= '    <episode-num system="xmltv_ns">'.$this->escapeXml($programme['episode_num']).'</episode-num>'.PHP_EOL;
                                 }
                                 if ($programme['icon']) {
-                                    $icon = $this->escapeXml($programme['icon']);
-                                    if ($logoProxyEnabled) {
-                                        $icon = LogoProxyController::generateProxyUrl($icon);
-                                    }
-                                    $progXml .= '    <icon src="'.$icon.'"/>'.PHP_EOL;
+                                    $icon = $logoProxyEnabled
+                                        ? LogoProxyController::generateProxyUrl($programme['icon'])
+                                        : $programme['icon'];
+                                    $progXml .= '    <icon src="'.$this->escapeXml($icon).'"/>'.PHP_EOL;
                                 }
                                 // Program artwork images (NEW)
                                 if (! empty($programme['images'] ?? null) && is_array($programme['images'])) {
                                     foreach ($programme['images'] as $image) {
-                                        $rawUrl = $this->escapeXml($image['url'] ?? '');
+                                        $rawUrl = $image['url'] ?? '';
                                         $proxiedUrl = $logoProxyEnabled && $rawUrl
                                             ? LogoProxyController::generateProxyUrl($rawUrl)
                                             : $rawUrl;
 
-                                        $url = $proxiedUrl;
+                                        $url = $this->escapeXml($proxiedUrl);
                                         $type = $this->escapeXml($image['type']);
                                         $width = $this->escapeXml($image['width']);
                                         $height = $this->escapeXml($image['height']);
