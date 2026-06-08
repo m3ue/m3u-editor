@@ -2,15 +2,13 @@
 
 namespace App\Jobs;
 
-use App\Enums\SyncRunStatus;
-use App\Models\SyncRun;
 use App\Models\User;
 use Exception;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Support\Facades\Artisan;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
@@ -24,15 +22,25 @@ class CreateBackup implements ShouldQueue
     // Giving a timeout of 10 minutes to the Job to process the mapping
     public $timeout = 60 * 10;
 
-    // Maximum number of times to defer the job when SQLite is busy with a sync
-    private const MAX_SYNC_DEFERRALS = 5;
-
     /**
      * Create a new job instance.
      */
-    public function __construct(public bool $includeFiles = false, public int $syncDeferrals = 0)
+    public function __construct(public bool $includeFiles = false)
     {
         //
+    }
+
+    /**
+     * Prevent concurrent backups. Spatie's BackupJob always uses a fixed temp
+     * directory name ('temp') with force-recreate, so two overlapping runs will
+     * delete each other's working directory mid-write, causing ZipArchive::close()
+     * to fail with "Renaming temporary file failed: No such file or directory".
+     *
+     * @return array<int, WithoutOverlapping>
+     */
+    public function middleware(): array
+    {
+        return [(new WithoutOverlapping('create-backup'))->releaseAfter(60)->expireAfter($this->timeout + 60)];
     }
 
     /**
@@ -40,18 +48,6 @@ class CreateBackup implements ShouldQueue
      */
     public function handle(): void
     {
-        // On SQLite, a concurrent sync write can silently corrupt the dump (exit 0,
-        // empty file), causing ZipArchive to fail when finalizing. Defer and retry.
-        if (DB::connection()->getDriverName() === 'sqlite') {
-            $hasActiveSyncs = SyncRun::where('status', SyncRunStatus::Running->value)->exists();
-            if ($hasActiveSyncs && $this->syncDeferrals < self::MAX_SYNC_DEFERRALS) {
-                Log::info('[backup] Deferring backup: SQLite sync in progress.', ['deferral' => $this->syncDeferrals + 1]);
-                dispatch(new self($this->includeFiles, $this->syncDeferrals + 1))->delay(now()->addMinutes(2));
-
-                return;
-            }
-        }
-
         try {
             // Create a new backup
             Artisan::call('backup:run', [
