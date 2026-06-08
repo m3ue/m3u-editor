@@ -1049,7 +1049,7 @@ class PlaylistResource extends Resource implements CopilotResource
                 ->collapsible()
                 ->compact()
                 ->collapsed(fn (?Playlist $record): bool => ! ($record?->profiles_enabled ?? false))
-                ->hidden(fn (Get $get): bool => ! $get('xtream'))
+                ->hidden(fn (Get $get): bool => ! (auth()->user()->canUseProxy() && $get('xtream')))
                 ->schema([
                     Grid::make()
                         ->columns(3)

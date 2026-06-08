@@ -228,7 +228,7 @@ class AdminPanelProvider extends PanelProvider
                                 ...EpgChannelResource::getNavigationItems(),
                                 ...EpgMapResource::getNavigationItems(),
                             ]),
-                        ...(config('proxy.proxy_integration_enabled', true) ? [
+                        ...(config('proxy.proxy_integration_enabled', true) && auth()->user()?->canUseProxy() ? [
                             NavigationGroup::make(fn () => __('Proxy'))
                                 ->icon('heroicon-m-arrows-right-left')
                                 ->items([
@@ -355,7 +355,7 @@ class AdminPanelProvider extends PanelProvider
         // Queue indicator — live badge in the topbar for all authenticated users
         FilamentView::registerRenderHook(
             PanelsRenderHook::USER_MENU_BEFORE, // Place it before the user menu
-            fn (): string => auth()->check() ? view('components.queue-indicator')->render() : '',
+            fn (): string => auth()->user()?->isAdmin() ? view('components.queue-indicator')->render() : '',
         );
 
         // Register OIDC SSO button on the login page

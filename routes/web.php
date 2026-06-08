@@ -277,10 +277,12 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         ->name('api.playlist.merge-channels');
 
     // Proxy API routes
-    Route::get('proxy/status', [ProxyController::class, 'status'])
-        ->name('api.proxy.status');
-    Route::get('proxy/streams/active', [ProxyController::class, 'streams'])
-        ->name('api.proxy.streams');
+    if (config('proxy.proxy_integration_enabled')) {
+        Route::get('proxy/status', [ProxyController::class, 'status'])
+            ->name('api.proxy.status');
+        Route::get('proxy/streams/active', [ProxyController::class, 'streams'])
+            ->name('api.proxy.streams');
+    }
 });
 
 // Playlist API routes (public with UUID auth - rate limited to prevent DoS/queue flooding)
