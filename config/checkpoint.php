@@ -231,6 +231,11 @@ return [
         // fetched server-side via authenticated API — not user-supplied HTML.
         'ac51fa6935e0',
 
+        // chat-message.blade.php: {!! $assistantHtml !!} renders CommonMark output
+        // from LLM assistant messages. Raw HTML is stripped before conversion via
+        // ['html_input' => 'strip'], so only CommonMark-generated HTML is emitted.
+        'de53226d18d1',
+
         // ── Environment (local dev / CI) ─────────────────────────────────────
         // APP_DEBUG=true, APP_ENV=local, SESSION_SECURE_COOKIE off — expected
         // in local development. CI uses .env.example which sets production

@@ -70,7 +70,8 @@
 @elseif($isAssistant)
     @php
         $assistantHtml = \Illuminate\Support\Str::markdown(
-            preg_replace('/<think>.*?<\/think>/s', '', $msg['content'] ?? '')
+            preg_replace('/<think>.*?<\/think>/s', '', $msg['content'] ?? ''),
+            ['html_input' => 'strip']
         );
     @endphp
     <div class="flex items-start gap-2.5">
