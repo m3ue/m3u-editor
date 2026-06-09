@@ -65,10 +65,21 @@ jobs:
           extensions: dom, curl, libxml, mbstring, zip, pcntl, pdo, sqlite, pdo_sqlite
           coverage: none
 
-      - name: Install dependencies
+      - name: Get Composer cache directory
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> $GITHUB_OUTPUT
+
+      - name: Cache Composer dependencies
+        uses: actions/cache@v5
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}
+          restore-keys: ${{ runner.os }}-composer-
+
+      - name: Install Composer dependencies
         run: composer install --no-interaction --prefer-dist --no-progress
 
-      - name: Security audit (Composer)
+      - name: Composer CVE audit
         run: composer audit --format=summary
 
       - name: Setup Node.js
@@ -77,12 +88,22 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
-      - name: Install npm dependencies
+      - name: Install safe-chain (npm supply-chain protection)
+        run: |
+          npm install -g @aikidosec/safe-chain
+          safe-chain setup --ci
+
+      - name: Install npm dependencies (protected by safe-chain)
         run: npm ci
 
-      - name: Security audit (npm)
-        run: npm audit --audit-level=high || true
-        continue-on-error: true
+      - name: npm CVE audit
+        run: npm audit --audit-level=high
+
+      - name: Prepare .env for checkpoint
+        run: cp .env.example .env
+
+      - name: Checkpoint security scan
+        run: php artisan checkpoint:scan
 
   test:
     name: Tests
