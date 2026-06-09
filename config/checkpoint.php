@@ -152,6 +152,10 @@ return [
         '1581e67a6553',
         'a7ab544d3f1b',
         'fe1b0d7dc7fe',
+        // DvrPostProcessorService::hlsConcat — $cmd is built by passing every
+        // argument through escapeshellarg(). $ffmpegPath and $outputPath are
+        // server-resolved filesystem paths, not user input.
+        '2027df1d5791',
 
         // ── TLS Verification ─────────────────────────────────────────────────
         // MediaServerProxyController + WebDavMediaService — SSL verification is
@@ -227,13 +231,16 @@ return [
         // fetched server-side via authenticated API — not user-supplied HTML.
         'ac51fa6935e0',
 
-        // ── Environment (local dev only) ─────────────────────────────────────
+        // ── Environment (local dev / CI) ─────────────────────────────────────
         // APP_DEBUG=true, APP_ENV=local, SESSION_SECURE_COOKIE off — expected
         // in local development. CI uses .env.example which sets production
         // values; these hashes only appear locally.
         '3ff08f5321c5',
         '788146a4921b',
         '3804ebbc7280',
+        // APP_URL=http://localhost — placeholder value in .env.example, not a
+        // production deployment concern for the scanner.
+        '3ded26cb467c',
 
         // ── File Permissions (dev/Docker) ────────────────────────────────────
         // .env 644 and storage/ 777 are typical in local Docker volume mounts.
@@ -307,6 +314,14 @@ return [
         'ea53a22fdb1d', // PostProcessPivot
         '11d5a0f3298d', // MergedPlaylistPivot
         'a6558982e4e4', // PlaylistAuthPivot
+
+        // Experimental branch — new models managed via Filament forms,
+        // same rationale as all other models above.
+        'e2bd9aa629d2', // DvrSetting
+        '6d9744816fe0', // DvrRecording
+        '6903bd970c3a', // StreamFileSetting
+        '2dce3e94d599', // EpgProgramme
+        '16a8d1dc6e60', // DvrRecordingRule
     ],
 
     /*

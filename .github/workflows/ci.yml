@@ -103,6 +103,7 @@ jobs:
         run: |
           cp .env.example .env
           echo "REVERB_APP_SECRET=123" >> .env
+          php artisan key:generate
 
       - name: Checkpoint security scan
         run: php artisan checkpoint:scan
