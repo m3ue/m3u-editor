@@ -100,7 +100,9 @@ jobs:
         run: npm audit --audit-level=high
 
       - name: Prepare .env for checkpoint
-        run: cp .env.example .env
+        run: |
+          cp .env.example .env
+          echo "REVERB_APP_SECRET=123" >> .env
 
       - name: Checkpoint security scan
         run: php artisan checkpoint:scan
