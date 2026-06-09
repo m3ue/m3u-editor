@@ -15,6 +15,8 @@ class GeneralSettings extends Settings
 
     public ?bool $show_breadcrumbs = true;
 
+    public ?bool $show_queue_indicator = true;
+
     public ?bool $show_logs = false;
 
     public ?bool $show_api_docs = false;

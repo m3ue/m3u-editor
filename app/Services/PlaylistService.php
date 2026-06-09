@@ -6,6 +6,7 @@ use App\Jobs\AddGroupsToCustomPlaylist;
 use App\Jobs\MergeChannels;
 use App\Jobs\MergeEpisodes;
 use App\Jobs\UnmergeChannels;
+use App\Jobs\UnmergeEpisodes;
 use App\Models\CustomPlaylist;
 use App\Models\Group;
 use App\Models\MergedPlaylist;
@@ -28,6 +29,7 @@ use Filament\Schemas\Components\Fieldset;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 use Filament\Support\Enums\Width;
+use Illuminate\Contracts\Bus\Dispatcher;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -1198,7 +1200,7 @@ class PlaylistService
     public static function getMergeAction(bool $groupScoped = false, string $contentType = 'live'): Action
     {
         $action = Action::make('merge')
-            ->label($contentType === 'series' ? 'Merge Episodes' : 'Merge Same ID')
+            ->label($contentType === 'series' ? __('Merge Episodes') : 'Merge Same ID')
             ->schema(self::getMergeFormSchema($contentType))
             ->requiresConfirmation()
             ->icon('heroicon-o-arrows-pointing-in')
@@ -1267,10 +1269,12 @@ class PlaylistService
      *
      * @param  bool  $groupScoped  Whether this action operates on a single group (receives $record as Group)
      */
-    public static function getUnmergeAction(bool $groupScoped = false): Action
+    public static function getUnmergeAction(bool $groupScoped = false, string $contentType = 'live'): Action
     {
+        $isSeries = $contentType === 'series';
+
         $action = Action::make('unmerge')
-            ->label('Unmerge Same ID')
+            ->label($isSeries ? __('Unmerge Episodes') : 'Unmerge Same ID')
             ->requiresConfirmation()
             ->icon('heroicon-o-arrows-pointing-out')
             ->color('warning')
@@ -1287,7 +1291,7 @@ class PlaylistService
                 ])
                 ->modalDescription('Unmerge all channels with the same ID in this group, removing all failover relationships.')
                 ->action(function (Group $record, array $data): void {
-                    app('Illuminate\Contracts\Bus\Dispatcher')
+                    app(Dispatcher::class)
                         ->dispatch(new UnmergeChannels(
                             user: auth()->user(),
                             groupId: $record->id,
@@ -1298,24 +1302,40 @@ class PlaylistService
             $action
                 ->schema([
                     Select::make('playlist_id')
-                        ->label('Unmerge Playlist')
+                        ->label($isSeries ? 'Unmerge Playlist Episodes' : 'Unmerge Playlist')
                         ->options(Playlist::where('user_id', auth()->id())->pluck('name', 'id'))
                         ->live()
                         ->searchable()
-                        ->helperText('Playlist to unmerge channels from (or leave empty to unmerge all).'),
+                        ->helperText($isSeries
+                            ? 'Playlist to unmerge episodes from (or leave empty to unmerge all).'
+                            : 'Playlist to unmerge channels from (or leave empty to unmerge all).'
+                        ),
                     Toggle::make('reactivate_channels')
-                        ->label('Reactivate disabled channels')
-                        ->helperText('Enable channels that were previously disabled during merge.')
+                        ->label($isSeries ? 'Reactivate disabled episodes' : 'Reactivate disabled channels')
+                        ->helperText($isSeries
+                            ? 'Enable episodes that were previously disabled during merge.'
+                            : 'Enable channels that were previously disabled during merge.'
+                        )
                         ->default(false),
                 ])
-                ->modalDescription('Unmerge all channels with the same ID, removing all failover relationships.')
-                ->action(function (array $data): void {
-                    app('Illuminate\Contracts\Bus\Dispatcher')
-                        ->dispatch(new UnmergeChannels(
+                ->modalDescription($isSeries
+                    ? 'Unmerge all episodes, removing all failover relationships.'
+                    : 'Unmerge all channels with the same ID, removing all failover relationships.'
+                )
+                ->action(function (array $data) use ($isSeries): void {
+                    $job = $isSeries
+                        ? new UnmergeEpisodes(
+                            user: auth()->user(),
+                            playlistId: $data['playlist_id'] ?? null,
+                            reactivateEpisodes: $data['reactivate_channels'] ?? false,
+                        )
+                        : new UnmergeChannels(
                             user: auth()->user(),
                             playlistId: $data['playlist_id'] ?? null,
                             reactivateChannels: $data['reactivate_channels'] ?? false,
-                        ));
+                        );
+
+                    app(Dispatcher::class)->dispatch($job);
                 });
         }
 

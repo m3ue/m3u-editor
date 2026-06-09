@@ -100,6 +100,7 @@ class AdminPanelProvider extends PanelProvider
             'show_breadcrumbs' => true,
             'content_width' => Width::ScreenLarge,
             'output_wan_address' => false,
+            'show_queue_indicator' => true,
             'copilot_enabled' => false,
             'copilot_mgmt_enabled' => false,
             'copilot_api_key' => null,
@@ -119,6 +120,7 @@ class AdminPanelProvider extends PanelProvider
                 'output_wan_address' => $envShowWan !== null
                     ? (bool) $envShowWan
                     : (bool) ($userPreferences->output_wan_address ?? $settings['output_wan_address']),
+                'show_queue_indicator' => (bool) ($userPreferences->show_queue_indicator ?? $settings['show_queue_indicator']),
                 'copilot_enabled' => $userPreferences->copilot_enabled ?? $settings['copilot_enabled'],
                 'copilot_mgmt_enabled' => $userPreferences->copilot_mgmt_enabled ?? $settings['copilot_mgmt_enabled'],
                 'copilot_api_key' => $userPreferences->copilot_api_key ?? $settings['copilot_api_key'],
@@ -343,10 +345,12 @@ class AdminPanelProvider extends PanelProvider
         }
 
         // Queue indicator — live badge in the topbar for all authenticated users
-        FilamentView::registerRenderHook(
-            PanelsRenderHook::USER_MENU_BEFORE, // Place it before the user menu
-            fn (): string => auth()->user()?->isAdmin() ? view('components.queue-indicator')->render() : '',
-        );
+        if ($settings['show_queue_indicator'] ?? true) {
+            FilamentView::registerRenderHook(
+                PanelsRenderHook::USER_MENU_BEFORE, // Place it before the user menu
+                fn (): string => auth()->user()?->isAdmin() ? view('components.queue-indicator')->render() : '',
+            );
+        }
 
         // Register OIDC SSO button on the login page
         if (config('services.oidc.enabled')) {

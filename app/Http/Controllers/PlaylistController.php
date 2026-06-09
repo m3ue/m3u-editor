@@ -412,6 +412,7 @@ class PlaylistController extends Controller
             'fallback_alias_rules.*.label' => 'required_with:fallback_alias_rules|string|max:255',
             'fallback_alias_rules.*.aliases' => 'sometimes|array',
             'fallback_alias_rules.*.aliases.*' => 'string|max:255',
+            'merge_key' => 'sometimes|string|in:stream_id,tmdb_id',
         ]);
 
         $config = $playlist->auto_merge_config ?? [];
@@ -432,6 +433,7 @@ class PlaylistController extends Controller
             'fallback_name_matching_enabled',
             'fallback_name_matching_mode',
             'fallback_alias_rules',
+            'merge_key',
         ] as $key) {
             if (array_key_exists($key, $validated)) {
                 $config[$key] = $validated[$key];
@@ -539,6 +541,8 @@ class PlaylistController extends Controller
             newChannelsOnly: $newChannelsOnly,
             regexPatterns: ! empty($config['regex_patterns']) ? $config['regex_patterns'] : null,
             fallbackMergeConfig: $this->buildMergeFallbackConfig($config),
+            contentType: ($config['merge_key'] ?? 'stream_id') === 'tmdb_id' ? 'vod' : 'live',
+            mergeKey: $config['merge_key'] ?? 'stream_id',
         ));
 
         return response()->json([
@@ -556,6 +560,7 @@ class PlaylistController extends Controller
                 'new_channels_only' => $newChannelsOnly,
                 'weighted_config_enabled' => $weightedConfig !== null,
                 'fallback_name_matching_enabled' => (bool) ($config['fallback_name_matching_enabled'] ?? false),
+                'merge_key' => $config['merge_key'] ?? 'stream_id',
             ],
         ]);
     }
