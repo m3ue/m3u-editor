@@ -25,6 +25,7 @@ use App\Jobs\RunCustomPlaylistProcessing;
 use App\Jobs\RunPlaylistFindReplaceRules;
 use App\Jobs\RunPlaylistSortAlpha;
 use App\Jobs\SyncPlexDvrJob;
+use App\Listeners\SyncListener;
 use App\Models\ChannelScrubber;
 use App\Models\CustomPlaylist;
 use App\Models\Epg;
@@ -137,6 +138,19 @@ it('chains merge job alone when auto-merge is enabled and no recurring scrubbers
 
     Bus::assertChained([MergeChannels::class]);
     Bus::assertNotDispatched(ProcessChannelScrubber::class);
+});
+
+it('builds a vod tmdb auto-merge job when the playlist merge key is tmdb id', function () {
+    $this->playlist->update([
+        'auto_merge_channels_enabled' => true,
+        'auto_merge_config' => ['merge_key' => 'tmdb_id'],
+    ]);
+
+    $job = SyncListener::getMergeJob($this->playlist->refresh());
+
+    expect($job)->toBeInstanceOf(MergeChannels::class)
+        ->and($job->contentType)->toBe('vod')
+        ->and($job->mergeKey)->toBe('tmdb_id');
 });
 
 it('chains merge job before scrubber when both are enabled', function () {

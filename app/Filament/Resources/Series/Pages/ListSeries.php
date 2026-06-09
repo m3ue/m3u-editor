@@ -90,6 +90,14 @@ class ListSeries extends ListRecords
                             ->body(__('Merging series episodes in the background. You will be notified once the process is complete.'))
                             ->send();
                     }),
+                PlaylistService::getUnmergeAction(contentType: 'series')
+                    ->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title(__('Episode unmerge started'))
+                            ->body(__('Unmerging episodes in the background. You will be notified once the process is complete.'))
+                            ->send();
+                    }),
                 Action::make('process')
                     ->label(__('Fetch Series Metadata'))
                     ->schema([
