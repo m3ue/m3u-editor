@@ -133,6 +133,51 @@ it('preserves existing VOD pivot sort slots when reordering custom playlist VOD'
         ->and($pivotSorts[$vodB->id])->toBe(1003);
 });
 
+it('assigns sorted slot values in mixed pivot/no-pivot reorder', function () {
+    $this->actingAs($this->user);
+
+    // channelA: pivot.sort=5, channelB: pivot.sort=null (falls back to channels.sort=10), channelC: pivot.sort=15
+    $channelA = Channel::factory()->for($this->user)->for($this->playlist)->for($this->group)->create([
+        'enabled' => true,
+        'is_vod' => false,
+        'sort' => 1,
+        'title' => 'Channel A',
+    ]);
+    $channelB = Channel::factory()->for($this->user)->for($this->playlist)->for($this->group)->create([
+        'enabled' => true,
+        'is_vod' => false,
+        'sort' => 10,
+        'title' => 'Channel B',
+    ]);
+    $channelC = Channel::factory()->for($this->user)->for($this->playlist)->for($this->group)->create([
+        'enabled' => true,
+        'is_vod' => false,
+        'sort' => 3,
+        'title' => 'Channel C',
+    ]);
+
+    $this->customPlaylist->channels()->attach($channelA->id, ['sort' => 5]);
+    $this->customPlaylist->channels()->attach($channelB->id); // no pivot sort - falls back to channels.sort=10
+    $this->customPlaylist->channels()->attach($channelC->id, ['sort' => 15]);
+
+    // Reorder to [C, B, A] - slots [5, 10, 15] redistributed in that order
+    Livewire::test(ChannelsRelationManager::class, [
+        'ownerRecord' => $this->customPlaylist,
+        'pageClass' => EditCustomPlaylist::class,
+    ])->call('reorderTable', [$channelC->id, $channelB->id, $channelA->id]);
+
+    $pivotSorts = $this->customPlaylist->channels()
+        ->whereIn('channels.id', [$channelA->id, $channelB->id, $channelC->id])
+        ->pluck('channel_custom_playlist.sort', 'channels.id')
+        ->map(fn ($sort) => (float) $sort)
+        ->all();
+
+    // Existing slots sorted: [5, 10, 15] - assigned to positions [C, B, A]
+    expect($pivotSorts[$channelC->id])->toBe(5.0)
+        ->and($pivotSorts[$channelB->id])->toBe(10.0)
+        ->and($pivotSorts[$channelA->id])->toBe(15.0);
+});
+
 it('recounts custom playlist channels by pivot sort order', function () {
     $this->actingAs($this->user);
 

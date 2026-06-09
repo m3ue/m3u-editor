@@ -3,7 +3,6 @@
 namespace App\Filament\Resources\CustomPlaylists\RelationManagers\Concerns;
 
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
-use Illuminate\Database\Query\Expression;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
@@ -18,58 +17,34 @@ trait ReordersCustomPlaylistPivotSort
             return;
         }
 
-        $this->getTable()->callBeforeReordering($order);
-
         $orderColumn = (string) str($this->getTable()->getReorderColumn())->afterLast('.');
+        $relationship = $this->getTable()->getRelationship();
 
-        DB::transaction(function () use ($order, $orderColumn): void {
-            $relationship = $this->getTable()->getRelationship();
+        if (
+            ($relationship instanceof BelongsToMany) &&
+            in_array($orderColumn, $relationship->getPivotColumns(), true) &&
+            $this->isCustomPlaylistPivotSortReorder($relationship, $orderColumn)
+        ) {
+            $this->getTable()->callBeforeReordering($order);
 
-            if (
-                ($relationship instanceof BelongsToMany) &&
-                in_array($orderColumn, $relationship->getPivotColumns(), true)
-            ) {
-                if ($this->isCustomPlaylistPivotSortReorder($relationship, $orderColumn)) {
-                    $slots = $this->getCustomPlaylistPivotSortSlots($order, $orderColumn);
+            DB::transaction(function () use ($order, $orderColumn, $relationship): void {
+                $slots = $this->getCustomPlaylistPivotSortSlots($order, $orderColumn);
 
-                    foreach (array_values($order) as $index => $recordKey) {
-                        $this->getTableRecord($recordKey)
-                            ->getRelationValue($relationship->getPivotAccessor())
-                            ->update([
-                                $orderColumn => $slots->get($index, $index + 1),
-                            ]);
-                    }
-
-                    return;
+                foreach (array_values($order) as $index => $recordKey) {
+                    $this->getTableRecord($recordKey)
+                        ->getRelationValue($relationship->getPivotAccessor())
+                        ->update([
+                            $orderColumn => $slots->get($index, $index + 1),
+                        ]);
                 }
+            });
 
-                foreach ($order as $index => $recordKey) {
-                    $this->getTableRecord($recordKey)->getRelationValue($relationship->getPivotAccessor())->update([
-                        $orderColumn => $index + 1,
-                    ]);
-                }
+            $this->getTable()->callAfterReordering($order);
 
-                return;
-            }
+            return;
+        }
 
-            $model = app($this->getTable()->getModel());
-            $modelKeyName = $model->getKeyName();
-            $wrappedModelKeyName = $model->getConnection()?->getQueryGrammar()?->wrap($modelKeyName) ?? $modelKeyName;
-
-            $this->getTable()
-                ->getQuery()
-                ->whereIn($modelKeyName, array_values($order))
-                ->update([
-                    $orderColumn => new Expression(
-                        'case '.collect($order)
-                            ->when($this->getTable()->getReorderDirection() === 'desc', fn (Collection $order) => $order->reverse()->values())
-                            ->map(fn ($recordKey, int $recordIndex): string => 'when '.$wrappedModelKeyName.' = '.DB::getPdo()->quote($recordKey).' then '.($recordIndex + 1))
-                            ->implode(' ').' end'
-                    ),
-                ]);
-        });
-
-        $this->getTable()->callAfterReordering($order);
+        $this->filamentReorderTable($order, $draggedRecordKey);
     }
 
     private function isCustomPlaylistPivotSortReorder(BelongsToMany $relationship, string $orderColumn): bool
@@ -104,9 +79,7 @@ trait ReordersCustomPlaylistPivotSort
             ->values();
 
         if ($slots->isEmpty()) {
-            return collect($recordKeys)
-                ->keys()
-                ->map(fn (int $index): int => $index + 1);
+            return collect(range(1, count($recordKeys)));
         }
 
         $nextSlot = (float) $slots->last();

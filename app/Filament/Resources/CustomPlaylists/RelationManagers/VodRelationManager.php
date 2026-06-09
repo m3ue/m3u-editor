@@ -19,6 +19,7 @@ use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\SpatieTagsColumn;
 use Filament\Tables\Columns\TextInputColumn;
+use Filament\Tables\Concerns\CanReorderRecords;
 use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Grouping\Group;
@@ -30,7 +31,10 @@ use Illuminate\Support\Facades\DB;
 
 class VodRelationManager extends RelationManager
 {
-    use ReordersCustomPlaylistPivotSort;
+    use CanReorderRecords, ReordersCustomPlaylistPivotSort {
+        ReordersCustomPlaylistPivotSort::reorderTable insteadof CanReorderRecords;
+        CanReorderRecords::reorderTable as filamentReorderTable;
+    }
 
     protected static string $relationship = 'channels';
 
