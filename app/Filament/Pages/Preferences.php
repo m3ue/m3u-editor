@@ -59,7 +59,7 @@ use Spatie\SlackAlerts\Facades\SlackAlert;
 
 class Preferences extends SettingsPage
 {
-    protected static string|\BackedEnum|null $navigationIcon = 'heroicon-o-cog-6-tooth';
+    protected static string|\BackedEnum|null $navigationIcon = null;
 
     protected static string $settings = GeneralSettings::class;
 
