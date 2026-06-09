@@ -780,6 +780,17 @@ class GuestBrowseShows extends Page
     {
         $includeDisabled = $this->shouldIncludeDisabledChannels();
 
+        if ($this->channel_id) {
+            $channelQuery = Channel::where('id', $this->channel_id)->with('epgChannel');
+            if (! $includeDisabled) {
+                $channelQuery->where('enabled', true);
+            }
+            $channel = $channelQuery->first();
+            $epgId = $channel?->epgChannel?->channel_id;
+
+            return $epgId ? [$epgId] : null;
+        }
+
         $epgMapBase = DB::table('channels')
             ->join('epg_channels', 'epg_channels.id', '=', 'channels.epg_channel_id')
             ->where('channels.playlist_id', $playlistId)
@@ -796,17 +807,6 @@ class GuestBrowseShows extends Page
 
         if (! $includeDisabled) {
             $streamIdBase->where('channels.enabled', true);
-        }
-
-        if ($this->channel_id) {
-            $channelQuery = Channel::where('id', $this->channel_id)->with('epgChannel');
-            if (! $includeDisabled) {
-                $channelQuery->where('enabled', true);
-            }
-            $channel = $channelQuery->first();
-            $epgId = $channel?->epgChannel?->channel_id;
-
-            return $epgId ? [$epgId] : null;
         }
 
         if ($this->group_id) {

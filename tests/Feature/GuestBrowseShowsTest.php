@@ -273,6 +273,7 @@ it('hides disabled channels in guest channel options when include_disabled_chann
     ]);
 
     $component = makeGuestBrowseShows();
+    $component->loadChannelOptions();
 
     expect($component->channelOptions)
         ->toHaveKey($enabled->id)
@@ -288,6 +289,7 @@ it('includes disabled channels in guest channel options when include_disabled_ch
     ]);
 
     $component = makeGuestBrowseShows();
+    $component->loadChannelOptions();
 
     expect($component->channelOptions)->toHaveKey($disabled->id);
 });

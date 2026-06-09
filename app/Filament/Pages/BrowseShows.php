@@ -354,7 +354,6 @@ class BrowseShows extends Page
 
         $this->refreshRuleBadgeForProgramme($programmeId, 'once');
 
-        // Dispatch immediate scheduler tick so the recording materialises without waiting up to 60s.
         DvrSchedulerTick::dispatch();
 
         Notification::make()
@@ -416,12 +415,10 @@ class BrowseShows extends Page
         $sourceChannelId = null;
 
         if ($this->seriesChannelId === 0) {
-            // "From Original Source" sentinel — store source channel, leave channel_id null
             $sourceChannelId = $this->sourceChannelId;
         } elseif ($this->seriesChannelId > 0) {
             $channelId = $this->seriesChannelId;
         }
-        // seriesChannelId < 0 is not valid; both remain null → "Any channel"
 
         $this->createSeriesRule($title, [
             'new_only' => $this->seriesNewOnly,
@@ -531,7 +528,6 @@ class BrowseShows extends Page
 
         $this->refreshRuleBadgeForTitle($title, 'series');
 
-        // Dispatch immediate scheduler tick so any in-window airings materialise without waiting up to 60s.
         DvrSchedulerTick::dispatch();
 
         Notification::make()
@@ -562,6 +558,9 @@ class BrowseShows extends Page
         // recordOnce is only reachable from the open slide-over, so selectedShowTitle is always set.
         if ($type === 'once' && $this->selectedShowTitle) {
             $this->refreshRuleBadgeForTitle($this->selectedShowTitle, 'once');
+            if ($this->selectedShowDetail !== null) {
+                $this->selectedShowDetail['has_once_rule'] = true;
+            }
         }
     }
 
@@ -870,6 +869,17 @@ class BrowseShows extends Page
     {
         $includeDisabled = $this->shouldIncludeDisabledChannels();
 
+        if ($this->channel_id) {
+            $channelQuery = Channel::where('id', $this->channel_id)->with('epgChannel');
+            if (! $includeDisabled) {
+                $channelQuery->where('enabled', true);
+            }
+            $channel = $channelQuery->first();
+            $epgId = $channel?->epgChannel?->channel_id;
+
+            return $epgId ? [$epgId] : null;
+        }
+
         $epgMapBase = DB::table('channels')
             ->join('epg_channels', 'epg_channels.id', '=', 'channels.epg_channel_id')
             ->where('channels.playlist_id', $playlistId)
@@ -886,17 +896,6 @@ class BrowseShows extends Page
 
         if (! $includeDisabled) {
             $streamIdBase->where('channels.enabled', true);
-        }
-
-        if ($this->channel_id) {
-            $channelQuery = Channel::where('id', $this->channel_id)->with('epgChannel');
-            if (! $includeDisabled) {
-                $channelQuery->where('enabled', true);
-            }
-            $channel = $channelQuery->first();
-            $epgId = $channel?->epgChannel?->channel_id;
-
-            return $epgId ? [$epgId] : null;
         }
 
         if ($this->channel_name) {

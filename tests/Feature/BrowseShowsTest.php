@@ -420,7 +420,8 @@ it('hides disabled channels in channel options when include_disabled_channels is
     ]);
 
     $component = Livewire::test(BrowseShows::class)
-        ->set('dvr_setting_id', $this->setting->id);
+        ->set('dvr_setting_id', $this->setting->id)
+        ->call('loadChannelOptions');
 
     expect($component->get('channelOptions'))
         ->toHaveKey($enabled->id)
@@ -440,7 +441,8 @@ it('includes disabled channels in channel options when include_disabled_channels
     ]);
 
     $component = Livewire::test(BrowseShows::class)
-        ->set('dvr_setting_id', $this->setting->id);
+        ->set('dvr_setting_id', $this->setting->id)
+        ->call('loadChannelOptions');
 
     expect($component->get('channelOptions'))->toHaveKey($disabled->id);
 });
