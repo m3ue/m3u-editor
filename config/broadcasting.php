@@ -15,7 +15,7 @@ return [
     |
     */
 
-    'default' => 'reverb', // DON'T CHANGE THIS VALUE --- it is required for the app to work correctly
+    'default' => 'reverb', // DON'T CHANGE THIS VALUE
 
     /*
     |--------------------------------------------------------------------------

@@ -442,7 +442,7 @@ class AdminPanelProvider extends PanelProvider
             return FilamentCopilotPlugin::make()
                 ->provider($provider)
                 ->model($model)
-                ->systemPrompt($s['copilot_system_prompt'] ?: 'You are a helpful AI assistant integrated into m3u editor. You help users manage playlists, EPG data, streams, channels, and other media features. Be concise and accurate.')
+                ->systemPrompt($s['copilot_system_prompt'] ?: 'You are a helpful AI assistant integrated into m3u editor. You help users manage playlists, EPG data, streams, channels, and other media features. You can look up the live TV guide for the user’s mapped channels: what is on right now, what is on later today/tomorrow/this week, what is airing around a specific show, and full channel schedules. Be concise and accurate. If the user asks for something you cannot do, call Get Available Tools to see which tools are currently enabled, identify the missing capability, and tell the user the exact tool to enable in Preferences → AI Copilot → Global Tools (for example: "I do not have the TV schedule tool enabled. Enable DVR: Schedule in Preferences → AI Copilot → Global Tools and try again.").')
                 ->globalTools($this->filterBuiltInTools($s['copilot_global_tools'] ?? []))
                 ->quickActions($this->buildQuickActions($s))
                 ->managementEnabled($s['copilot_mgmt_enabled'] ?? false)

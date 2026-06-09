@@ -25,9 +25,11 @@ use Stringable;
  */
 class DvrOverviewTool extends BaseTool
 {
+    private const VALID_VIEWS = ['status', 'rules', 'capacity', 'recent'];
+
     public function description(): Stringable|string
     {
-        return 'Get an overview of the DVR system. Views: "status" (currently recording + upcoming + recent failures), "rules" (active recording rules), "capacity" (concurrent slots + disk usage per DVR setting), "recent" (latest recordings). Defaults to "status".';
+        return 'Get an overview of the DVR system. Valid views: "status" (currently recording + upcoming + recent failures), "rules" (active recording rules), "capacity" (concurrent slots + disk usage per DVR setting), "recent" (latest recordings). Defaults to "status".';
     }
 
     /** @return array<string, mixed> */
@@ -35,7 +37,7 @@ class DvrOverviewTool extends BaseTool
     {
         return [
             'view' => $schema->string()
-                ->description(__('The overview view to return: status, rules, capacity, recent. Default: status')),
+                ->description(__('The overview view to return. Must be one of: status, rules, capacity, recent. Default: status')),
             'limit' => $schema->integer()
                 ->description(__('Maximum number of records to return (default: 10, max: 50)')),
             'status_filter' => $schema->string()
@@ -50,6 +52,10 @@ class DvrOverviewTool extends BaseTool
         $statusFilter = isset($request['status_filter'])
             ? strtolower(trim((string) $request['status_filter']))
             : null;
+
+        if (! in_array($view, self::VALID_VIEWS, true)) {
+            return "Invalid view '{$view}'. Valid views: ".implode(', ', self::VALID_VIEWS).'.';
+        }
 
         return match ($view) {
             'rules' => $this->rulesOverview($limit),

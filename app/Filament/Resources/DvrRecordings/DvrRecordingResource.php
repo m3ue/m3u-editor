@@ -18,15 +18,21 @@ use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\ViewAction;
+use Filament\Infolists\Components\ImageEntry;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
+use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
+use Filament\Support\Enums\FontWeight;
+use Filament\Support\Enums\TextSize;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Filters\SelectFilter;
+use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 
 class DvrRecordingResource extends Resource
 {
@@ -74,40 +80,108 @@ class DvrRecordingResource extends Resource
     public static function infolist(Schema $schema): Schema
     {
         return $schema->components([
-            Section::make(__('Recording Details'))
-                ->columns(2)
+            Grid::make(3)
                 ->schema([
-                    TextEntry::make('title')->columnSpanFull(),
-                    TextEntry::make('subtitle'),
-                    TextEntry::make('status')->badge(),
-                    TextEntry::make('post_processing_step')
-                        ->label(__('Current Step'))
-                        ->hidden(fn ($record) => ! $record->post_processing_step),
-                    TextEntry::make('channel.title')->label(__('Channel')),
-                    TextEntry::make('dvrSetting.playlist.name')->label(__('Playlist')),
-                    TextEntry::make('scheduled_start')->dateTime(),
-                    TextEntry::make('scheduled_end')->dateTime(),
-                    TextEntry::make('actual_start')->dateTime(),
-                    TextEntry::make('actual_end')->dateTime(),
-                    TextEntry::make('duration_seconds')
-                        ->label(__('Duration'))
-                        ->formatStateUsing(fn (?int $state): string => $state
-                            ? gmdate('H:i:s', $state)
-                            : '—'),
-                    TextEntry::make('file_size_bytes')
-                        ->label(__('File Size'))
-                        ->formatStateUsing(fn (?int $state): string => $state
-                            ? number_format($state / 1024 / 1024, 1).' MB'
-                            : '—'),
-                    TextEntry::make('file_path')->columnSpanFull(),
-                    TextEntry::make('error_message')
-                        ->label(__('Error'))
-                        ->columnSpanFull()
-                        ->hidden(fn ($record) => ! $record->error_message),
-                    TextEntry::make('description')
-                        ->label(__('Description'))
-                        ->columnSpanFull()
-                        ->hidden(fn ($record) => ! $record->description),
+                    Section::make(__('Visuals'))
+                        ->columnSpan(1)
+                        ->schema([
+                            ImageEntry::make('series_poster')
+                                ->label(__('Series Poster'))
+                                ->hidden(fn (DvrRecording $record): bool => ! $record->series_poster)
+                                ->height(300)
+                                ->square()
+                                ->extraImgAttributes(['class' => 'rounded-lg']),
+                            ImageEntry::make('episode_cover')
+                                ->label(__('Episode Cover'))
+                                ->hidden(fn (DvrRecording $record): bool => ! $record->episode_cover)
+                                ->height(200)
+                                ->square()
+                                ->extraImgAttributes(['class' => 'rounded-lg']),
+                            Grid::make(2)
+                                ->schema([
+                                    ImageEntry::make('epg_programme_icon')
+                                        ->label(__('Programme Icon'))
+                                        ->hidden(fn (DvrRecording $record): bool => ! $record->epg_programme_icon)
+                                        ->height(80)
+                                        ->width(80)
+                                        ->square()
+                                        ->extraImgAttributes(['class' => 'rounded-md']),
+                                    ImageEntry::make('channel_icon')
+                                        ->label(__('Channel Icon'))
+                                        ->hidden(fn (DvrRecording $record): bool => ! $record->channel_icon)
+                                        ->height(80)
+                                        ->width(80)
+                                        ->square()
+                                        ->extraImgAttributes(['class' => 'rounded-md']),
+                                ]),
+                        ]),
+
+                    Grid::make(1)
+                        ->columnSpan(2)
+                        ->schema([
+                            Section::make(__('Show Information'))
+                                ->columns(2)
+                                ->schema([
+                                    TextEntry::make('title')
+                                        ->columnSpanFull()
+                                        ->size(TextSize::Large)
+                                        ->weight(FontWeight::Bold),
+                                    TextEntry::make('subtitle')
+                                        ->columnSpanFull(),
+                                    TextEntry::make('status')->badge(),
+                                    TextEntry::make('post_processing_step')
+                                        ->label(__('Current Step'))
+                                        ->hidden(fn (DvrRecording $record): bool => ! $record->post_processing_step),
+                                    TextEntry::make('channel.title')->label(__('Channel')),
+                                    TextEntry::make('dvrSetting.playlist.name')->label(__('Playlist')),
+                                    TextEntry::make('season')
+                                        ->label(__('Season'))
+                                        ->hidden(fn (DvrRecording $record): bool => $record->season === null),
+                                    TextEntry::make('episode')
+                                        ->label(__('Episode'))
+                                        ->hidden(fn (DvrRecording $record): bool => $record->episode === null),
+                                    TextEntry::make('description')
+                                        ->label(__('Description'))
+                                        ->columnSpanFull()
+                                        ->hidden(fn (DvrRecording $record): bool => ! $record->description),
+                                ]),
+
+                            Section::make(__('Timing'))
+                                ->columns(2)
+                                ->schema([
+                                    TextEntry::make('scheduled_start')->dateTime(),
+                                    TextEntry::make('scheduled_end')->dateTime(),
+                                    TextEntry::make('actual_start')
+                                        ->dateTime()
+                                        ->hidden(fn (DvrRecording $record): bool => ! $record->actual_start),
+                                    TextEntry::make('actual_end')
+                                        ->dateTime()
+                                        ->hidden(fn (DvrRecording $record): bool => ! $record->actual_end),
+                                    TextEntry::make('duration_seconds')
+                                        ->label(__('Duration'))
+                                        ->formatStateUsing(fn (?int $state): string => $state
+                                            ? gmdate('H:i:s', $state)
+                                            : '—'),
+                                ]),
+
+                            Section::make(__('File Details'))
+                                ->columns(2)
+                                ->schema([
+                                    TextEntry::make('file_size_bytes')
+                                        ->label(__('File Size'))
+                                        ->formatStateUsing(fn (?int $state): string => $state
+                                            ? number_format($state / 1024 / 1024, 1).' MB'
+                                            : '—'),
+                                    TextEntry::make('file_path')
+                                        ->columnSpanFull()
+                                        ->formatStateUsing(fn (?string $state): string => $state ?: '—'),
+                                    TextEntry::make('error_message')
+                                        ->label(__('Error'))
+                                        ->columnSpanFull()
+                                        ->color('danger')
+                                        ->hidden(fn (DvrRecording $record): bool => ! $record->error_message),
+                                ]),
+                        ]),
                 ]),
         ]);
     }
@@ -122,7 +196,19 @@ class DvrRecordingResource extends Resource
             ->filtersTriggerAction(function ($action) {
                 return $action->button()->label(__('Filters'));
             })
-            ->defaultSort('scheduled_start', 'desc')
+            ->defaultSort(function (Builder $query): Builder {
+                return $query
+                    ->orderByRaw('CASE
+                        WHEN status IN (?, ?) THEN 1
+                        WHEN status = ? THEN 2
+                        ELSE 3
+                    END', [
+                        DvrRecordingStatus::Recording->value,
+                        DvrRecordingStatus::PostProcessing->value,
+                        DvrRecordingStatus::Scheduled->value,
+                    ])
+                    ->orderByDesc('scheduled_start');
+            })
             ->columns([
                 TextColumn::make('title')
                     ->searchable()
@@ -139,10 +225,12 @@ class DvrRecordingResource extends Resource
                     ->sortable()
                     ->toggleable(),
                 TextColumn::make('scheduled_start')
-                    ->dateTime()
+                    ->since()
+                    ->dateTimeTooltip()
                     ->sortable(),
                 TextColumn::make('scheduled_end')
-                    ->dateTime()
+                    ->since()
+                    ->dateTimeTooltip()
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('duration_seconds')
@@ -154,9 +242,7 @@ class DvrRecordingResource extends Resource
                     ->toggleable(),
                 TextColumn::make('file_size_bytes')
                     ->label(__('Size'))
-                    ->formatStateUsing(fn (?int $state): string => $state
-                        ? number_format($state / 1024 / 1024, 1).' MB'
-                        : '—')
+                    ->formatStateUsing(fn (?int $state): string => self::formatFileSize($state))
                     ->sortable()
                     ->toggleable(),
                 TextColumn::make('created_at')
@@ -167,6 +253,14 @@ class DvrRecordingResource extends Resource
             ->filters([
                 SelectFilter::make('status')
                     ->options(DvrRecordingStatus::class),
+                TernaryFilter::make('has_error')
+                    ->label(__('Has Error'))
+                    ->attribute('error_message')
+                    ->nullable(),
+                TernaryFilter::make('has_file')
+                    ->label(__('Has File'))
+                    ->attribute('file_path')
+                    ->nullable(),
             ])
             ->recordActions([
                 ActionGroup::make([
@@ -278,5 +372,18 @@ class DvrRecordingResource extends Resource
             'index' => Pages\ListDvrRecordings::route('/'),
             'view' => Pages\ViewDvrRecording::route('/{record}'),
         ];
+    }
+
+    private static function formatFileSize(?int $sizeInBytes): string
+    {
+        if (! $sizeInBytes) {
+            return '—';
+        }
+
+        if ($sizeInBytes >= 1024 * 1024 * 1024) {
+            return number_format($sizeInBytes / 1024 / 1024 / 1024, 1).' GB';
+        }
+
+        return number_format($sizeInBytes / 1024 / 1024, 1).' MB';
     }
 }

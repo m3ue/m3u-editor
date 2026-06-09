@@ -8,6 +8,7 @@ use App\Models\Channel;
 use App\Models\DvrRecordingRule;
 use App\Models\DvrSetting;
 use App\Settings\GeneralSettings;
+use App\Traits\HasDvrMatchedAirings;
 use App\Traits\HasUserFiltering;
 use BackedEnum;
 use Filament\Actions;
@@ -17,6 +18,7 @@ use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Utilities\Get;
+use Filament\Schemas\Components\View;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Columns\ToggleColumn;
@@ -27,6 +29,7 @@ use Illuminate\Support\Facades\Auth;
 
 class DvrRecordingRuleResource extends Resource
 {
+    use HasDvrMatchedAirings;
     use HasUserFiltering;
 
     protected static ?string $model = DvrRecordingRule::class;
@@ -165,6 +168,13 @@ class DvrRecordingRuleResource extends Resource
                     ->numeric()
                     ->default(50)
                     ->required(),
+
+                View::make('filament.forms.dvr-matched-airings')
+                    ->viewData(fn (?DvrRecordingRule $record): array => [
+                        'airings' => $record ? static::resolveMatchedAirings($record) : [],
+                    ])
+                    ->visible(fn (?DvrRecordingRule $record, Get $get): bool => $record !== null && self::isRuleType($get('type'), DvrRuleType::Series))
+                    ->columnSpanFull(),
             ]);
     }
 

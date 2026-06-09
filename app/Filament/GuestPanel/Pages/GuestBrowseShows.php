@@ -133,15 +133,14 @@ class GuestBrowseShows extends Page
             return [];
         }
 
-        $query = Channel::where('playlist_id', $playlistId);
+        $channels = Channel::where('playlist_id', $playlistId)
+            ->orderBy('title');
 
         if (! $this->shouldIncludeDisabledChannels()) {
-            $query->where('enabled', true);
+            $channels->where('enabled', true);
         }
 
-        return $query->orderBy('title')
-            ->pluck('title', 'id')
-            ->all();
+        return $channels->pluck('title', 'id')->all();
     }
 
     public function getSeriesHintProperty(): string
@@ -617,21 +616,23 @@ class GuestBrowseShows extends Page
         return $query->limit(100)->get();
     }
 
+    private function shouldIncludeDisabledChannels(): bool
+    {
+        return static::getDvrSetting()?->include_disabled_channels ?? false;
+    }
+
     /**
      * @return list<string>|null
      */
     private function resolveEpgChannelScope(int $playlistId): ?array
     {
-        $includeDisabledChannels = $this->shouldIncludeDisabledChannels();
+        $includeDisabled = $this->shouldIncludeDisabledChannels();
 
         if ($this->channel_id) {
-            $channelQuery = Channel::where('id', $this->channel_id)
-                ->with('epgChannel');
-
-            if (! $includeDisabledChannels) {
+            $channelQuery = Channel::where('id', $this->channel_id)->with('epgChannel');
+            if (! $includeDisabled) {
                 $channelQuery->where('enabled', true);
             }
-
             $channel = $channelQuery->first();
             $epgId = $channel?->epgChannel?->channel_id;
 
@@ -639,45 +640,40 @@ class GuestBrowseShows extends Page
         }
 
         if ($this->group_id) {
-            $channelQuery = Channel::where('group_id', $this->group_id)
+            $ids = Channel::where('group_id', $this->group_id)
                 ->whereNotNull('epg_channel_id')
                 ->with('epgChannel');
 
-            if (! $includeDisabledChannels) {
-                $channelQuery->where('enabled', true);
+            if (! $includeDisabled) {
+                $ids->where('enabled', true);
             }
 
-            $ids = $channelQuery->get()
+            $result = $ids->get()
                 ->map(fn (Channel $c) => $c->epgChannel?->channel_id)
                 ->filter()
                 ->unique()
                 ->values()
                 ->all();
 
-            return ! empty($ids) ? $ids : null;
+            return ! empty($result) ? $result : null;
         }
 
-        $channelQuery = Channel::where('playlist_id', $playlistId)
+        $ids = Channel::where('playlist_id', $playlistId)
             ->whereNotNull('epg_channel_id')
             ->with('epgChannel');
 
-        if (! $includeDisabledChannels) {
-            $channelQuery->where('enabled', true);
+        if (! $includeDisabled) {
+            $ids->where('enabled', true);
         }
 
-        $ids = $channelQuery->get()
+        $result = $ids->get()
             ->map(fn (Channel $c) => $c->epgChannel?->channel_id)
             ->filter()
             ->unique()
             ->values()
             ->all();
 
-        return ! empty($ids) ? $ids : null;
-    }
-
-    private function shouldIncludeDisabledChannels(): bool
-    {
-        return static::getDvrSetting()?->include_disabled_channels ?? false;
+        return ! empty($result) ? $result : null;
     }
 
     /**

@@ -167,15 +167,14 @@ class BrowseShows extends Page
             return [];
         }
 
-        $query = Channel::where('playlist_id', $playlistId);
+        $channels = Channel::where('playlist_id', $playlistId)
+            ->orderBy('title');
 
         if (! $this->shouldIncludeDisabledChannels()) {
-            $query->where('enabled', true);
+            $channels->where('enabled', true);
         }
 
-        return $query->orderBy('title')
-            ->pluck('title', 'id')
-            ->all();
+        return $channels->pluck('title', 'id')->all();
     }
 
     // --- Lifecycle ---
@@ -464,11 +463,6 @@ class BrowseShows extends Page
         }
 
         return DvrSetting::where('user_id', Auth::id())->find($this->dvr_setting_id);
-    }
-
-    private function shouldIncludeDisabledChannels(): bool
-    {
-        return $this->resolvedDvrSetting()?->include_disabled_channels ?? false;
     }
 
     /**
@@ -825,6 +819,11 @@ class BrowseShows extends Page
             ->all();
     }
 
+    private function shouldIncludeDisabledChannels(): bool
+    {
+        return $this->resolvedDvrSetting()?->include_disabled_channels ?? false;
+    }
+
     /**
      * Resolve the set of XMLTV channel IDs that are in scope for the given playlist.
      *
@@ -841,14 +840,14 @@ class BrowseShows extends Page
      */
     private function resolveEpgChannelScope(int $playlistId): ?array
     {
-        $includeDisabledChannels = $this->shouldIncludeDisabledChannels();
+        $includeDisabled = $this->shouldIncludeDisabledChannels();
 
         $epgMapBase = DB::table('channels')
             ->join('epg_channels', 'epg_channels.id', '=', 'channels.epg_channel_id')
             ->where('channels.playlist_id', $playlistId)
             ->whereNotNull('channels.epg_channel_id');
 
-        if (! $includeDisabledChannels) {
+        if (! $includeDisabled) {
             $epgMapBase->where('channels.enabled', true);
         }
 
@@ -857,18 +856,15 @@ class BrowseShows extends Page
             ->whereNotNull('channels.stream_id')
             ->where('channels.stream_id', '!=', '');
 
-        if (! $includeDisabledChannels) {
+        if (! $includeDisabled) {
             $streamIdBase->where('channels.enabled', true);
         }
 
         if ($this->channel_id) {
-            $channelQuery = Channel::where('id', $this->channel_id)
-                ->with('epgChannel');
-
-            if (! $includeDisabledChannels) {
+            $channelQuery = Channel::where('id', $this->channel_id)->with('epgChannel');
+            if (! $includeDisabled) {
                 $channelQuery->where('enabled', true);
             }
-
             $channel = $channelQuery->first();
             $epgId = $channel?->epgChannel?->channel_id;
 
