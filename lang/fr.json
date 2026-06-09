@@ -2189,6 +2189,8 @@
     "Short description of the content.": "Brève description du contenu.",
     "Show breadcrumbs": "Afficher le fil d'Ariane",
     "Show breadcrumbs under the page titles": "Afficher le fil d'Ariane sous les titres des pages",
+    "Show queue indicator": "Afficher l'indicateur de file d'attente",
+    "Show the live queue status indicator in the top navigation bar": "Afficher l'indicateur d'état de la file d'attente en direct dans la barre de navigation supérieure",
     "Silence Detection Settings": "Paramètres de détection du silence",
     "Silence duration (seconds)": "Durée du silence (secondes)",
     "Silence threshold (dB)": "Seuil de silence (dB)",

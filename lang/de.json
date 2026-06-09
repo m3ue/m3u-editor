@@ -2189,6 +2189,8 @@
     "Short description of the content.": "Kurze Beschreibung des Inhalts.",
     "Show breadcrumbs": "Breadcrumbs anzeigen",
     "Show breadcrumbs under the page titles": "Breadcrumbs unter den Seitentiteln anzeigen",
+    "Show queue indicator": "Warteschlangenanzeige einblenden",
+    "Show the live queue status indicator in the top navigation bar": "Den Live-Warteschlangenstatus in der oberen Navigationsleiste einblenden",
     "Silence Detection Settings": "Einstellungen zur Stilleerkennung",
     "Silence duration (seconds)": "Stilledauer (Sekunden)",
     "Silence threshold (dB)": "Ruheschwelle (dB)",

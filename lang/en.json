@@ -2189,6 +2189,8 @@
     "Short description of the content.": "Short description of the content.",
     "Show breadcrumbs": "Show breadcrumbs",
     "Show breadcrumbs under the page titles": "Show breadcrumbs under the page titles",
+    "Show queue indicator": "Show queue indicator",
+    "Show the live queue status indicator in the top navigation bar": "Show the live queue status indicator in the top navigation bar",
     "Silence Detection Settings": "Silence Detection Settings",
     "Silence duration (seconds)": "Silence duration (seconds)",
     "Silence threshold (dB)": "Silence threshold (dB)",

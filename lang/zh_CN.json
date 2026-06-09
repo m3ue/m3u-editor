@@ -2189,6 +2189,8 @@
     "Short description of the content.": "内容的简短描述。",
     "Show breadcrumbs": "显示面包屑导航",
     "Show breadcrumbs under the page titles": "在页面标题下方显示层级路径",
+    "Show queue indicator": "显示队列指示器",
+    "Show the live queue status indicator in the top navigation bar": "在顶部导航栏中显示实时队列状态指示器",
     "Silence Detection Settings": "静默检测设置",
     "Silence duration (seconds)": "静默持续时长（秒）",
     "Silence threshold (dB)": "静默阈值 (dB)",

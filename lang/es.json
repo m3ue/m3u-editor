@@ -2189,6 +2189,8 @@
     "Short description of the content.": "Breve descripción del contenido.",
     "Show breadcrumbs": "Mostrar migas de pan",
     "Show breadcrumbs under the page titles": "Mostrar rutas de navegación debajo de los títulos de las páginas",
+    "Show queue indicator": "Mostrar indicador de cola",
+    "Show the live queue status indicator in the top navigation bar": "Mostrar el indicador de estado de cola en vivo en la barra de navegación superior",
     "Silence Detection Settings": "Configuración de detección de silencio",
     "Silence duration (seconds)": "Duración del silencio (segundos)",
     "Silence threshold (dB)": "Umbral de silencio (dB)",
