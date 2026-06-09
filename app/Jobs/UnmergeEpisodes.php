@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Models\Episode;
 use App\Models\EpisodeFailover;
+use App\Models\User;
 use Filament\Notifications\Notification;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -19,8 +20,8 @@ class UnmergeEpisodes implements ShouldQueue
      * Create a new job instance.
      */
     public function __construct(
-        public $user,
-        public $playlistId = null,
+        public readonly User $user,
+        public ?int $playlistId = null,
         public bool $reactivateEpisodes = false,
     ) {}
 
