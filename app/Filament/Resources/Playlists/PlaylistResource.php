@@ -2060,6 +2060,15 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ->helperText(__('Regex patterns for failover grouping. Useful when the same channel has different names within and across providers.'))
                                 ->columnSpanFull()
                                 ->splitKeys(['Tab', 'Return']),
+                            Select::make('auto_merge_config.merge_key')
+                                ->label(__('Merge key'))
+                                ->options([
+                                    'stream_id' => 'Stream ID',
+                                    'tmdb_id' => 'TMDB ID',
+                                ])
+                                ->default('stream_id')
+                                ->required()
+                                ->helperText(__('Use TMDB ID to merge the same movie across providers when stream IDs differ. Entries without a TMDB ID are skipped.')),
                             Toggle::make('auto_merge_config.check_resolution')
                                 ->label(__('Prioritize by resolution'))
                                 ->inline(false)

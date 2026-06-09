@@ -6,6 +6,7 @@ use App\Events\PlaylistCreated;
 use App\Events\PlaylistDeleted;
 use App\Events\PlaylistUpdated;
 use App\Jobs\MergeEpisodes;
+use App\Jobs\UnmergeEpisodes;
 use App\Models\Episode;
 use App\Models\EpisodeFailover;
 use App\Models\Playlist;
@@ -36,6 +37,11 @@ class MergeEpisodesTest extends TestCase
     private function runMergeEpisodes(...$arguments): void
     {
         Episode::withoutEvents(fn () => (new MergeEpisodes(...$arguments))->handle());
+    }
+
+    private function runUnmergeEpisodes(...$arguments): void
+    {
+        Episode::withoutEvents(fn () => (new UnmergeEpisodes(...$arguments))->handle());
     }
 
     #[Test]
@@ -189,6 +195,73 @@ class MergeEpisodesTest extends TestCase
         );
 
         $this->assertDatabaseCount('episode_failovers', 0);
+    }
+
+    #[Test]
+    public function it_unmerges_episode_failovers_for_a_playlist_and_reactivates_disabled_failovers(): void
+    {
+        $user = User::factory()->create();
+        $playlist = Playlist::factory()->for($user)->createQuietly();
+        $otherPlaylist = Playlist::factory()->for($user)->createQuietly();
+        $series = Series::factory()->for($user)->createQuietly([
+            'playlist_id' => $playlist->id,
+        ]);
+        $otherSeries = Series::factory()->for($user)->createQuietly([
+            'playlist_id' => $otherPlaylist->id,
+        ]);
+
+        $master = Episode::factory()->create([
+            'user_id' => $user->id,
+            'playlist_id' => $playlist->id,
+            'series_id' => $series->id,
+        ]);
+        $failover = Episode::factory()->create([
+            'user_id' => $user->id,
+            'playlist_id' => $playlist->id,
+            'series_id' => $series->id,
+            'enabled' => false,
+        ]);
+        $otherMaster = Episode::factory()->create([
+            'user_id' => $user->id,
+            'playlist_id' => $otherPlaylist->id,
+            'series_id' => $otherSeries->id,
+        ]);
+        $otherFailover = Episode::factory()->create([
+            'user_id' => $user->id,
+            'playlist_id' => $otherPlaylist->id,
+            'series_id' => $otherSeries->id,
+            'enabled' => false,
+        ]);
+
+        EpisodeFailover::create([
+            'user_id' => $user->id,
+            'episode_id' => $master->id,
+            'episode_failover_id' => $failover->id,
+            'sort' => 1,
+        ]);
+        EpisodeFailover::create([
+            'user_id' => $user->id,
+            'episode_id' => $otherMaster->id,
+            'episode_failover_id' => $otherFailover->id,
+            'sort' => 1,
+        ]);
+
+        $this->runUnmergeEpisodes(
+            user: $user,
+            playlistId: $playlist->id,
+            reactivateEpisodes: true,
+        );
+
+        $this->assertDatabaseMissing('episode_failovers', [
+            'episode_id' => $master->id,
+            'episode_failover_id' => $failover->id,
+        ]);
+        $this->assertDatabaseHas('episode_failovers', [
+            'episode_id' => $otherMaster->id,
+            'episode_failover_id' => $otherFailover->id,
+        ]);
+        $this->assertTrue($failover->refresh()->enabled);
+        $this->assertFalse($otherFailover->refresh()->enabled);
     }
 
     #[Test]

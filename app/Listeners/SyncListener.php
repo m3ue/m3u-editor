@@ -237,6 +237,8 @@ class SyncListener
             newChannelsOnly: $newChannelsOnly,
             regexPatterns: ! empty($config['regex_patterns'] ?? []) ? $config['regex_patterns'] : null,
             fallbackMergeConfig: PlaylistService::buildMergeFallbackConfig($config),
+            contentType: ($config['merge_key'] ?? 'stream_id') === 'tmdb_id' ? 'vod' : 'live',
+            mergeKey: $config['merge_key'] ?? 'stream_id',
         );
     }
 
