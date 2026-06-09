@@ -111,7 +111,7 @@ jobs:
   test:
     name: Tests
     runs-on: ubuntu-latest
-    needs: [lint]
+    needs: [lint, security]
     services:
       postgres:
         image: postgres:16-alpine
