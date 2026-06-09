@@ -231,6 +231,7 @@ class BrowseShows extends Page
     public function updatedDvrSettingId(): void
     {
         $this->group_id = null;
+        $this->channel_id = null;
         $this->channel_name = '';
         $this->channelOptions = [];
         $this->dvrSettingResolved = false;
