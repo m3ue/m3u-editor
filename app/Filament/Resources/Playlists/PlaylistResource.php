@@ -951,6 +951,99 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ->collapsible()
                                 ->collapsed()
                                 ->reorderable()
+                                ->extraItemActions([
+                                    Action::make('test_dns_url')
+                                        ->label(__('Test'))
+                                        ->icon('heroicon-o-signal')
+                                        ->color('info')
+                                        ->tooltip(__('Test connection to this fallback URL'))
+                                        ->action(function (array $arguments, Repeater $component, ?Playlist $record): void {
+                                            $itemKey = $arguments['item'];
+                                            $allItems = $component->getState();
+                                            $url = $allItems[$itemKey]['url'] ?? null;
+
+                                            if (empty($url)) {
+                                                Notification::make()
+                                                    ->title(__('Missing URL'))
+                                                    ->body(__('Please enter a URL first.'))
+                                                    ->warning()
+                                                    ->send();
+
+                                                return;
+                                            }
+
+                                            $config = $record?->xtream_config ?? [];
+                                            $username = $config['username'] ?? null;
+                                            $password = $config['password'] ?? null;
+
+                                            if (empty($username) || empty($password)) {
+                                                Notification::make()
+                                                    ->title(__('Missing Credentials'))
+                                                    ->body(__('Save the playlist with Xtream credentials before testing a fallback URL.'))
+                                                    ->warning()
+                                                    ->send();
+
+                                                return;
+                                            }
+
+                                            try {
+                                                $xtream = XtreamService::make(xtream_config: [
+                                                    'url' => $url,
+                                                    'username' => $username,
+                                                    'password' => $password,
+                                                ]);
+
+                                                $result = $xtream->userInfo(timeout: 10);
+
+                                                if (empty($result) || ! isset($result['user_info'])) {
+                                                    Notification::make()
+                                                        ->title(__('Connection Failed'))
+                                                        ->body(__('No valid response from the Xtream API. Check the URL and credentials.'))
+                                                        ->danger()
+                                                        ->send();
+
+                                                    return;
+                                                }
+
+                                                $userInfo = $result['user_info'];
+                                                $serverInfo = $result['server_info'] ?? [];
+
+                                                $status = $userInfo['status'] ?? 'Unknown';
+                                                $maxConnections = $userInfo['max_connections'] ?? '?';
+                                                $activeCons = $userInfo['active_cons'] ?? '0';
+                                                $expDate = ! empty($userInfo['exp_date'])
+                                                    ? date('Y-m-d', (int) $userInfo['exp_date'])
+                                                    : 'Never';
+                                                $serverUrl = $serverInfo['url'] ?? $url;
+                                                $serverTime = ! empty($serverInfo['time_now'])
+                                                    ? $serverInfo['time_now']
+                                                    : 'Unknown';
+
+                                                $isActive = $status === 'Active';
+                                                $statusIcon = $isActive ? '✅' : '⚠️';
+
+                                                $details = "{$statusIcon} **Status:** {$status}\n\n";
+                                                $details .= "**Max Connections:** {$maxConnections}\n\n";
+                                                $details .= "**Active Connections:** {$activeCons}\n\n";
+                                                $details .= "**Expires:** {$expDate}\n\n";
+                                                $details .= "**Server:** {$serverUrl}\n\n";
+                                                $details .= "**Server Time:** {$serverTime}";
+
+                                                Notification::make()
+                                                    ->title(__('Connection Successful'))
+                                                    ->body(Str::markdown($details))
+                                                    ->success()
+                                                    ->persistent()
+                                                    ->send();
+                                            } catch (Exception $e) {
+                                                Notification::make()
+                                                    ->title(__('Connection Failed'))
+                                                    ->body($e->getMessage())
+                                                    ->danger()
+                                                    ->send();
+                                            }
+                                        }),
+                                ])
                                 ->columnSpan(2),
                         ])->hidden(fn (Get $get): bool => ! $get('xtream')),
                     Grid::make()
