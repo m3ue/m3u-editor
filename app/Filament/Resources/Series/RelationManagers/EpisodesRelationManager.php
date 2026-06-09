@@ -3,8 +3,8 @@
 namespace App\Filament\Resources\Series\RelationManagers;
 
 use App\Filament\Tables\ProbeStatusColumn;
-use App\Jobs\ProbeVodStreamsChunk;
-use App\Jobs\ProbeVodStreamsComplete;
+use App\Jobs\ProbeStreamsChunk;
+use App\Jobs\ProbeStreamsComplete;
 use Filament\Actions;
 use Filament\Actions\Action;
 use Filament\Actions\ViewAction;
@@ -260,12 +260,12 @@ class EpisodesRelationManager extends RelationManager
                             $start = now();
 
                             $chunks = collect(array_chunk($ids, 50))
-                                ->map(fn ($chunk) => new ProbeVodStreamsChunk(episodeIds: $chunk, probeTimeout: 15))
+                                ->map(fn ($chunk) => new ProbeStreamsChunk(episodeIds: $chunk, probeTimeout: 15))
                                 ->all();
 
                             Bus::chain([
                                 ...$chunks,
-                                new ProbeVodStreamsComplete(
+                                new ProbeStreamsComplete(
                                     playlistId: null,
                                     total: count($ids),
                                     start: $start,

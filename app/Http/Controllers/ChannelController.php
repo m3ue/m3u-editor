@@ -104,7 +104,7 @@ class ChannelController extends Controller
 
         // Get sort parameters
         $sortField = $request->get('sort', 'id');
-        $sortOrder = $request->get('order', 'asc');
+        $sortOrder = strtoupper($request->get('order', 'asc')) === 'DESC' ? 'DESC' : 'ASC';
 
         // Build base query with relationships eager loaded
         $baseQuery = Channel::where('user_id', $user->id)

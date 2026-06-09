@@ -2,9 +2,9 @@
 
 return [
     'author' => 'Shaun Parkison',
-    'version' => '0.11.47',
-    'dev_version' => '0.11.47-dev',
-    'experimental_version' => '0.12.20-exp',
+    'version' => '0.11.52',
+    'dev_version' => '0.11.52-dev',
+    'experimental_version' => '0.12.25-exp',
     'repo' => 'm3ue/m3u-editor',
     'docs_url' => 'https://m3ue.sparkison.dev',
     'donate' => 'https://buymeacoffee.com/shparkison',
@@ -21,9 +21,11 @@ return [
     'max_channels' => env('MAX_CHANNELS', 50000), // Maximum number of channels allowed for m3u import
     'invalidate_import' => env('INVALIDATE_IMPORT', null), // Invalidate import if number of "new" channels is less than the current count (minus `INVALIDATE_IMPORT_THRESHOLD`)
     'invalidate_import_threshold' => env('INVALIDATE_IMPORT_THRESHOLD', null), // Threshold for invalidating import
+    'invalidate_import_series_threshold' => env('INVALIDATE_IMPORT_SERIES_THRESHOLD', null), // Threshold for invalidating import based on series removal count
+    'invalidate_import_group_threshold' => env('INVALIDATE_IMPORT_GROUP_THRESHOLD', null), // Threshold for invalidating import based on group/category removal count
     'default_epg_days' => env('DEFAULT_EPG_DAYS', 7), // Default number of days to fetch for EPG generation
     'show_wan_details' => env('SHOW_WAN_DETAILS', null), // Show WAN details in admin panel
-    'stuck_processing_minutes' => env('STUCK_PROCESSING_MINUTES', 120),
+    'stuck_processing_minutes' => env('STUCK_PROCESSING_MINUTES', 240),
     'failed_retry_cooldown_minutes' => env('FAILED_RETRY_COOLDOWN_MINUTES', 15),
     'auto_retry_503_enabled' => env('AUTO_RETRY_503_ENABLED', true),
     'auto_retry_503_max' => env('AUTO_RETRY_503_MAX', 3),

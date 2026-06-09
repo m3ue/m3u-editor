@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Models\Channel;
 use App\Models\ChannelFailover;
+use App\Models\User;
 use Filament\Notifications\Notification;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -19,7 +20,7 @@ class UnmergeChannels implements ShouldQueue
      * Create a new job instance.
      */
     public function __construct(
-        public $user,
+        public readonly User $user,
         public $playlistId = null,
         public $groupId = null,
         public bool $reactivateChannels = false,

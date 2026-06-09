@@ -44,7 +44,7 @@ class RefreshEpg extends Command
             // continuously refresh updated_at via progress updates, preventing the
             // updated_at check from ever triggering on actively-running stuck jobs.
             // Fall back to updated_at when processing_started_at is null (legacy runs).
-            $stuckMinutes = (int) config('dev.stuck_processing_minutes', 120);
+            $stuckMinutes = (int) config('dev.stuck_processing_minutes', 240);
             $stuckThreshold = now()->subMinutes($stuckMinutes);
 
             Epg::query()

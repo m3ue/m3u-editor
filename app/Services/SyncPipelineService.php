@@ -10,7 +10,7 @@ use App\Jobs\CompleteSyncPhase;
 use App\Jobs\FetchTmdbIds;
 use App\Jobs\MergeChannels;
 use App\Jobs\ProbeChannelStreams;
-use App\Jobs\ProbeVodStreams;
+use App\Jobs\ProbeStreams;
 use App\Jobs\ProcessChannelScrubber;
 use App\Jobs\ProcessM3uImportSeries;
 use App\Jobs\ProcessVodChannels;
@@ -23,6 +23,7 @@ use App\Models\Playlist;
 use App\Models\SyncRun;
 use App\Settings\GeneralSettings;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -35,25 +36,67 @@ class SyncPipelineService
      * phase; once the import job chain completes and we know which post-import
      * phases will actually run, expandPipelineAfterImport() replaces the
      * phases array with the full resolved plan.
+     *
+     * If a run is already active for this playlist, the existing run is returned
+     * and no new run is created. A cache-backed lock prevents concurrent callers
+     * from slipping through the guard simultaneously.
      */
     public function startImport(
         Playlist $playlist,
         string $trigger = 'full_sync',
     ): SyncRun {
-        return SyncRun::create([
-            'playlist_id' => $playlist->id,
-            'user_id' => $playlist->user_id,
-            'trigger' => $trigger,
-            'status' => SyncRunStatus::Running->value,
-            'current_phase' => SyncRunPhase::Import->value,
-            'phases' => [SyncRunPhase::Import->value],
-            'phase_statuses' => (object) [],
-            'context' => [
+        $lockKey = "sync_pipeline_start:{$playlist->id}";
+
+        return Cache::lock($lockKey, 10)->block(5, function () use ($playlist, $trigger): SyncRun {
+            $existing = SyncRun::where('playlist_id', $playlist->id)
+                ->where('status', SyncRunStatus::Running->value)
+                ->latest('started_at')
+                ->first();
+
+            if ($existing) {
+                // If the import phase is already complete the pipeline has moved past
+                // Import. This run is stale — the pipeline died mid-way (queue clear,
+                // worker crash, etc.). Fail it so we can start a fresh run below.
+                if ($existing->isPhaseComplete(SyncRunPhase::Import)) {
+                    $existing->update([
+                        'status' => SyncRunStatus::Failed->value,
+                        'finished_at' => now(),
+                    ]);
+
+                    Log::info("SyncPipeline: startImport — stale run {$existing->id} detected (import complete, pipeline dead). Failing and creating fresh run.", [
+                        'playlist_id' => $playlist->id,
+                        'trigger' => $trigger,
+                        'stale_run_id' => $existing->id,
+                        'stale_current_phase' => $existing->current_phase,
+                    ]);
+                } else {
+                    // Import is not yet complete — a true concurrent dispatch. Return the
+                    // existing run to prevent a duplicate import.
+                    Log::info("SyncPipeline: startImport skipped — run {$existing->id} already active for playlist {$playlist->id}.", [
+                        'existing_run_id' => $existing->id,
+                        'trigger' => $trigger,
+                        'playlist_id' => $playlist->id,
+                    ]);
+
+                    return $existing;
+                }
+            }
+
+            return SyncRun::create([
                 'playlist_id' => $playlist->id,
                 'user_id' => $playlist->user_id,
-            ],
-            'started_at' => now(),
-        ]);
+                'trigger' => $trigger,
+                'status' => SyncRunStatus::Running->value,
+                'current_phase' => SyncRunPhase::Import->value,
+                'phases' => [SyncRunPhase::Import->value],
+                'phase_statuses' => (object) [],
+                'context' => [
+                    'playlist_id' => $playlist->id,
+                    'user_id' => $playlist->user_id,
+                ],
+                'started_at' => now(),
+            ]);
+        });
     }
 
     /**
@@ -282,8 +325,10 @@ class SyncPipelineService
 
     private function dispatchProbe(SyncRun $run, Playlist $playlist, bool $isSeriesProbe): void
     {
-        dispatch(new ProbeVodStreams(
+        dispatch(new ProbeStreams(
             playlistId: $playlist->id,
+            onlyUnprobed: (bool) ($playlist->auto_probe_vod_streams_only_unprobed ?? true),
+            includeDisabled: (bool) ($playlist->auto_probe_vod_streams_include_disabled ?? false),
             syncRunId: $run->id,
             isSeriesProbe: $isSeriesProbe,
         ));
@@ -404,6 +449,8 @@ class SyncPipelineService
 
         dispatch(new ProbeChannelStreams(
             playlistId: $playlist->id,
+            onlyUnprobed: (bool) ($playlist->auto_probe_streams_only_unprobed ?? true),
+            includeDisabled: (bool) ($playlist->auto_probe_streams_include_disabled ?? false),
             syncRunId: $run->id,
         ));
     }

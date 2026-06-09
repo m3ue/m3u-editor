@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Enums\PlaylistSourceType;
 use App\Enums\Status;
+use App\Enums\SyncRunPhase;
 use App\Events\SyncCompleted;
 use App\Models\Category;
 use App\Models\Group;
@@ -208,6 +209,21 @@ class ProcessM3uImport implements ShouldQueue
                 ->sendToDatabase($this->playlist->user);
 
             return;
+        }
+
+        // If a SyncRun ID was provided and that run's import phase is already complete,
+        // this job was dispatched against a recycled run (startImport() returned an
+        // existing active run). Bail out before touching any channel data.
+        if ($this->syncRunId !== null) {
+            $syncRun = SyncRun::find($this->syncRunId);
+            if ($syncRun && $syncRun->isPhaseComplete(SyncRunPhase::Import)) {
+                Log::info('ProcessM3uImport: Skipping — import already complete for run, pipeline still active', [
+                    'playlist_id' => $this->playlist->id,
+                    'sync_run_id' => $this->syncRunId,
+                ]);
+
+                return;
+            }
         }
 
         if (! $this->force) {
@@ -1186,13 +1202,14 @@ class ProcessM3uImport implements ShouldQueue
                             }
                             $group = Group::create($data);
                         } else {
-                            if ($group->trashed()) {
-                                $group->restore();
-                            }
                             $data = [
                                 'import_batch_no' => $batchNo,
                                 'new' => false,
                             ];
+                            if ($group->trashed()) {
+                                $group->restore();
+                                $data['new'] = true; // if restoring, mark as new to trigger any new group logic in downstream processing
+                            }
                             if ($groupOrder !== null) {
                                 $data['sort_order'] = $groupOrder++;
                             }
@@ -1249,13 +1266,14 @@ class ProcessM3uImport implements ShouldQueue
                             }
                             $group = Group::create($data);
                         } else {
-                            if ($group->trashed()) {
-                                $group->restore();
-                            }
                             $data = [
                                 'import_batch_no' => $batchNo,
                                 'new' => false,
                             ];
+                            if ($group->trashed()) {
+                                $group->restore();
+                                $data['new'] = true; // if restoring, mark as new to trigger any new group logic in downstream processing
+                            }
                             if ($groupOrder !== null) {
                                 $data['sort_order'] = $groupOrder++;
                             }
@@ -1547,7 +1565,7 @@ class ProcessM3uImport implements ShouldQueue
                 ]);
 
                 // Auto retry on HTTP 503
-                if (self::isHttp503($e)) {
+                if (self::isHttp5xx($e)) {
                     $playlist->update([
                         'processing' => [
                             ...$playlist->processing ?? [],
@@ -1556,7 +1574,7 @@ class ProcessM3uImport implements ShouldQueue
                             'series_processing' => false,
                         ],
                     ]);
-                    self::scheduleRetry503($playlist);
+                    self::scheduleRetry5xx($playlist);
                 }
 
                 event(new SyncCompleted($playlist));
@@ -1618,13 +1636,14 @@ class ProcessM3uImport implements ShouldQueue
                         }
                         $group = Group::create($data);
                     } else {
-                        if ($group->trashed()) {
-                            $group->restore();
-                        }
                         $data = [
                             'import_batch_no' => $batchNo,
                             'new' => false,
                         ];
+                        if ($group->trashed()) {
+                            $group->restore();
+                            $data['new'] = true; // if restoring, mark as new to trigger any new group logic in downstream processing
+                        }
                         if ($groupOrder !== null) {
                             $data['sort_order'] = $groupOrder++;
                         }
@@ -1792,7 +1811,7 @@ class ProcessM3uImport implements ShouldQueue
                 ]);
 
                 // Auto retry on HTTP 503
-                if (self::isHttp503($e)) {
+                if (self::isHttp5xx($e)) {
                     $playlist->update([
                         'processing' => [
                             ...$playlist->processing ?? [],
@@ -1801,7 +1820,7 @@ class ProcessM3uImport implements ShouldQueue
                             'series_processing' => false,
                         ],
                     ]);
-                    self::scheduleRetry503($playlist);
+                    self::scheduleRetry5xx($playlist);
                 }
 
                 event(new SyncCompleted($playlist));
@@ -1948,24 +1967,38 @@ class ProcessM3uImport implements ShouldQueue
         return false;
     }
 
-    private static function isHttp503(Throwable $e): bool
+    private static function isHttp5xx(Throwable $e): bool
     {
         if ($e instanceof RequestException) {
             $response = $e->response;
             if ($response) {
-                return $response->status() === 503;
+                $status = $response->status();
+
+                return $status >= 500 && $status < 600;
             }
         }
 
         return Str::contains($e->getMessage(), [
+            'status code 500',
+            'status code 502',
             'status code 503',
+            'status code 504',
+            'HTTP request returned status code 500',
+            'HTTP request returned status code 502',
             'HTTP request returned status code 503',
+            'HTTP request returned status code 504',
+            '500 Internal Server Error',
+            '502 Bad Gateway',
             '503 Service Temporarily Unavailable',
+            '504 Gateway Timeout',
+            ' 500:',
+            ' 502:',
             ' 503:',
+            ' 504:',
         ]);
     }
 
-    private static function scheduleRetry503(Playlist $playlist): void
+    private static function scheduleRetry5xx(Playlist $playlist): void
     {
         if (! (bool) config('dev.auto_retry_503_enabled', true)) {
             return;

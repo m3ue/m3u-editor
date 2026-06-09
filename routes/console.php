@@ -2,7 +2,6 @@
 
 use App\Jobs\DvrRetentionCleanup;
 use App\Jobs\DvrSchedulerTick;
-use App\Models\PluginRun;
 use Illuminate\Support\Facades\Schedule;
 
 /*
@@ -55,9 +54,8 @@ Schedule::command('queue:prune-failed --hours=48')
 Schedule::command('app:prune-old-notifications --days=7')
     ->daily();
 
-// Prune old plugin run history (retention configured via PLUGIN_RUN_RETENTION_DAYS, default 7 days)
-Schedule::command('model:prune', ['--model' => [PluginRun::class]])
-    ->daily();
+// Prune old model history
+Schedule::command('model:prune')->daily();
 
 // Ensure m3u-proxy webhook is registered (handles proxy restarts, delayed startup, etc.)
 Schedule::command('m3u-proxy:register-webhook')

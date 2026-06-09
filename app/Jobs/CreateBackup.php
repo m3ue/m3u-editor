@@ -7,6 +7,7 @@ use Exception;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -27,6 +28,19 @@ class CreateBackup implements ShouldQueue
     public function __construct(public bool $includeFiles = false)
     {
         //
+    }
+
+    /**
+     * Prevent concurrent backups. Spatie's BackupJob always uses a fixed temp
+     * directory name ('temp') with force-recreate, so two overlapping runs will
+     * delete each other's working directory mid-write, causing ZipArchive::close()
+     * to fail with "Renaming temporary file failed: No such file or directory".
+     *
+     * @return array<int, WithoutOverlapping>
+     */
+    public function middleware(): array
+    {
+        return [(new WithoutOverlapping('create-backup'))->releaseAfter(60)->expireAfter($this->timeout + 60)];
     }
 
     /**

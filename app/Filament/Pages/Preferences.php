@@ -22,7 +22,6 @@ use App\Services\M3uProxyService;
 use App\Services\PlaylistService;
 use App\Settings\GeneralSettings;
 use Cron\CronExpression;
-use Dom\Text;
 use Exception;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
@@ -47,6 +46,7 @@ use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
 use Filament\Support\Enums\Width;
+use Illuminate\Contracts\Bus\Dispatcher;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Http;
@@ -54,7 +54,6 @@ use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\HtmlString;
 use Illuminate\Support\Str;
-use Ramsey\Uuid\Guid\Fields;
 use Spatie\DiscordAlerts\Facades\DiscordAlert;
 use Spatie\SlackAlerts\Facades\SlackAlert;
 
@@ -74,10 +73,6 @@ class Preferences extends SettingsPage
         return __('Settings');
     }
 
-    /**
-     * Check if the user can access this page.
-     * Only admin users can access the Preferences page.
-     */
     public static function canAccess(): bool
     {
         return auth()->check() && auth()->user()->isAdmin();
@@ -87,7 +82,27 @@ class Preferences extends SettingsPage
     {
         return [
             ActionGroup::make([
-                Action::make('Clear Expired Logo Cache')
+                Action::make('test_websocket')
+                    ->label(__('Test WebSocket'))
+                    ->icon('heroicon-o-signal')
+                    ->color('gray')
+                    ->modalWidth('md')
+                    ->schema([
+                        TextInput::make('message')
+                            ->label(__('Message'))
+                            ->required()
+                            ->default('Testing WebSocket connection')
+                            ->helperText(__('This message will be sent to the WebSocket server and displayed as a pop-up notification. If you do not see a notification shortly after sending, there is likely an issue with your WebSocket configuration.')),
+                    ])
+                    ->action(function (array $data): void {
+                        Notification::make()
+                            ->success()
+                            ->title(__('WebSocket Connection Test'))
+                            ->body($data['message'])
+                            ->persistent()
+                            ->broadcast(auth()->user());
+                    }),
+                Action::make('clear_expired_logo_cache')
                     ->label(__('Clear Expired Logo Cache'))
                     ->action(fn () => Artisan::call('app:logo-cleanup --force'))
                     ->after(function () {
@@ -104,7 +119,7 @@ class Preferences extends SettingsPage
                     ->modalIcon('heroicon-o-trash')
                     ->modalDescription(__('Only expired logo cache entries (those older than 30 days). If permanent cache is enabled, nothing will be removed.'))
                     ->modalSubmitActionLabel(__('Clear expired cache')),
-                Action::make('Clear Logo Cache')
+                Action::make('clear_logo_cache')
                     ->label(__('Clear All Logo Cache'))
                     ->action(fn () => Artisan::call('app:logo-cleanup --force --all'))
                     ->after(function () {
@@ -121,11 +136,10 @@ class Preferences extends SettingsPage
                     ->modalIcon('heroicon-o-exclamation-triangle')
                     ->modalDescription(__('Clearing the logo cache will remove all cached logo images. If permanent cache is enabled, it will be ignored. This action cannot be undone.'))
                     ->modalSubmitActionLabel(__('I understand, clear now')),
-                Action::make('Reset Queue')
+                Action::make('reset_queue')
                     ->label(__('Reset Queue'))
-                    ->action(function () {
-                        app('Illuminate\Contracts\Bus\Dispatcher')
-                            ->dispatch(new RestartQueue);
+                    ->action(function (Dispatcher $dispatcher): void {
+                        $dispatcher->dispatch(new RestartQueue);
                     })
                     ->after(function () {
                         Notification::make()
@@ -231,18 +245,14 @@ class Preferences extends SettingsPage
                                     ->schema([
                                         Grid::make()
                                             ->columnSpanFull()
-                                            ->columns(3)
+                                            ->columns(4)
                                             ->schema([
                                                 Toggle::make('show_breadcrumbs')
                                                     ->label(__('Show breadcrumbs'))
                                                     ->helperText(__('Show breadcrumbs under the page titles')),
-                                                Toggle::make('suppress_success_notifications')
-                                                    ->label(__('Suppress success notifications'))
-                                                    ->hintIcon(
-                                                        'heroicon-m-question-mark-circle',
-                                                        tooltip: 'When enabled, success notifications from background tasks (e.g. sync completed successfully) will be hidden. Errors and warnings will still be shown regardless of this setting.'
-                                                    )
-                                                    ->helperText(__('Hide success notifications from background tasks (errors and warnings are always shown).')),
+                                                Toggle::make('show_queue_indicator')
+                                                    ->label(__('Show queue indicator'))
+                                                    ->helperText(__('Show the live queue status indicator in the top navigation bar')),
                                                 Toggle::make('output_wan_address')
                                                     ->label(__('Output WAN address in menu'))
                                                     ->helperText(__('When enabled, the application will output the WAN address of the server m3u-editor is currently running on.'))
@@ -258,6 +268,13 @@ class Preferences extends SettingsPage
                                                     })->disabled(fn () => config('dev.show_wan_details') !== null)
                                                     ->hint(fn () => config('dev.show_wan_details') !== null ? 'Already set by environment variable!' : null)
                                                     ->dehydrated(fn () => config('dev.show_wan_details') === null),
+                                                Toggle::make('suppress_success_notifications')
+                                                    ->label(__('Suppress success notifications'))
+                                                    ->hintIcon(
+                                                        'heroicon-m-question-mark-circle',
+                                                        tooltip: 'When enabled, success notifications from background tasks (e.g. sync completed successfully) will be hidden. Errors and warnings will still be shown regardless of this setting.'
+                                                    )
+                                                    ->helperText(__('Hide success notifications from background tasks (errors and warnings are always shown).')),
                                             ]),
                                         Grid::make()
                                             ->columnSpanFull()
@@ -401,6 +418,7 @@ class Preferences extends SettingsPage
                                     ]),
                             ]),
                         Tab::make(__('Proxy'))
+                            ->hidden(fn () => ! config('proxy.proxy_integration_enabled', true))
                             ->schema([
                                 Section::make(__('URL & Connection'))
                                     ->description(__('Configure how the proxy is accessed and how stream URLs are resolved.'))
@@ -945,6 +963,7 @@ class Preferences extends SettingsPage
                                     ->schema([
                                         Toggle::make('invalidate_import')
                                             ->label(__('Enable sync invalidation'))
+                                            ->columnSpanFull()
                                             ->disabled(fn () => ! empty(config('dev.invalidate_import')))
                                             ->live()
                                             ->hint(fn () => ! empty(config('dev.invalidate_import')) ? 'Already set by environment variable!' : null)
@@ -958,8 +977,8 @@ class Preferences extends SettingsPage
                                             })
                                             ->dehydrated(fn () => empty(config('dev.invalidate_import'))),
                                         TextInput::make('invalidate_import_threshold')
-                                            ->label(__('Sync invalidation threshold'))
-                                            ->columnSpan(2)
+                                            ->label(__('Channel removal threshold'))
+                                            ->columnSpan(1)
                                             ->hintIcon(
                                                 'heroicon-m-question-mark-circle',
                                                 tooltip: 'Some providers frequently remove and re-add groups/categories, which can lead to channels be removed during sync. This setting helps prevent large-scale removals by canceling the sync if the defined number of channels would be removed.'
@@ -972,6 +991,36 @@ class Preferences extends SettingsPage
                                             ->hidden(fn ($get) => ! empty(config('dev.invalidate_import')) || ! $get('invalidate_import'))
                                             ->numeric()
                                             ->helperText(__('If sync will remove more than this number of channels, the sync will be canceled.')),
+                                        TextInput::make('invalidate_import_series_threshold')
+                                            ->label(__('Series removal threshold'))
+                                            ->columnSpan(1)
+                                            ->hintIcon(
+                                                'heroicon-m-question-mark-circle',
+                                                tooltip: 'Cancel the sync if this many series would be removed. Helps protect against provider API responses that omit series data temporarily.'
+                                            )
+                                            ->suffixIcon(fn () => ! empty(config('dev.invalidate_import_series_threshold')) ? 'heroicon-m-lock-closed' : null)
+                                            ->disabled(fn () => ! empty(config('dev.invalidate_import_series_threshold')))
+                                            ->hint(fn () => ! empty(config('dev.invalidate_import_series_threshold')) ? 'Already set by environment variable!' : null)
+                                            ->dehydrated(fn () => empty(config('dev.invalidate_import_series_threshold')))
+                                            ->placeholder(fn () => empty(config('dev.invalidate_import_series_threshold')) ? 100 : config('dev.invalidate_import_series_threshold'))
+                                            ->hidden(fn ($get) => ! empty(config('dev.invalidate_import')) || ! $get('invalidate_import'))
+                                            ->numeric()
+                                            ->helperText(__('If sync will remove more than this number of series, the sync will be canceled.')),
+                                        TextInput::make('invalidate_import_group_threshold')
+                                            ->label(__('Group/category removal threshold'))
+                                            ->columnSpan(1)
+                                            ->hintIcon(
+                                                'heroicon-m-question-mark-circle',
+                                                tooltip: 'Cancel the sync if this many groups or categories would be removed. Useful for catching provider outages that drop entire category lists.'
+                                            )
+                                            ->suffixIcon(fn () => ! empty(config('dev.invalidate_import_group_threshold')) ? 'heroicon-m-lock-closed' : null)
+                                            ->disabled(fn () => ! empty(config('dev.invalidate_import_group_threshold')))
+                                            ->hint(fn () => ! empty(config('dev.invalidate_import_group_threshold')) ? 'Already set by environment variable!' : null)
+                                            ->dehydrated(fn () => empty(config('dev.invalidate_import_group_threshold')))
+                                            ->placeholder(fn () => empty(config('dev.invalidate_import_group_threshold')) ? 50 : config('dev.invalidate_import_group_threshold'))
+                                            ->hidden(fn ($get) => ! empty(config('dev.invalidate_import')) || ! $get('invalidate_import'))
+                                            ->numeric()
+                                            ->helperText(__('If sync will remove more than this number of groups/categories, the sync will be canceled.')),
                                     ]),
                                 Section::make(__('Series stream file settings'))
                                     ->description(__('Select a Stream File Setting for series .strm file generation.'))
@@ -1743,59 +1792,6 @@ HTML))
                                         Toggle::make('alerts_on_import_failed')
                                             ->label(__('Notify on playlist import failures'))
                                             ->helperText(__('Sends an alert when a playlist sync fails entirely, e.g. all provider URLs were unreachable.')),
-                                    ]),
-                            ]),
-                        Tab::make(__('Debugging'))
-                            ->schema([
-                                Section::make(__('Debugging'))
-                                    ->headerActions([
-                                        Action::make('test_websocket')
-                                            ->label(__('Test WebSocket'))
-                                            ->icon('heroicon-o-signal')
-                                            ->iconPosition('after')
-                                            ->color('gray')
-                                            ->size('sm')
-                                            ->modalWidth('md')
-                                            ->schema([
-                                                TextInput::make('message')
-                                                    ->label(__('Message'))
-                                                    ->required()
-                                                    ->default('Testing WebSocket connection')
-                                                    ->helperText(__('This message will be sent to the WebSocket server, and displayed as a pop-up notification. If you do not see a notification shortly after sending, there is likely an issue with your WebSocket configuration.')),
-                                            ])
-                                            ->action(function (array $data): void {
-                                                Notification::make()
-                                                    ->success()
-                                                    ->title(__('WebSocket Connection Test'))
-                                                    ->body($data['message'])
-                                                    ->persistent()
-                                                    ->broadcast(auth()->user());
-                                            }),
-                                        // Action::make('view_logs')
-                                        //     ->label(__('View Logs'))
-                                        //     ->color('gray')
-                                        //     ->icon('heroicon-o-document-text')
-                                        //     ->iconPosition('after')
-                                        //     ->size('sm')
-                                        //     ->url('/logs'),
-                                        Action::make('view_queue_manager')
-                                            ->label(__('Queue Manager'))
-                                            ->icon('heroicon-o-arrow-top-right-on-square')
-                                            ->iconPosition('after')
-                                            ->size('sm')
-                                            ->url('/horizon')
-                                            ->openUrlInNewTab(true),
-                                    ])->schema([
-                                        // Toggle::make('show_logs')
-                                        //     ->label(__('Make log files viewable'))
-                                        //     ->hintIcon(
-                                        //         'heroicon-m-question-mark-circle',
-                                        //         tooltip: 'You may need to refresh the page after applying this setting to view the logs. When disabled you will get a 404.'
-                                        //     )
-                                        //     ->helperText(__('When enabled, there will be an additional navigation item (Logs) to view the log file content.')),
-                                        Toggle::make('show_queue_manager')
-                                            ->label(__('Allow queue manager access'))
-                                            ->helperText(__('When enabled you can access the queue manager using the "Queue Manager" button. When disabled, the queue manager endpoint will return a 403 (Unauthorized).')),
                                     ]),
                             ]),
                     ])->contained(false),

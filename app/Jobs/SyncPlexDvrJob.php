@@ -20,7 +20,11 @@ class SyncPlexDvrJob implements ShouldBeUnique, ShouldQueue
     public function __construct(
         public ?int $integrationId = null,
         public string $trigger = 'unknown',
-    ) {}
+    ) {
+        // Debounce: delay every dispatch so burst-firing events (channel observer, playlist sync,
+        // EPG sync) all collapse into a single execution after the dust settles.
+        $this->delay(now()->addSeconds(30));
+    }
 
     /**
      * Unique ID prevents duplicate jobs for the same integration.
@@ -31,12 +35,11 @@ class SyncPlexDvrJob implements ShouldBeUnique, ShouldQueue
     }
 
     /**
-     * Allow the job to be unique for 60 seconds (debounce window).
-     * If multiple events fire within this window, only one job runs.
+     * TTL must exceed delay (30 s) + max execution time so the lock never expires early.
      */
     public function uniqueFor(): int
     {
-        return 60;
+        return 120;
     }
 
     public function handle(): void

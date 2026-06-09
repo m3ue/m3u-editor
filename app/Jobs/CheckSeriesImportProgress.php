@@ -53,7 +53,7 @@ class CheckSeriesImportProgress implements ShouldQueue
     public function handle(GeneralSettings $settings): void
     {
         $batchSize = ProcessM3uImportSeriesEpisodes::BATCH_SIZE;
-        $seriesProcessed = $this->currentOffset;
+        $seriesProcessed = min($this->currentOffset, $this->totalSeries);
         $seriesRemaining = $this->totalSeries - $seriesProcessed;
         $progressPct = round(($seriesProcessed / max(1, $this->totalSeries)) * 100, 1);
 

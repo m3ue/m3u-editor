@@ -5,6 +5,7 @@ use App\Providers\Filament\AdminPanelProvider;
 use App\Providers\Filament\GuestPanelPanelProvider;
 use App\Providers\HorizonServiceProvider;
 use App\Providers\LogoServiceProvider;
+use App\Providers\QueueMonitorServiceProvider;
 use App\Providers\VersionServiceProvider;
 
 return [
@@ -13,5 +14,6 @@ return [
     GuestPanelPanelProvider::class,
     HorizonServiceProvider::class,
     LogoServiceProvider::class,
+    QueueMonitorServiceProvider::class,
     VersionServiceProvider::class,
 ];

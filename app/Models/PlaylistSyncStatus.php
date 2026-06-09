@@ -2,7 +2,9 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\MassPrunable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -10,6 +12,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class PlaylistSyncStatus extends Model
 {
     use HasFactory;
+    use MassPrunable;
 
     /**
      * The attributes that should be cast to native types.
@@ -26,6 +29,12 @@ class PlaylistSyncStatus extends Model
         'added_channels' => 'array',
         'sync_stats' => 'array',
     ];
+
+    public function prunable(): Builder
+    {
+        return static::query()
+            ->where('created_at', '<', now()->subDays(30));
+    }
 
     public function user(): BelongsTo
     {

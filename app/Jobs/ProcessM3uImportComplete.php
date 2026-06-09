@@ -7,8 +7,10 @@ use App\Enums\SyncRunPhase;
 use App\Models\Channel;
 use App\Models\Group;
 use App\Models\Job;
+use App\Models\Playlist;
 use App\Models\PlaylistSyncStatus;
 use App\Models\PlaylistSyncStatusLog;
+use App\Models\Series;
 use App\Models\SyncRun;
 use App\Models\User;
 use App\Services\EpgCacheService;
@@ -19,6 +21,7 @@ use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 
 class ProcessM3uImportComplete implements ShouldQueue
 {
@@ -30,16 +33,17 @@ class ProcessM3uImportComplete implements ShouldQueue
     // Giving a timeout of 10 minutes to the Job to process the file
     public $timeout = 60 * 10;
 
-    // Make sure the process logs are cleaned up
-    public int $maxLogs = 25;
-
     // Delete the job when the model is missing
     public $deleteWhenMissingModels = true;
 
     // Whether to invalidate the import if the number of new channels is less than the current count
     public $invalidateImport = false;
 
-    public $invalidateImportThreshold = 100; // Default threshold for invalidating import
+    public $invalidateImportThreshold = 100;
+
+    public $invalidateImportSeriesThreshold = 100;
+
+    public $invalidateImportGroupThreshold = 50;
 
     // Default user agent to use for HTTP requests
     // Used when user agent is not set in the playlist
@@ -62,6 +66,8 @@ class ProcessM3uImportComplete implements ShouldQueue
         // Set the invalidate import settings from config
         $this->invalidateImport = config('dev.invalidate_import', null);
         $this->invalidateImportThreshold = config('dev.invalidate_import_threshold', 100);
+        $this->invalidateImportGroupThreshold = config('dev.invalidate_import_group_threshold', 50);
+        $this->invalidateImportSeriesThreshold = config('dev.invalidate_import_series_threshold', 100);
     }
 
     /**
@@ -78,6 +84,8 @@ class ProcessM3uImportComplete implements ShouldQueue
             // If not set via config, check the settings
             $this->invalidateImport = $settings->invalidate_import ?? false;
             $this->invalidateImportThreshold = $settings->invalidate_import_threshold ?? 100;
+            $this->invalidateImportGroupThreshold = $settings->invalidate_import_group_threshold ?? 50;
+            $this->invalidateImportSeriesThreshold = $settings->invalidate_import_series_threshold ?? 100;
         }
 
         $user = User::find($this->userId);
@@ -105,6 +113,45 @@ class ProcessM3uImportComplete implements ShouldQueue
             ['import_batch_no', '!=', $this->batchNo],
         ]);
 
+        // Null safety guard: if VOD was enabled for this run but zero VOD channels landed in the
+        // new batch, the provider API likely returned an empty response rather than genuinely
+        // removing all VOD content. Exclude VOD from the removal queries to prevent mass
+        // churn on a temporary provider glitch.
+        // --
+        // NOTE: This runs regardless of sync invalidation settings, since it's a safety measure
+        //       to prevent zeroing out channels on provider/API issues.
+        if ($this->runningVodImport) {
+            $hasVodInBatch = $playlist->channels()
+                ->where('is_custom', false)
+                ->where('is_vod', true)
+                ->where('import_batch_no', $this->batchNo)
+                ->exists();
+
+            if (! $hasVodInBatch && $playlist->channels()->where('is_custom', false)->where('is_vod', true)->exists()) {
+                Log::warning("No VOD channels found in batch {$this->batchNo} for playlist {$playlist->id}, excluding VOD from removal to prevent accidental mass deletion.");
+                // For simplicity, we assume all VOD channels have is_vod=true and exclude them from removal.
+                // If there are other types in the future, this logic may need to be adjusted.
+                $removedGroups->where('type', '!=', 'vod');
+                $removedChannels->where('is_vod', false);
+            }
+        }
+
+        // Apply the same safety guard for live channels if the live import was run
+        if ($this->runningLiveImport) {
+            $hasLiveInBatch = $playlist->channels()
+                ->where('is_custom', false)
+                ->where('is_vod', false)
+                ->where('import_batch_no', $this->batchNo)
+                ->exists();
+
+            if (! $hasLiveInBatch && $playlist->channels()->where('is_custom', false)->where('is_vod', false)->exists()) {
+                Log::warning("No live channels found in batch {$this->batchNo} for playlist {$playlist->id}, excluding live from removal to prevent accidental mass deletion.");
+                // Inverse of the VOD logic: we assume live channels are those with is_vod=false, so we exclude those from removal if the live import ran but resulted in zero live channels.
+                $removedGroups->where('type', '!=', 'live');
+                $removedChannels->where('is_vod', true);
+            }
+        }
+
         // Get the newly added channels
         $newChannels = $playlist->channels()->where([
             ['import_batch_no', $this->batchNo],
@@ -127,76 +174,57 @@ class ProcessM3uImportComplete implements ShouldQueue
 
             // Check if we need to invalidate the import before proceeding
             if ($this->invalidateImport) {
-                // Only invalidate if there are channels being removed
-                if ($removedChannelCount > 0) {
-                    $currentCount = $playlist->channels()
-                        ->where('is_custom', false)
-                        ->count();
+                $syncStats = [
+                    'time' => $completedIn,
+                    'time_rounded' => $completedInRounded,
+                    'removed_groups' => $removedGroupCount,
+                    'added_groups' => $newGroupCount,
+                    'removed_channels' => $removedChannelCount,
+                    'added_channels' => $newChannelCount,
+                    'max_hit' => $this->maxHit,
+                ];
 
-                    // See how many new channels there will be after the import
+                // Channel threshold: only fires when the net result drops below current − threshold.
+                if ($removedChannelCount > 0) {
+                    $currentCount = $playlist->channels()->where('is_custom', false)->count();
                     $newCount = $currentCount + $newChannelCount - $removedChannelCount;
 
-                    // If the new count will be less than the current count (minus the threshold), invalidate the import
                     if ($newCount < ($currentCount - $this->invalidateImportThreshold)) {
-                        $message = "Playlist Sync Invalidated: The channel count would have been {$newCount} after import, which is less than the current count of {$currentCount} minus the threshold of {$this->invalidateImportThreshold}.";
-                        if (! $syncLogsDisabled) {
-                            $sync = PlaylistSyncStatus::create([
-                                'name' => $playlist->name,
-                                'user_id' => $user->id,
-                                'playlist_id' => $playlist->id,
-                                'sync_stats' => [
-                                    'time' => $completedIn,
-                                    'time_rounded' => $completedInRounded,
-                                    'removed_groups' => $removedGroupCount,
-                                    'added_groups' => $newGroupCount,
-                                    'removed_channels' => $removedChannelCount,
-                                    'added_channels' => $newChannelCount,
-                                    'max_hit' => $this->maxHit,
-                                    'message' => $message,
-                                    'status' => 'canceled',
-                                ],
-                            ]);
-
-                            /*
-                             * NOTE: Make sure to clone the collections as they will be deleted below
-                             */
-                            $this->createSyncLogEntries(
-                                $sync,
-                                $newChannels->clone(),
-                                $removedChannels->clone(),
-                                $newGroups->clone(),
-                                $removedGroups->clone()
-                            );
-                        }
-
-                        // Invalidate the import
-                        $playlist->update([
-                            'status' => Status::Failed,
-                            'errors' => $message,
-                            'processing' => [
-                                ...$playlist->processing ?? [],
-                                'live_processing' => false,
-                                'vod_processing' => false,
-                            ],
-                        ]);
-
-                        // Cleanup the any new groups/channels
-                        $newGroups->forceDelete();
-                        $newChannels->delete();
-
-                        // Clear out the jobs
-                        Job::where('batch_no', $this->batchNo)->delete();
-
-                        // Notify the user
-                        Notification::make()
-                            ->danger()
-                            ->title('Playlist Sync Invalidated')
-                            ->body($message)
-                            ->broadcast($user)
-                            ->sendToDatabase($user);
+                        $this->cancelImport(
+                            "Playlist Sync Invalidated: The channel count would have been {$newCount} after import, which is less than the current count of {$currentCount} minus the threshold of {$this->invalidateImportThreshold}.",
+                            $user, $playlist, $syncLogsDisabled, $syncStats,
+                            $newChannels, $removedChannels, $newGroups, $removedGroups,
+                        );
 
                         return;
                     }
+                }
+
+                // Group/category threshold.
+                if ($removedGroupCount > $this->invalidateImportGroupThreshold) {
+                    $this->cancelImport(
+                        "Playlist Sync Invalidated: {$removedGroupCount} groups/categories would have been removed, which exceeds the threshold of {$this->invalidateImportGroupThreshold}.",
+                        $user, $playlist, $syncLogsDisabled, $syncStats,
+                        $newChannels, $removedChannels, $newGroups, $removedGroups,
+                    );
+
+                    return;
+                }
+
+                // Series threshold.
+                $removedSeriesCount = Series::whereHas('category', function ($q) use ($playlist) {
+                    $q->where('playlist_id', $playlist->id)
+                        ->where('import_batch_no', '!=', $this->batchNo);
+                })->count();
+
+                if ($removedSeriesCount > $this->invalidateImportSeriesThreshold) {
+                    $this->cancelImport(
+                        "Playlist Sync Invalidated: {$removedSeriesCount} series would have been removed, which exceeds the threshold of {$this->invalidateImportSeriesThreshold}.",
+                        $user, $playlist, $syncLogsDisabled, $syncStats,
+                        $newChannels, $removedChannels, $newGroups, $removedGroups,
+                    );
+
+                    return;
                 }
             }
 
@@ -342,15 +370,8 @@ class ProcessM3uImportComplete implements ShouldQueue
         // Cleanup cached EPG files
         EpgCacheService::clearPlaylistEpgCacheFile($playlist);
 
-        // Clean up sync logs
-        $syncStatusQuery = $playlist->syncStatusesUnordered();
-        if ($syncStatusQuery->count() > $this->maxLogs) {
-            $syncStatusQuery
-                ->orderBy('created_at', 'asc')
-                ->limit($syncStatusQuery->count() - $this->maxLogs)
-                ->delete();
-        }
-
+        // Clean up old series/categories from previous imports to prevent orphaned data.
+        // This runs regardless of sync invalidation settings since it's a housekeeping step.
         $this->seriesCleanup($playlist);
 
         // Hand off to the SyncPipeline.
@@ -383,6 +404,67 @@ class ProcessM3uImportComplete implements ShouldQueue
 
         $run = $pipeline->buildPipeline($playlist, $settings);
         $pipeline->startRun($run);
+    }
+
+    /**
+     * Cancel the current sync run: write a canceled log entry, reset the playlist status,
+     * delete all new content from this batch, and notify the user.
+     *
+     * @param  array<string, mixed>  $syncStats  Base stats array (without message/status).
+     */
+    private function cancelImport(
+        string $message,
+        User $user,
+        Playlist $playlist,
+        bool $syncLogsDisabled,
+        array $syncStats,
+        $newChannels,
+        $removedChannels,
+        $newGroups,
+        $removedGroups,
+    ): void {
+        if (! $syncLogsDisabled) {
+            $sync = PlaylistSyncStatus::create([
+                'name' => $playlist->name,
+                'user_id' => $user->id,
+                'playlist_id' => $playlist->id,
+                'sync_stats' => [
+                    ...$syncStats,
+                    'message' => $message,
+                    'status' => 'canceled',
+                ],
+            ]);
+
+            // Clone before deletion so log entries can still read the queries.
+            $this->createSyncLogEntries(
+                $sync,
+                $newChannels->clone(),
+                $removedChannels->clone(),
+                $newGroups->clone(),
+                $removedGroups->clone(),
+            );
+        }
+
+        $playlist->update([
+            'status' => Status::Failed,
+            'errors' => $message,
+            'processing' => [
+                ...$playlist->processing ?? [],
+                'live_processing' => false,
+                'vod_processing' => false,
+            ],
+        ]);
+
+        $newGroups->forceDelete();
+        $newChannels->delete();
+        Job::where('batch_no', $this->batchNo)->delete();
+
+        Notification::make()
+            ->danger()
+            ->title('Playlist Sync Invalidated')
+            ->body($message)
+            ->broadcast($user)
+            ->sendToDatabase($user);
     }
 
     /**

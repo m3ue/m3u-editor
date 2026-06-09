@@ -21,6 +21,7 @@ use App\Http\Controllers\PlaylistController;
 use App\Http\Controllers\PlaylistGenerateController;
 use App\Http\Controllers\PluginRunReportController;
 use App\Http\Controllers\ProxyController;
+use App\Http\Controllers\QueueIndicatorController;
 use App\Http\Controllers\SchedulesDirectImageProxyController;
 use App\Http\Controllers\ShortURLController;
 use App\Http\Controllers\UserController;
@@ -41,6 +42,11 @@ Route::middleware(['throttle:60,1'])->group(function () {
     Route::post('/api/watch-progress', [WatchProgressController::class, 'update'])->name('watch-progress.update');
 });
 
+// Queue indicator — live snapshot endpoint, available to all authenticated users
+Route::get('/admin/api/queue-indicator', QueueIndicatorController::class)
+    ->middleware(['auth'])
+    ->name('admin.queue-indicator');
+
 // External IP refresh route for admin panel
 Route::post('/admin/refresh-external-ip', function (ExternalIpService $ipService) {
     $ipService->clearCache();
@@ -48,6 +54,11 @@ Route::post('/admin/refresh-external-ip', function (ExternalIpService $ipService
 
     return response()->json(['success' => true, 'external_ip' => $ip]);
 })->middleware(['auth']);
+
+// Redirect horizon to in-app queue monitor resource
+Route::get('/horizon/{path?}', function () {
+    return redirect()->route('filament.admin.resources.queue-monitor.queue-monitors.index');
+})->where('path', '.*');
 
 /*
  * Short URL forwarding route
@@ -266,10 +277,12 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         ->name('api.playlist.merge-channels');
 
     // Proxy API routes
-    Route::get('proxy/status', [ProxyController::class, 'status'])
-        ->name('api.proxy.status');
-    Route::get('proxy/streams/active', [ProxyController::class, 'streams'])
-        ->name('api.proxy.streams');
+    if (config('proxy.proxy_integration_enabled')) {
+        Route::get('proxy/status', [ProxyController::class, 'status'])
+            ->name('api.proxy.status');
+        Route::get('proxy/streams/active', [ProxyController::class, 'streams'])
+            ->name('api.proxy.streams');
+    }
 });
 
 // Playlist API routes (public with UUID auth - rate limited to prevent DoS/queue flooding)

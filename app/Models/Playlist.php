@@ -56,7 +56,11 @@ class Playlist extends Model
         'auto_merge_deactivate_failover' => 'boolean',
         'auto_merge_config' => 'array',
         'auto_probe_streams' => 'boolean',
+        'auto_probe_streams_only_unprobed' => 'boolean',
+        'auto_probe_streams_include_disabled' => 'boolean',
         'auto_probe_vod_streams' => 'boolean',
+        'auto_probe_vod_streams_only_unprobed' => 'boolean',
+        'auto_probe_vod_streams_include_disabled' => 'boolean',
         'probe_use_batching' => 'boolean',
         'probe_timeout' => 'integer',
         'find_replace_rules' => 'array',
@@ -281,11 +285,6 @@ class Playlist extends Model
     {
         return $this->hasMany(SyncRun::class)
             ->orderBy('created_at', 'desc');
-    }
-
-    public function syncStatusesUnordered(): HasMany
-    {
-        return $this->hasMany(PlaylistSyncStatus::class);
     }
 
     public function categories(): HasMany

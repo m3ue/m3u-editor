@@ -16,8 +16,8 @@ use App\Forms\Components\TmdbSearchResults;
 use App\Jobs\ChannelFindAndReplace;
 use App\Jobs\ChannelFindAndReplaceReset;
 use App\Jobs\FetchTmdbIds;
-use App\Jobs\ProbeVodStreamsChunk;
-use App\Jobs\ProbeVodStreamsComplete;
+use App\Jobs\ProbeStreamsChunk;
+use App\Jobs\ProbeStreamsComplete;
 use App\Jobs\ProcessVodChannels;
 use App\Jobs\SyncPlexDvrJob;
 use App\Jobs\SyncVodStrmFiles;
@@ -675,7 +675,7 @@ class VodResource extends Resource implements CopilotResource
                     ->icon('heroicon-o-signal')
                     ->visible(fn ($record) => $record && $record->probe_enabled)
                     ->action(function ($record): void {
-                        dispatch(new ProbeVodStreamsChunk(
+                        dispatch(new ProbeStreamsChunk(
                             channelIds: [$record->id],
                             probeTimeout: 15,
                             notifyUserId: auth()->id(),
@@ -1392,12 +1392,12 @@ class VodResource extends Resource implements CopilotResource
                         $start = now();
 
                         $chunks = collect(array_chunk($ids, 50))
-                            ->map(fn ($chunk) => new ProbeVodStreamsChunk(channelIds: $chunk, probeTimeout: 15))
+                            ->map(fn ($chunk) => new ProbeStreamsChunk(channelIds: $chunk, probeTimeout: 15))
                             ->all();
 
                         Bus::chain([
                             ...$chunks,
-                            new ProbeVodStreamsComplete(
+                            new ProbeStreamsComplete(
                                 playlistId: null,
                                 total: count($ids),
                                 start: $start,

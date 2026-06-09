@@ -18,8 +18,11 @@
  */
 
 use App\Models\Channel;
+use App\Models\Episode;
+use App\Models\EpisodeFailover;
 use App\Models\Playlist;
 use App\Models\PlaylistProfile;
+use App\Models\Series;
 use App\Models\User;
 use App\Services\M3uProxyService;
 use App\Services\ProfileService;
@@ -324,4 +327,78 @@ test('getChannelUrl clears stale channel stream key when proxy has no matching n
 
     // After stale key cleared, a new stream is created and its URL is returned
     expect($url)->toContain('stream/new-stream-xyz');
+});
+
+test('getEpisodeUrl uses first available episode failover when primary playlist is at capacity', function () {
+    $playlistA = Playlist::factory()->for($this->user)->create([
+        'profiles_enabled' => false,
+        'enable_proxy' => true,
+        'available_streams' => 1,
+        'xtream' => false,
+    ]);
+    $playlistB = Playlist::factory()->for($this->user)->create([
+        'profiles_enabled' => false,
+        'enable_proxy' => true,
+        'available_streams' => 2,
+        'xtream' => false,
+    ]);
+
+    $seriesA = Series::factory()->for($this->user)->for($playlistA)->create();
+    $seriesB = Series::factory()->for($this->user)->for($playlistB)->create();
+
+    $master = Episode::factory()->for($this->user)->for($playlistA)->for($seriesA)->create([
+        'url' => 'http://provider-a.example/series/user/pass/1001.mkv',
+        'container_extension' => 'mkv',
+    ]);
+    $failover = Episode::factory()->for($this->user)->for($playlistB)->for($seriesB)->create([
+        'url' => 'http://provider-b.example/series/user/pass/2001.mkv',
+        'container_extension' => 'mkv',
+    ]);
+
+    EpisodeFailover::create([
+        'user_id' => $this->user->id,
+        'episode_id' => $master->id,
+        'episode_failover_id' => $failover->id,
+        'sort' => 1,
+    ]);
+
+    Http::fake(function ($request) use ($playlistA) {
+        if (str_contains($request->url(), '/streams/by-metadata')) {
+            $value = $request['value'] ?? null;
+
+            return Http::response([
+                'matching_streams' => [],
+                'total_matching' => $value === $playlistA->uuid ? 1 : 0,
+                'total_clients' => $value === $playlistA->uuid ? 1 : 0,
+            ]);
+        }
+
+        if ($request->method() === 'POST' && str_ends_with($request->url(), '/streams')) {
+            return Http::response(['stream_id' => 'episode-failover-stream']);
+        }
+
+        return Http::response([], 404);
+    });
+
+    $service = app(M3uProxyService::class);
+    $url = $service->getEpisodeUrl($playlistA, $master);
+
+    expect($url)->toContain('stream/episode-failover-stream');
+
+    Http::assertSent(function ($request) use ($playlistA, $playlistB, $master, $failover) {
+        if ($request->method() !== 'POST' || ! str_ends_with($request->url(), '/streams')) {
+            return false;
+        }
+
+        $body = $request->data();
+        $metadata = $body['metadata'] ?? [];
+
+        return ($body['url'] ?? null) === 'http://provider-b.example/series/user/pass/2001.mkv'
+            && ($metadata['id'] ?? null) === $failover->id
+            && ($metadata['episode_id'] ?? null) === (string) $failover->id
+            && ($metadata['playlist_uuid'] ?? null) === $playlistB->uuid
+            && ($metadata['original_episode_id'] ?? null) === $master->id
+            && ($metadata['original_playlist_uuid'] ?? null) === $playlistA->uuid
+            && ($metadata['is_failover'] ?? null) === true;
+    });
 });

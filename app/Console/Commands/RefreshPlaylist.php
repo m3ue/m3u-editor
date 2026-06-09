@@ -6,7 +6,6 @@ use App\Enums\Status;
 use App\Enums\SyncRunStatus;
 use App\Jobs\ProcessM3uImport;
 use App\Models\Playlist;
-use App\Models\SyncRun;
 use App\Services\SyncPipelineService;
 use Cron\CronExpression;
 use Illuminate\Console\Command;
@@ -44,44 +43,24 @@ class RefreshPlaylist extends Command
             $this->info('Refreshing all playlists');
             // Auto-reset stuck playlists (processing for too long).
             //
-            // We use SyncRun.started_at rather than Playlist.updated_at because
-            // long-running import jobs continuously refresh updated_at via progress
-            // updates (vod_progress, processing flags, etc.), which prevents the
-            // updated_at check from ever triggering for actively-running stuck jobs.
-            $stuckMinutes = (int) config('dev.stuck_processing_minutes', 120);
+            // Active syncs touch updated_at via periodic progress updates, so a stale
+            // updated_at reliably signals a genuinely hung or orphaned sync. When we
+            // reset a playlist we also fail any stale Running SyncRuns so the next
+            // startImport() call creates a fresh run instead of attaching to the stale one.
+            $stuckMinutes = (int) config('dev.stuck_processing_minutes', 240);
             $stuckThreshold = now()->subMinutes($stuckMinutes);
 
-            // Fail any SyncRuns that have been Running since before the threshold.
-            SyncRun::query()
-                ->where('status', SyncRunStatus::Running->value)
-                ->where('started_at', '<', $stuckThreshold)
-                ->each(function (SyncRun $run) {
-                    $run->update([
-                        'status' => SyncRunStatus::Failed->value,
-                        'finished_at' => now(),
-                    ]);
-                });
-
-            // Reset any playlists whose most recent SyncRun started before the threshold
-            // and is now failed/completed (covers the run we just failed above), or that
-            // have been stuck in Processing with NO SyncRun at all (legacy imports).
             Playlist::query()
                 ->where('status', Status::Processing)
-                ->where(function ($query) use ($stuckThreshold) {
-                    $query
-                        // Playlist has a SyncRun that started before the threshold (now failed)
-                        ->whereHas('syncRuns', function ($q) use ($stuckThreshold) {
-                            $q->where('started_at', '<', $stuckThreshold)
-                                ->whereIn('status', [SyncRunStatus::Failed->value, SyncRunStatus::Completed->value]);
-                        })
-                        // OR no SyncRun at all and the playlist itself is stale (legacy path)
-                        ->orWhere(function ($q) use ($stuckThreshold) {
-                            $q->whereDoesntHave('syncRuns', function ($inner) {
-                                $inner->where('status', SyncRunStatus::Running->value);
-                            })->where('updated_at', '<', $stuckThreshold);
-                        });
-                })
+                ->where('updated_at', '<', $stuckThreshold)
                 ->each(function (Playlist $playlist) {
+                    $playlist->syncRuns()
+                        ->where('status', SyncRunStatus::Running->value)
+                        ->update([
+                            'status' => SyncRunStatus::Failed->value,
+                            'finished_at' => now(),
+                        ]);
+
                     $playlist->update([
                         'status' => Status::Pending,
                         'synced' => null,

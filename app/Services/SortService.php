@@ -106,6 +106,43 @@ class SortService
         EpgCacheService::clearForGroup($record->id, $record->playlist_id);
     }
 
+    /**
+     * Bulk recount multiple groups in deterministic sort order.
+     */
+    public function bulkRecountGroupsByOrder(Collection $groups, int $start = 1): void
+    {
+        $currentStart = max(1, $start);
+
+        $orderedGroups = $groups
+            ->sort(function (Group $first, Group $second): int {
+                $sortOrderComparison = ((float) $first->sort_order) <=> ((float) $second->sort_order);
+
+                if ($sortOrderComparison !== 0) {
+                    return $sortOrderComparison;
+                }
+
+                $nameComparison = strcasecmp($first->name, $second->name);
+
+                if ($nameComparison !== 0) {
+                    return $nameComparison;
+                }
+
+                return $first->id <=> $second->id;
+            })
+            ->values();
+
+        foreach ($orderedGroups as $record) {
+            $channelCount = $record->channels()->count();
+
+            if ($channelCount === 0) {
+                continue;
+            }
+
+            $this->bulkRecountGroupChannels($record, $currentStart);
+            $currentStart += $channelCount;
+        }
+    }
+
     public function bulkRecountChannels(Collection $channels, $start = 1): void
     {
         $offset = max(0, $start - 1);

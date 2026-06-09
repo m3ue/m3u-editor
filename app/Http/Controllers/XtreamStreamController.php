@@ -224,7 +224,7 @@ class XtreamStreamController extends Controller
         }
 
         if ($channel instanceof Channel) {
-            if ($channel->enable_proxy || $playlist->enable_proxy || $request->input('proxy') === 'true') {
+            if (($channel->enable_proxy || $playlist->enable_proxy || $request->input('proxy') === 'true') && $playlist->user->canUseProxy()) {
                 // Timeshift handled in proxy controller (if needed)
                 // Add username and PlaylistAuth ID to request for proxy traceability and per-auth enforcement
                 $request->merge(['username' => $username]);
@@ -276,7 +276,7 @@ class XtreamStreamController extends Controller
         $format = $format ?? 'ts'; // Default to 'ts' if no format provided
         [$playlist, $channel, $playlistAuth] = $this->findAuthenticatedPlaylistAndStreamModel($username, $password, $streamId, 'vod');
         if ($channel instanceof Channel) {
-            if ($channel->enable_proxy || $playlist->enable_proxy || $request->input('proxy') === 'true') {
+            if (($channel->enable_proxy || $playlist->enable_proxy || $request->input('proxy') === 'true') && $playlist->user->canUseProxy()) {
                 // Add username and PlaylistAuth ID to request for proxy traceability and per-auth enforcement
                 $request->merge(['username' => $username]);
                 if ($playlistAuth instanceof PlaylistAuth) {
@@ -311,7 +311,7 @@ class XtreamStreamController extends Controller
         $format = $format ?? 'mp4'; // Default to 'mp4' if no format provided
         [$playlist, $episode, $playlistAuth] = $this->findAuthenticatedPlaylistAndStreamModel($username, $password, $streamId, 'episode');
         if ($episode instanceof Episode) {
-            if ($playlist->enable_proxy || $request->input('proxy') === 'true') {
+            if (($playlist->enable_proxy || $request->input('proxy') === 'true') && $playlist->user->canUseProxy()) {
                 // Add username and PlaylistAuth ID to request for proxy traceability and per-auth enforcement
                 $request->merge(['username' => $username]);
                 if ($playlistAuth instanceof PlaylistAuth) {
@@ -404,7 +404,7 @@ class XtreamStreamController extends Controller
         }
         $request->merge($mergeData);
 
-        if ($playlist->enable_proxy) {
+        if ($playlist->enable_proxy && $playlist->user->canUseProxy()) {
             return app()->call([app(M3uProxyApiController::class), 'channel'], [
                 'id' => $timeshiftChannel->id,
                 'uuid' => $playlist->uuid,

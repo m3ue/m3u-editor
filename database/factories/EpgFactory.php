@@ -5,6 +5,7 @@ namespace Database\Factories;
 use App\Models\Epg;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\Factory;
+use Illuminate\Support\Str;
 
 class EpgFactory extends Factory
 {
@@ -24,6 +25,7 @@ class EpgFactory extends Factory
             'name' => $this->faker->name(),
             'url' => $this->faker->url(),
             'user_id' => User::factory(),
+            'uuid' => Str::orderedUuid()->toString(),
         ];
     }
 }

@@ -15,6 +15,8 @@ class GeneralSettings extends Settings
 
     public ?bool $show_breadcrumbs = true;
 
+    public ?bool $show_queue_indicator = true;
+
     public ?bool $show_logs = false;
 
     public ?bool $show_api_docs = false;
@@ -196,6 +198,10 @@ class GeneralSettings extends Settings
     public ?bool $invalidate_import = false;
 
     public ?int $invalidate_import_threshold = 100;
+
+    public ?int $invalidate_import_group_threshold = 50;
+
+    public ?int $invalidate_import_series_threshold = 100;
 
     // Backup options
     public ?bool $auto_backup_database = false;

@@ -37,7 +37,7 @@ class RestartQueue implements ShouldQueue
             Playlist::where('status', Status::Processing)
                 ->orWhere('processing', true)
                 ->update([
-                    'status' => Status::Pending,
+                    'status' => Status::Failed,
                     'processing' => [
                         'live_processing' => false,
                         'vod_processing' => false,
@@ -53,7 +53,7 @@ class RestartQueue implements ShouldQueue
             Epg::where('status', Status::Processing)
                 ->orWhere('processing', true)
                 ->update([
-                    'status' => Status::Pending,
+                    'status' => Status::Failed,
                     'processing' => false,
                     'progress' => 0,
                     'sd_progress' => 0,

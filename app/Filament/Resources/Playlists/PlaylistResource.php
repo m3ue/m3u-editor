@@ -951,6 +951,99 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ->collapsible()
                                 ->collapsed()
                                 ->reorderable()
+                                ->extraItemActions([
+                                    Action::make('test_dns_url')
+                                        ->label(__('Test'))
+                                        ->icon('heroicon-o-signal')
+                                        ->color('info')
+                                        ->tooltip(__('Test connection to this fallback URL'))
+                                        ->action(function (array $arguments, Repeater $component, ?Playlist $record): void {
+                                            $itemKey = $arguments['item'];
+                                            $allItems = $component->getState();
+                                            $url = $allItems[$itemKey]['url'] ?? null;
+
+                                            if (empty($url)) {
+                                                Notification::make()
+                                                    ->title(__('Missing URL'))
+                                                    ->body(__('Please enter a URL first.'))
+                                                    ->warning()
+                                                    ->send();
+
+                                                return;
+                                            }
+
+                                            $config = $record?->xtream_config ?? [];
+                                            $username = $config['username'] ?? null;
+                                            $password = $config['password'] ?? null;
+
+                                            if (empty($username) || empty($password)) {
+                                                Notification::make()
+                                                    ->title(__('Missing Credentials'))
+                                                    ->body(__('Save the playlist with Xtream credentials before testing a fallback URL.'))
+                                                    ->warning()
+                                                    ->send();
+
+                                                return;
+                                            }
+
+                                            try {
+                                                $xtream = XtreamService::make(xtream_config: [
+                                                    'url' => $url,
+                                                    'username' => $username,
+                                                    'password' => $password,
+                                                ]);
+
+                                                $result = $xtream->userInfo(timeout: 10);
+
+                                                if (empty($result) || ! isset($result['user_info'])) {
+                                                    Notification::make()
+                                                        ->title(__('Connection Failed'))
+                                                        ->body(__('No valid response from the Xtream API. Check the URL and credentials.'))
+                                                        ->danger()
+                                                        ->send();
+
+                                                    return;
+                                                }
+
+                                                $userInfo = $result['user_info'];
+                                                $serverInfo = $result['server_info'] ?? [];
+
+                                                $status = $userInfo['status'] ?? 'Unknown';
+                                                $maxConnections = $userInfo['max_connections'] ?? '?';
+                                                $activeCons = $userInfo['active_cons'] ?? '0';
+                                                $expDate = ! empty($userInfo['exp_date'])
+                                                    ? date('Y-m-d', (int) $userInfo['exp_date'])
+                                                    : 'Never';
+                                                $serverUrl = $serverInfo['url'] ?? $url;
+                                                $serverTime = ! empty($serverInfo['time_now'])
+                                                    ? $serverInfo['time_now']
+                                                    : 'Unknown';
+
+                                                $isActive = $status === 'Active';
+                                                $statusIcon = $isActive ? '✅' : '⚠️';
+
+                                                $details = "{$statusIcon} **Status:** {$status}\n\n";
+                                                $details .= "**Max Connections:** {$maxConnections}\n\n";
+                                                $details .= "**Active Connections:** {$activeCons}\n\n";
+                                                $details .= "**Expires:** {$expDate}\n\n";
+                                                $details .= "**Server:** {$serverUrl}\n\n";
+                                                $details .= "**Server Time:** {$serverTime}";
+
+                                                Notification::make()
+                                                    ->title(__('Connection Successful'))
+                                                    ->body(Str::markdown($details))
+                                                    ->success()
+                                                    ->persistent()
+                                                    ->send();
+                                            } catch (Exception $e) {
+                                                Notification::make()
+                                                    ->title(__('Connection Failed'))
+                                                    ->body($e->getMessage())
+                                                    ->danger()
+                                                    ->send();
+                                            }
+                                        }),
+                                ])
                                 ->columnSpan(2),
                         ])->hidden(fn (Get $get): bool => ! $get('xtream')),
                     Grid::make()
@@ -1049,7 +1142,7 @@ class PlaylistResource extends Resource implements CopilotResource
                 ->collapsible()
                 ->compact()
                 ->collapsed(fn (?Playlist $record): bool => ! ($record?->profiles_enabled ?? false))
-                ->hidden(fn (Get $get): bool => ! $get('xtream'))
+                ->hidden(fn (Get $get): bool => ! (auth()->user()->canUseProxy() && $get('xtream')))
                 ->schema([
                     Grid::make()
                         ->columns(3)
@@ -1820,29 +1913,57 @@ class PlaylistResource extends Resource implements CopilotResource
                         ->inline(true)
                         ->default(false),
 
+                    Toggle::make('auto_probe_streams_only_unprobed')
+                        ->label(__('Only probe Live streams that have not been probed before'))
+                        ->helperText(__('Keeps automatic Live stream probing incremental by skipping streams that already have stored stream metadata.'))
+                        ->inline(true)
+                        ->default(true)
+                        ->visible(fn (Get $get): bool => (bool) $get('auto_probe_streams')),
+
+                    Toggle::make('auto_probe_streams_include_disabled')
+                        ->label(__('Include disabled Live streams'))
+                        ->helperText(__('Also probes disabled Live streams after sync while still respecting the per-channel probe opt-out setting.'))
+                        ->inline(true)
+                        ->default(false)
+                        ->visible(fn (Get $get): bool => (bool) $get('auto_probe_streams')),
+
                     Toggle::make('auto_probe_vod_streams')
                         ->label(__('Probe VOD & series streams after sync'))
-                        ->helperText(__('When enabled, both VOD movies and series episodes are automatically probed after each sync. This significantly increases sync time but enables Trash Guide naming with stream-stat-based quality/codec/HDR detection — and falls back to existing TMDB metadata where probing is not possible.'))
+                        ->helperText(__('When enabled, both VOD movies and series episodes are automatically probed after each sync. This significantly increases sync time but enables Trash Guide naming with stream-stat-based quality/codec/HDR detection. It falls back to existing TMDB metadata where probing is not possible.'))
                         ->live()
                         ->columnSpanFull()
                         ->inline(true)
                         ->default(false),
+
+                    Toggle::make('auto_probe_vod_streams_only_unprobed')
+                        ->label(__('Only probe VOD and series streams that have not been probed before'))
+                        ->helperText(__('Keeps automatic VOD and series probing incremental by skipping streams that already have stored stream metadata.'))
+                        ->inline(true)
+                        ->default(true)
+                        ->visible(fn (Get $get): bool => (bool) $get('auto_probe_vod_streams')),
+
+                    Toggle::make('auto_probe_vod_streams_include_disabled')
+                        ->label(__('Include disabled VOD and series streams'))
+                        ->helperText(__('Also probes disabled VOD streams and series episodes after sync while still respecting the per-stream probe opt-out setting.'))
+                        ->inline(true)
+                        ->default(false)
+                        ->visible(fn (Get $get): bool => (bool) $get('auto_probe_vod_streams')),
 
                     Toggle::make('probe_use_batching')
                         ->label(__('Parallel processing'))
                         ->helperText(__('Process in parallel rather than one-at-a-time for significantly faster results.'))
                         ->inline(true)
                         ->default(false)
-                        ->visible(fn (Get $get): bool => (bool) $get('auto_probe_streams')),
+                        ->visible(fn (Get $get): bool => (bool) $get('auto_probe_streams') || (bool) $get('auto_probe_vod_streams')),
 
                     TextInput::make('probe_timeout')
                         ->label(__('Probe timeout (seconds)'))
-                        ->helperText(__('Seconds to wait per stream (5–60). Streams that do not respond within this window will be skipped.'))
+                        ->helperText(__('Seconds to wait per stream (5 to 60). Streams that do not respond within this window will be skipped.'))
                         ->numeric()
                         ->minValue(5)
                         ->maxValue(60)
                         ->default(15)
-                        ->visible(fn (Get $get): bool => (bool) $get('auto_probe_streams')),
+                        ->visible(fn (Get $get): bool => (bool) $get('auto_probe_streams') || (bool) $get('auto_probe_vod_streams')),
                 ]),
 
             Section::make(__('Auto-Enable Settings'))
@@ -2042,8 +2163,16 @@ class PlaylistResource extends Resource implements CopilotResource
                                     tooltip: 'Each pattern matches channels by title or name, grouping them as master + failovers. The highest-scoring match becomes the master. Use PHP regex syntax, e.g. /^CCTV[-]?1$/i'
                                 )
                                 ->helperText(__('Regex patterns for failover grouping. Useful when the same channel has different names within and across providers.'))
-                                ->columnSpanFull()
                                 ->splitKeys(['Tab', 'Return']),
+                            Select::make('auto_merge_config.merge_key')
+                                ->label(__('VOD Merge key'))
+                                ->options([
+                                    'stream_id' => 'Stream ID (default)',
+                                    'tmdb_id' => 'TMDB ID',
+                                ])
+                                ->default('stream_id')
+                                ->required()
+                                ->helperText(__('Use TMDB ID to merge the same movie across providers when stream IDs differ. VOD channels without a TMDB ID are skipped.')),
                             Toggle::make('auto_merge_config.check_resolution')
                                 ->label(__('Prioritize by resolution'))
                                 ->inline(false)
