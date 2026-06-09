@@ -8,6 +8,7 @@ use App\Filament\GuestPanel\Pages\Concerns\HasGuestDvr;
 use App\Jobs\DvrSchedulerTick;
 use App\Models\Channel;
 use App\Models\DvrRecordingRule;
+use App\Models\DvrSetting;
 use App\Models\EpgChannel;
 use App\Models\EpgProgramme;
 use App\Models\Group;
@@ -16,8 +17,9 @@ use App\Settings\GeneralSettings;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Illuminate\Contracts\Support\Htmlable;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Livewire\Attributes\On;
 
@@ -61,6 +63,8 @@ class GuestBrowseShows extends Page
         return route(static::getRouteName($panel), $parameters, $isAbsolute);
     }
 
+    private const PER_PAGE = 20;
+
     // --- Filter state ---
 
     public string $keyword = '';
@@ -84,7 +88,16 @@ class GuestBrowseShows extends Page
     /** @var array<int, array<string, mixed>> */
     public array $groupedShows = [];
 
+    public int $totalShows = 0;
+
+    public int $currentPage = 1;
+
+    // --- Slide-over ---
+
     public string $selectedShowTitle = '';
+
+    /** @var array<string, mixed>|null */
+    public ?array $selectedShowDetail = null;
 
     // --- Series options form state ---
 
@@ -104,14 +117,25 @@ class GuestBrowseShows extends Page
 
     public ?int $seriesKeepLast = null;
 
+    // --- DVR setting cache (per-request) ---
+
+    private ?DvrSetting $cachedDvrSetting = null;
+
+    private bool $dvrSettingResolved = false;
+
     // --- Computed helpers ---
+
+    public function getTotalPagesProperty(): int
+    {
+        return (int) ceil($this->totalShows / self::PER_PAGE);
+    }
 
     /**
      * @return array<int, string>
      */
     public function getGroupOptionsProperty(): array
     {
-        $playlistId = static::getDvrSetting()?->playlist_id;
+        $playlistId = $this->getCachedDvrSetting()?->playlist_id;
         if (! $playlistId) {
             return [];
         }
@@ -124,23 +148,36 @@ class GuestBrowseShows extends Page
     }
 
     /**
-     * @return array<int, string>
+     * Lazily populated on first dropdown open. Not computed eagerly to avoid
+     * serialising thousands of channel names into the initial page HTML.
+     *
+     * @var array<int, string>
      */
-    public function getChannelOptionsProperty(): array
+    public array $channelOptions = [];
+
+    public function loadChannelOptions(): void
     {
-        $playlistId = static::getDvrSetting()?->playlist_id;
+        if (! empty($this->channelOptions)) {
+            return;
+        }
+
+        $playlistId = $this->getCachedDvrSetting()?->playlist_id;
         if (! $playlistId) {
-            return [];
+            return;
         }
 
         $channels = Channel::where('playlist_id', $playlistId)
-            ->orderBy('title');
-
+            ->select(['id', 'title', 'title_custom', 'name', 'name_custom']);
         if (! $this->shouldIncludeDisabledChannels()) {
             $channels->where('enabled', true);
         }
 
-        return $channels->pluck('title', 'id')->all();
+        $this->channelOptions = $channels->get()
+            ->mapWithKeys(function (Channel $c) {
+                return [$c->id => $c->title_custom ?: $c->title ?: $c->name_custom ?: $c->name];
+            })
+            ->sortBy(fn (string $label) => mb_strtolower($label))
+            ->all();
     }
 
     public function getSeriesHintProperty(): string
@@ -168,11 +205,10 @@ class GuestBrowseShows extends Page
         return implode(' · ', $parts);
     }
 
-    // --- Slide-over actions ---
+    // --- Slide-over ---
 
     public function openShowDetail(string $title): void
     {
-        Log::info('GuestBrowseShows: openShowDetail called: '.$title);
         $this->selectedShowTitle = $title;
         $this->seriesNewOnly = 0;
         $this->seriesPriority = 50;
@@ -181,23 +217,32 @@ class GuestBrowseShows extends Page
         $this->seriesKeepLast = null;
         $this->sourceChannelId = $this->resolveSourceChannelId($title);
         $this->seriesChannelId = 0;
+        $this->selectedShowDetail = $this->buildShowDetail($title);
+        $this->loadChannelOptions();
     }
 
     public function closeShowDetail(): void
     {
         $this->selectedShowTitle = '';
+        $this->selectedShowDetail = null;
     }
 
-    // --- Search ---
+    // --- Search & pagination ---
 
     public function search(): void
     {
         $this->searched = true;
         $this->postersLoaded = false;
+        $this->currentPage = 1;
+        $this->loadPage();
+        $this->dispatch('start-poster-load');
+    }
 
-        $programmes = $this->runSearch();
-        $this->groupedShows = $this->buildGroupedShows($programmes);
-
+    public function gotoPage(int $page): void
+    {
+        $this->currentPage = max(1, min($page, $this->totalPages));
+        $this->postersLoaded = false;
+        $this->loadPage();
         $this->dispatch('start-poster-load');
     }
 
@@ -224,7 +269,7 @@ class GuestBrowseShows extends Page
 
     public function recordOnce(int $programmeId): void
     {
-        $dvrSetting = static::getDvrSetting();
+        $dvrSetting = $this->getCachedDvrSetting();
         $auth = static::getCurrentPlaylistAuth();
 
         if (! $dvrSetting) {
@@ -252,8 +297,6 @@ class GuestBrowseShows extends Page
             return;
         }
 
-        // Resolve the channel from the programme's EPG channel ID so the scheduler
-        // can start the recording without relying on the EPG fallback alone.
         $channel = null;
         if ($programme->epg_channel_id) {
             $epgChannelPk = EpgChannel::where('channel_id', $programme->epg_channel_id)->value('id');
@@ -285,7 +328,6 @@ class GuestBrowseShows extends Page
 
         $this->refreshRuleBadgeForProgramme($programmeId, 'once');
 
-        // Dispatch immediate scheduler tick so the recording materialises without waiting up to 60s.
         DvrSchedulerTick::dispatch();
 
         Notification::make()
@@ -296,9 +338,18 @@ class GuestBrowseShows extends Page
 
     public function quickRecordNextAiring(string $title): void
     {
-        $show = collect($this->groupedShows)->firstWhere('title', $title);
+        if ($this->selectedShowTitle === $title && ! empty($this->selectedShowDetail['airings'])) {
+            $this->recordOnce($this->selectedShowDetail['airings'][0]['id']);
 
-        if (! $show || empty($show['airings'])) {
+            return;
+        }
+
+        $programme = $this->buildBaseQuery()
+            ->where('title', $title)
+            ->orderBy('start_time')
+            ->first();
+
+        if (! $programme) {
             Notification::make()
                 ->title(__('No upcoming airings found for ":title"', ['title' => $title]))
                 ->warning()
@@ -307,12 +358,12 @@ class GuestBrowseShows extends Page
             return;
         }
 
-        $this->recordOnce($show['airings'][0]['id']);
+        $this->recordOnce($programme->id);
     }
 
     public function recordSeriesDefaults(string $title): void
     {
-        $dvrSetting = static::getDvrSetting();
+        $dvrSetting = $this->getCachedDvrSetting();
         $seriesMode = $dvrSetting?->default_series_mode ?? DvrSeriesMode::UniqueSe;
 
         $this->createSeriesRule($title, [
@@ -349,12 +400,22 @@ class GuestBrowseShows extends Page
 
     // --- Internal ---
 
+    private function getCachedDvrSetting(): ?DvrSetting
+    {
+        if (! $this->dvrSettingResolved) {
+            $this->cachedDvrSetting = static::getDvrSetting();
+            $this->dvrSettingResolved = true;
+        }
+
+        return $this->cachedDvrSetting;
+    }
+
     /**
      * @param  array<string, mixed>  $options
      */
     private function createSeriesRule(string $title, array $options): void
     {
-        $dvrSetting = static::getDvrSetting();
+        $dvrSetting = $this->getCachedDvrSetting();
         $auth = static::getCurrentPlaylistAuth();
 
         if (! $dvrSetting) {
@@ -388,7 +449,6 @@ class GuestBrowseShows extends Page
 
         $this->refreshRuleBadgeForTitle($title, 'series');
 
-        // Dispatch immediate scheduler tick so any in-window airings materialise without waiting up to 60s.
         DvrSchedulerTick::dispatch();
 
         Notification::make()
@@ -403,6 +463,9 @@ class GuestBrowseShows extends Page
             if ($show['title'] === $title) {
                 if ($type === 'series') {
                     $this->groupedShows[$index]['has_series_rule'] = true;
+                    if ($this->selectedShowTitle === $title && $this->selectedShowDetail !== null) {
+                        $this->selectedShowDetail['has_series_rule'] = true;
+                    }
                 } elseif ($type === 'once') {
                     $this->groupedShows[$index]['has_once_rule'] = true;
                 }
@@ -413,19 +476,95 @@ class GuestBrowseShows extends Page
 
     private function refreshRuleBadgeForProgramme(int $programmeId, string $type): void
     {
-        foreach ($this->groupedShows as $index => $show) {
-            foreach ($show['airings'] as $airing) {
-                if ($airing['id'] === $programmeId) {
-                    if ($type === 'once') {
-                        $this->groupedShows[$index]['has_once_rule'] = true;
-                    }
-                    break 2;
-                }
+        if ($type === 'once' && $this->selectedShowTitle) {
+            $this->refreshRuleBadgeForTitle($this->selectedShowTitle, 'once');
+            if ($this->selectedShowDetail !== null) {
+                $this->selectedShowDetail['has_once_rule'] = true;
             }
         }
     }
 
+    private function loadPage(): void
+    {
+        $base = $this->buildBaseQuery();
+
+        $this->totalShows = (clone $base)->distinct()->count('title');
+
+        if ($this->totalShows === 0) {
+            $this->groupedShows = [];
+
+            return;
+        }
+
+        $offset = ($this->currentPage - 1) * self::PER_PAGE;
+
+        $titles = (clone $base)
+            ->select('title')
+            ->groupBy('title')
+            ->orderByRaw('MIN(start_time)')
+            ->offset($offset)
+            ->limit(self::PER_PAGE)
+            ->pluck('title');
+
+        if ($titles->isEmpty()) {
+            $this->groupedShows = [];
+
+            return;
+        }
+
+        $programmes = (clone $base)
+            ->whereIn('title', $titles->all())
+            ->orderBy('start_time')
+            ->get();
+
+        $this->groupedShows = $this->buildGroupedShows($programmes);
+    }
+
     /**
+     * Base query with all active filters applied — no grouping or pagination.
+     * Clone before adding further constraints.
+     */
+    private function buildBaseQuery(): Builder
+    {
+        $dvrSetting = $this->getCachedDvrSetting();
+
+        $query = EpgProgramme::query()
+            ->where('start_time', '>=', now())
+            ->where('start_time', '<=', now()->addDays($this->days));
+
+        if (! empty($this->keyword)) {
+            $kw = mb_strtolower($this->keyword);
+            $query->whereRaw('LOWER(title) LIKE ?', ["%{$kw}%"]);
+        }
+
+        if (! empty($this->category)) {
+            $kw = mb_strtolower($this->category);
+            $query->whereRaw('LOWER(category) LIKE ?', ["%{$kw}%"]);
+        }
+
+        if (! empty($this->description_keyword)) {
+            $kw = mb_strtolower($this->description_keyword);
+            $query->where(function ($q) use ($kw): void {
+                $q->whereRaw('LOWER(description) LIKE ?', ["%{$kw}%"])
+                    ->orWhereRaw('LOWER(subtitle) LIKE ?', ["%{$kw}%"]);
+            });
+        }
+
+        if ($dvrSetting?->playlist_id) {
+            $epgChannelIds = $this->resolveEpgChannelScope($dvrSetting->playlist_id);
+
+            if ($epgChannelIds !== null) {
+                $query->whereIn('epg_channel_id', $epgChannelIds);
+            }
+        }
+
+        return $query;
+    }
+
+    /**
+     * Build slim card data from a flat programmes collection (airings NOT embedded).
+     *
+     * @param  Collection<int, EpgProgramme>  $programmes
      * @return array<int, array<string, mixed>>
      */
     private function buildGroupedShows(Collection $programmes): array
@@ -434,10 +573,7 @@ class GuestBrowseShows extends Page
             return [];
         }
 
-        $dvrSetting = static::getDvrSetting();
-
-        $channelIds = $programmes->pluck('epg_channel_id')->unique()->filter()->values()->all();
-        $channelNames = $this->resolveChannelNames($channelIds);
+        $dvrSetting = $this->getCachedDvrSetting();
 
         $seriesRuleTitles = $dvrSetting
             ? DvrRecordingRule::where('dvr_setting_id', $dvrSetting->id)
@@ -455,7 +591,6 @@ class GuestBrowseShows extends Page
                 ->all()
             : [];
 
-        $shows = [];
         $timezone = app(GeneralSettings::class)->app_timezone ?? 'UTC';
 
         $episodeLookups = [];
@@ -469,13 +604,12 @@ class GuestBrowseShows extends Page
                 ];
             }
         }
-
         $episodeIsNewMap = app(ShowMetadataService::class)->resolveEpisodeIsNew($episodeLookups);
 
+        $shows = [];
         foreach ($programmes->groupBy('title') as $title => $airings) {
             /** @var EpgProgramme $first */
             $first = $airings->first();
-            $hasOnceRule = $airings->contains(fn (EpgProgramme $p) => isset($onceProgrammeIds[$p->id]));
 
             $anyNewFromTvMaze = $airings->contains(function (EpgProgramme $p) use ($episodeIsNewMap) {
                 [$season, $episode] = $this->parseSeasonEpisode($p);
@@ -488,7 +622,6 @@ class GuestBrowseShows extends Page
 
             $shows[] = [
                 'title' => (string) $title,
-                'next_air_date' => $first->start_time?->format('Y-m-d H:i'),
                 'next_air_date_human' => $first->start_time?->timezone($timezone)->format('D M j, g:ia'),
                 'flags' => [
                     'is_new' => $airings->contains('is_new', true) || $anyNewFromTvMaze,
@@ -498,37 +631,90 @@ class GuestBrowseShows extends Page
                 'epg_icon' => $first->icon,
                 'poster_url' => null,
                 'has_series_rule' => isset($seriesRuleTitles[(string) $title]),
-                'has_once_rule' => $hasOnceRule,
+                'has_once_rule' => $airings->contains(fn (EpgProgramme $p) => isset($onceProgrammeIds[$p->id])),
                 'airing_count' => $airings->count(),
                 'category' => $first->category,
-                'description' => $first->description,
-                'airings' => $airings->map(function (EpgProgramme $p) use ($channelNames, $timezone, $episodeIsNewMap) {
-                    $startTime = $p->start_time?->timezone($timezone);
-
-                    [$season, $episode, $subtitle, $description] = $this->parseSeasonEpisode($p);
-
-                    $isNewFromTvMaze = $season !== null && $episode !== null
-                        ? ($episodeIsNewMap[md5("{$p->title}:{$season}:{$episode}")] ?? false)
-                        : false;
-
-                    return [
-                        'id' => $p->id,
-                        'channel_name' => $channelNames[$p->epg_channel_id] ?? $p->epg_channel_id,
-                        'start_time' => $startTime?->format('Y-m-d H:i'),
-                        'start_time_human' => $startTime?->format('D M j, g:ia'),
-                        'end_time' => $p->end_time?->format('Y-m-d H:i'),
-                        'season' => $season,
-                        'episode' => $episode,
-                        'subtitle' => $subtitle,
-                        'description' => $description,
-                        'is_new' => $p->is_new || $isNewFromTvMaze,
-                        'premiere' => $p->premiere,
-                    ];
-                })->values()->all(),
             ];
         }
 
         return $shows;
+    }
+
+    /**
+     * Fetch and build full show detail for the slide-over (one DB query, on demand).
+     *
+     * @return array<string, mixed>|null
+     */
+    private function buildShowDetail(string $title): ?array
+    {
+        $programmes = $this->buildBaseQuery()
+            ->where('title', $title)
+            ->orderBy('start_time')
+            ->get();
+
+        if ($programmes->isEmpty()) {
+            return null;
+        }
+
+        $channelIds = $programmes->pluck('epg_channel_id')->unique()->filter()->values()->all();
+        $channelNames = $this->resolveChannelNames($channelIds);
+        $timezone = app(GeneralSettings::class)->app_timezone ?? 'UTC';
+
+        $episodeLookups = [];
+        foreach ($programmes as $p) {
+            [$season, $episode] = $this->parseSeasonEpisode($p);
+            if ($season !== null && $episode !== null) {
+                $episodeLookups[] = [
+                    'title' => (string) $p->title,
+                    'season' => $season,
+                    'episode' => $episode,
+                ];
+            }
+        }
+        $episodeIsNewMap = app(ShowMetadataService::class)->resolveEpisodeIsNew($episodeLookups);
+
+        $airings = $programmes->map(function (EpgProgramme $p) use ($channelNames, $timezone, $episodeIsNewMap) {
+            $startTime = $p->start_time?->timezone($timezone);
+
+            [$season, $episode, $subtitle, $description] = $this->parseSeasonEpisode($p);
+
+            $isNewFromTvMaze = $season !== null && $episode !== null
+                ? ($episodeIsNewMap[md5("{$p->title}:{$season}:{$episode}")] ?? false)
+                : false;
+
+            return [
+                'id' => $p->id,
+                'channel_name' => $channelNames[$p->epg_channel_id] ?? $p->epg_channel_id,
+                'start_time' => $startTime?->format('Y-m-d H:i'),
+                'start_time_human' => $startTime?->format('D M j, g:ia'),
+                'end_time' => $p->end_time?->format('Y-m-d H:i'),
+                'season' => $season,
+                'episode' => $episode,
+                'subtitle' => $subtitle,
+                'description' => $description,
+                'is_new' => $p->is_new || $isNewFromTvMaze,
+                'premiere' => $p->premiere,
+            ];
+        })->values()->all();
+
+        $dvrSetting = $this->getCachedDvrSetting();
+        $seriesRuleExists = $dvrSetting
+            ? DvrRecordingRule::where('dvr_setting_id', $dvrSetting->id)
+                ->where('type', DvrRuleType::Series)
+                ->where('series_title', $title)
+                ->exists()
+            : false;
+
+        return [
+            'title' => $title,
+            'flags' => [
+                'is_new' => $programmes->contains('is_new', true),
+                'premiere' => $programmes->contains('premiere', true),
+                'previously_shown' => $programmes->every(fn (EpgProgramme $p) => $p->previously_shown),
+            ],
+            'has_series_rule' => $seriesRuleExists,
+            'airings' => $airings,
+        ];
     }
 
     /**
@@ -577,56 +763,40 @@ class GuestBrowseShows extends Page
             ->all();
     }
 
-    /**
-     * @return Collection<int, EpgProgramme>
-     */
-    private function runSearch(): Collection
-    {
-        $dvrSetting = static::getDvrSetting();
-
-        $query = EpgProgramme::query()
-            ->where('start_time', '>=', now())
-            ->where('start_time', '<=', now()->addDays($this->days))
-            ->orderBy('start_time');
-
-        if (! empty($this->keyword)) {
-            $query->where('title', 'like', '%'.$this->keyword.'%');
-        }
-
-        if (! empty($this->category)) {
-            $query->where('category', 'like', '%'.$this->category.'%');
-        }
-
-        if (! empty($this->description_keyword)) {
-            $kw = $this->description_keyword;
-            $query->where(function ($q) use ($kw): void {
-                $q->where('description', 'like', '%'.$kw.'%')
-                    ->orWhere('subtitle', 'like', '%'.$kw.'%');
-            });
-        }
-
-        if ($dvrSetting?->playlist_id) {
-            $epgChannelIds = $this->resolveEpgChannelScope($dvrSetting->playlist_id);
-
-            if ($epgChannelIds !== null) {
-                $query->whereIn('epg_channel_id', $epgChannelIds);
-            }
-        }
-
-        return $query->limit(100)->get();
-    }
-
     private function shouldIncludeDisabledChannels(): bool
     {
-        return static::getDvrSetting()?->include_disabled_channels ?? false;
+        return $this->getCachedDvrSetting()?->include_disabled_channels ?? false;
     }
 
     /**
+     * Resolve the set of XMLTV channel IDs in scope for the given playlist.
+     *
+     * Uses SQL joins (same as the authenticated BrowseShows) to avoid loading
+     * every Channel model into PHP memory.
+     *
      * @return list<string>|null
      */
     private function resolveEpgChannelScope(int $playlistId): ?array
     {
         $includeDisabled = $this->shouldIncludeDisabledChannels();
+
+        $epgMapBase = DB::table('channels')
+            ->join('epg_channels', 'epg_channels.id', '=', 'channels.epg_channel_id')
+            ->where('channels.playlist_id', $playlistId)
+            ->whereNotNull('channels.epg_channel_id');
+
+        if (! $includeDisabled) {
+            $epgMapBase->where('channels.enabled', true);
+        }
+
+        $streamIdBase = DB::table('channels')
+            ->where('channels.playlist_id', $playlistId)
+            ->whereNotNull('channels.stream_id')
+            ->where('channels.stream_id', '!=', '');
+
+        if (! $includeDisabled) {
+            $streamIdBase->where('channels.enabled', true);
+        }
 
         if ($this->channel_id) {
             $channelQuery = Channel::where('id', $this->channel_id)->with('epgChannel');
@@ -640,67 +810,47 @@ class GuestBrowseShows extends Page
         }
 
         if ($this->group_id) {
-            $ids = Channel::where('group_id', $this->group_id)
-                ->whereNotNull('epg_channel_id')
-                ->with('epgChannel');
+            $ids = (clone $epgMapBase)
+                ->where('channels.group_id', $this->group_id)
+                ->pluck('epg_channels.channel_id')
+                ->merge(
+                    (clone $streamIdBase)
+                        ->where('channels.group_id', $this->group_id)
+                        ->pluck('channels.stream_id')
+                )
+                ->unique()->values()->all();
 
-            if (! $includeDisabled) {
-                $ids->where('enabled', true);
-            }
-
-            $result = $ids->get()
-                ->map(fn (Channel $c) => $c->epgChannel?->channel_id)
-                ->filter()
-                ->unique()
-                ->values()
-                ->all();
-
-            return ! empty($result) ? $result : null;
+            return ! empty($ids) ? $ids : null;
         }
 
-        $ids = Channel::where('playlist_id', $playlistId)
-            ->whereNotNull('epg_channel_id')
-            ->with('epgChannel');
+        $ids = (clone $epgMapBase)
+            ->pluck('epg_channels.channel_id')
+            ->merge($streamIdBase->pluck('channels.stream_id'))
+            ->unique()->values()->all();
 
-        if (! $includeDisabled) {
-            $ids->where('enabled', true);
-        }
-
-        $result = $ids->get()
-            ->map(fn (Channel $c) => $c->epgChannel?->channel_id)
-            ->filter()
-            ->unique()
-            ->values()
-            ->all();
-
-        return ! empty($result) ? $result : null;
+        return ! empty($ids) ? $ids : null;
     }
 
     /**
-     * Resolve the channel (within the DVR setting's playlist) that a show most likely
-     * airs on. Used to pre-populate sourceChannelId when the slide-over opens and to
-     * set source_channel_id when creating a series rule with defaults.
-     *
-     * Returns null when the channel cannot be determined.
+     * Resolve the channel (within the DVR setting's playlist) that a show most likely airs on.
      */
     private function resolveSourceChannelId(string $title): ?int
     {
-        $playlistId = static::getDvrSetting()?->playlist_id;
+        $playlistId = $this->getCachedDvrSetting()?->playlist_id;
         if (! $playlistId) {
             return null;
         }
 
-        $show = collect($this->groupedShows)->firstWhere('title', $title);
-        if (! $show || empty($show['airings'])) {
+        $programme = $this->buildBaseQuery()
+            ->where('title', $title)
+            ->orderBy('start_time')
+            ->first(['epg_channel_id']);
+
+        if (! $programme?->epg_channel_id) {
             return null;
         }
 
-        $firstProgramme = EpgProgramme::find($show['airings'][0]['id']);
-        if (! $firstProgramme?->epg_channel_id) {
-            return null;
-        }
-
-        $epgChannelPk = EpgChannel::where('channel_id', $firstProgramme->epg_channel_id)->value('id');
+        $epgChannelPk = EpgChannel::where('channel_id', $programme->epg_channel_id)->value('id');
         if (! $epgChannelPk) {
             return null;
         }

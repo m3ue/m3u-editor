@@ -111,7 +111,7 @@
             <div class="flex flex-col gap-1" x-data="{
                 open: false,
                 search: '',
-                allOptions: @js($this->channelOptions),
+                get allOptions() { return $wire.channelOptions; },
                 get filtered() {
                     if (!this.search) return this.allOptions;
                     const q = this.search.toLowerCase();
@@ -125,7 +125,7 @@
                         class="text-sm font-medium leading-6 text-gray-950 dark:text-white">{{ __('Channel') }}</span>
                 </label>
                 <div class="relative">
-                    <input type="text" x-model="search" @focus="open = true" @keydown.escape="open = false"
+                    <input type="text" x-model="search" @focus="$wire.loadChannelOptions(); open = true" @keydown.escape="open = false"
                         :placeholder="!$wire.channel_id ? '{{ __('— Any —') }}' : ''"
                         class="w-full rounded-lg border border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-white text-sm shadow-sm outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500 placeholder-gray-400 dark:placeholder-gray-500 py-2 pl-3" />
                     <div x-show="open && Object.keys(filtered).length > 0" x-transition @click.stop

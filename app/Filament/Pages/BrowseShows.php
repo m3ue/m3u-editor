@@ -106,6 +106,12 @@ class BrowseShows extends Page
 
     public ?int $seriesKeepLast = null;
 
+    // --- DVR setting cache (per-request) ---
+
+    private ?DvrSetting $cachedDvrSetting = null;
+
+    private bool $dvrSettingResolved = false;
+
     // --- Computed helpers ---
 
     public function getTimezoneNotSetProperty(): bool
@@ -139,7 +145,7 @@ class BrowseShows extends Page
             return [];
         }
 
-        $playlistId = $this->resolvedDvrSetting()?->playlist_id;
+        $playlistId = $this->getCachedDvrSetting()?->playlist_id;
 
         if (! $playlistId) {
             return [];
@@ -153,28 +159,36 @@ class BrowseShows extends Page
     }
 
     /**
-     * @return array<int, string>
+     * Lazily populated on first dropdown open. Not computed eagerly to avoid
+     * serialising thousands of channel names into the initial page HTML.
+     *
+     * @var array<int, string>
      */
-    public function getChannelOptionsProperty(): array
+    public array $channelOptions = [];
+
+    public function loadChannelOptions(): void
     {
-        if (! $this->dvr_setting_id) {
-            return [];
+        if (! empty($this->channelOptions) || ! $this->dvr_setting_id) {
+            return;
         }
 
-        $playlistId = $this->resolvedDvrSetting()?->playlist_id;
-
+        $playlistId = $this->getCachedDvrSetting()?->playlist_id;
         if (! $playlistId) {
-            return [];
+            return;
         }
 
         $channels = Channel::where('playlist_id', $playlistId)
-            ->orderBy('title');
-
+            ->select(['id', 'title', 'title_custom', 'name', 'name_custom']);
         if (! $this->shouldIncludeDisabledChannels()) {
             $channels->where('enabled', true);
         }
 
-        return $channels->pluck('title', 'id')->all();
+        $this->channelOptions = $channels->get()
+            ->mapWithKeys(function (Channel $c) {
+                return [$c->id => $c->title_custom ?: $c->title ?: $c->name_custom ?: $c->name];
+            })
+            ->sortBy(fn (string $label) => mb_strtolower($label))
+            ->all();
     }
 
     // --- Lifecycle ---
@@ -218,6 +232,9 @@ class BrowseShows extends Page
     {
         $this->group_id = null;
         $this->channel_name = '';
+        $this->channelOptions = [];
+        $this->dvrSettingResolved = false;
+        $this->cachedDvrSetting = null;
     }
 
     // --- Search & pagination ---
@@ -271,6 +288,7 @@ class BrowseShows extends Page
         $this->sourceChannelId = $this->resolveSourceChannelId($title);
         $this->seriesChannelId = 0;
         $this->selectedShowDetail = $this->buildShowDetail($title);
+        $this->loadChannelOptions();
     }
 
     public function closeShowDetail(): void
@@ -283,7 +301,7 @@ class BrowseShows extends Page
 
     public function recordOnce(int $programmeId): void
     {
-        $dvrSetting = $this->resolvedDvrSetting();
+        $dvrSetting = $this->getCachedDvrSetting();
 
         if (! $dvrSetting) {
             Notification::make()->title(__('Select a DVR Setting first.'))->warning()->send();
@@ -380,7 +398,7 @@ class BrowseShows extends Page
 
     public function recordSeriesDefaults(string $title): void
     {
-        $dvrSetting = $this->resolvedDvrSetting();
+        $dvrSetting = $this->getCachedDvrSetting();
         $seriesMode = $dvrSetting?->default_series_mode ?? DvrSeriesMode::UniqueSe;
 
         $this->createSeriesRule($title, [
@@ -428,7 +446,7 @@ class BrowseShows extends Page
      */
     private function resolveSourceChannelId(string $title): ?int
     {
-        $playlistId = $this->resolvedDvrSetting()?->playlist_id;
+        $playlistId = $this->getCachedDvrSetting()?->playlist_id;
         if (! $playlistId) {
             return null;
         }
@@ -452,6 +470,16 @@ class BrowseShows extends Page
             ->value('id');
     }
 
+    private function getCachedDvrSetting(): ?DvrSetting
+    {
+        if (! $this->dvrSettingResolved) {
+            $this->cachedDvrSetting = $this->resolvedDvrSetting();
+            $this->dvrSettingResolved = true;
+        }
+
+        return $this->cachedDvrSetting;
+    }
+
     /**
      * Returns null if none is selected or the setting doesn't belong to this user,
      * preventing cross-user data access via a manipulated dvr_setting_id.
@@ -470,7 +498,7 @@ class BrowseShows extends Page
      */
     private function createSeriesRule(string $title, array $options): void
     {
-        $dvrSetting = $this->resolvedDvrSetting();
+        $dvrSetting = $this->getCachedDvrSetting();
 
         if (! $dvrSetting) {
             Notification::make()->title(__('Select a DVR Setting first.'))->warning()->send();
@@ -605,7 +633,7 @@ class BrowseShows extends Page
         }
 
         if ($this->dvr_setting_id) {
-            $playlistId = $this->resolvedDvrSetting()?->playlist_id;
+            $playlistId = $this->getCachedDvrSetting()?->playlist_id;
 
             if ($playlistId) {
                 $epgChannelIds = $this->resolveEpgChannelScope($playlistId);
@@ -821,7 +849,7 @@ class BrowseShows extends Page
 
     private function shouldIncludeDisabledChannels(): bool
     {
-        return $this->resolvedDvrSetting()?->include_disabled_channels ?? false;
+        return $this->getCachedDvrSetting()?->include_disabled_channels ?? false;
     }
 
     /**

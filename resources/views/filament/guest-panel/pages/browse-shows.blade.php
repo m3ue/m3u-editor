@@ -97,7 +97,7 @@
             <div class="flex flex-col gap-1" x-data="{
                 open: false,
                 search: '',
-                allOptions: @js($this->channelOptions),
+                get allOptions() { return $wire.channelOptions; },
                 get filtered() {
                     if (!this.search) return this.allOptions;
                     const q = this.search.toLowerCase();
@@ -111,7 +111,7 @@
                         class="text-sm font-medium leading-6 text-gray-950 dark:text-white">{{ __('Channel') }}</span>
                 </label>
                 <div class="relative">
-                    <input type="text" x-model="search" @focus="open = true" @keydown.escape="open = false"
+                    <input type="text" x-model="search" @focus="$wire.loadChannelOptions(); open = true" @keydown.escape="open = false"
                         :placeholder="!$wire.channel_id ? '{{ __('— Any —') }}' : ''"
                         class="w-full rounded-lg border border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-white text-sm shadow-sm outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500 placeholder-gray-400 dark:placeholder-gray-500 py-2 pl-3" />
                     <div x-show="open && Object.keys(filtered).length > 0" x-transition @click.stop
@@ -169,8 +169,31 @@
                 {{ __('No EPG programmes matched your search in the selected window.') }}
             </div>
         @else
-            <div class="text-sm text-gray-500 dark:text-gray-400 mb-4">
-                {{ trans_choice(':count show found.|:count shows found.', count($groupedShows), ['count' => count($groupedShows)]) }}
+            {{-- Result summary + top pagination --}}
+            <div class="flex items-center justify-between mb-4">
+                <p class="text-sm text-gray-500 dark:text-gray-400">
+                    @php
+                        $pageFrom = ($currentPage - 1) * 20 + 1;
+                        $pageTo = min($currentPage * 20, $totalShows);
+                    @endphp
+                    {{ __(':from–:to of :total shows', ['from' => $pageFrom, 'to' => $pageTo, 'total' => $totalShows]) }}
+                </p>
+
+                @if ($this->totalPages > 1)
+                    <div class="flex items-center gap-2">
+                        <x-filament::button wire:click="gotoPage({{ $currentPage - 1 }})" color="gray" size="sm"
+                            :disabled="$currentPage <= 1" icon="heroicon-m-chevron-left">
+                            {{ __('Prev') }}
+                        </x-filament::button>
+                        <span class="text-sm text-gray-500 dark:text-gray-400">
+                            {{ __('Page :page of :total', ['page' => $currentPage, 'total' => $this->totalPages]) }}
+                        </span>
+                        <x-filament::button wire:click="gotoPage({{ $currentPage + 1 }})" color="gray" size="sm"
+                            :disabled="$currentPage >= $this->totalPages" icon="heroicon-m-chevron-right" icon-position="after">
+                            {{ __('Next') }}
+                        </x-filament::button>
+                    </div>
+                @endif
             </div>
 
             {{-- Poster Card Grid --}}
@@ -305,6 +328,53 @@
                     </div>
                 @endforeach
             </div>
+
+            {{-- Pagination (bottom) --}}
+            @if ($this->totalPages > 1)
+                <div class="flex items-center justify-between mt-6 pt-4 border-t border-gray-200 dark:border-white/10">
+                    <p class="text-sm text-gray-500 dark:text-gray-400">
+                        {{ __('Page :page of :total', ['page' => $currentPage, 'total' => $this->totalPages]) }}
+                    </p>
+                    <div class="flex items-center gap-2">
+                        <x-filament::button wire:click="gotoPage({{ $currentPage - 1 }})" color="gray"
+                            size="sm" :disabled="$currentPage <= 1" icon="heroicon-m-chevron-left">
+                            {{ __('Prev') }}
+                        </x-filament::button>
+
+                        @php
+                            $total = $this->totalPages;
+                            $current = $currentPage;
+                            $window = 3;
+                            $start = max(1, $current - $window);
+                            $end = min($total, $current + $window);
+                        @endphp
+                        @if ($start > 1)
+                            <x-filament::button wire:click="gotoPage(1)" color="gray"
+                                size="sm">1</x-filament::button>
+                            @if ($start > 2)
+                                <span class="text-gray-400 text-sm">…</span>
+                            @endif
+                        @endif
+                        @for ($p = $start; $p <= $end; $p++)
+                            <x-filament::button wire:click="gotoPage({{ $p }})"
+                                color="{{ $p === $current ? 'primary' : 'gray' }}"
+                                size="sm">{{ $p }}</x-filament::button>
+                        @endfor
+                        @if ($end < $total)
+                            @if ($end < $total - 1)
+                                <span class="text-gray-400 text-sm">…</span>
+                            @endif
+                            <x-filament::button wire:click="gotoPage({{ $total }})" color="gray"
+                                size="sm">{{ $total }}</x-filament::button>
+                        @endif
+
+                        <x-filament::button wire:click="gotoPage({{ $currentPage + 1 }})" color="gray"
+                            size="sm" :disabled="$currentPage >= $this->totalPages" icon="heroicon-m-chevron-right" icon-position="after">
+                            {{ __('Next') }}
+                        </x-filament::button>
+                    </div>
+                </div>
+            @endif
         @endif
     @endif
 
@@ -344,9 +414,8 @@
 
             {{-- Content --}}
             <div class="p-4 flex-1 overflow-y-auto">
-                @php $selectedShow = collect($groupedShows)->firstWhere('title', $selectedShowTitle); @endphp
                 @include('filament.pages.browse-show-detail', [
-                    'show' => $selectedShow ?? null,
+                    'show' => $selectedShowDetail,
                     'channelOptions' => $this->channelOptions,
                     'seriesHint' => $this->seriesHint,
                     'sourceChannelId' => $sourceChannelId,
