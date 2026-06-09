@@ -29,6 +29,7 @@ use Filament\Schemas\Components\Fieldset;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 use Filament\Support\Enums\Width;
+use Illuminate\Contracts\Bus\Dispatcher;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -1290,7 +1291,7 @@ class PlaylistService
                 ])
                 ->modalDescription('Unmerge all channels with the same ID in this group, removing all failover relationships.')
                 ->action(function (Group $record, array $data): void {
-                    app(\Illuminate\Contracts\Bus\Dispatcher::class)
+                    app(Dispatcher::class)
                         ->dispatch(new UnmergeChannels(
                             user: auth()->user(),
                             groupId: $record->id,
@@ -1334,7 +1335,7 @@ class PlaylistService
                             reactivateChannels: $data['reactivate_channels'] ?? false,
                         );
 
-                    app(\Illuminate\Contracts\Bus\Dispatcher::class)->dispatch($job);
+                    app(Dispatcher::class)->dispatch($job);
                 });
         }
 
