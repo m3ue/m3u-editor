@@ -4,6 +4,11 @@ namespace App\Filament\Resources\CustomPlaylists\Pages;
 
 use App\Facades\PlaylistFacade;
 use App\Filament\Resources\CustomPlaylists\CustomPlaylistResource;
+use App\Filament\Resources\CustomPlaylists\RelationManagers\CategoriesRelationManager;
+use App\Filament\Resources\CustomPlaylists\RelationManagers\ChannelsRelationManager;
+use App\Filament\Resources\CustomPlaylists\RelationManagers\GroupsRelationManager;
+use App\Filament\Resources\CustomPlaylists\RelationManagers\SeriesRelationManager;
+use App\Filament\Resources\CustomPlaylists\RelationManagers\VodRelationManager;
 use App\Livewire\EpgViewer;
 use App\Livewire\MediaFlowProxyUrl;
 use App\Livewire\PlaylistEpgUrl;
@@ -89,7 +94,11 @@ class ViewCustomPlaylist extends ViewRecord
     public function getRelationManagers(): array
     {
         return [
-            //
+            ChannelsRelationManager::class,
+            GroupsRelationManager::class,
+            VodRelationManager::class,
+            SeriesRelationManager::class,
+            CategoriesRelationManager::class,
         ];
     }
 }

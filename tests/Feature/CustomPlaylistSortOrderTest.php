@@ -14,6 +14,12 @@
  */
 
 use App\Enums\PlaylistChannelId;
+use App\Facades\SortFacade;
+use App\Filament\Resources\CustomPlaylists\Pages\EditCustomPlaylist;
+use App\Filament\Resources\CustomPlaylists\Pages\ViewCustomPlaylist;
+use App\Filament\Resources\CustomPlaylists\RelationManagers\ChannelsRelationManager;
+use App\Filament\Resources\CustomPlaylists\RelationManagers\GroupsRelationManager;
+use App\Filament\Resources\CustomPlaylists\RelationManagers\VodRelationManager;
 use App\Http\Controllers\PlaylistGenerateController;
 use App\Models\Channel;
 use App\Models\CustomPlaylist;
@@ -23,6 +29,7 @@ use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
+use Livewire\Livewire;
 use Spatie\Tags\Tag;
 
 uses(RefreshDatabase::class);
@@ -36,6 +43,166 @@ beforeEach(function () {
 
     // Clear any stale EPG cache files so tests don't serve cached results from previous runs
     Storage::disk('local')->deleteDirectory('playlist-epg-files');
+});
+
+// ---------------------------------------------------------------------------
+// Custom playlist pivot reorder: preserve existing sort slots
+// ---------------------------------------------------------------------------
+
+it('preserves existing live channel pivot sort slots when reordering custom playlist channels', function () {
+    $this->actingAs($this->user);
+
+    $channelA = Channel::factory()->for($this->user)->for($this->playlist)->for($this->group)->create([
+        'enabled' => true,
+        'is_vod' => false,
+        'sort' => 1,
+        'title' => 'Channel A',
+    ]);
+    $channelB = Channel::factory()->for($this->user)->for($this->playlist)->for($this->group)->create([
+        'enabled' => true,
+        'is_vod' => false,
+        'sort' => 2,
+        'title' => 'Channel B',
+    ]);
+    $channelC = Channel::factory()->for($this->user)->for($this->playlist)->for($this->group)->create([
+        'enabled' => true,
+        'is_vod' => false,
+        'sort' => 3,
+        'title' => 'Channel C',
+    ]);
+
+    $this->customPlaylist->channels()->attach($channelA->id, ['sort' => 10]);
+    $this->customPlaylist->channels()->attach($channelB->id, ['sort' => 20]);
+    $this->customPlaylist->channels()->attach($channelC->id, ['sort' => 30]);
+
+    Livewire::test(ChannelsRelationManager::class, [
+        'ownerRecord' => $this->customPlaylist,
+        'pageClass' => EditCustomPlaylist::class,
+    ])->call('reorderTable', [$channelC->id, $channelA->id, $channelB->id]);
+
+    $pivotSorts = $this->customPlaylist->channels()
+        ->whereIn('channels.id', [$channelA->id, $channelB->id, $channelC->id])
+        ->pluck('channel_custom_playlist.sort', 'channels.id')
+        ->map(fn ($sort) => (int) $sort)
+        ->all();
+
+    expect($pivotSorts[$channelC->id])->toBe(10)
+        ->and($pivotSorts[$channelA->id])->toBe(20)
+        ->and($pivotSorts[$channelB->id])->toBe(30);
+});
+
+it('preserves existing VOD pivot sort slots when reordering custom playlist VOD', function () {
+    $this->actingAs($this->user);
+
+    $vodA = Channel::factory()->for($this->user)->for($this->playlist)->for($this->group)->create([
+        'enabled' => true,
+        'is_vod' => true,
+        'sort' => 1,
+        'title' => 'Movie A',
+    ]);
+    $vodB = Channel::factory()->for($this->user)->for($this->playlist)->for($this->group)->create([
+        'enabled' => true,
+        'is_vod' => true,
+        'sort' => 2,
+        'title' => 'Movie B',
+    ]);
+    $vodC = Channel::factory()->for($this->user)->for($this->playlist)->for($this->group)->create([
+        'enabled' => true,
+        'is_vod' => true,
+        'sort' => 3,
+        'title' => 'Movie C',
+    ]);
+
+    $this->customPlaylist->channels()->attach($vodA->id, ['sort' => 1001]);
+    $this->customPlaylist->channels()->attach($vodB->id, ['sort' => 1002]);
+    $this->customPlaylist->channels()->attach($vodC->id, ['sort' => 1003]);
+
+    Livewire::test(VodRelationManager::class, [
+        'ownerRecord' => $this->customPlaylist,
+        'pageClass' => EditCustomPlaylist::class,
+    ])->call('reorderTable', [$vodC->id, $vodA->id, $vodB->id]);
+
+    $pivotSorts = $this->customPlaylist->channels()
+        ->whereIn('channels.id', [$vodA->id, $vodB->id, $vodC->id])
+        ->pluck('channel_custom_playlist.sort', 'channels.id')
+        ->map(fn ($sort) => (int) $sort)
+        ->all();
+
+    expect($pivotSorts[$vodC->id])->toBe(1001)
+        ->and($pivotSorts[$vodA->id])->toBe(1002)
+        ->and($pivotSorts[$vodB->id])->toBe(1003);
+});
+
+it('recounts custom playlist channels by pivot sort order', function () {
+    $this->actingAs($this->user);
+
+    $channelFirst = Channel::factory()->for($this->user)->for($this->playlist)->for($this->group)->create([
+        'enabled' => true,
+        'is_vod' => false,
+        'sort' => 100,
+        'channel' => 900,
+        'title' => 'Channel First',
+    ]);
+    $channelSecond = Channel::factory()->for($this->user)->for($this->playlist)->for($this->group)->create([
+        'enabled' => true,
+        'is_vod' => false,
+        'sort' => 1,
+        'channel' => 100,
+        'title' => 'Channel Second',
+    ]);
+
+    $this->customPlaylist->channels()->attach($channelFirst->id, ['sort' => 1]);
+    $this->customPlaylist->channels()->attach($channelSecond->id, ['sort' => 2]);
+
+    SortFacade::bulkRecountCustomPlaylistChannels(
+        $this->customPlaylist,
+        Channel::whereKey([$channelFirst->id, $channelSecond->id])->get(),
+        10
+    );
+
+    $numbers = $this->customPlaylist->channels()
+        ->whereIn('channels.id', [$channelFirst->id, $channelSecond->id])
+        ->pluck('channel_custom_playlist.channel_number', 'channels.id')
+        ->map(fn ($number) => (int) $number)
+        ->all();
+
+    expect($numbers[$channelFirst->id])->toBe(10)
+        ->and($numbers[$channelSecond->id])->toBe(11);
+});
+
+it('exposes custom playlist relation managers on the view page', function () {
+    $this->actingAs($this->user);
+
+    $managers = Livewire::test(ViewCustomPlaylist::class, [
+        'record' => $this->customPlaylist->getRouteKey(),
+    ])->instance()->getRelationManagers();
+
+    expect($managers)->toContain(ChannelsRelationManager::class)
+        ->and($managers)->toContain(GroupsRelationManager::class)
+        ->and($managers)->toContain(VodRelationManager::class);
+});
+
+it('lists custom playlist groups by order_column', function () {
+    $this->actingAs($this->user);
+
+    $third = Tag::create(['name' => ['en' => 'Group C'], 'type' => $this->customPlaylist->uuid]);
+    $first = Tag::create(['name' => ['en' => 'Group A'], 'type' => $this->customPlaylist->uuid]);
+    $second = Tag::create(['name' => ['en' => 'Group B'], 'type' => $this->customPlaylist->uuid]);
+
+    $third->update(['order_column' => 30]);
+    $first->update(['order_column' => 10]);
+    $second->update(['order_column' => 20]);
+
+    $this->customPlaylist->attachTag($third);
+    $this->customPlaylist->attachTag($first);
+    $this->customPlaylist->attachTag($second);
+
+    Livewire::test(GroupsRelationManager::class, [
+        'ownerRecord' => $this->customPlaylist,
+        'pageClass' => EditCustomPlaylist::class,
+    ])
+        ->loadTable()
+        ->assertCanSeeTableRecords([$first, $second, $third], inOrder: true);
 });
 
 // ---------------------------------------------------------------------------
@@ -268,7 +435,7 @@ it('EPG XML uses pivot channel_number for channel id when id_channel_by is Numbe
     $this->customPlaylist->update(['id_channel_by' => PlaylistChannelId::Number, 'dummy_epg' => true]);
     $this->customPlaylist->channels()->attach($channel->id, ['channel_number' => 42]);
 
-    // Use compressed endpoint — returns a regular (non-streamed) response, avoiding ob_start conflicts
+    // Use compressed endpoint - returns a regular (non-streamed) response, avoiding ob_start conflicts
     $response = $this->get("/{$this->customPlaylist->uuid}/epg.xml.gz");
     $response->assertStatus(200);
 
@@ -304,14 +471,14 @@ it('EPG XML falls back to global channel number when pivot channel_number is nul
 // ---------------------------------------------------------------------------
 
 it('getChannelQuery orders channels by pivot sort when all channels have pivot sort set', function () {
-    // channelFirst has a high channels.sort (100) but pivot.sort=1 — should come first
+    // channelFirst has a high channels.sort (100) but pivot.sort=1 - should come first
     $channelFirst = Channel::factory()->for($this->user)->for($this->playlist)->for($this->group)->create([
         'enabled' => true,
         'is_vod' => false,
         'sort' => 100,
         'title' => 'Channel First',
     ]);
-    // channelSecond has a low channels.sort (2) but pivot.sort=50 — should come second
+    // channelSecond has a low channels.sort (2) but pivot.sort=50 - should come second
     $channelSecond = Channel::factory()->for($this->user)->for($this->playlist)->for($this->group)->create([
         'enabled' => true,
         'is_vod' => false,
@@ -352,14 +519,14 @@ it('getChannelQuery falls back to channels.sort when pivot sort is null', functi
 });
 
 it('getChannelQuery pivot sort takes precedence over channels.sort in mixed scenario', function () {
-    // channelA has pivot.sort=1 but a very high channels.sort — COALESCE picks pivot
+    // channelA has pivot.sort=1 but a very high channels.sort - COALESCE picks pivot
     $channelA = Channel::factory()->for($this->user)->for($this->playlist)->for($this->group)->create([
         'enabled' => true,
         'is_vod' => false,
         'sort' => 100,
         'title' => 'Channel A',
     ]);
-    // channelB has no pivot sort — COALESCE falls back to channels.sort=2
+    // channelB has no pivot sort - COALESCE falls back to channels.sort=2
     $channelB = Channel::factory()->for($this->user)->for($this->playlist)->for($this->group)->create([
         'enabled' => true,
         'is_vod' => false,
@@ -373,7 +540,7 @@ it('getChannelQuery pivot sort takes precedence over channels.sort in mixed scen
     $channels = PlaylistGenerateController::getChannelQuery($this->customPlaylist)->get();
 
     // COALESCE(1, 100)=1 for A, COALESCE(null, 2)=2 for B → A comes first
-    // Without COALESCE (channels.sort only): B(2) before A(100) — opposite result
+    // Without COALESCE (channels.sort only): B(2) before A(100) - opposite result
     expect($channels->first()->id)->toBe($channelA->id)
         ->and($channels->last()->id)->toBe($channelB->id);
 });
@@ -394,7 +561,7 @@ it('EPG channel ids match HDHR lineup GuideNumbers for custom playlists', functi
 
     $this->customPlaylist->update(['id_channel_by' => PlaylistChannelId::Number, 'dummy_epg' => true]);
 
-    // Get EPG XML (compressed — avoids streamed response ob_start conflicts)
+    // Get EPG XML (compressed - avoids streamed response ob_start conflicts)
     $epgResponse = $this->get("/{$this->customPlaylist->uuid}/epg.xml.gz");
     $epgContent = gzdecode($epgResponse->getContent());
 

@@ -138,6 +138,7 @@ class SeriesRelationManager extends RelationManager
                     ->options(function () use ($ownerRecord) {
                         return $ownerRecord->tags()
                             ->where('type', $ownerRecord->uuid.'-category')
+                            ->orderBy('order_column')
                             ->get()
                             ->mapWithKeys(fn ($tag) => [$tag->getAttributeValue('name') => $tag->getAttributeValue('name')])
                             ->toArray();
@@ -249,7 +250,7 @@ class SeriesRelationManager extends RelationManager
                             ->label(__('Select category'))
                             ->native(false)
                             ->options(
-                                $ownerRecord->categoryTags()->get()
+                                $ownerRecord->categoryTags()->orderBy('order_column')->get()
                                     ->map(fn ($name) => [
                                         'id' => $name->getAttributeValue('name'),
                                         'name' => $name->getAttributeValue('name'),
@@ -284,7 +285,7 @@ class SeriesRelationManager extends RelationManager
     {
         // Lets group the tabs by Custom Playlist tags
         $ownerRecord = $this->ownerRecord;
-        $tags = $ownerRecord->tags()->where('type', $ownerRecord->uuid.'-category')->get();
+        $tags = $ownerRecord->tags()->where('type', $ownerRecord->uuid.'-category')->orderBy('order_column')->get();
         $tabs = $tags->map(
             fn ($tag) => Tab::make($tag->name)
                 ->modifyQueryUsing(fn ($query) => $query->whereHas('tags', function ($tagQuery) use ($tag) {

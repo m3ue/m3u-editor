@@ -67,6 +67,7 @@ class GroupsRelationManager extends RelationManager
             })
             ->paginated([10, 25, 50, 100])
             ->defaultPaginationPageOption(25)
+            ->defaultSort('order_column', 'asc')
             ->columns([
                 TextInputColumn::make('name')
                     ->sortable(),

@@ -312,7 +312,7 @@ class SortService
                 "UPDATE channel_custom_playlist ccp
                  JOIN (
                     SELECT ccp2.channel_id,
-                           ROW_NUMBER() OVER (ORDER BY c.sort, c.channel, c.id) AS rn
+                           ROW_NUMBER() OVER (ORDER BY COALESCE(ccp2.sort, c.sort), c.channel, c.id) AS rn
                     FROM channel_custom_playlist ccp2
                     JOIN channels c ON c.id = ccp2.channel_id
                     WHERE ccp2.custom_playlist_id = ?
@@ -330,7 +330,7 @@ class SortService
                  SET channel_number = t.rn + ?
                  FROM (
                     SELECT ccp2.channel_id,
-                           ROW_NUMBER() OVER (ORDER BY c.sort, c.channel, c.id) AS rn
+                           ROW_NUMBER() OVER (ORDER BY COALESCE(ccp2.sort, c.sort), c.channel, c.id) AS rn
                     FROM channel_custom_playlist ccp2
                     JOIN channels c ON c.id = ccp2.channel_id
                     WHERE ccp2.custom_playlist_id = ?
@@ -346,7 +346,7 @@ class SortService
             DB::statement(
                 "WITH ranked AS (
                     SELECT ccp2.channel_id AS channel_id,
-                           ROW_NUMBER() OVER (ORDER BY c.sort, c.channel, c.id) AS rn
+                           ROW_NUMBER() OVER (ORDER BY COALESCE(ccp2.sort, c.sort), c.channel, c.id) AS rn
                     FROM channel_custom_playlist ccp2
                     JOIN channels c ON c.id = ccp2.channel_id
                     WHERE ccp2.custom_playlist_id = ?
@@ -364,7 +364,7 @@ class SortService
                 ->join('channels as c', 'c.id', '=', 'ccp.channel_id')
                 ->where('ccp.custom_playlist_id', $playlist->id)
                 ->whereIn('ccp.channel_id', $ids)
-                ->orderBy('c.sort')
+                ->orderByRaw('COALESCE(ccp.sort, c.sort)')
                 ->orderBy('c.channel')
                 ->orderBy('c.id')
                 ->pluck('ccp.channel_id')

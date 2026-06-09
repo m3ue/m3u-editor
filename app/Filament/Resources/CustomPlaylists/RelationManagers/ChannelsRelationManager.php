@@ -4,6 +4,7 @@ namespace App\Filament\Resources\CustomPlaylists\RelationManagers;
 
 use App\Facades\SortFacade;
 use App\Filament\Resources\Channels\ChannelResource;
+use App\Filament\Resources\CustomPlaylists\RelationManagers\Concerns\ReordersCustomPlaylistPivotSort;
 use App\Jobs\SyncPlexDvrJob;
 use App\Models\Channel;
 use Filament\Actions\AttachAction;
@@ -30,6 +31,8 @@ use Illuminate\Support\Facades\DB;
 
 class ChannelsRelationManager extends RelationManager
 {
+    use ReordersCustomPlaylistPivotSort;
+
     protected static string $relationship = 'channels';
 
     protected static ?string $label = 'Live Channels';
@@ -202,6 +205,7 @@ class ChannelsRelationManager extends RelationManager
                     ->options(function () use ($ownerRecord) {
                         return $ownerRecord->tags()
                             ->where('type', $ownerRecord->uuid)
+                            ->orderBy('order_column')
                             ->get()
                             ->mapWithKeys(fn ($tag) => [$tag->getAttributeValue('name') => $tag->getAttributeValue('name')])
                             ->toArray();
@@ -405,7 +409,7 @@ class ChannelsRelationManager extends RelationManager
                             ->label(__('Select group'))
                             ->native(false)
                             ->options(
-                                $ownerRecord->groupTags()->get()
+                                $ownerRecord->groupTags()->orderBy('order_column')->get()
                                     ->map(fn ($name) => [
                                         'id' => $name->getAttributeValue('name'),
                                         'name' => $name->getAttributeValue('name'),
@@ -440,7 +444,7 @@ class ChannelsRelationManager extends RelationManager
     {
         // Lets group the tabs by Custom Playlist tags
         $ownerRecord = $this->ownerRecord;
-        $tags = $ownerRecord->tags()->where('type', $ownerRecord->uuid)->get();
+        $tags = $ownerRecord->tags()->where('type', $ownerRecord->uuid)->orderBy('order_column')->get();
         $tabs = $tags->map(
             fn ($tag) => Tab::make($tag->name)
                 ->modifyQueryUsing(fn ($query) => $query->where('is_vod', false)->whereHas('tags', function ($tagQuery) use ($tag) {
