@@ -575,21 +575,20 @@ class GuestBrowseShows extends Page
 
         $dvrSetting = $this->getCachedDvrSetting();
 
-        $seriesRuleTitles = $dvrSetting
-            ? DvrRecordingRule::where('dvr_setting_id', $dvrSetting->id)
-                ->where('type', DvrRuleType::Series)
-                ->pluck('series_title')
-                ->flip()
-                ->all()
-            : [];
+        $seriesRuleTitles = [];
+        $onceProgrammeIds = [];
 
-        $onceProgrammeIds = $dvrSetting
-            ? DvrRecordingRule::where('dvr_setting_id', $dvrSetting->id)
-                ->where('type', DvrRuleType::Once)
-                ->pluck('programme_id')
-                ->flip()
-                ->all()
-            : [];
+        if ($dvrSetting) {
+            $rules = DvrRecordingRule::where('dvr_setting_id', $dvrSetting->id)
+                ->whereIn('type', [DvrRuleType::Series, DvrRuleType::Once])
+                ->get(['type', 'series_title', 'programme_id']);
+
+            $seriesRuleTitles = $rules->where('type', DvrRuleType::Series)
+                ->pluck('series_title')->flip()->all();
+
+            $onceProgrammeIds = $rules->where('type', DvrRuleType::Once)
+                ->pluck('programme_id')->flip()->all();
+        }
 
         $timezone = app(GeneralSettings::class)->app_timezone ?? 'UTC';
 
@@ -781,12 +780,14 @@ class GuestBrowseShows extends Page
         $includeDisabled = $this->shouldIncludeDisabledChannels();
 
         if ($this->channel_id) {
-            $channelQuery = Channel::where('id', $this->channel_id)->with('epgChannel');
+            $channelQuery = DB::table('channels')
+                ->join('epg_channels', 'epg_channels.id', '=', 'channels.epg_channel_id')
+                ->where('channels.id', $this->channel_id)
+                ->whereNotNull('channels.epg_channel_id');
             if (! $includeDisabled) {
-                $channelQuery->where('enabled', true);
+                $channelQuery->where('channels.enabled', true);
             }
-            $channel = $channelQuery->first();
-            $epgId = $channel?->epgChannel?->channel_id;
+            $epgId = $channelQuery->value('epg_channels.channel_id');
 
             return $epgId ? [$epgId] : null;
         }
