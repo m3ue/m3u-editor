@@ -25,10 +25,7 @@ class ForcePasswordChange extends Component
             return;
         }
 
-        $user = auth()->user();
-        if ($user && $user->must_change_password) {
-            $this->show = true;
-        }
+        $this->show = auth()->user()?->must_change_password ?? false;
     }
 
     protected function rules(): array

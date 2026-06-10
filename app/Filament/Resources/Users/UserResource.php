@@ -42,10 +42,7 @@ class UserResource extends Resource implements CopilotResource
 
     public static function getEloquentQuery(): Builder
     {
-        $query = parent::getEloquentQuery()
-            ->where('is_admin', false); // Hide admin users from the list
-
-        return $query;
+        return parent::getEloquentQuery()->where('is_admin', false);
     }
 
     protected static string|BackedEnum|null $navigationIcon = null;
