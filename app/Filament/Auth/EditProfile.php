@@ -2,6 +2,7 @@
 
 namespace App\Filament\Auth;
 
+use Filament\Schemas\Components\Component;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 
@@ -22,14 +23,15 @@ class EditProfile extends \Filament\Auth\Pages\EditProfile
     public function form(Schema $schema): Schema
     {
         $isOidcUser = auth()->user()?->isOidcUser();
+        $isAutoLogin = config('auth.auto_login');
 
         $fields = [
             $this->getNameFormComponent(),
             $this->getEmailFormComponent(),
         ];
 
-        // OIDC users authenticate via their IdP — hide password fields
-        if (! $isOidcUser) {
+        // OIDC and AUTO_LOGIN users authenticate externally — hide password fields
+        if (! $isOidcUser && ! $isAutoLogin) {
             $fields[] = $this->getPasswordFormComponent()
                 ->helperText(__('Leave blank to keep the current password'))
                 ->rules([
@@ -51,5 +53,14 @@ class EditProfile extends \Filament\Auth\Pages\EditProfile
                     ->description(__('Update your profile information'))
                     ->schema($fields),
             ]);
+    }
+
+    public function getMultiFactorAuthenticationContentComponent(): ?Component
+    {
+        if (config('auth.auto_login')) {
+            return null;
+        }
+
+        return parent::getMultiFactorAuthenticationContentComponent();
     }
 }

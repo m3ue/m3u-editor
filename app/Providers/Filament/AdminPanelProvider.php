@@ -68,6 +68,7 @@ use EslamRedaDiv\FilamentCopilot\Tools\RecallTool;
 use EslamRedaDiv\FilamentCopilot\Tools\RememberTool;
 use EslamRedaDiv\FilamentCopilot\Tools\RunToolTool;
 use Exception;
+use Filament\Actions\Action;
 use Filament\Auth\MultiFactor\App\AppAuthentication;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
@@ -145,9 +146,12 @@ class AdminPanelProvider extends PanelProvider
             ->login(Login::class)
             ->loginRouteSlug(trim(config('app.login_path', 'login'), '/') ?? 'login')
             ->profile(EditProfile::class, isSimple: false)
-            ->multiFactorAuthentication([
+            ->multiFactorAuthentication(config('auth.auto_login') ? [] : [
                 AppAuthentication::make()
                     ->recoverable(),
+            ])
+            ->userMenuItems([
+                'logout' => fn (Action $action) => $action->hidden(config('auth.auto_login')),
             ])
             ->brandName('m3u editor')
             ->brandLogo(fn () => view('filament.admin.logo'))
@@ -181,7 +185,7 @@ class AdminPanelProvider extends PanelProvider
                             NavigationGroup::make(fn () => __('Administration'))
                                 ->icon('heroicon-s-shield-check')
                                 ->items([
-                                    ...UserResource::getNavigationItems(),
+                                    ...(config('auth.auto_login') ? [] : UserResource::getNavigationItems()),
                                     ...Preferences::getNavigationItems(),
                                 ]),
                         ] : []),

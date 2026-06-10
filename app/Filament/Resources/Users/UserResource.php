@@ -30,12 +30,13 @@ class UserResource extends Resource implements CopilotResource
 
     protected static ?string $model = User::class;
 
-    /**
-     * Check if the user can access this page.
-     * Only admin users can access the Preferences page.
-     */
     public static function canAccess(): bool
     {
+        // User management is irrelevant in single-user AUTO_LOGIN setups.
+        if (config('auth.auto_login')) {
+            return false;
+        }
+
         return auth()->check() && auth()->user()->isAdmin();
     }
 

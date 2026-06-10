@@ -19,6 +19,12 @@ class ForcePasswordChange extends Component
 
     public function mount(): void
     {
+        // When AUTO_LOGIN is active the admin is trusted via an external auth
+        // system — there is no point forcing a password change.
+        if (config('auth.auto_login')) {
+            return;
+        }
+
         $user = auth()->user();
         if ($user && $user->must_change_password) {
             $this->show = true;
