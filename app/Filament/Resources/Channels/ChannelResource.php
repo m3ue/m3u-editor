@@ -1522,8 +1522,12 @@ class ChannelResource extends Resource implements CopilotResource
         return [
             // Customizable channel fields
             Toggle::make('enabled')
-                ->columnSpanFull()
                 ->default(true),
+            TextInput::make('sort')
+                ->label(__('Sort Order'))
+                ->numeric()
+                ->minValue(0)
+                ->placeholder(__('Sort Order')),
             Grid::make()
                 ->columns(3)
                 ->schema([
