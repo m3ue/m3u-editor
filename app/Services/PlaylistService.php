@@ -352,6 +352,8 @@ class PlaylistService
 
     public static function makeFilesystemSafe(string $name, $replaceWith = ' '): string
     {
+        $name = Utf8StringService::clean($name);
+
         switch ($replaceWith) {
             case 'space':
                 $replaceWith = ' ';

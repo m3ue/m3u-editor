@@ -6,6 +6,7 @@ use App\Enums\Status;
 use App\Models\Category;
 use App\Models\Playlist;
 use App\Models\Series;
+use App\Services\Utf8StringService;
 use App\Traits\ProviderRequestDelay;
 use Carbon\Carbon;
 use Filament\Notifications\Notification;
@@ -109,15 +110,45 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
             return; // skip this category if there's an error
         }
 
+        $seriesStreamsBody = $seriesStreamsResponse->body();
+
         // Guard against providers that return a non-JSON body (e.g. a PNG error image)
         // with a 200 OK status. JsonMachine will throw a SyntaxError on the first byte
         // if the body is not JSON, which would crash the entire import chain.
-        $firstChar = ltrim($seriesStreamsResponse->body())[0] ?? '';
+        $firstChar = ltrim($seriesStreamsBody)[0] ?? '';
         if ($firstChar !== '[' && $firstChar !== '{') {
             Log::warning('ProcessM3uImportSeriesChunk: Non-JSON response for series category, skipping', [
                 'source_category_id' => $sourceCategoryId,
+                'source_category_name' => $sourceCategoryName,
                 'playlist_id' => $playlistId,
-                'content_preview' => substr($seriesStreamsResponse->body(), 0, 12),
+                'phase' => 'series_category_streams',
+                'content_preview' => Utf8StringService::preview($seriesStreamsBody, 12),
+            ]);
+
+            return;
+        }
+
+        if (! Utf8StringService::isValid($seriesStreamsBody)) {
+            Log::warning('ProcessM3uImportSeriesChunk: Malformed JSON response for series category, skipping', [
+                'source_category_id' => $sourceCategoryId,
+                'source_category_name' => $sourceCategoryName,
+                'playlist_id' => $playlistId,
+                'phase' => 'series_category_streams',
+                'error' => 'Response body is not valid UTF-8.',
+                'content_preview' => Utf8StringService::preview($seriesStreamsBody),
+            ]);
+
+            return;
+        }
+
+        if (! json_validate($seriesStreamsBody)) {
+            Log::warning('ProcessM3uImportSeriesChunk: Malformed JSON response for series category, skipping', [
+                'source_category_id' => $sourceCategoryId,
+                'source_category_name' => $sourceCategoryName,
+                'playlist_id' => $playlistId,
+                'phase' => 'series_category_streams',
+                'error' => json_last_error_msg(),
+                'content_preview' => Utf8StringService::preview($seriesStreamsBody),
             ]);
 
             return;
@@ -125,7 +156,7 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
 
         // Single-pass stream: pluck existing rows once for O(1) lookup, then iterate
         // the JSON stream and immediately route each item to an update or a rolling
-        // insert buffer — never accumulating more than 100 rows at a time.
+        // insert buffer, never accumulating more than 100 rows at a time.
         //
         // Keyed by source_series_id → last_modified. Use has() (not get()) for the
         // existence check so that series whose last_modified is NULL are not mistakenly
@@ -137,7 +168,7 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
 
         $insertBuffer = [];
 
-        foreach (Items::fromString($seriesStreamsResponse->body()) as $item) {
+        foreach (Items::fromString($seriesStreamsBody) as $item) {
             $itemName = trim((string) ($item->name ?? $item->title ?? ''));
             if ($itemName === '') {
                 continue;
@@ -148,7 +179,7 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
                 : null;
 
             if ($existingSeriesIds->has($item->series_id)) {
-                // Already in DB — only update last_modified if it changed
+                // Already in DB, only update last_modified if it changed
                 $storedModified = $existingSeriesIds->get($item->series_id);
                 if ($lastModified && $lastModified !== $storedModified) {
                     $playlist->series()
@@ -241,7 +272,7 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
         } catch (QueryException $e) {
             // SQLSTATE 23503 = foreign_key_violation (PostgreSQL).
             // Occurs when a concurrent sync's seriesCleanup deletes the category between
-            // transaction retries. Log and skip — series are re-imported on next sync.
+            // transaction retries. Log and skip because series are re-imported on next sync.
             if ($e->getCode() === '23503') {
                 Log::warning('Series insert skipped: category deleted by concurrent sync', [
                     'source_category_id' => $sourceCategoryId,

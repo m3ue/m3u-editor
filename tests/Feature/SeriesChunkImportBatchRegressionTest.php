@@ -20,6 +20,7 @@ use App\Models\Series;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 
 uses(RefreshDatabase::class);
 
@@ -43,9 +44,9 @@ function runChunk(Playlist $playlist, int $categoryId, string $categoryName, arr
 
     (new ProcessM3uImportSeriesChunk(
         payload: ['playlistId' => $playlist->id, 'categoryId' => $categoryId, 'categoryName' => $categoryName],
-        batchCount: 1,
+        batchCount: 2,
         batchNo: $batchNo,
-        index: 0,
+        index: 1,
     ))->handle();
 }
 
@@ -55,14 +56,14 @@ beforeEach(function () {
 });
 
 it('does not re-insert a series whose last_modified is NULL on subsequent syncs', function () {
-    // First sync — series inserted with no last_modified (null)
+    // First sync: series inserted with no last_modified (null)
     runChunk($this->playlist, 1, 'Drama', [
         ['series_id' => 200, 'name' => 'Null Date Show'],
     ], 'batch-1');
 
     $this->assertDatabaseCount('series', 1);
 
-    // Second sync — same item still has no last_modified
+    // Second sync: same item still has no last_modified
     runChunk($this->playlist, 1, 'Drama', [
         ['series_id' => 200, 'name' => 'Null Date Show'],
     ], 'batch-2');
@@ -99,4 +100,56 @@ it('imports new series and links them to the correct category', function () {
 
     $category = Category::first();
     expect(Series::where('category_id', $category->id)->count())->toBe(2);
+});
+
+it('skips a series category when the provider returns malformed utf-8 json', function () {
+    Log::spy();
+
+    Http::fake([
+        'xtream.test/player_api.php*' => Http::response("[{\"series_id\":400,\"name\":\"Bad \xB1 Name\"}]", 200),
+    ]);
+
+    (new ProcessM3uImportSeriesChunk(
+        payload: ['playlistId' => $this->playlist->id, 'categoryId' => 9, 'categoryName' => 'Bad Data'],
+        batchCount: 2,
+        batchNo: 'bad-utf8-batch',
+        index: 1,
+    ))->handle();
+
+    $this->assertDatabaseCount('series', 0);
+
+    Log::shouldHaveReceived('warning')
+        ->with('ProcessM3uImportSeriesChunk: Malformed JSON response for series category, skipping', Mockery::on(
+            fn (array $context): bool => $context['playlist_id'] === $this->playlist->id
+                && $context['source_category_id'] === 9
+                && $context['source_category_name'] === 'Bad Data'
+                && $context['phase'] === 'series_category_streams'
+        ))
+        ->once();
+});
+
+it('skips a series category when the provider returns malformed json', function () {
+    Log::spy();
+
+    Http::fake([
+        'xtream.test/player_api.php*' => Http::response('[}', 200),
+    ]);
+
+    (new ProcessM3uImportSeriesChunk(
+        payload: ['playlistId' => $this->playlist->id, 'categoryId' => 10, 'categoryName' => 'Malformed Data'],
+        batchCount: 2,
+        batchNo: 'bad-json-batch',
+        index: 1,
+    ))->handle();
+
+    $this->assertDatabaseCount('series', 0);
+
+    Log::shouldHaveReceived('warning')
+        ->with('ProcessM3uImportSeriesChunk: Malformed JSON response for series category, skipping', Mockery::on(
+            fn (array $context): bool => $context['playlist_id'] === $this->playlist->id
+                && $context['source_category_id'] === 10
+                && $context['source_category_name'] === 'Malformed Data'
+                && $context['phase'] === 'series_category_streams'
+        ))
+        ->once();
 });
