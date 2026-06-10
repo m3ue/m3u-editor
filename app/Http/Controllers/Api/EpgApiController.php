@@ -859,14 +859,16 @@ class EpgApiController extends Controller
         $g = $channelQuery->getQuery()->getGrammar();
         $coalesce = 'COALESCE('.$g->wrap('channels.group').', '.$g->wrap('channels.group_internal').')';
 
+        // No groups.enabled filter here — getChannelQuery (used in getDataForPlaylist) does not
+        // filter by groups.enabled either. Applying it here caused groups to vanish from the tab
+        // list for any channel whose source group happened to be disabled, including all channels
+        // in CustomPlaylists sourced from multiple playlists with disabled groups.
         $groups = $channelQuery
-            ->leftJoin('groups', 'channels.group_id', '=', 'groups.id')
             ->selectRaw("{$coalesce} as effective_group")
             ->when(! $includeVod, function ($q) {
                 $q->where('channels.is_vod', false);
             })
             ->where('channels.enabled', true)
-            ->where(fn ($q) => $q->where('groups.enabled', true)->orWhereNull('channels.group_id'))
             ->whereRaw("{$coalesce} IS NOT NULL")
             ->whereRaw("{$coalesce} != ''")
             ->groupByRaw($coalesce)
