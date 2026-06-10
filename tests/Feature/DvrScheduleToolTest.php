@@ -678,6 +678,8 @@ it('around respects the context_before and context_after bounds', function () {
 // ── Time Window Filtering ──────────────────────────────────────────────────────
 
 it('search with time_window=today returns only today\'s programmes', function () {
+    $this->travelTo(now()->startOfDay()->addHours(12));
+
     $user = User::factory()->create();
     $epg = Epg::factory()->for($user)->create();
     $epgChannel = EpgChannel::factory()->for($epg)->for($user)->create([
@@ -717,6 +719,8 @@ it('search with time_window=today returns only today\'s programmes', function ()
 });
 
 it('search with time_window=tomorrow returns only tomorrow\'s programmes', function () {
+    $this->travelTo(now()->startOfDay()->addHours(12));
+
     $user = User::factory()->create();
     $epg = Epg::factory()->for($user)->create();
     $epgChannel = EpgChannel::factory()->for($epg)->for($user)->create([
