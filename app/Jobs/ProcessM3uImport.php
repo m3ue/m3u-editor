@@ -397,9 +397,14 @@ class ProcessM3uImport implements ShouldQueue
                 ->timeout(30)
                 ->throw()->get($userInfo));
             if ($userInfoResponse->ok()) {
-                $playlist->update([
-                    'xtream_status' => $userInfoResponse->json(),
-                ]);
+                $userInfo = $userInfoResponse->json();
+                $update = [
+                    'xtream_status' => $userInfo,
+                ];
+                if (! $playlist->server_timezone) {
+                    $update['server_timezone'] = $userInfo['server_info']['timezone'] ?? null;
+                }
+                $playlist->update($update);
             }
 
             // If including Live streams, get the categories and streams
