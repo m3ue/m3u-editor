@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\CustomPlaylists\RelationManagers;
 
+use App\Filament\Resources\CustomPlaylists\RelationManagers\Concerns\ReordersCustomPlaylistPivotSort;
 use App\Filament\Resources\Series\SeriesResource;
 use App\Models\Series;
 use Filament\Actions\AttachAction;
@@ -15,6 +16,7 @@ use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Schemas\Schema;
 use Filament\Tables;
 use Filament\Tables\Columns\SpatieTagsColumn;
+use Filament\Tables\Columns\TextInputColumn;
 use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Grouping\Group;
@@ -26,6 +28,8 @@ use Illuminate\Support\Facades\DB;
 
 class SeriesRelationManager extends RelationManager
 {
+    use ReordersCustomPlaylistPivotSort;
+
     protected static string $relationship = 'series';
 
     public function isReadOnly(): bool
@@ -113,11 +117,31 @@ class SeriesRelationManager extends RelationManager
             });
         $defaultColumns = SeriesResource::getTableColumns(showCategory: true, showPlaylist: true);
 
-        // Inject the custom group column after the group column
+        // Replace the global sort column with a pivot-aware version
+        foreach ($defaultColumns as $i => $column) {
+            if (method_exists($column, 'getName') && $column->getName() === 'sort') {
+                $defaultColumns[$i] = TextInputColumn::make('sort')
+                    ->label(__('Sort Order'))
+                    ->type('number')
+                    ->rules(['nullable', 'numeric', 'min:0'])
+                    ->placeholder(fn ($record) => (string) $record->sort)
+                    ->getStateUsing(fn ($record) => $record->pivot?->sort ?? null)
+                    ->updateStateUsing(function ($record, $state) use ($ownerRecord): void {
+                        $ownerRecord->series()->updateExistingPivot(
+                            $record->id,
+                            ['sort' => ($state !== '' && $state !== null) ? (float) $state : null]
+                        );
+                    })
+                    ->sortable(query: function (Builder $query, string $direction): Builder {
+                        return $query->orderBy('series_custom_playlist.sort', $direction);
+                    });
+            }
+        }
+
+        // Inject the custom category column after the group column
         array_splice($defaultColumns, 7, 0, [$groupColumn]);
 
         return $table->persistFiltersInSession()
-            ->persistFiltersInSession()
             ->persistSortInSession()
             ->recordTitleAttribute('name')
             ->filtersTriggerAction(function ($action) {
@@ -128,8 +152,10 @@ class SeriesRelationManager extends RelationManager
             })
             ->paginated([10, 25, 50, 100])
             ->defaultPaginationPageOption(25)
-            ->defaultSort('sort', 'asc')
-            ->reorderable('sort')
+            ->defaultSort(fn (Builder $query, string $direction): Builder => $query->orderByRaw(
+                'COALESCE(series_custom_playlist.sort, series.sort) '.($direction === 'desc' ? 'desc' : 'asc')
+            ))
+            ->reorderable('series_custom_playlist.sort')
             ->columns($defaultColumns)
             ->filters([
                 ...SeriesResource::getTableFilters(showPlaylist: true),
@@ -191,7 +217,6 @@ class SeriesRelationManager extends RelationManager
                             ->getOptionLabelFromRecordUsing(function ($record) {
                                 $displayTitle = $record->title_custom ?: $record->title;
                                 $playlistName = $record->getEffectivePlaylist()->name ?? 'Unknown';
-                                $options[$record->id] = "{$displayTitle} [{$playlistName}]";
 
                                 return "{$displayTitle} [{$playlistName}]";
                             }),
@@ -294,7 +319,7 @@ class SeriesRelationManager extends RelationManager
                 ->badge($ownerRecord->series()->withAnyTags([$tag], $tag->type)->count())
         )->toArray();
 
-        // Add an "All" tab to show all channels
+        // Add an "All" tab to show all series
         array_unshift(
             $tabs,
             Tab::make(__('All'))

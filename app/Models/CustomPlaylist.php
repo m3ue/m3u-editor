@@ -87,7 +87,8 @@ class CustomPlaylist extends Model
 
     public function series(): BelongsToMany
     {
-        return $this->belongsToMany(Series::class, 'series_custom_playlist');
+        return $this->belongsToMany(Series::class, 'series_custom_playlist')
+            ->withPivot(['sort']);
     }
 
     public function enabled_series(): BelongsToMany
@@ -247,11 +248,8 @@ class CustomPlaylist extends Model
     {
         return Attribute::make(
             get: function ($value) {
-                if ($value) {
-                    // Check playlist user has access to proxy features
-                    if (! $this->user?->canUseProxy()) {
-                        return false;
-                    }
+                if ($value && ! $this->user?->canUseProxy()) {
+                    return false;
                 }
 
                 return $value;

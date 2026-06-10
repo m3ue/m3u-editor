@@ -4,6 +4,7 @@ namespace App\Filament\Resources\CustomPlaylists\RelationManagers;
 
 use App\Facades\SortFacade;
 use App\Filament\Resources\Channels\ChannelResource;
+use App\Filament\Resources\CustomPlaylists\RelationManagers\Concerns\ReordersCustomPlaylistPivotSort;
 use App\Jobs\SyncPlexDvrJob;
 use App\Models\Channel;
 use Filament\Actions\AttachAction;
@@ -30,6 +31,8 @@ use Illuminate\Support\Facades\DB;
 
 class ChannelsRelationManager extends RelationManager
 {
+    use ReordersCustomPlaylistPivotSort;
+
     protected static string $relationship = 'channels';
 
     protected static ?string $label = 'Live Channels';
@@ -174,7 +177,6 @@ class ChannelsRelationManager extends RelationManager
         array_splice($defaultColumns, 12, 0, [$groupColumn]);
 
         return $table->persistFiltersInSession()
-            ->persistFiltersInSession()
             ->persistSortInSession()
             ->recordTitleAttribute('title')
             ->filtersTriggerAction(function ($action) {
@@ -268,7 +270,6 @@ class ChannelsRelationManager extends RelationManager
                             ->getOptionLabelFromRecordUsing(function ($record) {
                                 $displayTitle = $record->title_custom ?: $record->title;
                                 $playlistName = $record->getEffectivePlaylist()->name ?? 'Unknown';
-                                $options[$record->id] = "{$displayTitle} [{$playlistName}]";
 
                                 return "{$displayTitle} [{$playlistName}]";
                             }),
@@ -440,7 +441,16 @@ class ChannelsRelationManager extends RelationManager
     {
         // Lets group the tabs by Custom Playlist tags
         $ownerRecord = $this->ownerRecord;
-        $tags = $ownerRecord->tags()->where('type', $ownerRecord->uuid)->get();
+        $liveChannelIds = $ownerRecord->channels()->where('is_vod', false)->select('channels.id');
+        $tags = $ownerRecord->tags()
+            ->where('type', $ownerRecord->uuid)
+            ->whereIn('id', function ($query) use ($liveChannelIds) {
+                $query->select('tag_id')
+                    ->from('taggables')
+                    ->where('taggable_type', Channel::class)
+                    ->whereIn('taggable_id', $liveChannelIds);
+            })
+            ->get();
         $tabs = $tags->map(
             fn ($tag) => Tab::make($tag->name)
                 ->modifyQueryUsing(fn ($query) => $query->where('is_vod', false)->whereHas('tags', function ($tagQuery) use ($tag) {

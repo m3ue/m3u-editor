@@ -851,8 +851,8 @@ class XtreamApiController extends Controller
                         return $aOrder <=> $bOrder;
                     }
 
-                    $aSort = $a->sort ?? 999999;
-                    $bSort = $b->sort ?? 999999;
+                    $aSort = $a->pivot?->sort ?? $a->sort ?? 999999;
+                    $bSort = $b->pivot?->sort ?? $b->sort ?? 999999;
                     if ($aSort !== $bSort) {
                         return $aSort <=> $bSort;
                     }

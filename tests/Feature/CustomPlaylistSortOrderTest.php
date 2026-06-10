@@ -14,15 +14,23 @@
  */
 
 use App\Enums\PlaylistChannelId;
+use App\Facades\SortFacade;
+use App\Filament\Resources\CustomPlaylists\Pages\EditCustomPlaylist;
+use App\Filament\Resources\CustomPlaylists\RelationManagers\ChannelsRelationManager;
+use App\Filament\Resources\CustomPlaylists\RelationManagers\GroupsRelationManager;
+use App\Filament\Resources\CustomPlaylists\RelationManagers\SeriesRelationManager;
+use App\Filament\Resources\CustomPlaylists\RelationManagers\VodRelationManager;
 use App\Http\Controllers\PlaylistGenerateController;
 use App\Models\Channel;
 use App\Models\CustomPlaylist;
 use App\Models\Group;
 use App\Models\Playlist;
+use App\Models\Series;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
+use Livewire\Livewire;
 use Spatie\Tags\Tag;
 
 uses(RefreshDatabase::class);
@@ -36,6 +44,235 @@ beforeEach(function () {
 
     // Clear any stale EPG cache files so tests don't serve cached results from previous runs
     Storage::disk('local')->deleteDirectory('playlist-epg-files');
+});
+
+// ---------------------------------------------------------------------------
+// Custom playlist pivot reorder: preserve existing sort slots
+// ---------------------------------------------------------------------------
+
+it('preserves existing live channel pivot sort slots when reordering custom playlist channels', function () {
+    $this->actingAs($this->user);
+
+    $channelA = Channel::factory()->for($this->user)->for($this->playlist)->for($this->group)->create([
+        'enabled' => true,
+        'is_vod' => false,
+        'sort' => 1,
+        'title' => 'Channel A',
+    ]);
+    $channelB = Channel::factory()->for($this->user)->for($this->playlist)->for($this->group)->create([
+        'enabled' => true,
+        'is_vod' => false,
+        'sort' => 2,
+        'title' => 'Channel B',
+    ]);
+    $channelC = Channel::factory()->for($this->user)->for($this->playlist)->for($this->group)->create([
+        'enabled' => true,
+        'is_vod' => false,
+        'sort' => 3,
+        'title' => 'Channel C',
+    ]);
+
+    $this->customPlaylist->channels()->attach($channelA->id, ['sort' => 10]);
+    $this->customPlaylist->channels()->attach($channelB->id, ['sort' => 20]);
+    $this->customPlaylist->channels()->attach($channelC->id, ['sort' => 30]);
+
+    Livewire::test(ChannelsRelationManager::class, [
+        'ownerRecord' => $this->customPlaylist,
+        'pageClass' => EditCustomPlaylist::class,
+    ])->call('reorderTable', [$channelC->id, $channelA->id, $channelB->id]);
+
+    $pivotSorts = $this->customPlaylist->channels()
+        ->whereIn('channels.id', [$channelA->id, $channelB->id, $channelC->id])
+        ->pluck('channel_custom_playlist.sort', 'channels.id')
+        ->map(fn ($sort) => (int) $sort)
+        ->all();
+
+    expect($pivotSorts[$channelC->id])->toBe(10)
+        ->and($pivotSorts[$channelA->id])->toBe(20)
+        ->and($pivotSorts[$channelB->id])->toBe(30);
+});
+
+it('preserves existing VOD pivot sort slots when reordering custom playlist VOD', function () {
+    $this->actingAs($this->user);
+
+    $vodA = Channel::factory()->for($this->user)->for($this->playlist)->for($this->group)->create([
+        'enabled' => true,
+        'is_vod' => true,
+        'sort' => 1,
+        'title' => 'Movie A',
+    ]);
+    $vodB = Channel::factory()->for($this->user)->for($this->playlist)->for($this->group)->create([
+        'enabled' => true,
+        'is_vod' => true,
+        'sort' => 2,
+        'title' => 'Movie B',
+    ]);
+    $vodC = Channel::factory()->for($this->user)->for($this->playlist)->for($this->group)->create([
+        'enabled' => true,
+        'is_vod' => true,
+        'sort' => 3,
+        'title' => 'Movie C',
+    ]);
+
+    $this->customPlaylist->channels()->attach($vodA->id, ['sort' => 1001]);
+    $this->customPlaylist->channels()->attach($vodB->id, ['sort' => 1002]);
+    $this->customPlaylist->channels()->attach($vodC->id, ['sort' => 1003]);
+
+    Livewire::test(VodRelationManager::class, [
+        'ownerRecord' => $this->customPlaylist,
+        'pageClass' => EditCustomPlaylist::class,
+    ])->call('reorderTable', [$vodC->id, $vodA->id, $vodB->id]);
+
+    $pivotSorts = $this->customPlaylist->channels()
+        ->whereIn('channels.id', [$vodA->id, $vodB->id, $vodC->id])
+        ->pluck('channel_custom_playlist.sort', 'channels.id')
+        ->map(fn ($sort) => (int) $sort)
+        ->all();
+
+    expect($pivotSorts[$vodC->id])->toBe(1001)
+        ->and($pivotSorts[$vodA->id])->toBe(1002)
+        ->and($pivotSorts[$vodB->id])->toBe(1003);
+});
+
+it('assigns sorted slot values in mixed pivot/no-pivot reorder', function () {
+    $this->actingAs($this->user);
+
+    $channelA = Channel::factory()->for($this->user)->for($this->playlist)->for($this->group)->create([
+        'enabled' => true,
+        'is_vod' => false,
+        'sort' => 1,
+        'title' => 'Channel A',
+    ]);
+    $channelB = Channel::factory()->for($this->user)->for($this->playlist)->for($this->group)->create([
+        'enabled' => true,
+        'is_vod' => false,
+        'sort' => 10,
+        'title' => 'Channel B',
+    ]);
+    $channelC = Channel::factory()->for($this->user)->for($this->playlist)->for($this->group)->create([
+        'enabled' => true,
+        'is_vod' => false,
+        'sort' => 3,
+        'title' => 'Channel C',
+    ]);
+
+    $this->customPlaylist->channels()->attach($channelA->id, ['sort' => 5]);
+    $this->customPlaylist->channels()->attach($channelB->id); // no pivot sort - falls back to channels.sort=10
+    $this->customPlaylist->channels()->attach($channelC->id, ['sort' => 15]);
+
+    Livewire::test(ChannelsRelationManager::class, [
+        'ownerRecord' => $this->customPlaylist,
+        'pageClass' => EditCustomPlaylist::class,
+    ])->call('reorderTable', [$channelC->id, $channelB->id, $channelA->id]);
+
+    $pivotSorts = $this->customPlaylist->channels()
+        ->whereIn('channels.id', [$channelA->id, $channelB->id, $channelC->id])
+        ->pluck('channel_custom_playlist.sort', 'channels.id')
+        ->map(fn ($sort) => (float) $sort)
+        ->all();
+
+    expect($pivotSorts[$channelC->id])->toBe(5.0)
+        ->and($pivotSorts[$channelB->id])->toBe(10.0)
+        ->and($pivotSorts[$channelA->id])->toBe(15.0);
+});
+
+it('recounts custom playlist channels by pivot sort order', function () {
+    $this->actingAs($this->user);
+
+    $channelFirst = Channel::factory()->for($this->user)->for($this->playlist)->for($this->group)->create([
+        'enabled' => true,
+        'is_vod' => false,
+        'sort' => 100,
+        'channel' => 900,
+        'title' => 'Channel First',
+    ]);
+    $channelSecond = Channel::factory()->for($this->user)->for($this->playlist)->for($this->group)->create([
+        'enabled' => true,
+        'is_vod' => false,
+        'sort' => 1,
+        'channel' => 100,
+        'title' => 'Channel Second',
+    ]);
+
+    $this->customPlaylist->channels()->attach($channelFirst->id, ['sort' => 1]);
+    $this->customPlaylist->channels()->attach($channelSecond->id, ['sort' => 2]);
+
+    SortFacade::bulkRecountCustomPlaylistChannels(
+        $this->customPlaylist,
+        Channel::whereKey([$channelFirst->id, $channelSecond->id])->get(),
+        10
+    );
+
+    $numbers = $this->customPlaylist->channels()
+        ->whereIn('channels.id', [$channelFirst->id, $channelSecond->id])
+        ->pluck('channel_custom_playlist.channel_number', 'channels.id')
+        ->map(fn ($number) => (int) $number)
+        ->all();
+
+    expect($numbers[$channelFirst->id])->toBe(10)
+        ->and($numbers[$channelSecond->id])->toBe(11);
+});
+
+it('lists custom playlist groups by order_column', function () {
+    $this->actingAs($this->user);
+
+    $third = Tag::create(['name' => ['en' => 'Group C'], 'type' => $this->customPlaylist->uuid]);
+    $first = Tag::create(['name' => ['en' => 'Group A'], 'type' => $this->customPlaylist->uuid]);
+    $second = Tag::create(['name' => ['en' => 'Group B'], 'type' => $this->customPlaylist->uuid]);
+
+    $third->update(['order_column' => 30]);
+    $first->update(['order_column' => 10]);
+    $second->update(['order_column' => 20]);
+
+    $this->customPlaylist->attachTag($third);
+    $this->customPlaylist->attachTag($first);
+    $this->customPlaylist->attachTag($second);
+
+    Livewire::test(GroupsRelationManager::class, [
+        'ownerRecord' => $this->customPlaylist,
+        'pageClass' => EditCustomPlaylist::class,
+    ])
+        ->loadTable()
+        ->assertCanSeeTableRecords([$first, $second, $third], inOrder: true);
+});
+
+it('preserves existing series pivot sort slots when reordering custom playlist series', function () {
+    $this->actingAs($this->user);
+
+    $seriesA = Series::factory()->for($this->user)->for($this->playlist)->create([
+        'enabled' => true,
+        'sort' => 1,
+        'name' => 'Series A',
+    ]);
+    $seriesB = Series::factory()->for($this->user)->for($this->playlist)->create([
+        'enabled' => true,
+        'sort' => 2,
+        'name' => 'Series B',
+    ]);
+    $seriesC = Series::factory()->for($this->user)->for($this->playlist)->create([
+        'enabled' => true,
+        'sort' => 3,
+        'name' => 'Series C',
+    ]);
+
+    $this->customPlaylist->series()->attach($seriesA->id, ['sort' => 10]);
+    $this->customPlaylist->series()->attach($seriesB->id, ['sort' => 20]);
+    $this->customPlaylist->series()->attach($seriesC->id, ['sort' => 30]);
+
+    Livewire::test(SeriesRelationManager::class, [
+        'ownerRecord' => $this->customPlaylist,
+        'pageClass' => EditCustomPlaylist::class,
+    ])->call('reorderTable', [$seriesC->id, $seriesA->id, $seriesB->id]);
+
+    $pivotSorts = $this->customPlaylist->series()
+        ->whereIn('series.id', [$seriesA->id, $seriesB->id, $seriesC->id])
+        ->pluck('series_custom_playlist.sort', 'series.id')
+        ->map(fn ($sort) => (int) $sort)
+        ->all();
+
+    expect($pivotSorts[$seriesC->id])->toBe(10)
+        ->and($pivotSorts[$seriesA->id])->toBe(20)
+        ->and($pivotSorts[$seriesB->id])->toBe(30);
 });
 
 // ---------------------------------------------------------------------------

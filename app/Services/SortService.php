@@ -9,6 +9,11 @@ use Illuminate\Support\Facades\DB;
 
 class SortService
 {
+    private function isPostgres(string $driver): bool
+    {
+        return str_starts_with($driver, 'pgsql') || $driver === 'postgresql' || $driver === 'postgres';
+    }
+
     /**
      * Bulk-update channels' sort order using DB window functions when available,
      * falling back to a single CASE-based UPDATE to avoid N queries.
@@ -18,7 +23,6 @@ class SortService
         $direction = strtoupper($order) === 'DESC' ? 'DESC' : 'ASC';
         $driver = DB::getPdo()->getAttribute(\PDO::ATTR_DRIVER_NAME);
 
-        // Determine order by column, handling special cases.
         // IMPORTANT: $column is whitelisted here because its value is interpolated
         // directly into raw SQL below; never fall through unknown values.
         [$orderByColumn, $lowerOrderByColumn] = match ($column) {
@@ -37,7 +41,7 @@ class SortService
         }
 
         // Postgres
-        if (str_starts_with($driver, 'pgsql') || $driver === 'postgresql' || $driver === 'postgres') {
+        if ($this->isPostgres($driver)) {
             DB::statement("UPDATE channels SET sort = t.rn FROM (SELECT id, ROW_NUMBER() OVER (ORDER BY {$lowerOrderByColumn} {$direction}) AS rn FROM channels WHERE group_id = ?) t WHERE channels.id = t.id", [$record->id]);
 
             return;
@@ -79,7 +83,7 @@ class SortService
 
         if ($driver === 'mysql') {
             DB::statement('UPDATE channels c JOIN (SELECT id, ROW_NUMBER() OVER (ORDER BY sort) AS rn FROM channels WHERE group_id = ?) t ON c.id = t.id SET c.channel = t.rn + ?', [$record->id, $offset]);
-        } elseif (str_starts_with($driver, 'pgsql') || $driver === 'postgresql' || $driver === 'postgres') {
+        } elseif ($this->isPostgres($driver)) {
             DB::statement('UPDATE channels SET channel = t.rn + ? FROM (SELECT id, ROW_NUMBER() OVER (ORDER BY sort) AS rn FROM channels WHERE group_id = ?) t WHERE channels.id = t.id', [$offset, $record->id]);
         } elseif ($driver === 'sqlite') {
             DB::statement('WITH ranked AS (SELECT id, ROW_NUMBER() OVER (ORDER BY sort) AS rn FROM channels WHERE group_id = ?) UPDATE channels SET channel = (SELECT rn FROM ranked WHERE ranked.id = channels.id) + ? WHERE group_id = ?', [$record->id, $offset, $record->id]);
@@ -158,7 +162,7 @@ class SortService
 
         if ($driver === 'mysql') {
             DB::statement("UPDATE channels c JOIN (SELECT id, ROW_NUMBER() OVER (ORDER BY sort) AS rn FROM channels WHERE id IN ({$idsSql})) t ON c.id = t.id SET c.channel = t.rn + ?", [$offset]);
-        } elseif (str_starts_with($driver, 'pgsql') || $driver === 'postgresql' || $driver === 'postgres') {
+        } elseif ($this->isPostgres($driver)) {
             DB::statement("UPDATE channels SET channel = t.rn + ? FROM (SELECT id, ROW_NUMBER() OVER (ORDER BY sort) AS rn FROM channels WHERE id IN ({$idsSql})) t WHERE channels.id = t.id", [$offset]);
         } elseif ($driver === 'sqlite') {
             DB::statement("WITH ranked AS (SELECT id, ROW_NUMBER() OVER (ORDER BY sort) AS rn FROM channels WHERE id IN ({$idsSql})) UPDATE channels SET channel = (SELECT rn FROM ranked WHERE ranked.id = channels.id) + ? WHERE id IN ({$idsSql})", [$offset]);
@@ -219,7 +223,7 @@ class SortService
                    AND ccp.channel_id IN ({$idsSql})",
                 [$playlist->id, $playlist->id]
             );
-        } elseif (str_starts_with($driver, 'pgsql') || $driver === 'postgresql' || $driver === 'postgres') {
+        } elseif ($this->isPostgres($driver)) {
             // PostgreSQL
             DB::statement(
                 "UPDATE channel_custom_playlist ccp
@@ -312,7 +316,7 @@ class SortService
                 "UPDATE channel_custom_playlist ccp
                  JOIN (
                     SELECT ccp2.channel_id,
-                           ROW_NUMBER() OVER (ORDER BY c.sort, c.channel, c.id) AS rn
+                           ROW_NUMBER() OVER (ORDER BY COALESCE(ccp2.sort, c.sort), c.channel, c.id) AS rn
                     FROM channel_custom_playlist ccp2
                     JOIN channels c ON c.id = ccp2.channel_id
                     WHERE ccp2.custom_playlist_id = ?
@@ -323,14 +327,14 @@ class SortService
                    AND ccp.channel_id IN ({$idsSql})",
                 [$playlist->id, $offset, $playlist->id]
             );
-        } elseif (str_starts_with($driver, 'pgsql') || $driver === 'postgresql' || $driver === 'postgres') {
+        } elseif ($this->isPostgres($driver)) {
             // Postgres
             DB::statement(
                 "UPDATE channel_custom_playlist ccp
                  SET channel_number = t.rn + ?
                  FROM (
                     SELECT ccp2.channel_id,
-                           ROW_NUMBER() OVER (ORDER BY c.sort, c.channel, c.id) AS rn
+                           ROW_NUMBER() OVER (ORDER BY COALESCE(ccp2.sort, c.sort), c.channel, c.id) AS rn
                     FROM channel_custom_playlist ccp2
                     JOIN channels c ON c.id = ccp2.channel_id
                     WHERE ccp2.custom_playlist_id = ?
@@ -346,7 +350,7 @@ class SortService
             DB::statement(
                 "WITH ranked AS (
                     SELECT ccp2.channel_id AS channel_id,
-                           ROW_NUMBER() OVER (ORDER BY c.sort, c.channel, c.id) AS rn
+                           ROW_NUMBER() OVER (ORDER BY COALESCE(ccp2.sort, c.sort), c.channel, c.id) AS rn
                     FROM channel_custom_playlist ccp2
                     JOIN channels c ON c.id = ccp2.channel_id
                     WHERE ccp2.custom_playlist_id = ?
@@ -364,7 +368,7 @@ class SortService
                 ->join('channels as c', 'c.id', '=', 'ccp.channel_id')
                 ->where('ccp.custom_playlist_id', $playlist->id)
                 ->whereIn('ccp.channel_id', $ids)
-                ->orderBy('c.sort')
+                ->orderByRaw('COALESCE(ccp.sort, c.sort)')
                 ->orderBy('c.channel')
                 ->orderBy('c.id')
                 ->pluck('ccp.channel_id')
