@@ -365,21 +365,17 @@ class ProcessEpgImport implements ShouldQueue
 
                             // Only return valid channels
                             if ($elementData['channel_id']) {
-                                // Assign source_id via collision-relative hashing.
-                                // First occurrence keeps the base md5 (backwards-compatible);
-                                // each subsequent duplicate channel_id in the same feed gets
-                                // a :dup:N suffix so all entries survive as distinct records.
-                                // $seen is keyed by channel_id only — epg_id/user_id are constant
-                                // within a single import so there's no need to include them in
-                                // the tracking key (they still appear in the source_id hash for
-                                // global DB uniqueness across different EPG sources).
-                                $channelId = $elementData['channel_id'];
-                                $globalKey = "{$channelId}|{$elementData['epg_id']}|{$elementData['user_id']}";
-                                $count = $seen[$channelId] ?? 0;
+                                // Collision-relative hashing: first occurrence gets the base md5;
+                                // duplicates in the same feed get a :dup:N suffix so all survive
+                                // as distinct records. epg_id/user_id are included in the hash for
+                                // global DB uniqueness but excluded from the $seen tracking key
+                                // because they are constant within a single import.
+                                $globalKey = "{$elementData['channel_id']}|{$elementData['epg_id']}|{$elementData['user_id']}";
+                                $count = $seen[$elementData['channel_id']] ?? 0;
                                 $elementData['source_id'] = $count === 0
                                     ? md5($globalKey)
                                     : md5("{$globalKey}:dup:{$count}");
-                                $seen[$channelId] = $count + 1;
+                                $seen[$elementData['channel_id']] = $count + 1;
                                 $channelCount++;
                                 yield $elementData;
                             }

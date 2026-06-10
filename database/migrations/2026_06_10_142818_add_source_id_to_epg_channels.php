@@ -7,7 +7,7 @@ use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
-    private $oldUniqueColumns = ['name', 'channel_id', 'epg_id', 'user_id'];
+    private array $oldUniqueColumns = ['name', 'channel_id', 'epg_id', 'user_id'];
 
     /**
      * Run the migrations.

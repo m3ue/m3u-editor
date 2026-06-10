@@ -32,26 +32,18 @@ class ProcessEpgImportChunk implements ShouldQueue
      */
     public function handle(): void
     {
-        // Determine what percentage of the import this batch accounts for
-        $totalJobsCount = $this->batchCount;
         $chunkSize = 10;
 
         // Process the jobs
         foreach (Job::whereIn('id', $this->jobs)->cursor() as $index => $job) {
-            $bulk = [];
             if ($index % $chunkSize === 0) {
                 $epg = Epg::find($job->variables['epgId']);
                 $epg->update([
-                    'progress' => min(99, $epg->progress + (($chunkSize / $totalJobsCount) * 100)),
+                    'progress' => min(99, $epg->progress + (($chunkSize / $this->batchCount) * 100)),
                 ]);
             }
 
-            // Add the channel for insert/update
-            foreach ($job->payload as $channel) {
-                $bulk[] = [
-                    ...$channel,
-                ];
-            }
+            $bulk = $job->payload;
 
             // Deduplicate the channels
             $bulk = collect($bulk)
