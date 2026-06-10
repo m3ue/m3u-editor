@@ -55,12 +55,11 @@ class ProcessEpgImportChunk implements ShouldQueue
 
             // Deduplicate the channels
             $bulk = collect($bulk)
-                ->unique(function ($item) {
-                    return $item['name'].$item['channel_id'].$item['epg_id'].$item['user_id'];
-                })->toArray();
+                ->unique(fn ($item) => $item['source_id'])
+                ->toArray();
 
             // Upsert the channels
-            EpgChannel::upsert($bulk, uniqueBy: ['name', 'channel_id', 'epg_id', 'user_id'], update: [
+            EpgChannel::upsert($bulk, uniqueBy: ['source_id'], update: [
                 // Don't update the following fields...
                 // 'name_custom',
                 // 'display_name_custom',
@@ -69,7 +68,7 @@ class ProcessEpgImportChunk implements ShouldQueue
                 // 'user_id',
                 // ...only update the following fields
                 'lang',
-                // 'name', // part of uniqueBy, so won't be updated
+                'name',         // may change (e.g. PPV channels rename between syncs)
                 'display_name',
                 'icon',
                 'channel_id',
