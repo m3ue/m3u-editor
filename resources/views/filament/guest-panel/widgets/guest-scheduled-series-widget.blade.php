@@ -3,8 +3,8 @@
     $rules = $this->getSeriesRules();
 @endphp
 
-@if ($rules->isNotEmpty())
-    <x-filament-widgets::widget>
+<x-filament-widgets::widget>
+    @if ($rules->isNotEmpty())
         <x-filament::section>
             <x-slot name="heading">
                 {{ __('Scheduled Series') }}
@@ -43,5 +43,5 @@
                 @endforeach
             </div>
         </x-filament::section>
-    </x-filament-widgets::widget>
-@endif
+    @endif
+</x-filament-widgets::widget>
