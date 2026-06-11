@@ -312,14 +312,11 @@ class PlaylistGenerateController extends Controller
                             if (! ((config('app.disable_m3u_xtream_format') ?? false) || $playlist->disable_m3u_xtream_format) || $proxyEnabled) {
                                 $containerExtension = $episode->container_extension ?? 'mp4';
                                 $url = $baseUrl."/series/{$username}/{$password}/".$episode->id.".{$containerExtension}";
+                            } elseif ($mfRewriteEnabled) {
+                                // Raw URL mode: wrap the provider URL through MediaFlow Proxy
+                                $url = PlaylistFacade::buildMediaFlowStreamUrl($url);
                             }
                             $url = rtrim($url, '.');
-
-                            if ($proxyEnabled) {
-                                $url .= '?'.http_build_query([
-                                    'proxy' => 'true',
-                                ]);
-                            }
 
                             // Get the TVG ID
                             switch ($idChannelBy) {
@@ -515,8 +512,9 @@ class PlaylistGenerateController extends Controller
 
         // Check if proxy enabled
         $idChannelBy = $playlist->id_channel_by;
-        $autoIncrement = $playlist->auto_channel_increment;
-        $channelNumber = $autoIncrement ? $playlist->channel_start - 1 : 0;
+        $channelNumber = $playlist->auto_channel_increment
+            ? $playlist->channel_start - 1
+            : 0;
         $isCustomContext = ($playlist instanceof CustomPlaylist) ||
             ($playlist instanceof PlaylistAlias && ! empty($playlist->custom_playlist_id));
 
@@ -526,25 +524,32 @@ class PlaylistGenerateController extends Controller
             'Content-Type' => 'application/json',
         ];
 
-        return response()->stream(function () use ($cursor, $username, $password, $idChannelBy, $autoIncrement, &$channelNumber, $isCustomContext) {
+        // Check if user has permission to use proxy
+        // If not, force proxy to be disabled regardless of settings
+        $proxyEnabled = false;
+        if ($playlist->user->canUseProxy()) {
+            $proxyEnabled = $playlist->enable_proxy;
+        }
+
+        // Pre-compute MediaFlow stream URL rewrite flag (checked once, used per channel)
+        $mfRewriteEnabled = ! $proxyEnabled && PlaylistFacade::mediaFlowProxyEnabled()
+            && (PlaylistFacade::getMediaFlowSettings()['mediaflow_proxy_rewrite_stream_urls'] ?? false);
+
+        // Pre-compute the base URL for stream URL generation (used if proxy enabled or internal Xtream format used)
+        $baseUrl = ProxyFacade::getBaseUrl();
+        $useInternalXtreamFormat = ! ((config('app.disable_m3u_xtream_format') ?? false) || $playlist->disable_m3u_xtream_format);
+
+        return response()->stream(function () use ($cursor, $baseUrl, $username, $password, $playlist, $idChannelBy, $mfRewriteEnabled, $isCustomContext, $useInternalXtreamFormat, &$channelNumber) {
             $first = true;
             echo '[';
             foreach ($cursor as $channel) {
-                $sourceUrl = $channel->url_custom ?? $channel->url;
-                $baseUrl = ProxyFacade::getBaseUrl();
-                $filename = parse_url($sourceUrl, PHP_URL_PATH);
-                $extension = pathinfo($filename, PATHINFO_EXTENSION);
-                $urlPath = 'live';
-                if ($channel->is_vod) {
-                    $urlPath = 'movie';
-                    $extension = $channel->container_extension ?? 'mkv';
-                }
-                $url = rtrim($baseUrl."/{$urlPath}/{$username}/{$password}/".$channel->id.'.'.$extension, '.');
+                $url = PlaylistUrlService::getChannelUrl($channel, $playlist);
 
                 $channelNo = ($isCustomContext && ! empty($channel->pivot?->channel_number))
-                    ? (int) $channel->pivot->channel_number
-                    : $channel->channel;
-                if (! $channelNo && ($autoIncrement || $idChannelBy === PlaylistChannelId::Number)) {
+                        ? (int) $channel->pivot->channel_number
+                        : $channel->channel;
+
+                if (! $channelNo && ($playlist->auto_channel_increment || $idChannelBy === PlaylistChannelId::Number)) {
                     $channelNo = ++$channelNumber;
                 }
 
@@ -567,10 +572,37 @@ class PlaylistGenerateController extends Controller
                         break;
                 }
 
+                // If no TVG ID still, fallback to the channel source ID or internal ID as a last resort
                 if (empty($tvgId)) {
                     $tvgId = $channel->source_id ?? $channel->id;
                 }
-                $tvgId = preg_replace(config('dev.tvgid.regex'), '', $tvgId);
+
+                // Get the extension from the source URL
+                // Need to get clean URL first (in case URL variables are used that might not have an extension, e.g. /stream/{id})
+                $filename = parse_url($url, PHP_URL_PATH);
+                $extension = pathinfo($filename, PATHINFO_EXTENSION);
+                if (empty($extension)) {
+                    $sourcePlaylist = $channel->getEffectivePlaylist();
+                    if ($sourcePlaylist?->xtream) {
+                        $extension = $sourcePlaylist->xtream_config['output'] ?? 'ts'; // Default to 'ts' if not set
+                    }
+                }
+
+                // Format the URL in Xtream Codes format if not disabled
+                // This way we can perform additional stream analysis, check for stream limits, etc.
+                // When disabled, will return the raw URL from the channel (or the proxyfied URL if proxy enabled)
+                if ($useInternalXtreamFormat) {
+                    $urlPath = 'live';
+                    if ($channel->is_vod) {
+                        $urlPath = 'movie';
+                        $extension = $channel->container_extension ?? 'mkv';
+                    }
+                    $url = $baseUrl."/{$urlPath}/{$username}/{$password}/".$channel->id.'.'.$extension;
+                } elseif ($mfRewriteEnabled) {
+                    // Raw URL mode: wrap the provider URL through MediaFlow Proxy
+                    $url = PlaylistFacade::buildMediaFlowStreamUrl($url);
+                }
+                $url = rtrim($url, '.');
 
                 $item = [
                     'GuideNumber' => (string) $tvgId,
