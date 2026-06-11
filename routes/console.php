@@ -67,11 +67,6 @@ Schedule::command('app:refresh-playlist-profiles')
     ->everyFifteenMinutes()
     ->withoutOverlapping();
 
-// Regenerate network schedules (hourly check, regenerates when needed)
-Schedule::command('networks:regenerate-schedules')
-    ->hourly()
-    ->withoutOverlapping();
-
 // Run scheduled plugin invocations
 Schedule::command('plugins:run-scheduled')
     ->everyMinute()
@@ -91,9 +86,15 @@ if (config('plugins.update_check.enabled', true)) {
 }
 
 // Note: HLS broadcast files are managed by m3u-proxy service
+if (config('proxy.proxy_integration_enabled', true)) {
+    // Regenerate network schedules (hourly check, regenerates when needed)
+    Schedule::command('networks:regenerate-schedules')
+        ->hourly()
+        ->withoutOverlapping();
 
-// DVR scheduler tick — run every minute to match rules, start, and stop recordings
-Schedule::job(new DvrSchedulerTick)->everyMinute()->withoutOverlapping();
+    // DVR scheduler tick — run every minute to match rules, start, and stop recordings
+    Schedule::job(new DvrSchedulerTick)->everyMinute()->withoutOverlapping();
 
-// DVR retention cleanup — run hourly to enforce keepLast, age, and quota policies
-Schedule::job(new DvrRetentionCleanup)->hourly()->withoutOverlapping();
+    // DVR retention cleanup — run hourly to enforce keepLast, age, and quota policies
+    Schedule::job(new DvrRetentionCleanup)->hourly()->withoutOverlapping();
+}
