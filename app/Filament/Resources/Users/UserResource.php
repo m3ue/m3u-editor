@@ -78,18 +78,32 @@ class UserResource extends Resource implements CopilotResource
                     ->schema([
                         Forms\Components\CheckboxList::make('permissions')
                             ->label(__('Select Permissions'))
-                            ->options(User::getAvailablePermissions())
+                            ->options(function () {
+                                $permissions = User::getAvailablePermissions();
+                                if (! config('proxy.proxy_integration_enabled', true)) {
+                                    unset($permissions['use_dvr']);
+                                }
+
+                                return $permissions;
+                            })
                             ->bulkToggleable()
-                            ->descriptions([
-                                'use_proxy' => 'Allow this user to access proxy features and stream via the m3u-proxy server',
-                                'use_integrations' => 'Allow this user to access media server integrations and related features',
-                                'use_tools' => 'Allow this user to access tools like API Tokens and Post Processing',
-                                'use_stream_file_sync' => 'Allow this user to access stream file sync features',
-                                'use_scrubber' => 'Allow this user to access the Channel Scrubber feature',
-                                'view_release_logs' => 'Allow this user to view release logs and the release logs page',
-                                'use_ai_copilot' => 'Allow this user to access and use the AI Copilot chat assistant',
-                                'use_dvr' => 'Allow this user to access DVR features, manage recording rules, and view recordings',
-                            ])
+                            ->descriptions(function () {
+                                $descriptions = [
+                                    'use_proxy' => 'Allow this user to access proxy features and stream via the m3u-proxy server',
+                                    'use_integrations' => 'Allow this user to access media server integrations and related features',
+                                    'use_tools' => 'Allow this user to access tools like API Tokens and Post Processing',
+                                    'use_stream_file_sync' => 'Allow this user to access stream file sync features',
+                                    'use_scrubber' => 'Allow this user to access the Channel Scrubber feature',
+                                    'view_release_logs' => 'Allow this user to view release logs and the release logs page',
+                                    'use_ai_copilot' => 'Allow this user to access and use the AI Copilot chat assistant',
+                                    'use_dvr' => 'Allow this user to access DVR features, manage recording rules, and view recordings',
+                                ];
+                                if (! config('proxy.proxy_integration_enabled', true)) {
+                                    unset($descriptions['use_dvr']);
+                                }
+
+                                return $descriptions;
+                            })
                             ->columnSpanFull()
                             ->gridDirection('row')
                             ->columns(2),

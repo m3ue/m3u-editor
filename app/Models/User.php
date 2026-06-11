@@ -284,7 +284,7 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
 
     public function canUseDvr(): bool
     {
-        return $this->hasPermission('use_dvr');
+        return config('proxy.proxy_integration_enabled', true) && $this->hasPermission('use_dvr');
     }
 
     /**

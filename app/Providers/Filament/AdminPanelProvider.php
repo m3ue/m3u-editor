@@ -201,13 +201,15 @@ class AdminPanelProvider extends PanelProvider
                                 ...StreamFileSettingResource::getNavigationItems(),
                                 ...ChannelScrubberResource::getNavigationItems(),
                             ]),
-                        NavigationGroup::make(fn () => __('DVR'))
-                            ->icon('heroicon-m-video-camera')
-                            ->items([
-                                ...DvrRecordingResource::getNavigationItems(),
-                                ...DvrRecordingRuleResource::getNavigationItems(),
-                                ...BrowseShows::getNavigationItems(),
-                            ]),
+                        ...(auth()->user()?->canUseDvr() ? [
+                            NavigationGroup::make(fn () => __('DVR'))
+                                ->icon('heroicon-m-video-camera')
+                                ->items([
+                                    ...DvrRecordingResource::getNavigationItems(),
+                                    ...DvrRecordingRuleResource::getNavigationItems(),
+                                    ...BrowseShows::getNavigationItems(),
+                                ]),
+                        ] : []),
                         NavigationGroup::make(fn () => __('Integrations'))
                             ->icon('heroicon-m-server-stack')
                             ->items([

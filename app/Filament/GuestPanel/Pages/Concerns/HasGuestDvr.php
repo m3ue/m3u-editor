@@ -54,6 +54,10 @@ trait HasGuestDvr
      */
     protected static function guestCanAccessDvr(): bool
     {
+        if (! config('proxy.proxy_integration_enabled', true)) {
+            return false;
+        }
+
         $auth = static::getCurrentPlaylistAuth();
         if (! $auth || ! $auth->dvr_enabled) {
             return false;
