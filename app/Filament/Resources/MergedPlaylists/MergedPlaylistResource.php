@@ -8,10 +8,10 @@ use App\Filament\Resources\MergedPlaylistResource\Pages;
 use App\Filament\Resources\MergedPlaylists\Pages\EditMergedPlaylist;
 use App\Filament\Resources\MergedPlaylists\Pages\ListMergedPlaylists;
 use App\Filament\Resources\MergedPlaylists\RelationManagers\PlaylistsRelationManager;
-use App\Forms\Components\MediaFlowProxyUrl;
 use App\Forms\Components\PlaylistEpgUrl;
 use App\Forms\Components\PlaylistM3uUrl;
 use App\Forms\Components\XtreamApiInfo;
+use App\Livewire\MediaFlowProxyUrl;
 use App\Models\MergedPlaylist;
 use App\Models\PlaylistAuth;
 use App\Models\StreamProfile;
@@ -33,6 +33,7 @@ use Filament\Resources\Resource;
 use Filament\Schemas\Components\Fieldset;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Group as ComponentsGroup;
+use Filament\Schemas\Components\Livewire;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Tabs;
 use Filament\Schemas\Components\Tabs\Tab;
@@ -467,12 +468,6 @@ class MergedPlaylistResource extends Resource implements CopilotResource
                 ->columnSpan(1)
                 ->dehydrated(false), // don't save the value in the database
         ];
-        if (PlaylistFacade::mediaFlowProxyEnabled()) {
-            $urls[] = MediaFlowProxyUrl::make('mediaflow_proxy_url')
-                ->label(__('Proxied M3U URL'))
-                ->columnSpan(1)
-                ->dehydrated(false); // don't save the value in the database
-        }
 
         return [
             Grid::make()
@@ -614,9 +609,24 @@ class MergedPlaylistResource extends Resource implements CopilotResource
                                             XtreamApiInfo::make('xtream_api_info')
                                                 ->label(__('Xtream API Info'))
                                                 ->columnSpan(2)
-                                                ->dehydrated(false), // don't save the value in the database
+                                                ->dehydrated(false),
                                         ]),
                                 ]),
+
+                            ...(PlaylistFacade::mediaFlowProxyEnabled() ? [
+                                Tab::make(__('MediaFlow Proxy'))
+                                    ->columns(2)
+                                    ->icon('heroicon-m-shield-check')
+                                    ->schema([
+                                        Section::make(__('MediaFlow Proxy'))
+                                            ->compact()
+                                            ->icon('heroicon-m-shield-check')
+                                            ->columnSpan(2)
+                                            ->schema([
+                                                Livewire::make(MediaFlowProxyUrl::class, ['section' => 'all']),
+                                            ]),
+                                    ]),
+                            ] : []),
 
                             Tab::make(__('Output'))
                                 ->columns(2)

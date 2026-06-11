@@ -865,51 +865,6 @@ class Preferences extends SettingsPage
                                             ->step(1)
                                             ->helperText(__('Maximum number of players that can be open at once.')),
                                     ]),
-                                Section::make(__('MediaFlow Proxy'))
-                                    ->description(__('If you have MediaFlow Proxy installed, you can use it to proxy your m3u editor playlist streams. When enabled, the app will auto-generate URLs for you to use via MediaFlow Proxy.'))
-                                    ->columnSpan('full')
-                                    ->columns(3)
-                                    ->collapsible()
-                                    ->collapsed(true)
-                                    ->headerActions([
-                                        Action::make('mfproxy_git')
-                                            ->label(__('GitHub'))
-                                            ->icon('heroicon-o-arrow-top-right-on-square')
-                                            ->iconPosition('after')
-                                            ->color('gray')
-                                            ->size('sm')
-                                            ->url('https://github.com/mhdzumair/mediaflow-proxy')
-                                            ->openUrlInNewTab(true),
-                                    ])
-                                    ->schema([
-                                        TextInput::make('mediaflow_proxy_url')
-                                            ->label(__('Proxy URL'))
-                                            ->columnSpan(1)
-                                            ->placeholder(__('socks5://user:pass@host:port or http://user:pass@host:port')),
-                                        TextInput::make('mediaflow_proxy_port')
-                                            ->label(__('Proxy Port (Alternative)'))
-                                            ->numeric()
-                                            ->columnSpan(1)
-                                            ->helperText(__('Alternative port if not specified in URL. Not commonly used.')),
-
-                                        TextInput::make('mediaflow_proxy_password')
-                                            ->label(__('Proxy Password (Alternative)'))
-                                            ->columnSpan(1)
-                                            ->password()
-                                            ->revealable()
-                                            ->helperText(__('Alternative password if not specified in URL. Not commonly used.')),
-                                        Toggle::make('mediaflow_proxy_playlist_user_agent')
-                                            ->label(__('Use playlist user agent'))
-                                            ->inline(false)
-                                            ->live()
-                                            ->label(__('Use Proxy User Agent for Playlists (M3U8/MPD)'))
-                                            ->helperText(__('If enabled, the User Agent will also be used for fetching playlist files. Otherwise, the default FFmpeg User Agent is used for playlists.')),
-                                        TextInput::make('mediaflow_proxy_user_agent')
-                                            ->label(__('Proxy User Agent for Media Streams'))
-                                            ->placeholder(__('VLC/3.0.21 LibVLC/3.0.21'))
-                                            ->columnSpan(2),
-                                    ]),
-
                             ]),
 
                         Tab::make(__('Sync Options'))
@@ -1296,12 +1251,39 @@ class Preferences extends SettingsPage
                                             ->helperText(__('The "From" email address for outgoing emails. Defaults to no-reply@m3u-editor.dev.')),
                                     ]),
                             ]),
-                        Tab::make(__('TMDB'))
-                            ->columns(2)
+                        Tab::make(__('API'))
+                            ->schema([
+                                Section::make(__('API Settings'))
+                                    ->headerActions([
+                                        Action::make('manage_api_keys')
+                                            ->label(__('Manage API Tokens'))
+                                            ->color('gray')
+                                            ->icon('heroicon-s-key')
+                                            ->iconPosition('before')
+                                            ->size('sm')
+                                            ->url('/personal-access-tokens'),
+                                        Action::make('view_api_docs')
+                                            ->label(__('API Docs'))
+                                            ->icon('heroicon-o-arrow-top-right-on-square')
+                                            ->iconPosition('after')
+                                            ->size('sm')
+                                            ->url('/docs/api')
+                                            ->openUrlInNewTab(true),
+                                    ])->schema([
+                                        Toggle::make('show_api_docs')
+                                            ->label(__('Allow access to API docs'))
+                                            ->helperText(__('When enabled you can access the API documentation using the "API Docs" button. When disabled, the docs endpoint will return a 403 (Unauthorized). NOTE: The API will respond regardless of this setting. You do not need to enable it to use the API.')),
+                                    ]),
+                            ]),
+
+                        Tab::make(__('Integrations'))
+                            ->icon('heroicon-m-puzzle-piece')
                             ->schema([
                                 Section::make(__('TMDB Integration'))
                                     ->description(__('Configure The Movie Database (TMDB) integration to automatically lookup and populate metadata IDs (TMDB, TVDB, IMDB) for your VOD content and Series.'))
                                     ->columnSpanFull()
+                                    ->icon('heroicon-m-film')
+                                    ->collapsible()
                                     ->columns(2)
                                     ->headerActions([
                                         Action::make('test_tmdb_connection')
@@ -1444,31 +1426,115 @@ class Preferences extends SettingsPage
                                             ->default(80)
                                             ->helperText(__('Minimum title similarity percentage (50-100) required to accept a match. Higher values = stricter matching.')),
                                     ]),
-                            ]),
-                        Tab::make(__('API'))
-                            ->schema([
-                                Section::make(__('API Settings'))
+
+                                Section::make(__('MediaFlow Proxy'))
+                                    ->description(__('Connect MediaFlow Proxy to route your playlists, EPG, and Xtream API through it. Once configured, proxied URLs are auto-generated on each playlist\'s detail page.'))
+                                    ->columnSpan('full')
+                                    ->icon('heroicon-m-shield-check')
+                                    ->collapsible()
+                                    ->columns(3)
                                     ->headerActions([
-                                        Action::make('manage_api_keys')
-                                            ->label(__('Manage API Tokens'))
+                                        Action::make('test_mediaflow_connection')
+                                            ->label(__('Test Connection'))
+                                            ->icon('heroicon-o-signal')
+                                            ->iconPosition('after')
                                             ->color('gray')
-                                            ->icon('heroicon-s-key')
-                                            ->iconPosition('before')
                                             ->size('sm')
-                                            ->url('/personal-access-tokens'),
-                                        Action::make('view_api_docs')
-                                            ->label(__('API Docs'))
+                                            ->action(function ($get): void {
+                                                $proxyUrl = rtrim($get('mediaflow_proxy_url') ?? '', '/');
+                                                $port = $get('mediaflow_proxy_port');
+                                                $password = $get('mediaflow_proxy_password');
+
+                                                if (empty($proxyUrl)) {
+                                                    Notification::make()
+                                                        ->danger()
+                                                        ->title(__('Proxy URL Required'))
+                                                        ->body(__('Please enter a MediaFlow Proxy URL to test the connection.'))
+                                                        ->send();
+
+                                                    return;
+                                                }
+
+                                                if ($port) {
+                                                    $proxyUrl .= ':'.$port;
+                                                }
+
+                                                try {
+                                                    $response = Http::timeout(10)->get($proxyUrl.'/proxy/ip', array_filter([
+                                                        'api_password' => $password ?: null,
+                                                    ]));
+
+                                                    if ($response->successful()) {
+                                                        $ip = $response->json('ip') ?? $response->body();
+                                                        Notification::make()
+                                                            ->success()
+                                                            ->title(__('Connection Successful'))
+                                                            ->body(__('MediaFlow Proxy is reachable. Public IP: ').$ip)
+                                                            ->send();
+                                                    } else {
+                                                        $error = $response->json('detail') ?? $response->json('message') ?? "HTTP {$response->status()}";
+                                                        Notification::make()
+                                                            ->danger()
+                                                            ->title(__('Connection Failed'))
+                                                            ->body("MediaFlow Proxy returned an error: {$error}")
+                                                            ->send();
+                                                    }
+                                                } catch (Exception $e) {
+                                                    Notification::make()
+                                                        ->danger()
+                                                        ->title(__('Connection Failed'))
+                                                        ->body('Could not reach MediaFlow Proxy: '.$e->getMessage())
+                                                        ->send();
+                                                }
+                                            }),
+                                        Action::make('mfproxy_docs')
+                                            ->label(__('Docs'))
                                             ->icon('heroicon-o-arrow-top-right-on-square')
                                             ->iconPosition('after')
                                             ->size('sm')
-                                            ->url('/docs/api')
+                                            ->url('https://mhdzumair.github.io/mediaflow-proxy/')
                                             ->openUrlInNewTab(true),
-                                    ])->schema([
-                                        Toggle::make('show_api_docs')
-                                            ->label(__('Allow access to API docs'))
-                                            ->helperText(__('When enabled you can access the API documentation using the "API Docs" button. When disabled, the docs endpoint will return a 403 (Unauthorized). NOTE: The API will respond regardless of this setting. You do not need to enable it to use the API.')),
+                                        Action::make('mfproxy_git')
+                                            ->label(__('GitHub'))
+                                            ->icon('heroicon-o-arrow-top-right-on-square')
+                                            ->iconPosition('after')
+                                            ->size('sm')
+                                            ->url('https://github.com/mhdzumair/mediaflow-proxy')
+                                            ->openUrlInNewTab(true),
+                                    ])
+                                    ->schema([
+                                        TextInput::make('mediaflow_proxy_url')
+                                            ->label(__('Proxy URL'))
+                                            ->columnSpan(1)
+                                            ->placeholder(__('http://your-mediaflow-host:8888')),
+                                        TextInput::make('mediaflow_proxy_port')
+                                            ->label(__('Proxy Port (Alternative)'))
+                                            ->numeric()
+                                            ->columnSpan(1)
+                                            ->helperText(__('Alternative port if not specified in the URL above.')),
+                                        TextInput::make('mediaflow_proxy_password')
+                                            ->label(__('API Password'))
+                                            ->columnSpan(1)
+                                            ->password()
+                                            ->revealable()
+                                            ->helperText(__('The API_PASSWORD configured on your MediaFlow Proxy instance.')),
+                                        Toggle::make('mediaflow_proxy_playlist_user_agent')
+                                            ->label(__('Use Proxy User Agent for Playlists (M3U8/MPD)'))
+                                            ->inline(false)
+                                            ->live()
+                                            ->helperText(__('If enabled, the User Agent will also be used for fetching playlist files. Otherwise, the default User Agent is used for playlists.')),
+                                        TextInput::make('mediaflow_proxy_user_agent')
+                                            ->label(__('Proxy User Agent for Media Streams'))
+                                            ->placeholder(__('VLC/3.0.21 LibVLC/3.0.21'))
+                                            ->columnSpan(2),
+                                        Toggle::make('mediaflow_proxy_rewrite_stream_urls')
+                                            ->label(__('Automatically Rewrite Stream URLs'))
+                                            ->inline(false)
+                                            ->columnSpanFull()
+                                            ->helperText(__('When enabled, individual stream URLs in generated playlists and Xtream API responses will be rewritten to route through MediaFlow Proxy. Applies only when the m3u-proxy is not already in use for a given playlist or stream.')),
                                     ]),
                             ]),
+
                         Tab::make(__('AI Copilot'))
                             ->icon('heroicon-o-sparkles')
                             ->schema([

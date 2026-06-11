@@ -3,11 +3,13 @@
 namespace App\Filament\Resources\MergedEpgs\Pages;
 
 use App\Enums\Status;
+use App\Facades\PlaylistFacade;
 use App\Filament\Resources\Epgs\Widgets\ImportProgress;
 use App\Filament\Resources\MergedEpgs\MergedEpgResource;
 use App\Jobs\ProcessEpgImport;
 use App\Livewire\EpgViewer;
 use Filament\Actions\Action;
+use Filament\Actions\ActionGroup;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
@@ -56,12 +58,25 @@ class ViewMergedEpg extends ViewRecord
                 ->requiresConfirmation()
                 ->modalDescription(__('Process merged EPG now? This will regenerate the merged EPG output.'))
                 ->modalSubmitActionLabel(__('Yes, process now')),
+            ActionGroup::make([
+                Action::make('download')
+                    ->label(__('Download EPG'))
+                    ->icon('heroicon-o-arrow-down-tray')
+                    ->url(fn () => route('epg.file', ['uuid' => $this->getRecord()->uuid]))
+                    ->openUrlInNewTab(),
 
-            Action::make('download')
-                ->label(__('Download EPG'))
-                ->icon('heroicon-o-arrow-down-tray')
-                ->url(fn () => route('epg.file', ['uuid' => $this->getRecord()->uuid]))
-                ->openUrlInNewTab(),
+                Action::make('download_mediaflow_epg')
+                    ->label(__('MediaFlow Proxy EPG'))
+                    ->icon('heroicon-o-arrow-down-tray')
+                    ->visible(fn () => PlaylistFacade::mediaFlowProxyEnabled())
+                    ->url(function () {
+                        $settings = PlaylistFacade::getMediaFlowSettings();
+                        $proxyUrl = PlaylistFacade::getMediaFlowProxyServerUrl();
+
+                        return $proxyUrl.'/proxy/epg?d='.urlencode(route('epg.file', ['uuid' => $this->getRecord()->uuid])).'&api_password='.$settings['mediaflow_proxy_password'];
+                    })
+                    ->openUrlInNewTab(),
+            ])->button()->color('gray'),
         ];
     }
 

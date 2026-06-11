@@ -42,6 +42,8 @@ class GeneralSettings extends Settings
 
     public ?bool $mediaflow_proxy_playlist_user_agent = false;
 
+    public ?bool $mediaflow_proxy_rewrite_stream_urls = false;
+
     // M3U Proxy settings
     public ?bool $enable_failover_resolver = false;
 

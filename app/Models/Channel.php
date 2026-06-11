@@ -335,6 +335,25 @@ class Channel extends Model
     }
 
     /**
+     * Build a MediaFlow Proxy URL for this channel's stream.
+     * Uses /proxy/hls/manifest.m3u8 for HLS streams and /proxy/stream for all others.
+     */
+    public function getMediaFlowProxyUrl(): ?string
+    {
+        $service = app(PlaylistService::class);
+        if (! $service->mediaFlowProxyEnabled()) {
+            return null;
+        }
+
+        $streamUrl = $this->url_custom ?? $this->url;
+        if (! $streamUrl) {
+            return null;
+        }
+
+        return $service->buildMediaFlowStreamUrl($streamUrl);
+    }
+
+    /**
      * Get the stream attributes.
      *
      * @var array

@@ -4,6 +4,7 @@ namespace App\Filament\Resources\MergedEpgs;
 
 use App\Enums\EpgSourceType;
 use App\Enums\Status;
+use App\Facades\PlaylistFacade;
 use App\Filament\Actions\CronHelperAction;
 use App\Filament\Concerns\HasCopilotSupport;
 use App\Filament\Resources\MergedEpgs\Pages\EditMergedEpg;
@@ -184,6 +185,17 @@ class MergedEpgResource extends Resource implements CopilotResource
                         ->label(__('Download EPG'))
                         ->icon('heroicon-o-arrow-down-tray')
                         ->url(fn ($record) => route('epg.file', ['uuid' => $record->uuid]))
+                        ->openUrlInNewTab(),
+                    Action::make('download_mediaflow_epg')
+                        ->label(__('MediaFlow Proxy EPG'))
+                        ->icon('heroicon-o-arrow-down-tray')
+                        ->hidden(fn () => ! PlaylistFacade::mediaFlowProxyEnabled())
+                        ->url(function ($record) {
+                            $settings = PlaylistFacade::getMediaFlowSettings();
+                            $proxyUrl = PlaylistFacade::getMediaFlowProxyServerUrl();
+
+                            return $proxyUrl.'/proxy/epg?d='.urlencode(route('epg.file', ['uuid' => $record->uuid])).'&api_password='.$settings['mediaflow_proxy_password'];
+                        })
                         ->openUrlInNewTab(),
                     Action::make('reset')
                         ->label(__('Reset status'))

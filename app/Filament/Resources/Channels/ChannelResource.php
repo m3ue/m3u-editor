@@ -1751,10 +1751,26 @@ class ChannelResource extends Resource implements CopilotResource
                         )
                         ->formatStateUsing(fn ($record) => $record?->getProxyUrl())
                         ->helperText(__('m3u editor proxy url.'))
-                        ->disabled() // make it read-only but copyable
-                        ->dehydrated(false) // don't save the value in the database
+                        ->disabled()
+                        ->dehydrated(false)
                         ->type('url')
-                        ->hiddenOn('create'),
+                        ->hiddenOn('create')
+                        ->hidden(fn () => ! config('proxy.proxy_integration_enabled')),
+                    TextInput::make('mediaflow_proxy_url')
+                        ->label(__('MediaFlow Proxy URL'))
+                        ->columnSpan(2)
+                        ->prefixIcon('heroicon-m-shield-check')
+                        ->hintIcon(
+                            'heroicon-m-question-mark-circle',
+                            tooltip: 'Stream this channel through your MediaFlow Proxy instance. Uses /proxy/hls/manifest.m3u8 for HLS streams and /proxy/stream for all others.'
+                        )
+                        ->formatStateUsing(fn ($record) => $record?->getMediaFlowProxyUrl())
+                        ->helperText(__('MediaFlow Proxy stream URL.'))
+                        ->disabled()
+                        ->dehydrated(false)
+                        ->type('url')
+                        ->hiddenOn('create')
+                        ->hidden(fn () => ! app(PlaylistService::class)->mediaFlowProxyEnabled()),
                 ]),
             Fieldset::make(__('Proxy Settings'))
                 ->columns(2)

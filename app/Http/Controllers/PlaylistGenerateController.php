@@ -96,13 +96,17 @@ class PlaylistGenerateController extends Controller
         // Get the base URL
         $baseUrl = ProxyFacade::getBaseUrl();
 
+        // Pre-compute MediaFlow stream URL rewrite flag (checked once, used per channel)
+        $mfRewriteEnabled = ! $proxyEnabled && PlaylistFacade::mediaFlowProxyEnabled()
+            && (PlaylistFacade::getMediaFlowSettings()['mediaflow_proxy_rewrite_stream_urls'] ?? false);
+
         // Build the channel query
         $channels = self::getChannelQuery($playlist);
         $cursor = $channels->cursor();
 
         // Get all active channels
         return response()->stream(
-            function () use ($cursor, $baseUrl, $playlist, $proxyEnabled, $logoProxyEnabled, $type, $usedAuth) {
+            function () use ($cursor, $baseUrl, $playlist, $proxyEnabled, $logoProxyEnabled, $type, $usedAuth, $mfRewriteEnabled) {
                 // Set the auth details
                 if ($usedAuth) {
                     $username = urlencode($usedAuth->username);
@@ -211,6 +215,9 @@ class PlaylistGenerateController extends Controller
                             $extension = $channel->container_extension ?? 'mkv';
                         }
                         $url = $baseUrl."/{$urlPath}/{$username}/{$password}/".$channel->id.'.'.$extension;
+                    } elseif ($mfRewriteEnabled) {
+                        // Raw URL mode: wrap the provider URL through MediaFlow Proxy
+                        $url = PlaylistFacade::buildMediaFlowStreamUrl($url);
                     }
                     $url = rtrim($url, '.');
 

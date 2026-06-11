@@ -255,8 +255,8 @@ class XtreamStreamController extends Controller
                     $streamUrl = PlaylistService::generateTimeshiftUrl($request, $streamUrl, $playlist);
                 }
 
-                // Regular live stream request, redirect to the stream URL
-                return Redirect::to($streamUrl);
+                // Regular live stream request, redirect to the stream URL (via MediaFlow Proxy if enabled)
+                return Redirect::to($this->applyMediaFlowProxy($streamUrl));
             }
         }
 
@@ -291,7 +291,7 @@ class XtreamStreamController extends Controller
                     'uuid' => $playlist->uuid,
                 ]);
             } else {
-                return Redirect::to(PlaylistUrlService::getChannelUrl($channel, $playlist));
+                return Redirect::to($this->applyMediaFlowProxy(PlaylistUrlService::getChannelUrl($channel, $playlist)));
             }
         }
 
@@ -326,7 +326,7 @@ class XtreamStreamController extends Controller
                     'uuid' => $playlist->uuid,
                 ]);
             } else {
-                return Redirect::to(PlaylistUrlService::getEpisodeUrl($episode, $playlist));
+                return Redirect::to($this->applyMediaFlowProxy(PlaylistUrlService::getEpisodeUrl($episode, $playlist)));
             }
         }
 
@@ -413,8 +413,22 @@ class XtreamStreamController extends Controller
             $streamUrl = PlaylistUrlService::getChannelUrl($timeshiftChannel, $playlist);
             $streamUrl = PlaylistService::generateTimeshiftUrl($request, $streamUrl, $playlist);
 
-            return Redirect::to($streamUrl);
+            return Redirect::to($this->applyMediaFlowProxy($streamUrl));
         }
+    }
+
+    /**
+     * If MediaFlow Proxy stream URL rewriting is enabled, wrap the given stream URL
+     * through the appropriate MediaFlow Proxy endpoint. Otherwise returns the URL unchanged.
+     */
+    private function applyMediaFlowProxy(string $streamUrl): string
+    {
+        $service = app(PlaylistService::class);
+        if ($service->mediaFlowProxyEnabled() && ($service->getMediaFlowSettings()['mediaflow_proxy_rewrite_stream_urls'] ?? false)) {
+            return $service->buildMediaFlowStreamUrl($streamUrl);
+        }
+
+        return $streamUrl;
     }
 
     /**
