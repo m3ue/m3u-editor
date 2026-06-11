@@ -28,11 +28,20 @@ class QueueMonitorResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = null;
 
-    protected static ?string $navigationLabel = 'Job Monitor';
+    public static function getNavigationLabel(): string
+    {
+        return __('Job Monitor');
+    }
 
-    protected static ?string $modelLabel = 'Job';
+    public static function getModelLabel(): string
+    {
+        return __('Job');
+    }
 
-    protected static ?string $pluralModelLabel = 'Job Monitor';
+    public static function getPluralModelLabel(): string
+    {
+        return __('Job Monitor');
+    }
 
     protected static ?int $navigationSort = 8;
 
@@ -136,7 +145,7 @@ class QueueMonitorResource extends Resource
                     ->limit(60)
                     ->tooltip(fn (QueueMonitor $record): ?string => $record->exception_message)
                     ->color(fn (QueueMonitor $record): ?string => $record->exception_message ? 'danger' : null)
-                    ->placeholder('—')
+                    ->placeholder(__('—'))
                     ->wrap()
                     ->toggleable(isToggledHiddenByDefault: true),
             ])

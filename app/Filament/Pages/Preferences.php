@@ -1511,7 +1511,7 @@ class Preferences extends SettingsPage
                                             ->label(__('Proxy Port (Alternative)'))
                                             ->numeric()
                                             ->columnSpan(1)
-                                            ->helperText(__('Alternative port if not specified in the URL above.')),
+                                            ->helperText(__('Alternative port if not specified in the URL.')),
                                         TextInput::make('mediaflow_proxy_password')
                                             ->label(__('API Password'))
                                             ->columnSpan(1)

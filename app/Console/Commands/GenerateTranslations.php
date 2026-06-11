@@ -44,6 +44,8 @@ class GenerateTranslations extends Command
     private const PROTECTED_EXACT = [
         // Media server / app brand names
         'Jellyfin', 'Plex', 'Emby', 'Kodi', 'Infuse', 'VLC',
+        // Proxy tools
+        'MediaFlow Proxy',
         // Database / metadata brands
         'TMDB', 'TVDB', 'IMDB',
         // *arr ecosystem
