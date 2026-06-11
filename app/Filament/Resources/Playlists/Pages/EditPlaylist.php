@@ -33,7 +33,7 @@ class EditPlaylist extends EditRecord
         }
 
         // If this playlist has networks (is a network playlist), redirect to the networks list
-        if ($playlist->networks()->exists()) {
+        if ($playlist->networks()->exists() && NetworkResource::canAccess()) {
             $this->redirect(NetworkResource::getUrl('index'));
 
             return;

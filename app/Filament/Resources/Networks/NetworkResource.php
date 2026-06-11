@@ -102,7 +102,9 @@ class NetworkResource extends Resource implements CopilotResource
      */
     public static function canAccess(): bool
     {
-        return auth()->check() && auth()->user()->canUseIntegrations();
+        return config('proxy.proxy_integration_enabled', true)
+            && auth()->check()
+            && auth()->user()->canUseIntegrations();
     }
 
     public static function getDescription(): ?string

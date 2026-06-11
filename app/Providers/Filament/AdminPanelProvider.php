@@ -214,7 +214,7 @@ class AdminPanelProvider extends PanelProvider
                             ->icon('heroicon-m-server-stack')
                             ->items([
                                 ...MediaServerIntegrationResource::getNavigationItems(),
-                                ...NetworkResource::getNavigationItems(),
+                                ...(config('proxy.proxy_integration_enabled', true) ? NetworkResource::getNavigationItems() : []),
                             ]),
                         NavigationGroup::make(fn () => __('Live Channels'))
                             ->icon('heroicon-m-tv')
