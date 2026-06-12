@@ -300,7 +300,7 @@ class EpgApiController extends Controller
                     $g = $queryBuilder->getQuery()->getGrammar();
                     $coalesce = 'COALESCE('.$g->wrap('channels.group').', '.$g->wrap('channels.group_internal').')';
 
-                    return $queryBuilder->whereRaw("{$coalesce} = ?", [$group]);
+                    return $queryBuilder->whereRaw("LOWER({$coalesce}) = LOWER(?)", [$group]);
                 })
                 ->limit($perPage)
                 ->offset($skip)
@@ -473,7 +473,7 @@ class EpgApiController extends Controller
                     $g = $queryBuilder->getQuery()->getGrammar();
                     $coalesce = 'COALESCE('.$g->wrap('channels.group').', '.$g->wrap('channels.group_internal').')';
 
-                    return $queryBuilder->whereRaw("{$coalesce} = ?", [$group]);
+                    return $queryBuilder->whereRaw("LOWER({$coalesce}) = LOWER(?)", [$group]);
                 })
                 ->when(! $vod, function ($query) {
                     return $query->where('channels.is_vod', false);
