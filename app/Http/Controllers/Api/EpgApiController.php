@@ -297,10 +297,7 @@ class EpgApiController extends Controller
                     });
                 })
                 ->when($group, function ($queryBuilder) use ($group) {
-                    $g = $queryBuilder->getQuery()->getGrammar();
-                    $coalesce = 'COALESCE('.$g->wrap('channels.group').', '.$g->wrap('channels.group_internal').')';
-
-                    return $queryBuilder->whereRaw("LOWER({$coalesce}) = LOWER(?)", [$group]);
+                    return $queryBuilder->whereRaw('LOWER(COALESCE("channels"."group", "channels"."group_internal")) = LOWER(?)', [$group]);
                 })
                 ->limit($perPage)
                 ->offset($skip)
@@ -470,10 +467,7 @@ class EpgApiController extends Controller
                     });
                 })
                 ->when($group, function ($queryBuilder) use ($group) {
-                    $g = $queryBuilder->getQuery()->getGrammar();
-                    $coalesce = 'COALESCE('.$g->wrap('channels.group').', '.$g->wrap('channels.group_internal').')';
-
-                    return $queryBuilder->whereRaw("LOWER({$coalesce}) = LOWER(?)", [$group]);
+                    return $queryBuilder->whereRaw('LOWER(COALESCE("channels"."group", "channels"."group_internal")) = LOWER(?)', [$group]);
                 })
                 ->when(! $vod, function ($query) {
                     return $query->where('channels.is_vod', false);
