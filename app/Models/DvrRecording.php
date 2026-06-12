@@ -67,7 +67,7 @@ class DvrRecording extends Model
                     // Delete comskip sidecar files: .edl, .txt, and .logo.txt
                     $basePath = preg_replace('/\.[^.]+$/', '', $recording->file_path);
                     foreach (['.edl', '.txt', '.logo.txt'] as $ext) {
-                        $sidecarPath = $basePath . $ext;
+                        $sidecarPath = $basePath.$ext;
                         if (Storage::disk($disk)->exists($sidecarPath)) {
                             Storage::disk($disk)->delete($sidecarPath);
                         }
