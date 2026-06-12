@@ -400,7 +400,9 @@ class VodRelationManager extends RelationManager
                                         'id' => $name->getAttributeValue('name'),
                                         'name' => $name->getAttributeValue('name'),
                                     ])->pluck('id', 'name')
-                            )->required(),
+                            )
+                            ->searchable()
+                            ->required(),
                     ])
                     ->action(function (Collection $records, $data) use ($ownerRecord): void {
                         $tags = $ownerRecord->groupTags()->get();
