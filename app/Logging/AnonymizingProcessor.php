@@ -13,8 +13,8 @@ class AnonymizingProcessor implements ProcessorInterface
 {
     private const string URL_PATTERN = '/(?:https?|rtmps?|ftps?|hls):\/\/[^\s"\'<>\[\]{}\|\\\\^`]+/i';
 
-    /** Matches key=value or key: value; stops before & ) space quote etc. */
-    private const string USER_PATTERN = '/\b(username|user|login|ip)\s*[:=]\s*([^&\s"\'<>#,\)\]]+)/i';
+    /** Matches key=value, key: value, key='value', key="value". Group 1: keyword, group 2: optional quote, group 3: value. */
+    private const string USER_PATTERN = '/\b(username|user|login|ip|host|hostname|server)\s*[:=]\s*([\'"]?)([^&\s"\'<>#,\)\]]+)\2/i';
 
     /** UUIDs identify specific resources and can be used to probe APIs */
     private const string UUID_PATTERN = '/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i';
@@ -41,7 +41,7 @@ class AnonymizingProcessor implements ProcessorInterface
     private function scrub(string $text): string
     {
         $text = (string) preg_replace(self::URL_PATTERN, '****', $text);
-        $text = (string) preg_replace(self::USER_PATTERN, '$1=****', $text);
+        $text = (string) preg_replace(self::USER_PATTERN, '$1=$2****$2', $text);
         $text = (string) preg_replace(self::UUID_PATTERN, '****', $text);
 
         return $text;
