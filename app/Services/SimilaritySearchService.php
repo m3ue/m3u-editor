@@ -149,10 +149,13 @@ class SimilaritySearchService
             ->get();
 
         // Verify exact match after normalization in PHP (faster than DB REPLACE operations)
+        // Both sides must go through the same normalizeChannelName() pipeline (including stop-word
+        // removal) before space-stripping, otherwise names like "USA FOX 8 WGHP GREENSBORO" will
+        // never equal "fox8wghpgreensboro" because the EPG side still carries the "usa" prefix.
         foreach ($exactMatchCandidates as $candidate) {
-            $normalizedChannelId = mb_strtolower(str_replace([' ', '-', '_'], '', $candidate->channel_id ?? ''), 'UTF-8');
-            $normalizedName = mb_strtolower(str_replace([' ', '-', '_'], '', $candidate->name ?? ''), 'UTF-8');
-            $normalizedDisplayName = mb_strtolower(str_replace([' ', '-', '_'], '', $candidate->display_name ?? ''), 'UTF-8');
+            $normalizedChannelId = mb_strtolower(str_replace([' ', '-', '_'], '', $this->normalizeChannelName($candidate->channel_id ?? '')), 'UTF-8');
+            $normalizedName = mb_strtolower(str_replace([' ', '-', '_'], '', $this->normalizeChannelName($candidate->name ?? '')), 'UTF-8');
+            $normalizedDisplayName = mb_strtolower(str_replace([' ', '-', '_'], '', $this->normalizeChannelName($candidate->display_name ?? '')), 'UTF-8');
 
             if (
                 $normalizedSearch === $normalizedChannelId ||
