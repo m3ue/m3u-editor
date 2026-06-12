@@ -154,7 +154,7 @@ class PlaylistAuthResource extends Resource implements CopilotResource
     {
         $dvrSection = Section::make(__('DVR Access'))
             ->description(__('Control whether this guest can schedule and manage DVR recordings.'))
-            ->hidden(fn () => ! config('proxy.proxy_integration_enabled', true))
+            ->hidden(fn () => ! (config('dvr.dvr_enabled', true) && config('proxy.proxy_integration_enabled', true)))
             ->schema([
                 Toggle::make('dvr_enabled')
                     ->label(__('Enable DVR'))

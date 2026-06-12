@@ -29,6 +29,8 @@ function setGuestDvrRecordingContext(Playlist $playlist, PlaylistAuth $auth): vo
 
 beforeEach(function () {
     Queue::fake();
+    config()->set('dvr.dvr_enabled', true);
+    config()->set('proxy.proxy_integration_enabled', true);
     $this->user = User::factory()->create();
     $this->playlist = Playlist::factory()->for($this->user)->create();
     $this->dvrSetting = DvrSetting::factory()->enabled()->for($this->playlist)->for($this->user)->create();
@@ -49,6 +51,18 @@ it('grants access when dvr_enabled is true and DvrSetting exists', function () {
 
 it('denies access when dvr_enabled is false', function () {
     $this->guestA->update(['dvr_enabled' => false]);
+
+    expect(GuestDvrRecordingResource::canAccess())->toBeFalse();
+});
+
+it('denies access when DVR_ENABLED config is false', function () {
+    config()->set('dvr.dvr_enabled', false);
+
+    expect(GuestDvrRecordingResource::canAccess())->toBeFalse();
+});
+
+it('denies access when proxy integration config is false', function () {
+    config()->set('proxy.proxy_integration_enabled', false);
 
     expect(GuestDvrRecordingResource::canAccess())->toBeFalse();
 });

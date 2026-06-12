@@ -54,7 +54,7 @@ trait HasGuestDvr
      */
     protected static function guestCanAccessDvr(): bool
     {
-        if (! config('proxy.proxy_integration_enabled', true)) {
+        if (! (config('dvr.dvr_enabled', true) && config('proxy.proxy_integration_enabled', true))) {
             return false;
         }
 

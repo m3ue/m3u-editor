@@ -14,6 +14,8 @@ use Livewire\Livewire;
 beforeEach(function () {
     Carbon::setTestNow('2026-01-15 12:00:00');
     Event::fake([PlaylistCreated::class]);
+    config()->set('dvr.dvr_enabled', true);
+    config()->set('proxy.proxy_integration_enabled', true);
 
     $this->user = User::factory()->create([
         'permissions' => ['use_dvr'],

@@ -2,6 +2,8 @@
 
 return [
 
+    'dvr_enabled' => env('DVR_ENABLED', true),
+
     /*
     |--------------------------------------------------------------------------
     | DVR — FFmpeg binary path

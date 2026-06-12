@@ -80,7 +80,7 @@ class UserResource extends Resource implements CopilotResource
                             ->label(__('Select Permissions'))
                             ->options(function () {
                                 $permissions = User::getAvailablePermissions();
-                                if (! config('proxy.proxy_integration_enabled', true)) {
+                                if (! (config('dvr.dvr_enabled', true) && config('proxy.proxy_integration_enabled', true))) {
                                     unset($permissions['use_dvr']);
                                 }
 
@@ -98,7 +98,7 @@ class UserResource extends Resource implements CopilotResource
                                     'use_ai_copilot' => 'Allow this user to access and use the AI Copilot chat assistant',
                                     'use_dvr' => 'Allow this user to access DVR features, manage recording rules, and view recordings',
                                 ];
-                                if (! config('proxy.proxy_integration_enabled', true)) {
+                                if (! (config('dvr.dvr_enabled', true) && config('proxy.proxy_integration_enabled', true))) {
                                     unset($descriptions['use_dvr']);
                                 }
 

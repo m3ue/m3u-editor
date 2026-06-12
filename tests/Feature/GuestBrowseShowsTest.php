@@ -44,6 +44,8 @@ function makeGuestBrowseShows(): GuestBrowseShows
 
 beforeEach(function () {
     Queue::fake();
+    config()->set('dvr.dvr_enabled', true);
+    config()->set('proxy.proxy_integration_enabled', true);
     $this->user = User::factory()->create();
     $this->playlist = Playlist::factory()->for($this->user)->create();
     $this->dvrSetting = DvrSetting::factory()->enabled()->for($this->playlist)->for($this->user)->create();
@@ -60,6 +62,18 @@ beforeEach(function () {
 
 it('denies access when dvr_enabled is false on PlaylistAuth', function () {
     $this->auth->update(['dvr_enabled' => false]);
+
+    expect(GuestBrowseShows::canAccess())->toBeFalse();
+});
+
+it('denies access when DVR_ENABLED config is false', function () {
+    config()->set('dvr.dvr_enabled', false);
+
+    expect(GuestBrowseShows::canAccess())->toBeFalse();
+});
+
+it('denies access when proxy integration config is false', function () {
+    config()->set('proxy.proxy_integration_enabled', false);
 
     expect(GuestBrowseShows::canAccess())->toBeFalse();
 });

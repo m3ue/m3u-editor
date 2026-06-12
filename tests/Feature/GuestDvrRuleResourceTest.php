@@ -28,6 +28,8 @@ function setGuestDvrRuleContext(Playlist $playlist, PlaylistAuth $auth): void
 
 beforeEach(function () {
     Queue::fake();
+    config()->set('dvr.dvr_enabled', true);
+    config()->set('proxy.proxy_integration_enabled', true);
     $this->user = User::factory()->create();
     $this->playlist = Playlist::factory()->for($this->user)->create();
     $this->dvrSetting = DvrSetting::factory()->enabled()->for($this->playlist)->for($this->user)->create();
@@ -52,12 +54,30 @@ it('denies access when dvr_enabled is false', function () {
     expect(GuestDvrRuleResource::canAccess())->toBeFalse();
 });
 
+it('denies access when DVR_ENABLED config is false', function () {
+    config()->set('dvr.dvr_enabled', false);
+
+    expect(GuestDvrRuleResource::canAccess())->toBeFalse();
+});
+
+it('denies access when proxy integration config is false', function () {
+    config()->set('proxy.proxy_integration_enabled', false);
+
+    expect(GuestDvrRuleResource::canAccess())->toBeFalse();
+});
+
 it('allows creating rules when access is granted', function () {
     expect(GuestDvrRuleResource::canCreate())->toBeTrue();
 });
 
 it('denies creating rules when dvr_enabled is false', function () {
     $this->guestA->update(['dvr_enabled' => false]);
+
+    expect(GuestDvrRuleResource::canCreate())->toBeFalse();
+});
+
+it('denies creating rules when DVR_ENABLED config is false', function () {
+    config()->set('dvr.dvr_enabled', false);
 
     expect(GuestDvrRuleResource::canCreate())->toBeFalse();
 });

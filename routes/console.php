@@ -92,9 +92,11 @@ if (config('proxy.proxy_integration_enabled', true)) {
         ->hourly()
         ->withoutOverlapping();
 
-    // DVR scheduler tick — run every minute to match rules, start, and stop recordings
-    Schedule::job(new DvrSchedulerTick)->everyMinute()->withoutOverlapping();
+    if (config('dvr.dvr_enabled', true)) {
+        // DVR scheduler tick — run every minute to match rules, start, and stop recordings
+        Schedule::job(new DvrSchedulerTick)->everyMinute()->withoutOverlapping();
 
-    // DVR retention cleanup — run hourly to enforce keepLast, age, and quota policies
-    Schedule::job(new DvrRetentionCleanup)->hourly()->withoutOverlapping();
+        // DVR retention cleanup — run hourly to enforce keepLast, age, and quota policies
+        Schedule::job(new DvrRetentionCleanup)->hourly()->withoutOverlapping();
+    }
 }

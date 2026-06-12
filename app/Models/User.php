@@ -284,7 +284,12 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
 
     public function canUseDvr(): bool
     {
-        return config('proxy.proxy_integration_enabled', true) && $this->hasPermission('use_dvr');
+        // If proxy integration and/or DVR features are globally disabled, then no users can use DVR features regardless of their permissions.
+        if (! (config('dvr.dvr_enabled', true) && config('proxy.proxy_integration_enabled', true))) {
+            return false;
+        }
+
+        return $this->hasPermission('use_dvr');
     }
 
     /**
