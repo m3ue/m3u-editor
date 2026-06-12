@@ -202,6 +202,7 @@ return [
         // $grammar->wrap('column.name') calls on hardcoded column identifiers.
         // $dedupeSubquery embeds $idList (integer EPG IDs from DB) and
         // $priorityCase (a CASE built from DB-sourced priority values).
+        'c5de08c38c25',
         'f30c37727ff6',
         '5d446de55dab',
         'c4299abfeb14',
