@@ -5,7 +5,7 @@ namespace App\Services;
 use App\Models\Channel;
 use App\Models\Epg;
 use App\Models\EpgChannel;
-use Illuminate\Database\Query\Builder;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -14,28 +14,65 @@ use Illuminate\Support\Facades\Log;
  */
 class SimilaritySearchService
 {
-    // Constant for original search prefix length
     private const ORIGINAL_SEARCH_PREFIX_LENGTH = 10;
 
-    // Configurable parameters
-    private $bestFuzzyThreshold = 8;       // Stricter threshold for exact matches (reduced from 15)
+    private int $bestFuzzyThreshold = 8;
 
-    private $upperFuzzyThreshold = 25;     // Much stricter - only allow very similar names (reduced from 50)
+    private int $upperFuzzyThreshold = 25;
 
-    private $embedSimThreshold = 0.80;     // Higher similarity required (increased from 0.75)
+    private float $embedSimThreshold = 0.80;
 
-    private $minChannelLength = 3;         // Minimum length to consider for matching
+    private int $minChannelLength = 3;
 
-    // Words to ignore (reduced list - keep quality indicators that differentiate channels)
-    private $stopWords = [
+    /** @var array<int, string> */
+    private array $stopWords = [
         'tv',
         'channel',
         'network',
         'television',
         'east',
         'west',
+        // Country/region codes — all common IPTV playlist prefixes
         'us',
         'usa',
+        'ca',
+        'uk',
+        'au',
+        'de',
+        'fr',
+        'es',
+        'it',
+        'nl',
+        'pt',
+        'be',
+        'ch',
+        'at',
+        'nz',
+        'ie',
+        'mx',
+        'br',
+        'in',
+        'pk',
+        'tr',
+        'pl',
+        'se',
+        'no',
+        'dk',
+        'fi',
+        'ro',
+        'hu',
+        'gr',
+        'il',
+        'ae',
+        'sa',
+        'eg',
+        'ng',
+        'za',
+        'jp',
+        'kr',
+        'cn',
+        'hk',
+        // Generic filler tokens
         'not',
         '24/7',
         'arabic',
@@ -45,8 +82,8 @@ class SimilaritySearchService
         'movies',
     ];
 
-    // Quality indicators to optionally remove (when setting is enabled)
-    private $qualityIndicators = [
+    /** @var array<int, string> */
+    private array $qualityIndicators = [
         'hd',
         'fhd',
         'uhd',
@@ -64,8 +101,7 @@ class SimilaritySearchService
         'h265',
     ];
 
-    // Whether to remove quality indicators during normalization
-    private $removeQualityIndicators = false;
+    private bool $removeQualityIndicators = false;
 
     /**
      * Sanitizes UTF-8 encoding in strings to prevent PostgreSQL errors.
@@ -88,24 +124,17 @@ class SimilaritySearchService
     /**
      * Find the best matching EPG channel for a given channel.
      *
-     * @param  Channel  $channel
-     * @param  Epg  $epg
-     * @param  bool  $removeQualityIndicators  Whether to remove quality indicators during matching
-     * @param  int  $similarityThreshold  Minimum similarity percentage (0-100)
-     * @param  int  $fuzzyMaxDistance  Maximum Levenshtein distance for fuzzy matching
-     * @param  int  $exactMatchDistance  Maximum distance for exact matches
-     * @param  array|null  $customQualityIndicators  Override the default quality indicators list
+     * @param  array<int, string>|null  $customQualityIndicators  Override the default quality indicators list
      */
     public function findMatchingEpgChannel(
-        $channel,
-        $epg = null,
-        $removeQualityIndicators = false,
-        $similarityThreshold = 70,
-        $fuzzyMaxDistance = 25,
-        $exactMatchDistance = 8,
+        Channel $channel,
+        ?Epg $epg = null,
+        bool $removeQualityIndicators = false,
+        int $similarityThreshold = 70,
+        int $fuzzyMaxDistance = 25,
+        int $exactMatchDistance = 8,
         ?array $customQualityIndicators = null,
     ): ?EpgChannel {
-        // Set the instance variables
         $this->removeQualityIndicators = $removeQualityIndicators;
         $this->upperFuzzyThreshold = $fuzzyMaxDistance;
         $this->bestFuzzyThreshold = $exactMatchDistance;
@@ -190,12 +219,11 @@ class SimilaritySearchService
                 $this->addJsonSearchCondition($query, $searchTerm);
             });
 
-        // Setup variables
-        $bestScore = PHP_INT_MAX; // Levenshtein: lower is better
+        $bestScore = PHP_INT_MAX;
         $bestMatch = null;
         $bestEpgForEmbedding = null;
-        $candidates = []; // Store all candidates with scores for better decision making
-        $hasEpgChannels = false; // Track if the query returned any rows without issuing a separate COUNT(*) query
+        $candidates = [];
+        $hasEpgChannels = false;
 
         /**
          * Multi-Strategy Matching for Better Accuracy
@@ -220,7 +248,7 @@ class SimilaritySearchService
             // Also calculate with original names (can be more accurate for similar channels)
             $scoreOriginal = levenshtein($channelNameOriginal, $epgNameOriginal);
 
-            // Use the better score
+            // Use the better of the two scores
             $finalScore = min($score, $scoreOriginal);
 
             // Calculate similarity percentage for better filtering
@@ -244,7 +272,6 @@ class SimilaritySearchService
                 'similarity' => $similarityPercentage,
                 'region_bonus' => $regionBonus,
                 'normalized_name' => $normalizedEpg,
-                'original_score' => $scoreOriginal,  // Track original score for debugging
             ];
 
             if ($finalScore < $bestScore) {
@@ -298,30 +325,22 @@ class SimilaritySearchService
         }
 
         // ** Cosine Similarity for Borderline Cases **
-        if ($bestEpgForEmbedding && ! empty($candidates)) {
+        // Run this even when the candidate was filtered out by the Levenshtein similarity threshold,
+        // because word-order transpositions (e.g. "15 CBS WANE" vs "CBS 15 WANE") score poorly on
+        // edit distance but identically on a word-frequency cosine — which is the whole point of this
+        // fallback.
+        if ($bestEpgForEmbedding) {
             $chanVector = $this->textToVector($normalizedChan);
             $epgVector = $this->textToVector($this->normalizeChannelName($bestEpgForEmbedding->name));
             if (! empty($chanVector) && ! empty($epgVector)) {
                 $similarity = $this->cosineSimilarity($chanVector, $epgVector);
 
-                // Only accept if similarity is high enough
                 if ($similarity >= $this->embedSimThreshold) {
-                    // Additional check: ensure this is actually the best candidate
-                    $candidateFound = false;
-                    foreach ($candidates as $candidate) {
-                        if ($candidate['channel']->id === $bestEpgForEmbedding->id && $candidate['similarity'] >= 65) {
-                            $candidateFound = true;
-                            break;
-                        }
+                    if ($debug) {
+                        Log::debug("Channel {$channel->id} '{$fallbackName}' matched via cosine similarity with channel_id={$bestEpgForEmbedding->channel_id} (cos-sim={$similarity})");
                     }
 
-                    if ($candidateFound) {
-                        if ($debug) {
-                            Log::debug("Channel {$channel->id} '{$fallbackName}' matched via cosine similarity with channel_id={$bestEpgForEmbedding->channel_id} (cos-sim={$similarity})");
-                        }
-
-                        return $bestEpgForEmbedding;
-                    }
+                    return $bestEpgForEmbedding;
                 } else {
                     if ($debug) {
                         Log::debug("Channel {$channel->id} '{$fallbackName}' cosine-similarity with '{$bestEpgForEmbedding->name}' = {$similarity} (rejected, below threshold)");
@@ -341,10 +360,8 @@ class SimilaritySearchService
 
     /**
      * Normalize a channel name for similarity comparison.
-     *
-     * @param  string  $name
      */
-    private function normalizeChannelName($name): string
+    private function normalizeChannelName(?string $name): string
     {
         if (! $name) {
             return '';
@@ -358,21 +375,10 @@ class SimilaritySearchService
 
         $name = mb_strtolower($name, 'UTF-8');
 
-        // Remove brackets and parentheses CONTENT but keep the channel name intact
-        $name = preg_replace('/\[.*?\]/', '', $name);
-        $name = preg_replace('/\(.*?\)/', '', $name);
-
-        // Only remove truly special characters, but keep: ², ³, +, numbers
-        // This preserves HDraw², FHD+, etc.
-        $name = preg_replace('/[^\w\s²³\+\-]/', '', $name);
-
-        // Work with UTF-8 and lowercase properly
-        $name = mb_strtolower($name, 'UTF-8');
-
-        // Remove brackets and parentheses (Unicode-aware)
+        // Remove bracket/parenthesis content (Unicode-aware)
         $name = preg_replace('/\[.*?\]|\(.*?\)/u', '', $name);
 
-        // Remove special characters but keep letters & numbers from all scripts
+        // Keep only letters, numbers, and spaces from all Unicode scripts
         $name = preg_replace('/[^\p{L}\p{N}\s]/u', '', $name);
 
         // Normalize whitespace
@@ -393,15 +399,10 @@ class SimilaritySearchService
 
     /**
      * Convert a text into a word frequency vector.
-     *
-     * @param  string  $text
      */
-    private function textToVector($text): array
+    private function textToVector(string $text): array
     {
-        $words = explode(' ', $text);
-        $vector = array_count_values($words); // Simple word frequency vector
-
-        return $vector;
+        return array_count_values(explode(' ', $text));
     }
 
     /**
@@ -432,10 +433,8 @@ class SimilaritySearchService
 
     /**
      * Add database-specific search condition for additional_display_names JSONB column.
-     *
-     * @param  Builder  $query
      */
-    private function addJsonSearchCondition($query, string $normalizedChan): void
+    private function addJsonSearchCondition(Builder $query, string $normalizedChan): void
     {
         $driver = DB::connection()->getConfig('driver');
 
