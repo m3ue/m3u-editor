@@ -13,12 +13,12 @@
         "chokidar": "^4.0.3",
         "concurrently": "^10.0.0",
         "laravel-echo": "^1.17.1",
-        "laravel-vite-plugin": "^1.0",
+        "laravel-vite-plugin": "^3.1",
         "postcss": "^8.5.14",
         "pusher-js": "^8.4.0-rc2",
         "sass-embedded": "^1.97.3",
         "tailwindcss": "^4.1.12",
-        "vite": ">=6.4.2"
+        "vite": ">=8.0.16"
     },
     "dependencies": {
         "easyqrcodejs": "^4.6.2",
