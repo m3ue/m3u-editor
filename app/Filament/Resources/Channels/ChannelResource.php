@@ -426,20 +426,23 @@ class ChannelResource extends Resource implements CopilotResource
                 ->toggle()
                 ->query(function ($query) {
                     return $query->whereNotNull('stream_stats_probed_at')
-                        ->whereNotNull('stream_stats')->whereRaw("CAST(stream_stats AS TEXT) != '[]'");
+                        ->whereNotNull('stream_stats')->whereRaw("CAST(stream_stats AS TEXT) != '[]'")
+                        ->where('probe_enabled', true);
                 }),
             Filter::make('probe_failed')
                 ->label(__('Probe failed'))
                 ->toggle()
                 ->query(function ($query) {
                     return $query->whereNotNull('stream_stats_probed_at')
-                        ->where(fn ($q) => $q->whereNull('stream_stats')->orWhereRaw("CAST(stream_stats AS TEXT) = '[]'"));
+                        ->where(fn ($q) => $q->whereNull('stream_stats')->orWhereRaw("CAST(stream_stats AS TEXT) = '[]'"))
+                        ->where('probe_enabled', true);
                 }),
             Filter::make('not_probed')
                 ->label(__('Not probed'))
                 ->toggle()
                 ->query(function ($query) {
-                    return $query->whereNull('stream_stats_probed_at');
+                    return $query->whereNull('stream_stats_probed_at')
+                        ->where('probe_enabled', true);
                 }),
         ];
     }
