@@ -63,6 +63,15 @@ class DvrRecording extends Model
                     if (Storage::disk($disk)->exists($recording->file_path)) {
                         Storage::disk($disk)->delete($recording->file_path);
                     }
+
+                    // Delete comskip sidecar files: .edl, .txt, and .logo.txt
+                    $basePath = preg_replace('/\.[^.]+$/', '', $recording->file_path);
+                    foreach (['.edl', '.txt', '.logo.txt'] as $ext) {
+                        $sidecarPath = $basePath.$ext;
+                        if (Storage::disk($disk)->exists($sidecarPath)) {
+                            Storage::disk($disk)->delete($sidecarPath);
+                        }
+                    }
                 } catch (\Throwable $e) {
                     Log::warning("DvrRecording deleting hook: could not delete file {$recording->file_path}: {$e->getMessage()}", [
                         'recording_id' => $recording->id,
