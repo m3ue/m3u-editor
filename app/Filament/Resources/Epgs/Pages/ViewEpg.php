@@ -35,6 +35,8 @@ class ViewEpg extends ViewRecord
     protected function getHeaderActions(): array
     {
         return [
+            EpgResource::getManageSdLineupsAction(),
+
             Action::make('refresh')
                 ->label(__('Process'))
                 ->icon('heroicon-o-arrow-path')

@@ -51,6 +51,7 @@ use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Facades\Log;
 
 class EpgResource extends Resource implements CopilotResource
 {
@@ -293,7 +294,8 @@ class EpgResource extends Resource implements CopilotResource
                         ->modalIcon('heroicon-o-arrow-uturn-left')
                         ->modalDescription(__('Reset EPG status so it can be processed again. Only perform this action if you are having problems with the EPG syncing.'))
                         ->modalSubmitActionLabel(__('Yes, reset now')),
-                    DeleteAction::make(),
+                    self::getManageSdLineupsAction(),
+                    self::getSdDeleteAction(),
                 ])->button()->hiddenLabel()->size('sm'),
                 EditAction::make()->slideOver()
                     ->button()->hiddenLabel()->size('sm'),
@@ -795,5 +797,96 @@ class EpgResource extends Resource implements CopilotResource
                         ->maxLength(10),
                 ]),
         ];
+    }
+
+    /**
+     * Shared "Manage SD Lineups" action used in the table, edit page, and view page.
+     * Filament injects the current $record via type-hint in all three contexts.
+     */
+    public static function getManageSdLineupsAction(): Action
+    {
+        return Action::make('manage_sd_lineups')
+            ->label(__('Manage SD Lineups'))
+            ->icon('heroicon-o-list-bullet')
+            ->color('warning')
+            ->visible(fn (Epg $record): bool => $record->isSchedulesDirect())
+            ->modalHeading(__('Manage SchedulesDirect Lineups'))
+            ->modalDescription(__('View and remove lineups from your SchedulesDirect account. SchedulesDirect allows a maximum of 4 lineups per account.'))
+            ->modalSubmitActionLabel(__('Remove Selected Lineup'))
+            ->schema(function (Epg $record): array {
+                try {
+                    $lineups = app(SchedulesDirectService::class)->getAccountLineupsAsOptions($record);
+                    $count = count($lineups);
+
+                    return [
+                        Select::make('lineup_to_remove')
+                            ->label(__('Lineup to Remove'))
+                            ->options($lineups)
+                            ->required()
+                            ->hint(__("{$count} of 4 slots used"))
+                            ->helperText(__('Select the lineup you want to remove from your SchedulesDirect account.')),
+                    ];
+                } catch (Exception $e) {
+                    return [
+                        Select::make('lineup_to_remove')
+                            ->label(__('Lineup to Remove'))
+                            ->options([])
+                            ->helperText(__('Could not fetch lineups: ').$e->getMessage()),
+                    ];
+                }
+            })
+            ->action(function (array $data, Epg $record): void {
+                $lineupId = $data['lineup_to_remove'] ?? null;
+                if (! $lineupId) {
+                    return;
+                }
+
+                try {
+                    app(SchedulesDirectService::class)->removeLineupFromEpg($record, $lineupId);
+
+                    Notification::make()
+                        ->success()
+                        ->title(__('Lineup removed'))
+                        ->body(__("Lineup {$lineupId} has been removed from your SchedulesDirect account."))
+                        ->send();
+                } catch (Exception $e) {
+                    Notification::make()
+                        ->danger()
+                        ->title(__('Failed to remove lineup'))
+                        ->body($e->getMessage())
+                        ->send();
+                }
+            });
+    }
+
+    /**
+     * Shared DeleteAction that, for SD EPGs, offers to also remove the lineup from SD.
+     * Filament injects the current $record via type-hint in all three contexts.
+     */
+    public static function getSdDeleteAction(): DeleteAction
+    {
+        return DeleteAction::make()
+            ->modalDescription(fn (Epg $record) => $record->isSchedulesDirect() && $record->hasSchedulesDirectLineup()
+                ? __('Delete this EPG? You can optionally also remove the associated lineup from your SchedulesDirect account to free up a lineup slot.')
+                : null)
+            ->schema(fn (Epg $record): array => $record->isSchedulesDirect() && $record->hasSchedulesDirectLineup() ? [
+                Toggle::make('delete_sd_lineup')
+                    ->label(__('Also delete lineup from SchedulesDirect account'))
+                    ->helperText(__('SchedulesDirect allows a maximum of 4 lineups. Removing unused lineups frees up slots for new ones.'))
+                    ->default(true),
+            ] : [])
+            ->before(function (array $data, Epg $record): void {
+                if ($record->isSchedulesDirect() && ($data['delete_sd_lineup'] ?? false) && $record->hasSchedulesDirectLineup()) {
+                    try {
+                        app(SchedulesDirectService::class)->removeConfiguredLineup($record);
+                    } catch (Exception $e) {
+                        Log::warning('Failed to remove SchedulesDirect lineup on EPG delete', [
+                            'epg_id' => $record->id,
+                            'lineup_id' => $record->sd_lineup_id,
+                            'error' => $e->getMessage(),
+                        ]);
+                    }
+                }
+            });
     }
 }

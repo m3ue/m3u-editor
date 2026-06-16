@@ -57,6 +57,8 @@ return [
         'minimum_age_days' => 3,
         'whitelist' => [
             'andreapollastri/checkpoint',
+            // 3.0.55 was the security patch for GHSA-m557-wrgg-6rp4 (SSRF via AIA in X.509 validation)
+            'phpseclib/phpseclib',
         ],
     ],
 

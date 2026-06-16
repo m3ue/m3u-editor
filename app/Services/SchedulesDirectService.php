@@ -339,6 +339,52 @@ class SchedulesDirectService
     }
 
     /**
+     * Return all account lineups as a keyed options array suitable for Filament Select fields.
+     * Authenticates if the EPG token is missing or expired.
+     *
+     * @return array<string, string> lineup_id => "Name (transport)"
+     */
+    public function getAccountLineupsAsOptions(Epg $epg): array
+    {
+        if (! $epg->hasValidSchedulesDirectToken()) {
+            $this->authenticateFromEpg($epg);
+            $epg->refresh();
+        }
+
+        $userLineups = $this->getUserLineups($epg->sd_token);
+
+        return collect($userLineups['lineups'] ?? [])
+            ->mapWithKeys(fn ($lineup) => [$lineup['lineup'] => "{$lineup['name']} ({$lineup['transport']})"])
+            ->all();
+    }
+
+    /**
+     * Remove a specific lineup from the EPG's SD account, re-authenticating if needed.
+     */
+    public function removeLineupFromEpg(Epg $epg, string $lineupId): void
+    {
+        if (! $epg->hasValidSchedulesDirectToken()) {
+            $this->authenticateFromEpg($epg);
+            $epg->refresh();
+        }
+
+        $this->removeLineup($epg->sd_token, $lineupId);
+    }
+
+    /**
+     * Remove the lineup that is currently configured on the EPG from the SD account.
+     * No-op if no lineup is configured.
+     */
+    public function removeConfiguredLineup(Epg $epg): void
+    {
+        if (! $epg->hasSchedulesDirectLineup()) {
+            return;
+        }
+
+        $this->removeLineupFromEpg($epg, $epg->sd_lineup_id);
+    }
+
+    /**
      * Get lineup details including stations
      */
     public function getLineup(string $token, string $lineupId): array

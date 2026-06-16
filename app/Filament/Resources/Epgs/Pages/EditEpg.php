@@ -3,7 +3,6 @@
 namespace App\Filament\Resources\Epgs\Pages;
 
 use App\Filament\Resources\Epgs\EpgResource;
-use Filament\Actions\DeleteAction;
 use Filament\Resources\Pages\EditRecord;
 
 class EditEpg extends EditRecord
@@ -13,7 +12,8 @@ class EditEpg extends EditRecord
     protected function getHeaderActions(): array
     {
         return [
-            DeleteAction::make(),
+            EpgResource::getManageSdLineupsAction(),
+            EpgResource::getSdDeleteAction(),
         ];
     }
 }
