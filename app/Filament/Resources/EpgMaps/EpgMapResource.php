@@ -236,7 +236,7 @@ class EpgMapResource extends Resource implements CopilotResource
                                 ->body(__('The EPG mapping process has been initiated for the selected mappings.'))
                                 ->duration(10000)
                                 ->send();
-                        }),
+                        })->deselectRecordsAfterCompletion(),
                     DeleteBulkAction::make(),
                 ]),
             ]);
