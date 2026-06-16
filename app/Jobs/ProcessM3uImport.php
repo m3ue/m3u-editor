@@ -1170,7 +1170,7 @@ class ProcessM3uImport implements ShouldQueue
 
         // Setup group sort, if Playlist auto sort is enabled
         $groupOrder = null;
-        if ($playlist->auto_sort) {
+        if ($playlist->auto_sort_groups) {
             $groupOrder = 1;
         }
 

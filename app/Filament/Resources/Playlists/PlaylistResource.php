@@ -2718,7 +2718,7 @@ class PlaylistResource extends Resource implements CopilotResource
                 ->columnSpanFull()
                 ->collapsible()
                 ->collapsed($creating)
-                ->columns(2)
+                ->columns(3)
                 ->schema([
                     Toggle::make('sync_logs_enabled')
                         ->label(__('Enable Sync Logs'))
@@ -2730,11 +2730,25 @@ class PlaylistResource extends Resource implements CopilotResource
                         ->hintIcon(fn (Get $get): string => config('dev.disable_sync_logs', false) ? 'heroicon-m-lock-closed' : '')
                         ->helperText(__('Retain logs of playlist syncs. This is useful for debugging and tracking changes to the playlist. This can lead to increased sync time and storage usage depending on the size of the playlist.')),
                     Toggle::make('auto_sort')
-                        ->label(__('Automatically assign sort number based on playlist order'))
+                        ->label(__('Channel Auto Sort'))
                         ->columnSpan(1)
+                        ->hintIcon(
+                            'heroicon-m-question-mark-circle',
+                            tooltip: 'You will need to re-sync your playlist, or wait for the next scheduled sync, if changing this. This will overwrite any existing channel sort order customization for this playlist.'
+                        )
                         ->inline(false)
                         ->default(true)
-                        ->helperText(__('NOTE: You will need to re-sync your playlist, or wait for the next scheduled sync, if changing this. This will overwrite any existing channel sort order customization for this playlist.')),
+                        ->helperText(__('Automatically assign Channel sort number based on playlist order')),
+                    Toggle::make('auto_sort_groups')
+                        ->label(__('Group Auto Sort'))
+                        ->columnSpan(1)
+                        ->hintIcon(
+                            'heroicon-m-question-mark-circle',
+                            tooltip: 'You will need to re-sync your playlist, or wait for the next scheduled sync, if changing this. This will overwrite any existing group sort order customization for this playlist.'
+                        )
+                        ->inline(false)
+                        ->default(true)
+                        ->helperText(__('Automatically assign Group sort number based on playlist order')),
                     ComponentsGroup::make()
                         ->columnSpanFull()
                         ->columns(3)

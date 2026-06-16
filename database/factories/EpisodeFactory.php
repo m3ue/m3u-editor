@@ -26,7 +26,7 @@ class EpisodeFactory extends Factory
         return [
             'title' => fake()->sentence(4),
             'new' => fake()->boolean(),
-            'source_episode_id' => fake()->unique()->randomNumber(),
+            'source_episode_id' => fake()->unique()->numberBetween(1, 9999999),
             'import_batch_no' => fake()->word(),
             'user_id' => User::factory(),
             'playlist_id' => Playlist::factory(),
