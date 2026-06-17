@@ -147,6 +147,17 @@ class MediaServerProxyController extends Controller
             $mediaServer = MediaServerService::make($integration);
             $fullUrl = $mediaServer->getDirectStreamUrl($request, $itemId, $container);
 
+            // Make sure we got a valid URL back
+            if (empty($fullUrl)) {
+                Log::warning('Media server returned empty stream URL', [
+                    'integration_id' => $integrationId,
+                    'item_id' => $itemId,
+                    'container' => $container,
+                ]);
+
+                return response()->json(['error' => 'Media server could not resolve stream URL'], 502);
+            }
+
             // Get content type based on container
             $contentType = $this->getContentTypeForContainer($container);
 

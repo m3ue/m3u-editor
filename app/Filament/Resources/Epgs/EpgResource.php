@@ -514,7 +514,7 @@ class EpgResource extends Resource implements CopilotResource
                                                 if (stripos($lineup['name'], $search) !== false) {
                                                     // Don't duplicate if already in account
                                                     if (! isset($options[$lineup['lineup']])) {
-                                                        $options[$lineup['lineup']] = "{$lineup['name']} ({$headend['transport']})";
+                                                        $options[$lineup['lineup']] = "{$lineup['name']} — {$lineup['lineup']} ({$headend['transport']})";
                                                     }
                                                 }
                                             }
@@ -544,7 +544,7 @@ class EpgResource extends Resource implements CopilotResource
                                         foreach ($headends as $headend) {
                                             foreach ($headend['lineups'] as $lineup) {
                                                 if ($lineup['lineup'] === $value) {
-                                                    return "{$lineup['name']} ({$headend['transport']})";
+                                                    return "{$lineup['name']} — {$lineup['lineup']} ({$headend['transport']})";
                                                 }
                                             }
                                         }

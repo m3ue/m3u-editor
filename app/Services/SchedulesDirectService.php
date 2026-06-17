@@ -354,7 +354,7 @@ class SchedulesDirectService
         $userLineups = $this->getUserLineups($epg->sd_token);
 
         return collect($userLineups['lineups'] ?? [])
-            ->mapWithKeys(fn ($lineup) => [$lineup['lineup'] => "{$lineup['name']} ({$lineup['transport']})"])
+            ->mapWithKeys(fn ($lineup) => [$lineup['lineup'] => "{$lineup['name']} — {$lineup['lineup']} ({$lineup['transport']})"])
             ->all();
     }
 

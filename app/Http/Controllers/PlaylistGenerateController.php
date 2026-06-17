@@ -92,6 +92,7 @@ class PlaylistGenerateController extends Controller
         }
 
         $logoProxyEnabled = $playlist->enable_logo_proxy;
+        $tvgTypeoutputEnabled = $playlist->output_tvg_type ?? false;
 
         // Get the base URL
         $baseUrl = ProxyFacade::getBaseUrl();
@@ -106,7 +107,7 @@ class PlaylistGenerateController extends Controller
 
         // Get all active channels
         return response()->stream(
-            function () use ($cursor, $baseUrl, $playlist, $proxyEnabled, $logoProxyEnabled, $type, $usedAuth, $mfRewriteEnabled) {
+            function () use ($cursor, $baseUrl, $playlist, $proxyEnabled, $logoProxyEnabled, $type, $tvgTypeoutputEnabled, $usedAuth, $mfRewriteEnabled) {
                 // Set the auth details
                 if ($usedAuth) {
                     $username = urlencode($usedAuth->username);
@@ -256,6 +257,20 @@ class PlaylistGenerateController extends Controller
                     if ($epgShift) {
                         $extInf .= " tvg-shift=\"$epgShift\"";
                     }
+
+                    // Output TVG type if enabled
+                    if ($tvgTypeoutputEnabled) {
+                        $channelType = 'live'; // default for Live content
+
+                        // Channel specific tvg-type takes precedence, otherwise fallback to basic live/vod categorization
+                        if ($channel->tvg_type) {
+                            $channelType = $channel->tvg_type;
+                        } elseif ($channel->is_vod) {
+                            $channelType = 'movies'; // default for VOD
+                        }
+
+                        $extInf .= " tvg-type=\"{$channelType}\"";
+                    }
                     $tmdbId = $channel->tmdb_id ?: ($channel->info['tmdb_id'] ?? $channel->movie_data['tmdb_id'] ?? null);
                     if ($tmdbId) {
                         $extInf .= " tmdb-id=\"{$tmdbId}\"";
@@ -342,6 +357,11 @@ class PlaylistGenerateController extends Controller
                             $episodeTmdbId = $episode->tmdb_id ?: ($episode->info['tmdb_id'] ?? null) ?: $seriesTmdbId;
                             if ($episodeTmdbId) {
                                 $extInf .= " tmdb-id=\"{$episodeTmdbId}\"";
+                            }
+
+                            // Output TVG type if enabled
+                            if ($tvgTypeoutputEnabled) {
+                                $extInf .= ' tvg-type="tvshows"';
                             }
 
                             // Add season and episode information

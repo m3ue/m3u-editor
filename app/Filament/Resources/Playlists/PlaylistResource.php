@@ -2755,7 +2755,6 @@ class PlaylistResource extends Resource implements CopilotResource
                         ->schema([
                             Toggle::make('disable_catchup')
                                 ->label(__('Disable catch-up'))
-                                ->columnSpan(1)
                                 ->inline(false)
                                 ->default(false)
                                 ->hintIcon(
@@ -2765,7 +2764,6 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ->helperText(__('Strip all catch-up related attributes from the playlist output and Xtream API. Useful when your provider\\\'s catch-up doesn\\\'t work or is unreliable.')),
                             Toggle::make('disable_m3u_xtream_format')
                                 ->label(__('Disable Xtream URL format in M3U output'))
-                                ->columnSpan(1)
                                 ->inline(false)
                                 ->default(false)
                                 ->hintIcon(
@@ -2780,14 +2778,24 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ->dehydrated(fn (): bool => ! config('app.disable_m3u_xtream_format', false))
                                 ->disabled(fn (): bool => config('app.disable_m3u_xtream_format', false))
                                 ->helperText(config('app.disable_m3u_xtream_format', false) ? __('Already set by environment variable!') : __('Output the provider URL directly in M3U instead of routing through the internal Xtream URL format.')),
-                            Toggle::make('auto_channel_increment')
-                                ->label(__('Auto channel number increment'))
-                                ->columnSpan(1)
+                            Toggle::make('output_tvg_type')
+                                ->label(__('Enable TVG Type Output'))
                                 ->inline(false)
-                                ->live()
                                 ->default(false)
-                                ->helperText(__('If no channel number is set, output an automatically incrementing number.')),
+                                ->hintIcon(
+                                    'heroicon-m-question-mark-circle',
+                                    tooltip: 'This can be used by clients to better categorize channels.'
+                                )
+                                ->helperText(__('When enabled, a <tvg-type> tag will be included in the M3U output based on the channel type (live, vod, series).')),
+
                         ]),
+                    Toggle::make('auto_channel_increment')
+                        ->label(__('Auto channel number increment'))
+                        ->columnSpan(1)
+                        ->inline(false)
+                        ->live()
+                        ->default(false)
+                        ->helperText(__('If no channel number is set, output an automatically incrementing number.')),
                     TextInput::make('channel_start')
                         ->helperText(__('The starting channel number.'))
                         ->columnSpan(1)

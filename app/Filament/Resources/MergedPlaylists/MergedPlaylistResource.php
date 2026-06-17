@@ -248,27 +248,36 @@ class MergedPlaylistResource extends Resource implements CopilotResource
                 ->collapsed($creating)
                 ->columns(2)
                 ->schema([
+                    Toggle::make('disable_m3u_xtream_format')
+                        ->label(__('Disable Xtream URL format in M3U output'))
+                        ->columnSpan(1)
+                        ->inline(false)
+                        ->default(false)
+                        ->hintIcon(
+                            'heroicon-m-question-mark-circle',
+                            tooltip: 'When enabled, the provider\'s original stream URL will be used directly in M3U output instead of the internal Xtream-format URL.'
+                        )
+                        ->afterStateHydrated(function (Toggle $component) {
+                            if (config('app.disable_m3u_xtream_format', false)) {
+                                $component->state(true);
+                            }
+                        })
+                        ->dehydrated(fn (): bool => ! config('app.disable_m3u_xtream_format', false))
+                        ->disabled(fn (): bool => config('app.disable_m3u_xtream_format', false))
+                        ->helperText(config('app.disable_m3u_xtream_format', false) ? 'Already set by environment variable!' : __('Output the provider URL directly in M3U instead of routing through the internal Xtream URL format.')),
+                    Toggle::make('output_tvg_type')
+                        ->label(__('Enable TVG Type Output'))
+                        ->inline(false)
+                        ->default(false)
+                        ->hintIcon(
+                            'heroicon-m-question-mark-circle',
+                            tooltip: 'This can be used by clients to better categorize channels.'
+                        )
+                        ->helperText(__('When enabled, a <tvg-type> tag will be included in the M3U output based on the channel type (live, vod, series).')),
                     ComponentsGroup::make()
                         ->columnSpanFull()
                         ->columns(2)
                         ->schema([
-                            Toggle::make('disable_m3u_xtream_format')
-                                ->label(__('Disable Xtream URL format in M3U output'))
-                                ->columnSpan(1)
-                                ->inline(false)
-                                ->default(false)
-                                ->hintIcon(
-                                    'heroicon-m-question-mark-circle',
-                                    tooltip: 'When enabled, the provider\'s original stream URL will be used directly in M3U output instead of the internal Xtream-format URL.'
-                                )
-                                ->afterStateHydrated(function (Toggle $component) {
-                                    if (config('app.disable_m3u_xtream_format', false)) {
-                                        $component->state(true);
-                                    }
-                                })
-                                ->dehydrated(fn (): bool => ! config('app.disable_m3u_xtream_format', false))
-                                ->disabled(fn (): bool => config('app.disable_m3u_xtream_format', false))
-                                ->helperText(config('app.disable_m3u_xtream_format', false) ? 'Already set by environment variable!' : __('Output the provider URL directly in M3U instead of routing through the internal Xtream URL format.')),
                             Toggle::make('auto_channel_increment')
                                 ->label(__('Auto channel number increment'))
                                 ->columnSpan(1)
@@ -276,14 +285,14 @@ class MergedPlaylistResource extends Resource implements CopilotResource
                                 ->live()
                                 ->default(false)
                                 ->helperText(__('If no channel number is set, output an automatically incrementing number.')),
+                            TextInput::make('channel_start')
+                                ->helperText(__('The starting channel number.'))
+                                ->columnSpan(1)
+                                ->rules(['min:1'])
+                                ->type('number')
+                                ->hidden(fn (Get $get): bool => ! $get('auto_channel_increment'))
+                                ->required(),
                         ]),
-                    TextInput::make('channel_start')
-                        ->helperText(__('The starting channel number.'))
-                        ->columnSpan(1)
-                        ->rules(['min:1'])
-                        ->type('number')
-                        ->hidden(fn (Get $get): bool => ! $get('auto_channel_increment'))
-                        ->required(),
                 ]),
             Section::make(__('EPG Output'))
                 ->description(__('EPG output options'))
@@ -599,7 +608,7 @@ class MergedPlaylistResource extends Resource implements CopilotResource
                             Tab::make(__('Xtream API'))
                                 ->columns(2)
                                 ->icon('heroicon-m-bolt')
-                                ->schema([
+                                ->schema(array_filter([
                                     Section::make(__('Xtream API'))
                                         ->compact()
                                         ->description(__('Xtream API connection details.'))
@@ -609,24 +618,12 @@ class MergedPlaylistResource extends Resource implements CopilotResource
                                             XtreamApiInfo::make('xtream_api_info')
                                                 ->label(__('Xtream API Info'))
                                                 ->columnSpan(2)
-                                                ->dehydrated(false),
+                                                ->dehydrated(false), // don't save the value in the database
                                         ]),
-                                ]),
-
-                            ...(PlaylistFacade::mediaFlowProxyEnabled() ? [
-                                Tab::make(__('MediaFlow Proxy'))
-                                    ->columns(2)
-                                    ->icon('heroicon-m-shield-check')
-                                    ->schema([
-                                        Section::make(__('MediaFlow Proxy'))
-                                            ->compact()
-                                            ->icon('heroicon-m-shield-check')
-                                            ->columnSpan(2)
-                                            ->schema([
-                                                Livewire::make(MediaFlowProxyUrl::class, ['section' => 'all']),
-                                            ]),
-                                    ]),
-                            ] : []),
+                                    PlaylistFacade::mediaFlowProxyEnabled()
+                                        ? Livewire::make(MediaFlowProxyUrl::class, ['section' => 'xtream'])
+                                        : null,
+                                ])),
 
                             Tab::make(__('Output'))
                                 ->columns(2)

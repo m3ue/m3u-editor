@@ -1646,7 +1646,7 @@ class ChannelResource extends Resource implements CopilotResource
                         ->columnSpan(1)
                         ->rules(['numeric', 'min:0']),
                     Grid::make()
-                        ->columnSpanFull()
+                        ->columnSpan(1)
                         ->schema([
                             Hidden::make('group'),
                             Select::make('group_id')
@@ -1664,12 +1664,20 @@ class ChannelResource extends Resource implements CopilotResource
                                 ->rules(['numeric', 'min:0']),
                         ])->hidden(fn (Get $get) => ! $get('playlist_id')),
                     TextInput::make('group')
-                        ->columnSpanFull()
                         ->placeholder(__('Enter a group title'))
                         ->hint(__('group-title'))
                         ->hidden(! $edit)
                         ->rules(['min:1', 'max:255'])
                         ->hidden(fn (Get $get) => ! $get('custom_playlist_id')),
+                    TextInput::make('tvg_type')
+                        ->label(__('TVG Type'))
+                        ->hint(__('tvg-type'))
+                        ->hintIcon(
+                            'heroicon-m-question-mark-circle',
+                            tooltip: 'Typically used to specify stream type, e.g.: "live", "movies", "tvshows", etc.',
+                        )
+                        ->rules(['min:1', 'max:255'])
+                        ->columnSpan(1),
                 ]),
             Fieldset::make(__('URL Settings'))
                 ->schema([

@@ -319,42 +319,31 @@ class CustomPlaylistResource extends Resource implements CopilotResource
                 ->collapsed($creating)
                 ->columns(2)
                 ->schema([
-                    ComponentsGroup::make()
-                        ->columnSpanFull()
-                        ->columns(2)
-                        ->schema([
-                            Toggle::make('disable_m3u_xtream_format')
-                                ->label(__('Disable Xtream URL format in M3U output'))
-                                ->columnSpan(1)
-                                ->inline(false)
-                                ->default(false)
-                                ->hintIcon(
-                                    'heroicon-m-question-mark-circle',
-                                    tooltip: 'When enabled, the provider\'s original stream URL will be used directly in M3U output instead of the internal Xtream-format URL.'
-                                )
-                                ->afterStateHydrated(function (Toggle $component) {
-                                    if (config('app.disable_m3u_xtream_format', false)) {
-                                        $component->state(true);
-                                    }
-                                })
-                                ->dehydrated(fn (): bool => ! config('app.disable_m3u_xtream_format', false))
-                                ->disabled(fn (): bool => config('app.disable_m3u_xtream_format', false))
-                                ->helperText(config('app.disable_m3u_xtream_format', false) ? 'Already set by environment variable!' : __('Output the provider URL directly in M3U instead of routing through the internal Xtream URL format.')),
-                            Toggle::make('auto_channel_increment')
-                                ->label(__('Auto channel number increment'))
-                                ->columnSpan(1)
-                                ->inline(false)
-                                ->live()
-                                ->default(false)
-                                ->helperText(__('If no channel number is set, output an automatically incrementing number.')),
-                        ]),
-                    TextInput::make('channel_start')
-                        ->helperText(__('The starting channel number.'))
-                        ->columnSpan(1)
-                        ->rules(['min:1'])
-                        ->type('number')
-                        ->hidden(fn (Get $get): bool => ! $get('auto_channel_increment'))
-                        ->required(),
+                    Toggle::make('disable_m3u_xtream_format')
+                        ->label(__('Disable Xtream URL format in M3U output'))
+                        ->inline(false)
+                        ->default(false)
+                        ->hintIcon(
+                            'heroicon-m-question-mark-circle',
+                            tooltip: 'When enabled, the provider\'s original stream URL will be used directly in M3U output instead of the internal Xtream-format URL.'
+                        )
+                        ->afterStateHydrated(function (Toggle $component) {
+                            if (config('app.disable_m3u_xtream_format', false)) {
+                                $component->state(true);
+                            }
+                        })
+                        ->dehydrated(fn (): bool => ! config('app.disable_m3u_xtream_format', false))
+                        ->disabled(fn (): bool => config('app.disable_m3u_xtream_format', false))
+                        ->helperText(config('app.disable_m3u_xtream_format', false) ? 'Already set by environment variable!' : __('Output the provider URL directly in M3U instead of routing through the internal Xtream URL format.')),
+                    Toggle::make('output_tvg_type')
+                        ->label(__('Enable TVG Type Output'))
+                        ->inline(false)
+                        ->default(false)
+                        ->hintIcon(
+                            'heroicon-m-question-mark-circle',
+                            tooltip: 'This can be used by clients to better categorize channels.'
+                        )
+                        ->helperText(__('When enabled, a <tvg-type> tag will be included in the M3U output based on the channel type (live, vod, series).')),
                     Grid::make()
                         ->columns(2)
                         ->columnSpanFull()
@@ -377,6 +366,25 @@ class CustomPlaylistResource extends Resource implements CopilotResource
                                 )
                                 ->default(false)
                                 ->helperText(__('When enabled, VOD channels will be included in the M3U output.')),
+                        ]),
+                    ComponentsGroup::make()
+                        ->columnSpanFull()
+                        ->columns(2)
+                        ->schema([
+                            Toggle::make('auto_channel_increment')
+                                ->label(__('Auto channel number increment'))
+                                ->columnSpan(1)
+                                ->inline(false)
+                                ->live()
+                                ->default(false)
+                                ->helperText(__('If no channel number is set, output an automatically incrementing number.')),
+                            TextInput::make('channel_start')
+                                ->helperText(__('The starting channel number.'))
+                                ->columnSpan(1)
+                                ->rules(['min:1'])
+                                ->type('number')
+                                ->hidden(fn (Get $get): bool => ! $get('auto_channel_increment'))
+                                ->required(),
                         ]),
                 ]),
             Section::make(__('EPG Output'))
