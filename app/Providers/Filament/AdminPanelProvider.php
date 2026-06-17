@@ -14,6 +14,8 @@ use App\Filament\Pages\M3uProxyStreamMonitor;
 use App\Filament\Pages\PluginsDashboard;
 use App\Filament\Pages\Preferences;
 use App\Filament\Pages\ReleaseLogs;
+use App\Filament\Pages\RequestContent;
+use App\Filament\Resources\ArrIntegrations\ArrIntegrationResource;
 use App\Filament\Resources\Assets\AssetResource;
 use App\Filament\Resources\Categories\CategoryResource;
 use App\Filament\Resources\Channels\ChannelResource;
@@ -214,6 +216,8 @@ class AdminPanelProvider extends PanelProvider
                             ->icon('heroicon-m-server-stack')
                             ->items([
                                 ...MediaServerIntegrationResource::getNavigationItems(),
+                                ...ArrIntegrationResource::getNavigationItems(),
+                                ...RequestContent::getNavigationItems(),
                                 ...(config('proxy.proxy_integration_enabled', true) ? NetworkResource::getNavigationItems() : []),
                             ]),
                         NavigationGroup::make(fn () => __('Live Channels'))
