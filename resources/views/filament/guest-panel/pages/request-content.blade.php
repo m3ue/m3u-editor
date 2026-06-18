@@ -1,49 +1,20 @@
 <x-filament-panels::page>
-    @if($this->integration)
+    @if($this->integrations->isNotEmpty())
         <x-filament::section>
             <x-slot name="heading">
                 {{ __('Search & Request') }}
             </x-slot>
             <x-slot name="description">
-                {{ __('Request TV shows or movies to be added to :playlist via :integration.', [
+                {{ __('Request TV shows or movies to be added to :playlist.', [
                     'playlist' => $playlistName ?? 'your playlist',
-                    'integration' => $this->integration->name,
                 ]) }}
             </x-slot>
 
-            {{-- For multiple integrations, render one ArrSearch per integration. --}}
-            @if($this->integrations->count() > 1)
-                <div x-data="{ active: {{ $this->integrations->first()->id }} }">
-                    <div class="mb-4 flex flex-wrap gap-2">
-                        @foreach($this->integrations as $integrationOption)
-                            <button
-                                type="button"
-                                @click="active = {{ $integrationOption->id }}"
-                                :class="active === {{ $integrationOption->id }} ? 'bg-primary-600 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300'"
-                                class="px-3 py-1.5 rounded-md text-sm font-medium transition-colors"
-                            >
-                                {{ $integrationOption->name }}
-                            </button>
-                        @endforeach
-                    </div>
-
-                    @foreach($this->integrations as $integrationOption)
-                        <div x-show="active === {{ $integrationOption->id }}" x-cloak>
-                            <livewire:arr-search
-                                :integration-id="$integrationOption->id"
-                                :guest-mode="true"
-                                :wire:key="'arr-search-'.$integrationOption->id"
-                            />
-                        </div>
-                    @endforeach
-                </div>
-            @else
-                <livewire:arr-search
-                    :integration-id="$this->integration->id"
-                    :guest-mode="true"
-                    :wire:key="'arr-search-'.$this->integration->id"
-                />
-            @endif
+            <livewire:arr-search
+                :guest-integration-ids="$this->integrations->pluck('id')->all()"
+                :guest-mode="true"
+                wire:key="arr-search-guest"
+            />
         </x-filament::section>
     @else
         <x-filament::section>

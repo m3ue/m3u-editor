@@ -65,6 +65,13 @@ interface ArrIntegrationInterface
     public function downloadRelease(array $payload): array;
 
     /**
+     * Trigger an automatic search for content already in the library.
+     *
+     * @return array{ok: bool, error?: string}
+     */
+    public function triggerAutomaticSearch(int $contentId): array;
+
+    /**
      * Fetch the current download queue.
      *
      * @return array<int, array<string, mixed>>
@@ -75,4 +82,11 @@ interface ArrIntegrationInterface
      * The integration this service was constructed for.
      */
     public function getIntegration(): ArrIntegration;
+
+    /**
+     * Fetch all TMDB IDs currently in the library (for library cross-reference).
+     *
+     * @return array<int>
+     */
+    public function fetchLibraryTmdbIds(): array;
 }

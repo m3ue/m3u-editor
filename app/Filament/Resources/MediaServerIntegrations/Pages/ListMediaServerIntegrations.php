@@ -3,7 +3,7 @@
 namespace App\Filament\Resources\MediaServerIntegrations\Pages;
 
 use App\Filament\Resources\MediaServerIntegrations\MediaServerIntegrationResource;
-use Filament\Actions\CreateAction;
+use App\Filament\Resources\MediaServerIntegrations\Widgets\ArrIntegrationsWidget;
 use Filament\Resources\Pages\ListRecords;
 use Illuminate\Contracts\Support\Htmlable;
 
@@ -13,14 +13,13 @@ class ListMediaServerIntegrations extends ListRecords
 
     public function getSubheading(): string|Htmlable|null
     {
-        return __('Access your media server content directly within M3U Editor by integrating with popular media servers like Emby and Jellyfin, or directly via mount points. An associated playlist will be automatically created for each integration to manage content like you would for any other playlist.');
+        return __('Connect media servers (Emby, Jellyfin, Plex), local media libraries, WebDAV shares, and download servers (Sonarr, Radarr) — all from one place.');
     }
 
-    protected function getHeaderActions(): array
+    protected function getFooterWidgets(): array
     {
         return [
-            CreateAction::make()
-                ->label(__('Add Media Server')),
+            ArrIntegrationsWidget::class,
         ];
     }
 }

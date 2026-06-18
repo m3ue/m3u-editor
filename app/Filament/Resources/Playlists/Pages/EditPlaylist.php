@@ -9,6 +9,7 @@ use App\Filament\Resources\Playlists\PlaylistResource;
 use App\Filament\Resources\Playlists\Widgets\ImportProgress;
 use App\Models\DvrSetting;
 use App\Models\Playlist;
+use App\Models\PlaylistRequestSetting;
 use Filament\Actions\ViewAction;
 use Filament\Resources\Pages\EditRecord;
 
@@ -108,6 +109,8 @@ class EditPlaylist extends EditRecord
             $data['dvr_default_series_keep_last'] = null;
         }
 
+        $data['request_enabled'] = $record->requestSetting?->enabled ?? false;
+
         return $data;
     }
 
@@ -120,7 +123,7 @@ class EditPlaylist extends EditRecord
     protected function mutateFormDataBeforeSave(array $data): array
     {
         foreach (array_keys($data) as $key) {
-            if (str_starts_with($key, 'dvr_')) {
+            if (str_starts_with($key, 'dvr_') || str_starts_with($key, 'request_')) {
                 unset($data[$key]);
             }
         }
@@ -129,7 +132,7 @@ class EditPlaylist extends EditRecord
     }
 
     /**
-     * Save dvr_ prefixed fields back to the dvrSetting HasOne relationship.
+     * Save dvr_ and request_ prefixed fields back to their respective HasOne relationships.
      */
     protected function afterSave(): void
     {
@@ -137,29 +140,37 @@ class EditPlaylist extends EditRecord
         $record = $this->getRecord();
         $data = $this->form->getRawState();
 
-        if (! isset($data['dvr_enabled'])) {
-            return;
+        if (isset($data['dvr_enabled'])) {
+            DvrSetting::updateOrCreate(
+                ['playlist_id' => $record->id],
+                [
+                    'user_id' => $record->user_id,
+                    'enabled' => $data['dvr_enabled'] ?? false,
+                    'use_proxy' => true,
+                    'dvr_output_format' => $data['dvr_output_format'] ?? 'ts',
+                    'max_concurrent_recordings' => $data['dvr_max_concurrent_recordings'] ?? 2,
+                    'default_start_early_seconds' => $data['dvr_default_start_early_seconds'] ?? 30,
+                    'default_end_late_seconds' => $data['dvr_default_end_late_seconds'] ?? 60,
+                    'retention_days' => $data['dvr_retention_days'] ?? 0,
+                    'global_disk_quota_gb' => $data['dvr_global_disk_quota_gb'] ?? 0,
+                    'enable_metadata_enrichment' => $data['dvr_enable_metadata_enrichment'] ?? true,
+                    'generate_nfo_files' => $data['dvr_generate_nfo_files'] ?? false,
+                    'enable_comskip' => $data['dvr_enable_comskip'] ?? false,
+                    'include_disabled_channels' => $data['dvr_include_disabled_channels'] ?? false,
+                    'default_series_mode' => $data['dvr_default_series_mode'] ?? DvrSeriesMode::UniqueSe->value,
+                    'default_series_keep_last' => ($data['dvr_default_series_keep_last'] > 0) ? $data['dvr_default_series_keep_last'] : null,
+                ]
+            );
         }
 
-        DvrSetting::updateOrCreate(
-            ['playlist_id' => $record->id],
-            [
-                'user_id' => $record->user_id,
-                'enabled' => $data['dvr_enabled'] ?? false,
-                'use_proxy' => true,
-                'dvr_output_format' => $data['dvr_output_format'] ?? 'ts',
-                'max_concurrent_recordings' => $data['dvr_max_concurrent_recordings'] ?? 2,
-                'default_start_early_seconds' => $data['dvr_default_start_early_seconds'] ?? 30,
-                'default_end_late_seconds' => $data['dvr_default_end_late_seconds'] ?? 60,
-                'retention_days' => $data['dvr_retention_days'] ?? 0,
-                'global_disk_quota_gb' => $data['dvr_global_disk_quota_gb'] ?? 0,
-                'enable_metadata_enrichment' => $data['dvr_enable_metadata_enrichment'] ?? true,
-                'generate_nfo_files' => $data['dvr_generate_nfo_files'] ?? false,
-                'enable_comskip' => $data['dvr_enable_comskip'] ?? false,
-                'include_disabled_channels' => $data['dvr_include_disabled_channels'] ?? false,
-                'default_series_mode' => $data['dvr_default_series_mode'] ?? DvrSeriesMode::UniqueSe->value,
-                'default_series_keep_last' => ($data['dvr_default_series_keep_last'] > 0) ? $data['dvr_default_series_keep_last'] : null,
-            ]
-        );
+        if (isset($data['request_enabled'])) {
+            PlaylistRequestSetting::updateOrCreate(
+                ['playlist_id' => $record->id],
+                [
+                    'user_id' => $record->user_id,
+                    'enabled' => $data['request_enabled'] ?? false,
+                ]
+            );
+        }
     }
 }

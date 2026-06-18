@@ -8,6 +8,7 @@ use App\Filament\Resources\ArrIntegrations\Pages\ListArrIntegrations;
 use App\Models\ArrIntegration;
 use App\Services\Arr\ArrService;
 use App\Traits\HasUserFiltering;
+use Carbon\Carbon;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Actions\BulkActionGroup;
@@ -61,6 +62,8 @@ class ArrIntegrationResource extends Resource
         return __('Integrations');
     }
 
+    protected static bool $shouldRegisterNavigation = false;
+
     protected static ?int $navigationSort = 105;
 
     /**
@@ -104,27 +107,12 @@ class ArrIntegrationResource extends Resource
                                 ->disabledOn('edit'),
                         ]),
 
-                        Grid::make(2)->schema([
-                            Select::make('playlist_id')
-                                ->label(__('Playlist'))
-                                ->relationship(
-                                    'playlist',
-                                    'name',
-                                    fn (Builder $query): Builder => $query->where('user_id', Auth::id())
-                                )
-                                ->required()
-                                ->searchable()
-                                ->preload()
-                                ->native(false)
-                                ->helperText(__('Content added via this integration will be requested in the context of this playlist.')),
-
-                            TextInput::make('url')
-                                ->label(__('Server URL'))
-                                ->placeholder('http://192.168.1.42:8989')
-                                ->required()
-                                ->url()
-                                ->maxLength(255),
-                        ]),
+                        TextInput::make('url')
+                            ->label(__('Server URL'))
+                            ->placeholder('http://192.168.1.42:8989')
+                            ->required()
+                            ->url()
+                            ->maxLength(255),
 
                         TextInput::make('api_key')
                             ->label(__('API Key'))
@@ -139,10 +127,7 @@ class ArrIntegrationResource extends Resource
                         Actions::make(self::getDiscoverActions())
                             ->fullWidth(),
 
-                        // Hidden fields populated by the Discover action
-                        Hidden::make('quality_profile_id'),
                         Hidden::make('quality_profile_name'),
-                        Hidden::make('root_folder_path'),
 
                         Grid::make(2)->schema([
                             Select::make('quality_profile_id')
@@ -157,6 +142,15 @@ class ArrIntegrationResource extends Resource
                                 })
                                 ->helperText(__('Discovered from the server — click "Test Connection & Discover" above to populate.'))
                                 ->visible(fn (Get $get): bool => filled($get('quality_profiles_options')))
+                                ->live()
+                                ->afterStateUpdated(function (Get $get, Set $set, $state): void {
+                                    $raw = $get('quality_profiles_options') ?? '[]';
+                                    $profiles = json_decode($raw, true) ?: [];
+                                    $profile = collect($profiles)->firstWhere('id', $state);
+                                    if ($profile) {
+                                        $set('quality_profile_name', $profile['name']);
+                                    }
+                                })
                                 ->native(false),
 
                             Select::make('root_folder_path')
@@ -192,9 +186,22 @@ class ArrIntegrationResource extends Resource
 
                         Toggle::make('guest_enabled')
                             ->label(__('Allow Guest Requests'))
-                            ->helperText(__('Allow guests on this playlist to request content via this integration.'))
+                            ->helperText(__('Allow guests to request content via this integration on any playlist that has content requests enabled.'))
                             ->default(false),
                     ]),
+
+                Section::make(__('Webhook'))
+                    ->description(__('Add this URL as a notification in Radarr/Sonarr (Settings → Connect → Webhook) for real-time queue updates.'))
+                    ->schema([
+                        TextInput::make('webhook_url')
+                            ->label(__('Webhook URL'))
+                            ->disabled()
+                            ->dehydrated(false)
+                            ->copyable()
+                            ->extraAttributes(['class' => 'font-mono text-xs'])
+                            ->helperText(__('Set "On Grab", "On Download", "On Movie Added", and "On Manual Interaction Required" triggers in Radarr/Sonarr.')),
+                    ])
+                    ->visible(fn (string $operation): bool => $operation === 'edit'),
 
                 Section::make(__('Status'))
                     ->schema([
@@ -203,7 +210,7 @@ class ArrIntegrationResource extends Resource
                                 ->label(__('Last Tested'))
                                 ->disabled()
                                 ->dehydrated(false)
-                                ->formatStateUsing(fn ($state) => $state ? $state->diffForHumans() : 'Never'),
+                                ->formatStateUsing(fn ($state) => $state ? Carbon::parse($state)->diffForHumans() : 'Never'),
 
                             TextInput::make('quality_profile_name')
                                 ->label(__('Active Quality Profile'))
@@ -229,12 +236,6 @@ class ArrIntegrationResource extends Resource
                     ->color(fn (string $state): string => $state === 'sonarr' ? 'info' : 'purple')
                     ->formatStateUsing(fn (string $state): string => ucfirst($state))
                     ->sortable(),
-
-                TextColumn::make('playlist.name')
-                    ->label(__('Playlist'))
-                    ->searchable()
-                    ->sortable()
-                    ->placeholder('—'),
 
                 TextColumn::make('url')
                     ->label(__('URL'))

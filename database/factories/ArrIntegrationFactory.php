@@ -3,7 +3,6 @@
 namespace Database\Factories;
 
 use App\Models\ArrIntegration;
-use App\Models\Playlist;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
@@ -21,7 +20,6 @@ class ArrIntegrationFactory extends Factory
     {
         return [
             'user_id' => User::factory(),
-            'playlist_id' => Playlist::factory(),
             'name' => fake()->company().' Arr',
             'type' => fake()->randomElement(['sonarr', 'radarr']),
             'url' => 'http://'.fake()->ipv4().':8989',

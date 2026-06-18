@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\ArrIntegrations\Pages;
 
 use App\Filament\Resources\ArrIntegrations\ArrIntegrationResource;
+use App\Filament\Resources\MediaServerIntegrations\MediaServerIntegrationResource;
 use App\Models\ArrIntegration;
 use App\Services\Arr\ArrService;
 use Filament\Actions\Action;
@@ -84,6 +85,6 @@ class EditArrIntegration extends EditRecord
 
     protected function getRedirectUrl(): string
     {
-        return $this->getResource()::getUrl('index');
+        return MediaServerIntegrationResource::getUrl('index');
     }
 }

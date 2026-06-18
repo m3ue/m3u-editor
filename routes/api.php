@@ -3,8 +3,16 @@
 use App\Http\Controllers\Api\DispatcharrController;
 use App\Http\Controllers\Api\EpgApiController;
 use App\Http\Controllers\Api\M3uProxyApiController;
+use App\Http\Controllers\ArrWebhookController;
 use App\Http\Controllers\DvrCallbackController;
 use Illuminate\Support\Facades\Route;
+
+/*
+ * Arr (Sonarr/Radarr) webhook receiver.
+ * Routed by the integration's unique webhook_secret so no additional auth header is needed.
+ */
+Route::post('webhooks/arr/{integration:webhook_secret}', [ArrWebhookController::class, 'receive'])
+    ->name('webhooks.arr');
 
 /*
  * EPG API routes

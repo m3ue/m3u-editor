@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\ArrIntegrations\Pages;
 
 use App\Filament\Resources\ArrIntegrations\ArrIntegrationResource;
+use App\Filament\Resources\MediaServerIntegrations\MediaServerIntegrationResource;
 use Filament\Resources\Pages\CreateRecord;
 use Illuminate\Support\Facades\Auth;
 
@@ -19,6 +20,6 @@ class CreateArrIntegration extends CreateRecord
 
     protected function getRedirectUrl(): string
     {
-        return $this->getResource()::getUrl('index');
+        return MediaServerIntegrationResource::getUrl('index');
     }
 }
