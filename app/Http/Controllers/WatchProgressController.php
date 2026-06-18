@@ -83,7 +83,7 @@ class WatchProgressController extends Controller
         $seriesId = $request->input('series_id') ? (int) $request->input('series_id') : null;
         $seasonNumber = $request->input('season_number') ? (int) $request->input('season_number') : null;
 
-        $completed = (bool) $request->input('completed', false);
+        $completed = $request->boolean('completed');
         if (! $completed && $durationSeconds && $durationSeconds > 0) {
             $completed = $positionSeconds >= ($durationSeconds * 0.9);
         }

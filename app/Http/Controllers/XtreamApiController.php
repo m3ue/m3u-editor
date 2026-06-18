@@ -2261,8 +2261,9 @@ class XtreamApiController extends Controller
         $seriesId = $request->input('series_id') ? (int) $request->input('series_id') : null;
         $seasonNumber = $request->input('season_number') ? (int) $request->input('season_number') : null;
 
-        // Auto-mark completed when position reaches 90% of duration
-        $completed = (bool) $request->input('completed', false);
+        // Auto-mark completed when position reaches 90% of duration.
+        // Use $request->boolean() so the string 'false' is treated as false, not truthy.
+        $completed = $request->boolean('completed');
         if (! $completed && $durationSeconds && $durationSeconds > 0) {
             $completed = $positionSeconds >= ($durationSeconds * 0.9);
         }
@@ -2351,7 +2352,8 @@ class XtreamApiController extends Controller
         $limit = min((int) $request->input('limit', 20), 100);
 
         $query = ViewerWatchProgress::where('playlist_viewer_id', $viewer->id)
-            ->orderByDesc('last_watched_at');
+            ->orderByDesc('last_watched_at')
+            ->with(['channel', 'episode.series']);
 
         if ($type && in_array($type, ['live', 'vod', 'episode'])) {
             $query->where('content_type', $type);
@@ -2359,7 +2361,47 @@ class XtreamApiController extends Controller
 
         $results = $query->limit($limit)->get();
 
-        return response()->json($results);
+        $enriched = $results->map(function (ViewerWatchProgress $progress): array {
+            $data = $progress->toArray();
+
+            if ($progress->content_type === 'episode') {
+                $episode = $progress->episode;
+                $series = $episode?->series;
+                $backdropPath = $series?->backdrop_path;
+
+                $data['title'] = $series?->name ?? $episode?->title ?? null;
+                $data['episode_title'] = $episode?->title ?? null;
+                $data['series_name'] = $series?->name ?? null;
+                $data['thumbnail_url'] = $episode?->cover ?? $series?->cover ?? null;
+                $data['backdrop_url'] = is_array($backdropPath) ? ($backdropPath[0] ?? null) : $backdropPath;
+                $data['rating'] = null;
+            } elseif ($progress->content_type === 'vod') {
+                $channel = $progress->channel;
+                $info = $channel?->info;
+                $backdropPath = is_array($info) ? ($info['backdrop_path'] ?? null) : null;
+
+                $data['title'] = $channel?->title ?? $channel?->name ?? null;
+                $data['episode_title'] = null;
+                $data['series_name'] = null;
+                $data['thumbnail_url'] = $channel?->logo ?? null;
+                $data['backdrop_url'] = is_array($backdropPath) ? ($backdropPath[0] ?? null) : $backdropPath;
+                $data['rating'] = $channel?->rating ?? null;
+            } else {
+                // live
+                $channel = $progress->channel;
+
+                $data['title'] = $channel?->title ?? $channel?->name ?? null;
+                $data['episode_title'] = null;
+                $data['series_name'] = null;
+                $data['thumbnail_url'] = $channel?->logo ?? null;
+                $data['backdrop_url'] = null;
+                $data['rating'] = null;
+            }
+
+            return $data;
+        });
+
+        return response()->json($enriched);
     }
 
     /**
