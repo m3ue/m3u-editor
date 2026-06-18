@@ -15,7 +15,6 @@ use App\Filament\Pages\PluginsDashboard;
 use App\Filament\Pages\Preferences;
 use App\Filament\Pages\ReleaseLogs;
 use App\Filament\Pages\RequestContent;
-use App\Filament\Resources\ArrIntegrations\ArrIntegrationResource;
 use App\Filament\Resources\Assets\AssetResource;
 use App\Filament\Resources\Categories\CategoryResource;
 use App\Filament\Resources\Channels\ChannelResource;
@@ -200,7 +199,6 @@ class AdminPanelProvider extends PanelProvider
                             ->icon('heroicon-m-server-stack')
                             ->items([
                                 ...MediaServerIntegrationResource::getNavigationItems(),
-                                ...ArrIntegrationResource::getNavigationItems(),
                                 ...RequestContent::getNavigationItems(),
                                 ...NetworkResource::getNavigationItems(),
                             ]),

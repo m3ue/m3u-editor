@@ -11,9 +11,11 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::table('dvr_settings', function (Blueprint $table) {
-            $table->boolean('include_disabled_channels')->default(false);
-        });
+        if (! Schema::hasColumn('dvr_settings', 'include_disabled_channels')) {
+            Schema::table('dvr_settings', function (Blueprint $table) {
+                $table->boolean('include_disabled_channels')->default(false);
+            });
+        }
     }
 
     /**

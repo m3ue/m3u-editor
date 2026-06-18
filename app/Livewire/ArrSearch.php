@@ -4,16 +4,29 @@ namespace App\Livewire;
 
 use App\Models\ArrIntegration;
 use App\Services\Arr\ArrService;
+use App\Services\Arr\SonarrService;
+use App\Services\TmdbService;
+use App\Services\TvMazeService;
 use Filament\Notifications\Notification;
+use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Facades\Cache;
 use Livewire\Component;
 
 /**
- * Shared Sonarr/Radarr search & request UI for admin and guest panels.
- * Renders a search box, result grid, and queue panel with optional polling.
+ * Unified Sonarr/Radarr search & request UI for admin and guest panels.
+ * Searches all enabled integrations simultaneously; content type (TV/movie)
+ * is derived from the integration that returned each result.
+ *
+ * Also provides a TMDB-powered discover/browse mode when TMDB is configured.
  */
 class ArrSearch extends Component
 {
-    public ?int $integrationId = null;
+    /**
+     * Guest-mode: restrict search to these specific integration IDs.
+     *
+     * @var array<int>
+     */
+    public array $guestIntegrationIds = [];
 
     public string $searchTerm = '';
 
@@ -27,34 +40,161 @@ class ArrSearch extends Component
     /** @var array<int, array<string, mixed>> */
     public array $queue = [];
 
-    public bool $queuePolling = true;
+    public bool $queuePolling = false;
 
-    public function mount(?int $integrationId = null, bool $guestMode = false): void
+    public bool $showDetail = false;
+
+    /** @var array<string, mixed>|null */
+    public ?array $detailResult = null;
+
+    public ?int $detailIndex = null;
+
+    public ?int $detailIntegrationId = null;
+
+    /** @var array<int, bool> keyed by seasonNumber */
+    public array $selectedSeasons = [];
+
+    /**
+     * Episodes fetched from TV Maze, keyed by seasonNumber.
+     *
+     * @var array<int, array<int, array{seasonNumber: int, episodeNumber: int, title: string, airDate: ?string, overview: ?string}>>
+     */
+    public array $detailEpisodes = [];
+
+    /**
+     * Cast fetched from TV Maze.
+     *
+     * @var array<int, array{actor: string, character: string, photo: ?string}>
+     */
+    public array $detailCast = [];
+
+    /**
+     * Interactive search releases for the currently open detail panel.
+     *
+     * @var array<int, array<string, mixed>>
+     */
+    public array $detailReleases = [];
+
+    /**
+     * Per-episode hasFile status fetched from Sonarr for an in-library series.
+     * Keyed seasonNumber => [episodeNumber => hasFile].
+     *
+     * @var array<int, array<int, bool>>
+     */
+    public array $detailSonarrEpisodeStatus = [];
+
+    public bool $releasesLoading = false;
+
+    // ── Discover ──────────────────────────────────────────────────────────────
+
+    public bool $tmdbConfigured = false;
+
+    public bool $discoverLoaded = false;
+
+    /** @var array<int, array<string, mixed>> */
+    public array $trendingItems = [];
+
+    /** @var array<int, array<string, mixed>> */
+    public array $popularMovies = [];
+
+    /** @var array<int, array<string, mixed>> */
+    public array $popularTv = [];
+
+    /** @var array<int, array<string, mixed>> */
+    public array $upcomingMovies = [];
+
+    /** @var array<int, array{id: int, name: string}> */
+    public array $movieGenres = [];
+
+    /** @var array<int, array{id: int, name: string}> */
+    public array $tvGenres = [];
+
+    public ?int $browseGenreId = null;
+
+    public ?string $browseGenreType = null;
+
+    /** @var array<int, array<string, mixed>> */
+    public array $browseResults = [];
+
+    public bool $browseLoading = false;
+
+    // ── Browse Filters ────────────────────────────────────────────────────────
+
+    public string $sortBy = 'popularity';
+
+    public ?int $yearFrom = null;
+
+    public ?int $yearTo = null;
+
+    public float $minRating = 0;
+
+    public int $minVoteCount = 0;
+
+    public ?int $minRuntime = null;
+
+    public ?int $maxRuntime = null;
+
+    public string $originalLanguage = '';
+
+    public string $watchRegion = 'US';
+
+    /** @var array<int, int> Selected streaming provider IDs */
+    public array $selectedProviders = [];
+
+    /** @var array<int, int> Selected TV status values (0=Returning, 3=Ended, 4=Canceled, etc.) */
+    public array $tvStatuses = [];
+
+    /** @var array<int, array{id: int, name: string, logo: string|null}> Loaded from TMDB for current region+type */
+    public array $availableProviders = [];
+
+    public function mount(array $guestIntegrationIds = [], bool $guestMode = false): void
     {
-        $this->integrationId = $integrationId;
+        $this->guestIntegrationIds = $guestIntegrationIds;
         $this->guestMode = $guestMode;
+        $this->queuePolling = $guestMode;
+        $this->tmdbConfigured = app(TmdbService::class)->isConfigured();
 
-        $this->loadQueue();
-    }
-
-    public function getIntegrationProperty(): ?ArrIntegration
-    {
-        if (! $this->integrationId) {
-            return null;
+        if ($guestMode) {
+            $this->loadQueue();
         }
-
-        return ArrIntegration::find($this->integrationId);
     }
 
     /**
-     * Re-fetch the queue when the active integration changes.
+     * Integration used by the currently open detail panel.
      */
-    public function updatedIntegrationId(): void
+    public function getDetailIntegrationProperty(): ?ArrIntegration
     {
-        $this->results = [];
-        $this->searchTerm = '';
-        $this->loadQueue();
+        if (! $this->detailIntegrationId) {
+            return null;
+        }
+
+        return ArrIntegration::find($this->detailIntegrationId);
     }
+
+    /**
+     * Integrations to search.
+     * Admin: all enabled integrations for the authenticated user.
+     * Guest: only integrations in $guestIntegrationIds.
+     *
+     * @return Collection<int, ArrIntegration>
+     */
+    public function getIntegrationsForSearchProperty(): Collection
+    {
+        if ($this->guestMode && count($this->guestIntegrationIds) > 0) {
+            return ArrIntegration::whereIn('id', $this->guestIntegrationIds)
+                ->where('enabled', true)
+                ->orderBy('name')
+                ->get();
+        }
+
+        return ArrIntegration::query()
+            ->where('user_id', auth()->id())
+            ->where('enabled', true)
+            ->orderBy('name')
+            ->get();
+    }
+
+    // ── Search ────────────────────────────────────────────────────────────────
 
     /**
      * Debounced search trigger.
@@ -66,59 +206,63 @@ class ArrSearch extends Component
 
     public function search(): void
     {
-        $integration = $this->integration;
-        if (! $integration || strlen(trim($this->searchTerm)) < 2) {
+        if (strlen(trim($this->searchTerm)) < 2) {
             $this->results = [];
 
             return;
         }
 
         $this->isSearching = true;
+        $this->results = [];
 
-        try {
-            $this->results = ArrService::make($integration)->search($this->searchTerm);
-        } catch (\Exception $e) {
-            Notification::make()
-                ->danger()
-                ->title(__('Search Failed'))
-                ->body($e->getMessage())
-                ->send();
+        $integrations = $this->integrationsForSearch;
 
-            $this->results = [];
+        foreach ($integrations as $integration) {
+            try {
+                $items = ArrService::make($integration)->search($this->searchTerm);
+                foreach ($items as $item) {
+                    $this->results[] = array_merge($item, [
+                        'integrationId' => $integration->id,
+                        'integrationName' => $integration->name,
+                        'integrationType' => $integration->type,
+                    ]);
+                }
+            } catch (\Exception) {
+                // Skip failed integrations silently
+            }
         }
 
         $this->isSearching = false;
     }
 
     /**
-     * Request a single result. Honours integration defaults if no override passed.
-     *
-     * @param  int  $index  index into $this->results
+     * Request a single result. Routes to the correct integration based on the result.
      */
     public function request(int $index, ?int $qualityProfileId = null, ?string $rootFolderPath = null): void
     {
-        $integration = $this->integration;
-        if (! $integration) {
-            return;
-        }
-
         if (! isset($this->results[$index])) {
             return;
         }
 
         $item = $this->results[$index];
+        $integration = ArrIntegration::find($item['integrationId'] ?? null);
+
+        if (! $integration) {
+            return;
+        }
+
         $isSonarr = $integration->isSonarr();
 
         $payload = [
             'title' => $item['title'] ?? null,
             'titleSlug' => $item['titleSlug'] ?? null,
+            'images' => $item['images'] ?? [],
             'qualityProfileId' => $qualityProfileId ?? $integration->quality_profile_id,
             'rootFolderPath' => $rootFolderPath ?? $integration->root_folder_path,
             'searchForMissingEpisodes' => true,
             'searchForMovie' => true,
         ];
 
-        // External ID key differs per platform
         $externalKey = $isSonarr ? 'tvdbId' : 'tmdbId';
         $payload[$externalKey] = $item[$externalKey] ?? null;
 
@@ -134,7 +278,378 @@ class ArrSearch extends Component
                 ]))
                 ->send();
 
-            // Refresh queue shortly after to show the new download
+            $this->loadQueue();
+        } else {
+            Notification::make()
+                ->danger()
+                ->title(__('Request Failed'))
+                ->body($result['error'] ?? 'Unknown error')
+                ->send();
+        }
+    }
+
+    public function openDetail(int $index): void
+    {
+        if (! isset($this->results[$index])) {
+            return;
+        }
+
+        $this->detailIndex = $index;
+        $this->detailResult = $this->results[$index];
+        $this->detailIntegrationId = (int) ($this->detailResult['integrationId'] ?? 0) ?: null;
+
+        // Pre-check all seasons except specials (season 0)
+        $this->selectedSeasons = collect($this->detailResult['seasons'] ?? [])
+            ->mapWithKeys(fn ($s) => [(int) $s['seasonNumber'] => (int) $s['seasonNumber'] !== 0])
+            ->all();
+
+        $this->detailEpisodes = [];
+        $this->detailCast = [];
+        $this->showDetail = true;
+    }
+
+    public function closeDetail(): void
+    {
+        $this->showDetail = false;
+        $this->detailResult = null;
+        $this->detailIndex = null;
+        $this->detailIntegrationId = null;
+        $this->selectedSeasons = [];
+        $this->detailEpisodes = [];
+        $this->detailCast = [];
+        $this->detailReleases = [];
+        $this->detailSonarrEpisodeStatus = [];
+        $this->releasesLoading = false;
+    }
+
+    /**
+     * Fetch episode data from TV Maze for the currently open detail panel.
+     * Triggered by Alpine after the panel opens so it doesn't block the slide-over appearing.
+     */
+    public function loadDetailEpisodes(): void
+    {
+        if (! $this->detailResult) {
+            return;
+        }
+
+        if ($this->detailIntegration?->isSonarr()) {
+            $tvdbId = (int) ($this->detailResult['tvdbId'] ?? 0);
+
+            if (! $tvdbId) {
+                return;
+            }
+
+            try {
+                $data = app(TvMazeService::class)->fetchSeriesData($tvdbId);
+                $this->detailEpisodes = $data['episodes'];
+                $this->detailCast = $data['cast'];
+            } catch (\Exception) {
+                $this->detailEpisodes = [];
+                $this->detailCast = [];
+            }
+
+            // Fetch authoritative per-episode hasFile status from Sonarr when the
+            // series is already in the library — this is the reliable source for
+            // download status, not the lookup's statistics fields.
+            $libraryId = (int) ($this->detailResult['libraryId'] ?? 0);
+
+            if ($libraryId) {
+                $service = ArrService::make($this->detailIntegration);
+
+                if ($service instanceof SonarrService) {
+                    try {
+                        $this->detailSonarrEpisodeStatus = $service->fetchEpisodes($libraryId);
+                    } catch (\Exception) {
+                        $this->detailSonarrEpisodeStatus = [];
+                    }
+                }
+            }
+
+            return;
+        }
+
+        if ($this->detailIntegration?->isRadarr()) {
+            $tmdbId = (int) ($this->detailResult['tmdbId'] ?? 0);
+
+            if (! $tmdbId) {
+                return;
+            }
+
+            $this->detailCast = app(TmdbService::class)->getMovieCast($tmdbId);
+        }
+    }
+
+    /**
+     * Trigger an automatic search in Sonarr/Radarr for a library item.
+     * Admin only — not available in guest mode.
+     */
+    public function triggerAutomaticSearch(): void
+    {
+        if ($this->guestMode || ! $this->detailResult || ! $this->detailIntegration) {
+            return;
+        }
+
+        $libraryId = $this->resolveLibraryId();
+
+        if (! $libraryId) {
+            Notification::make()
+                ->warning()
+                ->title(__('Not in Library'))
+                ->body(__('This title must be added to the library before triggering a search.'))
+                ->send();
+
+            return;
+        }
+
+        $result = ArrService::make($this->detailIntegration)->triggerAutomaticSearch($libraryId);
+
+        if ($result['ok']) {
+            Notification::make()
+                ->success()
+                ->title(__('Search Triggered'))
+                ->body(__('Sonarr/Radarr is now searching for releases of :title.', [
+                    'title' => $this->detailResult['title'] ?? 'this title',
+                ]))
+                ->send();
+        } else {
+            Notification::make()
+                ->danger()
+                ->title(__('Search Failed'))
+                ->body($result['error'] ?? 'Unknown error')
+                ->send();
+        }
+    }
+
+    /**
+     * Fetch interactive search releases for the currently open detail panel.
+     * Admin only — not available in guest mode.
+     */
+    public function loadDetailReleases(): void
+    {
+        if ($this->guestMode || ! $this->detailResult || ! $this->detailIntegration) {
+            return;
+        }
+
+        $libraryId = $this->resolveLibraryId();
+
+        if (! $libraryId) {
+            Notification::make()
+                ->warning()
+                ->title(__('Not in Library'))
+                ->body(__('Add this title to the library first to perform an interactive search.'))
+                ->send();
+
+            return;
+        }
+
+        $this->releasesLoading = true;
+        $this->detailReleases = [];
+
+        try {
+            $this->detailReleases = ArrService::make($this->detailIntegration)->fetchReleases($libraryId);
+        } catch (\Exception) {
+            Notification::make()
+                ->danger()
+                ->title(__('Search Failed'))
+                ->body(__('Could not fetch releases from the indexer.'))
+                ->send();
+        }
+
+        $this->releasesLoading = false;
+    }
+
+    /**
+     * Download a specific release selected from the interactive search.
+     * Admin only — not available in guest mode.
+     */
+    public function downloadDetailRelease(string $guid, int $indexerId): void
+    {
+        if ($this->guestMode || ! $this->detailResult || ! $this->detailIntegration) {
+            return;
+        }
+
+        $libraryId = $this->resolveLibraryId();
+
+        if (! $libraryId) {
+            return;
+        }
+
+        $isSonarr = $this->detailIntegration->isSonarr();
+
+        $payload = [
+            'guid' => $guid,
+            'indexerId' => $indexerId,
+            $isSonarr ? 'seriesId' : 'movieId' => $libraryId,
+        ];
+
+        $result = ArrService::make($this->detailIntegration)->downloadRelease($payload);
+
+        if ($result['ok']) {
+            Notification::make()
+                ->success()
+                ->title(__('Download Started'))
+                ->body(__('The release has been sent to your download client.'))
+                ->send();
+
+            $this->detailReleases = [];
+        } else {
+            Notification::make()
+                ->danger()
+                ->title(__('Download Failed'))
+                ->body($result['error'] ?? 'Unknown error')
+                ->send();
+        }
+    }
+
+    /**
+     * Resolve the Sonarr/Radarr internal library ID for the current detail result.
+     * Uses the cached libraryId from the search result, falling back to checkExists().
+     */
+    private function resolveLibraryId(): ?int
+    {
+        if (! $this->detailResult || ! $this->detailIntegration) {
+            return null;
+        }
+
+        $libraryId = $this->detailResult['libraryId'] ?? null;
+
+        if ($libraryId) {
+            return (int) $libraryId;
+        }
+
+        $isSonarr = $this->detailIntegration->isSonarr();
+        $externalId = $isSonarr
+            ? (int) ($this->detailResult['tvdbId'] ?? 0)
+            : (int) ($this->detailResult['tmdbId'] ?? 0);
+
+        if (! $externalId) {
+            return null;
+        }
+
+        try {
+            $check = ArrService::make($this->detailIntegration)->checkExists($externalId);
+
+            return $check['exists'] ? ($check['id'] ?? null) : null;
+        } catch (\Exception) {
+            return null;
+        }
+    }
+
+    public function toggleAllSeasons(bool $checked): void
+    {
+        $this->selectedSeasons = collect($this->selectedSeasons)
+            ->map(fn () => $checked)
+            ->all();
+    }
+
+    /**
+     * Request a single episode from the detail panel (Sonarr only).
+     * Adds the series with all seasons unmonitored if it is not yet in the library,
+     * then monitors and searches the specific episode.
+     */
+    public function requestEpisode(int $seasonNumber, int $episodeNumber): void
+    {
+        $integration = $this->detailIntegration;
+
+        if (! $integration || ! $this->detailResult || ! $integration->isSonarr()) {
+            return;
+        }
+
+        $tvdbId = (int) ($this->detailResult['tvdbId'] ?? 0);
+
+        if (! $tvdbId) {
+            return;
+        }
+
+        $result = ArrService::make($integration)->requestEpisode(
+            $tvdbId,
+            $seasonNumber,
+            $episodeNumber,
+            [
+                'qualityProfileId' => $integration->quality_profile_id,
+                'rootFolderPath' => $integration->root_folder_path,
+            ]
+        );
+
+        if ($result['ok']) {
+            Notification::make()
+                ->success()
+                ->title(__('Episode Requested'))
+                ->body(__('S:s E:e of :title has been queued for download.', [
+                    's' => str_pad((string) $seasonNumber, 2, '0', STR_PAD_LEFT),
+                    'e' => str_pad((string) $episodeNumber, 2, '0', STR_PAD_LEFT),
+                    'title' => $this->detailResult['title'] ?? 'the show',
+                ]))
+                ->send();
+
+            $this->loadQueue();
+        } else {
+            Notification::make()
+                ->danger()
+                ->title(__('Request Failed'))
+                ->body($result['error'] ?? 'Unknown error')
+                ->send();
+        }
+    }
+
+    /**
+     * Request a Sonarr series from the detail panel with season-level granularity.
+     * Sends all seasons from the lookup result, each with an explicit monitored flag.
+     */
+    public function requestDetail(): void
+    {
+        $integration = $this->detailIntegration;
+        if (! $integration || ! $this->detailResult || ! $integration->isSonarr()) {
+            return;
+        }
+
+        // Build full seasons array with explicit monitored flag per season
+        $seasons = collect($this->detailResult['seasons'] ?? [])
+            ->map(fn ($s) => [
+                'seasonNumber' => (int) $s['seasonNumber'],
+                'monitored' => (bool) ($this->selectedSeasons[(int) $s['seasonNumber']] ?? false),
+            ])
+            ->values()
+            ->all();
+
+        $monitoredCount = collect($seasons)->where('monitored', true)->count();
+
+        if ($monitoredCount === 0) {
+            Notification::make()
+                ->warning()
+                ->title(__('No Seasons Selected'))
+                ->body(__('Please select at least one season to request.'))
+                ->send();
+
+            return;
+        }
+
+        $item = $this->detailResult;
+
+        $payload = [
+            'tvdbId' => $item['tvdbId'] ?? null,
+            'title' => $item['title'] ?? null,
+            'titleSlug' => $item['titleSlug'] ?? null,
+            'qualityProfileId' => $integration->quality_profile_id,
+            'rootFolderPath' => $integration->root_folder_path,
+            'seasons' => $seasons,
+            'searchForMissingEpisodes' => true,
+        ];
+
+        $result = ArrService::make($integration)->add($payload);
+
+        if ($result['ok']) {
+            Notification::make()
+                ->success()
+                ->title(__('Request Submitted'))
+                ->body(__(':title has been added to :server and will begin searching for :count selected season(s).', [
+                    'title' => $item['title'] ?? 'Content',
+                    'server' => $integration->name,
+                    'count' => $monitoredCount,
+                ]))
+                ->send();
+
+            $this->closeDetail();
             $this->loadQueue();
         } else {
             Notification::make()
@@ -147,23 +662,382 @@ class ArrSearch extends Component
 
     public function loadQueue(): void
     {
-        $integration = $this->integration;
-        if (! $integration) {
+        if (! $this->guestMode) {
             $this->queue = [];
 
             return;
         }
 
-        try {
-            $this->queue = ArrService::make($integration)->fetchQueue();
-        } catch (\Exception $e) {
-            $this->queue = [];
+        $allItems = [];
+
+        foreach ($this->integrationsForSearch as $integration) {
+            try {
+                $items = ArrService::make($integration)->fetchQueue();
+                foreach ($items as $item) {
+                    $allItems[] = array_merge($item, ['server' => $integration->name]);
+                }
+            } catch (\Exception) {
+                // Skip failed integrations silently
+            }
         }
+
+        $this->queue = $allItems;
     }
 
     public function getQueuePollIntervalProperty(): int
     {
         return $this->queuePolling ? 5 : 0;
+    }
+
+    // ── Discover ──────────────────────────────────────────────────────────────
+
+    /**
+     * Load discover data (trending, popular, genres). Called via wire:init on the root element.
+     * All sections are cached at the TMDB service layer; this method just assembles them.
+     */
+    public function loadDiscover(): void
+    {
+        if ($this->discoverLoaded || ! $this->tmdbConfigured) {
+            $this->discoverLoaded = true;
+
+            return;
+        }
+
+        $tmdb = app(TmdbService::class);
+        $libraryIds = $this->loadLibraryTmdbIds();
+
+        $crossRef = function (array $items) use ($libraryIds): array {
+            return array_map(function ($item) use ($libraryIds) {
+                $tmdbId = (int) ($item['tmdb_id'] ?? 0);
+                $item['existsInLibrary'] = array_key_exists($tmdbId, $libraryIds);
+                $item['isDownloaded'] = $libraryIds[$tmdbId] ?? false;
+
+                return $item;
+            }, $items);
+        };
+
+        $this->trendingItems = $crossRef($tmdb->getTrending());
+        $this->popularMovies = $crossRef($tmdb->getPopularMovies());
+        $this->popularTv = $crossRef($tmdb->getPopularTv());
+        $this->upcomingMovies = $crossRef($tmdb->getUpcomingMovies());
+        $this->movieGenres = $tmdb->getMovieGenres();
+        $this->tvGenres = $tmdb->getTvGenres();
+        $this->discoverLoaded = true;
+    }
+
+    /**
+     * Browse content by genre. Replaces the carousel view with a filtered grid.
+     */
+    public function browseGenre(int $genreId, string $type): void
+    {
+        if (! $this->tmdbConfigured) {
+            return;
+        }
+
+        $this->browseGenreId = $genreId;
+        $this->browseGenreType = $type;
+        $this->browseLoading = true;
+        $this->browseResults = [];
+
+        $tmdb = app(TmdbService::class);
+        $libraryIds = $this->loadLibraryTmdbIds();
+
+        $this->availableProviders = $tmdb->getWatchProviders($type === 'tv' ? 'tv' : 'movie', $this->watchRegion ?: 'US');
+
+        $params = array_merge(['with_genres' => $genreId], $this->buildFilterParams($type));
+
+        $items = $type === 'tv'
+            ? $tmdb->discoverTv($params)
+            : $tmdb->discoverMovies($params);
+
+        $this->browseResults = array_map(function ($item) use ($libraryIds) {
+            $tmdbId = (int) ($item['tmdb_id'] ?? 0);
+            $item['existsInLibrary'] = array_key_exists($tmdbId, $libraryIds);
+            $item['isDownloaded'] = $libraryIds[$tmdbId] ?? false;
+
+            return $item;
+        }, $items);
+
+        $this->browseLoading = false;
+    }
+
+    /**
+     * Clear the genre browse view and return to carousels.
+     */
+    public function clearBrowse(): void
+    {
+        $this->browseGenreId = null;
+        $this->browseGenreType = null;
+        $this->browseResults = [];
+        $this->browseLoading = false;
+    }
+
+    /**
+     * Re-run the current genre browse with updated filter state.
+     */
+    public function reloadBrowse(): void
+    {
+        if ($this->browseGenreId !== null && $this->browseGenreType !== null) {
+            $this->browseGenre($this->browseGenreId, $this->browseGenreType);
+        }
+    }
+
+    /**
+     * Reset all browse filters and reload.
+     */
+    public function resetFilters(): void
+    {
+        $this->sortBy = 'popularity';
+        $this->yearFrom = null;
+        $this->yearTo = null;
+        $this->minRating = 0;
+        $this->minVoteCount = 0;
+        $this->minRuntime = null;
+        $this->maxRuntime = null;
+        $this->originalLanguage = '';
+        $this->selectedProviders = [];
+        $this->tvStatuses = [];
+        $this->reloadBrowse();
+    }
+
+    /**
+     * Toggle a streaming provider in/out of the selected set.
+     */
+    public function toggleProvider(int $providerId): void
+    {
+        $key = array_search($providerId, $this->selectedProviders);
+
+        if ($key !== false) {
+            array_splice($this->selectedProviders, $key, 1);
+        } else {
+            $this->selectedProviders[] = $providerId;
+        }
+    }
+
+    /**
+     * Toggle a TV status value in/out of the selected set.
+     */
+    public function toggleTvStatus(int $status): void
+    {
+        $key = array_search($status, $this->tvStatuses);
+
+        if ($key !== false) {
+            array_splice($this->tvStatuses, $key, 1);
+        } else {
+            $this->tvStatuses[] = $status;
+        }
+    }
+
+    /**
+     * Auto-reload when sort order changes.
+     */
+    public function updatedSortBy(): void
+    {
+        $this->reloadBrowse();
+    }
+
+    /**
+     * Auto-reload when language filter changes.
+     */
+    public function updatedOriginalLanguage(): void
+    {
+        $this->reloadBrowse();
+    }
+
+    /**
+     * Reload providers and results when region changes.
+     */
+    public function updatedWatchRegion(): void
+    {
+        if ($this->browseGenreId !== null && $this->browseGenreType !== null) {
+            $tmdb = app(TmdbService::class);
+            $this->availableProviders = $tmdb->getWatchProviders(
+                $this->browseGenreType === 'tv' ? 'tv' : 'movie',
+                $this->watchRegion ?: 'US'
+            );
+        }
+
+        $this->reloadBrowse();
+    }
+
+    /**
+     * Build TMDB /discover query params from current filter state.
+     *
+     * @return array<string, mixed>
+     */
+    private function buildFilterParams(string $type): array
+    {
+        $params = [];
+
+        // Sort order — map generic keys to type-aware TMDB sort_by values
+        $sortMap = [
+            'popularity' => 'popularity.desc',
+            'rating' => 'vote_average.desc',
+            'votes' => 'vote_count.desc',
+            'newest' => $type === 'tv' ? 'first_air_date.desc' : 'primary_release_date.desc',
+            'oldest' => $type === 'tv' ? 'first_air_date.asc' : 'primary_release_date.asc',
+            'revenue' => 'revenue.desc',
+        ];
+        $params['sort_by'] = $sortMap[$this->sortBy] ?? 'popularity.desc';
+
+        // Year range — map to type-aware date fields
+        if ($this->yearFrom) {
+            $params[$type === 'tv' ? 'first_air_date.gte' : 'primary_release_date.gte'] = $this->yearFrom.'-01-01';
+        }
+
+        if ($this->yearTo) {
+            $params[$type === 'tv' ? 'first_air_date.lte' : 'primary_release_date.lte'] = $this->yearTo.'-12-31';
+        }
+
+        // Rating + vote count floor
+        if ($this->minRating > 0) {
+            $params['vote_average.gte'] = $this->minRating;
+        }
+
+        $voteCountFloor = $this->minVoteCount > 0 ? $this->minVoteCount : ($this->minRating > 0 ? 50 : 0);
+
+        if ($voteCountFloor > 0) {
+            $params['vote_count.gte'] = $voteCountFloor;
+        }
+
+        // Runtime range (minutes)
+        if ($this->minRuntime !== null && $this->minRuntime > 0) {
+            $params['with_runtime.gte'] = $this->minRuntime;
+        }
+
+        if ($this->maxRuntime !== null && $this->maxRuntime > 0) {
+            $params['with_runtime.lte'] = $this->maxRuntime;
+        }
+
+        // Original language
+        if ($this->originalLanguage !== '') {
+            $params['with_original_language'] = $this->originalLanguage;
+        }
+
+        // Watch providers (pipe-separated IDs, requires watch_region)
+        if (! empty($this->selectedProviders)) {
+            $params['with_watch_providers'] = implode('|', $this->selectedProviders);
+            $params['watch_region'] = $this->watchRegion ?: 'US';
+        }
+
+        // TV show status (pipe-separated values)
+        if ($type === 'tv' && ! empty($this->tvStatuses)) {
+            $params['with_status'] = implode('|', $this->tvStatuses);
+        }
+
+        return $params;
+    }
+
+    /**
+     * Handle a click on a TMDB discover card.
+     * Resolves the TMDB card to an Arr-native result shape and opens the detail panel.
+     * For movies this also enables direct requesting from the panel.
+     */
+    public function requestFromDiscover(int $tmdbId, string $mediaType): void
+    {
+        $resolved = $this->resolveDiscoverToArrResult($tmdbId, $mediaType);
+
+        if (! $resolved) {
+            Notification::make()
+                ->warning()
+                ->title(__('Not Found'))
+                ->body(__('Could not find this title on your Sonarr/Radarr servers. Try searching for it directly.'))
+                ->send();
+
+            return;
+        }
+
+        // Append to results so the existing openDetail()/request() machinery can use the index
+        $idx = count($this->results);
+        $this->results[$idx] = $resolved;
+        $this->openDetail($idx);
+    }
+
+    /**
+     * Resolve a TMDB discover item to an Arr-native result shape.
+     * Movies go through Radarr's tmdb: lookup; TV goes through TMDB external IDs → Sonarr tvdb: lookup.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function resolveDiscoverToArrResult(int $tmdbId, string $mediaType): ?array
+    {
+        $integrations = $this->integrationsForSearch;
+
+        if ($mediaType === 'movie') {
+            $radarr = $integrations->first(fn ($i) => $i->isRadarr());
+
+            if (! $radarr) {
+                return null;
+            }
+
+            $items = ArrService::make($radarr)->search("tmdb:{$tmdbId}");
+            $item = $items[0] ?? null;
+
+            if (! $item) {
+                return null;
+            }
+
+            return array_merge($item, [
+                'integrationId' => $radarr->id,
+                'integrationName' => $radarr->name,
+                'integrationType' => 'radarr',
+            ]);
+        }
+
+        // TV: TMDB → TVDB → Sonarr
+        $sonarr = $integrations->first(fn ($i) => $i->isSonarr());
+
+        if (! $sonarr) {
+            return null;
+        }
+
+        $externalIds = app(TmdbService::class)->getTvExternalIds($tmdbId);
+        $tvdbId = $externalIds['tvdb_id'] ?? null;
+
+        if (! $tvdbId) {
+            return null;
+        }
+
+        $items = ArrService::make($sonarr)->search("tvdb:{$tvdbId}");
+        $item = $items[0] ?? null;
+
+        if (! $item) {
+            return null;
+        }
+
+        return array_merge($item, [
+            'integrationId' => $sonarr->id,
+            'integrationName' => $sonarr->name,
+            'integrationType' => 'sonarr',
+        ]);
+    }
+
+    /**
+     * Fetch all TMDB IDs currently in library across all accessible integrations.
+     * Cached per integration for 5 minutes to avoid hammering Sonarr/Radarr on every page view.
+     *
+     * @return array<int, bool> tmdbId => isDownloaded
+     */
+    private function loadLibraryTmdbIds(): array
+    {
+        $map = [];
+
+        foreach ($this->integrationsForSearch as $integration) {
+            $cacheKey = "arr_library_tmdb_ids_{$integration->id}";
+            $integrationMap = Cache::remember($cacheKey, now()->addMinutes(5), function () use ($integration) {
+                try {
+                    return ArrService::make($integration)->fetchLibraryTmdbIds();
+                } catch (\Exception) {
+                    return [];
+                }
+            });
+
+            foreach ($integrationMap as $tmdbId => $isDownloaded) {
+                $map[$tmdbId] = ($map[$tmdbId] ?? false) || $isDownloaded;
+            }
+        }
+
+        return $map;
     }
 
     public function render()
