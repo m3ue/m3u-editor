@@ -19,6 +19,7 @@ use App\Jobs\RunPlaylistSortAlpha;
 use App\Jobs\SyncSeriesStrmFiles;
 use App\Jobs\SyncVodStrmFiles;
 use App\Listeners\SyncListener;
+use App\Models\Group;
 use App\Models\Playlist;
 use App\Models\SyncRun;
 use App\Settings\GeneralSettings;
@@ -459,21 +460,47 @@ class SyncPipelineService
     {
         $rules = collect($playlist->auto_sync_to_custom_config ?? [])
             ->filter(fn (array $rule): bool => $rule['enabled'] ?? false)
-            ->filter(fn (array $rule): bool => (int) ($rule['custom_playlist_id'] ?? 0) > 0 && ! empty($rule['groups'] ?? []));
+            ->filter(function (array $rule): bool {
+                if ((int) ($rule['custom_playlist_id'] ?? 0) === 0) {
+                    return false;
+                }
 
-        $jobs = $rules->map(fn (array $rule): AutoSyncGroupsToCustomPlaylist => new AutoSyncGroupsToCustomPlaylist(
-            userId: $playlist->user_id,
-            playlistId: $playlist->id,
-            groupIds: array_map('intval', (array) ($rule['groups'] ?? [])),
-            customPlaylistId: (int) ($rule['custom_playlist_id'] ?? 0),
-            data: [
-                'mode' => $rule['mode'] ?? 'original',
-                'category' => $rule['category'] ?? null,
-                'new_category' => $rule['new_category'] ?? null,
-            ],
-            type: $rule['type'] === 'series_categories' ? 'series' : 'channel',
-            syncMode: $rule['sync_mode'] ?? 'full_sync',
-        ))->values()->all();
+                return ($rule['group_filter'] ?? 'selected') === 'new_only' || ! empty($rule['groups'] ?? []);
+            });
+
+        $jobs = $rules->map(function (array $rule) use ($playlist): ?AutoSyncGroupsToCustomPlaylist {
+            $groupFilter = $rule['group_filter'] ?? 'selected';
+
+            if ($groupFilter === 'new_only') {
+                $groupType = $rule['type'] === 'vod_groups' ? 'vod' : 'live';
+                $groupIds = Group::where('playlist_id', $playlist->id)
+                    ->where('type', $groupType)
+                    ->where('new', true)
+                    ->pluck('id')
+                    ->map(fn ($id): int => (int) $id)
+                    ->all();
+
+                if (empty($groupIds)) {
+                    return null;
+                }
+            } else {
+                $groupIds = array_map('intval', (array) ($rule['groups'] ?? []));
+            }
+
+            return new AutoSyncGroupsToCustomPlaylist(
+                userId: $playlist->user_id,
+                playlistId: $playlist->id,
+                groupIds: $groupIds,
+                customPlaylistId: (int) ($rule['custom_playlist_id'] ?? 0),
+                data: [
+                    'mode' => $rule['mode'] ?? 'original',
+                    'category' => $rule['category'] ?? null,
+                    'new_category' => $rule['new_category'] ?? null,
+                ],
+                type: $rule['type'] === 'series_categories' ? 'series' : 'channel',
+                syncMode: $rule['sync_mode'] ?? 'full_sync',
+            );
+        })->filter()->values()->all();
 
         $jobs[] = new CompleteSyncPhase($run->id, SyncRunPhase::CustomPlaylistSync);
 

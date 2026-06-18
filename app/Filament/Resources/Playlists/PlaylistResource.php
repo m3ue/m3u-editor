@@ -2591,6 +2591,24 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ->live()
                                 ->default('live_groups')
                                 ->required()
+                                ->afterStateUpdated(function (Set $set): void {
+                                    $set('groups', []);
+                                    $set('group_filter', 'selected');
+                                })
+                                ->columnSpan(2),
+                            Select::make('group_filter')
+                                ->label(__('Group Filter'))
+                                ->options([
+                                    'selected' => 'Selected Groups',
+                                    'new_only' => 'New Groups Only',
+                                ])
+                                ->default('selected')
+                                ->afterStateHydrated(fn ($component, $state) => $component->state($state ?? 'selected'))
+                                ->live()
+                                ->native(false)
+                                ->required()
+                                ->hintIcon('heroicon-m-question-mark-circle', tooltip: '"New Groups Only" automatically syncs any group flagged as new (first import or re-added) into the Custom Playlist, without needing to select them manually.')
+                                ->visible(fn (Get $get): bool => $get('type') !== 'series_categories')
                                 ->afterStateUpdated(fn (Set $set) => $set('groups', []))
                                 ->columnSpan(2),
                             Select::make('groups')
@@ -2617,7 +2635,8 @@ class PlaylistResource extends Resource implements CopilotResource
                                 })
                                 ->multiple()
                                 ->searchable()
-                                ->required()
+                                ->required(fn (Get $get): bool => ($get('group_filter') ?? 'selected') !== 'new_only')
+                                ->hidden(fn (Get $get): bool => ($get('group_filter') ?? 'selected') === 'new_only')
                                 ->columnSpan(4),
                             Select::make('custom_playlist_id')
                                 ->label(__('Custom Playlist'))
@@ -2634,7 +2653,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                     $set('category', null);
                                     $set('new_category', null);
                                 })
-                                ->columnSpan(4),
+                                ->columnSpan(3),
                             Select::make('sync_mode')
                                 ->label(__('Sync Mode'))
                                 ->native(false)
@@ -2645,7 +2664,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ->default('full_sync')
                                 ->required()
                                 ->hintIcon('heroicon-m-question-mark-circle', tooltip: '"Sync" adds new channels and removes channels no longer in the source group. "Add only" never removes channels from the Custom Playlist.')
-                                ->columnSpan(3),
+                                ->columnSpan(4),
                             Select::make('mode')
                                 ->label(__('Group Assignment'))
                                 ->options([
@@ -2682,7 +2701,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ->visible(fn (Get $get): bool => (bool) $get('custom_playlist_id') && $get('mode') === 'create')
                                 ->columnSpan(4),
                         ])
-                        ->columns(11)
+                        ->columns(12)
                         ->reorderable()
                         ->reorderableWithButtons()
                         ->collapsible()
@@ -2698,9 +2717,14 @@ class PlaylistResource extends Resource implements CopilotResource
                                 'series_categories' => 'Series Categories',
                                 default => 'Live Groups',
                             };
-                            $groupIds = (array) ($state['groups'] ?? []);
-                            $groupCount = count($groupIds);
-                            $groupLabel = $groupCount === 0 ? 'No groups' : "{$groupCount} group".($groupCount === 1 ? '' : 's');
+                            $groupFilter = $state['group_filter'] ?? 'selected';
+                            if ($groupFilter === 'new_only') {
+                                $groupLabel = 'New groups only';
+                            } else {
+                                $groupIds = (array) ($state['groups'] ?? []);
+                                $groupCount = count($groupIds);
+                                $groupLabel = $groupCount === 0 ? 'No groups' : "{$groupCount} group".($groupCount === 1 ? '' : 's');
+                            }
                             $customPlaylistId = $state['custom_playlist_id'] ?? null;
                             $customPlaylistName = $customPlaylistId
                                 ? (CustomPlaylist::find($customPlaylistId)?->name ?? "Playlist #{$customPlaylistId}")
