@@ -37,9 +37,22 @@ class SchedulesDirectImageProxyController extends Controller
             // Create cache key for this image
             $cacheKey = "sd_image_{$epgId}_{$imageHash}";
 
+            // Short-circuit if this EPG already hit its daily download limit
+            if (Cache::has("sd_download_limit_{$epgId}")) {
+                return response()->json(['error' => 'Daily image download limit reached'], 429);
+            }
+
             // Check cache first (cache for 24 hours)
             $cachedResponse = Cache::get($cacheKey);
             if ($cachedResponse) {
+                if (isset($cachedResponse['not_found'])) {
+                    return response()->json(['error' => 'Image not found'], 404);
+                }
+
+                if (isset($cachedResponse['download_limit'])) {
+                    return response()->json(['error' => 'Daily image download limit reached'], 429);
+                }
+
                 return response($cachedResponse['body'], 200, $cachedResponse['headers']);
             }
 
@@ -85,12 +98,31 @@ class SchedulesDirectImageProxyController extends Controller
 
                 return response($body, 200, $headers);
             } else {
+                $errorData = $response->json() ?: [];
+                $sdCode = $errorData['code'] ?? null;
+
                 Log::warning('Failed to fetch SchedulesDirect image', [
                     'epg_id' => $epgId,
                     'image_hash' => $imageHash,
                     'status' => $response->status(),
+                    'sd_code' => $sdCode,
                     'response' => $response->body(),
                 ]);
+
+                // Image does not exist — cache the not-found state so we never re-request it
+                if ($response->status() === 404 || $sdCode === SchedulesDirectService::IMAGE_NOT_FOUND_CODE) {
+                    Cache::put($cacheKey, ['not_found' => true], now()->addHours(24));
+
+                    return response()->json(['error' => 'Image not found'], 404);
+                }
+
+                // Download limit exceeded — cache at both the EPG and image level
+                if (\in_array($sdCode, [SchedulesDirectService::EXCEED_DOWNLOAD_LIMIT_TRIAL_CODE, SchedulesDirectService::EXCEED_DOWNLOAD_LIMIT_CODE], true)) {
+                    Cache::put("sd_download_limit_{$epgId}", true, now()->endOfDay());
+                    Cache::put($cacheKey, ['download_limit' => true], now()->endOfDay());
+
+                    return response()->json(['error' => 'Daily image download limit reached'], 429);
+                }
 
                 return response()->json([
                     'error' => 'Failed to fetch image from SchedulesDirect',

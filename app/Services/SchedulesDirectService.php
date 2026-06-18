@@ -32,6 +32,22 @@ class SchedulesDirectService
      */
     private const DEBUG_NOT_ENABLED_CODE = 2055;
 
+    private const LINEUP_ALREADY_IN_ACCOUNT_CODE = 2101;
+
+    private const MAX_LINEUPS_CODE = 2102;
+
+    private const LINEUP_NOT_IN_ACCOUNT_CODE = 2104;
+
+    private const TOO_MANY_LINEUP_CHANGES_CODE = 2107;
+
+    public const IMAGE_NOT_FOUND_CODE = 4001;
+
+    /** Trial account download limit exceeded. */
+    public const EXCEED_DOWNLOAD_LIMIT_TRIAL_CODE = 4003;
+
+    /** Full subscriber download limit exceeded. */
+    public const EXCEED_DOWNLOAD_LIMIT_CODE = 4004;
+
     /**
      * The current EPG model being used for requests (used to check/update sd_debug)
      */
@@ -257,6 +273,21 @@ class SchedulesDirectService
     }
 
     /**
+     * Return the maximum number of lineups allowed for this account from the /status endpoint.
+     * Falls back to 4 (the default for most accounts) if the value cannot be determined.
+     */
+    public function getAccountMaxLineups(string $token): int
+    {
+        try {
+            $status = $this->getStatus($token);
+
+            return (int) ($status['account']['maxLineups'] ?? 4);
+        } catch (Exception) {
+            return 4;
+        }
+    }
+
+    /**
      * Get available countries
      * Results are cached for 5 minutes
      */
@@ -313,14 +344,28 @@ class SchedulesDirectService
      */
     public function addLineup(string $token, string $lineupId): array
     {
-        $response = $this->makeRequest('PUT', "/lineups/{$lineupId}", [], $token);
+        try {
+            $response = $this->makeRequest('PUT', "/lineups/{$lineupId}", [], $token);
 
-        if ($response->failed()) {
-            $errorData = $response->json();
-            throw new Exception('Failed to add lineup: '.($errorData['message'] ?? $response->body()));
+            return $response->json();
+        } catch (Exception $e) {
+            match ($e->getCode()) {
+                self::LINEUP_ALREADY_IN_ACCOUNT_CODE => null, // idempotent — already added
+                self::MAX_LINEUPS_CODE => throw new Exception(
+                    'Your SchedulesDirect account has reached the maximum number of allowed lineups. Remove an existing lineup before adding a new one.',
+                    self::MAX_LINEUPS_CODE,
+                    $e
+                ),
+                self::TOO_MANY_LINEUP_CHANGES_CODE => throw new Exception(
+                    'You have exceeded the daily limit of 6 lineup changes on your SchedulesDirect account. Please try again tomorrow.',
+                    self::TOO_MANY_LINEUP_CHANGES_CODE,
+                    $e
+                ),
+                default => throw $e,
+            };
+
+            return ['code' => 0, 'message' => 'Lineup already in account'];
         }
-
-        return $response->json();
     }
 
     /**
@@ -328,14 +373,23 @@ class SchedulesDirectService
      */
     public function removeLineup(string $token, string $lineupId): array
     {
-        $response = $this->makeRequest('DELETE', "/lineups/{$lineupId}", [], $token);
+        try {
+            $response = $this->makeRequest('DELETE', "/lineups/{$lineupId}", [], $token);
 
-        if ($response->failed()) {
-            $errorData = $response->json();
-            throw new Exception('Failed to remove lineup: '.($errorData['message'] ?? $response->body()));
+            return $response->json();
+        } catch (Exception $e) {
+            match ($e->getCode()) {
+                self::LINEUP_NOT_IN_ACCOUNT_CODE => null, // idempotent — already removed
+                self::TOO_MANY_LINEUP_CHANGES_CODE => throw new Exception(
+                    'You have exceeded the daily limit of 6 lineup changes on your SchedulesDirect account. Please try again tomorrow.',
+                    self::TOO_MANY_LINEUP_CHANGES_CODE,
+                    $e
+                ),
+                default => throw $e,
+            };
+
+            return ['code' => 0, 'message' => 'Lineup not in account'];
         }
-
-        return $response->json();
     }
 
     /**
@@ -809,11 +863,15 @@ class SchedulesDirectService
                 'sd_progress' => 0,
             ]);
 
-            // Check if lineup is already in account, if not add it
+            // Check if lineup is already in account; add it if not
             try {
                 $lineupData = $this->getLineup($epg->sd_token, $epg->sd_lineup_id);
             } catch (Exception $e) {
-                if (str_contains($e->getMessage(), 'Lineup not in account') || str_contains($e->getMessage(), 'not subscribed')) {
+                // 4003/4004 = lineup not found/not subscribed
+                if ($e->getCode() === self::LINEUP_NOT_IN_ACCOUNT_CODE
+                    || str_contains($e->getMessage(), 'not in account')
+                    || str_contains($e->getMessage(), 'not subscribed')
+                ) {
                     Log::debug("Adding lineup {$epg->sd_lineup_id} to SchedulesDirect account", ['epg_id' => $epg->id]);
                     $this->addLineup($epg->sd_token, $epg->sd_lineup_id);
                     $lineupData = $this->getLineup($epg->sd_token, $epg->sd_lineup_id);
@@ -1451,7 +1509,7 @@ class SchedulesDirectService
                 'message' => $message,
                 'full_response' => $response->body(),
             ]);
-            throw new Exception("SchedulesDirect API error: {$message} (Code: {$code})");
+            throw new Exception("SchedulesDirect API error: {$message} (Code: {$code})", (int) $code);
         }
 
         return $response;

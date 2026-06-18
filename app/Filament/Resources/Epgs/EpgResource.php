@@ -811,19 +811,21 @@ class EpgResource extends Resource implements CopilotResource
             ->color('warning')
             ->visible(fn (Epg $record): bool => $record->isSchedulesDirect())
             ->modalHeading(__('Manage SchedulesDirect Lineups'))
-            ->modalDescription(__('View and remove lineups from your SchedulesDirect account. SchedulesDirect allows a maximum of 4 lineups per account.'))
+            ->modalDescription(__('View and remove lineups from your SchedulesDirect account.'))
             ->modalSubmitActionLabel(__('Remove Selected Lineup'))
             ->schema(function (Epg $record): array {
                 try {
-                    $lineups = app(SchedulesDirectService::class)->getAccountLineupsAsOptions($record);
+                    $service = app(SchedulesDirectService::class);
+                    $lineups = $service->getAccountLineupsAsOptions($record);
                     $count = count($lineups);
+                    $max = $service->getAccountMaxLineups($record->sd_token);
 
                     return [
                         Select::make('lineup_to_remove')
                             ->label(__('Lineup to Remove'))
                             ->options($lineups)
                             ->required()
-                            ->hint(__("{$count} of 4 slots used"))
+                            ->hint(__("{$count} of {$max} slots used"))
                             ->helperText(__('Select the lineup you want to remove from your SchedulesDirect account.')),
                     ];
                 } catch (Exception $e) {
@@ -872,7 +874,7 @@ class EpgResource extends Resource implements CopilotResource
             ->schema(fn (Epg $record): array => $record->isSchedulesDirect() && $record->hasSchedulesDirectLineup() ? [
                 Toggle::make('delete_sd_lineup')
                     ->label(__('Also delete lineup from SchedulesDirect account'))
-                    ->helperText(__('SchedulesDirect allows a maximum of 4 lineups. Removing unused lineups frees up slots for new ones.'))
+                    ->helperText(__('Removing unused lineups from your SchedulesDirect account frees up slots for new ones.'))
                     ->default(true),
             ] : [])
             ->before(function (array $data, Epg $record): void {
