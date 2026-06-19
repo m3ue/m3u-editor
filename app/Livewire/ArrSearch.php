@@ -83,7 +83,27 @@ class ArrSearch extends Component
      */
     public array $detailSonarrEpisodeStatus = [];
 
+    /**
+     * Per-episode file quality and size, keyed seasonNumber => [episodeNumber => {quality, size}].
+     * Only populated for episodes that have a file and Sonarr embeds episodeFile in the response.
+     *
+     * @var array<int, array<int, array{quality: ?string, size: ?int}>>
+     */
+    public array $detailSonarrEpisodeFileInfo = [];
+
     public bool $releasesLoading = false;
+
+    /** Sonarr episode ID when the interactive search accordion is showing episode-level results. */
+    public ?int $detailEpisodeId = null;
+
+    /** Season number for the episode-level search context, used to re-run on Refresh. */
+    public ?int $detailEpisodeSeason = null;
+
+    /** Episode number for the episode-level search context, used to re-run on Refresh. */
+    public ?int $detailEpisodeNumber = null;
+
+    /** Human-readable label shown in the accordion header when in episode context, e.g. "S01E05". */
+    public ?string $detailReleasesLabel = null;
 
     // ── Discover ──────────────────────────────────────────────────────────────
 
@@ -305,6 +325,11 @@ class ArrSearch extends Component
 
         $this->detailEpisodes = [];
         $this->detailCast = [];
+        $this->detailReleases = [];
+        $this->detailEpisodeId = null;
+        $this->detailEpisodeSeason = null;
+        $this->detailEpisodeNumber = null;
+        $this->detailReleasesLabel = null;
         $this->showDetail = true;
     }
 
@@ -319,7 +344,12 @@ class ArrSearch extends Component
         $this->detailCast = [];
         $this->detailReleases = [];
         $this->detailSonarrEpisodeStatus = [];
+        $this->detailSonarrEpisodeFileInfo = [];
         $this->releasesLoading = false;
+        $this->detailEpisodeId = null;
+        $this->detailEpisodeSeason = null;
+        $this->detailEpisodeNumber = null;
+        $this->detailReleasesLabel = null;
     }
 
     /**
@@ -361,6 +391,12 @@ class ArrSearch extends Component
                         $this->detailSonarrEpisodeStatus = $service->fetchEpisodes($libraryId);
                     } catch (\Exception) {
                         $this->detailSonarrEpisodeStatus = [];
+                    }
+
+                    try {
+                        $this->detailSonarrEpisodeFileInfo = $service->fetchEpisodeFileInfo($libraryId);
+                    } catch (\Exception) {
+                        $this->detailSonarrEpisodeFileInfo = [];
                     }
                 }
             }
@@ -430,6 +466,19 @@ class ArrSearch extends Component
             return;
         }
 
+        // If in episode context, refresh the episode-specific releases instead.
+        if ($this->detailEpisodeSeason !== null && $this->detailEpisodeNumber !== null) {
+            $this->loadEpisodeReleases($this->detailEpisodeSeason, $this->detailEpisodeNumber);
+
+            return;
+        }
+
+        // Series/movie level search — clear any stale episode context.
+        $this->detailEpisodeId = null;
+        $this->detailEpisodeSeason = null;
+        $this->detailEpisodeNumber = null;
+        $this->detailReleasesLabel = null;
+
         $libraryId = $this->resolveLibraryId();
 
         if (! $libraryId) {
@@ -459,6 +508,176 @@ class ArrSearch extends Component
     }
 
     /**
+     * Load interactive search releases for a specific episode (Sonarr only).
+     * Adds the series to Sonarr without searching if it is not yet in the library,
+     * then fetches episode-level releases via /release?seriesId=X&episodeId=Y.
+     * Admin only — not available in guest mode.
+     */
+    public function loadEpisodeReleases(int $seasonNumber, int $episodeNumber): void
+    {
+        if ($this->guestMode || ! $this->detailResult || ! $this->detailIntegration) {
+            return;
+        }
+
+        if (! $this->detailIntegration->isSonarr()) {
+            return;
+        }
+
+        $tvdbId = (int) ($this->detailResult['tvdbId'] ?? 0);
+
+        if (! $tvdbId) {
+            return;
+        }
+
+        $this->releasesLoading = true;
+        $this->detailReleases = [];
+        $this->detailEpisodeId = null;
+
+        $libraryId = $this->resolveLibraryId();
+        $seriesJustAdded = false;
+
+        if (! $libraryId) {
+            $item = $this->detailResult;
+            $seasons = collect($item['seasons'] ?? [])
+                ->map(fn ($s) => ['seasonNumber' => (int) $s['seasonNumber'], 'monitored' => false])
+                ->all();
+
+            $result = ArrService::make($this->detailIntegration)->add([
+                'tvdbId' => $tvdbId,
+                'title' => $item['title'] ?? null,
+                'titleSlug' => $item['titleSlug'] ?? null,
+                'seasons' => $seasons,
+                'searchForMissingEpisodes' => false,
+            ]);
+
+            if (! $result['ok']) {
+                Notification::make()
+                    ->danger()
+                    ->title(__('Failed to Add Series'))
+                    ->body($result['error'] ?? 'Unknown error')
+                    ->send();
+
+                $this->releasesLoading = false;
+
+                return;
+            }
+
+            $libraryId = (int) ($result['data']['id'] ?? 0);
+            $seriesJustAdded = true;
+
+            if ($libraryId) {
+                $this->detailResult['libraryId'] = $libraryId;
+                $this->detailResult['existsInLibrary'] = true;
+
+                if ($this->detailIndex !== null && isset($this->results[$this->detailIndex])) {
+                    $this->results[$this->detailIndex]['libraryId'] = $libraryId;
+                    $this->results[$this->detailIndex]['existsInLibrary'] = true;
+                }
+            }
+        }
+
+        if (! $libraryId) {
+            Notification::make()
+                ->danger()
+                ->title(__('Could Not Add Series'))
+                ->body(__('Unable to resolve the series in Sonarr.'))
+                ->send();
+
+            $this->releasesLoading = false;
+
+            return;
+        }
+
+        try {
+            $service = new SonarrService($this->detailIntegration);
+            $episodeId = $service->resolveEpisodeId($libraryId, $seasonNumber, $episodeNumber, $seriesJustAdded);
+
+            if (! $episodeId) {
+                Notification::make()
+                    ->warning()
+                    ->title(__('Episode Not Ready'))
+                    ->body(__('Sonarr is still indexing the series. Please try again in a moment.'))
+                    ->send();
+
+                $this->releasesLoading = false;
+
+                return;
+            }
+
+            $this->detailEpisodeId = $episodeId;
+            $this->detailEpisodeSeason = $seasonNumber;
+            $this->detailEpisodeNumber = $episodeNumber;
+            $s = str_pad((string) $seasonNumber, 2, '0', STR_PAD_LEFT);
+            $e = str_pad((string) $episodeNumber, 2, '0', STR_PAD_LEFT);
+            $this->detailReleasesLabel = "S{$s}E{$e}";
+
+            $this->detailReleases = $service->fetchEpisodeReleases($libraryId, $episodeId);
+        } catch (\Exception) {
+            Notification::make()
+                ->danger()
+                ->title(__('Search Failed'))
+                ->body(__('Could not fetch episode releases from the indexer.'))
+                ->send();
+        }
+
+        $this->releasesLoading = false;
+    }
+
+    /**
+     * Add a Radarr movie to the library without triggering an automatic search,
+     * then immediately open the interactive search so the user can pick a specific release.
+     * Admin only — not available in guest mode.
+     */
+    public function addForInteractiveSearch(): void
+    {
+        if ($this->guestMode || ! $this->detailResult || ! $this->detailIntegration) {
+            return;
+        }
+
+        if (! $this->detailIntegration->isRadarr()) {
+            return;
+        }
+
+        $item = $this->detailResult;
+
+        $result = ArrService::make($this->detailIntegration)->add([
+            'tmdbId' => $item['tmdbId'] ?? null,
+            'title' => $item['title'] ?? null,
+            'titleSlug' => $item['titleSlug'] ?? null,
+            'images' => $item['images'] ?? [],
+            'qualityProfileId' => $this->detailIntegration->quality_profile_id,
+            'rootFolderPath' => $this->detailIntegration->root_folder_path,
+            'minimumAvailability' => 'released',
+            'searchForMovie' => false,
+        ]);
+
+        if (! $result['ok']) {
+            Notification::make()
+                ->danger()
+                ->title(__('Failed to Add Movie'))
+                ->body($result['error'] ?? 'Unknown error')
+                ->send();
+
+            return;
+        }
+
+        // Update local state so resolveLibraryId() finds the new ID without a round-trip
+        $newId = $result['data']['id'] ?? null;
+
+        if ($newId) {
+            $this->detailResult['libraryId'] = (int) $newId;
+            $this->detailResult['existsInLibrary'] = true;
+
+            if ($this->detailIndex !== null && isset($this->results[$this->detailIndex])) {
+                $this->results[$this->detailIndex]['libraryId'] = (int) $newId;
+                $this->results[$this->detailIndex]['existsInLibrary'] = true;
+            }
+        }
+
+        $this->loadDetailReleases();
+    }
+
+    /**
      * Download a specific release selected from the interactive search.
      * Admin only — not available in guest mode.
      */
@@ -481,6 +700,10 @@ class ArrSearch extends Component
             'indexerId' => $indexerId,
             $isSonarr ? 'seriesId' : 'movieId' => $libraryId,
         ];
+
+        if ($isSonarr && $this->detailEpisodeId !== null) {
+            $payload['episodeId'] = $this->detailEpisodeId;
+        }
 
         $result = ArrService::make($this->detailIntegration)->downloadRelease($payload);
 
@@ -663,7 +886,7 @@ class ArrSearch extends Component
     public function loadQueue(): void
     {
         if (! $this->guestMode) {
-            $this->queue = [];
+            $this->dispatch('refreshArrQueue');
 
             return;
         }

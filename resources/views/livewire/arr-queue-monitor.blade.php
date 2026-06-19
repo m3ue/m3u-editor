@@ -1,4 +1,4 @@
-<div wire:poll.30s="loadQueues">
+<div wire:poll.10s="loadQueues">
     @php
         $hasSonarr = ! empty($this->sonarrQueues);
         $hasRadarr = ! empty($this->radarrQueues);

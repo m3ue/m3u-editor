@@ -981,27 +981,33 @@
                     @endif
 
                     <div class="px-4 space-y-4 pb-4">
-                        {{-- Interactive Search (admin-only, library items only) --}}
-                        @if(! $guestMode && $detailInLibrary && ($this->detailIntegration?->isSonarr() || $this->detailIntegration?->isRadarr()))
-                            <div x-data="{ open: false }" class="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+                        {{-- Interactive Search (admin-only, library items only; or any Sonarr item when doing episode-level search) --}}
+                        @if(! $guestMode && ($detailInLibrary || ! empty($detailReleasesLabel)) && ($this->detailIntegration?->isSonarr() || $this->detailIntegration?->isRadarr()))
+                            <div
+                                x-data="{ open: @js(! empty($detailReleases) || $releasesLoading) }"
+                                x-effect="if ($wire.detailReleasesLabel) { open = true; }"
+                                class="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden"
+                            >
                                 <button
                                     @click="open = !open; if (open && @js(empty($detailReleases)) && !@js($releasesLoading)) $wire.call('loadDetailReleases')"
                                     type="button"
                                     class="w-full flex items-center gap-2 px-3 py-2.5 text-left hover:bg-gray-50 dark:hover:bg-gray-800/60 transition-colors"
                                 >
                                     <x-heroicon-m-chevron-right class="w-4 h-4 flex-shrink-0 text-gray-400 transition-transform duration-200" x-bind:class="{ 'rotate-90': open }" />
-                                    <span class="flex-1 text-sm font-semibold text-gray-900 dark:text-gray-100">{{ __('Interactive Search') }}</span>
-                                    <span wire:loading wire:target="loadDetailReleases"><x-filament::loading-indicator class="h-3 w-3 text-primary-500" /></span>
+                                    <span class="flex-1 text-sm font-semibold text-gray-900 dark:text-gray-100">
+                                        {{ __('Interactive Search') }}{{ $detailReleasesLabel ? ' — '.$detailReleasesLabel : '' }}
+                                    </span>
+                                    <span wire:loading wire:target="loadDetailReleases,loadEpisodeReleases"><x-filament::loading-indicator class="h-3 w-3 text-primary-500" /></span>
                                     @if(! empty($detailReleases))
-                                        <span wire:loading.remove wire:target="loadDetailReleases" class="text-xs text-gray-400 dark:text-gray-500">{{ count($detailReleases) }}</span>
+                                        <span wire:loading.remove wire:target="loadDetailReleases,loadEpisodeReleases" class="text-xs text-gray-400 dark:text-gray-500">{{ count($detailReleases) }}</span>
                                     @endif
                                 </button>
                                 <div x-show="open" x-collapse>
                                     <div class="border-t border-gray-200 dark:border-gray-700">
-                                        <div wire:loading wire:target="loadDetailReleases" class="py-4 flex justify-center">
+                                        <div wire:loading wire:target="loadDetailReleases,loadEpisodeReleases" class="py-4 flex justify-center">
                                             <x-filament::loading-indicator class="h-4 w-4 text-primary-500" />
                                         </div>
-                                        <div wire:loading.remove wire:target="loadDetailReleases">
+                                        <div wire:loading.remove wire:target="loadDetailReleases,loadEpisodeReleases">
                                             @if(! empty($detailReleases))
                                                 <div class="divide-y divide-gray-100 dark:divide-gray-800 max-h-72 overflow-y-auto">
                                                     @foreach($detailReleases as $release)
@@ -1053,7 +1059,7 @@
                                                     @endforeach
                                                 </div>
                                                 <div class="px-3 py-2 border-t border-gray-100 dark:border-gray-800 flex justify-end">
-                                                    <button wire:click="loadDetailReleases" wire:loading.attr="disabled" wire:target="loadDetailReleases" class="text-xs text-primary-600 dark:text-primary-400 hover:underline disabled:opacity-40">{{ __('Refresh') }}</button>
+                                                    <button wire:click="loadDetailReleases" wire:loading.attr="disabled" wire:target="loadDetailReleases,loadEpisodeReleases" class="text-xs text-primary-600 dark:text-primary-400 hover:underline disabled:opacity-40">{{ __('Refresh') }}</button>
                                                 </div>
                                             @elseif(! $releasesLoading)
                                                 <p class="text-xs text-gray-400 dark:text-gray-500 text-center py-3">{{ __('No releases found.') }}</p>
@@ -1163,14 +1169,27 @@
                                                     @if($seasonEpisodes !== null && count($seasonEpisodes) > 0)
                                                         <div class="divide-y divide-gray-100 dark:divide-gray-700/50">
                                                             @foreach($seasonEpisodes as $episode)
-                                                                @php $epHasFile = ! empty($detailSonarrEpisodeStatus[$seasonNum][$episode['episodeNumber']]); @endphp
+                                                                @php
+                                                                    $epHasFile  = ! empty($detailSonarrEpisodeStatus[$seasonNum][$episode['episodeNumber']]);
+                                                                    $epFileInfo = $detailSonarrEpisodeFileInfo[$seasonNum][$episode['episodeNumber']] ?? null;
+                                                                    $epQuality  = $epFileInfo['quality'] ?? null;
+                                                                    $epBytes    = $epFileInfo['size'] ?? null;
+                                                                    $epSize     = $epBytes ? match (true) {
+                                                                        $epBytes >= 1_073_741_824 => number_format($epBytes / 1_073_741_824, 2).' GB',
+                                                                        $epBytes >= 1_048_576     => number_format($epBytes / 1_048_576, 2).' MB',
+                                                                        $epBytes > 0              => number_format($epBytes / 1_024, 2).' KB',
+                                                                        default                   => null,
+                                                                    } : null;
+                                                                @endphp
                                                                 <div class="flex items-center gap-2 px-3 py-1.5">
                                                                     <span class="text-xs font-mono text-gray-400 dark:text-gray-500 w-6 flex-shrink-0 text-right">{{ str_pad($episode['episodeNumber'], 2, '0', STR_PAD_LEFT) }}</span>
                                                                     @if($epHasFile)
                                                                         <x-heroicon-s-check-circle class="w-3.5 h-3.5 flex-shrink-0 text-success-500 dark:text-success-400" />
                                                                     @endif
                                                                     <span class="flex-1 text-xs text-gray-800 dark:text-gray-200 min-w-0 truncate">{{ $episode['title'] }}</span>
-                                                                    @if(! empty($episode['airDate']))
+                                                                    @if($epHasFile && ($epQuality || $epSize))
+                                                                        <span class="text-xs text-gray-400 dark:text-gray-500 flex-shrink-0 tabular-nums">{{ implode(' · ', array_filter([$epQuality, $epSize])) }}</span>
+                                                                    @elseif(! empty($episode['airDate']))
                                                                         <span class="text-xs text-gray-400 dark:text-gray-500 flex-shrink-0 tabular-nums">{{ \Carbon\Carbon::parse($episode['airDate'])->format('M j, Y') }}</span>
                                                                     @endif
                                                                     @if($epHasFile)
@@ -1194,6 +1213,17 @@
                                                                             <x-heroicon-o-arrow-down-tray class="w-3.5 h-3.5" />
                                                                         </button>
                                                                     @endif
+                                                                    @if(! $guestMode)
+                                                                        <button
+                                                                            wire:click="loadEpisodeReleases({{ $seasonNum }}, {{ $episode['episodeNumber'] }})"
+                                                                            wire:loading.attr="disabled"
+                                                                            wire:target="loadEpisodeReleases,requestEpisode"
+                                                                            title="{{ __('Pick a specific release for this episode') }}"
+                                                                            class="flex-shrink-0 p-1 rounded text-gray-300 dark:text-gray-600 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 disabled:opacity-40 transition-colors"
+                                                                        >
+                                                                            <x-heroicon-o-magnifying-glass class="w-3.5 h-3.5" />
+                                                                        </button>
+                                                                    @endif
                                                                 </div>
                                                             @endforeach
                                                         </div>
@@ -1213,15 +1243,29 @@
                 <div class="flex-shrink-0 px-4 py-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
                     @if($detailInLibrary && $detailIsSonarr)
                         {{-- Sonarr in-library: show status + always allow re-requesting seasons --}}
-                        @php $monitoredCount = collect($selectedSeasons)->filter()->count(); @endphp
+                        @php
+                            $monitoredCount    = collect($selectedSeasons)->filter()->count();
+                            $sonarrSizeBytes   = $detailResult['sizeOnDisk'] ?? 0;
+                            $sonarrSizeDisplay = $sonarrSizeBytes > 0 ? match (true) {
+                                $sonarrSizeBytes >= 1_073_741_824 => number_format($sonarrSizeBytes / 1_073_741_824, 2).' GB',
+                                $sonarrSizeBytes >= 1_048_576     => number_format($sonarrSizeBytes / 1_048_576, 2).' MB',
+                                $sonarrSizeBytes > 0              => number_format($sonarrSizeBytes / 1_024, 2).' KB',
+                                default                           => null,
+                            } : null;
+                        @endphp
                         <div class="space-y-2">
-                            <div class="flex items-center justify-center gap-2 py-0.5 text-sm">
-                                @if($detailIsDownloaded)
-                                    <x-heroicon-o-check-circle class="w-4 h-4 text-success-600 dark:text-success-400 flex-shrink-0" />
-                                    <span class="text-success-700 dark:text-success-400">{{ __('Available in library') }}</span>
-                                @else
-                                    <x-heroicon-s-bookmark class="w-4 h-4 text-amber-500 flex-shrink-0" />
-                                    <span class="text-amber-600 dark:text-amber-400">{{ __('Monitored — searching for releases') }}</span>
+                            <div class="flex flex-col items-center justify-center gap-1 py-0.5">
+                                <div class="flex items-center gap-2 text-sm">
+                                    @if($detailIsDownloaded)
+                                        <x-heroicon-o-check-circle class="w-4 h-4 text-success-600 dark:text-success-400 flex-shrink-0" />
+                                        <span class="text-success-700 dark:text-success-400">{{ __('Available in library') }}</span>
+                                    @else
+                                        <x-heroicon-s-bookmark class="w-4 h-4 text-amber-500 flex-shrink-0" />
+                                        <span class="text-amber-600 dark:text-amber-400">{{ __('Monitored — searching for releases') }}</span>
+                                    @endif
+                                </div>
+                                @if($sonarrSizeDisplay)
+                                    <div class="text-xs text-gray-400 dark:text-gray-500 tabular-nums">{{ $sonarrSizeDisplay }} {{ __('on disk') }}</div>
                                 @endif
                             </div>
                             @if(! $guestMode)
@@ -1253,10 +1297,27 @@
                         </div>
                     @elseif($detailIsDownloaded)
                         {{-- Radarr downloaded --}}
+                        @php
+                            $radarrFileQuality = $detailResult['fileQuality'] ?? null;
+                            $radarrFileBytes   = $detailResult['fileSize'] ?? null;
+                            $radarrFileSize    = $radarrFileBytes ? match (true) {
+                                $radarrFileBytes >= 1_073_741_824 => number_format($radarrFileBytes / 1_073_741_824, 2).' GB',
+                                $radarrFileBytes >= 1_048_576     => number_format($radarrFileBytes / 1_048_576, 2).' MB',
+                                $radarrFileBytes > 0              => number_format($radarrFileBytes / 1_024, 2).' KB',
+                                default                           => null,
+                            } : null;
+                        @endphp
                         <div class="space-y-2">
-                            <div class="flex items-center justify-center gap-2 py-1 text-sm text-success-700 dark:text-success-400">
-                                <x-heroicon-o-check-circle class="w-5 h-5" />
-                                {{ __('This title is available in your library.') }}
+                            <div class="flex flex-col items-center justify-center gap-1 py-1">
+                                <div class="flex items-center gap-2 text-sm text-success-700 dark:text-success-400">
+                                    <x-heroicon-o-check-circle class="w-5 h-5" />
+                                    {{ __('This title is available in your library.') }}
+                                </div>
+                                @if($radarrFileQuality || $radarrFileSize)
+                                    <div class="text-xs text-gray-400 dark:text-gray-500 tabular-nums">
+                                        {{ implode(' · ', array_filter([$radarrFileQuality, $radarrFileSize])) }}
+                                    </div>
+                                @endif
                             </div>
                             @if(! $guestMode)
                                 <button
@@ -1307,15 +1368,31 @@
                         </button>
                     @else
                         {{-- Radarr not in library --}}
-                        <button
-                            wire:click="request({{ $detailIndex }})"
-                            wire:click.stop
-                            wire:loading.attr="disabled"
-                            class="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 disabled:opacity-50 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2"
-                        >
-                            <x-heroicon-o-plus class="w-4 h-4" />
-                            {{ __('Request Movie') }}
-                        </button>
+                        <div class="flex gap-2">
+                            <button
+                                wire:click="request({{ $detailIndex }})"
+                                wire:click.stop
+                                wire:loading.attr="disabled"
+                                wire:target="request,addForInteractiveSearch"
+                                title="{{ __('Add to Radarr and let it auto-select the best release') }}"
+                                class="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 disabled:opacity-50 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 transition-colors"
+                            >
+                                <x-heroicon-o-plus class="w-4 h-4" />
+                                {{ __('Request') }}
+                            </button>
+                            @if(! $guestMode)
+                                <button
+                                    wire:click="addForInteractiveSearch"
+                                    wire:loading.attr="disabled"
+                                    wire:target="request,addForInteractiveSearch"
+                                    title="{{ __('Add to Radarr and pick a specific release') }}"
+                                    class="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 transition-colors"
+                                >
+                                    <x-heroicon-o-list-bullet class="w-4 h-4" />
+                                    {{ __('Pick Release') }}
+                                </button>
+                            @endif
+                        </div>
                     @endif
                 </div>
             @endif

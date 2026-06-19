@@ -17,6 +17,17 @@ class ArrQueueMonitor extends Component
      */
     public array $queues = [];
 
+    /**
+     * Completed orphan items (no webhook event) captured between polls.
+     * Keyed by "{integrationId}_{downloadId}". Persists until dismissed.
+     *
+     * @var array<string, array<string, mixed>>
+     */
+    public array $completedSnapshots = [];
+
+    /** @var array<string, string> */
+    protected $listeners = ['refreshArrQueue' => 'loadQueues'];
+
     public function mount(): void
     {
         $this->loadQueues();
@@ -59,6 +70,31 @@ class ArrQueueMonitor extends Component
             }
 
             $liveByDownloadId = $liveItems->keyBy('downloadId')->filter();
+            $currentLiveDownloadIds = $liveItems->pluck('downloadId')->filter()->flip();
+
+            // Snapshot orphan live items that vanished since the last poll.
+            // This lets us show "Completed" even when the item leaves the Arr queue.
+            $prevOrphans = collect($this->queues[$integration->id]['items'] ?? [])
+                ->where('source', 'live')
+                ->filter(fn ($i) => ! empty($i['downloadId']));
+
+            foreach ($prevOrphans as $prevItem) {
+                $downloadId = $prevItem['downloadId'];
+                $key = "{$integration->id}_{$downloadId}";
+
+                if (! isset($currentLiveDownloadIds[$downloadId]) && ! isset($this->completedSnapshots[$key])) {
+                    $this->completedSnapshots[$key] = array_merge($prevItem, [
+                        'status' => 'completed',
+                        'progress' => 100,
+                        'timeLeft' => null,
+                        'integration_id' => $integration->id,
+                        'dismiss_source' => 'snapshot',
+                        'dismiss_key' => $key,
+                        'can_dismiss' => true,
+                        'source' => 'snapshot',
+                    ]);
+                }
+            }
 
             // Webhook-sourced local events for the last 48 h (imported events age out after that).
             $localEvents = ArrQueueEvent::query()
@@ -80,17 +116,32 @@ class ArrQueueMonitor extends Component
                     $seenDownloadIds[] = $event->download_id;
                 }
 
+                $trackedState = $live ? ($live['trackedDownloadState'] ?? null) : null;
+                $effectiveStatus = self::resolveStatus(
+                    $live ? $live['status'] : $event->status,
+                    $trackedState
+                );
+
+                $canDismiss = in_array($effectiveStatus, ['imported', 'completed', 'failed', 'monitored', 'manual_required']);
+
                 return [
                     'title' => $event->title,
-                    'status' => $live ? $live['status'] : $event->status,
+                    'status' => $effectiveStatus,
                     'progress' => $live ? $live['progress'] : $event->progress,
-                    'quality' => $event->quality,
+                    'quality' => $event->quality ?? ($live ? ($live['quality'] ?? null) : null),
+                    'protocol' => $live ? ($live['protocol'] ?? null) : null,
+                    'indexer' => $live ? ($live['indexer'] ?? null) : null,
+                    'episode' => $live ? ($live['episode'] ?? null) : null,
                     'size' => $live ? (int) $live['size'] : (int) $event->size,
                     'timeLeft' => $live ? ($live['timeLeft'] ?? null) : null,
                     'event_type' => $event->event_type,
                     'last_event_at' => $event->last_event_at?->toIso8601String(),
                     'formattedSize' => self::formatBytes($live ? (int) $live['size'] : (int) $event->size),
                     'source' => 'webhook',
+                    'event_db_id' => $event->id,
+                    'dismiss_source' => 'event',
+                    'dismiss_key' => (string) $event->id,
+                    'can_dismiss' => $canDismiss,
                 ];
             });
 
@@ -100,16 +151,26 @@ class ArrQueueMonitor extends Component
                 ->filter(fn ($item) => ! ($item['downloadId'] && in_array($item['downloadId'], $seenDownloadIds)))
                 ->map(fn ($item) => [
                     'title' => $item['title'],
-                    'status' => $item['status'],
+                    'status' => self::resolveStatus($item['status'], $item['trackedDownloadState'] ?? null),
                     'progress' => $item['progress'],
-                    'quality' => null,
+                    'quality' => $item['quality'] ?? null,
+                    'protocol' => $item['protocol'] ?? null,
+                    'indexer' => $item['indexer'] ?? null,
+                    'episode' => $item['episode'] ?? null,
+                    'downloadId' => $item['downloadId'] ?? null,
                     'size' => (int) $item['size'],
                     'timeLeft' => $item['timeLeft'] ?? null,
                     'event_type' => 'live',
                     'last_event_at' => null,
                     'formattedSize' => self::formatBytes((int) $item['size']),
                     'source' => 'live',
+                    'can_dismiss' => false,
                 ]);
+
+            // Merge in completed snapshots that belong to this integration.
+            $snapshotItems = collect($this->completedSnapshots)
+                ->filter(fn ($s) => ($s['integration_id'] ?? null) === $integration->id)
+                ->values();
 
             $this->queues[$integration->id] = [
                 'integration' => [
@@ -117,12 +178,30 @@ class ArrQueueMonitor extends Component
                     'name' => $integration->name,
                     'type' => $integration->type,
                 ],
-                'items' => $items->concat($orphanLive)->values()->all(),
+                'items' => $items->concat($orphanLive)->concat($snapshotItems)->values()->all(),
                 'error' => $liveError && $localEvents->isEmpty(),
             ];
         }
 
         $this->dispatch('queue-status', count: $this->totalCount);
+    }
+
+    /**
+     * Dismiss a queue item from the display.
+     * For webhook events: delete the local ArrQueueEvent record.
+     * For completed snapshots: remove from component state.
+     */
+    public function dismissItem(string $source, string $key): void
+    {
+        if ($source === 'event') {
+            ArrQueueEvent::where('id', (int) $key)
+                ->where('user_id', auth()->id())
+                ->delete();
+        } elseif ($source === 'snapshot') {
+            unset($this->completedSnapshots[$key]);
+        }
+
+        $this->loadQueues();
     }
 
     /**
@@ -153,6 +232,21 @@ class ArrQueueMonitor extends Component
     }
 
     /**
+     * Resolve the display status from the raw Arr status + trackedDownloadState.
+     * trackedDownloadState is more precise once a download completes.
+     */
+    public static function resolveStatus(string $status, ?string $trackedDownloadState): string
+    {
+        return match ($trackedDownloadState) {
+            'importPending' => 'import_pending',
+            'importing' => 'importing',
+            'imported' => 'imported',
+            'failedPending' => 'failed',
+            default => $status,
+        };
+    }
+
+    /**
      * @return array{color: string, label: string}
      */
     public static function statusBadge(string $status): array
@@ -161,6 +255,8 @@ class ArrQueueMonitor extends Component
             'monitored' => ['color' => 'gray', 'label' => 'Monitored'],
             'grabbing' => ['color' => 'warning', 'label' => 'Grabbing'],
             'downloading' => ['color' => 'primary', 'label' => 'Downloading'],
+            'import_pending' => ['color' => 'warning', 'label' => 'Import Pending'],
+            'importing' => ['color' => 'primary', 'label' => 'Importing'],
             'imported' => ['color' => 'success', 'label' => 'Imported'],
             'manual_required' => ['color' => 'danger', 'label' => 'Manual Required'],
             'queued' => ['color' => 'warning', 'label' => 'Queued'],

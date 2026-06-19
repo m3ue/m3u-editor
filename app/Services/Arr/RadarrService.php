@@ -114,7 +114,9 @@ class RadarrService extends BaseArrService
                     'rating' => $rating,
                     'existsInLibrary' => isset($item['id']),
                     'libraryId' => isset($item['id']) ? (int) $item['id'] : null,
-                    'hasFile' => ($item['hasFile'] ?? false) === true,
+                    'hasFile' => ($item['hasFile'] ?? false) === true || isset($item['movieFile']),
+                    'fileQuality' => isset($item['movieFile']) ? ($item['movieFile']['quality']['quality']['name'] ?? null) : null,
+                    'fileSize' => isset($item['movieFile']) ? ($item['movieFile']['size'] ?? null) : null,
                     'images' => $item['images'] ?? [],
                 ];
             })
@@ -291,6 +293,11 @@ class RadarrService extends BaseArrService
                     'size' => $size,
                     'sizeLeft' => $sizeLeft,
                     'timeLeft' => $item['timeleft'] ?? null,
+                    'quality' => $item['quality']['quality']['name'] ?? null,
+                    'protocol' => $item['protocol'] ?? null,
+                    'indexer' => $item['indexer'] ?? null,
+                    'episode' => null,
+                    'trackedDownloadState' => $item['trackedDownloadState'] ?? null,
                 ];
             })
             ->values()
