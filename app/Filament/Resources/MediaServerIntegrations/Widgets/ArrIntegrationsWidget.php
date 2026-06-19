@@ -25,7 +25,6 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Filament\Widgets\TableWidget as BaseWidget;
-use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Auth;
 
 class ArrIntegrationsWidget extends BaseWidget
@@ -37,7 +36,7 @@ class ArrIntegrationsWidget extends BaseWidget
     public function table(Table $table): Table
     {
         return $table
-        ->filtersTriggerAction(function ($action) {
+            ->filtersTriggerAction(function ($action) {
                 return $action->button()->label(__('Filters'));
             })
             ->query(
@@ -72,12 +71,6 @@ class ArrIntegrationsWidget extends BaseWidget
                     ->color(fn (string $state): string => $state === 'sonarr' ? 'info' : 'purple')
                     ->formatStateUsing(fn (string $state): string => ucfirst($state))
                     ->sortable(),
-
-                TextColumn::make('playlist.name')
-                    ->label(__('Playlist'))
-                    ->searchable()
-                    ->sortable()
-                    ->placeholder('—'),
 
                 TextColumn::make('url')
                     ->label(__('URL'))
@@ -221,19 +214,6 @@ class ArrIntegrationsWidget extends BaseWidget
                     ]),
 
                     Grid::make(2)->schema([
-                        Select::make('playlist_id')
-                            ->label(__('Playlist'))
-                            ->relationship(
-                                'playlist',
-                                'name',
-                                fn (Builder $query): Builder => $query->where('user_id', Auth::id())
-                            )
-                            ->required()
-                            ->searchable()
-                            ->preload()
-                            ->native(false)
-                            ->helperText(__('Content added via this integration will be requested in the context of this playlist.')),
-
                         TextInput::make('url')
                             ->label(__('Server URL'))
                             ->placeholder('http://192.168.1.42:8989')
