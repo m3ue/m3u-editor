@@ -428,22 +428,57 @@ class FetchTmdbIds implements ShouldQueue
             'count' => $count,
         ]);
 
-        // Use cursor for memory-efficient iteration
-        foreach ($query->cursor() as $channel) {
-            if (! $channel instanceof Channel) {
-                continue;
-            }
+        // Iterate in buffered chunks (chunkById), NOT cursor(): cursor() keeps an
+        // unbuffered read statement open on the same SQLite connection, so the
+        // per-row update() inside processVodChannel() cannot upgrade to a writer
+        // and fails with "database is locked" — silently dropping the match.
+        // chunkById() closes each page's statement before we write. Pages by the
+        // primary key, which our updates never change, so it is safe.
+        $query->chunkById(100, function ($channels) use ($tmdb) {
+            foreach ($channels as $channel) {
+                if (! $channel instanceof Channel) {
+                    continue;
+                }
 
-            try {
-                $this->processVodChannel($tmdb, $channel);
-            } catch (\Exception $e) {
-                $this->errorCount++;
-                Log::error('FetchTmdbIds: Error processing VOD channel', [
-                    'channel_id' => $channel->id,
-                    'error' => $e->getMessage(),
-                ]);
+                try {
+                    $this->processVodChannel($tmdb, $channel);
+                } catch (\Exception $e) {
+                    $this->errorCount++;
+                    Log::error('FetchTmdbIds: Error processing VOD channel', [
+                        'channel_id' => $channel->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
+        });
+    }
+
+    /**
+     * Build the title used for the TMDB lookup.
+     *
+     * Providers prefix VOD names with category labels ("EN - ", "4K-EN - ",
+     * "D+ - ", "NF - ", "EN-TOP - 123. ", …) that wreck the search. We reuse the
+     * configured VOD name-filter patterns (the same ones the .strm sync applies to
+     * file names) and additionally drop any leading "123. " numbering, so a single
+     * setting cleans both the on-disk name and the match query. Display fields
+     * (title_custom) are left untouched.
+     */
+    protected function cleanTitleForSearch(?string $title): string
+    {
+        $title = $title ?? '';
+
+        $settings = app(GeneralSettings::class);
+        if (($settings->vod_stream_file_sync_name_filter_enabled ?? false)
+            && ! empty($settings->vod_stream_file_sync_name_filter_patterns)) {
+            foreach ($settings->vod_stream_file_sync_name_filter_patterns as $pattern) {
+                $title = str_replace($pattern, '', $title);
             }
         }
+
+        // Drop leading provider numbering like "123. " or "123) " left after a prefix.
+        $title = preg_replace('/^\s*\d+[\.\)]\s*/', '', $title);
+
+        return trim($title);
     }
 
     /**
@@ -520,8 +555,12 @@ class FetchTmdbIds implements ShouldQueue
             return;
         }
 
-        // Get title and year for search
-        $title = $channel->title_custom ?? $channel->title ?? $channel->name;
+        // Get title and year for search. Strip provider/category prefixes
+        // ("EN - ", "4K-EN - ", "D+ - ", "NF - ", "123. " numbering, …) BEFORE the
+        // TMDB lookup, otherwise the normalizer turns e.g. "NF - My Hero Academia"
+        // into "NFL …" or leaves "En", poisoning the match. Reuses the same VOD
+        // name-filter the .strm sync uses, so one setting governs both.
+        $title = $this->cleanTitleForSearch($channel->title_custom ?? $channel->title ?? $channel->name);
         $year = $channel->year
             ?? $channel->info['year']
             ?? TmdbService::extractYearFromTitle($title);
@@ -714,22 +753,25 @@ class FetchTmdbIds implements ShouldQueue
             'count' => $count,
         ]);
 
-        // Use cursor for memory-efficient iteration
-        foreach ($query->cursor() as $series) {
-            if (! $series instanceof Series) {
-                continue;
-            }
+        // Buffered chunks (chunkById), NOT cursor(): see processVodChannels() —
+        // cursor() holds an open read statement that blocks the per-row update().
+        $query->chunkById(100, function ($seriesChunk) use ($tmdb) {
+            foreach ($seriesChunk as $series) {
+                if (! $series instanceof Series) {
+                    continue;
+                }
 
-            try {
-                $this->processSingleSeries($tmdb, $series);
-            } catch (\Exception $e) {
-                $this->errorCount++;
-                Log::error('FetchTmdbIds: Error processing series', [
-                    'series_id' => $series->id,
-                    'error' => $e->getMessage(),
-                ]);
+                try {
+                    $this->processSingleSeries($tmdb, $series);
+                } catch (\Exception $e) {
+                    $this->errorCount++;
+                    Log::error('FetchTmdbIds: Error processing series', [
+                        'series_id' => $series->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
             }
-        }
+        });
     }
 
     /**
