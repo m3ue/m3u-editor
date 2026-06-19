@@ -134,6 +134,10 @@ return [
         // not a credential.
         '3d9d85f224d4',
 
+        // ArrIntegration: 'api_key' => 'encrypted' is a Laravel Eloquent cast
+        // declaration, not a hardcoded credential.
+        'acca5cf068e1',
+
         // GenerateTranslations: "{PH{$index}}" is a placeholder token template,
         // not a secret.
         '2a3eaf0a6403',

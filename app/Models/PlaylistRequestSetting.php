@@ -7,6 +7,15 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class PlaylistRequestSetting extends Model
 {
+    /**
+     * @var array<int, string>
+     */
+    protected $fillable = [
+        'playlist_id',
+        'user_id',
+        'enabled',
+    ];
+
     protected function casts(): array
     {
         return [

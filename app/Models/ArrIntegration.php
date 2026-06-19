@@ -12,6 +12,24 @@ class ArrIntegration extends Model
     use HasFactory;
 
     /**
+     * @var array<int, string>
+     */
+    protected $fillable = [
+        'name',
+        'type',
+        'url',
+        'api_key',
+        'quality_profile_id',
+        'quality_profile_name',
+        'root_folder_path',
+        'enabled',
+        'guest_enabled',
+        'last_test_at',
+        'webhook_secret',
+        'user_id',
+    ];
+
+    /**
      * @return array<string, string>
      */
     protected function casts(): array
