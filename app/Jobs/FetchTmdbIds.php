@@ -34,6 +34,8 @@ class FetchTmdbIds implements ShouldQueue
 
     protected bool $autoCreateGroups = false;
 
+    protected GeneralSettings $settings;
+
     protected const BATCH_STATS_TTL_HOURS = 6;
 
     public int $batchChunkSize = self::BATCH_CHUNK_SIZE;
@@ -101,7 +103,8 @@ class FetchTmdbIds implements ShouldQueue
             'overwriteExisting' => $this->overwriteExisting,
         ]);
 
-        $this->autoCreateGroups = (bool) app(GeneralSettings::class)->tmdb_auto_create_groups;
+        $this->settings = app(GeneralSettings::class);
+        $this->autoCreateGroups = (bool) $this->settings->tmdb_auto_create_groups;
 
         if (! $tmdb->isConfigured()) {
             Log::warning('FetchTmdbIds: TMDB API key not configured');
@@ -428,22 +431,25 @@ class FetchTmdbIds implements ShouldQueue
             'count' => $count,
         ]);
 
-        // Use cursor for memory-efficient iteration
-        foreach ($query->cursor() as $channel) {
-            if (! $channel instanceof Channel) {
-                continue;
-            }
+        // chunkById() rather than cursor(): cursor() holds an open read statement on
+        // the SQLite connection, blocking the per-row update() with "database is locked".
+        $query->chunkById(100, function ($channels) use ($tmdb) {
+            foreach ($channels as $channel) {
+                if (! $channel instanceof Channel) {
+                    continue;
+                }
 
-            try {
-                $this->processVodChannel($tmdb, $channel);
-            } catch (\Exception $e) {
-                $this->errorCount++;
-                Log::error('FetchTmdbIds: Error processing VOD channel', [
-                    'channel_id' => $channel->id,
-                    'error' => $e->getMessage(),
-                ]);
+                try {
+                    $this->processVodChannel($tmdb, $channel);
+                } catch (\Exception $e) {
+                    $this->errorCount++;
+                    Log::error('FetchTmdbIds: Error processing VOD channel', [
+                        'channel_id' => $channel->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
             }
-        }
+        });
     }
 
     /**
@@ -520,8 +526,7 @@ class FetchTmdbIds implements ShouldQueue
             return;
         }
 
-        // Get title and year for search
-        $title = $channel->title_custom ?? $channel->title ?? $channel->name;
+        $title = $this->cleanTitleForSearch($channel->title_custom ?? $channel->title ?? $channel->name);
         $year = $channel->year
             ?? $channel->info['year']
             ?? TmdbService::extractYearFromTitle($title);
@@ -714,22 +719,24 @@ class FetchTmdbIds implements ShouldQueue
             'count' => $count,
         ]);
 
-        // Use cursor for memory-efficient iteration
-        foreach ($query->cursor() as $series) {
-            if (! $series instanceof Series) {
-                continue;
-            }
+        // chunkById() rather than cursor(): same reason as processVodChannels().
+        $query->chunkById(100, function ($seriesChunk) use ($tmdb) {
+            foreach ($seriesChunk as $series) {
+                if (! $series instanceof Series) {
+                    continue;
+                }
 
-            try {
-                $this->processSingleSeries($tmdb, $series);
-            } catch (\Exception $e) {
-                $this->errorCount++;
-                Log::error('FetchTmdbIds: Error processing series', [
-                    'series_id' => $series->id,
-                    'error' => $e->getMessage(),
-                ]);
+                try {
+                    $this->processSingleSeries($tmdb, $series);
+                } catch (\Exception $e) {
+                    $this->errorCount++;
+                    Log::error('FetchTmdbIds: Error processing series', [
+                        'series_id' => $series->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
             }
-        }
+        });
     }
 
     /**
@@ -818,7 +825,7 @@ class FetchTmdbIds implements ShouldQueue
         }
 
         // Get name and year for search
-        $name = $series->name;
+        $name = $this->cleanTitleForSearch($series->name, true);
         $year = null;
 
         if ($series->release_date) {
@@ -1165,6 +1172,33 @@ class FetchTmdbIds implements ShouldQueue
             'tmdb_id' => $tmdbId,
             'episodes_updated' => $episodeCount,
         ]);
+    }
+
+    /**
+     * Clean title for TMDB search by applying user-defined patterns and stripping common prefixes.
+     */
+    protected function cleanTitleForSearch(?string $title, bool $isSeries = false): string
+    {
+        $title = $title ?? '';
+
+        $enabled = $isSeries
+            ? ($this->settings->stream_file_sync_name_filter_enabled ?? false)
+            : ($this->settings->vod_stream_file_sync_name_filter_enabled ?? false);
+        $patterns = $isSeries
+            ? ($this->settings->stream_file_sync_name_filter_patterns ?? [])
+            : ($this->settings->vod_stream_file_sync_name_filter_patterns ?? []);
+
+        if ($enabled && ! empty($patterns)) {
+            foreach ($patterns as $pattern) {
+                $title = str_replace($pattern, '', $title);
+            }
+        }
+
+        // Strip leading numbering ("123. " / "123) ") that remains after prefix removal.
+        // Requires whitespace after the separator so "3.10 to Yuma" is not mangled.
+        $title = preg_replace('/^\s*\d+[\.\)]\s+/', '', $title) ?? $title;
+
+        return trim($title);
     }
 
     /**

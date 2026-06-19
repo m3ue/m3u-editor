@@ -3,6 +3,7 @@
 namespace App\Filament\Pages;
 
 use App\Filament\Actions\CronHelperAction;
+use App\Filament\Actions\RegexTesterAction;
 use App\Filament\CopilotTools\DvrOverviewTool;
 use App\Filament\CopilotTools\DvrScheduleTool;
 use App\Filament\CopilotTools\EpgChannelMatcherTool;
@@ -1425,6 +1426,51 @@ class Preferences extends SettingsPage
                                             ->maxValue(100)
                                             ->default(80)
                                             ->helperText(__('Minimum title similarity percentage (50-100) required to accept a match. Higher values = stricter matching.')),
+                                        Section::make(__('Title Cleaning for TMDB Lookup'))
+                                            ->icon('heroicon-m-scissors')
+                                            ->description(__('Strip provider prefixes from VOD and Series titles before matching with TMDB. This helps improve matching accuracy by removing common prefixes like "EN - ", "4K-EN - ", "NF - ", etc.'))
+                                            ->compact()
+                                            ->columnSpanFull()
+                                            ->schema([
+                                                Grid::make()
+                                                    ->columnSpanFull()
+                                                    ->columns(2)
+                                                    ->schema([
+                                                        Toggle::make('vod_stream_file_sync_name_filter_enabled')
+                                                            ->label(__('Strip provider prefixes from VOD titles before matching'))
+                                                            ->helperText(__('Remove prefix patterns from VOD titles before searching TMDB.'))
+                                                            ->live()
+                                                            ->inline(false)
+                                                            ->default(false),
+                                                        TagsInput::make('vod_stream_file_sync_name_filter_patterns')
+                                                            ->label(__('VOD title prefix patterns'))
+                                                            ->placeholder(__('EN - '))
+                                                            ->helperText(__('Strings to strip from VOD titles before TMDB lookup. Press [tab] or [return] to add each pattern.'))
+                                                            ->hintAction(
+                                                                RegexTesterAction::make(name: 'test-vod-name-filter', flags: 'u', samplesContext: 'vod_channels')
+                                                            )
+                                                            ->hidden(fn (Get $get): bool => ! (bool) $get('vod_stream_file_sync_name_filter_enabled')),
+                                                    ]),
+                                                Grid::make()
+                                                    ->columnSpanFull()
+                                                    ->columns(2)
+                                                    ->schema([
+                                                        Toggle::make('stream_file_sync_name_filter_enabled')
+                                                            ->label(__('Strip provider prefixes from Series titles before matching'))
+                                                            ->helperText(__('Remove prefix patterns from Series titles before searching TMDB.'))
+                                                            ->live()
+                                                            ->inline(false)
+                                                            ->default(false),
+                                                        TagsInput::make('stream_file_sync_name_filter_patterns')
+                                                            ->label(__('Series title prefix patterns'))
+                                                            ->placeholder(__('EN - '))
+                                                            ->helperText(__('Strings to strip from Series titles before TMDB lookup. Press [tab] or [return] to add each pattern.'))
+                                                            ->hintAction(
+                                                                RegexTesterAction::make(name: 'test-series-name-filter', flags: 'u', samplesContext: 'series')
+                                                            )
+                                                            ->hidden(fn (Get $get): bool => ! (bool) $get('stream_file_sync_name_filter_enabled')),
+                                                    ]),
+                                            ]),
                                     ]),
 
                                 Section::make(__('MediaFlow Proxy'))
