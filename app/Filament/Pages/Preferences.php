@@ -1424,7 +1424,10 @@ class Preferences extends SettingsPage
                                             ->maxValue(100)
                                             ->default(80)
                                             ->helperText(__('Minimum title similarity percentage (50-100) required to accept a match. Higher values = stricter matching.')),
-                                        Fieldset::make(__('Title Cleaning for TMDB Lookup'))
+                                        Section::make(__('Title Cleaning for TMDB Lookup'))
+                                            ->icon('heroicon-m-scissors')
+                                            ->description(__('Strip provider prefixes from VOD and Series titles before matching with TMDB. This helps improve matching accuracy by removing common prefixes like "EN - ", "4K-EN - ", "NF - ", etc.'))
+                                            ->compact()
                                             ->columnSpanFull()
                                             ->schema([
                                                 Grid::make()
@@ -1433,7 +1436,7 @@ class Preferences extends SettingsPage
                                                     ->schema([
                                                         Toggle::make('vod_stream_file_sync_name_filter_enabled')
                                                             ->label(__('Strip provider prefixes from VOD titles before matching'))
-                                                            ->helperText(__('Remove prefix patterns from VOD titles before searching TMDB (e.g. "EN - ", "4K-EN - ", "NF - ").'))
+                                                            ->helperText(__('Remove prefix patterns from VOD titles before searching TMDB.'))
                                                             ->live()
                                                             ->inline(false)
                                                             ->default(false),
