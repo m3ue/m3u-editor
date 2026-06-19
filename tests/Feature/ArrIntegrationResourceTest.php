@@ -5,7 +5,6 @@ use App\Filament\Resources\ArrIntegrations\Pages\CreateArrIntegration;
 use App\Filament\Resources\ArrIntegrations\Pages\EditArrIntegration;
 use App\Filament\Resources\ArrIntegrations\Pages\ListArrIntegrations;
 use App\Models\ArrIntegration;
-use App\Models\Playlist;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
@@ -17,7 +16,6 @@ beforeEach(function () {
     Bus::fake();
     $this->user = User::factory()->create(['permissions' => ['use_integrations']]);
     $this->actingAs($this->user);
-    $this->playlist = Playlist::factory()->create(['user_id' => $this->user->id]);
 });
 
 it('hides navigation when user cannot use integrations', function () {
@@ -36,18 +34,9 @@ it('shows navigation when user has permission', function () {
 
 it('scopes table query to current user', function () {
     $other = User::factory()->create();
-    $otherPlaylist = Playlist::factory()->create(['user_id' => $other->id]);
 
-    ArrIntegration::factory()->create([
-        'user_id' => $this->user->id,
-        'playlist_id' => $this->playlist->id,
-        'name' => 'Mine',
-    ]);
-    ArrIntegration::factory()->create([
-        'user_id' => $other->id,
-        'playlist_id' => $otherPlaylist->id,
-        'name' => 'Theirs',
-    ]);
+    ArrIntegration::factory()->create(['user_id' => $this->user->id, 'name' => 'Mine']);
+    ArrIntegration::factory()->create(['user_id' => $other->id, 'name' => 'Theirs']);
 
     $query = ArrIntegrationResource::getEloquentQuery();
     $names = $query->pluck('name')->all();
@@ -61,7 +50,6 @@ it('can create an integration', function () {
         ->fillForm([
             'name' => 'Sonarr 1080p',
             'type' => 'sonarr',
-            'playlist_id' => $this->playlist->id,
             'url' => 'http://192.168.1.42:8989',
             'api_key' => 'secret-key-123',
             'enabled' => true,
@@ -78,23 +66,10 @@ it('can create an integration', function () {
     expect($integration->api_key)->toBe('secret-key-123');
 });
 
-it('requires playlist_id on create', function () {
-    Livewire::test(CreateArrIntegration::class)
-        ->fillForm([
-            'name' => 'No Playlist',
-            'type' => 'sonarr',
-            'url' => 'http://192.168.1.42:8989',
-            'api_key' => 'secret',
-        ])
-        ->call('create')
-        ->assertHasFormErrors(['playlist_id' => 'required']);
-});
-
 it('requires type on create', function () {
     Livewire::test(CreateArrIntegration::class)
         ->fillForm([
             'name' => 'No Type',
-            'playlist_id' => $this->playlist->id,
             'url' => 'http://192.168.1.42:8989',
             'api_key' => 'secret',
         ])
@@ -105,7 +80,6 @@ it('requires type on create', function () {
 it('can edit an existing integration', function () {
     $integration = ArrIntegration::factory()->create([
         'user_id' => $this->user->id,
-        'playlist_id' => $this->playlist->id,
         'name' => 'Old Name',
     ]);
 
@@ -125,7 +99,6 @@ it('can edit an existing integration', function () {
 it('preserves api_key on edit when left blank', function () {
     $integration = ArrIntegration::factory()->create([
         'user_id' => $this->user->id,
-        'playlist_id' => $this->playlist->id,
         'api_key' => 'original-key',
     ]);
 
@@ -141,10 +114,7 @@ it('preserves api_key on edit when left blank', function () {
 });
 
 it('can delete an integration', function () {
-    $integration = ArrIntegration::factory()->create([
-        'user_id' => $this->user->id,
-        'playlist_id' => $this->playlist->id,
-    ]);
+    $integration = ArrIntegration::factory()->create(['user_id' => $this->user->id]);
 
     $this->assertDatabaseHas('arr_integrations', ['id' => $integration->id]);
 
@@ -155,11 +125,7 @@ it('can delete an integration', function () {
 });
 
 it('lists the page without error', function () {
-    ArrIntegration::factory()->create([
-        'user_id' => $this->user->id,
-        'playlist_id' => $this->playlist->id,
-        'name' => 'My Sonarr',
-    ]);
+    ArrIntegration::factory()->create(['user_id' => $this->user->id, 'name' => 'My Sonarr']);
 
     Livewire::test(ListArrIntegrations::class)
         ->assertOk();

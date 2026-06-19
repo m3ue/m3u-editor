@@ -1,7 +1,6 @@
 <?php
 
 use App\Models\ArrIntegration;
-use App\Models\Playlist;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
@@ -11,18 +10,15 @@ uses(RefreshDatabase::class);
 beforeEach(function () {
     Bus::fake();
     $this->user = User::factory()->create();
-    $this->playlist = Playlist::factory()->create(['user_id' => $this->user->id]);
 });
 
 it('can be created via factory', function () {
     $integration = ArrIntegration::factory()->create([
         'user_id' => $this->user->id,
-        'playlist_id' => $this->playlist->id,
     ]);
 
     expect($integration)->toBeInstanceOf(ArrIntegration::class);
     expect($integration->user_id)->toBe($this->user->id);
-    expect($integration->playlist_id)->toBe($this->playlist->id);
     expect($integration->enabled)->toBeTrue();
     expect($integration->guest_enabled)->toBeFalse();
 });
@@ -30,7 +26,6 @@ it('can be created via factory', function () {
 it('casts api_key to encrypted', function () {
     $integration = ArrIntegration::factory()->create([
         'user_id' => $this->user->id,
-        'playlist_id' => $this->playlist->id,
         'api_key' => 'plain-secret-key',
     ]);
 
@@ -46,34 +41,24 @@ it('casts api_key to encrypted', function () {
 it('hides api_key from array/serialization', function () {
     $integration = ArrIntegration::factory()->create([
         'user_id' => $this->user->id,
-        'playlist_id' => $this->playlist->id,
     ]);
 
     $array = $integration->toArray();
     expect($array)->not->toHaveKey('api_key');
 });
 
-it('has user and playlist relationships', function () {
+it('has a user relationship', function () {
     $integration = ArrIntegration::factory()->create([
         'user_id' => $this->user->id,
-        'playlist_id' => $this->playlist->id,
     ]);
 
     expect($integration->user)->toBeInstanceOf(User::class);
     expect($integration->user->id)->toBe($this->user->id);
-    expect($integration->playlist)->toBeInstanceOf(Playlist::class);
-    expect($integration->playlist->id)->toBe($this->playlist->id);
 });
 
 it('has isSonarr and isRadarr helpers', function () {
-    $sonarr = ArrIntegration::factory()->sonarr()->create([
-        'user_id' => $this->user->id,
-        'playlist_id' => $this->playlist->id,
-    ]);
-    $radarr = ArrIntegration::factory()->radarr()->create([
-        'user_id' => $this->user->id,
-        'playlist_id' => $this->playlist->id,
-    ]);
+    $sonarr = ArrIntegration::factory()->sonarr()->create(['user_id' => $this->user->id]);
+    $radarr = ArrIntegration::factory()->radarr()->create(['user_id' => $this->user->id]);
 
     expect($sonarr->isSonarr())->toBeTrue();
     expect($sonarr->isRadarr())->toBeFalse();
@@ -84,7 +69,6 @@ it('has isSonarr and isRadarr helpers', function () {
 it('strips trailing slash from base_url', function () {
     $integration = ArrIntegration::factory()->create([
         'user_id' => $this->user->id,
-        'playlist_id' => $this->playlist->id,
         'url' => 'http://192.168.1.42:8989/',
     ]);
 
@@ -94,19 +78,16 @@ it('strips trailing slash from base_url', function () {
 it('scopeEnabled and scopeGuestEnabled filter correctly', function () {
     ArrIntegration::factory()->create([
         'user_id' => $this->user->id,
-        'playlist_id' => $this->playlist->id,
         'enabled' => true,
         'guest_enabled' => true,
     ]);
     ArrIntegration::factory()->create([
         'user_id' => $this->user->id,
-        'playlist_id' => $this->playlist->id,
         'enabled' => false,
         'guest_enabled' => true,
     ]);
     ArrIntegration::factory()->create([
         'user_id' => $this->user->id,
-        'playlist_id' => $this->playlist->id,
         'enabled' => true,
         'guest_enabled' => false,
     ]);

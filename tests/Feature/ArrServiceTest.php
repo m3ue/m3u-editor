@@ -23,7 +23,6 @@ beforeEach(function () {
 it('dispatches sonarr integrations to SonarrService', function () {
     $integration = ArrIntegration::factory()->sonarr()->create([
         'user_id' => $this->user->id,
-        'playlist_id' => $this->playlist->id,
     ]);
 
     expect(ArrService::make($integration))->toBeInstanceOf(SonarrService::class);
@@ -32,7 +31,6 @@ it('dispatches sonarr integrations to SonarrService', function () {
 it('dispatches radarr integrations to RadarrService', function () {
     $integration = ArrIntegration::factory()->radarr()->create([
         'user_id' => $this->user->id,
-        'playlist_id' => $this->playlist->id,
     ]);
 
     expect(ArrService::make($integration))->toBeInstanceOf(RadarrService::class);
@@ -41,7 +39,6 @@ it('dispatches radarr integrations to RadarrService', function () {
 it('returns the integration from getIntegration', function () {
     $integration = ArrIntegration::factory()->sonarr()->create([
         'user_id' => $this->user->id,
-        'playlist_id' => $this->playlist->id,
     ]);
 
     $service = ArrService::make($integration);
@@ -52,7 +49,6 @@ it('returns the integration from getIntegration', function () {
 it('throws for unknown arr types', function () {
     $integration = ArrIntegration::factory()->create([
         'user_id' => $this->user->id,
-        'playlist_id' => $this->playlist->id,
         'type' => 'unsupported',
     ]);
 
@@ -62,7 +58,6 @@ it('throws for unknown arr types', function () {
 it('returns the correct interface', function () {
     $integration = ArrIntegration::factory()->sonarr()->create([
         'user_id' => $this->user->id,
-        'playlist_id' => $this->playlist->id,
     ]);
 
     expect(ArrService::make($integration))->toBeInstanceOf(ArrIntegrationInterface::class);
@@ -75,7 +70,6 @@ it('testConnection returns version on success', function () {
 
     $integration = ArrIntegration::factory()->sonarr()->create([
         'user_id' => $this->user->id,
-        'playlist_id' => $this->playlist->id,
     ]);
 
     $result = ArrService::make($integration)->testConnection();
@@ -91,7 +85,6 @@ it('testConnection returns error on failure', function () {
 
     $integration = ArrIntegration::factory()->sonarr()->create([
         'user_id' => $this->user->id,
-        'playlist_id' => $this->playlist->id,
     ]);
 
     $result = ArrService::make($integration)->testConnection();
@@ -109,7 +102,6 @@ it('testConnection handles network errors', function () {
 
     $integration = ArrIntegration::factory()->sonarr()->create([
         'user_id' => $this->user->id,
-        'playlist_id' => $this->playlist->id,
     ]);
 
     $result = ArrService::make($integration)->testConnection();
@@ -125,7 +117,6 @@ it('sends X-Api-Key header on requests', function () {
 
     $integration = ArrIntegration::factory()->sonarr()->create([
         'user_id' => $this->user->id,
-        'playlist_id' => $this->playlist->id,
         'api_key' => 'my-secret-token',
     ]);
 
@@ -146,7 +137,6 @@ it('fetchQualityProfiles returns formatted profiles', function () {
 
     $integration = ArrIntegration::factory()->sonarr()->create([
         'user_id' => $this->user->id,
-        'playlist_id' => $this->playlist->id,
     ]);
 
     $profiles = ArrService::make($integration)->fetchQualityProfiles();
@@ -165,7 +155,6 @@ it('fetchRootFolders returns formatted folders', function () {
 
     $integration = ArrIntegration::factory()->sonarr()->create([
         'user_id' => $this->user->id,
-        'playlist_id' => $this->playlist->id,
     ]);
 
     $folders = ArrService::make($integration)->fetchRootFolders();
@@ -192,7 +181,6 @@ it('search returns formatted results', function () {
 
     $integration = ArrIntegration::factory()->sonarr()->create([
         'user_id' => $this->user->id,
-        'playlist_id' => $this->playlist->id,
     ]);
 
     $results = ArrService::make($integration)->search('breaking');
@@ -219,7 +207,6 @@ it('RadarrService search uses tmdbId', function () {
 
     $integration = ArrIntegration::factory()->radarr()->create([
         'user_id' => $this->user->id,
-        'playlist_id' => $this->playlist->id,
     ]);
 
     $results = ArrService::make($integration)->search('inception');
@@ -238,7 +225,6 @@ it('add posts correct payload for Sonarr', function () {
 
     $integration = ArrIntegration::factory()->sonarr()->create([
         'user_id' => $this->user->id,
-        'playlist_id' => $this->playlist->id,
         'quality_profile_id' => 2,
         'root_folder_path' => '/media/tv',
     ]);
@@ -271,7 +257,6 @@ it('add posts correct payload for Radarr', function () {
 
     $integration = ArrIntegration::factory()->radarr()->create([
         'user_id' => $this->user->id,
-        'playlist_id' => $this->playlist->id,
         'quality_profile_id' => 3,
         'root_folder_path' => '/media/movies',
     ]);
@@ -303,7 +288,6 @@ it('checkExists returns true when found', function () {
 
     $integration = ArrIntegration::factory()->sonarr()->create([
         'user_id' => $this->user->id,
-        'playlist_id' => $this->playlist->id,
     ]);
 
     $result = ArrService::make($integration)->checkExists(12345);
@@ -319,7 +303,6 @@ it('checkExists returns false when not found', function () {
 
     $integration = ArrIntegration::factory()->sonarr()->create([
         'user_id' => $this->user->id,
-        'playlist_id' => $this->playlist->id,
     ]);
 
     $result = ArrService::make($integration)->checkExists(99999);
@@ -336,7 +319,6 @@ it('RadarrService checkExists uses /movie endpoint', function () {
 
     $integration = ArrIntegration::factory()->radarr()->create([
         'user_id' => $this->user->id,
-        'playlist_id' => $this->playlist->id,
     ]);
 
     $result = ArrService::make($integration)->checkExists(27205);
@@ -364,7 +346,6 @@ it('fetchQueue maps progress from sizeleft/size', function () {
 
     $integration = ArrIntegration::factory()->sonarr()->create([
         'user_id' => $this->user->id,
-        'playlist_id' => $this->playlist->id,
     ]);
 
     $queue = ArrService::make($integration)->fetchQueue();
@@ -401,7 +382,6 @@ it('fetchReleases returns formatted releases with approval flag', function () {
 
     $integration = ArrIntegration::factory()->sonarr()->create([
         'user_id' => $this->user->id,
-        'playlist_id' => $this->playlist->id,
     ]);
 
     $releases = ArrService::make($integration)->fetchReleases(42);
@@ -419,7 +399,6 @@ it('downloadRelease posts to /release endpoint', function () {
 
     $integration = ArrIntegration::factory()->sonarr()->create([
         'user_id' => $this->user->id,
-        'playlist_id' => $this->playlist->id,
     ]);
 
     $result = ArrService::make($integration)->downloadRelease([
@@ -446,7 +425,6 @@ it('downloadRelease returns error on server failure', function () {
 
     $integration = ArrIntegration::factory()->sonarr()->create([
         'user_id' => $this->user->id,
-        'playlist_id' => $this->playlist->id,
     ]);
 
     $result = ArrService::make($integration)->downloadRelease([
@@ -466,7 +444,6 @@ it('base url strips trailing slash for client requests', function () {
 
     $integration = ArrIntegration::factory()->sonarr()->create([
         'user_id' => $this->user->id,
-        'playlist_id' => $this->playlist->id,
         'url' => 'http://sonarr.example.com:8989/', // trailing slash
     ]);
 

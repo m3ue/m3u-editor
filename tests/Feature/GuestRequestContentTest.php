@@ -3,6 +3,7 @@
 use App\Filament\GuestPanel\Pages\GuestRequestContent;
 use App\Models\ArrIntegration;
 use App\Models\Playlist;
+use App\Models\PlaylistRequestSetting;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
@@ -36,9 +37,13 @@ function setGuestAuthContext(string $uuid, ?string $username = 'guest', ?string 
 }
 
 it('hides the page when no session auth', function () {
+    PlaylistRequestSetting::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->owner->id,
+        'enabled' => true,
+    ]);
     ArrIntegration::factory()->create([
         'user_id' => $this->owner->id,
-        'playlist_id' => $this->playlist->id,
         'enabled' => true,
         'guest_enabled' => true,
     ]);
@@ -55,9 +60,13 @@ it('hides the page when no session auth', function () {
 });
 
 it('hides the page when no integration is guest-enabled', function () {
+    PlaylistRequestSetting::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->owner->id,
+        'enabled' => true,
+    ]);
     ArrIntegration::factory()->create([
         'user_id' => $this->owner->id,
-        'playlist_id' => $this->playlist->id,
         'enabled' => true,
         'guest_enabled' => false,
     ]);
@@ -68,15 +77,54 @@ it('hides the page when no integration is guest-enabled', function () {
 });
 
 it('hides the page when no integration exists at all', function () {
+    PlaylistRequestSetting::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->owner->id,
+        'enabled' => true,
+    ]);
+
     setGuestAuthContext($this->playlist->uuid);
 
     expect(GuestRequestContent::canAccess())->toBeFalse();
 });
 
-it('shows the page when an integration is guest-enabled', function () {
+it('hides the page when request setting is disabled', function () {
+    PlaylistRequestSetting::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->owner->id,
+        'enabled' => false,
+    ]);
     ArrIntegration::factory()->create([
         'user_id' => $this->owner->id,
+        'enabled' => true,
+        'guest_enabled' => true,
+    ]);
+
+    setGuestAuthContext($this->playlist->uuid);
+
+    expect(GuestRequestContent::canAccess())->toBeFalse();
+});
+
+it('hides the page when no request setting exists', function () {
+    ArrIntegration::factory()->create([
+        'user_id' => $this->owner->id,
+        'enabled' => true,
+        'guest_enabled' => true,
+    ]);
+
+    setGuestAuthContext($this->playlist->uuid);
+
+    expect(GuestRequestContent::canAccess())->toBeFalse();
+});
+
+it('shows the page when request setting is enabled and an integration is guest-enabled', function () {
+    PlaylistRequestSetting::factory()->create([
         'playlist_id' => $this->playlist->id,
+        'user_id' => $this->owner->id,
+        'enabled' => true,
+    ]);
+    ArrIntegration::factory()->create([
+        'user_id' => $this->owner->id,
         'enabled' => true,
         'guest_enabled' => true,
     ]);
@@ -87,9 +135,13 @@ it('shows the page when an integration is guest-enabled', function () {
 });
 
 it('hides the page when integration is disabled', function () {
+    PlaylistRequestSetting::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->owner->id,
+        'enabled' => true,
+    ]);
     ArrIntegration::factory()->create([
         'user_id' => $this->owner->id,
-        'playlist_id' => $this->playlist->id,
         'enabled' => false,
         'guest_enabled' => true,
     ]);
@@ -106,9 +158,13 @@ it('hides the page for unknown playlist UUID', function () {
 });
 
 it('resolves the integration via the integration property', function () {
+    PlaylistRequestSetting::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->owner->id,
+        'enabled' => true,
+    ]);
     $integration = ArrIntegration::factory()->sonarr()->create([
         'user_id' => $this->owner->id,
-        'playlist_id' => $this->playlist->id,
         'enabled' => true,
         'guest_enabled' => true,
         'name' => 'My Sonarr',
