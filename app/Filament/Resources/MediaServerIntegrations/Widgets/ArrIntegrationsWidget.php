@@ -77,7 +77,7 @@ class ArrIntegrationsWidget extends BaseWidget
 
                 TextColumn::make('type')
                     ->badge()
-                    ->color(fn (string $state): string => $state === 'sonarr' ? 'info' : 'purple')
+                    ->color(fn (string $state): string => $state === 'sonarr' ? 'info' : 'warning')
                     ->formatStateUsing(fn (string $state): string => ucfirst($state))
                     ->sortable(),
 
