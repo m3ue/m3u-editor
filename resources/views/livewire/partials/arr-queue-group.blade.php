@@ -21,13 +21,14 @@
             @foreach($queueGroup['items'] as $item)
                 @php
                     $badge = \App\Livewire\ArrQueueMonitor::statusBadge($item['status'] ?? 'unknown');
-                    $showProgress = in_array($item['status'] ?? '', ['downloading', 'queued', 'paused']);
+                    $showProgress = in_array($item['status'] ?? '', ['downloading', 'queued', 'paused', 'importing']);
                 @endphp
                 <div class="px-4 py-3 bg-white dark:bg-gray-900/30">
                     <div class="flex items-start justify-between gap-3">
                         <p class="text-sm font-medium text-gray-900 dark:text-gray-100 truncate flex-1 min-w-0">
                             {{ $item['title'] ?? __('Unknown') }}
                         </p>
+                        <div class="flex items-center gap-1.5 flex-shrink-0">
                         <span @class([
                             'inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap flex-shrink-0',
                             'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400' => $badge['color'] === 'primary',
@@ -38,11 +39,29 @@
                         ])>
                             {{ $badge['label'] }}
                         </span>
+                        @if($item['can_dismiss'] ?? false)
+                            <button
+                                wire:click="dismissItem('{{ $item['dismiss_source'] }}', '{{ $item['dismiss_key'] }}')"
+                                wire:loading.attr="disabled"
+                                title="{{ __('Dismiss') }}"
+                                class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                            >
+                                <x-heroicon-o-x-mark class="w-3.5 h-3.5" />
+                            </button>
+                        @endif
+                        </div>
                     </div>
+
+                    @if($item['episode'] ?? null)
+                        <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400 truncate">{{ $item['episode'] }}</p>
+                    @endif
 
                     <div class="mt-1 flex items-center gap-3 text-xs text-gray-500 dark:text-gray-500">
                         @if($item['quality'] ?? null)
                             <span class="font-medium text-gray-600 dark:text-gray-400">{{ $item['quality'] }}</span>
+                        @endif
+                        @if($item['protocol'] ?? null)
+                            <span class="uppercase tracking-wide text-gray-400 dark:text-gray-600">{{ $item['protocol'] === 'usenet' ? 'NZB' : ucfirst($item['protocol']) }}</span>
                         @endif
                         @if($showProgress && ($item['size'] ?? 0) > 0)
                             <span>{{ $item['formattedSize'] }}</span>
@@ -59,6 +78,10 @@
                             </span>
                         @endif
                     </div>
+
+                    @if($item['indexer'] ?? null)
+                        <p class="mt-0.5 text-xs text-gray-400 dark:text-gray-600 truncate">{{ $item['indexer'] }}</p>
+                    @endif
 
                     @if($showProgress)
                         <div class="mt-1.5 w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 overflow-hidden">

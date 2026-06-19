@@ -5,6 +5,12 @@ namespace App\Services\Arr;
 class SonarrService extends BaseArrService
 {
     /**
+     * Microseconds to wait between episode-fetch retry attempts after adding a new series.
+     * Sonarr indexes episodes asynchronously — zero in tests to avoid sleeping.
+     */
+    public static int $episodeRetryDelayUs = 500_000;
+
+    /**
      * @return array{ok: bool, version?: string, error?: string}
      */
     public function testConnection(): array
@@ -112,6 +118,7 @@ class SonarrService extends BaseArrService
                     'libraryId' => isset($item['id']) ? (int) $item['id'] : null,
                     'episodeFileCount' => (int) ($item['statistics']['episodeFileCount'] ?? 0),
                     'totalEpisodeCount' => (int) ($item['statistics']['totalEpisodeCount'] ?? 0),
+                    'sizeOnDisk' => (int) ($item['statistics']['sizeOnDisk'] ?? 0),
                 ];
             })
             ->all();
@@ -230,6 +237,37 @@ class SonarrService extends BaseArrService
     }
 
     /**
+     * Fetch per-episode file quality and size for a series in the Sonarr library.
+     * Only populated when the episode has a file and Sonarr embeds episodeFile.
+     *
+     * @return array<int, array<int, array{quality: ?string, size: ?int}>> seasonNumber => [episodeNumber => {quality, size}]
+     */
+    public function fetchEpisodeFileInfo(int $seriesId): array
+    {
+        $response = $this->client()->get('/episode', ['seriesId' => $seriesId]);
+
+        if (! $response->successful()) {
+            return [];
+        }
+
+        $info = [];
+        foreach ($response->json() ?? [] as $episode) {
+            if (! ($episode['hasFile'] ?? false)) {
+                continue;
+            }
+
+            $season = (int) ($episode['seasonNumber'] ?? 0);
+            $epNum = (int) ($episode['episodeNumber'] ?? 0);
+            $info[$season][$epNum] = [
+                'quality' => $episode['episodeFile']['quality']['quality']['name'] ?? null,
+                'size' => isset($episode['episodeFile']['size']) ? (int) $episode['episodeFile']['size'] : null,
+            ];
+        }
+
+        return $info;
+    }
+
+    /**
      * @param  array<string, mixed>  $payload
      * @return array{ok: bool, error?: string}
      */
@@ -237,13 +275,17 @@ class SonarrService extends BaseArrService
     {
         return $this->safeCall(
             function () use ($payload) {
-                $this->client()
-                    ->post('/release', [
-                        'guid' => $payload['guid'] ?? null,
-                        'indexerId' => $payload['indexerId'] ?? null,
-                        'seriesId' => $payload['seriesId'] ?? null,
-                    ])
-                    ->throw();
+                $body = [
+                    'guid' => $payload['guid'] ?? null,
+                    'indexerId' => $payload['indexerId'] ?? null,
+                    'seriesId' => $payload['seriesId'] ?? null,
+                ];
+
+                if (isset($payload['episodeId'])) {
+                    $body['episodeId'] = (int) $payload['episodeId'];
+                }
+
+                $this->client()->post('/release', $body)->throw();
 
                 return true;
             },
@@ -274,6 +316,7 @@ class SonarrService extends BaseArrService
             }
 
             $sonarrId = $series['id'] ?? null;
+            $seriesJustAdded = false;
 
             if (! $sonarrId) {
                 // Add the series with every season unmonitored so nothing bulk-downloads
@@ -296,21 +339,19 @@ class SonarrService extends BaseArrService
                     ->json();
 
                 $sonarrId = $added['id'];
+                $seriesJustAdded = true;
             }
 
-            // Find the target episode by season + episode number
-            $episodes = $this->client()
-                ->get('/episode', ['seriesId' => $sonarrId, 'seasonNumber' => $seasonNumber])
-                ->throw()
-                ->json();
+            // Find the target episode — retry when the series was just added because Sonarr
+            // indexes episodes asynchronously and the first fetch may return an empty list.
+            $episodeId = $this->resolveEpisodeId($sonarrId, $seasonNumber, $episodeNumber, $seriesJustAdded);
 
-            $episode = collect($episodes ?? [])->firstWhere('episodeNumber', $episodeNumber);
-
-            if (! $episode) {
-                throw new \RuntimeException("Episode S{$seasonNumber}E{$episodeNumber} not found in Sonarr.");
+            if (! $episodeId) {
+                throw new \RuntimeException(
+                    "Episode S{$seasonNumber}E{$episodeNumber} not found in Sonarr. ".
+                    'Sonarr may still be indexing the series — please try again in a moment.'
+                );
             }
-
-            $episodeId = (int) $episode['id'];
 
             // Monitor the episode then trigger an immediate search
             $this->client()
@@ -323,6 +364,71 @@ class SonarrService extends BaseArrService
 
             return $episodeId;
         }, "request episode S{$seasonNumber}E{$episodeNumber}");
+    }
+
+    /**
+     * Resolve the Sonarr-internal episode ID for a given season + episode number.
+     * When $retryIfEmpty is true, retries up to 5 times to handle the delay between
+     * a series being added via POST /series and its episodes becoming available.
+     */
+    public function resolveEpisodeId(int $seriesId, int $seasonNumber, int $episodeNumber, bool $retryIfEmpty = false): ?int
+    {
+        $maxAttempts = $retryIfEmpty ? 5 : 1;
+
+        for ($attempt = 0; $attempt < $maxAttempts; $attempt++) {
+            if ($attempt > 0 && static::$episodeRetryDelayUs > 0) {
+                usleep(static::$episodeRetryDelayUs);
+            }
+
+            $response = $this->client()->get('/episode', [
+                'seriesId' => $seriesId,
+                'seasonNumber' => $seasonNumber,
+            ]);
+
+            if (! $response->successful()) {
+                return null;
+            }
+
+            $episode = collect($response->json() ?? [])->firstWhere('episodeNumber', $episodeNumber);
+
+            if ($episode) {
+                return (int) $episode['id'];
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Fetch releases for a specific episode via Sonarr's indexer search.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function fetchEpisodeReleases(int $seriesId, int $episodeId): array
+    {
+        $response = $this->client()->get('/release', [
+            'seriesId' => $seriesId,
+            'episodeId' => $episodeId,
+        ]);
+
+        if (! $response->successful()) {
+            return [];
+        }
+
+        return collect($response->json() ?? [])
+            ->map(fn ($release) => [
+                'guid' => $release['guid'] ?? null,
+                'title' => $release['title'] ?? 'Unknown',
+                'indexerId' => $release['indexerId'] ?? null,
+                'size' => $release['size'] ?? 0,
+                'quality' => $release['quality']['quality']['name'] ?? 'Unknown',
+                'protocol' => $release['protocol'] ?? 'unknown',
+                'rejections' => $release['rejections'] ?? [],
+                'approved' => empty($release['rejections']),
+            ])
+            ->sortByDesc('approved')
+            ->values()
+            ->all();
     }
 
     /**
@@ -364,7 +470,7 @@ class SonarrService extends BaseArrService
      */
     public function fetchQueue(): array
     {
-        $response = $this->queueClient()->get('/queue', ['includeSeries' => 'true']);
+        $response = $this->queueClient()->get('/queue', ['includeSeries' => 'true', 'includeEpisode' => 'true']);
 
         if (! $response->successful()) {
             return [];
@@ -377,6 +483,13 @@ class SonarrService extends BaseArrService
                 $progress = $size > 0 ? (int) round((1 - ($sizeLeft / $size)) * 100) : 0;
 
                 $series = $item['series'] ?? null;
+                $episode = $item['episode'] ?? null;
+                $episodeLabel = null;
+                if ($episode) {
+                    $s = str_pad((string) ($episode['seasonNumber'] ?? 0), 2, '0', STR_PAD_LEFT);
+                    $e = str_pad((string) ($episode['episodeNumber'] ?? 0), 2, '0', STR_PAD_LEFT);
+                    $episodeLabel = "S{$s}E{$e}".($episode['title'] ? ' · '.$episode['title'] : '');
+                }
 
                 return [
                     'id' => $item['id'] ?? null,
@@ -387,6 +500,11 @@ class SonarrService extends BaseArrService
                     'size' => $size,
                     'sizeLeft' => $sizeLeft,
                     'timeLeft' => $item['timeleft'] ?? null,
+                    'quality' => $item['quality']['quality']['name'] ?? null,
+                    'protocol' => $item['protocol'] ?? null,
+                    'indexer' => $item['indexer'] ?? null,
+                    'episode' => $episodeLabel,
+                    'trackedDownloadState' => $item['trackedDownloadState'] ?? null,
                 ];
             })
             ->values()

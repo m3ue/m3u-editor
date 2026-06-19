@@ -221,6 +221,79 @@ it('returns hasFile false for radarr movies not yet downloaded', function () {
     expect($radarrResult['hasFile'])->toBeFalse();
 });
 
+it('surfaces radarr fileQuality and fileSize when movieFile is present', function () {
+    ArrIntegration::factory()->radarr()->create([
+        'user_id' => $this->user->id,
+    ]);
+
+    Http::fake([
+        '*/api/v3/series/lookup*' => Http::response([], 200),
+        '*/api/v3/movie/lookup*' => Http::response([
+            [
+                'id' => 7,
+                'tmdbId' => 27205,
+                'title' => 'Inception',
+                'year' => 2010,
+                'hasFile' => true,
+                'movieFile' => [
+                    'quality' => ['quality' => ['name' => 'Bluray-1080p']],
+                    'size' => 8589934592,
+                ],
+            ],
+        ], 200),
+    ]);
+
+    $component = Livewire::test(ArrSearch::class)
+        ->set('searchTerm', 'inception');
+
+    $radarrResult = collect($component->get('results'))->firstWhere('integrationType', 'radarr');
+    expect($radarrResult['fileQuality'])->toBe('Bluray-1080p');
+    expect($radarrResult['fileSize'])->toBe(8589934592);
+});
+
+it('returns null fileQuality and fileSize for radarr movies without a file', function () {
+    ArrIntegration::factory()->radarr()->create([
+        'user_id' => $this->user->id,
+    ]);
+
+    Http::fake([
+        '*/api/v3/series/lookup*' => Http::response([], 200),
+        '*/api/v3/movie/lookup*' => Http::response([
+            ['id' => 7, 'tmdbId' => 27205, 'title' => 'Inception', 'year' => 2010, 'hasFile' => false],
+        ], 200),
+    ]);
+
+    $component = Livewire::test(ArrSearch::class)
+        ->set('searchTerm', 'inception');
+
+    $radarrResult = collect($component->get('results'))->firstWhere('integrationType', 'radarr');
+    expect($radarrResult['fileQuality'])->toBeNull();
+    expect($radarrResult['fileSize'])->toBeNull();
+});
+
+it('surfaces sonarr sizeOnDisk when series is in library', function () {
+    Http::fake([
+        '*/api/v3/series/lookup*' => Http::response([
+            [
+                'id' => 42,
+                'tvdbId' => 12345,
+                'title' => 'Breaking Bad',
+                'year' => 2008,
+                'statistics' => [
+                    'episodeFileCount' => 5,
+                    'totalEpisodeCount' => 62,
+                    'sizeOnDisk' => 42949672960,
+                ],
+            ],
+        ], 200),
+    ]);
+
+    $component = Livewire::test(ArrSearch::class)
+        ->set('searchTerm', 'breaking');
+
+    expect($component->get('results.0.sizeOnDisk'))->toBe(42949672960);
+});
+
 it('does not search when term is too short', function () {
     Livewire::test(ArrSearch::class)
         ->set('searchTerm', 'a')
@@ -811,6 +884,64 @@ it('closeDetail resets detailSonarrEpisodeStatus', function () {
         ->call('loadDetailEpisodes')
         ->call('closeDetail')
         ->assertSet('detailSonarrEpisodeStatus', []);
+});
+
+it('loadDetailEpisodes populates detailSonarrEpisodeFileInfo when episodeFile is embedded', function () {
+    Http::fake([
+        '*/api/v3/series/lookup*' => Http::response([
+            ['id' => 42, 'tvdbId' => 12345, 'title' => 'Breaking Bad', 'seasons' => [['seasonNumber' => 1]]],
+        ], 200),
+        'api.tvmaze.com/lookup/shows*' => Http::response(['id' => 169], 200),
+        'api.tvmaze.com/shows/169/episodes*' => Http::response([], 200),
+        'api.tvmaze.com/shows/169/cast*' => Http::response([], 200),
+        '*/api/v3/episode*' => Http::response([
+            [
+                'seasonNumber' => 1,
+                'episodeNumber' => 1,
+                'hasFile' => true,
+                'episodeFile' => [
+                    'quality' => ['quality' => ['name' => 'WEBDL-1080p']],
+                    'size' => 1073741824,
+                ],
+            ],
+            ['seasonNumber' => 1, 'episodeNumber' => 2, 'hasFile' => false],
+        ], 200),
+    ]);
+
+    $component = Livewire::test(ArrSearch::class)
+        ->set('searchTerm', 'breaking')
+        ->call('openDetail', 0)
+        ->call('loadDetailEpisodes');
+
+    expect($component->get('detailSonarrEpisodeFileInfo.1.1.quality'))->toBe('WEBDL-1080p');
+    expect($component->get('detailSonarrEpisodeFileInfo.1.1.size'))->toBe(1073741824);
+    expect($component->get('detailSonarrEpisodeFileInfo.1'))->not->toHaveKey(2);
+});
+
+it('closeDetail resets detailSonarrEpisodeFileInfo', function () {
+    Http::fake([
+        '*/api/v3/series/lookup*' => Http::response([
+            ['id' => 42, 'tvdbId' => 1, 'title' => 'Show', 'seasons' => [['seasonNumber' => 1]]],
+        ], 200),
+        'api.tvmaze.com/lookup/shows*' => Http::response(['id' => 1], 200),
+        'api.tvmaze.com/shows/1/episodes*' => Http::response([], 200),
+        'api.tvmaze.com/shows/1/cast*' => Http::response([], 200),
+        '*/api/v3/episode*' => Http::response([
+            [
+                'seasonNumber' => 1,
+                'episodeNumber' => 1,
+                'hasFile' => true,
+                'episodeFile' => ['quality' => ['quality' => ['name' => 'WEBDL-1080p']], 'size' => 1073741824],
+            ],
+        ], 200),
+    ]);
+
+    Livewire::test(ArrSearch::class)
+        ->set('searchTerm', 'show')
+        ->call('openDetail', 0)
+        ->call('loadDetailEpisodes')
+        ->call('closeDetail')
+        ->assertSet('detailSonarrEpisodeFileInfo', []);
 });
 
 // --- Individual episode requests ---
@@ -1431,4 +1562,236 @@ it('livewire closeDetail clears detailReleases', function () {
 
     expect($component->get('detailReleases'))->toBe([]);
     expect($component->get('showDetail'))->toBeFalse();
+});
+
+// ── Live queue refresh ───────────────────────────────────────────────────────
+
+it('loadQueue dispatches refreshArrQueue event in admin mode', function () {
+    Livewire::test(ArrSearch::class)
+        ->call('loadQueue')
+        ->assertDispatched('refreshArrQueue');
+});
+
+it('loadQueue does not dispatch refreshArrQueue in guest mode', function () {
+    Http::fake(['*/api/v3/queue*' => Http::response(['records' => []], 200)]);
+
+    Livewire::test(ArrSearch::class, [
+        'guestMode' => true,
+        'guestIntegrationIds' => [$this->sonarr->id],
+    ])
+        ->call('loadQueue')
+        ->assertNotDispatched('refreshArrQueue');
+});
+
+// ── requestEpisode retry ─────────────────────────────────────────────────────
+
+it('requestEpisode retries episode fetch when series was just added and episodes not yet indexed', function () {
+    SonarrService::$episodeRetryDelayUs = 0;
+
+    // NOTE: Http::fake map-invokes ALL stubs for every request, so a Http::sequence() on *episode*
+    // would be consumed by monitor requests too. Use a closure that returns null for monitor URLs.
+    $episodeFetchCalls = 0;
+
+    Http::fake([
+        '*/api/v3/series/lookup*' => Http::response([
+            ['tvdbId' => 12345, 'title' => 'Dark', 'titleSlug' => 'dark', 'seasons' => [['seasonNumber' => 1]]],
+        ], 200),
+        '*/api/v3/series' => Http::response(['id' => 77, 'title' => 'Dark'], 201),
+        '*/api/v3/episode/monitor' => Http::response(null, 200),
+        '*/api/v3/command' => Http::response(['id' => 1], 201),
+        // Return null for monitor URLs so the specific stub above wins; simulate empty then populated.
+        '*/api/v3/episode*' => function ($request) use (&$episodeFetchCalls) {
+            if (str_contains($request->url(), '/monitor')) {
+                return null;
+            }
+            $episodeFetchCalls++;
+
+            return $episodeFetchCalls === 1
+                ? Http::response([], 200)
+                : Http::response([['id' => 301, 'episodeNumber' => 1, 'seasonNumber' => 1, 'title' => 'Secrets']], 200);
+        },
+        'api.tvmaze.com/*' => Http::response(['id' => 1], 200),
+    ]);
+
+    Livewire::test(ArrSearch::class)
+        ->set('searchTerm', 'dark')
+        ->call('openDetail', 0)
+        ->call('requestEpisode', 1, 1)
+        ->assertNotified();
+
+    Http::assertSent(fn ($r) => $r->method() === 'PUT' && str_ends_with($r->url(), '/api/v3/episode/monitor')
+        && in_array(301, $r->data()['episodeIds'] ?? []));
+
+    Http::assertSent(fn ($r) => $r->method() === 'POST' && str_ends_with($r->url(), '/api/v3/command')
+        && ($r->data()['name'] ?? '') === 'EpisodeSearch');
+})->after(fn () => SonarrService::$episodeRetryDelayUs = 500_000);
+
+it('requestEpisode shows error when episode still not found after all retries', function () {
+    SonarrService::$episodeRetryDelayUs = 0;
+
+    Http::fake([
+        '*/api/v3/series/lookup*' => Http::response([
+            ['tvdbId' => 12345, 'title' => 'Dark', 'titleSlug' => 'dark', 'seasons' => [['seasonNumber' => 1]]],
+        ], 200),
+        '*/api/v3/series' => Http::response(['id' => 77, 'title' => 'Dark'], 201),
+        // All attempts return empty — episode never indexes in time
+        '*/api/v3/episode*' => Http::response([], 200),
+        'api.tvmaze.com/*' => Http::response(['id' => 1], 200),
+    ]);
+
+    Livewire::test(ArrSearch::class)
+        ->set('searchTerm', 'dark')
+        ->call('openDetail', 0)
+        ->call('requestEpisode', 1, 1)
+        ->assertNotified();
+
+    Http::assertNotSent(fn ($r) => str_ends_with($r->url(), '/api/v3/command'));
+})->after(fn () => SonarrService::$episodeRetryDelayUs = 500_000);
+
+// ── Livewire: loadEpisodeReleases action ─────────────────────────────────────
+
+it('loadEpisodeReleases fetches episode releases for an in-library series', function () {
+    Http::fake([
+        '*/api/v3/series/lookup*' => Http::response([
+            ['id' => 42, 'tvdbId' => 12345, 'title' => 'Breaking Bad', 'titleSlug' => 'breaking-bad', 'seasons' => [['seasonNumber' => 1]]],
+        ], 200),
+        '*/api/v3/episode*' => Http::response([
+            ['id' => 101, 'episodeNumber' => 1, 'seasonNumber' => 1, 'title' => 'Pilot'],
+        ], 200),
+        '*/api/v3/release*' => Http::response([
+            [
+                'guid' => 'ep-guid-1',
+                'title' => 'Breaking.Bad.S01E01.1080p',
+                'indexerId' => 3,
+                'size' => 2_000_000_000,
+                'quality' => ['quality' => ['name' => 'Bluray-1080p']],
+                'protocol' => 'torrent',
+                'rejections' => [],
+            ],
+        ], 200),
+    ]);
+
+    $component = Livewire::test(ArrSearch::class)
+        ->set('searchTerm', 'breaking')
+        ->call('openDetail', 0)
+        ->call('loadEpisodeReleases', 1, 1);
+
+    expect($component->get('detailReleases'))->toHaveCount(1);
+    expect($component->get('detailReleases.0.guid'))->toBe('ep-guid-1');
+    expect($component->get('detailEpisodeId'))->toBe(101);
+    expect($component->get('detailReleasesLabel'))->toBe('S01E01');
+
+    // Should have passed episodeId to /release
+    Http::assertSent(fn ($r) => str_contains($r->url(), '/api/v3/release')
+        && $r->method() === 'GET'
+        && ($r->data()['episodeId'] ?? null) == 101);
+});
+
+it('loadEpisodeReleases adds the series first when not in library', function () {
+    SonarrService::$episodeRetryDelayUs = 0;
+
+    Http::fake([
+        // Initial search — series not in library
+        '*/api/v3/series/lookup*' => Http::response([
+            ['tvdbId' => 12345, 'title' => 'Dark', 'titleSlug' => 'dark', 'seasons' => [['seasonNumber' => 2]]],
+        ], 200),
+        '*/api/v3/series' => Http::response(['id' => 55, 'title' => 'Dark'], 201),
+        '*/api/v3/episode*' => Http::response([
+            ['id' => 201, 'episodeNumber' => 3, 'seasonNumber' => 2, 'title' => 'The Cave'],
+        ], 200),
+        '*/api/v3/release*' => Http::response([
+            [
+                'guid' => 'dark-ep-guid',
+                'title' => 'Dark.S02E03',
+                'indexerId' => 2,
+                'size' => 1_500_000_000,
+                'quality' => ['quality' => ['name' => '1080p']],
+                'protocol' => 'usenet',
+                'rejections' => [],
+            ],
+        ], 200),
+        'api.tvmaze.com/*' => Http::response(['id' => 1], 200),
+    ]);
+
+    $component = Livewire::test(ArrSearch::class)
+        ->set('searchTerm', 'dark')
+        ->call('openDetail', 0)
+        ->call('loadEpisodeReleases', 2, 3);
+
+    expect($component->get('detailReleases'))->toHaveCount(1);
+    expect($component->get('detailReleasesLabel'))->toBe('S02E03');
+    expect($component->get('detailResult.existsInLibrary'))->toBeTrue();
+    expect($component->get('detailResult.libraryId'))->toBe(55);
+
+    Http::assertSent(fn ($r) => $r->method() === 'POST' && str_ends_with($r->url(), '/api/v3/series')
+        && ($r->data()['addOptions']['searchForMissingEpisodes'] ?? true) === false);
+})->after(fn () => SonarrService::$episodeRetryDelayUs = 500_000);
+
+it('loadEpisodeReleases is blocked in guest mode', function () {
+    Http::fake([
+        '*/api/v3/series/lookup*' => Http::response([
+            ['id' => 42, 'tvdbId' => 12345, 'title' => 'Breaking Bad', 'titleSlug' => 'breaking-bad', 'seasons' => []],
+        ], 200),
+    ]);
+
+    $component = Livewire::test(ArrSearch::class, ['guestMode' => true, 'guestIntegrationIds' => [$this->sonarr->id]])
+        ->set('searchTerm', 'breaking')
+        ->call('openDetail', 0)
+        ->call('loadEpisodeReleases', 1, 1);
+
+    expect($component->get('detailReleases'))->toBe([]);
+    Http::assertNotSent(fn ($r) => str_contains($r->url(), '/episode'));
+});
+
+it('downloadDetailRelease includes episodeId when in episode search context', function () {
+    Http::fake([
+        '*/api/v3/series/lookup*' => Http::response([
+            ['id' => 42, 'tvdbId' => 12345, 'title' => 'Breaking Bad', 'titleSlug' => 'breaking-bad', 'seasons' => [['seasonNumber' => 1]]],
+        ], 200),
+        '*/api/v3/episode*' => Http::response([
+            ['id' => 101, 'episodeNumber' => 1, 'seasonNumber' => 1, 'title' => 'Pilot'],
+        ], 200),
+        '*/api/v3/release*' => Http::response([], 201),
+    ]);
+
+    Livewire::test(ArrSearch::class)
+        ->set('searchTerm', 'breaking')
+        ->call('openDetail', 0)
+        ->set('detailEpisodeId', 101)
+        ->call('downloadDetailRelease', 'ep-guid', 5)
+        ->assertNotified();
+
+    Http::assertSent(fn ($r) => $r->method() === 'POST'
+        && str_contains($r->url(), '/release')
+        && $r->data()['guid'] === 'ep-guid'
+        && $r->data()['seriesId'] === 42
+        && ($r->data()['episodeId'] ?? null) === 101);
+});
+
+it('closeDetail clears episode search context', function () {
+    Http::fake([
+        '*/api/v3/series/lookup*' => Http::response([
+            ['id' => 42, 'tvdbId' => 12345, 'title' => 'Breaking Bad', 'titleSlug' => 'breaking-bad', 'seasons' => [['seasonNumber' => 1]]],
+        ], 200),
+        '*/api/v3/episode*' => Http::response([
+            ['id' => 101, 'episodeNumber' => 1, 'seasonNumber' => 1, 'title' => 'Pilot'],
+        ], 200),
+        '*/api/v3/release*' => Http::response([
+            ['guid' => 'ep-g', 'title' => 'S01E01', 'indexerId' => 1, 'size' => 0, 'quality' => ['quality' => ['name' => 'HD']], 'protocol' => 'torrent', 'rejections' => []],
+        ], 200),
+    ]);
+
+    $component = Livewire::test(ArrSearch::class)
+        ->set('searchTerm', 'breaking')
+        ->call('openDetail', 0)
+        ->call('loadEpisodeReleases', 1, 1);
+
+    expect($component->get('detailReleasesLabel'))->toBe('S01E01');
+    expect($component->get('detailEpisodeId'))->toBe(101);
+
+    $component->call('closeDetail');
+
+    expect($component->get('detailReleasesLabel'))->toBeNull();
+    expect($component->get('detailEpisodeId'))->toBeNull();
+    expect($component->get('detailReleases'))->toBe([]);
 });
