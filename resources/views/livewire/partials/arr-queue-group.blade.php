@@ -1,20 +1,21 @@
-<div class="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
-    {{-- Integration header --}}
-    <div class="flex items-center justify-between px-4 py-2.5 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-        <span class="text-xs font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wide">
-            {{ $queueGroup['integration']['name'] }}
-        </span>
+<x-filament::section
+    :heading="$queueGroup['integration']['name']"
+    heading-tag="h3"
+    collapsible
+    :collapse-id="'queue-group-' . $queueGroup['integration']['id']"
+    persist-collapsed
+>
+    <x-slot name="afterHeader">
         @if($queueGroup['error'])
-            <span class="inline-flex items-center gap-1 text-xs text-danger-600 dark:text-danger-400">
-                <x-heroicon-o-exclamation-circle class="w-3.5 h-3.5" />
+            <x-filament::badge color="danger" icon="heroicon-o-exclamation-circle">
                 {{ __('Unreachable') }}
-            </span>
+            </x-filament::badge>
         @else
-            <span class="text-xs text-gray-500 dark:text-gray-500">
+            <x-filament::badge color="gray">
                 {{ trans_choice(':count item|:count items', count($queueGroup['items'])) }}
-            </span>
+            </x-filament::badge>
         @endif
-    </div>
+    </x-slot>
 
     @if(! $queueGroup['error'] && count($queueGroup['items']) > 0)
         <div class="divide-y divide-gray-100 dark:divide-gray-700/50">
@@ -23,32 +24,24 @@
                     $badge = \App\Livewire\ArrQueueMonitor::statusBadge($item['status'] ?? 'unknown');
                     $showProgress = in_array($item['status'] ?? '', ['downloading', 'queued', 'paused', 'importing']);
                 @endphp
-                <div class="px-4 py-3 bg-white dark:bg-gray-900/30">
+                <div class="py-3 first:pt-0 last:pb-0">
                     <div class="flex items-start justify-between gap-3">
                         <p class="text-sm font-medium text-gray-900 dark:text-gray-100 truncate flex-1 min-w-0">
                             {{ $item['title'] ?? __('Unknown') }}
                         </p>
-                        <div class="flex items-center gap-1.5 flex-shrink-0">
-                        <span @class([
-                            'inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap flex-shrink-0',
-                            'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400' => $badge['color'] === 'primary',
-                            'bg-warning-100 text-warning-700 dark:bg-warning-900/30 dark:text-warning-400' => $badge['color'] === 'warning',
-                            'bg-success-100 text-success-700 dark:bg-success-900/30 dark:text-success-400' => $badge['color'] === 'success',
-                            'bg-danger-100 text-danger-700 dark:bg-danger-900/30 dark:text-danger-400' => $badge['color'] === 'danger',
-                            'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400' => $badge['color'] === 'gray',
-                        ])>
-                            {{ $badge['label'] }}
-                        </span>
-                        @if($item['can_dismiss'] ?? false)
-                            <button
-                                wire:click="dismissItem('{{ $item['dismiss_source'] }}', '{{ $item['dismiss_key'] }}')"
-                                wire:loading.attr="disabled"
-                                title="{{ __('Dismiss') }}"
-                                class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
-                            >
-                                <x-heroicon-o-x-mark class="w-3.5 h-3.5" />
-                            </button>
-                        @endif
+                        <div class="flex items-center gap-1 shrink-0">
+                            <x-filament::badge :color="$badge['color']">
+                                {{ $badge['label'] }}
+                            </x-filament::badge>
+                            @if($item['can_dismiss'] ?? false)
+                                <x-filament::icon-button
+                                    color="gray"
+                                    icon="heroicon-o-x-mark"
+                                    size="sm"
+                                    :tooltip="__('Dismiss')"
+                                    wire:click="dismissItem('{{ $item['dismiss_source'] }}', '{{ $item['dismiss_key'] }}')"
+                                />
+                            @endif
                         </div>
                     </div>
 
@@ -73,7 +66,7 @@
                         @if($showProgress)
                             <span class="ml-auto font-medium text-gray-700 dark:text-gray-300">{{ $item['progress'] }}%</span>
                         @elseif($item['last_event_at'] ?? null)
-                            <span class="ml-auto text-gray-400 dark:text-gray-600 text-xs">
+                            <span class="ml-auto text-xs text-gray-400 dark:text-gray-600">
                                 {{ \Carbon\Carbon::parse($item['last_event_at'])->diffForHumans() }}
                             </span>
                         @endif
@@ -92,7 +85,7 @@
                                     'bg-warning-500' => $badge['color'] === 'warning',
                                     'bg-success-500' => $badge['color'] === 'success',
                                     'bg-danger-500' => $badge['color'] === 'danger',
-                                    'bg-gray-400' => $badge['color'] === 'gray',
+                                    'bg-gray-400'    => $badge['color'] === 'gray',
                                 ])
                                 style="width: {{ $item['progress'] }}%"
                             ></div>
@@ -102,8 +95,6 @@
             @endforeach
         </div>
     @elseif(! $queueGroup['error'])
-        <div class="px-4 py-6 text-center bg-white dark:bg-gray-900/30">
-            <p class="text-xs text-gray-400 dark:text-gray-600">{{ __('Queue is empty') }}</p>
-        </div>
+        <p class="text-xs text-center text-gray-400 dark:text-gray-600">{{ __('Queue is empty') }}</p>
     @endif
-</div>
+</x-filament::section>

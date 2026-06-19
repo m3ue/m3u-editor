@@ -24,16 +24,20 @@
             {{-- ── Search Results ──────────────────────────────────────────── --}}
             @if(strlen(trim($searchTerm)) >= 2 || $isSearching)
 
-                <div class="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-sm overflow-hidden">
-                    <div class="flex items-center gap-2.5 px-4 py-3.5 border-b border-gray-200 dark:border-gray-700 bg-gray-50/80 dark:bg-white/5">
-                        <x-heroicon-o-magnifying-glass class="w-4 h-4 text-gray-500 dark:text-gray-400" />
-                        <h3 class="flex-1 text-sm font-semibold text-gray-900 dark:text-gray-100">{{ __('Search Results') }}</h3>
-                        @if(count($results) > 0)
-                            <span class="text-xs font-medium text-gray-400 dark:text-gray-500">{{ count($results) }}</span>
-                        @endif
-                    </div>
+                <x-filament::section heading-tag="h3">
+                    <x-slot name="heading">
+                        <span class="flex items-center gap-2">
+                            <x-heroicon-o-magnifying-glass class="w-4 h-4 text-gray-500 dark:text-gray-400" />
+                            {{ __('Search Results') }}
+                        </span>
+                    </x-slot>
+                    @if(count($results) > 0)
+                        <x-slot name="afterHeader">
+                            <x-filament::badge color="gray">{{ count($results) }}</x-filament::badge>
+                        </x-slot>
+                    @endif
 
-                    <div class="p-4">
+                    <div>
                         @if($isSearching)
                             <div class="flex items-center justify-center py-10">
                                 <x-filament::loading-indicator class="h-7 w-7 text-primary-500" />
@@ -144,7 +148,7 @@
                             </div>
                         @endif
                     </div>
-                </div>
+                </x-filament::section>
 
             @endif
 
@@ -568,19 +572,19 @@
                                     $remainingItems = array_slice($section['items'], 10);
                                 @endphp
 
-                                <div
-                                    x-data="{ expanded: false }"
-                                    class="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-sm overflow-hidden"
-                                >
-                                    {{-- Section header --}}
-                                    <div class="flex items-center gap-2.5 px-4 py-3.5 border-b border-gray-200 dark:border-gray-700 bg-gray-50/80 dark:bg-white/5">
-                                        <x-dynamic-component :component="$section['icon']" class="w-4 h-4 flex-shrink-0 {{ $section['iconClass'] }}" />
-                                        <h3 class="flex-1 text-sm font-semibold text-gray-900 dark:text-gray-100">{{ $section['label'] }}</h3>
-                                        <span class="text-xs font-medium text-gray-400 dark:text-gray-500">{{ count($section['items']) }}</span>
-                                    </div>
+                                <x-filament::section heading-tag="h3">
+                                    <x-slot name="heading">
+                                        <span class="flex items-center gap-2">
+                                            <x-dynamic-component :component="$section['icon']" class="w-4 h-4 flex-shrink-0 {{ $section['iconClass'] }}" />
+                                            {{ $section['label'] }}
+                                        </span>
+                                    </x-slot>
 
-                                    {{-- Grid content --}}
-                                    <div class="p-4">
+                                    <x-slot name="afterHeader">
+                                        <x-filament::badge color="gray">{{ count($section['items']) }}</x-filament::badge>
+                                    </x-slot>
+
+                                    <div x-data="{ expanded: false }">
                                         <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
                                             @foreach($initialItems as $item)
                                                 <div
@@ -740,7 +744,7 @@
                                             </div>
                                         @endif
                                     </div>
-                                </div>
+                                </x-filament::section>
                             @endif
                         @endforeach
 
@@ -1071,44 +1075,51 @@
                         @endif
 
                         @if($this->detailIntegration?->isSonarr() || $this->detailIntegration?->isRadarr())
-                            <div x-data="{ castOpen: false }" class="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
-                                <button @click="castOpen = !castOpen" type="button" class="w-full flex items-center gap-2 px-3 py-2.5 text-left hover:bg-gray-50 dark:hover:bg-gray-800/60 transition-colors">
-                                    <x-heroicon-m-chevron-right class="w-4 h-4 flex-shrink-0 text-gray-400 transition-transform duration-200" x-bind:class="{ 'rotate-90': castOpen }" />
-                                    <span class="flex-1 text-sm font-semibold text-gray-900 dark:text-gray-100">{{ __('Cast') }}</span>
-                                    <span wire:loading wire:target="loadDetailEpisodes"><x-filament::loading-indicator class="h-3 w-3 text-primary-500" /></span>
-                                    @if($detailCast) <span wire:loading.remove wire:target="loadDetailEpisodes" class="text-xs text-gray-400 dark:text-gray-500">{{ count($detailCast) }}</span> @endif
-                                </button>
-                                <div x-show="castOpen" x-collapse>
-                                    <div class="border-t border-gray-200 dark:border-gray-700">
-                                        <div wire:loading wire:target="loadDetailEpisodes" class="py-4 flex justify-center">
-                                            <x-filament::loading-indicator class="h-4 w-4 text-primary-500" />
-                                        </div>
-                                        <div wire:loading.remove wire:target="loadDetailEpisodes">
-                                            @if($detailCast)
-                                                <div class="divide-y divide-gray-100 dark:divide-gray-800">
-                                                    @foreach($detailCast as $member)
-                                                        <div class="flex items-center gap-3 px-3 py-2.5">
-                                                            <div class="w-9 h-9 rounded-full overflow-hidden flex-shrink-0 bg-gray-200 dark:bg-gray-700">
-                                                                @if(! empty($member['photo']))
-                                                                    <img src="{{ $member['photo'] }}" alt="{{ $member['actor'] }}" class="w-full h-full object-cover" loading="lazy">
-                                                                @else
-                                                                    <div class="w-full h-full flex items-center justify-center"><x-heroicon-o-user class="w-4 h-4 text-gray-400" /></div>
-                                                                @endif
-                                                            </div>
-                                                            <div class="flex-1 min-w-0">
-                                                                <p class="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{{ $member['actor'] }}</p>
-                                                                @if(! empty($member['character'])) <p class="text-xs text-gray-500 dark:text-gray-400 truncate">{{ $member['character'] }}</p> @endif
-                                                            </div>
-                                                        </div>
-                                                    @endforeach
-                                                </div>
-                                            @else
-                                                <p class="text-xs text-gray-400 dark:text-gray-500 text-center py-3">{{ __('No cast information available.') }}</p>
-                                            @endif
-                                        </div>
-                                    </div>
+                            <x-filament::section
+                                collapsible
+                                :collapsed="true"
+                                heading="{{ __('Cast') }}"
+                                heading-tag="h3"
+                                compact
+                            >
+                                <x-slot name="afterHeader">
+                                    <span wire:loading wire:target="loadDetailEpisodes">
+                                        <x-filament::loading-indicator class="h-3 w-3 text-primary-500" />
+                                    </span>
+                                    @if($detailCast)
+                                        <x-filament::badge color="gray" wire:loading.remove wire:target="loadDetailEpisodes">
+                                            {{ count($detailCast) }}
+                                        </x-filament::badge>
+                                    @endif
+                                </x-slot>
+
+                                <div wire:loading wire:target="loadDetailEpisodes" class="py-2 flex justify-center">
+                                    <x-filament::loading-indicator class="h-4 w-4 text-primary-500" />
                                 </div>
-                            </div>
+                                <div wire:loading.remove wire:target="loadDetailEpisodes">
+                                    @if($detailCast)
+                                        <div class="divide-y divide-gray-100 dark:divide-gray-800">
+                                            @foreach($detailCast as $member)
+                                                <div class="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0">
+                                                    <div class="w-9 h-9 rounded-full overflow-hidden flex-shrink-0 bg-gray-200 dark:bg-gray-700">
+                                                        @if(! empty($member['photo']))
+                                                            <img src="{{ $member['photo'] }}" alt="{{ $member['actor'] }}" class="w-full h-full object-cover" loading="lazy">
+                                                        @else
+                                                            <div class="w-full h-full flex items-center justify-center"><x-heroicon-o-user class="w-4 h-4 text-gray-400" /></div>
+                                                        @endif
+                                                    </div>
+                                                    <div class="flex-1 min-w-0">
+                                                        <p class="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{{ $member['actor'] }}</p>
+                                                        @if(! empty($member['character'])) <p class="text-xs text-gray-500 dark:text-gray-400 truncate">{{ $member['character'] }}</p> @endif
+                                                    </div>
+                                                </div>
+                                            @endforeach
+                                        </div>
+                                    @else
+                                        <p class="text-xs text-gray-400 dark:text-gray-500 text-center py-2">{{ __('No cast information available.') }}</p>
+                                    @endif
+                                </div>
+                            </x-filament::section>
                         @endif
 
                         @if($this->detailIntegration?->isSonarr() && ! empty($detailResult['seasons']))

@@ -1,33 +1,32 @@
 <x-filament-panels::page>
-    {{-- Download Queue — collapsed by default, auto-expands when items are present --}}
+    {{-- Download Queue — collapsed by default, auto-expands when items arrive --}}
     <div
-        x-data="{ open: false, count: 0 }"
-        x-on:queue-status.window="count = $event.detail.count; if (count > 0 && !open) open = true"
-        class="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-sm overflow-hidden"
+        x-data
+        x-on:queue-status.window="if ($event.detail.count > 0) $dispatch('expand-section', { id: 'download-queue' })"
     >
-        <button
-            @click="open = !open"
-            type="button"
-            class="w-full flex items-center gap-2.5 px-4 py-3.5 text-left hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
+        <x-filament::section
+            collapsible
+            :collapsed="true"
+            collapse-id="download-queue"
+            icon="heroicon-o-arrow-down-tray"
+            icon-color="primary"
+            heading="{{ __('Download Queue') }}"
         >
-            <x-heroicon-o-arrow-down-tray class="w-4 h-4 text-primary-500 flex-shrink-0" />
-            <span class="flex-1 text-sm font-semibold text-gray-900 dark:text-gray-100">{{ __('Download Queue') }}</span>
-            <span
-                x-show="count > 0"
-                x-text="count"
-                style="display: none"
-                class="inline-flex items-center justify-center min-w-5 h-5 px-1.5 rounded-full bg-primary-600 text-white text-[10px] font-bold leading-none"
-            ></span>
-            <x-heroicon-o-chevron-down
-                class="w-4 h-4 text-gray-400 transition-transform duration-200"
-                x-bind:class="{ 'rotate-180': open }"
-            />
-        </button>
-        <div x-show="open" x-collapse style="display: none">
-            <div class="border-t border-gray-200 dark:border-gray-700 p-4">
-                <livewire:arr-queue-monitor />
-            </div>
-        </div>
+            <x-slot name="afterHeader">
+                <span
+                    x-data="{ count: 0 }"
+                    x-on:queue-status.window="count = $event.detail.count"
+                    x-show="count > 0"
+                    style="display: none"
+                >
+                    <x-filament::badge color="primary">
+                        <span x-text="count"></span>
+                    </x-filament::badge>
+                </span>
+            </x-slot>
+
+            <livewire:arr-queue-monitor />
+        </x-filament::section>
     </div>
 
     <livewire:arr-search />
