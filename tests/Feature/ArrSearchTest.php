@@ -1199,7 +1199,10 @@ it('browseGenre loads discover results filtered by genre', function () {
     app()->bind(TmdbService::class, function () use ($genreResults) {
         $mock = Mockery::mock(TmdbService::class)->makePartial();
         $mock->shouldReceive('isConfigured')->andReturn(true);
-        $mock->shouldReceive('discoverMovies')->with(['with_genres' => 28])->andReturn($genreResults);
+        $mock->shouldReceive('getWatchProviders')->andReturn([]);
+        $mock->shouldReceive('discoverMovies')
+            ->with(Mockery::on(fn ($p) => ($p['with_genres'] ?? null) === 28))
+            ->andReturn($genreResults);
 
         return $mock;
     });
