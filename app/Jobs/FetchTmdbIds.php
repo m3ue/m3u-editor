@@ -34,6 +34,8 @@ class FetchTmdbIds implements ShouldQueue
 
     protected bool $autoCreateGroups = false;
 
+    protected GeneralSettings $settings;
+
     protected const BATCH_STATS_TTL_HOURS = 6;
 
     public int $batchChunkSize = self::BATCH_CHUNK_SIZE;
@@ -101,7 +103,8 @@ class FetchTmdbIds implements ShouldQueue
             'overwriteExisting' => $this->overwriteExisting,
         ]);
 
-        $this->autoCreateGroups = (bool) app(GeneralSettings::class)->tmdb_auto_create_groups;
+        $this->settings = app(GeneralSettings::class);
+        $this->autoCreateGroups = (bool) $this->settings->tmdb_auto_create_groups;
 
         if (! $tmdb->isConfigured()) {
             Log::warning('FetchTmdbIds: TMDB API key not configured');
@@ -428,12 +431,8 @@ class FetchTmdbIds implements ShouldQueue
             'count' => $count,
         ]);
 
-        // Iterate in buffered chunks (chunkById), NOT cursor(): cursor() keeps an
-        // unbuffered read statement open on the same SQLite connection, so the
-        // per-row update() inside processVodChannel() cannot upgrade to a writer
-        // and fails with "database is locked" — silently dropping the match.
-        // chunkById() closes each page's statement before we write. Pages by the
-        // primary key, which our updates never change, so it is safe.
+        // chunkById() rather than cursor(): cursor() holds an open read statement on
+        // the SQLite connection, blocking the per-row update() with "database is locked".
         $query->chunkById(100, function ($channels) use ($tmdb) {
             foreach ($channels as $channel) {
                 if (! $channel instanceof Channel) {
@@ -453,30 +452,25 @@ class FetchTmdbIds implements ShouldQueue
         });
     }
 
-    /**
-     * Build the title used for the TMDB lookup.
-     *
-     * Providers prefix VOD names with category labels ("EN - ", "4K-EN - ",
-     * "D+ - ", "NF - ", "EN-TOP - 123. ", …) that wreck the search. We reuse the
-     * configured VOD name-filter patterns (the same ones the .strm sync applies to
-     * file names) and additionally drop any leading "123. " numbering, so a single
-     * setting cleans both the on-disk name and the match query. Display fields
-     * (title_custom) are left untouched.
-     */
-    protected function cleanTitleForSearch(?string $title): string
+    protected function cleanTitleForSearch(?string $title, bool $isSeries = false): string
     {
         $title = $title ?? '';
 
-        $settings = app(GeneralSettings::class);
-        if (($settings->vod_stream_file_sync_name_filter_enabled ?? false)
-            && ! empty($settings->vod_stream_file_sync_name_filter_patterns)) {
-            foreach ($settings->vod_stream_file_sync_name_filter_patterns as $pattern) {
+        $enabled = $isSeries
+            ? ($this->settings->stream_file_sync_name_filter_enabled ?? false)
+            : ($this->settings->vod_stream_file_sync_name_filter_enabled ?? false);
+        $patterns = $isSeries
+            ? ($this->settings->stream_file_sync_name_filter_patterns ?? [])
+            : ($this->settings->vod_stream_file_sync_name_filter_patterns ?? []);
+
+        if ($enabled && ! empty($patterns)) {
+            foreach ($patterns as $pattern) {
                 $title = str_replace($pattern, '', $title);
             }
         }
 
-        // Drop leading provider numbering like "123. " or "123) " left after a prefix.
-        $title = preg_replace('/^\s*\d+[\.\)]\s*/', '', $title);
+        // Strip leading numbering ("123. " / "123) ") that remains after prefix removal.
+        $title = preg_replace('/^\s*\d+[\.\)]\s*/', '', $title) ?? $title;
 
         return trim($title);
     }
@@ -555,11 +549,6 @@ class FetchTmdbIds implements ShouldQueue
             return;
         }
 
-        // Get title and year for search. Strip provider/category prefixes
-        // ("EN - ", "4K-EN - ", "D+ - ", "NF - ", "123. " numbering, …) BEFORE the
-        // TMDB lookup, otherwise the normalizer turns e.g. "NF - My Hero Academia"
-        // into "NFL …" or leaves "En", poisoning the match. Reuses the same VOD
-        // name-filter the .strm sync uses, so one setting governs both.
         $title = $this->cleanTitleForSearch($channel->title_custom ?? $channel->title ?? $channel->name);
         $year = $channel->year
             ?? $channel->info['year']
@@ -753,8 +742,7 @@ class FetchTmdbIds implements ShouldQueue
             'count' => $count,
         ]);
 
-        // Buffered chunks (chunkById), NOT cursor(): see processVodChannels() —
-        // cursor() holds an open read statement that blocks the per-row update().
+        // chunkById() rather than cursor(): same reason as processVodChannels().
         $query->chunkById(100, function ($seriesChunk) use ($tmdb) {
             foreach ($seriesChunk as $series) {
                 if (! $series instanceof Series) {
@@ -860,7 +848,7 @@ class FetchTmdbIds implements ShouldQueue
         }
 
         // Get name and year for search
-        $name = $series->name;
+        $name = $this->cleanTitleForSearch($series->name, true);
         $year = null;
 
         if ($series->release_date) {

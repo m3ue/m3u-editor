@@ -865,8 +865,8 @@ class SyncSeriesStrmFiles implements ShouldQueue
             'clean_special_chars' => $settings->stream_file_sync_clean_special_chars ?? false,
             'remove_consecutive_chars' => $settings->stream_file_sync_remove_consecutive_chars ?? false,
             'replace_char' => $settings->stream_file_sync_replace_char ?? 'space',
-            'name_filter_enabled' => $settings->stream_file_sync_name_filter_enabled ?? false,
-            'name_filter_patterns' => $settings->stream_file_sync_name_filter_patterns ?? [],
+            'name_filter_enabled' => false, // Use Stream File Setting for name filtering configuration; legacy settings do not support name filtering
+            'name_filter_patterns' => [], // Use Stream File Setting for name filtering configuration; legacy settings do not support name filtering
             'generate_nfo' => $settings->stream_file_sync_generate_nfo ?? false,
         ];
 
