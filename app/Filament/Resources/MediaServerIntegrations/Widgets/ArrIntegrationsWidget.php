@@ -20,8 +20,9 @@ use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
-use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Columns\ToggleColumn;
+use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Filament\Widgets\TableWidget as BaseWidget;
@@ -66,6 +67,14 @@ class ArrIntegrationsWidget extends BaseWidget
                     ->searchable()
                     ->sortable(),
 
+                ToggleColumn::make('enabled')
+                    ->label(__('Enabled'))
+                    ->sortable(),
+
+                ToggleColumn::make('guest_enabled')
+                    ->label(__('Guest'))
+                    ->sortable(),
+
                 TextColumn::make('type')
                     ->badge()
                     ->color(fn (string $state): string => $state === 'sonarr' ? 'info' : 'purple')
@@ -83,16 +92,6 @@ class ArrIntegrationsWidget extends BaseWidget
                     ->placeholder('—')
                     ->toggleable(),
 
-                IconColumn::make('enabled')
-                    ->label(__('Enabled'))
-                    ->boolean()
-                    ->sortable(),
-
-                IconColumn::make('guest_enabled')
-                    ->label(__('Guest'))
-                    ->boolean()
-                    ->sortable(),
-
                 TextColumn::make('last_test_at')
                     ->label(__('Last Tested'))
                     ->dateTime()
@@ -107,13 +106,8 @@ class ArrIntegrationsWidget extends BaseWidget
                         'radarr' => 'Radarr',
                     ]),
             ])
-            ->actions([
+            ->recordActions([
                 ActionGroup::make([
-                    Action::make('edit')
-                        ->label(__('Edit'))
-                        ->icon('heroicon-o-pencil')
-                        ->url(fn (ArrIntegration $record): string => ArrIntegrationResource::getUrl('edit', ['record' => $record])),
-
                     Action::make('test')
                         ->label(__('Test Connection'))
                         ->icon('heroicon-o-signal')
@@ -172,9 +166,14 @@ class ArrIntegrationsWidget extends BaseWidget
                         }),
 
                     DeleteAction::make(),
-                ])->button(),
-            ])
-            ->bulkActions([
+                ])->button()->hiddenLabel()->size('sm'),
+                Action::make('edit')
+                    ->label(__('Edit'))
+                    ->icon('heroicon-s-pencil-square')
+                    ->url(fn (ArrIntegration $record): string => ArrIntegrationResource::getUrl('edit', ['record' => $record]))
+                    ->button()->hiddenLabel()->size('sm'),
+            ], RecordActionsPosition::BeforeCells)
+            ->toolbarActions([
                 BulkActionGroup::make([
                     DeleteBulkAction::make(),
                 ]),
