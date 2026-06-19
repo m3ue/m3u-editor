@@ -2367,25 +2367,48 @@ class XtreamApiController extends Controller
             if ($progress->content_type === 'episode') {
                 $episode = $progress->episode;
                 $series = $episode?->series;
-                $backdropPath = $series?->backdrop_path;
+                $episodeInfo = \is_array($episode?->info) ? $episode->info : [];
+                $backdrop = null;
+                if ($episodeInfo['movie_image'] ?? false) {
+                    $backdrop = $episodeInfo['movie_image'];
+                }
+                if ($episodeInfo['cover_big'] ?? false) {
+                    $backdrop = $episodeInfo['cover_big'];
+                }
+                if (! $backdrop) {
+                    $backdropPath = $series?->backdrop_path ?? null;
+                    $backdrop = $this->extractFirstUrl($backdropPath);
+                }
+                if ($backdrop && ($playlist->enable_logo_proxy ?? false)) {
+                    $backdrop = LogoProxyController::generateProxyUrl($backdrop);
+                }
 
                 $data['title'] = $series?->name ?? $episode?->title ?? null;
                 $data['episode_title'] = $episode?->title ?? null;
                 $data['series_name'] = $series?->name ?? null;
                 $data['thumbnail_url'] = $episode?->cover ?? $series?->cover ?? null;
-                $data['backdrop_url'] = is_array($backdropPath) ? ($backdropPath[0] ?? null) : $backdropPath;
-                $data['rating'] = null;
+                $data['backdrop_url'] = $backdrop;
+                $data['rating'] = isset($episodeInfo['rating']) ? (string) $episodeInfo['rating'] : null;
+                $data['runtime'] = $episodeInfo['duration'] ?? null;
             } elseif ($progress->content_type === 'vod') {
                 $channel = $progress->channel;
-                $info = $channel?->info;
-                $backdropPath = is_array($info) ? ($info['backdrop_path'] ?? null) : null;
+                $info = \is_array($channel?->info) ? $channel->info : [];
+                $backdropPaths = $info['backdrop_path'] ?? [];
+                if (is_string($backdropPaths)) {
+                    $backdropPaths = json_decode($backdropPaths, true) ?? [];
+                }
+                $backdropPaths = array_filter($backdropPaths);
+                if ($playlist->enable_logo_proxy ?? false) {
+                    $backdropPaths = array_map(fn ($path) => LogoProxyController::generateProxyUrl($path), $backdropPaths);
+                }
 
                 $data['title'] = $channel?->title ?? $channel?->name ?? null;
                 $data['episode_title'] = null;
                 $data['series_name'] = null;
-                $data['thumbnail_url'] = $channel?->logo ?? null;
-                $data['backdrop_url'] = is_array($backdropPath) ? ($backdropPath[0] ?? null) : $backdropPath;
+                $data['thumbnail_url'] = $channel?->logo ?? $channel?->logo_internal ?? null;
+                $data['backdrop_url'] = $this->extractFirstUrl($backdropPaths);
                 $data['rating'] = $channel?->rating ?? null;
+                $data['runtime'] = $info['duration'] ?? null;
             } else {
                 // live
                 $channel = $progress->channel;
@@ -2393,15 +2416,37 @@ class XtreamApiController extends Controller
                 $data['title'] = $channel?->title ?? $channel?->name ?? null;
                 $data['episode_title'] = null;
                 $data['series_name'] = null;
-                $data['thumbnail_url'] = $channel?->logo ?? null;
+                $data['thumbnail_url'] = $channel?->logo ?? $channel?->logo_internal ?? null;
                 $data['backdrop_url'] = null;
                 $data['rating'] = null;
+                $data['runtime'] = null;
             }
 
             return $data;
         });
 
         return response()->json($enriched);
+    }
+
+    /**
+     * Extract the first URL from a backdrop_path value.
+     * Handles both native arrays and double-encoded JSON strings.
+     */
+    private function extractFirstUrl(mixed $value): ?string
+    {
+        if (\is_array($value)) {
+            return $value[0] ?? null;
+        }
+        if (\is_string($value) && ! empty($value)) {
+            $decoded = json_decode($value, true);
+            if (\is_array($decoded)) {
+                return $decoded[0] ?? null;
+            }
+
+            return $value;
+        }
+
+        return null;
     }
 
     /**
