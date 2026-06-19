@@ -2,13 +2,21 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\MassPrunable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class ArrQueueEvent extends Model
 {
     use HasFactory;
+    use MassPrunable;
+
+    public function prunable(): Builder
+    {
+        return static::query()->where('last_event_at', '<', now()->subDays(30));
+    }
 
     /**
      * @return array<string, string>

@@ -9,7 +9,11 @@ use App\Services\TmdbService;
 use App\Services\TvMazeService;
 use Filament\Notifications\Notification;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Http\Client\Pool;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Livewire\Component;
 
 /**
@@ -200,7 +204,11 @@ class ArrSearch extends Component
      */
     public function getIntegrationsForSearchProperty(): Collection
     {
-        if ($this->guestMode && count($this->guestIntegrationIds) > 0) {
+        if ($this->guestMode) {
+            if (empty($this->guestIntegrationIds)) {
+                return collect();
+            }
+
             return ArrIntegration::whereIn('id', $this->guestIntegrationIds)
                 ->where('enabled', true)
                 ->orderBy('name')
@@ -237,18 +245,52 @@ class ArrSearch extends Component
 
         $integrations = $this->integrationsForSearch;
 
-        foreach ($integrations as $integration) {
-            try {
-                $items = ArrService::make($integration)->search($this->searchTerm);
-                foreach ($items as $item) {
-                    $this->results[] = array_merge($item, [
-                        'integrationId' => $integration->id,
-                        'integrationName' => $integration->name,
-                        'integrationType' => $integration->type,
-                    ]);
+        if ($integrations->isEmpty()) {
+            $this->isSearching = false;
+
+            return;
+        }
+
+        $services = $integrations->mapWithKeys(
+            fn ($i) => [(string) $i->id => ArrService::make($i)]
+        );
+
+        try {
+            $responses = Http::pool(function (Pool $pool) use ($integrations, $services) {
+                foreach ($integrations as $integration) {
+                    $pool->as((string) $integration->id)
+                        ->withHeaders(['X-Api-Key' => $integration->api_key])
+                        ->timeout(15)
+                        ->get(
+                            rtrim($integration->base_url, '/').'/api/v3'.$services[(string) $integration->id]->getSearchEndpoint(),
+                            ['term' => $this->searchTerm]
+                        );
                 }
-            } catch (\Exception) {
-                // Skip failed integrations silently
+            });
+        } catch (\Exception $e) {
+            Log::warning('ArrSearch: pool request failed', ['error' => $e->getMessage()]);
+            $this->isSearching = false;
+
+            return;
+        }
+
+        foreach ($integrations as $integration) {
+            $response = $responses[(string) $integration->id] ?? null;
+
+            if (! $response instanceof Response || ! $response->successful()) {
+                Log::warning('ArrSearch: integration search failed', ['integration_id' => $integration->id]);
+
+                continue;
+            }
+
+            $items = $services[(string) $integration->id]->parseSearchResponse($response);
+
+            foreach ($items as $item) {
+                $this->results[] = array_merge($item, [
+                    'integrationId' => $integration->id,
+                    'integrationName' => $integration->name,
+                    'integrationType' => $integration->type,
+                ]);
             }
         }
 
@@ -389,14 +431,11 @@ class ArrSearch extends Component
                 if ($service->supportsEpisodes()) {
                     /** @var SonarrService $service */
                     try {
-                        $this->detailSonarrEpisodeStatus = $service->fetchEpisodes($libraryId);
+                        $episodeData = $service->fetchEpisodeData($libraryId);
+                        $this->detailSonarrEpisodeStatus = $episodeData['status'];
+                        $this->detailSonarrEpisodeFileInfo = $episodeData['fileInfo'];
                     } catch (\Exception) {
                         $this->detailSonarrEpisodeStatus = [];
-                    }
-
-                    try {
-                        $this->detailSonarrEpisodeFileInfo = $service->fetchEpisodeFileInfo($libraryId);
-                    } catch (\Exception) {
                         $this->detailSonarrEpisodeFileInfo = [];
                     }
                 }

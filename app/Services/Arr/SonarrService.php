@@ -2,6 +2,8 @@
 
 namespace App\Services\Arr;
 
+use Illuminate\Http\Client\Response;
+
 class SonarrService extends BaseArrService
 {
     /**
@@ -75,6 +77,11 @@ class SonarrService extends BaseArrService
             ->all();
     }
 
+    public function getSearchEndpoint(): string
+    {
+        return '/series/lookup';
+    }
+
     /**
      * @return array<int, array<string, mixed>>
      */
@@ -82,6 +89,11 @@ class SonarrService extends BaseArrService
     {
         $response = $this->client()->get('/series/lookup', ['term' => $term]);
 
+        return $this->parseSearchResponse($response);
+    }
+
+    public function parseSearchResponse(Response $response): array
+    {
         if (! $response->successful()) {
             return [];
         }
@@ -218,53 +230,54 @@ class SonarrService extends BaseArrService
      *
      * @return array<int, array<int, bool>> seasonNumber => [episodeNumber => hasFile]
      */
-    public function fetchEpisodes(int $seriesId): array
+    /**
+     * Fetch episode status and file info for a library series in a single API call.
+     *
+     * @return array{
+     *     status: array<int, array<int, bool>>,
+     *     fileInfo: array<int, array<int, array{quality: ?string, size: ?int}>>
+     * }
+     */
+    public function fetchEpisodeData(int $seriesId): array
     {
         $response = $this->client()->get('/episode', ['seriesId' => $seriesId]);
 
         if (! $response->successful()) {
-            return [];
+            return ['status' => [], 'fileInfo' => []];
         }
 
         $status = [];
+        $fileInfo = [];
+
         foreach ($response->json() ?? [] as $episode) {
             $season = (int) ($episode['seasonNumber'] ?? 0);
             $epNum = (int) ($episode['episodeNumber'] ?? 0);
-            $status[$season][$epNum] = ($episode['hasFile'] ?? false) === true;
+            $hasFile = ($episode['hasFile'] ?? false) === true;
+
+            $status[$season][$epNum] = $hasFile;
+
+            if ($hasFile) {
+                $fileInfo[$season][$epNum] = [
+                    'quality' => $episode['episodeFile']['quality']['quality']['name'] ?? null,
+                    'size' => isset($episode['episodeFile']['size']) ? (int) $episode['episodeFile']['size'] : null,
+                ];
+            }
         }
 
-        return $status;
+        return ['status' => $status, 'fileInfo' => $fileInfo];
+    }
+
+    public function fetchEpisodes(int $seriesId): array
+    {
+        return $this->fetchEpisodeData($seriesId)['status'];
     }
 
     /**
-     * Fetch per-episode file quality and size for a series in the Sonarr library.
-     * Only populated when the episode has a file and Sonarr embeds episodeFile.
-     *
-     * @return array<int, array<int, array{quality: ?string, size: ?int}>> seasonNumber => [episodeNumber => {quality, size}]
+     * @return array<int, array<int, array{quality: ?string, size: ?int}>>
      */
     public function fetchEpisodeFileInfo(int $seriesId): array
     {
-        $response = $this->client()->get('/episode', ['seriesId' => $seriesId]);
-
-        if (! $response->successful()) {
-            return [];
-        }
-
-        $info = [];
-        foreach ($response->json() ?? [] as $episode) {
-            if (! ($episode['hasFile'] ?? false)) {
-                continue;
-            }
-
-            $season = (int) ($episode['seasonNumber'] ?? 0);
-            $epNum = (int) ($episode['episodeNumber'] ?? 0);
-            $info[$season][$epNum] = [
-                'quality' => $episode['episodeFile']['quality']['quality']['name'] ?? null,
-                'size' => isset($episode['episodeFile']['size']) ? (int) $episode['episodeFile']['size'] : null,
-            ];
-        }
-
-        return $info;
+        return $this->fetchEpisodeData($seriesId)['fileInfo'];
     }
 
     /**

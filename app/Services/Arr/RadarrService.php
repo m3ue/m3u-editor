@@ -2,6 +2,8 @@
 
 namespace App\Services\Arr;
 
+use Illuminate\Http\Client\Response;
+
 class RadarrService extends BaseArrService
 {
     /**
@@ -72,10 +74,20 @@ class RadarrService extends BaseArrService
     /**
      * @return array<int, array<string, mixed>>
      */
+    public function getSearchEndpoint(): string
+    {
+        return '/movie/lookup';
+    }
+
     public function search(string $term): array
     {
         $response = $this->client()->get('/movie/lookup', ['term' => $term]);
 
+        return $this->parseSearchResponse($response);
+    }
+
+    public function parseSearchResponse(Response $response): array
+    {
         if (! $response->successful()) {
             return [];
         }

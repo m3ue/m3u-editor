@@ -3,6 +3,7 @@
 namespace App\Services\Arr\Contracts;
 
 use App\Models\ArrIntegration;
+use Illuminate\Http\Client\Response;
 
 interface ArrIntegrationInterface
 {
@@ -33,6 +34,20 @@ interface ArrIntegrationInterface
      * @return array<int, array<string, mixed>>
      */
     public function search(string $term): array;
+
+    /**
+     * The /lookup endpoint path for this integration (e.g. /movie/lookup or /series/lookup).
+     * Used by ArrSearch to build parallel pool requests.
+     */
+    public function getSearchEndpoint(): string;
+
+    /**
+     * Parse a raw /lookup HTTP response into the normalized search result shape.
+     * Separated from search() to allow parallel fetching via Http::pool() in ArrSearch.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function parseSearchResponse(Response $response): array;
 
     /**
      * Add content to the library and trigger a search.
