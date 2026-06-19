@@ -1586,9 +1586,270 @@ it('advances the sync pipeline when TMDB is not configured', function () {
     $job->handle($tmdb);
 });
 
+// ---------------------------------------------------------------------------
+// Helper: build a GeneralSettings mock with name-filter settings wired up.
+// ---------------------------------------------------------------------------
+function mockTmdbSettingsWithNameFilter(
+    array $vodPatterns = [],
+    bool $vodEnabled = true,
+    array $seriesPatterns = [],
+    bool $seriesEnabled = true,
+    bool $autoCreateGroups = false,
+): void {
+    test()->mock(GeneralSettings::class, function ($mock) use (
+        $vodPatterns,
+        $vodEnabled,
+        $seriesPatterns,
+        $seriesEnabled,
+        $autoCreateGroups,
+    ) {
+        $mock->shouldReceive('getAttribute')->with('tmdb_api_key')->andReturn('fake-api-key');
+        $mock->shouldReceive('getAttribute')->with('tmdb_language')->andReturn('en-US');
+        $mock->shouldReceive('getAttribute')->with('tmdb_rate_limit')->andReturn(40);
+        $mock->shouldReceive('getAttribute')->with('tmdb_confidence_threshold')->andReturn(80);
+        $mock->shouldReceive('getAttribute')->with('tmdb_auto_create_groups')->andReturn($autoCreateGroups);
+        $mock->tmdb_api_key = 'fake-api-key';
+        $mock->tmdb_language = 'en-US';
+        $mock->tmdb_rate_limit = 40;
+        $mock->tmdb_confidence_threshold = 80;
+        $mock->tmdb_auto_create_groups = $autoCreateGroups;
+        $mock->vod_stream_file_sync_name_filter_enabled = $vodEnabled;
+        $mock->vod_stream_file_sync_name_filter_patterns = $vodPatterns;
+        $mock->stream_file_sync_name_filter_enabled = $seriesEnabled;
+        $mock->stream_file_sync_name_filter_patterns = $seriesPatterns;
+    });
+}
+
+// ---------------------------------------------------------------------------
+// cleanTitleForSearch — unit tests
+// ---------------------------------------------------------------------------
+
+describe('cleanTitleForSearch', function () {
+    beforeEach(function () {
+        $this->job = new TestableFetchTmdbIds(vodChannelIds: []);
+    });
+
+    it('returns an empty string for null input', function () {
+        $this->job->initSettings(app(GeneralSettings::class));
+        expect($this->job->callCleanTitle(null))->toBe('');
+    });
+
+    it('returns the title unchanged when the VOD filter is disabled', function () {
+        $settings = app(GeneralSettings::class);
+        $settings->vod_stream_file_sync_name_filter_enabled = false;
+        $settings->vod_stream_file_sync_name_filter_patterns = ['EN - '];
+        $this->job->initSettings($settings);
+
+        expect($this->job->callCleanTitle('EN - The Matrix'))->toBe('EN - The Matrix');
+    });
+
+    it('strips a single VOD prefix pattern', function () {
+        $settings = app(GeneralSettings::class);
+        $settings->vod_stream_file_sync_name_filter_enabled = true;
+        $settings->vod_stream_file_sync_name_filter_patterns = ['EN - '];
+        $this->job->initSettings($settings);
+
+        expect($this->job->callCleanTitle('EN - The Matrix'))->toBe('The Matrix');
+    });
+
+    it('strips multiple VOD patterns in sequence', function () {
+        $settings = app(GeneralSettings::class);
+        $settings->vod_stream_file_sync_name_filter_enabled = true;
+        $settings->vod_stream_file_sync_name_filter_patterns = ['4K-EN - ', 'NF - '];
+        $this->job->initSettings($settings);
+
+        expect($this->job->callCleanTitle('4K-EN - The Conjuring'))->toBe('The Conjuring')
+            ->and($this->job->callCleanTitle('NF - My Hero Academia'))->toBe('My Hero Academia');
+    });
+
+    it('strips leading numbering left after prefix removal', function () {
+        $settings = app(GeneralSettings::class);
+        $settings->vod_stream_file_sync_name_filter_enabled = true;
+        $settings->vod_stream_file_sync_name_filter_patterns = ['EN-TOP - '];
+        $this->job->initSettings($settings);
+
+        expect($this->job->callCleanTitle('EN-TOP - 42. Interstellar'))->toBe('Interstellar')
+            ->and($this->job->callCleanTitle('EN-TOP - 7) Dune'))->toBe('Dune');
+    });
+
+    it('strips leading numbering even when no patterns are configured', function () {
+        $settings = app(GeneralSettings::class);
+        $settings->vod_stream_file_sync_name_filter_enabled = false;
+        $settings->vod_stream_file_sync_name_filter_patterns = [];
+        $this->job->initSettings($settings);
+
+        expect($this->job->callCleanTitle('123. Inception'))->toBe('Inception');
+    });
+
+    it('does not strip numeric movie titles without a separator', function () {
+        $settings = app(GeneralSettings::class);
+        $settings->vod_stream_file_sync_name_filter_enabled = false;
+        $settings->vod_stream_file_sync_name_filter_patterns = [];
+        $this->job->initSettings($settings);
+
+        expect($this->job->callCleanTitle('1917'))->toBe('1917')
+            ->and($this->job->callCleanTitle('65'))->toBe('65')
+            ->and($this->job->callCleanTitle('10 Cloverfield Lane'))->toBe('10 Cloverfield Lane')
+            ->and($this->job->callCleanTitle('2001: A Space Odyssey'))->toBe('2001: A Space Odyssey')
+            ->and($this->job->callCleanTitle('3.10 to Yuma'))->toBe('3.10 to Yuma');
+    });
+
+    it('trims surrounding whitespace after stripping', function () {
+        $settings = app(GeneralSettings::class);
+        $settings->vod_stream_file_sync_name_filter_enabled = true;
+        $settings->vod_stream_file_sync_name_filter_patterns = ['D+ - '];
+        $this->job->initSettings($settings);
+
+        expect($this->job->callCleanTitle('D+ - Avengers: Endgame'))->toBe('Avengers: Endgame');
+    });
+
+    it('uses series patterns (not VOD patterns) when isSeries is true', function () {
+        $settings = app(GeneralSettings::class);
+        $settings->vod_stream_file_sync_name_filter_enabled = true;
+        $settings->vod_stream_file_sync_name_filter_patterns = ['VOD-PREFIX - '];
+        $settings->stream_file_sync_name_filter_enabled = true;
+        $settings->stream_file_sync_name_filter_patterns = ['NF - '];
+        $this->job->initSettings($settings);
+
+        expect($this->job->callCleanTitle('NF - Breaking Bad', isSeries: true))->toBe('Breaking Bad')
+            ->and($this->job->callCleanTitle('VOD-PREFIX - The Matrix', isSeries: true))->toBe('VOD-PREFIX - The Matrix');
+    });
+
+    it('does not apply series patterns to VOD titles', function () {
+        $settings = app(GeneralSettings::class);
+        $settings->vod_stream_file_sync_name_filter_enabled = true;
+        $settings->vod_stream_file_sync_name_filter_patterns = ['EN - '];
+        $settings->stream_file_sync_name_filter_enabled = true;
+        $settings->stream_file_sync_name_filter_patterns = ['SERIES-PREFIX - '];
+        $this->job->initSettings($settings);
+
+        expect($this->job->callCleanTitle('EN - The Matrix', isSeries: false))->toBe('The Matrix')
+            ->and($this->job->callCleanTitle('SERIES-PREFIX - The Matrix', isSeries: false))->toBe('SERIES-PREFIX - The Matrix');
+    });
+
+    it('returns the title unchanged when no patterns are provided', function () {
+        $settings = app(GeneralSettings::class);
+        $settings->vod_stream_file_sync_name_filter_enabled = true;
+        $settings->vod_stream_file_sync_name_filter_patterns = [];
+        $this->job->initSettings($settings);
+
+        expect($this->job->callCleanTitle('EN - The Matrix'))->toBe('EN - The Matrix');
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Name-filter integration — TMDB is called with the cleaned title
+// ---------------------------------------------------------------------------
+
+it('searches TMDB with cleaned VOD title when name filter is enabled', function () {
+    mockTmdbSettingsWithNameFilter(vodPatterns: ['EN - '], vodEnabled: true);
+
+    $channel = Channel::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'is_vod' => true,
+        'title' => 'EN - The Matrix',
+        'tmdb_id' => null,
+        'last_metadata_fetch' => null,
+        'info' => [],
+    ]);
+
+    $tmdb = Mockery::mock(TmdbService::class);
+    $tmdb->shouldReceive('isConfigured')->andReturn(true);
+    $tmdb->shouldReceive('searchMovie')
+        ->once()
+        ->with('The Matrix', Mockery::any())
+        ->andReturn(['tmdb_id' => 603, 'imdb_id' => 'tt0133093']);
+    $tmdb->shouldReceive('getMovieDetails')->andReturn(null);
+
+    $job = new TestableFetchTmdbIds(vodChannelIds: [$channel->id], user: $this->user);
+    $job->handle($tmdb);
+});
+
+it('searches TMDB with raw VOD title when name filter is disabled', function () {
+    mockTmdbSettingsWithNameFilter(vodPatterns: ['EN - '], vodEnabled: false);
+
+    $channel = Channel::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'is_vod' => true,
+        'title' => 'EN - The Matrix',
+        'tmdb_id' => null,
+        'last_metadata_fetch' => null,
+        'info' => [],
+    ]);
+
+    $tmdb = Mockery::mock(TmdbService::class);
+    $tmdb->shouldReceive('isConfigured')->andReturn(true);
+    $tmdb->shouldReceive('searchMovie')
+        ->once()
+        ->with('EN - The Matrix', Mockery::any())
+        ->andReturn(null);
+
+    $job = new TestableFetchTmdbIds(vodChannelIds: [$channel->id], user: $this->user);
+    $job->handle($tmdb);
+});
+
+it('searches TMDB with cleaned series title when series name filter is enabled', function () {
+    mockTmdbSettingsWithNameFilter(seriesPatterns: ['NF - '], seriesEnabled: true);
+
+    $series = Series::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'name' => 'NF - Breaking Bad',
+        'tmdb_id' => null,
+        'last_metadata_fetch' => null,
+        'metadata' => [],
+    ]);
+
+    $tmdb = Mockery::mock(TmdbService::class);
+    $tmdb->shouldReceive('isConfigured')->andReturn(true);
+    $tmdb->shouldReceive('searchTvSeries')
+        ->once()
+        ->with('Breaking Bad', Mockery::any())
+        ->andReturn(null);
+
+    $job = new TestableFetchTmdbIds(seriesIds: [$series->id], user: $this->user);
+    $job->handle($tmdb);
+});
+
+it('strips numbering from VOD title even without prefix patterns', function () {
+    mockTmdbSettingsWithNameFilter(vodPatterns: [], vodEnabled: false);
+
+    $channel = Channel::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'is_vod' => true,
+        'title' => '42. Interstellar',
+        'tmdb_id' => null,
+        'last_metadata_fetch' => null,
+        'info' => [],
+    ]);
+
+    $tmdb = Mockery::mock(TmdbService::class);
+    $tmdb->shouldReceive('isConfigured')->andReturn(true);
+    $tmdb->shouldReceive('searchMovie')
+        ->once()
+        ->with('Interstellar', Mockery::any())
+        ->andReturn(null);
+
+    $job = new TestableFetchTmdbIds(vodChannelIds: [$channel->id], user: $this->user);
+    $job->handle($tmdb);
+});
+
 class TestableFetchTmdbIds extends FetchTmdbIds
 {
     protected function sendCompletionNotification(): void {}
 
     protected function notifyUser(string $title, string $body, string $type = 'success'): void {}
+
+    public function callCleanTitle(?string $title, bool $isSeries = false): string
+    {
+        return $this->cleanTitleForSearch($title, $isSeries);
+    }
+
+    public function initSettings(GeneralSettings $settings): void
+    {
+        $this->settings = $settings;
+    }
 }

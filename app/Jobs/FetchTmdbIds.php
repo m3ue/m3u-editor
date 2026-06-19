@@ -1195,7 +1195,8 @@ class FetchTmdbIds implements ShouldQueue
         }
 
         // Strip leading numbering ("123. " / "123) ") that remains after prefix removal.
-        $title = preg_replace('/^\s*\d+[\.\)]\s*/', '', $title) ?? $title;
+        // Requires whitespace after the separator so "3.10 to Yuma" is not mangled.
+        $title = preg_replace('/^\s*\d+[\.\)]\s+/', '', $title) ?? $title;
 
         return trim($title);
     }
