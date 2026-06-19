@@ -17,6 +17,7 @@ use App\Models\EpgProgramme;
 use App\Support\SeriesKey;
 use Exception;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -35,19 +36,41 @@ class DvrSchedulerService
 {
     /**
      * Execute one scheduler tick.
+     *
+     * The trigger/stop steps always run for minute-level precision. Rule matching
+     * is throttled via a cache key (default: every 5 minutes) since the 30-minute
+     * lookahead makes sub-5-minute re-evaluation wasteful. When there are no enabled
+     * rules and no active recordings the tick exits silently to avoid log noise.
      */
     public function tick(): void
     {
         try {
-            $lookaheadMinutes = (int) config('dvr.scheduler_lookahead_minutes', 30);
+            $hasRules = DvrRecordingRule::enabled()->exists();
+            $hasActiveRecordings = DvrRecording::whereIn('status', [
+                DvrRecordingStatus::Scheduled,
+                DvrRecordingStatus::Recording,
+                DvrRecordingStatus::PostProcessing,
+            ])->exists();
 
-            // Step 1-4: Match rules → create SCHEDULED recordings
-            $this->matchAndSchedule($lookaheadMinutes);
+            if (! $hasRules && ! $hasActiveRecordings) {
+                return;
+            }
 
-            // Step 5: Trigger recordings whose time has come
+            // Rule matching is expensive (EPG queries per rule). Throttle it to run
+            // every N minutes — well within the 30-minute lookahead window.
+            if ($hasRules) {
+                $matchIntervalMinutes = max(1, (int) config('dvr.scheduler_match_interval_minutes', 5));
+                $cacheKey = 'dvr_scheduler_last_match';
+
+                if (! Cache::has($cacheKey)) {
+                    $lookaheadMinutes = (int) config('dvr.scheduler_lookahead_minutes', 30);
+                    $this->matchAndSchedule($lookaheadMinutes);
+                    Cache::put($cacheKey, true, now()->addMinutes($matchIntervalMinutes));
+                }
+            }
+
+            // These always run every minute for start/stop precision.
             $this->triggerPendingRecordings();
-
-            // Step 6: Stop recordings whose scheduled end has passed
             $this->stopExpiredRecordings();
         } catch (Exception $e) {
             Log::error('DVR scheduler tick failed: '.$e->getMessage(), [
