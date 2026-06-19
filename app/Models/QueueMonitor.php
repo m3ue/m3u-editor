@@ -15,20 +15,6 @@ class QueueMonitor extends Model
 
     protected $table = 'queue_monitor';
 
-    protected $fillable = [
-        'job_id',
-        'name',
-        'queue',
-        'batch_id',
-        'batch_name',
-        'started_at',
-        'finished_at',
-        'failed',
-        'attempt',
-        'progress',
-        'exception_message',
-    ];
-
     protected $casts = [
         'failed' => 'boolean',
         'started_at' => 'datetime',

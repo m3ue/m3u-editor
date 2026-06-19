@@ -30,6 +30,7 @@ use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Actions\BulkAction;
 use Filament\Actions\BulkActionGroup;
+use Filament\Actions\CreateAction;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
@@ -75,17 +76,17 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
 
     public static function getNavigationLabel(): string
     {
-        return __('Media Servers');
+        return __('Servers');
     }
 
     public static function getModelLabel(): string
     {
-        return __('Media Server');
+        return __('Server');
     }
 
     public static function getPluralModelLabel(): string
     {
-        return __('Media Servers');
+        return __('Servers');
     }
 
     public static function getNavigationGroup(): ?string
@@ -1130,6 +1131,11 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
     public static function table(Table $table): Table
     {
         return $table
+            ->heading(__('Media Servers'))
+            ->headerActions([
+                CreateAction::make()
+                    ->label(__('Add Media Server')),
+            ])
             ->filtersTriggerAction(function ($action) {
                 return $action->button()->label(__('Filters'));
             })

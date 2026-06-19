@@ -960,6 +960,49 @@ class TmdbService
     }
 
     /**
+     * Fetch cast for a movie from TMDB credits endpoint.
+     *
+     * @return array<int, array{actor: string, character: string, photo: ?string}>
+     */
+    public function getMovieCast(int $tmdbId): array
+    {
+        if (! $this->isConfigured()) {
+            return [];
+        }
+
+        $cacheKey = "tmdb_movie_cast_{$tmdbId}_{$this->language}";
+
+        return Cache::remember($cacheKey, now()->addMinutes(60), function () use ($tmdbId) {
+            $this->waitForRateLimit();
+
+            try {
+                $response = Http::timeout(15)->get(
+                    self::BASE_URL."/movie/{$tmdbId}/credits",
+                    ['api_key' => $this->apiKey, 'language' => $this->language]
+                );
+
+                if (! $response->successful()) {
+                    return [];
+                }
+
+                return collect($response->json()['cast'] ?? [])
+                    ->take(15)
+                    ->map(fn ($p) => [
+                        'actor' => $p['name'] ?? '',
+                        'character' => $p['character'] ?? '',
+                        'photo' => ! empty($p['profile_path'])
+                            ? 'https://image.tmdb.org/t/p/w185'.$p['profile_path']
+                            : null,
+                    ])
+                    ->values()
+                    ->all();
+            } catch (\Exception) {
+                return [];
+            }
+        });
+    }
+
+    /**
      * Get alternative titles for a TV series.
      * Returns titles in different languages/regions.
      *
@@ -1744,6 +1787,394 @@ class TmdbService
 
             return null;
         }
+    }
+
+    /**
+     * Fetch trending content (movies + TV or a specific type).
+     *
+     * @param  string  $mediaType  'all', 'movie', or 'tv'
+     * @param  string  $timeWindow  'day' or 'week'
+     * @return array<int, array<string, mixed>>
+     */
+    public function getTrending(string $mediaType = 'all', string $timeWindow = 'week'): array
+    {
+        if (! $this->isConfigured()) {
+            return [];
+        }
+
+        $cacheKey = "tmdb_trending_{$mediaType}_{$timeWindow}_{$this->language}";
+
+        return Cache::remember($cacheKey, now()->addMinutes(30), function () use ($mediaType, $timeWindow) {
+            $this->waitForRateLimit();
+
+            try {
+                $response = Http::timeout(15)->get(
+                    self::BASE_URL."/trending/{$mediaType}/{$timeWindow}",
+                    ['api_key' => $this->apiKey, 'language' => $this->language]
+                );
+
+                if (! $response->successful()) {
+                    return [];
+                }
+
+                return collect($response->json()['results'] ?? [])
+                    ->map(fn ($item) => $this->normalizeDiscoverResult($item, $item['media_type'] ?? $mediaType))
+                    ->filter(fn ($item) => $item['tmdb_id'] > 0 && in_array($item['media_type'], ['movie', 'tv'], true))
+                    ->values()
+                    ->all();
+            } catch (\Exception $e) {
+                Log::error('TMDB: getTrending error', ['error' => $e->getMessage()]);
+
+                return [];
+            }
+        });
+    }
+
+    /**
+     * Fetch popular movies.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function getPopularMovies(int $page = 1): array
+    {
+        if (! $this->isConfigured()) {
+            return [];
+        }
+
+        $cacheKey = "tmdb_popular_movies_{$page}_{$this->language}";
+
+        return Cache::remember($cacheKey, now()->addMinutes(30), function () use ($page) {
+            $this->waitForRateLimit();
+
+            try {
+                $response = Http::timeout(15)->get(self::BASE_URL.'/movie/popular', [
+                    'api_key' => $this->apiKey,
+                    'language' => $this->language,
+                    'page' => $page,
+                ]);
+
+                if (! $response->successful()) {
+                    return [];
+                }
+
+                return collect($response->json()['results'] ?? [])
+                    ->map(fn ($item) => $this->normalizeDiscoverResult($item, 'movie'))
+                    ->filter(fn ($item) => $item['tmdb_id'] > 0)
+                    ->values()
+                    ->all();
+            } catch (\Exception $e) {
+                Log::error('TMDB: getPopularMovies error', ['error' => $e->getMessage()]);
+
+                return [];
+            }
+        });
+    }
+
+    /**
+     * Fetch popular TV series.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function getPopularTv(int $page = 1): array
+    {
+        if (! $this->isConfigured()) {
+            return [];
+        }
+
+        $cacheKey = "tmdb_popular_tv_{$page}_{$this->language}";
+
+        return Cache::remember($cacheKey, now()->addMinutes(30), function () use ($page) {
+            $this->waitForRateLimit();
+
+            try {
+                $response = Http::timeout(15)->get(self::BASE_URL.'/tv/popular', [
+                    'api_key' => $this->apiKey,
+                    'language' => $this->language,
+                    'page' => $page,
+                ]);
+
+                if (! $response->successful()) {
+                    return [];
+                }
+
+                return collect($response->json()['results'] ?? [])
+                    ->map(fn ($item) => $this->normalizeDiscoverResult($item, 'tv'))
+                    ->filter(fn ($item) => $item['tmdb_id'] > 0)
+                    ->values()
+                    ->all();
+            } catch (\Exception $e) {
+                Log::error('TMDB: getPopularTv error', ['error' => $e->getMessage()]);
+
+                return [];
+            }
+        });
+    }
+
+    /**
+     * Fetch upcoming movies.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function getUpcomingMovies(int $page = 1): array
+    {
+        if (! $this->isConfigured()) {
+            return [];
+        }
+
+        $cacheKey = "tmdb_upcoming_movies_{$page}_{$this->language}";
+
+        return Cache::remember($cacheKey, now()->addHours(1), function () use ($page) {
+            $this->waitForRateLimit();
+
+            try {
+                $response = Http::timeout(15)->get(self::BASE_URL.'/movie/upcoming', [
+                    'api_key' => $this->apiKey,
+                    'language' => $this->language,
+                    'page' => $page,
+                ]);
+
+                if (! $response->successful()) {
+                    return [];
+                }
+
+                return collect($response->json()['results'] ?? [])
+                    ->map(fn ($item) => $this->normalizeDiscoverResult($item, 'movie'))
+                    ->filter(fn ($item) => $item['tmdb_id'] > 0)
+                    ->values()
+                    ->all();
+            } catch (\Exception $e) {
+                Log::error('TMDB: getUpcomingMovies error', ['error' => $e->getMessage()]);
+
+                return [];
+            }
+        });
+    }
+
+    /**
+     * Fetch movie genre list.
+     *
+     * @return array<int, array{id: int, name: string}>
+     */
+    public function getMovieGenres(): array
+    {
+        if (! $this->isConfigured()) {
+            return [];
+        }
+
+        return Cache::remember('tmdb_genres_movie_'.$this->language, now()->addHours(24), function () {
+            $this->waitForRateLimit();
+
+            try {
+                $response = Http::timeout(15)->get(self::BASE_URL.'/genre/movie/list', [
+                    'api_key' => $this->apiKey,
+                    'language' => $this->language,
+                ]);
+
+                if (! $response->successful()) {
+                    return [];
+                }
+
+                return collect($response->json()['genres'] ?? [])
+                    ->map(fn ($g) => ['id' => (int) $g['id'], 'name' => $g['name']])
+                    ->all();
+            } catch (\Exception $e) {
+                Log::error('TMDB: getMovieGenres error', ['error' => $e->getMessage()]);
+
+                return [];
+            }
+        });
+    }
+
+    /**
+     * Fetch TV genre list.
+     *
+     * @return array<int, array{id: int, name: string}>
+     */
+    public function getTvGenres(): array
+    {
+        if (! $this->isConfigured()) {
+            return [];
+        }
+
+        return Cache::remember('tmdb_genres_tv_'.$this->language, now()->addHours(24), function () {
+            $this->waitForRateLimit();
+
+            try {
+                $response = Http::timeout(15)->get(self::BASE_URL.'/genre/tv/list', [
+                    'api_key' => $this->apiKey,
+                    'language' => $this->language,
+                ]);
+
+                if (! $response->successful()) {
+                    return [];
+                }
+
+                return collect($response->json()['genres'] ?? [])
+                    ->map(fn ($g) => ['id' => (int) $g['id'], 'name' => $g['name']])
+                    ->all();
+            } catch (\Exception $e) {
+                Log::error('TMDB: getTvGenres error', ['error' => $e->getMessage()]);
+
+                return [];
+            }
+        });
+    }
+
+    /**
+     * Discover movies with optional filters.
+     *
+     * @param  array<string, mixed>  $params  TMDB /discover/movie query params
+     * @return array<int, array<string, mixed>>
+     */
+    public function discoverMovies(array $params = []): array
+    {
+        if (! $this->isConfigured()) {
+            return [];
+        }
+
+        $cacheKey = 'tmdb_discover_movie_'.md5(serialize($params)).'_'.$this->language;
+
+        return Cache::remember($cacheKey, now()->addMinutes(30), function () use ($params) {
+            $this->waitForRateLimit();
+
+            try {
+                $response = Http::timeout(15)->get(self::BASE_URL.'/discover/movie', array_merge([
+                    'api_key' => $this->apiKey,
+                    'language' => $this->language,
+                    'sort_by' => 'popularity.desc',
+                ], $params));
+
+                if (! $response->successful()) {
+                    return [];
+                }
+
+                return collect($response->json()['results'] ?? [])
+                    ->map(fn ($item) => $this->normalizeDiscoverResult($item, 'movie'))
+                    ->filter(fn ($item) => $item['tmdb_id'] > 0)
+                    ->values()
+                    ->all();
+            } catch (\Exception $e) {
+                Log::error('TMDB: discoverMovies error', ['error' => $e->getMessage()]);
+
+                return [];
+            }
+        });
+    }
+
+    /**
+     * Discover TV series with optional filters.
+     *
+     * @param  array<string, mixed>  $params  TMDB /discover/tv query params
+     * @return array<int, array<string, mixed>>
+     */
+    public function discoverTv(array $params = []): array
+    {
+        if (! $this->isConfigured()) {
+            return [];
+        }
+
+        $cacheKey = 'tmdb_discover_tv_'.md5(serialize($params)).'_'.$this->language;
+
+        return Cache::remember($cacheKey, now()->addMinutes(30), function () use ($params) {
+            $this->waitForRateLimit();
+
+            try {
+                $response = Http::timeout(15)->get(self::BASE_URL.'/discover/tv', array_merge([
+                    'api_key' => $this->apiKey,
+                    'language' => $this->language,
+                    'sort_by' => 'popularity.desc',
+                ], $params));
+
+                if (! $response->successful()) {
+                    return [];
+                }
+
+                return collect($response->json()['results'] ?? [])
+                    ->map(fn ($item) => $this->normalizeDiscoverResult($item, 'tv'))
+                    ->filter(fn ($item) => $item['tmdb_id'] > 0)
+                    ->values()
+                    ->all();
+            } catch (\Exception $e) {
+                Log::error('TMDB: discoverTv error', ['error' => $e->getMessage()]);
+
+                return [];
+            }
+        });
+    }
+
+    /**
+     * Fetch available streaming providers for a media type + region, sorted by display priority.
+     *
+     * @return array<int, array{id: int, name: string, logo: string|null}>
+     */
+    public function getWatchProviders(string $mediaType = 'movie', string $region = 'US'): array
+    {
+        if (! $this->isConfigured()) {
+            return [];
+        }
+
+        $cacheKey = "tmdb_watch_providers_{$mediaType}_{$region}";
+
+        return Cache::remember($cacheKey, now()->addDay(), function () use ($mediaType, $region) {
+            try {
+                $response = Http::timeout(15)->get(self::BASE_URL."/watch/providers/{$mediaType}", [
+                    'api_key' => $this->apiKey,
+                    'watch_region' => $region,
+                    'language' => $this->language,
+                ]);
+
+                if (! $response->successful()) {
+                    return [];
+                }
+
+                return collect($response->json()['results'] ?? [])
+                    ->sortBy('display_priority')
+                    ->map(fn ($p) => [
+                        'id' => $p['provider_id'],
+                        'name' => $p['provider_name'],
+                        'logo' => ! empty($p['logo_path'])
+                            ? 'https://image.tmdb.org/t/p/w45'.$p['logo_path']
+                            : null,
+                    ])
+                    ->values()
+                    ->all();
+            } catch (\Exception $e) {
+                Log::error('TMDB: getWatchProviders error', ['error' => $e->getMessage()]);
+
+                return [];
+            }
+        });
+    }
+
+    /**
+     * Normalize a single TMDB discover/trending result to the standard discover card shape.
+     *
+     * @param  array<string, mixed>  $item
+     * @return array<string, mixed>
+     */
+    private function normalizeDiscoverResult(array $item, string $mediaType = 'movie'): array
+    {
+        $title = $mediaType === 'tv'
+            ? ($item['name'] ?? $item['title'] ?? 'Unknown')
+            : ($item['title'] ?? $item['name'] ?? 'Unknown');
+
+        $date = $mediaType === 'tv'
+            ? ($item['first_air_date'] ?? null)
+            : ($item['release_date'] ?? null);
+
+        return [
+            'tmdb_id' => (int) ($item['id'] ?? 0),
+            'title' => $title,
+            'media_type' => $mediaType,
+            'year' => $date ? substr((string) $date, 0, 4) : null,
+            'overview' => $item['overview'] ?? null,
+            'poster_url' => ! empty($item['poster_path']) ? 'https://image.tmdb.org/t/p/w500'.$item['poster_path'] : null,
+            'backdrop_url' => ! empty($item['backdrop_path']) ? 'https://image.tmdb.org/t/p/original'.$item['backdrop_path'] : null,
+            'vote_average' => isset($item['vote_average']) && $item['vote_average'] > 0
+                ? round((float) $item['vote_average'], 1)
+                : null,
+            'genre_ids' => $item['genre_ids'] ?? [],
+        ];
     }
 
     /**

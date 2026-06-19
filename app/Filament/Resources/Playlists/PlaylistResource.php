@@ -3300,6 +3300,25 @@ class PlaylistResource extends Resource implements CopilotResource
                 ->hiddenOn('create');
         }
 
+        // Requests tab — per-playlist opt-in for content requests via Sonarr/Radarr.
+        // Fields are prefixed with request_ and hydrated/dehydrated via EditPlaylist hooks.
+        $tabs[] = Tab::make(__('Requests'))
+            ->icon('heroicon-m-magnifying-glass-circle')
+            ->hidden(fn () => ! auth()->user()->canUseIntegrations())
+            ->schema([
+                Section::make(__('Content Requests'))
+                    ->icon('heroicon-m-magnifying-glass-circle')
+                    ->description(__('Allow guests to browse and request content from your Sonarr and Radarr servers on this playlist.'))
+                    ->schema([
+                        Toggle::make('request_enabled')
+                            ->label(__('Enable Content Requests'))
+                            ->helperText(__('When enabled, guests on this playlist will see the Request Content page and can submit requests to your configured Sonarr/Radarr integrations.'))
+                            ->default(false)
+                            ->inline(false),
+                    ]),
+            ])
+            ->hiddenOn('create');
+
         // Compose the form with tabs and sections
         return [
             Grid::make()
