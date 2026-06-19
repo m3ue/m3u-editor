@@ -338,6 +338,13 @@ return [
         '6903bd970c3a', // StreamFileSetting
         '2dce3e94d599', // EpgProgramme
         '16a8d1dc6e60', // DvrRecordingRule
+
+        // Arr integration models — managed via Filament form schemas and explicit
+        // service-layer assignments. Model::unguard() is called in AppServiceProvider.
+        '0f3dc97aaced', // ArrIntegration
+        'f19a8a24ad42', // ArrQueueEvent
+        '057e992825e3', // PlaylistRequestSetting
+        '9a065d722be9', // QueueMonitor
     ],
 
     /*
