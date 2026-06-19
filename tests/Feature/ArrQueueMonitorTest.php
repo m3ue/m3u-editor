@@ -161,6 +161,83 @@ it('returns correct status badge color for known statuses', function () {
     expect(ArrQueueMonitor::statusBadge('paused')['color'])->toBe('gray');
 });
 
+it('snapshots a live item that vanishes between polls and marks it completed', function () {
+    $integration = ArrIntegration::factory()->sonarr()->create([
+        'user_id' => $this->user->id,
+    ]);
+
+    // First poll returns an active item; second poll returns empty (item completed and left the queue).
+    Http::fake([
+        '*/api/v3/queue*' => Http::sequence()
+            ->push([
+                'records' => [[
+                    'id' => 1,
+                    'downloadId' => 'ghost-dl-abc',
+                    'status' => 'downloading',
+                    'size' => 1_073_741_824,
+                    'sizeleft' => 536_870_912,
+                    'timeleft' => '00:05:00',
+                    'series' => ['title' => 'Severance'],
+                ]],
+            ], 200)
+            ->push(['records' => []], 200),
+    ]);
+
+    $component = Livewire::test(ArrQueueMonitor::class);
+
+    expect($component->get("queues.{$integration->id}.items.0.title"))->toBe('Severance');
+    expect($component->get("queues.{$integration->id}.items.0.source"))->toBe('live');
+
+    $component->call('loadQueues');
+
+    $items = $component->get("queues.{$integration->id}.items");
+    $snapshot = collect($items)->firstWhere('source', 'snapshot');
+
+    expect($snapshot)->not->toBeNull()
+        ->and($snapshot['title'])->toBe('Severance')
+        ->and($snapshot['status'])->toBe('completed')
+        ->and($snapshot['progress'])->toBe(100)
+        ->and($snapshot['can_dismiss'])->toBeTrue();
+
+    expect($component->get('completedSnapshots'))->toHaveCount(1);
+});
+
+it('caps completed snapshots at MAX_SNAPSHOTS_PER_INTEGRATION per integration', function () {
+    $integration = ArrIntegration::factory()->sonarr()->create([
+        'user_id' => $this->user->id,
+    ]);
+
+    // Seed the component with 26 orphan live items across two polls, one per cycle.
+    $component = null;
+    for ($i = 1; $i <= 26; $i++) {
+        // Each iteration: previous item gone, new item present.
+        Http::fake([
+            '*/api/v3/queue*' => Http::response([
+                'records' => [[
+                    'id' => $i,
+                    'downloadId' => "dl-{$i}",
+                    'status' => 'downloading',
+                    'size' => 0,
+                    'sizeleft' => 0,
+                    'series' => ['title' => "Show {$i}"],
+                ]],
+            ], 200),
+        ]);
+
+        if ($component === null) {
+            $component = Livewire::test(ArrQueueMonitor::class);
+        } else {
+            $component->call('loadQueues');
+        }
+
+        // Now clear the queue so the item becomes an orphan on next poll.
+        Http::fake(['*/api/v3/queue*' => Http::response(['records' => []], 200)]);
+        $component->call('loadQueues');
+    }
+
+    expect(count($component->get('completedSnapshots')))->toBeLessThanOrEqual(25);
+});
+
 it('counts total items across all queues', function () {
     ArrIntegration::factory()->sonarr()->create([
         'user_id' => $this->user->id,

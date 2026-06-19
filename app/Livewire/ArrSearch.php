@@ -386,7 +386,8 @@ class ArrSearch extends Component
             if ($libraryId) {
                 $service = ArrService::make($this->detailIntegration);
 
-                if ($service instanceof SonarrService) {
+                if ($service->supportsEpisodes()) {
+                    /** @var SonarrService $service */
                     try {
                         $this->detailSonarrEpisodeStatus = $service->fetchEpisodes($libraryId);
                     } catch (\Exception) {
@@ -589,7 +590,8 @@ class ArrSearch extends Component
         }
 
         try {
-            $service = new SonarrService($this->detailIntegration);
+            /** @var SonarrService $service */
+            $service = ArrService::make($this->detailIntegration);
             $episodeId = $service->resolveEpisodeId($libraryId, $seasonNumber, $episodeNumber, $seriesJustAdded);
 
             if (! $episodeId) {
@@ -784,7 +786,9 @@ class ArrSearch extends Component
             return;
         }
 
-        $result = ArrService::make($integration)->requestEpisode(
+        /** @var SonarrService $sonarrService */
+        $sonarrService = ArrService::make($integration);
+        $result = $sonarrService->requestEpisode(
             $tvdbId,
             $seasonNumber,
             $episodeNumber,

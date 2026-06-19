@@ -10,15 +10,6 @@ class PlaylistRequestSetting extends Model
 {
     use HasFactory;
 
-    /**
-     * @var array<int, string>
-     */
-    protected $fillable = [
-        'playlist_id',
-        'user_id',
-        'enabled',
-    ];
-
     protected function casts(): array
     {
         return [

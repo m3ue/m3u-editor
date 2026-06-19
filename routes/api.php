@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Route;
  * Routed by the integration's unique webhook_secret so no additional auth header is needed.
  */
 Route::post('webhooks/arr/{integration:webhook_secret}', [ArrWebhookController::class, 'receive'])
+    ->middleware('throttle:120,1')
     ->name('webhooks.arr');
 
 /*

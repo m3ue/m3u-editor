@@ -11,24 +11,6 @@ class ArrQueueEvent extends Model
     use HasFactory;
 
     /**
-     * @var array<int, string>
-     */
-    protected $fillable = [
-        'arr_integration_id',
-        'user_id',
-        'download_id',
-        'external_id',
-        'title',
-        'event_type',
-        'status',
-        'quality',
-        'release_title',
-        'size',
-        'progress',
-        'last_event_at',
-    ];
-
-    /**
      * @return array<string, string>
      */
     protected function casts(): array

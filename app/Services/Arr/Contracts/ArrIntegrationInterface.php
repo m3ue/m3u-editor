@@ -89,4 +89,19 @@ interface ArrIntegrationInterface
      * @return array<int>
      */
     public function fetchLibraryTmdbIds(): array;
+
+    /**
+     * Whether this integration supports episode-level operations (Sonarr only).
+     * Use this instead of instanceof checks to keep components decoupled from concrete types.
+     */
+    public function supportsEpisodes(): bool;
+
+    /**
+     * Parse raw /queue API records into the normalized queue item shape.
+     * Separated from fetchQueue() to allow parallel HTTP fetching via Http::pool().
+     *
+     * @param  array<int, array<string, mixed>>  $records
+     * @return array<int, array<string, mixed>>
+     */
+    public function parseQueueRecords(array $records): array;
 }

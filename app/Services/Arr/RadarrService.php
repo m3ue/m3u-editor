@@ -265,6 +265,11 @@ class RadarrService extends BaseArrService
             ->all();
     }
 
+    public function supportsEpisodes(): bool
+    {
+        return false;
+    }
+
     /**
      * @return array<int, array<string, mixed>>
      */
@@ -276,7 +281,16 @@ class RadarrService extends BaseArrService
             return [];
         }
 
-        return collect($response->json()['records'] ?? [])
+        return $this->parseQueueRecords($response->json()['records'] ?? []);
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $records
+     * @return array<int, array<string, mixed>>
+     */
+    public function parseQueueRecords(array $records): array
+    {
+        return collect($records)
             ->map(function ($item) {
                 $size = (int) ($item['size'] ?? 0);
                 $sizeLeft = (int) ($item['sizeleft'] ?? 0);

@@ -5,6 +5,8 @@ namespace App\Livewire;
 use App\Models\ArrIntegration;
 use App\Models\ArrQueueEvent;
 use App\Services\Arr\ArrService;
+use Illuminate\Http\Client\Pool;
+use Illuminate\Support\Facades\Http;
 use Illuminate\View\View;
 use Livewire\Component;
 
@@ -20,10 +22,13 @@ class ArrQueueMonitor extends Component
     /**
      * Completed orphan items (no webhook event) captured between polls.
      * Keyed by "{integrationId}_{downloadId}". Persists until dismissed.
+     * Capped at MAX_SNAPSHOTS_PER_INTEGRATION per integration to prevent unbounded growth.
      *
      * @var array<string, array<string, mixed>>
      */
     public array $completedSnapshots = [];
+
+    protected const MAX_SNAPSHOTS_PER_INTEGRATION = 25;
 
     /** @var array<string, string> */
     protected $listeners = ['refreshArrQueue' => 'loadQueues'];
@@ -57,16 +62,44 @@ class ArrQueueMonitor extends Component
             ->where('user_id', auth()->id())
             ->where('enabled', true)
             ->orderBy('name')
-            ->get();
+            ->get()
+            ->values(); // 0-indexed so pool responses map by position
 
-        foreach ($integrations as $integration) {
+        if ($integrations->isEmpty()) {
+            $this->dispatch('queue-status', count: 0);
+
+            return;
+        }
+
+        // Fire all queue HTTP requests in parallel instead of serially.
+        $services = $integrations->map(fn ($i) => ArrService::make($i));
+
+        $queueResponses = Http::pool(function (Pool $pool) use ($integrations) {
+            return $integrations->map(function ($integration) use ($pool) {
+                $params = $integration->isSonarr()
+                    ? ['includeSeries' => 'true', 'includeEpisode' => 'true']
+                    : ['includeMovie' => 'true'];
+
+                return $pool
+                    ->baseUrl($integration->base_url.'/api/v3')
+                    ->timeout(5)
+                    ->acceptJson()
+                    ->withHeaders(['X-Api-Key' => $integration->api_key])
+                    ->get('/queue', $params);
+            })->all();
+        });
+
+        foreach ($integrations as $index => $integration) {
+            $queueResponse = $queueResponses[$index];
+
             // Live items from the Arr service (actively downloading — have progress).
             $liveItems = collect();
             $liveError = false;
-            try {
-                $liveItems = collect(ArrService::make($integration)->fetchQueue());
-            } catch (\Exception) {
+
+            if ($queueResponse instanceof \Throwable || ! $queueResponse->successful()) {
                 $liveError = true;
+            } else {
+                $liveItems = collect($services[$index]->parseQueueRecords($queueResponse->json()['records'] ?? []));
             }
 
             $liveByDownloadId = $liveItems->keyBy('downloadId')->filter();
@@ -93,6 +126,16 @@ class ArrQueueMonitor extends Component
                         'can_dismiss' => true,
                         'source' => 'snapshot',
                     ]);
+
+                    // Trim oldest snapshots for this integration to enforce the cap.
+                    $integrationSnapshots = array_filter(
+                        $this->completedSnapshots,
+                        fn ($s) => ($s['integration_id'] ?? null) === $integration->id
+                    );
+
+                    if (count($integrationSnapshots) > self::MAX_SNAPSHOTS_PER_INTEGRATION) {
+                        unset($this->completedSnapshots[(string) array_key_first($integrationSnapshots)]);
+                    }
                 }
             }
 

@@ -6,12 +6,6 @@ use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
-    /**
-     * Run the migrations.
-     *
-     * Sonarr/Radarr content request integrations.
-     * One record per (user, playlist, server) — mirrors the DvrSetting per-playlist pattern.
-     */
     public function up(): void
     {
         Schema::create('arr_integrations', function (Blueprint $table) {
@@ -27,11 +21,9 @@ return new class extends Migration
             $table->boolean('guest_enabled')->default(false);
             $table->timestamp('last_test_at')->nullable();
             $table->foreignId('user_id')->constrained()->cascadeOnDelete();
-            $table->foreignId('playlist_id')->constrained()->cascadeOnDelete();
             $table->timestamps();
 
             $table->index(['user_id', 'enabled']);
-            $table->index(['playlist_id', 'enabled', 'guest_enabled']);
         });
     }
 

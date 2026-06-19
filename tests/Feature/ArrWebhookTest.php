@@ -195,3 +195,36 @@ it('exposes a webhook_url accessor', function () {
         ->toContain('/api/webhooks/arr/')
         ->toContain($this->radarr->webhook_secret);
 });
+
+it('handles duplicate Grab events for the same download_id idempotently', function () {
+    $payload = [
+        'eventType' => 'Grab',
+        'movie' => ['title' => 'Conclave', 'tmdbId' => 974635],
+        'release' => [
+            'releaseTitle' => 'Conclave.2024.1080p.BluRay.x264',
+            'quality' => ['quality' => ['name' => 'Bluray-1080p']],
+            'size' => 14_000_000_000,
+        ],
+        'downloadId' => 'abc123',
+    ];
+
+    $this->postJson('/api/webhooks/arr/'.$this->radarr->webhook_secret, $payload)->assertNoContent();
+    $this->postJson('/api/webhooks/arr/'.$this->radarr->webhook_secret, $payload)->assertNoContent();
+
+    // updateOrCreate on download_id means only one record exists.
+    expect(ArrQueueEvent::where('download_id', 'abc123')->count())->toBe(1);
+    expect(ArrQueueEvent::where('status', 'grabbing')->count())->toBe(1);
+    // Broadcast fires for each webhook call (intentional — UI always refreshes).
+    Event::assertDispatchedTimes(ArrQueueUpdated::class, 2);
+});
+
+it('logs debug for unknown event types and still broadcasts', function () {
+    $response = $this->postJson(
+        '/api/webhooks/arr/'.$this->radarr->webhook_secret,
+        ['eventType' => 'EpisodeFileDelete', 'movie' => ['title' => 'Test', 'tmdbId' => 1]]
+    );
+
+    $response->assertNoContent();
+    expect(ArrQueueEvent::count())->toBe(0);
+    Event::assertDispatched(ArrQueueUpdated::class);
+});

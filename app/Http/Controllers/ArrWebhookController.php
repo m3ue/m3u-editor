@@ -43,7 +43,10 @@ class ArrWebhookController extends Controller
             'Grab' => $this->handleGrab($integration, $payload),
             'Download' => $this->handleDownload($integration, $payload),
             'ManualInteractionRequired' => $this->handleManualRequired($integration, $payload),
-            default => null,
+            default => Log::debug('ArrWebhook: unhandled event type', [
+                'integration_id' => $integration->id,
+                'event_type' => $eventType,
+            ]),
         };
     }
 

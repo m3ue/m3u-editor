@@ -37,6 +37,9 @@ class ArrIntegrationsWidget extends BaseWidget
     public function table(Table $table): Table
     {
         return $table
+        ->filtersTriggerAction(function ($action) {
+                return $action->button()->label(__('Filters'));
+            })
             ->query(
                 ArrIntegration::query()
                     ->where('user_id', Auth::id())

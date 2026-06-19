@@ -370,6 +370,10 @@ class SonarrService extends BaseArrService
      * Resolve the Sonarr-internal episode ID for a given season + episode number.
      * When $retryIfEmpty is true, retries up to 5 times to handle the delay between
      * a series being added via POST /series and its episodes becoming available.
+     *
+     * NOTE: Retries use usleep() which blocks the PHP worker for up to 2.5 s total.
+     * This is intentional for a single-user self-hosted setup; do not call from a
+     * high-concurrency context without moving to a queued job first.
      */
     public function resolveEpisodeId(int $seriesId, int $seasonNumber, int $episodeNumber, bool $retryIfEmpty = false): ?int
     {
@@ -465,6 +469,11 @@ class SonarrService extends BaseArrService
             ->all();
     }
 
+    public function supportsEpisodes(): bool
+    {
+        return true;
+    }
+
     /**
      * @return array<int, array<string, mixed>>
      */
@@ -476,7 +485,16 @@ class SonarrService extends BaseArrService
             return [];
         }
 
-        return collect($response->json()['records'] ?? [])
+        return $this->parseQueueRecords($response->json()['records'] ?? []);
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $records
+     * @return array<int, array<string, mixed>>
+     */
+    public function parseQueueRecords(array $records): array
+    {
+        return collect($records)
             ->map(function ($item) {
                 $size = (int) ($item['size'] ?? 0);
                 $sizeLeft = (int) ($item['sizeleft'] ?? 0);
