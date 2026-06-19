@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\MediaServerIntegrations\Widgets;
 
+use App\Filament\Pages\RequestContent;
 use App\Filament\Resources\ArrIntegrations\ArrIntegrationResource;
 use App\Models\ArrIntegration;
 use App\Services\Arr\ArrService;
@@ -46,6 +47,11 @@ class ArrIntegrationsWidget extends BaseWidget
                     ->orderBy('name')
             )
             ->headerActions([
+                Action::make('request')
+                    ->label(__('Request Content'))
+                    ->url(RequestContent::getUrl())
+                    ->color('gray')
+                    ->button(),
                 Action::make('createArr')
                     ->label(__('Add Sonarr / Radarr'))
                     ->modalHeading(__('Add Sonarr / Radarr Integration'))
