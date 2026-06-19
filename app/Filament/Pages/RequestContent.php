@@ -9,8 +9,6 @@ class RequestContent extends Page
 {
     protected string $view = 'filament.pages.request-content';
 
-    protected static string|\BackedEnum|null $navigationIcon = 'heroicon-o-magnifying-glass-circle';
-
     public static function getNavigationLabel(): string
     {
         return __('Request Content');
