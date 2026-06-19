@@ -452,29 +452,6 @@ class FetchTmdbIds implements ShouldQueue
         });
     }
 
-    protected function cleanTitleForSearch(?string $title, bool $isSeries = false): string
-    {
-        $title = $title ?? '';
-
-        $enabled = $isSeries
-            ? ($this->settings->stream_file_sync_name_filter_enabled ?? false)
-            : ($this->settings->vod_stream_file_sync_name_filter_enabled ?? false);
-        $patterns = $isSeries
-            ? ($this->settings->stream_file_sync_name_filter_patterns ?? [])
-            : ($this->settings->vod_stream_file_sync_name_filter_patterns ?? []);
-
-        if ($enabled && ! empty($patterns)) {
-            foreach ($patterns as $pattern) {
-                $title = str_replace($pattern, '', $title);
-            }
-        }
-
-        // Strip leading numbering ("123. " / "123) ") that remains after prefix removal.
-        $title = preg_replace('/^\s*\d+[\.\)]\s*/', '', $title) ?? $title;
-
-        return trim($title);
-    }
-
     /**
      * Process a single VOD channel.
      */
@@ -1195,6 +1172,32 @@ class FetchTmdbIds implements ShouldQueue
             'tmdb_id' => $tmdbId,
             'episodes_updated' => $episodeCount,
         ]);
+    }
+
+    /**
+     * Clean title for TMDB search by applying user-defined patterns and stripping common prefixes.
+     */
+    protected function cleanTitleForSearch(?string $title, bool $isSeries = false): string
+    {
+        $title = $title ?? '';
+
+        $enabled = $isSeries
+            ? ($this->settings->stream_file_sync_name_filter_enabled ?? false)
+            : ($this->settings->vod_stream_file_sync_name_filter_enabled ?? false);
+        $patterns = $isSeries
+            ? ($this->settings->stream_file_sync_name_filter_patterns ?? [])
+            : ($this->settings->vod_stream_file_sync_name_filter_patterns ?? []);
+
+        if ($enabled && ! empty($patterns)) {
+            foreach ($patterns as $pattern) {
+                $title = str_replace($pattern, '', $title);
+            }
+        }
+
+        // Strip leading numbering ("123. " / "123) ") that remains after prefix removal.
+        $title = preg_replace('/^\s*\d+[\.\)]\s*/', '', $title) ?? $title;
+
+        return trim($title);
     }
 
     /**

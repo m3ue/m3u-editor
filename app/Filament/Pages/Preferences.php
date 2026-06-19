@@ -3,6 +3,7 @@
 namespace App\Filament\Pages;
 
 use App\Filament\Actions\CronHelperAction;
+use App\Filament\Actions\RegexTesterAction;
 use App\Filament\CopilotTools\EpgChannelMatcherTool;
 use App\Filament\CopilotTools\EpgMappingApplyTool;
 use App\Filament\CopilotTools\EpgMappingStateTool;
@@ -1440,6 +1441,9 @@ class Preferences extends SettingsPage
                                                             ->label(__('VOD title prefix patterns'))
                                                             ->placeholder(__('EN - '))
                                                             ->helperText(__('Strings to strip from VOD titles before TMDB lookup. Press [tab] or [return] to add each pattern.'))
+                                                            ->hintAction(
+                                                                RegexTesterAction::make(name: 'test-vod-name-filter', flags: 'u', samplesContext: 'vod_channels')
+                                                            )
                                                             ->hidden(fn (Get $get): bool => ! (bool) $get('vod_stream_file_sync_name_filter_enabled')),
                                                     ]),
                                                 Grid::make()
@@ -1456,6 +1460,9 @@ class Preferences extends SettingsPage
                                                             ->label(__('Series title prefix patterns'))
                                                             ->placeholder(__('EN - '))
                                                             ->helperText(__('Strings to strip from Series titles before TMDB lookup. Press [tab] or [return] to add each pattern.'))
+                                                            ->hintAction(
+                                                                RegexTesterAction::make(name: 'test-series-name-filter', flags: 'u', samplesContext: 'series')
+                                                            )
                                                             ->hidden(fn (Get $get): bool => ! (bool) $get('stream_file_sync_name_filter_enabled')),
                                                     ]),
                                             ]),
