@@ -50,6 +50,18 @@ class MergeChannels implements ShouldQueue
     protected ?array $normalizedPriorityOrder = null;
 
     /**
+     * Channel IDs that are already configured as native failovers.
+     *
+     * Disabled channels in this set may be hidden by auto-merge rather than
+     * unavailable, so they remain eligible to become master again during a
+     * re-merge. Other disabled channels are treated as unavailable for master
+     * selection and are not silently re-enabled by this job.
+     *
+     * @var array<int, true>
+     */
+    protected array $existingFailoverChannelIds = [];
+
+    /**
      * Create a new job instance.
      */
     public function __construct(
@@ -107,7 +119,10 @@ class MergeChannels implements ShouldQueue
                 $query->whereIn('playlist_id', $playlistIds);
             })
             ->pluck('channel_failover_id')
+            ->map(fn (mixed $id): int => (int) $id)
             ->toArray();
+
+        $this->existingFailoverChannelIds = array_fill_keys($existingFailoverChannelIds, true);
 
         // Get all channels for the requested content type and merge key.
         // Exclude channels that are already configured as failovers (unless we're re-merging everything).
@@ -233,11 +248,12 @@ class MergeChannels implements ShouldQueue
                 continue;
             }
 
-            if (! $master->enabled && ! in_array($master->group_id, $this->disabledGroupIds, true)) {
-                $master->update(['enabled' => true]);
-            }
+            $this->prepareSelectedMaster($master);
 
-            $failoverChannels = $this->sortChannelsByScore($group->where('id', '!=', $master->id), $playlistPriority);
+            $failoverChannels = $this->sortChannelsByScore(
+                $this->filterUnavailableMergeCandidates($group->where('id', '!=', $master->id)),
+                $playlistPriority,
+            );
 
             $sortOrder = 1;
             foreach ($failoverChannels as $failover) {
@@ -391,12 +407,21 @@ class MergeChannels implements ShouldQueue
                 continue;
             }
 
-            $sorted = $this->sortChannelsByScore($matches, $playlistPriority);
-            $master = $sorted->first();
+            $master = $this->selectMasterChannel($matches, $playlistPriority);
+            if (! $master) {
+                continue;
+            }
+
+            $this->prepareSelectedMaster($master);
+
             $maxSort = ChannelFailover::where('channel_id', $master->id)->max('sort') ?? 0;
             $sortOrder = $maxSort + 1;
+            $sorted = $this->sortChannelsByScore(
+                $this->filterUnavailableMergeCandidates($matches->where('id', '!=', $master->id)),
+                $playlistPriority,
+            );
 
-            foreach ($sorted->skip(1) as $failover) {
+            foreach ($sorted as $failover) {
                 ChannelFailover::updateOrCreate(
                     [
                         'channel_id' => $master->id,
@@ -456,6 +481,12 @@ class MergeChannels implements ShouldQueue
             return null;
         }
 
+        $eligibleGroup = $this->filterUnavailableMergeCandidates($eligibleGroup);
+
+        if ($eligibleGroup->isEmpty()) {
+            return null;
+        }
+
         // Use weighted priority system if config provided
         if ($this->weightedConfig !== null) {
             return $this->selectMasterByWeightedScore($eligibleGroup, $playlistPriority);
@@ -477,6 +508,50 @@ class MergeChannels implements ShouldQueue
         return $group->filter(function ($channel) {
             return ! in_array($channel->group_id, $this->disabledGroupIds);
         });
+    }
+
+    /**
+     * Keep unavailable disabled channels out of merge selection.
+     *
+     * A disabled channel that is already in channel_failovers may simply be a
+     * hidden failover created by auto-merge. A disabled channel in an excluded
+     * disabled group is also allowed to remain a failover because the native
+     * `exclude_disabled_groups` option means "not master, failover only".
+     * Other disabled channels may have been disabled manually or by the
+     * scrubber and should not be silently promoted, re-enabled, or added as
+     * runtime failovers here.
+     */
+    protected function filterUnavailableMergeCandidates(Collection $group): Collection
+    {
+        return $group->filter(function ($channel) {
+            return (bool) $channel->enabled
+                || isset($this->existingFailoverChannelIds[(int) $channel->id])
+                || in_array($channel->group_id, $this->disabledGroupIds, true);
+        });
+    }
+
+    protected function shouldEnableSelectedMaster(Channel $master): bool
+    {
+        if ($master->enabled) {
+            return false;
+        }
+
+        if (in_array($master->group_id, $this->disabledGroupIds, true)) {
+            return false;
+        }
+
+        return isset($this->existingFailoverChannelIds[(int) $master->id]);
+    }
+
+    protected function prepareSelectedMaster(Channel $master): void
+    {
+        ChannelFailover::where('user_id', $this->user->id)
+            ->where('channel_failover_id', $master->id)
+            ->delete();
+
+        if ($this->shouldEnableSelectedMaster($master)) {
+            $master->update(['enabled' => true]);
+        }
     }
 
     /**

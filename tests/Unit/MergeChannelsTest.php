@@ -37,11 +37,11 @@ class MergeChannelsTest extends TestCase
         $playlist = Playlist::factory()->for($user)->createQuietly();
 
         // Create channels for the playlist with same stream_id
-        $channel1 = Channel::factory()->create(['stream_id' => 'stream1', 'user_id' => $user->id, 'playlist_id' => $playlist->id, 'group_id' => null]);
-        $channel2 = Channel::factory()->create(['stream_id' => 'stream1', 'user_id' => $user->id, 'playlist_id' => $playlist->id, 'group_id' => null]);
+        $channel1 = Channel::factory()->create(['stream_id' => 'stream1', 'user_id' => $user->id, 'playlist_id' => $playlist->id, 'group_id' => null, 'enabled' => true]);
+        $channel2 = Channel::factory()->create(['stream_id' => 'stream1', 'user_id' => $user->id, 'playlist_id' => $playlist->id, 'group_id' => null, 'enabled' => true]);
         // Channels with empty stream_ids should not be merged
-        $channel3 = Channel::factory()->create(['stream_id' => '', 'user_id' => $user->id, 'playlist_id' => $playlist->id, 'group_id' => null]);
-        $channel4 = Channel::factory()->create(['stream_id' => null, 'user_id' => $user->id, 'playlist_id' => $playlist->id, 'group_id' => null]);
+        $channel3 = Channel::factory()->create(['stream_id' => '', 'user_id' => $user->id, 'playlist_id' => $playlist->id, 'group_id' => null, 'enabled' => true]);
+        $channel4 = Channel::factory()->create(['stream_id' => null, 'user_id' => $user->id, 'playlist_id' => $playlist->id, 'group_id' => null, 'enabled' => true]);
 
         // Create playlists collection as expected by MergeChannels constructor
         $playlists = collect([['playlist_failover_id' => $playlist->id]]);
@@ -68,6 +68,7 @@ class MergeChannelsTest extends TestCase
             'user_id' => $user->id,
             'playlist_id' => $playlist1->id,
             'group_id' => null,
+            'enabled' => true,
         ]);
 
         $failover = Channel::factory()->create([
@@ -77,6 +78,7 @@ class MergeChannelsTest extends TestCase
             'user_id' => $user->id,
             'playlist_id' => $playlist2->id,
             'group_id' => null,
+            'enabled' => true,
         ]);
 
         $unrelatedLive = Channel::factory()->create([
@@ -86,6 +88,7 @@ class MergeChannelsTest extends TestCase
             'user_id' => $user->id,
             'playlist_id' => $playlist2->id,
             'group_id' => null,
+            'enabled' => true,
         ]);
 
         $this->runMergeChannels(
@@ -148,7 +151,7 @@ class MergeChannelsTest extends TestCase
     }
 
     #[Test]
-    public function promoted_master_is_enabled_and_old_master_is_deactivated_when_failovers_are_deactivated()
+    public function hidden_failover_can_be_promoted_to_master_and_old_master_is_deactivated()
     {
         $user = User::factory()->create();
         $playlist1 = Playlist::factory()->for($user)->createQuietly();
@@ -179,7 +182,13 @@ class MergeChannelsTest extends TestCase
             'enabled' => true,
         ]);
 
-        // Existing failover relationship (old master had a failover)
+        // Existing failover relationships. The new preferred master is disabled
+        // because it is currently hidden as a native auto-merge failover.
+        ChannelFailover::create([
+            'user_id' => $user->id,
+            'channel_id' => $oldMaster->id,
+            'channel_failover_id' => $newMaster->id,
+        ]);
         ChannelFailover::create([
             'user_id' => $user->id,
             'channel_id' => $oldMaster->id,
@@ -201,6 +210,7 @@ class MergeChannelsTest extends TestCase
 
         $this->assertTrue($newMaster->enabled, 'Promoted master should be enabled');
         $this->assertFalse($oldMaster->enabled, 'Old master should be deactivated as a failover');
+        $this->assertFalse($failover->enabled, 'Remaining failover should be deactivated');
         // Ensure failover relationships exist for the new master
         $this->assertDatabaseHas('channel_failovers', [
             'channel_id' => $newMaster->id,
@@ -210,5 +220,47 @@ class MergeChannelsTest extends TestCase
             'channel_id' => $newMaster->id,
             'channel_failover_id' => $failover->id,
         ]);
+        $this->assertDatabaseMissing('channel_failovers', [
+            'channel_id' => $oldMaster->id,
+            'channel_failover_id' => $newMaster->id,
+        ]);
+    }
+
+    #[Test]
+    public function disabled_preferred_channel_that_is_not_an_existing_failover_is_not_promoted_or_merged()
+    {
+        $user = User::factory()->create();
+        $playlist1 = Playlist::factory()->for($user)->createQuietly();
+        $playlist2 = Playlist::factory()->for($user)->createQuietly();
+
+        $enabledMaster = Channel::factory()->create([
+            'stream_id' => 'streamY',
+            'user_id' => $user->id,
+            'playlist_id' => $playlist1->id,
+            'group_id' => null,
+            'enabled' => true,
+        ]);
+
+        $disabledPreferred = Channel::factory()->create([
+            'stream_id' => 'streamY',
+            'user_id' => $user->id,
+            'playlist_id' => $playlist2->id,
+            'group_id' => null,
+            'enabled' => false,
+        ]);
+
+        $playlists = collect([
+            ['playlist_failover_id' => $playlist1->id],
+            ['playlist_failover_id' => $playlist2->id],
+        ]);
+
+        // The preferred playlist contains the disabled channel, but it is not
+        // an existing hidden failover. Merge should not promote/re-enable it,
+        // and should not add it as a runtime failover candidate.
+        $this->runMergeChannels($user, $playlists, $playlist2->id, false, true);
+
+        $this->assertTrue($enabledMaster->refresh()->enabled);
+        $this->assertFalse($disabledPreferred->refresh()->enabled);
+        $this->assertDatabaseCount('channel_failovers', 0);
     }
 }
