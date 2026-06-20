@@ -1675,6 +1675,8 @@ class Preferences extends SettingsPage
                                             ->bulkToggleable()
                                             ->options([
                                                 SearchDocsTool::class => __('Search Documentation'),
+                                                DvrOverviewTool::class => __('DVR: Recording Overview'),
+                                                DvrScheduleTool::class => __('DVR: Schedule Recording'),
                                                 EpgMappingStateTool::class => __('EPG Mapper: Mapping State'),
                                                 EpgChannelMatcherTool::class => __('EPG Mapper: Channel Matcher'),
                                                 EpgMappingApplyTool::class => __('EPG Mapper: Apply Mappings'),
@@ -1698,6 +1700,7 @@ class Preferences extends SettingsPage
                                             ->columns(2)
                                             ->default([
                                                 SearchDocsTool::class,
+                                                DvrOverviewTool::class,
                                                 DvrScheduleTool::class,
                                             ])
                                             ->helperText(__('Select which additional tools the AI assistant can use. Core tools (navigation, memory) are always available.')),
