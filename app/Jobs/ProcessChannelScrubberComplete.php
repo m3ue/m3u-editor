@@ -114,6 +114,9 @@ class ProcessChannelScrubberComplete implements ShouldQueue
             return;
         }
 
+        $mergeJob->newChannelsOnly = false;
+        $mergeJob->forceCompleteRemerge = true;
+
         dispatch($mergeJob);
     }
 }

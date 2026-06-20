@@ -82,8 +82,6 @@ it('dispatches native merge after a successful scan when enabled', function () {
         'auto_merge_channels_enabled' => true,
         'auto_merge_config' => [
             'merge_key' => 'stream_id',
-            'new_channels_only' => false,
-            'force_complete_remerge' => true,
         ],
     ]);
     $scrubber = ($this->scrubber)(['rebuild_failovers_after_scan' => true]);

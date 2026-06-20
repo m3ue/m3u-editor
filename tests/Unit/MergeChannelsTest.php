@@ -265,7 +265,7 @@ class MergeChannelsTest extends TestCase
     }
 
     #[Test]
-    public function scrubber_dead_hidden_failover_is_not_promoted_and_is_pruned_from_master_failovers()
+    public function scrubber_dead_hidden_failover_is_not_promoted_but_mapping_is_preserved()
     {
         $user = User::factory()->create();
         $playlist1 = Playlist::factory()->for($user)->createQuietly();
@@ -302,14 +302,109 @@ class MergeChannelsTest extends TestCase
 
         // Playlist 2 would normally be preferred, and the disabled channel is
         // an existing hidden failover. The scrubber-dead state makes it
-        // unavailable, so it must not be promoted or retained as a failover.
+        // unavailable as master, but the native failover mapping is topology
+        // and should be preserved.
         $this->runMergeChannels($user, $playlists, $playlist2->id, false, true);
 
         $this->assertTrue($currentMaster->refresh()->enabled);
         $this->assertFalse($deadHiddenFailover->refresh()->enabled);
-        $this->assertDatabaseMissing('channel_failovers', [
+        $this->assertDatabaseHas('channel_failovers', [
             'channel_id' => $currentMaster->id,
             'channel_failover_id' => $deadHiddenFailover->id,
+        ]);
+    }
+
+    #[Test]
+    public function scrubber_dead_master_rotates_to_live_failover_and_restores_when_live_again()
+    {
+        $user = User::factory()->create();
+        $playlist1 = Playlist::factory()->for($user)->createQuietly();
+        $playlist2 = Playlist::factory()->for($user)->createQuietly();
+        $playlist3 = Playlist::factory()->for($user)->createQuietly();
+
+        $oldMaster = Channel::factory()->create([
+            'stream_id' => 'streamR',
+            'user_id' => $user->id,
+            'playlist_id' => $playlist1->id,
+            'group_id' => null,
+            'sort' => 1.0,
+            'enabled' => false,
+            'last_scrubber_live' => false,
+        ]);
+
+        $liveFailover = Channel::factory()->create([
+            'stream_id' => 'streamR',
+            'user_id' => $user->id,
+            'playlist_id' => $playlist2->id,
+            'group_id' => null,
+            'sort' => 2.0,
+            'enabled' => false,
+            'last_scrubber_live' => true,
+        ]);
+
+        $secondaryFailover = Channel::factory()->create([
+            'stream_id' => 'streamR',
+            'user_id' => $user->id,
+            'playlist_id' => $playlist3->id,
+            'group_id' => null,
+            'sort' => 3.0,
+            'enabled' => false,
+            'last_scrubber_live' => true,
+        ]);
+
+        ChannelFailover::create([
+            'user_id' => $user->id,
+            'channel_id' => $oldMaster->id,
+            'channel_failover_id' => $liveFailover->id,
+            'sort' => 1,
+        ]);
+        ChannelFailover::create([
+            'user_id' => $user->id,
+            'channel_id' => $oldMaster->id,
+            'channel_failover_id' => $secondaryFailover->id,
+            'sort' => 2,
+        ]);
+
+        $playlists = collect([
+            ['playlist_failover_id' => $playlist1->id],
+            ['playlist_failover_id' => $playlist2->id],
+            ['playlist_failover_id' => $playlist3->id],
+        ]);
+
+        $this->runMergeChannels($user, $playlists, $playlist1->id, false, true);
+
+        $this->assertFalse($oldMaster->refresh()->enabled);
+        $this->assertTrue($liveFailover->refresh()->enabled);
+        $this->assertFalse($secondaryFailover->refresh()->enabled);
+        $this->assertDatabaseMissing('channel_failovers', [
+            'channel_id' => $oldMaster->id,
+            'channel_failover_id' => $liveFailover->id,
+        ]);
+        $this->assertDatabaseHas('channel_failovers', [
+            'channel_id' => $liveFailover->id,
+            'channel_failover_id' => $secondaryFailover->id,
+            'sort' => 1,
+        ]);
+        $this->assertDatabaseHas('channel_failovers', [
+            'channel_id' => $liveFailover->id,
+            'channel_failover_id' => $oldMaster->id,
+            'sort' => 2,
+        ]);
+
+        $oldMaster->update(['last_scrubber_live' => true]);
+
+        $this->runMergeChannels($user, $playlists, $playlist1->id, false, true);
+
+        $this->assertTrue($oldMaster->refresh()->enabled);
+        $this->assertFalse($liveFailover->refresh()->enabled);
+        $this->assertFalse($secondaryFailover->refresh()->enabled);
+        $this->assertDatabaseHas('channel_failovers', [
+            'channel_id' => $oldMaster->id,
+            'channel_failover_id' => $liveFailover->id,
+        ]);
+        $this->assertDatabaseHas('channel_failovers', [
+            'channel_id' => $oldMaster->id,
+            'channel_failover_id' => $secondaryFailover->id,
         ]);
     }
 }
