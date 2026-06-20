@@ -19,6 +19,8 @@ beforeEach(function () {
         'user_id' => $this->user->id,
         'playlist_id' => $this->playlist->id,
     ]);
+
+    createEligiblePlexDvrIntegration($this->user->id);
 });
 
 it('dispatches SyncPlexDvrJob when channel enabled status changes', function () {

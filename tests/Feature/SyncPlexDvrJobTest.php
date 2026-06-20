@@ -4,7 +4,9 @@ use App\Jobs\SyncPlexDvrJob;
 use App\Models\MediaServerIntegration;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 
 uses(RefreshDatabase::class);
 
@@ -42,6 +44,51 @@ it('skips when no eligible integrations exist', function () {
     $job->handle();
 
     expect(true)->toBeTrue();
+});
+
+it('does not dispatch when no eligible Plex DVR integration exists', function () {
+    Bus::fake();
+
+    MediaServerIntegration::withoutEvents(function () {
+        return MediaServerIntegration::create([
+            'name' => 'Unmanaged Plex',
+            'type' => 'plex',
+            'host' => 'plex.example.com',
+            'port' => 32400,
+            'ssl' => false,
+            'api_key' => 'test-token',
+            'enabled' => true,
+            'user_id' => $this->user->id,
+            'plex_management_enabled' => false,
+            'plex_dvr_id' => 1,
+            'plex_dvr_tuners' => [['device_key' => 'dev1', 'playlist_uuid' => 'uuid1']],
+        ]);
+    });
+
+    expect(SyncPlexDvrJob::dispatchIfConfigured(trigger: 'test'))->toBeFalse();
+
+    Bus::assertNotDispatched(SyncPlexDvrJob::class);
+});
+
+it('dispatches when an eligible Plex DVR integration exists', function () {
+    Bus::fake();
+
+    createEligiblePlexDvrIntegration($this->user->id);
+
+    expect(SyncPlexDvrJob::dispatchIfConfigured(trigger: 'test'))->toBeTrue();
+
+    Bus::assertDispatched(
+        SyncPlexDvrJob::class,
+        fn (SyncPlexDvrJob $job): bool => $job->trigger === 'test'
+    );
+});
+
+it('does not dispatch when the specified integration id has no eligible integration', function () {
+    Bus::fake();
+
+    expect(SyncPlexDvrJob::dispatchIfConfigured(integrationId: 99999, trigger: 'test'))->toBeFalse();
+
+    Bus::assertNotDispatched(SyncPlexDvrJob::class);
 });
 
 it('skips disabled integrations', function () {
@@ -92,6 +139,31 @@ it('skips integrations without plex management enabled', function () {
     $job->handle();
 
     expect(true)->toBeTrue();
+});
+
+it('skips non-plex integrations even when dvr fields are present', function () {
+    MediaServerIntegration::withoutEvents(function () {
+        return MediaServerIntegration::create([
+            'name' => 'Jellyfin with DVR fields',
+            'type' => 'jellyfin',
+            'host' => 'jellyfin.example.com',
+            'port' => 8096,
+            'ssl' => false,
+            'api_key' => 'test-token',
+            'enabled' => true,
+            'user_id' => $this->user->id,
+            'plex_management_enabled' => true,
+            'plex_dvr_id' => 1,
+            'plex_dvr_tuners' => [['device_key' => 'dev1', 'playlist_uuid' => 'uuid1']],
+        ]);
+    });
+
+    Log::spy();
+
+    $job = new SyncPlexDvrJob(trigger: 'test');
+    $job->handle();
+
+    Log::shouldNotHaveReceived('error');
 });
 
 it('skips integrations without dvr id', function () {

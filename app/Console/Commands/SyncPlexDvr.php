@@ -30,17 +30,9 @@ class SyncPlexDvr extends Command
     {
         $integrationId = $this->argument('integration');
 
-        $query = MediaServerIntegration::query()
-            ->where('enabled', true)
-            ->where('plex_management_enabled', true)
-            ->whereNotNull('plex_dvr_id')
-            ->whereNotNull('plex_dvr_tuners');
-
-        if ($integrationId) {
-            $query->where('id', $integrationId);
-        }
-
-        $integrations = $query->get();
+        $integrations = MediaServerIntegration::query()
+            ->eligibleForPlexDvr($integrationId ? (int) $integrationId : null)
+            ->get();
 
         if ($integrations->isEmpty()) {
             $this->info('No Plex integrations with active DVR found.');

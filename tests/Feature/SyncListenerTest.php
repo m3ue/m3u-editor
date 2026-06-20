@@ -50,6 +50,8 @@ beforeEach(function () {
         'sort_alpha_config' => null,
         'auto_merge_channels_enabled' => false,
     ]);
+
+    createEligiblePlexDvrIntegration($this->user->id);
 });
 
 // ──────────────────────────────────────────────────────────────────────────────

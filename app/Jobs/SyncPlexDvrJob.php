@@ -42,19 +42,25 @@ class SyncPlexDvrJob implements ShouldBeUnique, ShouldQueue
         return 120;
     }
 
-    public function handle(): void
+    public static function dispatchIfConfigured(?int $integrationId = null, string $trigger = 'unknown'): bool
     {
-        $query = MediaServerIntegration::query()
-            ->where('enabled', true)
-            ->where('plex_management_enabled', true)
-            ->whereNotNull('plex_dvr_id')
-            ->whereNotNull('plex_dvr_tuners');
+        if (! MediaServerIntegration::query()->eligibleForPlexDvr($integrationId)->exists()) {
+            Log::debug('SyncPlexDvrJob: skipped dispatch, no eligible Plex DVR integration', [
+                'integration_id' => $integrationId,
+                'trigger' => $trigger,
+            ]);
 
-        if ($this->integrationId) {
-            $query->where('id', $this->integrationId);
+            return false;
         }
 
-        $integrations = $query->get();
+        dispatch(new self(integrationId: $integrationId, trigger: $trigger));
+
+        return true;
+    }
+
+    public function handle(): void
+    {
+        $integrations = MediaServerIntegration::query()->eligibleForPlexDvr($this->integrationId)->get();
 
         if ($integrations->isEmpty()) {
             return;

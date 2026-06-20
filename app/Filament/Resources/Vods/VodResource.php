@@ -1432,7 +1432,7 @@ class VodResource extends Resource implements CopilotResource
                             Channel::whereIn('id', $chunk->pluck('id'))->update(['enabled' => true]);
                         }
                     })->after(function () {
-                        dispatch(new SyncPlexDvrJob(trigger: 'vod_bulk_enable'));
+                        SyncPlexDvrJob::dispatchIfConfigured(trigger: 'vod_bulk_enable');
                         Notification::make()
                             ->success()
                             ->title(__('Selected channels enabled'))
@@ -1453,7 +1453,7 @@ class VodResource extends Resource implements CopilotResource
                             Channel::whereIn('id', $chunk->pluck('id'))->update(['enabled' => false]);
                         }
                     })->after(function () {
-                        dispatch(new SyncPlexDvrJob(trigger: 'vod_bulk_disable'));
+                        SyncPlexDvrJob::dispatchIfConfigured(trigger: 'vod_bulk_disable');
                         Notification::make()
                             ->success()
                             ->title(__('Selected channels disabled'))
