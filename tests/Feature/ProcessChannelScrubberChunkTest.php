@@ -3,6 +3,7 @@
 use App\Enums\Status;
 use App\Jobs\ProcessChannelScrubberChunk;
 use App\Models\Channel;
+use App\Models\ChannelFailover;
 use App\Models\ChannelScrubber;
 use App\Models\ChannelScrubberLog;
 use App\Models\Playlist;
@@ -260,5 +261,85 @@ it('re-enables a previously disabled live channel when enableLive is true', func
     expect($channel->last_scrubber_live)->toBeTrue();
     expect($channel->last_scrubbed_at)->not->toBeNull();
 
+    expect($this->log->fresh()->live_count)->toBe(1);
+});
+
+it('keeps a disabled live failover channel hidden when failover protection is enabled', function () {
+    $master = ($this->channel)([
+        'enabled' => true,
+    ]);
+
+    $failover = ($this->channel)([
+        'enabled' => false,
+        'url' => 'http://example.invalid/failover',
+        'url_custom' => null,
+        'stream_stats' => null,
+    ]);
+
+    ChannelFailover::create([
+        'user_id' => $this->user->id,
+        'channel_id' => $master->id,
+        'channel_failover_id' => $failover->id,
+    ]);
+
+    Http::fake([
+        'http://example.invalid/failover' => Http::response('', 200),
+    ]);
+
+    ($this->handleChunk)(new ProcessChannelScrubberChunk(
+        channelIds: [$failover->id],
+        scrubberId: $this->scrubber->id,
+        logId: $this->log->id,
+        checkMethod: 'http',
+        batchNo: $this->scrubber->uuid,
+        totalChannels: 1,
+        enableLive: true,
+        protectFailoverChannels: true,
+    ));
+
+    $failover->refresh();
+    expect($failover->enabled)->toBeFalse();
+    expect($failover->last_scrubber_live)->toBeTrue();
+    expect($failover->last_scrubbed_at)->not->toBeNull();
+    expect($this->log->fresh()->live_count)->toBe(1);
+});
+
+it('re-enables a disabled live failover channel when failover protection is disabled', function () {
+    $master = ($this->channel)([
+        'enabled' => true,
+    ]);
+
+    $failover = ($this->channel)([
+        'enabled' => false,
+        'url' => 'http://example.invalid/failover',
+        'url_custom' => null,
+        'stream_stats' => null,
+    ]);
+
+    ChannelFailover::create([
+        'user_id' => $this->user->id,
+        'channel_id' => $master->id,
+        'channel_failover_id' => $failover->id,
+    ]);
+
+    Http::fake([
+        'http://example.invalid/failover' => Http::response('', 200),
+    ]);
+
+    ($this->handleChunk)(new ProcessChannelScrubberChunk(
+        channelIds: [$failover->id],
+        scrubberId: $this->scrubber->id,
+        logId: $this->log->id,
+        checkMethod: 'http',
+        batchNo: $this->scrubber->uuid,
+        totalChannels: 1,
+        enableLive: true,
+        protectFailoverChannels: false,
+    ));
+
+    $failover->refresh();
+    expect($failover->enabled)->toBeTrue();
+    expect($failover->last_scrubber_live)->toBeTrue();
+    expect($failover->last_scrubbed_at)->not->toBeNull();
     expect($this->log->fresh()->live_count)->toBe(1);
 });
