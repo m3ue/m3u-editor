@@ -62,7 +62,7 @@ class SyncListener
                 }
 
                 // Sync Plex DVR channel maps (lineup may have changed)
-                dispatch(new SyncPlexDvrJob(trigger: 'playlist_sync'));
+                SyncPlexDvrJob::dispatchIfConfigured(trigger: 'playlist_sync');
             }
 
             // Handle Playlist post-processes
@@ -94,7 +94,7 @@ class SyncListener
                 $this->postProcessEpg($event->model);
 
                 // Sync Plex DVR (EPG data changed, guide needs refresh)
-                dispatch(new SyncPlexDvrJob(trigger: 'epg_sync'));
+                SyncPlexDvrJob::dispatchIfConfigured(trigger: 'epg_sync');
             }
         }
     }

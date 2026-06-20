@@ -313,7 +313,7 @@ class VodRelationManager extends RelationManager
                     ->action(function (Collection $records, array $data) use ($ownerRecord): void {
                         $start = (int) $data['start'];
                         SortFacade::bulkRecountCustomPlaylistChannels($ownerRecord, $records, $start);
-                        dispatch(new SyncPlexDvrJob(trigger: 'custom_playlist_recount'));
+                        SyncPlexDvrJob::dispatchIfConfigured(trigger: 'custom_playlist_recount');
                     })
                     ->after(function () {
                         Notification::make()

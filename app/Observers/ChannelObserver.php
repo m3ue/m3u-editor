@@ -40,7 +40,7 @@ class ChannelObserver
     public function updated(Channel $channel): void
     {
         if ($channel->wasChanged('enabled')) {
-            dispatch(new SyncPlexDvrJob(trigger: 'channel_observer'));
+            SyncPlexDvrJob::dispatchIfConfigured(trigger: 'channel_observer');
         }
     }
 }

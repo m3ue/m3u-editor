@@ -2,7 +2,7 @@
 
 namespace App\Console\Commands;
 
-use App\Models\MediaServerIntegration;
+use App\Jobs\SyncPlexDvrJob;
 use App\Services\PlexManagementService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
@@ -30,15 +30,7 @@ class SyncPlexDvr extends Command
     {
         $integrationId = $this->argument('integration');
 
-        $query = MediaServerIntegration::query()
-            ->where('enabled', true)
-            ->where('plex_management_enabled', true)
-            ->whereNotNull('plex_dvr_id')
-            ->whereNotNull('plex_dvr_tuners');
-
-        if ($integrationId) {
-            $query->where('id', $integrationId);
-        }
+        $query = SyncPlexDvrJob::eligibleIntegrationsQuery($integrationId ? (int) $integrationId : null);
 
         $integrations = $query->get();
 

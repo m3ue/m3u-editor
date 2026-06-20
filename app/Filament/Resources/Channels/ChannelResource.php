@@ -222,7 +222,7 @@ class ChannelResource extends Resource implements CopilotResource
                 ->toggleable()
                 ->sortable()
                 ->afterStateUpdated(function (): void {
-                    dispatch(new SyncPlexDvrJob(trigger: 'channel_toggle'));
+                    SyncPlexDvrJob::dispatchIfConfigured(trigger: 'channel_toggle');
                 }),
             ToggleColumn::make('can_merge')
                 ->label(__('Merge Enabled'))
@@ -574,7 +574,7 @@ class ChannelResource extends Resource implements CopilotResource
                         ->action(function (Collection $records, array $data): void {
                             $start = (int) $data['start'];
                             SortFacade::bulkRecountChannels($records, $start);
-                            dispatch(new SyncPlexDvrJob(trigger: 'channel_recount'));
+                            SyncPlexDvrJob::dispatchIfConfigured(trigger: 'channel_recount');
                         })
                         ->after(function ($livewire) {
                             Notification::make()
@@ -1241,7 +1241,7 @@ class ChannelResource extends Resource implements CopilotResource
                             ->title(__('Selected channels enabled'))
                             ->body(__('The selected channels have been enabled.'))
                             ->send();
-                        dispatch(new SyncPlexDvrJob(trigger: 'channel_bulk_enable'));
+                        SyncPlexDvrJob::dispatchIfConfigured(trigger: 'channel_bulk_enable');
                     })
                     ->color('success')
                     ->deselectRecordsAfterCompletion()
@@ -1262,7 +1262,7 @@ class ChannelResource extends Resource implements CopilotResource
                             ->title(__('Selected channels disabled'))
                             ->body(__('The selected channels have been disabled.'))
                             ->send();
-                        dispatch(new SyncPlexDvrJob(trigger: 'channel_bulk_disable'));
+                        SyncPlexDvrJob::dispatchIfConfigured(trigger: 'channel_bulk_disable');
                     })
                     ->color('danger')
                     ->deselectRecordsAfterCompletion()

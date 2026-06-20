@@ -6,6 +6,7 @@ use App\Models\MediaServerIntegration;
 use App\Services\PlexManagementService;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Log;
 
@@ -42,19 +43,36 @@ class SyncPlexDvrJob implements ShouldBeUnique, ShouldQueue
         return 120;
     }
 
-    public function handle(): void
+    public static function dispatchIfConfigured(?int $integrationId = null, string $trigger = 'unknown'): bool
+    {
+        if (! self::eligibleIntegrationsQuery($integrationId)->exists()) {
+            return false;
+        }
+
+        dispatch(new self(integrationId: $integrationId, trigger: $trigger));
+
+        return true;
+    }
+
+    public static function eligibleIntegrationsQuery(?int $integrationId = null): Builder
     {
         $query = MediaServerIntegration::query()
+            ->where('type', 'plex')
             ->where('enabled', true)
             ->where('plex_management_enabled', true)
             ->whereNotNull('plex_dvr_id')
             ->whereNotNull('plex_dvr_tuners');
 
-        if ($this->integrationId) {
-            $query->where('id', $this->integrationId);
+        if ($integrationId) {
+            $query->where('id', $integrationId);
         }
 
-        $integrations = $query->get();
+        return $query;
+    }
+
+    public function handle(): void
+    {
+        $integrations = self::eligibleIntegrationsQuery($this->integrationId)->get();
 
         if ($integrations->isEmpty()) {
             return;

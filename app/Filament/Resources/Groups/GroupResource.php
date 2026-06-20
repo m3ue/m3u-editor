@@ -348,7 +348,7 @@ class GroupResource extends Resource implements CopilotResource
 
                             SortFacade::bulkRecountGroupChannels($record, $maxChannel + 1);
                         })->after(function () {
-                            dispatch(new SyncPlexDvrJob(trigger: 'group_enable'));
+                            SyncPlexDvrJob::dispatchIfConfigured(trigger: 'group_enable');
                             Notification::make()
                                 ->success()
                                 ->title(__('Group channels enabled'))
@@ -368,7 +368,7 @@ class GroupResource extends Resource implements CopilotResource
                                 'enabled' => false,
                             ]);
                         })->after(function () {
-                            dispatch(new SyncPlexDvrJob(trigger: 'group_disable'));
+                            SyncPlexDvrJob::dispatchIfConfigured(trigger: 'group_disable');
                             Notification::make()
                                 ->success()
                                 ->title(__('Group channels disabled'))
@@ -509,7 +509,7 @@ class GroupResource extends Resource implements CopilotResource
                                 SortFacade::bulkRecountGroupChannels($record, $maxChannel + 1);
                             }
                         })->after(function () {
-                            dispatch(new SyncPlexDvrJob(trigger: 'group_bulk_enable'));
+                            SyncPlexDvrJob::dispatchIfConfigured(trigger: 'group_bulk_enable');
                             Notification::make()
                                 ->success()
                                 ->title(__('Selected group channels enabled'))
@@ -531,7 +531,7 @@ class GroupResource extends Resource implements CopilotResource
                                 ]);
                             }
                         })->after(function () {
-                            dispatch(new SyncPlexDvrJob(trigger: 'group_bulk_disable'));
+                            SyncPlexDvrJob::dispatchIfConfigured(trigger: 'group_bulk_disable');
                             Notification::make()
                                 ->success()
                                 ->title(__('Selected group channels disabled'))
@@ -553,7 +553,7 @@ class GroupResource extends Resource implements CopilotResource
                                 ]);
                             }
                         })->after(function () {
-                            dispatch(new SyncPlexDvrJob(trigger: 'group_bulk_enable_groups'));
+                            SyncPlexDvrJob::dispatchIfConfigured(trigger: 'group_bulk_enable_groups');
                             Notification::make()
                                 ->success()
                                 ->title(__('Selected groups enabled'))
@@ -576,7 +576,7 @@ class GroupResource extends Resource implements CopilotResource
                                 ]);
                             }
                         })->after(function () {
-                            dispatch(new SyncPlexDvrJob(trigger: 'group_bulk_disable_groups'));
+                            SyncPlexDvrJob::dispatchIfConfigured(trigger: 'group_bulk_disable_groups');
                             Notification::make()
                                 ->success()
                                 ->title(__('Selected groups disabled'))
