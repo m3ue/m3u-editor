@@ -263,4 +263,53 @@ class MergeChannelsTest extends TestCase
         $this->assertFalse($disabledPreferred->refresh()->enabled);
         $this->assertDatabaseCount('channel_failovers', 0);
     }
+
+    #[Test]
+    public function scrubber_dead_hidden_failover_is_not_promoted_and_is_pruned_from_master_failovers()
+    {
+        $user = User::factory()->create();
+        $playlist1 = Playlist::factory()->for($user)->createQuietly();
+        $playlist2 = Playlist::factory()->for($user)->createQuietly();
+
+        $currentMaster = Channel::factory()->create([
+            'stream_id' => 'streamZ',
+            'user_id' => $user->id,
+            'playlist_id' => $playlist1->id,
+            'group_id' => null,
+            'enabled' => true,
+            'last_scrubber_result' => 'live',
+        ]);
+
+        $deadHiddenFailover = Channel::factory()->create([
+            'stream_id' => 'streamZ',
+            'user_id' => $user->id,
+            'playlist_id' => $playlist2->id,
+            'group_id' => null,
+            'enabled' => false,
+            'last_scrubber_result' => 'dead',
+        ]);
+
+        ChannelFailover::create([
+            'user_id' => $user->id,
+            'channel_id' => $currentMaster->id,
+            'channel_failover_id' => $deadHiddenFailover->id,
+        ]);
+
+        $playlists = collect([
+            ['playlist_failover_id' => $playlist1->id],
+            ['playlist_failover_id' => $playlist2->id],
+        ]);
+
+        // Playlist 2 would normally be preferred, and the disabled channel is
+        // an existing hidden failover. The scrubber-dead state makes it
+        // unavailable, so it must not be promoted or retained as a failover.
+        $this->runMergeChannels($user, $playlists, $playlist2->id, false, true);
+
+        $this->assertTrue($currentMaster->refresh()->enabled);
+        $this->assertFalse($deadHiddenFailover->refresh()->enabled);
+        $this->assertDatabaseMissing('channel_failovers', [
+            'channel_id' => $currentMaster->id,
+            'channel_failover_id' => $deadHiddenFailover->id,
+        ]);
+    }
 }
