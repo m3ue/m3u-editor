@@ -3,6 +3,7 @@
 use App\Enums\Status;
 use App\Jobs\ProcessChannelScrubberChunk;
 use App\Models\Channel;
+use App\Models\ChannelFailover;
 use App\Models\ChannelScrubber;
 use App\Models\ChannelScrubberLog;
 use App\Models\Playlist;
@@ -11,16 +12,25 @@ use Illuminate\Support\Facades\Http;
 
 beforeEach(function () {
     $this->user = User::factory()->create();
-    $this->playlist = Playlist::factory()->for($this->user)->createQuietly();
+    $this->playlist = Playlist::withoutEvents(fn () => Playlist::factory()->for($this->user)->create());
 
-    $this->scrubber = ChannelScrubber::create([
+    $this->channel = function (array $attributes = []): Channel {
+        return Channel::withoutEvents(fn () => Channel::factory()->create([
+            'user_id' => $this->user->id,
+            'playlist_id' => $this->playlist->id,
+            'group_id' => null,
+            ...$attributes,
+        ]));
+    };
+
+    $this->scrubber = ChannelScrubber::withoutEvents(fn () => ChannelScrubber::create([
         'name' => 'Test Scrubber',
-        'uuid' => 'test-batch-uuid',
+        'uuid' => '00000000-0000-4000-8000-000000000001',
         'status' => Status::Processing,
         'user_id' => $this->user->id,
         'playlist_id' => $this->playlist->id,
         'progress' => 0,
-    ]);
+    ]));
 
     $this->log = ChannelScrubberLog::create([
         'channel_scrubber_id' => $this->scrubber->id,
@@ -36,8 +46,7 @@ beforeEach(function () {
 
 it('marks a channel dead via ffprobe when ensureStreamStats returns empty', function () {
     // No URL and no stream_stats → ensureStreamStats() returns [] → dead
-    $channel = Channel::factory()->for($this->playlist)->create([
-        'user_id' => $this->user->id,
+    $channel = ($this->channel)([
         'enabled' => true,
         'url' => null,
         'url_custom' => null,
@@ -67,8 +76,7 @@ it('marks a channel dead via ffprobe even when stream_stats are cached', functio
     // producing false negatives for dead streams that had been probed before.
     // The new lightweight ffprobe probe always makes a fresh network call — cached stats
     // are irrelevant. A null URL with cached stats is still dead.
-    $channel = Channel::factory()->for($this->playlist)->create([
-        'user_id' => $this->user->id,
+    $channel = ($this->channel)([
         'enabled' => true,
         'url' => null,
         'url_custom' => null,
@@ -96,14 +104,12 @@ it('marks a channel dead via ffprobe even when stream_stats are cached', functio
 });
 
 it('increments dead_count on the scrubber for each dead channel', function () {
-    $dead1 = Channel::factory()->for($this->playlist)->create([
-        'user_id' => $this->user->id,
+    $dead1 = ($this->channel)([
         'url' => null,
         'url_custom' => null,
         'stream_stats' => null,
     ]);
-    $dead2 = Channel::factory()->for($this->playlist)->create([
-        'user_id' => $this->user->id,
+    $dead2 = ($this->channel)([
         'url' => null,
         'url_custom' => null,
         'stream_stats' => null,
@@ -127,8 +133,7 @@ it('increments dead_count on the scrubber for each dead channel', function () {
 // ──────────────────────────────────────────────────────────────────────────────
 
 it('skips processing when the batch uuid does not match', function () {
-    $channel = Channel::factory()->for($this->playlist)->create([
-        'user_id' => $this->user->id,
+    $channel = ($this->channel)([
         'enabled' => true,
         'url' => null,
         'stream_stats' => null,
@@ -150,8 +155,7 @@ it('skips processing when the batch uuid does not match', function () {
 it('skips processing when the scrubber is cancelled', function () {
     $this->scrubber->update(['status' => Status::Cancelled]);
 
-    $channel = Channel::factory()->for($this->playlist)->create([
-        'user_id' => $this->user->id,
+    $channel = ($this->channel)([
         'enabled' => true,
         'url' => null,
         'stream_stats' => null,
@@ -175,8 +179,7 @@ it('skips processing when the scrubber is cancelled', function () {
 // ──────────────────────────────────────────────────────────────────────────────
 
 it('does not disable dead channels when disableDead is false', function () {
-    $channel = Channel::factory()->for($this->playlist)->create([
-        'user_id' => $this->user->id,
+    $channel = ($this->channel)([
         'enabled' => true,
         'url' => null,
         'url_custom' => null,
@@ -210,8 +213,7 @@ it('does not disable dead channels when disableDead is false', function () {
 // ──────────────────────────────────────────────────────────────────────────────
 
 it('re-enables a previously disabled live channel when enableLive is true', function () {
-    $channel = Channel::factory()->for($this->playlist)->create([
-        'user_id' => $this->user->id,
+    $channel = ($this->channel)([
         'enabled' => false,
         'url' => 'http://example.invalid/stream',
         'url_custom' => null,
@@ -236,5 +238,81 @@ it('re-enables a previously disabled live channel when enableLive is true', func
     $channel->refresh();
     expect($channel->enabled)->toBeTrue();
 
+    expect($this->log->fresh()->live_count)->toBe(1);
+});
+
+it('keeps a disabled live failover channel hidden when failover protection is enabled', function () {
+    $master = ($this->channel)([
+        'enabled' => true,
+    ]);
+
+    $failover = ($this->channel)([
+        'enabled' => false,
+        'url' => 'http://example.invalid/failover',
+        'url_custom' => null,
+        'stream_stats' => null,
+    ]);
+
+    ChannelFailover::create([
+        'user_id' => $this->user->id,
+        'channel_id' => $master->id,
+        'channel_failover_id' => $failover->id,
+    ]);
+
+    Http::fake([
+        'http://example.invalid/failover' => Http::response('', 200),
+    ]);
+
+    (new ProcessChannelScrubberChunk(
+        channelIds: [$failover->id],
+        scrubberId: $this->scrubber->id,
+        logId: $this->log->id,
+        checkMethod: 'http',
+        batchNo: $this->scrubber->uuid,
+        totalChannels: 1,
+        enableLive: true,
+        protectFailoverChannels: true,
+    ))->handle();
+
+    $failover->refresh();
+    expect($failover->enabled)->toBeFalse();
+    expect($this->log->fresh()->live_count)->toBe(1);
+});
+
+it('re-enables a disabled live failover channel when failover protection is disabled', function () {
+    $master = ($this->channel)([
+        'enabled' => true,
+    ]);
+
+    $failover = ($this->channel)([
+        'enabled' => false,
+        'url' => 'http://example.invalid/failover',
+        'url_custom' => null,
+        'stream_stats' => null,
+    ]);
+
+    ChannelFailover::create([
+        'user_id' => $this->user->id,
+        'channel_id' => $master->id,
+        'channel_failover_id' => $failover->id,
+    ]);
+
+    Http::fake([
+        'http://example.invalid/failover' => Http::response('', 200),
+    ]);
+
+    (new ProcessChannelScrubberChunk(
+        channelIds: [$failover->id],
+        scrubberId: $this->scrubber->id,
+        logId: $this->log->id,
+        checkMethod: 'http',
+        batchNo: $this->scrubber->uuid,
+        totalChannels: 1,
+        enableLive: true,
+        protectFailoverChannels: false,
+    ))->handle();
+
+    $failover->refresh();
+    expect($failover->enabled)->toBeTrue();
     expect($this->log->fresh()->live_count)->toBe(1);
 });

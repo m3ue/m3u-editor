@@ -380,6 +380,15 @@ class ChannelScrubberResource extends Resource implements CopilotResource
                                 ->helperText(__('Re-enable disabled channels that are found to be live. Requires "Scan all channels" to be on.'))
                                 ->default(false)
                                 ->visible(fn (Get $get): bool => (bool) $get('scan_all')),
+                            Toggle::make('protect_failover_channels')
+                                ->label(__('Keep failover channels hidden'))
+                                ->hintIcon(
+                                    'heroicon-s-information-circle',
+                                    tooltip: 'When re-enabling live channels, channels that are disabled because they are configured as failovers will be logged as live but left disabled.',
+                                )
+                                ->helperText(__('Prevents the scrubber from undoing auto-merge failover deactivation while still counting live failover channels as live.'))
+                                ->default(true)
+                                ->visible(fn (Get $get): bool => (bool) $get('scan_all') && (bool) $get('enable_live')),
                         ]),
                 ]),
         ];
