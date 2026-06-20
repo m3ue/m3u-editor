@@ -78,12 +78,14 @@ class Series extends Model
 
     public function seasons(): HasMany
     {
-        return $this->hasMany(Season::class);
+        return $this->hasMany(Season::class)
+            ->orderBy('season_number', 'asc');
     }
 
     public function episodes(): HasMany
     {
-        return $this->hasMany(Episode::class);
+        return $this->hasMany(Episode::class)
+            ->orderBy('episode_num', 'asc');
     }
 
     public function enabled_episodes(): HasMany
