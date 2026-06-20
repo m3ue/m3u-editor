@@ -380,6 +380,14 @@ class ChannelScrubberResource extends Resource implements CopilotResource
                                 ->helperText(__('Re-enable disabled channels that are found to be live. Requires "Scan all channels" to be on.'))
                                 ->default(false)
                                 ->visible(fn (Get $get): bool => (bool) $get('scan_all')),
+                            Toggle::make('rebuild_failovers_after_scan')
+                                ->label(__('Rebuild failovers after scan'))
+                                ->hintIcon(
+                                    'heroicon-s-information-circle',
+                                    tooltip: 'After a successful scrubber scan, dispatch the playlist native auto-merge job so failovers can be rebuilt using fresh scan results.',
+                                )
+                                ->helperText(__('Runs native auto-merge after this scrubber completes when playlist auto-merge is enabled.'))
+                                ->default(false),
                         ]),
                 ]),
         ];
