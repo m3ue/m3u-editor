@@ -541,8 +541,8 @@ class MergeChannels implements ShouldQueue
     }
 
     /**
-     * Keep existing native failover topology intact while avoiding new dead or
-     * manually disabled failovers.
+     * Keep existing native failover topology intact and allow matched disabled
+     * channels to be hidden failovers, unless the scrubber already marked them dead.
      */
     protected function filterFailoverCandidates(Collection $group): Collection
     {
@@ -555,8 +555,7 @@ class MergeChannels implements ShouldQueue
                 return false;
             }
 
-            return (bool) $channel->enabled
-                || in_array($channel->group_id, $this->disabledGroupIds, true);
+            return true;
         });
     }
 

@@ -227,7 +227,7 @@ class MergeChannelsTest extends TestCase
     }
 
     #[Test]
-    public function disabled_preferred_channel_that_is_not_an_existing_failover_is_not_promoted_or_merged()
+    public function disabled_preferred_channel_that_is_not_an_existing_failover_is_not_promoted_but_can_be_failover()
     {
         $user = User::factory()->create();
         $playlist1 = Playlist::factory()->for($user)->createQuietly();
@@ -255,13 +255,56 @@ class MergeChannelsTest extends TestCase
         ]);
 
         // The preferred playlist contains the disabled channel, but it is not
-        // an existing hidden failover. Merge should not promote/re-enable it,
-        // and should not add it as a runtime failover candidate.
+        // an existing hidden failover. Merge should not promote/re-enable it
+        // as master, but it can still be linked as a hidden failover.
         $this->runMergeChannels($user, $playlists, $playlist2->id, false, true);
 
         $this->assertTrue($enabledMaster->refresh()->enabled);
         $this->assertFalse($disabledPreferred->refresh()->enabled);
-        $this->assertDatabaseCount('channel_failovers', 0);
+        $this->assertDatabaseHas('channel_failovers', [
+            'channel_id' => $enabledMaster->id,
+            'channel_failover_id' => $disabledPreferred->id,
+        ]);
+    }
+
+    #[Test]
+    public function scrubber_dead_channel_that_is_not_existing_topology_is_not_added_as_new_failover()
+    {
+        $user = User::factory()->create();
+        $playlist1 = Playlist::factory()->for($user)->createQuietly();
+        $playlist2 = Playlist::factory()->for($user)->createQuietly();
+
+        $enabledMaster = Channel::factory()->create([
+            'stream_id' => 'streamY-dead',
+            'user_id' => $user->id,
+            'playlist_id' => $playlist1->id,
+            'group_id' => null,
+            'enabled' => true,
+            'last_scrubber_live' => true,
+        ]);
+
+        $deadCandidate = Channel::factory()->create([
+            'stream_id' => 'streamY-dead',
+            'user_id' => $user->id,
+            'playlist_id' => $playlist2->id,
+            'group_id' => null,
+            'enabled' => false,
+            'last_scrubber_live' => false,
+        ]);
+
+        $playlists = collect([
+            ['playlist_failover_id' => $playlist1->id],
+            ['playlist_failover_id' => $playlist2->id],
+        ]);
+
+        $this->runMergeChannels($user, $playlists, $playlist2->id, false, true);
+
+        $this->assertTrue($enabledMaster->refresh()->enabled);
+        $this->assertFalse($deadCandidate->refresh()->enabled);
+        $this->assertDatabaseMissing('channel_failovers', [
+            'channel_id' => $enabledMaster->id,
+            'channel_failover_id' => $deadCandidate->id,
+        ]);
     }
 
     #[Test]
