@@ -71,7 +71,7 @@ it('marks a channel dead via ffprobe when ensureStreamStats returns empty', func
 
     $channel->refresh();
     expect($channel->enabled)->toBeFalse();
-    expect($channel->last_scrubber_result)->toBe('dead');
+    expect($channel->last_scrubber_live)->toBeFalse();
     expect($channel->last_scrubbed_at)->not->toBeNull();
 
     $this->assertDatabaseHas('channel_scrubber_log_channels', [
@@ -106,7 +106,7 @@ it('marks a channel dead via ffprobe even when stream_stats are cached', functio
 
     $channel->refresh();
     expect($channel->enabled)->toBeFalse();
-    expect($channel->last_scrubber_result)->toBe('dead');
+    expect($channel->last_scrubber_live)->toBeFalse();
     expect($channel->last_scrubbed_at)->not->toBeNull();
 
     $this->assertDatabaseHas('channel_scrubber_log_channels', [
@@ -215,7 +215,7 @@ it('does not disable dead channels when disableDead is false', function () {
 
     $channel->refresh();
     expect($channel->enabled)->toBeTrue();
-    expect($channel->last_scrubber_result)->toBe('dead');
+    expect($channel->last_scrubber_live)->toBeFalse();
     expect($channel->last_scrubbed_at)->not->toBeNull();
 
     $this->assertDatabaseHas('channel_scrubber_log_channels', [
@@ -257,7 +257,7 @@ it('re-enables a previously disabled live channel when enableLive is true', func
 
     $channel->refresh();
     expect($channel->enabled)->toBeTrue();
-    expect($channel->last_scrubber_result)->toBe('live');
+    expect($channel->last_scrubber_live)->toBeTrue();
     expect($channel->last_scrubbed_at)->not->toBeNull();
 
     expect($this->log->fresh()->live_count)->toBe(1);

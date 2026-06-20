@@ -323,7 +323,7 @@ class MergeChannels implements ShouldQueue
             ->when($this->newChannelsOnly, fn ($query) => $query->where('new', true))
             ->select(['id', 'user_id', 'playlist_id', 'group_id', 'title', 'title_custom',
                 'name', 'name_custom', 'stream_id', 'stream_id_custom', 'sort',
-                'catchup', 'enabled', 'stream_stats', 'last_scrubber_result'])
+                'catchup', 'enabled', 'stream_stats', 'last_scrubber_live'])
             ->cursor();
 
         $groupedChannels = $channels
@@ -384,7 +384,7 @@ class MergeChannels implements ShouldQueue
             ->when($this->groupId, fn ($q) => $q->where('group_id', $this->groupId))
             ->select(['id', 'user_id', 'playlist_id', 'group_id', 'title', 'title_custom',
                 'name', 'name_custom', 'stream_id', 'stream_id_custom', 'sort',
-                'catchup', 'enabled', 'last_scrubber_result'])
+                'catchup', 'enabled', 'last_scrubber_live'])
             ->chunk(500, function ($chunk) use ($validPatterns, &$matchesByPattern) {
                 foreach ($chunk as $channel) {
                     $title = $channel->title_custom ?: $channel->title;
@@ -526,7 +526,7 @@ class MergeChannels implements ShouldQueue
     protected function filterUnavailableMergeCandidates(Collection $group): Collection
     {
         return $group->filter(function ($channel) {
-            if ($channel->last_scrubber_result === 'dead') {
+            if ($channel->last_scrubber_live === false) {
                 return false;
             }
 
@@ -542,7 +542,7 @@ class MergeChannels implements ShouldQueue
             return false;
         }
 
-        if ($master->last_scrubber_result === 'dead') {
+        if ($master->last_scrubber_live === false) {
             return false;
         }
 

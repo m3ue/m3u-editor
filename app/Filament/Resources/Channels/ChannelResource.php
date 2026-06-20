@@ -228,7 +228,7 @@ class ChannelResource extends Resource implements CopilotResource
                 ->label(__('Merge Enabled'))
                 ->toggleable()
                 ->sortable(),
-            IconColumn::make('last_scrubber_result')
+            IconColumn::make('last_scrubber_live')
                 ->label(__('Scrubber'))
                 ->getStateUsing(fn ($record): string => self::resolveScrubberStatus($record))
                 ->icon(fn (string $state): string => self::resolveScrubberStatusIcon($state))
@@ -1336,7 +1336,7 @@ class ChannelResource extends Resource implements CopilotResource
                             ->boolean()
                             ->trueColor('success')
                             ->falseColor('danger'),
-                        IconEntry::make('last_scrubber_result')
+                        IconEntry::make('last_scrubber_live')
                             ->label(__('Scrubber'))
                             ->state(fn ($record): string => self::resolveScrubberStatus($record))
                             ->icon(fn (string $state): string => self::resolveScrubberStatusIcon($state))
@@ -1971,9 +1971,9 @@ class ChannelResource extends Resource implements CopilotResource
 
     private static function resolveScrubberStatus(?Channel $record): string
     {
-        return match ($record?->last_scrubber_result) {
-            'live' => 'live',
-            'dead' => 'dead',
+        return match ($record?->last_scrubber_live) {
+            true => 'live',
+            false => 'dead',
             default => 'unknown',
         };
     }

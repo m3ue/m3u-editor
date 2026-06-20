@@ -106,7 +106,7 @@ class ProcessChannelScrubberChunk implements ShouldQueue
 
                 $updates = [
                     'last_scrubbed_at' => $checkedAt,
-                    'last_scrubber_result' => 'dead',
+                    'last_scrubber_live' => false,
                 ];
 
                 if ($this->disableDead && $channel->enabled) {
@@ -132,7 +132,7 @@ class ProcessChannelScrubberChunk implements ShouldQueue
 
             $updates = [
                 'last_scrubbed_at' => $checkedAt,
-                'last_scrubber_result' => 'live',
+                'last_scrubber_live' => true,
             ];
 
             // Re-enable disabled channels that are now live (only when enableLive is set)

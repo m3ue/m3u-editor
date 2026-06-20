@@ -277,7 +277,7 @@ class MergeChannelsTest extends TestCase
             'playlist_id' => $playlist1->id,
             'group_id' => null,
             'enabled' => true,
-            'last_scrubber_result' => 'live',
+            'last_scrubber_live' => true,
         ]);
 
         $deadHiddenFailover = Channel::factory()->create([
@@ -286,7 +286,7 @@ class MergeChannelsTest extends TestCase
             'playlist_id' => $playlist2->id,
             'group_id' => null,
             'enabled' => false,
-            'last_scrubber_result' => 'dead',
+            'last_scrubber_live' => false,
         ]);
 
         ChannelFailover::create([

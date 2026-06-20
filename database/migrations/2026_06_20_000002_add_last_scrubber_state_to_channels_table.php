@@ -13,7 +13,7 @@ return new class extends Migration
     {
         Schema::table('channels', function (Blueprint $table) {
             $table->timestamp('last_scrubbed_at')->nullable()->after('probe_enabled');
-            $table->string('last_scrubber_result')->nullable()->after('last_scrubbed_at');
+            $table->boolean('last_scrubber_live')->nullable()->after('last_scrubbed_at');
         });
     }
 
@@ -23,7 +23,7 @@ return new class extends Migration
     public function down(): void
     {
         Schema::table('channels', function (Blueprint $table) {
-            $table->dropColumn(['last_scrubbed_at', 'last_scrubber_result']);
+            $table->dropColumn(['last_scrubbed_at', 'last_scrubber_live']);
         });
     }
 };

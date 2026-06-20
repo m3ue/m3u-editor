@@ -64,7 +64,7 @@ it('registers scrubber status columns on the channel table', function () {
         ->map(fn ($column) => $column->getName())
         ->all();
 
-    expect($columnNames)->toContain('last_scrubber_result')
+    expect($columnNames)->toContain('last_scrubber_live')
         ->and($columnNames)->toContain('last_scrubbed_at');
 });
 
@@ -73,7 +73,7 @@ it('loads the view page when scrubber state is present', function () {
     $channel = Channel::factory()->for($this->playlist)->create([
         'user_id' => $this->playlist->user_id,
         'is_vod' => false,
-        'last_scrubber_result' => 'dead',
+        'last_scrubber_live' => false,
         'last_scrubbed_at' => $checkedAt,
     ]);
 
