@@ -536,27 +536,30 @@
                                         @endforeach
                                     </div>
                                     @if($browseTotalPages > 1)
-                                        <div class="mt-4 pt-3 border-t border-gray-100 dark:border-gray-800 flex items-center justify-center gap-3">
+                                        <div class="mt-4 pt-3 border-t border-gray-100 dark:border-gray-800 flex items-center justify-center gap-1 sm:gap-2">
                                             <button
                                                 wire:click="goToBrowsePage({{ $browsePage - 1 }})"
                                                 wire:loading.attr="disabled"
                                                 wire:target="goToBrowsePage"
                                                 @disabled($browsePage <= 1)
-                                                class="p-1 rounded text-gray-500 dark:text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                                                class="p-1 rounded transition-colors {{ $browsePage <= 1 ? 'text-gray-300 dark:text-gray-600 cursor-not-allowed' : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100' }}"
                                             >
-                                                <x-heroicon-o-chevron-left class="w-4 h-4" />
+                                                <x-heroicon-m-chevron-left class="w-4 h-4" />
                                             </button>
-                                            <span class="text-xs text-gray-500 dark:text-gray-400" wire:loading.class="opacity-50" wire:target="goToBrowsePage">
-                                                {{ __('Page :current of :total', ['current' => $browsePage, 'total' => $browseTotalPages]) }}
-                                            </span>
+                                            <div class="flex items-center gap-1" wire:loading.class="opacity-50" wire:target="goToBrowsePage">
+                                                <span class="text-xs text-gray-500 dark:text-gray-400">{{ __('Page') }}</span>
+                                                <span class="text-xs font-medium text-gray-700 dark:text-gray-300">{{ $browsePage }}</span>
+                                                <span class="text-xs text-gray-500 dark:text-gray-400">{{ __('of') }}</span>
+                                                <span class="text-xs font-medium text-gray-700 dark:text-gray-300">{{ $browseTotalPages }}</span>
+                                            </div>
                                             <button
                                                 wire:click="goToBrowsePage({{ $browsePage + 1 }})"
                                                 wire:loading.attr="disabled"
                                                 wire:target="goToBrowsePage"
                                                 @disabled($browsePage >= $browseTotalPages)
-                                                class="p-1 rounded text-gray-500 dark:text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                                                class="p-1 rounded transition-colors {{ $browsePage >= $browseTotalPages ? 'text-gray-300 dark:text-gray-600 cursor-not-allowed' : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100' }}"
                                             >
-                                                <x-heroicon-o-chevron-right class="w-4 h-4" />
+                                                <x-heroicon-m-chevron-right class="w-4 h-4" />
                                             </button>
                                         </div>
                                     @endif
