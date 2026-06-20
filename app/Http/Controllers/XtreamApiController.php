@@ -2386,6 +2386,8 @@ class XtreamApiController extends Controller
                 $data['title'] = $series?->name ?? $episode?->title ?? null;
                 $data['episode_title'] = $episode?->title ?? null;
                 $data['series_name'] = $series?->name ?? null;
+                $data['season_number'] = $episode?->season ?? null;
+                $data['episode_number'] = $episode?->episode_num ?? null;
                 $data['thumbnail_url'] = $episode?->cover ?? $series?->cover ?? null;
                 $data['backdrop_url'] = $backdrop;
                 $data['rating'] = isset($episodeInfo['rating']) ? (string) $episodeInfo['rating'] : null;
@@ -2405,6 +2407,8 @@ class XtreamApiController extends Controller
                 $data['title'] = $channel?->title ?? $channel?->name ?? null;
                 $data['episode_title'] = null;
                 $data['series_name'] = null;
+                $data['season_number'] = null;
+                $data['episode_number'] = null;
                 $data['thumbnail_url'] = $channel?->logo ?? $channel?->logo_internal ?? null;
                 $data['backdrop_url'] = $this->extractFirstUrl($backdropPaths);
                 $data['rating'] = $channel?->rating ?? null;
@@ -2416,6 +2420,8 @@ class XtreamApiController extends Controller
                 $data['title'] = $channel?->title ?? $channel?->name ?? null;
                 $data['episode_title'] = null;
                 $data['series_name'] = null;
+                $data['season_number'] = null;
+                $data['episode_number'] = null;
                 $data['thumbnail_url'] = $channel?->logo ?? $channel?->logo_internal ?? null;
                 $data['backdrop_url'] = null;
                 $data['rating'] = null;
