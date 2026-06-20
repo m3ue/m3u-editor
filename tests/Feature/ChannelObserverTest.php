@@ -3,7 +3,6 @@
 use App\Jobs\SyncPlexDvrJob;
 use App\Models\Channel;
 use App\Models\Group;
-use App\Models\MediaServerIntegration;
 use App\Models\Playlist;
 use App\Models\User;
 use Illuminate\Support\Facades\Bus;
@@ -21,21 +20,7 @@ beforeEach(function () {
         'playlist_id' => $this->playlist->id,
     ]);
 
-    MediaServerIntegration::withoutEvents(function () {
-        return MediaServerIntegration::create([
-            'name' => 'Managed Plex',
-            'type' => 'plex',
-            'host' => 'plex.example.com',
-            'port' => 32400,
-            'ssl' => false,
-            'api_key' => 'test-token',
-            'enabled' => true,
-            'user_id' => $this->user->id,
-            'plex_management_enabled' => true,
-            'plex_dvr_id' => 1,
-            'plex_dvr_tuners' => [['device_key' => 'dev1', 'playlist_uuid' => 'uuid1']],
-        ]);
-    });
+    createEligiblePlexDvrIntegration($this->user->id);
 });
 
 it('dispatches SyncPlexDvrJob when channel enabled status changes', function () {

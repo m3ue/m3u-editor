@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -239,6 +240,24 @@ class MediaServerIntegration extends Model
     public function scopeEnabled($query)
     {
         return $query->where('enabled', true);
+    }
+
+    /**
+     * Scope to integrations eligible for Plex DVR sync.
+     */
+    public function scopeEligibleForPlexDvr(Builder $query, ?int $integrationId = null)
+    {
+        $query->where('type', 'plex')
+            ->where('enabled', true)
+            ->where('plex_management_enabled', true)
+            ->whereNotNull('plex_dvr_id')
+            ->whereNotNull('plex_dvr_tuners');
+
+        if ($integrationId) {
+            $query->where('id', $integrationId);
+        }
+
+        return $query;
     }
 
     /**

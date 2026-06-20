@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\MediaServerIntegration;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -47,4 +48,23 @@ expect()->extend('toBeOne', function () {
 function something()
 {
     // ..
+}
+
+function createEligiblePlexDvrIntegration(int $userId): MediaServerIntegration
+{
+    return MediaServerIntegration::withoutEvents(function () use ($userId) {
+        return MediaServerIntegration::create([
+            'name' => 'Managed Plex',
+            'type' => 'plex',
+            'host' => 'plex.example.com',
+            'port' => 32400,
+            'ssl' => false,
+            'api_key' => 'test-token',
+            'enabled' => true,
+            'user_id' => $userId,
+            'plex_management_enabled' => true,
+            'plex_dvr_id' => 1,
+            'plex_dvr_tuners' => [['device_key' => 'dev1', 'playlist_uuid' => 'uuid1']],
+        ]);
+    });
 }

@@ -73,21 +73,7 @@ it('does not dispatch when no eligible Plex DVR integration exists', function ()
 it('dispatches when an eligible Plex DVR integration exists', function () {
     Bus::fake();
 
-    MediaServerIntegration::withoutEvents(function () {
-        return MediaServerIntegration::create([
-            'name' => 'Managed Plex',
-            'type' => 'plex',
-            'host' => 'plex.example.com',
-            'port' => 32400,
-            'ssl' => false,
-            'api_key' => 'test-token',
-            'enabled' => true,
-            'user_id' => $this->user->id,
-            'plex_management_enabled' => true,
-            'plex_dvr_id' => 1,
-            'plex_dvr_tuners' => [['device_key' => 'dev1', 'playlist_uuid' => 'uuid1']],
-        ]);
-    });
+    createEligiblePlexDvrIntegration($this->user->id);
 
     expect(SyncPlexDvrJob::dispatchIfConfigured(trigger: 'test'))->toBeTrue();
 
@@ -95,6 +81,14 @@ it('dispatches when an eligible Plex DVR integration exists', function () {
         SyncPlexDvrJob::class,
         fn (SyncPlexDvrJob $job): bool => $job->trigger === 'test'
     );
+});
+
+it('does not dispatch when the specified integration id has no eligible integration', function () {
+    Bus::fake();
+
+    expect(SyncPlexDvrJob::dispatchIfConfigured(integrationId: 99999, trigger: 'test'))->toBeFalse();
+
+    Bus::assertNotDispatched(SyncPlexDvrJob::class);
 });
 
 it('skips disabled integrations', function () {

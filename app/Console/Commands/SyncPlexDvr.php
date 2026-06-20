@@ -2,7 +2,7 @@
 
 namespace App\Console\Commands;
 
-use App\Jobs\SyncPlexDvrJob;
+use App\Models\MediaServerIntegration;
 use App\Services\PlexManagementService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
@@ -30,9 +30,9 @@ class SyncPlexDvr extends Command
     {
         $integrationId = $this->argument('integration');
 
-        $query = SyncPlexDvrJob::eligibleIntegrationsQuery($integrationId ? (int) $integrationId : null);
-
-        $integrations = $query->get();
+        $integrations = MediaServerIntegration::query()
+            ->eligibleForPlexDvr($integrationId ? (int) $integrationId : null)
+            ->get();
 
         if ($integrations->isEmpty()) {
             $this->info('No Plex integrations with active DVR found.');

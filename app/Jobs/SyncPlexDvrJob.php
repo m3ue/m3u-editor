@@ -6,7 +6,6 @@ use App\Models\MediaServerIntegration;
 use App\Services\PlexManagementService;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
-use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Log;
 
@@ -45,7 +44,12 @@ class SyncPlexDvrJob implements ShouldBeUnique, ShouldQueue
 
     public static function dispatchIfConfigured(?int $integrationId = null, string $trigger = 'unknown'): bool
     {
-        if (! self::eligibleIntegrationsQuery($integrationId)->exists()) {
+        if (! MediaServerIntegration::query()->eligibleForPlexDvr($integrationId)->exists()) {
+            Log::debug('SyncPlexDvrJob: skipped dispatch, no eligible Plex DVR integration', [
+                'integration_id' => $integrationId,
+                'trigger' => $trigger,
+            ]);
+
             return false;
         }
 
@@ -54,25 +58,9 @@ class SyncPlexDvrJob implements ShouldBeUnique, ShouldQueue
         return true;
     }
 
-    public static function eligibleIntegrationsQuery(?int $integrationId = null): Builder
-    {
-        $query = MediaServerIntegration::query()
-            ->where('type', 'plex')
-            ->where('enabled', true)
-            ->where('plex_management_enabled', true)
-            ->whereNotNull('plex_dvr_id')
-            ->whereNotNull('plex_dvr_tuners');
-
-        if ($integrationId) {
-            $query->where('id', $integrationId);
-        }
-
-        return $query;
-    }
-
     public function handle(): void
     {
-        $integrations = self::eligibleIntegrationsQuery($this->integrationId)->get();
+        $integrations = MediaServerIntegration::query()->eligibleForPlexDvr($this->integrationId)->get();
 
         if ($integrations->isEmpty()) {
             return;
