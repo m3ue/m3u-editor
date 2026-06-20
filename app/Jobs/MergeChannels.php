@@ -541,22 +541,12 @@ class MergeChannels implements ShouldQueue
     }
 
     /**
-     * Keep existing native failover topology intact and allow matched disabled
-     * channels to be hidden failovers, unless the scrubber already marked them dead.
+     * Keep matched channels eligible as failovers. Scrubber-dead state affects
+     * ordering, not whether the failover relationship can exist.
      */
     protected function filterFailoverCandidates(Collection $group): Collection
     {
-        return $group->filter(function ($channel) {
-            if ($this->isExistingFailoverTopologyChannel($channel)) {
-                return true;
-            }
-
-            if ($channel->last_scrubber_live === false) {
-                return false;
-            }
-
-            return true;
-        });
+        return $group;
     }
 
     protected function shouldEnableSelectedMaster(Channel $master): bool

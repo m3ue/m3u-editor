@@ -268,11 +268,12 @@ class MergeChannelsTest extends TestCase
     }
 
     #[Test]
-    public function scrubber_dead_channel_that_is_not_existing_topology_is_not_added_as_new_failover()
+    public function scrubber_dead_channel_that_is_not_existing_topology_is_added_after_healthier_failovers()
     {
         $user = User::factory()->create();
         $playlist1 = Playlist::factory()->for($user)->createQuietly();
         $playlist2 = Playlist::factory()->for($user)->createQuietly();
+        $playlist3 = Playlist::factory()->for($user)->createQuietly();
 
         $enabledMaster = Channel::factory()->create([
             'stream_id' => 'streamY-dead',
@@ -283,10 +284,19 @@ class MergeChannelsTest extends TestCase
             'last_scrubber_live' => true,
         ]);
 
-        $deadCandidate = Channel::factory()->create([
+        $healthyCandidate = Channel::factory()->create([
             'stream_id' => 'streamY-dead',
             'user_id' => $user->id,
             'playlist_id' => $playlist2->id,
+            'group_id' => null,
+            'enabled' => false,
+            'last_scrubber_live' => true,
+        ]);
+
+        $deadCandidate = Channel::factory()->create([
+            'stream_id' => 'streamY-dead',
+            'user_id' => $user->id,
+            'playlist_id' => $playlist3->id,
             'group_id' => null,
             'enabled' => false,
             'last_scrubber_live' => false,
@@ -295,15 +305,23 @@ class MergeChannelsTest extends TestCase
         $playlists = collect([
             ['playlist_failover_id' => $playlist1->id],
             ['playlist_failover_id' => $playlist2->id],
+            ['playlist_failover_id' => $playlist3->id],
         ]);
 
-        $this->runMergeChannels($user, $playlists, $playlist2->id, false, true);
+        $this->runMergeChannels($user, $playlists, $playlist3->id, false, true);
 
         $this->assertTrue($enabledMaster->refresh()->enabled);
+        $this->assertFalse($healthyCandidate->refresh()->enabled);
         $this->assertFalse($deadCandidate->refresh()->enabled);
-        $this->assertDatabaseMissing('channel_failovers', [
+        $this->assertDatabaseHas('channel_failovers', [
+            'channel_id' => $enabledMaster->id,
+            'channel_failover_id' => $healthyCandidate->id,
+            'sort' => 1,
+        ]);
+        $this->assertDatabaseHas('channel_failovers', [
             'channel_id' => $enabledMaster->id,
             'channel_failover_id' => $deadCandidate->id,
+            'sort' => 2,
         ]);
     }
 
