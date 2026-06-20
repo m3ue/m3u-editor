@@ -2,6 +2,7 @@
 
 namespace App\Services\Arr;
 
+use Carbon\Carbon;
 use Illuminate\Http\Client\Response;
 
 class RadarrService extends BaseArrService
@@ -244,20 +245,40 @@ class RadarrService extends BaseArrService
     }
 
     /**
-     * @return array{ok: bool, error?: string}
+     * @return array{ok: bool, data?: int, error?: string}
      */
     public function triggerAutomaticSearch(int $contentId): array
     {
         return $this->safeCall(
             function () use ($contentId) {
-                $this->client()
+                $response = $this->client()
                     ->post('/command', ['name' => 'MoviesSearch', 'movieIds' => [$contentId]])
                     ->throw();
 
-                return true;
+                return (int) $response->json('id');
             },
             'trigger automatic search'
         );
+    }
+
+    public function fetchRecentGrabCount(int $contentId, Carbon $since): int
+    {
+        $response = $this->client()->get('/history', [
+            'movieId' => $contentId,
+            'pageSize' => 50,
+            'page' => 1,
+            'sortKey' => 'date',
+            'sortDirection' => 'descending',
+        ]);
+
+        if (! $response->successful()) {
+            return 0;
+        }
+
+        return collect($response->json('records') ?? [])
+            ->filter(fn ($r) => ($r['eventType'] ?? '') === 'grabbed'
+                && Carbon::parse($r['date'])->isAfter($since))
+            ->count();
     }
 
     /**

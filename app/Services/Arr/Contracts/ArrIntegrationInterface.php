@@ -3,6 +3,7 @@
 namespace App\Services\Arr\Contracts;
 
 use App\Models\ArrIntegration;
+use Carbon\Carbon;
 use Illuminate\Http\Client\Response;
 
 interface ArrIntegrationInterface
@@ -82,9 +83,20 @@ interface ArrIntegrationInterface
     /**
      * Trigger an automatic search for content already in the library.
      *
-     * @return array{ok: bool, error?: string}
+     * @return array{ok: bool, data?: int, error?: string}
      */
     public function triggerAutomaticSearch(int $contentId): array;
+
+    /**
+     * Get the status of a command by its ID ('queued', 'started', 'completed', 'failed', etc.).
+     * Returns 'completed' if the command has aged out (404).
+     */
+    public function getCommandStatus(int $commandId): string;
+
+    /**
+     * Count history records of type 'grabbed' for the given content since a timestamp.
+     */
+    public function fetchRecentGrabCount(int $contentId, Carbon $since): int;
 
     /**
      * Fetch the current download queue.

@@ -51,6 +51,21 @@ abstract class BaseArrService implements ArrIntegrationInterface
             ]);
     }
 
+    public function getCommandStatus(int $commandId): string
+    {
+        $response = $this->client()->get("/command/{$commandId}");
+
+        if ($response->status() === 404) {
+            return 'completed';
+        }
+
+        if (! $response->successful()) {
+            return 'failed';
+        }
+
+        return $response->json('status') ?? 'failed';
+    }
+
     /**
      * Wrap a request in a try/catch and return a uniform {ok, data, error} shape.
      *

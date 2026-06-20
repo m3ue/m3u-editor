@@ -2,6 +2,7 @@
 
 namespace App\Livewire;
 
+use App\Jobs\MonitorArrSearch;
 use App\Models\ArrIntegration;
 use App\Services\Arr\ArrService;
 use App\Services\Arr\SonarrService;
@@ -11,6 +12,7 @@ use Filament\Notifications\Notification;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\Client\Pool;
 use Illuminate\Http\Client\Response;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -141,6 +143,10 @@ class ArrSearch extends Component
     public array $browseResults = [];
 
     public bool $browseLoading = false;
+
+    public int $browsePage = 1;
+
+    public int $browseTotalPages = 0;
 
     // ── Browse Filters ────────────────────────────────────────────────────────
 
@@ -479,14 +485,29 @@ class ArrSearch extends Component
 
         $result = ArrService::make($this->detailIntegration)->triggerAutomaticSearch($libraryId);
 
+        $server = $this->detailIntegration->isSonarr() ? 'Sonarr' : 'Radarr';
+
         if ($result['ok']) {
+            $commandId = $result['data'] ?? 0;
+            $title = $this->detailResult['title'] ?? 'this title';
+
             Notification::make()
                 ->success()
-                ->title(__('Search Triggered'))
-                ->body(__('Sonarr/Radarr is now searching for releases of :title.', [
-                    'title' => $this->detailResult['title'] ?? 'this title',
+                ->title(__('Search Started'))
+                ->body(__(':server is searching for ":title". You\'ll receive a notification when results are in.', [
+                    'server' => $server,
+                    'title' => $title,
                 ]))
                 ->send();
+
+            if ($commandId > 0) {
+                MonitorArrSearch::dispatch(
+                    integrationId: $this->detailIntegration->id,
+                    contentId: $libraryId,
+                    contentTitle: $title,
+                    userId: Auth::id(),
+                );
+            }
         } else {
             Notification::make()
                 ->danger()
@@ -838,17 +859,35 @@ class ArrSearch extends Component
         );
 
         if ($result['ok']) {
-            Notification::make()
-                ->success()
-                ->title(__('Episode Requested'))
-                ->body(__('S:s E:e of :title has been queued for download.', [
-                    's' => str_pad((string) $seasonNumber, 2, '0', STR_PAD_LEFT),
-                    'e' => str_pad((string) $episodeNumber, 2, '0', STR_PAD_LEFT),
-                    'title' => $this->detailResult['title'] ?? 'the show',
-                ]))
-                ->send();
+            $s = str_pad((string) $seasonNumber, 2, '0', STR_PAD_LEFT);
+            $e = str_pad((string) $episodeNumber, 2, '0', STR_PAD_LEFT);
+            $title = $this->detailResult['title'] ?? 'the show';
 
-            $this->loadQueue();
+            if ($result['data']['queued'] ?? false) {
+                // Series was just added to Sonarr and is still indexing — a background
+                // job will monitor and search the episode once it becomes available.
+                Notification::make()
+                    ->info()
+                    ->title(__('Series Added — Episode Queued'))
+                    ->body(__('S:s E:e of :title will be queued for download once Sonarr finishes indexing. You\'ll be notified when it\'s ready.', [
+                        's' => $s,
+                        'e' => $e,
+                        'title' => $title,
+                    ]))
+                    ->send();
+            } else {
+                Notification::make()
+                    ->success()
+                    ->title(__('Episode Requested'))
+                    ->body(__('S:s E:e of :title has been queued for download.', [
+                        's' => $s,
+                        'e' => $e,
+                        'title' => $title,
+                    ]))
+                    ->send();
+
+                $this->loadQueue();
+            }
         } else {
             Notification::make()
                 ->danger()
@@ -1002,6 +1041,8 @@ class ArrSearch extends Component
 
         $this->browseGenreId = $genreId;
         $this->browseGenreType = $type;
+        $this->browsePage = 1;
+        $this->browseHasMore = false;
         $this->browseLoading = true;
         $this->browseResults = [];
 
@@ -1010,9 +1051,9 @@ class ArrSearch extends Component
 
         $this->availableProviders = $tmdb->getWatchProviders($type === 'tv' ? 'tv' : 'movie', $this->watchRegion ?: 'US');
 
-        $params = array_merge(['with_genres' => $genreId], $this->buildFilterParams($type));
+        $params = array_merge(['with_genres' => $genreId, 'page' => 1], $this->buildFilterParams($type));
 
-        $items = $type === 'tv'
+        $response = $type === 'tv'
             ? $tmdb->discoverTv($params)
             : $tmdb->discoverMovies($params);
 
@@ -1022,9 +1063,46 @@ class ArrSearch extends Component
             $item['isDownloaded'] = $libraryIds[$tmdbId] ?? false;
 
             return $item;
-        }, $items);
+        }, $response['results']);
 
+        $this->browseTotalPages = $response['total_pages'];
         $this->browseLoading = false;
+    }
+
+    /**
+     * Navigate to a specific page of the current genre browse results.
+     */
+    public function goToBrowsePage(int $page): void
+    {
+        if (! $this->tmdbConfigured || $this->browseGenreId === null || $this->browseGenreType === null) {
+            return;
+        }
+
+        $page = max(1, min($page, $this->browseTotalPages));
+        $this->browsePage = $page;
+
+        $tmdb = app(TmdbService::class);
+        $libraryIds = $this->loadLibraryTmdbIds();
+        $type = $this->browseGenreType;
+
+        $params = array_merge(
+            ['with_genres' => $this->browseGenreId, 'page' => $this->browsePage],
+            $this->buildFilterParams($type)
+        );
+
+        $response = $type === 'tv'
+            ? $tmdb->discoverTv($params)
+            : $tmdb->discoverMovies($params);
+
+        $this->browseResults = array_map(function ($item) use ($libraryIds) {
+            $tmdbId = (int) ($item['tmdb_id'] ?? 0);
+            $item['existsInLibrary'] = array_key_exists($tmdbId, $libraryIds);
+            $item['isDownloaded'] = $libraryIds[$tmdbId] ?? false;
+
+            return $item;
+        }, $response['results']);
+
+        $this->browseTotalPages = $response['total_pages'];
     }
 
     /**
@@ -1036,6 +1114,8 @@ class ArrSearch extends Component
         $this->browseGenreType = null;
         $this->browseResults = [];
         $this->browseLoading = false;
+        $this->browsePage = 1;
+        $this->browseTotalPages = 0;
     }
 
     /**

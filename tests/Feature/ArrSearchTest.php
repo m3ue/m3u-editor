@@ -1,5 +1,7 @@
 <?php
 
+use App\Jobs\MonitorArrSearch;
+use App\Jobs\RequestArrEpisode;
 use App\Livewire\ArrSearch;
 use App\Models\ArrIntegration;
 use App\Models\Playlist;
@@ -1188,21 +1190,17 @@ it('loadDiscover is a no-op when TMDB is not configured', function () {
 });
 
 it('browseGenre loads discover results filtered by genre', function () {
-    $radarr = ArrIntegration::factory()->radarr()->create([
-        'user_id' => $this->user->id,
-    ]);
+    ArrIntegration::factory()->radarr()->create(['user_id' => $this->user->id]);
 
-    $genreResults = [
-        ['tmdb_id' => 101, 'title' => 'Action Movie', 'media_type' => 'movie', 'year' => '2024', 'overview' => null, 'poster_url' => null, 'backdrop_url' => null, 'vote_average' => 7.5, 'genre_ids' => [28]],
-    ];
+    $genreItem = ['tmdb_id' => 101, 'title' => 'Action Movie', 'media_type' => 'movie', 'year' => '2024', 'overview' => null, 'poster_url' => null, 'backdrop_url' => null, 'vote_average' => 7.5, 'genre_ids' => [28]];
 
-    app()->bind(TmdbService::class, function () use ($genreResults) {
+    app()->bind(TmdbService::class, function () use ($genreItem) {
         $mock = Mockery::mock(TmdbService::class)->makePartial();
         $mock->shouldReceive('isConfigured')->andReturn(true);
         $mock->shouldReceive('getWatchProviders')->andReturn([]);
         $mock->shouldReceive('discoverMovies')
-            ->with(Mockery::on(fn ($p) => ($p['with_genres'] ?? null) === 28))
-            ->andReturn($genreResults);
+            ->with(Mockery::on(fn ($p) => ($p['with_genres'] ?? null) === 28 && ($p['page'] ?? null) === 1))
+            ->andReturn(['results' => [$genreItem], 'total_pages' => 3]);
 
         return $mock;
     });
@@ -1221,6 +1219,46 @@ it('browseGenre loads discover results filtered by genre', function () {
     expect($component->get('browseResults'))->toHaveCount(1);
     expect($component->get('browseResults.0.title'))->toBe('Action Movie');
     expect($component->get('browseLoading'))->toBeFalse();
+    expect($component->get('browseTotalPages'))->toBe(3);
+    expect($component->get('browsePage'))->toBe(1);
+});
+
+it('goToBrowsePage replaces results with the requested page', function () {
+    ArrIntegration::factory()->radarr()->create(['user_id' => $this->user->id]);
+
+    $page2Item = ['tmdb_id' => 202, 'title' => 'Action Sequel', 'media_type' => 'movie', 'year' => '2025', 'overview' => null, 'poster_url' => null, 'backdrop_url' => null, 'vote_average' => 6.8, 'genre_ids' => [28]];
+
+    app()->bind(TmdbService::class, function () use ($page2Item) {
+        $mock = Mockery::mock(TmdbService::class)->makePartial();
+        $mock->shouldReceive('isConfigured')->andReturn(true);
+        $mock->shouldReceive('getWatchProviders')->andReturn([]);
+        $mock->shouldReceive('discoverMovies')
+            ->with(Mockery::on(fn ($p) => ($p['page'] ?? null) === 2))
+            ->andReturn(['results' => [$page2Item], 'total_pages' => 3]);
+
+        return $mock;
+    });
+
+    Http::fake([
+        '*/api/v3/series*' => Http::response([], 200),
+        '*/api/v3/movie*' => Http::response([], 200),
+    ]);
+
+    $existing = ['tmdb_id' => 101, 'title' => 'Action Movie', 'media_type' => 'movie', 'year' => '2024', 'overview' => null, 'poster_url' => null, 'backdrop_url' => null, 'vote_average' => 7.5, 'genre_ids' => [28], 'existsInLibrary' => false, 'isDownloaded' => false];
+
+    $component = Livewire::test(ArrSearch::class)
+        ->set('tmdbConfigured', true)
+        ->set('browseGenreId', 28)
+        ->set('browseGenreType', 'movie')
+        ->set('browsePage', 1)
+        ->set('browseTotalPages', 3)
+        ->set('browseResults', [$existing])
+        ->call('goToBrowsePage', 2);
+
+    expect($component->get('browseResults'))->toHaveCount(1);
+    expect($component->get('browseResults.0.title'))->toBe('Action Sequel');
+    expect($component->get('browsePage'))->toBe(2);
+    expect($component->get('browseTotalPages'))->toBe(3);
 });
 
 it('clearBrowse resets genre browse state', function () {
@@ -1230,10 +1268,14 @@ it('clearBrowse resets genre browse state', function () {
         ->set('browseGenreId', 28)
         ->set('browseGenreType', 'movie')
         ->set('browseResults', [['tmdb_id' => 1, 'title' => 'Test']])
+        ->set('browsePage', 3)
+        ->set('browseTotalPages', 5)
         ->call('clearBrowse')
         ->assertSet('browseGenreId', null)
         ->assertSet('browseGenreType', null)
-        ->assertSet('browseResults', []);
+        ->assertSet('browseResults', [])
+        ->assertSet('browsePage', 1)
+        ->assertSet('browseTotalPages', 0);
 });
 
 it('requestFromDiscover resolves a Radarr movie and opens detail panel', function () {
@@ -1392,34 +1434,38 @@ it('radarr search includes libraryId when item exists in library', function () {
 
 // ── triggerAutomaticSearch ────────────────────────────────────────────────────
 
-it('sonarr triggerAutomaticSearch posts SeriesSearch command', function () {
+it('sonarr triggerAutomaticSearch posts SeriesSearch command and returns command id', function () {
     Http::fake([
-        '*/api/v3/command*' => Http::response([], 201),
+        '*/api/v3/command*' => Http::response(['id' => 77], 201),
     ]);
 
     $service = new SonarrService($this->sonarr);
     $result = $service->triggerAutomaticSearch(42);
 
-    expect($result['ok'])->toBeTrue();
+    expect($result['ok'])->toBeTrue()
+        ->and($result['data'])->toBe(77);
+
     Http::assertSent(fn ($req) => str_contains($req->url(), '/command')
         && $req->data()['name'] === 'SeriesSearch'
         && $req->data()['seriesId'] === 42
     );
 });
 
-it('radarr triggerAutomaticSearch posts MoviesSearch command', function () {
+it('radarr triggerAutomaticSearch posts MoviesSearch command and returns command id', function () {
     $radarr = ArrIntegration::factory()->radarr()->create([
         'user_id' => $this->user->id,
     ]);
 
     Http::fake([
-        '*/api/v3/command*' => Http::response([], 201),
+        '*/api/v3/command*' => Http::response(['id' => 88], 201),
     ]);
 
     $service = new RadarrService($radarr);
     $result = $service->triggerAutomaticSearch(99);
 
-    expect($result['ok'])->toBeTrue();
+    expect($result['ok'])->toBeTrue()
+        ->and($result['data'])->toBe(88);
+
     Http::assertSent(fn ($req) => str_contains($req->url(), '/command')
         && $req->data()['name'] === 'MoviesSearch'
         && $req->data()['movieIds'] === [99]
@@ -1440,12 +1486,12 @@ it('triggerAutomaticSearch returns error when command fails', function () {
 
 // ── Livewire: triggerAutomaticSearch action ───────────────────────────────────
 
-it('livewire triggerAutomaticSearch triggers search for library item', function () {
+it('livewire triggerAutomaticSearch triggers search and dispatches MonitorArrSearch job', function () {
     Http::fake([
         '*/api/v3/series/lookup*' => Http::response([
             ['id' => 42, 'tvdbId' => 12345, 'title' => 'Breaking Bad', 'year' => 2008, 'seasons' => []],
         ], 200),
-        '*/api/v3/command*' => Http::response([], 201),
+        '*/api/v3/command*' => Http::response(['id' => 55], 201),
     ]);
 
     Livewire::test(ArrSearch::class)
@@ -1456,6 +1502,11 @@ it('livewire triggerAutomaticSearch triggers search for library item', function 
 
     Http::assertSent(fn ($req) => str_contains($req->url(), '/command')
         && $req->data()['name'] === 'SeriesSearch'
+    );
+
+    Bus::assertDispatched(MonitorArrSearch::class, fn ($job) => $job->contentId === 42
+        && $job->contentTitle === 'Breaking Bad'
+        && $job->userId === $this->user->id
     );
 });
 
@@ -1588,31 +1639,12 @@ it('loadQueue does not dispatch refreshArrQueue in guest mode', function () {
 
 // ── requestEpisode retry ─────────────────────────────────────────────────────
 
-it('requestEpisode retries episode fetch when series was just added and episodes not yet indexed', function () {
-    SonarrService::$episodeRetryDelayUs = 0;
-
-    // NOTE: Http::fake map-invokes ALL stubs for every request, so a Http::sequence() on *episode*
-    // would be consumed by monitor requests too. Use a closure that returns null for monitor URLs.
-    $episodeFetchCalls = 0;
-
+it('requestEpisode dispatches a background job when the series was just added to Sonarr', function () {
     Http::fake([
         '*/api/v3/series/lookup*' => Http::response([
             ['tvdbId' => 12345, 'title' => 'Dark', 'titleSlug' => 'dark', 'seasons' => [['seasonNumber' => 1]]],
         ], 200),
         '*/api/v3/series' => Http::response(['id' => 77, 'title' => 'Dark'], 201),
-        '*/api/v3/episode/monitor' => Http::response(null, 200),
-        '*/api/v3/command' => Http::response(['id' => 1], 201),
-        // Return null for monitor URLs so the specific stub above wins; simulate empty then populated.
-        '*/api/v3/episode*' => function ($request) use (&$episodeFetchCalls) {
-            if (str_contains($request->url(), '/monitor')) {
-                return null;
-            }
-            $episodeFetchCalls++;
-
-            return $episodeFetchCalls === 1
-                ? Http::response([], 200)
-                : Http::response([['id' => 301, 'episodeNumber' => 1, 'seasonNumber' => 1, 'title' => 'Secrets']], 200);
-        },
         'api.tvmaze.com/*' => Http::response(['id' => 1], 200),
     ]);
 
@@ -1621,35 +1653,47 @@ it('requestEpisode retries episode fetch when series was just added and episodes
         ->call('openDetail', 0)
         ->call('requestEpisode', 1, 1)
         ->assertNotified();
+
+    Bus::assertDispatched(RequestArrEpisode::class, fn ($job) => $job->integrationId === $this->sonarr->id
+        && $job->sonarrSeriesId === 77
+        && $job->seasonNumber === 1
+        && $job->episodeNumber === 1
+        && $job->showTitle === 'Dark'
+    );
+
+    // monitor and command must NOT be called from the web worker — they happen inside the job
+    Http::assertNotSent(fn ($r) => str_ends_with($r->url(), '/api/v3/episode/monitor'));
+    Http::assertNotSent(fn ($r) => str_ends_with($r->url(), '/api/v3/command'));
+});
+
+it('requestEpisode monitors and searches synchronously when series already exists in Sonarr', function () {
+    Http::fake([
+        '*/api/v3/series/lookup*' => Http::response([
+            // id present → series already in library, no POST /series
+            ['id' => 42, 'tvdbId' => 12345, 'title' => 'Dark', 'titleSlug' => 'dark', 'seasons' => [['seasonNumber' => 1]]],
+        ], 200),
+        '*/api/v3/episode/monitor' => Http::response(null, 200),
+        '*/api/v3/command' => Http::response(['id' => 1], 201),
+        '*/api/v3/episode*' => Http::response([
+            ['id' => 301, 'episodeNumber' => 1, 'seasonNumber' => 1, 'title' => 'Secrets'],
+        ], 200),
+        'api.tvmaze.com/*' => Http::response(['id' => 1], 200),
+    ]);
+
+    Livewire::test(ArrSearch::class)
+        ->set('searchTerm', 'dark')
+        ->call('openDetail', 0)
+        ->call('requestEpisode', 1, 1)
+        ->assertNotified();
+
+    // No job dispatched — handled synchronously
+    Bus::assertNotDispatched(RequestArrEpisode::class);
 
     Http::assertSent(fn ($r) => $r->method() === 'PUT' && str_ends_with($r->url(), '/api/v3/episode/monitor')
         && in_array(301, $r->data()['episodeIds'] ?? []));
-
     Http::assertSent(fn ($r) => $r->method() === 'POST' && str_ends_with($r->url(), '/api/v3/command')
         && ($r->data()['name'] ?? '') === 'EpisodeSearch');
-})->after(fn () => SonarrService::$episodeRetryDelayUs = 500_000);
-
-it('requestEpisode shows error when episode still not found after all retries', function () {
-    SonarrService::$episodeRetryDelayUs = 0;
-
-    Http::fake([
-        '*/api/v3/series/lookup*' => Http::response([
-            ['tvdbId' => 12345, 'title' => 'Dark', 'titleSlug' => 'dark', 'seasons' => [['seasonNumber' => 1]]],
-        ], 200),
-        '*/api/v3/series' => Http::response(['id' => 77, 'title' => 'Dark'], 201),
-        // All attempts return empty — episode never indexes in time
-        '*/api/v3/episode*' => Http::response([], 200),
-        'api.tvmaze.com/*' => Http::response(['id' => 1], 200),
-    ]);
-
-    Livewire::test(ArrSearch::class)
-        ->set('searchTerm', 'dark')
-        ->call('openDetail', 0)
-        ->call('requestEpisode', 1, 1)
-        ->assertNotified();
-
-    Http::assertNotSent(fn ($r) => str_ends_with($r->url(), '/api/v3/command'));
-})->after(fn () => SonarrService::$episodeRetryDelayUs = 500_000);
+});
 
 // ── Livewire: loadEpisodeReleases action ─────────────────────────────────────
 

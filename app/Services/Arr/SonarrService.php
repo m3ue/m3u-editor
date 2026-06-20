@@ -2,6 +2,8 @@
 
 namespace App\Services\Arr;
 
+use App\Jobs\RequestArrEpisode;
+use Carbon\Carbon;
 use Illuminate\Http\Client\Response;
 
 class SonarrService extends BaseArrService
@@ -355,18 +357,50 @@ class SonarrService extends BaseArrService
                 $seriesJustAdded = true;
             }
 
-            // Find the target episode — retry when the series was just added because Sonarr
-            // indexes episodes asynchronously and the first fetch may return an empty list.
-            $episodeId = $this->resolveEpisodeId($sonarrId, $seasonNumber, $episodeNumber, $seriesJustAdded);
+            if ($seriesJustAdded) {
+                // Sonarr indexes episodes asynchronously after a POST /series, so the episode
+                // list may be empty for several seconds. Hand off to a queued job that retries
+                // with backoff rather than blocking the web worker with usleep().
+                RequestArrEpisode::dispatch(
+                    $this->integration->id,
+                    $sonarrId,
+                    $seasonNumber,
+                    $episodeNumber,
+                    $this->integration->user_id,
+                    $series['title'] ?? 'Unknown',
+                );
+
+                return ['queued' => true];
+            }
+
+            $result = $this->monitorAndSearchEpisode($sonarrId, $seasonNumber, $episodeNumber);
+
+            if (! $result['ok']) {
+                throw new \RuntimeException($result['error'] ?? 'Failed to monitor and search episode.');
+            }
+
+            return $result['data'];
+        }, "request episode S{$seasonNumber}E{$episodeNumber}");
+    }
+
+    /**
+     * Monitor a specific episode and trigger an immediate search.
+     * Returns ok=false (without throwing) when the episode is not yet indexed,
+     * so the caller (e.g. RequestArrEpisode job) can decide whether to retry.
+     *
+     * @return array{ok: bool, data?: mixed, error?: string}
+     */
+    public function monitorAndSearchEpisode(int $sonarrSeriesId, int $seasonNumber, int $episodeNumber): array
+    {
+        return $this->safeCall(function () use ($sonarrSeriesId, $seasonNumber, $episodeNumber) {
+            $episodeId = $this->resolveEpisodeId($sonarrSeriesId, $seasonNumber, $episodeNumber);
 
             if (! $episodeId) {
                 throw new \RuntimeException(
-                    "Episode S{$seasonNumber}E{$episodeNumber} not found in Sonarr. ".
-                    'Sonarr may still be indexing the series — please try again in a moment.'
+                    "Episode S{$seasonNumber}E{$episodeNumber} not yet indexed by Sonarr."
                 );
             }
 
-            // Monitor the episode then trigger an immediate search
             $this->client()
                 ->put('/episode/monitor', ['episodeIds' => [$episodeId], 'monitored' => true])
                 ->throw();
@@ -376,17 +410,13 @@ class SonarrService extends BaseArrService
                 ->throw();
 
             return $episodeId;
-        }, "request episode S{$seasonNumber}E{$episodeNumber}");
+        }, "monitor and search episode S{$seasonNumber}E{$episodeNumber}");
     }
 
     /**
      * Resolve the Sonarr-internal episode ID for a given season + episode number.
      * When $retryIfEmpty is true, retries up to 5 times to handle the delay between
      * a series being added via POST /series and its episodes becoming available.
-     *
-     * NOTE: Retries use usleep() which blocks the PHP worker for up to 2.5 s total.
-     * This is intentional for a single-user self-hosted setup; do not call from a
-     * high-concurrency context without moving to a queued job first.
      */
     public function resolveEpisodeId(int $seriesId, int $seasonNumber, int $episodeNumber, bool $retryIfEmpty = false): ?int
     {
@@ -449,20 +479,40 @@ class SonarrService extends BaseArrService
     }
 
     /**
-     * @return array{ok: bool, error?: string}
+     * @return array{ok: bool, data?: int, error?: string}
      */
     public function triggerAutomaticSearch(int $contentId): array
     {
         return $this->safeCall(
             function () use ($contentId) {
-                $this->client()
+                $response = $this->client()
                     ->post('/command', ['name' => 'SeriesSearch', 'seriesId' => $contentId])
                     ->throw();
 
-                return true;
+                return (int) $response->json('id');
             },
             'trigger automatic search'
         );
+    }
+
+    public function fetchRecentGrabCount(int $contentId, Carbon $since): int
+    {
+        $response = $this->client()->get('/history', [
+            'seriesId' => $contentId,
+            'pageSize' => 50,
+            'page' => 1,
+            'sortKey' => 'date',
+            'sortDirection' => 'descending',
+        ]);
+
+        if (! $response->successful()) {
+            return 0;
+        }
+
+        return collect($response->json('records') ?? [])
+            ->filter(fn ($r) => ($r['eventType'] ?? '') === 'grabbed'
+                && Carbon::parse($r['date'])->isAfter($since))
+            ->count();
     }
 
     /**
