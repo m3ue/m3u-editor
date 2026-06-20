@@ -222,6 +222,39 @@ it('renders plugin-declared table UIs through the generic plugin table page', fu
         ->assertSee('Native Playlist');
 });
 
+it('applies declared cascade actions to plugin table foreign keys', function () {
+    $plugin = declaredTableUiPlugin();
+    $tableName = 'plugin_declared_table_ui_profiles';
+
+    expect(DB::table($tableName)->count())->toBe(1);
+
+    $plugin->delete();
+
+    expect(DB::table($tableName)->count())->toBe(0);
+});
+
+it('applies declared null actions to plugin table foreign keys', function () {
+    $user = User::factory()->create();
+    $playlist = Playlist::withoutEvents(fn (): Playlist => Playlist::factory()->for($user)->create());
+
+    [$plugin, $profilesTable, $linksTable] = declaredPrefilledTableUiPlugin();
+
+    $profileId = DB::table($profilesTable)->value('id');
+
+    DB::table($linksTable)->insert([
+        'extension_plugin_id' => $plugin->id,
+        'playlist_id' => $playlist->id,
+        'extension_plugin_profile_id' => $profileId,
+        'enabled' => false,
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    DB::table($profilesTable)->where('id', $profileId)->delete();
+
+    expect(DB::table($linksTable)->value('extension_plugin_profile_id'))->toBeNull();
+});
+
 it('prefills plugin-declared table rows from an owned source table', function () {
     $user = User::factory()->admin()->create();
     $otherUser = User::factory()->create();

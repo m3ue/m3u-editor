@@ -155,10 +155,10 @@ class PluginSchemaManager
             }
 
             if ($type === 'foreignId' && filled($column['references'] ?? null)) {
-                $definition->constrained((string) $column['references']);
+                $constraint = $definition->constrained((string) $column['references']);
                 match ($column['on_delete'] ?? null) {
-                    'cascade' => $definition->cascadeOnDelete(),
-                    'null' => $definition->nullOnDelete(),
+                    'cascade' => $constraint->cascadeOnDelete(),
+                    'null' => $constraint->nullOnDelete(),
                     default => null,
                 };
             }
