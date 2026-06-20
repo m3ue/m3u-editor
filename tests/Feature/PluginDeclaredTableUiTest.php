@@ -222,6 +222,17 @@ it('renders plugin-declared table UIs through the generic plugin table page', fu
         ->assertSee('Native Playlist');
 });
 
+it('applies declared cascade actions to plugin table foreign keys', function () {
+    $plugin = declaredTableUiPlugin();
+    $tableName = 'plugin_declared_table_ui_profiles';
+
+    expect(DB::table($tableName)->count())->toBe(1);
+
+    $plugin->delete();
+
+    expect(DB::table($tableName)->count())->toBe(0);
+});
+
 it('prefills plugin-declared table rows from an owned source table', function () {
     $user = User::factory()->admin()->create();
     $otherUser = User::factory()->create();
