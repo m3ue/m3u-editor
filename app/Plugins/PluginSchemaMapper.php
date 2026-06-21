@@ -11,12 +11,14 @@ use Filament\Forms\Components\Toggle;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
+use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Exists;
+use Illuminate\Validation\Rules\In;
 use InvalidArgumentException;
 use Throwable;
 
@@ -349,7 +351,7 @@ class PluginSchemaMapper
     }
 
     /**
-     * @return array<int, string|\Illuminate\Contracts\Validation\ValidationRule|\Illuminate\Validation\Rules\In>
+     * @return array<int, string|ValidationRule|In>
      */
     private function selectValueRules(array $field): array
     {
