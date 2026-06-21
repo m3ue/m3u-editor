@@ -5,12 +5,14 @@ use App\Filament\Resources\Plugins\PluginResource;
 use App\Models\Playlist;
 use App\Models\Plugin;
 use App\Models\User;
+use App\Plugins\PluginIntegrityService;
 use App\Plugins\PluginSchemaManager;
 use App\Plugins\PluginSchemaMapper;
 use App\Plugins\PluginUiTableRegistry;
 use App\Plugins\PluginValidator;
 use App\Plugins\Support\PluginManifest;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rules\Exists;
@@ -94,6 +96,156 @@ function declaredTableUiPlugin(): Plugin
     ]);
 
     return $plugin;
+}
+
+function declaredDynamicOptionsTableUiPlugin(): array
+{
+    $suffix = Str::lower(Str::random(6));
+    $pluginId = "dynamic-table-ui-{$suffix}";
+    $classSegment = Str::studly(str_replace('-', ' ', $pluginId));
+    $tablePrefix = "plugin_dynamic_table_ui_{$suffix}_";
+    $tableName = "{$tablePrefix}profiles";
+    $sourcePath = storage_path("app/testing-plugin-sources/{$pluginId}");
+
+    $schema = [
+        'tables' => [[
+            'name' => $tableName,
+            'columns' => [
+                ['type' => 'id', 'name' => 'id'],
+                ['type' => 'foreignId', 'name' => 'extension_plugin_id', 'references' => 'extension_plugins', 'on_delete' => 'cascade'],
+                ['type' => 'string', 'name' => 'name'],
+                ['type' => 'json', 'name' => 'settings', 'nullable' => true],
+                ['type' => 'timestamps'],
+            ],
+            'indexes' => [],
+        ]],
+        'ui_tables' => [[
+            'id' => 'profiles',
+            'label' => 'Profiles',
+            'model_label' => 'Profile',
+            'table' => $tableName,
+            'columns' => [
+                ['name' => 'name', 'label' => 'Name'],
+                [
+                    'name' => 'settings.provider_source',
+                    'label' => 'Provider Source',
+                    'options_provider' => 'fixture_sources',
+                    'depends_on' => ['settings.provider', 'settings.country'],
+                ],
+            ],
+            'fields' => [],
+        ]],
+    ];
+
+    $manifest = [
+        'id' => $pluginId,
+        'name' => 'Dynamic Table UI',
+        'version' => '1.0.0',
+        'api_version' => config('plugins.api_version'),
+        'description' => 'Declarative table UI dynamic options fixture.',
+        'entrypoint' => 'Plugin.php',
+        'class' => "AppLocalPlugins\\{$classSegment}\\Plugin",
+        'capabilities' => [],
+        'hooks' => [],
+        'permissions' => ['schema_manage'],
+        'settings' => [],
+        'actions' => [],
+        'schema' => $schema,
+        'data_ownership' => [
+            'plugin_id' => $pluginId,
+            'table_prefix' => $tablePrefix,
+            'tables' => [$tableName],
+            'directories' => [],
+            'files' => [],
+            'default_cleanup_policy' => 'preserve',
+        ],
+    ];
+
+    $pluginSource = <<<PHP
+<?php
+
+namespace AppLocalPlugins\\{$classSegment};
+
+use App\\Plugins\\Contracts\\PluginInterface;
+use App\\Plugins\\Contracts\\PluginSelectOptionsProviderInterface;
+use App\\Plugins\\Support\\PluginActionResult;
+use App\\Plugins\\Support\\PluginExecutionContext;
+use App\\Plugins\\Support\\PluginSelectOptionsContext;
+
+class Plugin implements PluginInterface, PluginSelectOptionsProviderInterface
+{
+    public function runAction(string \$action, array \$payload, PluginExecutionContext \$context): PluginActionResult
+    {
+        return PluginActionResult::success('Fixture plugin action completed.');
+    }
+
+    public function selectOptions(string \$provider, PluginSelectOptionsContext \$context): array
+    {
+        if (\$provider !== 'fixture_sources') {
+            return [];
+        }
+
+        return [
+            'viewersvault' => 'ViewersVault '.\$context->value('settings.provider', 'unknown').'/'.\$context->value('settings.country', 'unknown'),
+        ];
+    }
+}
+PHP;
+
+    File::deleteDirectory($sourcePath);
+    File::ensureDirectoryExists($sourcePath);
+    File::put(
+        "{$sourcePath}/plugin.json",
+        json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR).PHP_EOL,
+    );
+    File::put("{$sourcePath}/Plugin.php", $pluginSource);
+
+    $hashes = app(PluginIntegrityService::class)->hashesForPlugin($sourcePath, 'Plugin.php');
+
+    $plugin = Plugin::query()->create([
+        'plugin_id' => $pluginId,
+        'name' => 'Dynamic Table UI',
+        'version' => '1.0.0',
+        'api_version' => config('plugins.api_version'),
+        'description' => 'Declarative table UI dynamic options fixture.',
+        'entrypoint' => 'Plugin.php',
+        'class_name' => "AppLocalPlugins\\{$classSegment}\\Plugin",
+        'capabilities' => [],
+        'hooks' => [],
+        'permissions' => ['schema_manage'],
+        'schema_definition' => $schema,
+        'actions' => [],
+        'settings_schema' => [],
+        'settings' => [],
+        'data_ownership' => $manifest['data_ownership'],
+        'source_type' => 'local_directory',
+        'path' => $sourcePath,
+        'available' => true,
+        'enabled' => true,
+        'installation_status' => 'installed',
+        'trust_state' => 'trusted',
+        'integrity_status' => 'verified',
+        'trusted_hashes' => $hashes,
+        'manifest_hash' => $hashes['manifest_hash'] ?? null,
+        'entrypoint_hash' => $hashes['entrypoint_hash'] ?? null,
+        'plugin_hash' => $hashes['plugin_hash'] ?? null,
+    ]);
+
+    app(PluginSchemaManager::class)->apply($schema);
+
+    DB::table($tableName)->insert([
+        'extension_plugin_id' => $plugin->id,
+        'name' => 'Dynamic Profile',
+        'settings' => json_encode([
+            'provider' => 'sky',
+            'country' => 'uk',
+            'provider_source' => 'viewersvault',
+        ], JSON_THROW_ON_ERROR),
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    return [$plugin, $sourcePath];
 }
 
 function declaredPrefilledTableUiPlugin(): array
@@ -222,6 +374,21 @@ it('renders plugin-declared table UIs through the generic plugin table page', fu
         ->assertSee('Native Playlist');
 });
 
+it('renders plugin-declared table column options from a dynamic provider', function () {
+    $this->actingAs(User::factory()->admin()->create());
+
+    [$plugin, $sourcePath] = declaredDynamicOptionsTableUiPlugin();
+
+    try {
+        Livewire::test(ManagePluginTable::class, ['record' => $plugin->getRouteKey(), 'table' => 'profiles'])
+            ->assertOk()
+            ->assertSee('Dynamic Profile')
+            ->assertSee('ViewersVault sky/uk');
+    } finally {
+        File::deleteDirectory($sourcePath);
+    }
+});
+
 it('applies declared cascade actions to plugin table foreign keys', function () {
     $plugin = declaredTableUiPlugin();
     $tableName = 'plugin_declared_table_ui_profiles';
@@ -330,6 +497,38 @@ it('returns validation errors (not TypeError) when ui_table columns or fields is
 
     expect($errors)->toContain('schema.ui_tables.0.columns must be a list.')
         ->and($errors)->toContain('schema.ui_tables.0.fields must be a list.');
+});
+
+it('validates dynamic option provider declarations on ui_table columns', function () {
+    $suffix = Str::lower(Str::random(6));
+    $tableName = "plugin_test_{$suffix}_items";
+
+    $manifest = PluginManifest::fromArray([
+        'id' => "test-{$suffix}",
+        'name' => 'Test Plugin',
+        'permissions' => [],
+        'schema' => [
+            'tables' => [['name' => $tableName, 'columns' => [['type' => 'id', 'name' => 'id']]]],
+            'ui_tables' => [[
+                'id' => 'items',
+                'table' => $tableName,
+                'label' => 'Items',
+                'columns' => [[
+                    'name' => 'source',
+                    'options_provider' => '',
+                    'depends_on' => ['provider', ''],
+                ]],
+                'fields' => [],
+            ]],
+        ],
+    ], '/tmp/test-plugin');
+
+    $validator = app(PluginValidator::class);
+    $method = new ReflectionMethod($validator, 'validateSchema');
+    $errors = $method->invoke($validator, $manifest);
+
+    expect($errors)->toContain('schema.ui_tables.0.columns.0 options_provider must be a non-empty string')
+        ->and($errors)->toContain('schema.ui_tables.0.columns.0 depends_on must contain only non-empty strings');
 });
 
 it('generates an exists rule for table_select settings fields', function () {
