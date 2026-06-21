@@ -10,9 +10,11 @@ use App\Models\User;
 use App\Plugins\Contracts\HookablePluginInterface;
 use App\Plugins\Contracts\LifecyclePluginInterface;
 use App\Plugins\Contracts\PluginInterface;
+use App\Plugins\Contracts\PluginSelectOptionsProviderInterface;
 use App\Plugins\Contracts\ScheduledPluginInterface;
 use App\Plugins\Support\PluginActionResult;
 use App\Plugins\Support\PluginExecutionContext;
+use App\Plugins\Support\PluginSelectOptionsContext;
 use App\Plugins\Support\PluginUninstallContext;
 use App\Plugins\Support\PluginValidationResult;
 use Carbon\CarbonInterface;
@@ -765,12 +767,46 @@ class PluginManager
             ->values();
     }
 
+    /**
+     * @param  array<string, mixed>  $state
+     * @param  array<string, mixed>  $field
+     * @return array<string, string>
+     */
+    public function selectOptions(Plugin $plugin, string $provider, array $state = [], array $field = []): array
+    {
+        $plugin = $this->validate($plugin);
+        $this->assertPluginLoadable($plugin, requireEnabled: false);
+        $this->assertPluginTrustedForUi($plugin);
+
+        $instance = $this->resolvePluginInstance($plugin);
+
+        if (! $instance instanceof PluginSelectOptionsProviderInterface) {
+            throw new RuntimeException("Plugin [{$plugin->plugin_id}] does not provide dynamic select options.");
+        }
+
+        return $this->normalizeSelectOptions($instance->selectOptions(
+            $provider,
+            new PluginSelectOptionsContext(
+                plugin: $plugin->fresh() ?? $plugin,
+                user: auth()->user(),
+                settings: $this->resolvedSettings($plugin),
+                state: $state,
+                field: $field,
+            ),
+        ));
+    }
+
     public function instantiate(Plugin $plugin): PluginInterface
     {
         $plugin = $this->validate($plugin);
         $this->assertPluginLoadable($plugin, requireEnabled: false);
         $this->assertPluginRunnable($plugin);
 
+        return $this->resolvePluginInstance($plugin);
+    }
+
+    private function resolvePluginInstance(Plugin $plugin): PluginInterface
+    {
         $entrypoint = rtrim((string) $plugin->path, DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR.$plugin->entrypoint;
         if (! class_exists($plugin->class_name, false)) {
             require_once $entrypoint;
@@ -782,6 +818,25 @@ class PluginManager
         }
 
         return $instance;
+    }
+
+    /**
+     * @param  array<mixed>  $options
+     * @return array<string, string>
+     */
+    private function normalizeSelectOptions(array $options): array
+    {
+        $normalized = [];
+
+        foreach ($options as $value => $label) {
+            if (! is_scalar($value) || ! is_scalar($label)) {
+                continue;
+            }
+
+            $normalized[(string) $value] = (string) $label;
+        }
+
+        return $normalized;
     }
 
     public function trust(Plugin $plugin, ?int $userId = null, ?string $reason = null): Plugin
@@ -1170,7 +1225,7 @@ class PluginManager
                 }
             }
 
-            if ($plugin->isInstalled() || ($plugin->last_cleanup_mode ?? null) !== 'purge') {
+            if ($plugin->isInstalled() || ($plugin->last_cleanup_mode ?? null) === 'preserve') {
                 foreach ($this->schemaManager->diagnostics($plugin->plugin_id, $plugin->schema_definition ?? []) as $diagnostic) {
                     $issues[] = [
                         'plugin_id' => $plugin->plugin_id,
@@ -2062,6 +2117,11 @@ class PluginManager
             throw new RuntimeException("Plugin [{$plugin->plugin_id}] is disabled.");
         }
 
+        $this->assertPluginTrustedForUi($plugin);
+    }
+
+    private function assertPluginTrustedForUi(Plugin $plugin): void
+    {
         if ($plugin->isBlocked()) {
             throw new RuntimeException("Plugin [{$plugin->plugin_id}] has been blocked by an administrator.");
         }

@@ -589,8 +589,27 @@ class PluginValidator
             $errors[] = "{$group}.{$fieldId} should define a human-friendly [label]";
         }
 
-        if ($type === 'select' && empty($field['options'])) {
-            $errors[] = "{$group}.{$fieldId} select fields require [options]";
+        if ($type === 'select' && empty($field['options']) && blank($field['options_provider'] ?? null)) {
+            $errors[] = "{$group}.{$fieldId} select fields require [options] or [options_provider]";
+        }
+
+        if (array_key_exists('options_provider', $field)
+            && (! is_string($field['options_provider']) || blank($field['options_provider']))) {
+            $errors[] = "{$group}.{$fieldId} options_provider must be a non-empty string";
+        }
+
+        if (array_key_exists('depends_on', $field)) {
+            if (! is_array($field['depends_on'])) {
+                $errors[] = "{$group}.{$fieldId} depends_on must be a list of field names";
+            } else {
+                foreach ($field['depends_on'] as $dependency) {
+                    if (! is_string($dependency) || blank($dependency)) {
+                        $errors[] = "{$group}.{$fieldId} depends_on must contain only non-empty strings";
+
+                        break;
+                    }
+                }
+            }
         }
 
         if ($type === 'model_select' && blank($field['model'] ?? null)) {
