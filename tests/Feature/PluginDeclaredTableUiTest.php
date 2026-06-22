@@ -562,6 +562,14 @@ it('returns validation errors (not TypeError) when ui_table columns or fields is
         ->and($errors)->toContain('schema.ui_tables.0.fields must be a list.');
 });
 
+it('treats delete_behavior delete as a standard delete with no clear applied', function () {
+    $plugin = declaredTableUiPlugin();
+    $definition = data_get($plugin->schema_definition, 'ui_tables.0');
+    $definition['delete_behavior'] = 'delete';
+
+    expect(app(PluginUiTableRegistry::class)->clearsRecordOnDelete($definition))->toBeFalse();
+});
+
 it('validates clear delete behavior declarations on ui_tables', function () {
     $suffix = Str::lower(Str::random(6));
     $tableName = "plugin_test_{$suffix}_items";
