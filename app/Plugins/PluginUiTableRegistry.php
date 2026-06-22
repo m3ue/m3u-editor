@@ -8,6 +8,7 @@ use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Throwable;
 
@@ -252,7 +253,13 @@ class PluginUiTableRegistry
                 $this->columnOptionProviderState($column, $recordState),
                 $column,
             );
-        } catch (Throwable) {
+        } catch (Throwable $e) {
+            Log::warning('Plugin dynamic column options failed.', [
+                'plugin_id' => $plugin->plugin_id,
+                'provider' => $provider,
+                'error' => $e->getMessage(),
+            ]);
+
             return [];
         }
     }

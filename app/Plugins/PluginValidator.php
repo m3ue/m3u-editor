@@ -778,7 +778,7 @@ class PluginValidator
                 foreach ($uiTable['columns'] ?? [] as $columnIndex => $column) {
                     if (! is_array($column) || blank($column['name'] ?? null)) {
                         $errors[] = "{$path}.columns.{$columnIndex} requires [name].";
-                    } elseif (is_array($column)) {
+                    } else {
                         $errors = [
                             ...$errors,
                             ...$this->validateOptionsProviderDefinition($column, "{$path}.columns.{$columnIndex}"),
@@ -823,6 +823,10 @@ class PluginValidator
 
         if (! array_key_exists('depends_on', $definition)) {
             return $errors;
+        }
+
+        if (array_key_exists('depends_on', $definition) && blank($definition['options_provider'] ?? null)) {
+            $errors[] = "{$path} depends_on has no effect without options_provider";
         }
 
         if (! is_array($definition['depends_on'])) {
