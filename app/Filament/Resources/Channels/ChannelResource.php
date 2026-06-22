@@ -228,6 +228,22 @@ class ChannelResource extends Resource implements CopilotResource
                 ->label(__('Merge Enabled'))
                 ->toggleable()
                 ->sortable(),
+            IconColumn::make('last_scrubber_live')
+                ->label(__('Scrubber'))
+                ->getStateUsing(fn ($record): string => self::resolveScrubberStatus($record))
+                ->icon(fn (string $state): string => self::resolveScrubberStatusIcon($state))
+                ->color(fn (string $state): string => self::resolveScrubberStatusColor($state))
+                ->tooltip(fn ($record): string => self::resolveScrubberStatusTooltip($record))
+                ->toggleable()
+                ->sortable(),
+            TextColumn::make('last_scrubbed_at')
+                ->label(__('Last Scrubbed'))
+                ->formatStateUsing(fn ($state) => app(DateFormatService::class)->format($state))
+                ->tooltip(fn ($record): string => $record->last_scrubbed_at
+                    ? __('Scrubbed').' '.$record->last_scrubbed_at->diffForHumans()
+                    : __('Never scrubbed'))
+                ->toggleable()
+                ->sortable(),
             TextColumn::make('failovers_count')
                 ->label(__('Failovers'))
                 ->counts('failovers')
@@ -1320,6 +1336,18 @@ class ChannelResource extends Resource implements CopilotResource
                             ->boolean()
                             ->trueColor('success')
                             ->falseColor('danger'),
+                        IconEntry::make('last_scrubber_live')
+                            ->label(__('Scrubber'))
+                            ->state(fn ($record): string => self::resolveScrubberStatus($record))
+                            ->icon(fn (string $state): string => self::resolveScrubberStatusIcon($state))
+                            ->color(fn (string $state): string => self::resolveScrubberStatusColor($state))
+                            ->tooltip(fn ($record): string => self::resolveScrubberStatusTooltip($record)),
+                        TextEntry::make('last_scrubbed_at')
+                            ->label(__('Last Scrubbed'))
+                            ->state(fn ($record) => app(DateFormatService::class)->format($record?->last_scrubbed_at))
+                            ->tooltip(fn ($record): string => $record?->last_scrubbed_at
+                                ? __('Scrubbed').' '.$record->last_scrubbed_at->diffForHumans()
+                                : __('Never scrubbed')),
                     ]),
                 Section::make(__('Technical Details'))
                     ->collapsible()
@@ -1939,6 +1967,48 @@ class ChannelResource extends Resource implements CopilotResource
                         ->defaultItems(0),
                 ]),
         ];
+    }
+
+    private static function resolveScrubberStatus(?Channel $record): string
+    {
+        return match ($record?->last_scrubber_live) {
+            true => 'live',
+            false => 'dead',
+            default => 'unknown',
+        };
+    }
+
+    private static function resolveScrubberStatusIcon(string $state): string
+    {
+        return match ($state) {
+            'live' => 'heroicon-o-check-circle',
+            'dead' => 'heroicon-o-x-circle',
+            default => 'heroicon-o-question-mark-circle',
+        };
+    }
+
+    private static function resolveScrubberStatusColor(string $state): string
+    {
+        return match ($state) {
+            'live' => 'success',
+            'dead' => 'danger',
+            default => 'gray',
+        };
+    }
+
+    private static function resolveScrubberStatusTooltip(?Channel $record): string
+    {
+        $checkedAt = $record?->last_scrubbed_at;
+
+        return match (self::resolveScrubberStatus($record)) {
+            'live' => $checkedAt
+                ? __('Last scrubber result: live').' ('.$checkedAt->diffForHumans().')'
+                : __('Last scrubber result: live'),
+            'dead' => $checkedAt
+                ? __('Last scrubber result: dead').' ('.$checkedAt->diffForHumans().')'
+                : __('Last scrubber result: dead'),
+            default => __('No scrubber result recorded yet'),
+        };
     }
 
     /**

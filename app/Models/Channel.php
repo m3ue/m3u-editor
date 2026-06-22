@@ -65,6 +65,8 @@ class Channel extends Model
         'stream_stats' => 'array',
         'stream_stats_probed_at' => 'datetime',
         'probe_enabled' => 'boolean',
+        'last_scrubbed_at' => 'datetime',
+        'last_scrubber_live' => 'boolean',
         'year' => 'integer',
         'edition' => 'string',
     ];

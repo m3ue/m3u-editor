@@ -37,6 +37,7 @@ it('merges channels matching a playlist-level regex pattern as failovers', funct
         'name' => 'CCTV-1',
         'stream_id' => 'cctv1-primary',
         'can_merge' => true,
+        'enabled' => true,
     ]);
 
     $match1 = Channel::factory()->create([
@@ -47,6 +48,7 @@ it('merges channels matching a playlist-level regex pattern as failovers', funct
         'name' => 'CCTV1',
         'stream_id' => 'cctv1-backup-a',
         'can_merge' => true,
+        'enabled' => true,
     ]);
 
     $match2 = Channel::factory()->create([
@@ -57,6 +59,7 @@ it('merges channels matching a playlist-level regex pattern as failovers', funct
         'name' => 'cctv-1',
         'stream_id' => 'cctv1-backup-b',
         'can_merge' => true,
+        'enabled' => true,
     ]);
 
     // Should NOT match — CCTV10 is beyond the regex boundary
@@ -68,6 +71,7 @@ it('merges channels matching a playlist-level regex pattern as failovers', funct
         'name' => 'CCTV10',
         'stream_id' => 'cctv10',
         'can_merge' => true,
+        'enabled' => true,
     ]);
 
     $playlists = collect([['playlist_failover_id' => $this->playlist->id]]);
@@ -100,6 +104,7 @@ it('skips channels with invalid regex patterns without crashing', function () {
         'group_id' => $this->group->id,
         'stream_id' => 'test1',
         'can_merge' => true,
+        'enabled' => true,
     ]);
 
     $playlists = collect([['playlist_failover_id' => $this->playlist->id]]);
@@ -124,6 +129,7 @@ it('does nothing when no regex patterns are configured', function () {
             'group_id' => $this->group->id,
             'stream_id' => $id,
             'can_merge' => true,
+            'enabled' => true,
         ]);
     }
 
@@ -147,6 +153,7 @@ it('matches regex against channel name when title does not match', function () {
         'name' => 'BBC One',
         'stream_id' => 'bbc-one-primary',
         'can_merge' => true,
+        'enabled' => true,
     ]);
 
     $matchByName = Channel::factory()->create([
@@ -157,6 +164,7 @@ it('matches regex against channel name when title does not match', function () {
         'name' => 'BBC One',
         'stream_id' => 'bbc-one-other',
         'can_merge' => true,
+        'enabled' => true,
     ]);
 
     $playlists = collect([['playlist_failover_id' => $this->playlist->id]]);

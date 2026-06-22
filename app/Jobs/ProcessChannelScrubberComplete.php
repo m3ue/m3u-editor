@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Enums\Status;
+use App\Listeners\SyncListener;
 use App\Models\ChannelScrubber;
 use App\Models\ChannelScrubberLog;
 use Carbon\Carbon;
@@ -79,6 +80,8 @@ class ProcessChannelScrubberComplete implements ShouldQueue
             'errors' => null,
         ]);
 
+        $this->dispatchPostScanMerge($scrubber);
+
         Notification::make()
             ->success()
             ->title("Channel Scrubber \"{$scrubber->name}\" completed")
@@ -93,5 +96,27 @@ class ProcessChannelScrubberComplete implements ShouldQueue
     public function failed(Throwable $exception): void
     {
         Log::error("Channel scrubber complete job failed: {$exception->getMessage()}");
+    }
+
+    private function dispatchPostScanMerge(ChannelScrubber $scrubber): void
+    {
+        if (! $scrubber->rebuild_failovers_after_scan) {
+            return;
+        }
+
+        $playlist = $scrubber->playlist;
+        if (! $playlist || ! $playlist->auto_merge_channels_enabled) {
+            return;
+        }
+
+        $mergeJob = SyncListener::getMergeJob($playlist);
+        if ($mergeJob === null) {
+            return;
+        }
+
+        $mergeJob->newChannelsOnly = false;
+        $mergeJob->forceCompleteRemerge = true;
+
+        dispatch($mergeJob);
     }
 }

@@ -3,28 +3,31 @@
 use App\Enums\Status;
 use App\Jobs\ProcessChannelScrubberChunk;
 use App\Models\Channel;
+use App\Models\ChannelFailover;
 use App\Models\ChannelScrubber;
 use App\Models\ChannelScrubberLog;
 use App\Models\Group;
 use App\Models\Playlist;
 use App\Models\User;
+use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 
 beforeEach(function () {
+    Config::set('cache.default', 'array');
+    Queue::fake();
+
     $this->user = User::factory()->create();
     $this->playlist = Playlist::factory()->for($this->user)->createQuietly();
-    $this->group = Group::factory()->createQuietly(['user_id' => $this->user->id]);
 
-    $this->batchUuid = '00000000-0000-0000-0000-000000000001';
-
-    $this->scrubber = ChannelScrubber::createQuietly([
+    $this->scrubber = ChannelScrubber::create([
         'name' => 'Test Scrubber',
-        'uuid' => $this->batchUuid,
+        'uuid' => 'test-batch-uuid',
         'status' => Status::Processing,
         'user_id' => $this->user->id,
         'playlist_id' => $this->playlist->id,
         'progress' => 0,
-    ]);
+    ]));
 
     $this->log = ChannelScrubberLog::create([
         'channel_scrubber_id' => $this->scrubber->id,
@@ -32,6 +35,17 @@ beforeEach(function () {
         'playlist_id' => $this->playlist->id,
         'status' => 'processing',
     ]);
+
+    $this->channel = function (array $attributes = []): Channel {
+        return Channel::withoutEvents(fn () => Channel::factory()->create([
+            'user_id' => $this->user->id,
+            'playlist_id' => $this->playlist->id,
+            'group_id' => null,
+            ...$attributes,
+        ]));
+    };
+
+    $this->handleChunk = fn (ProcessChannelScrubberChunk $chunk): mixed => Channel::withoutEvents(fn () => $chunk->handle());
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -40,8 +54,7 @@ beforeEach(function () {
 
 it('marks a channel dead via ffprobe when ensureStreamStats returns empty', function () {
     // No URL and no stream_stats → ensureStreamStats() returns [] → dead
-    $channel = Channel::factory()->create([
-        'playlist_id' => $this->playlist->id,
+    $channel = Channel::factory()->for($this->playlist)->create([
         'user_id' => $this->user->id,
         'group_id' => $this->group->id,
         'enabled' => true,
@@ -50,17 +63,19 @@ it('marks a channel dead via ffprobe when ensureStreamStats returns empty', func
         'stream_stats' => null,
     ]);
 
-    (new ProcessChannelScrubberChunk(
+    ($this->handleChunk)(new ProcessChannelScrubberChunk(
         channelIds: [$channel->id],
         scrubberId: $this->scrubber->id,
         logId: $this->log->id,
         checkMethod: 'ffprobe',
         batchNo: $this->scrubber->uuid,
         totalChannels: 1,
-    ))->handle();
+    ));
 
     $channel->refresh();
     expect($channel->enabled)->toBeFalse();
+    expect($channel->last_scrubber_live)->toBeFalse();
+    expect($channel->last_scrubbed_at)->not->toBeNull();
 
     $this->assertDatabaseHas('channel_scrubber_log_channels', [
         'channel_scrubber_log_id' => $this->log->id,
@@ -73,8 +88,7 @@ it('marks a channel dead via ffprobe even when stream_stats are cached', functio
     // producing false negatives for dead streams that had been probed before.
     // The new lightweight ffprobe probe always makes a fresh network call — cached stats
     // are irrelevant. A null URL with cached stats is still dead.
-    $channel = Channel::factory()->create([
-        'playlist_id' => $this->playlist->id,
+    $channel = Channel::factory()->for($this->playlist)->create([
         'user_id' => $this->user->id,
         'group_id' => $this->group->id,
         'enabled' => true,
@@ -85,17 +99,19 @@ it('marks a channel dead via ffprobe even when stream_stats are cached', functio
         ],
     ]);
 
-    (new ProcessChannelScrubberChunk(
+    ($this->handleChunk)(new ProcessChannelScrubberChunk(
         channelIds: [$channel->id],
         scrubberId: $this->scrubber->id,
         logId: $this->log->id,
         checkMethod: 'ffprobe',
         batchNo: $this->scrubber->uuid,
         totalChannels: 1,
-    ))->handle();
+    ));
 
     $channel->refresh();
     expect($channel->enabled)->toBeFalse();
+    expect($channel->last_scrubber_live)->toBeFalse();
+    expect($channel->last_scrubbed_at)->not->toBeNull();
 
     $this->assertDatabaseHas('channel_scrubber_log_channels', [
         'channel_scrubber_log_id' => $this->log->id,
@@ -104,16 +120,14 @@ it('marks a channel dead via ffprobe even when stream_stats are cached', functio
 });
 
 it('increments dead_count on the scrubber for each dead channel', function () {
-    $dead1 = Channel::factory()->create([
-        'playlist_id' => $this->playlist->id,
+    $dead1 = Channel::factory()->for($this->playlist)->create([
         'user_id' => $this->user->id,
         'group_id' => $this->group->id,
         'url' => null,
         'url_custom' => null,
         'stream_stats' => null,
     ]);
-    $dead2 = Channel::factory()->create([
-        'playlist_id' => $this->playlist->id,
+    $dead2 = Channel::factory()->for($this->playlist)->create([
         'user_id' => $this->user->id,
         'group_id' => $this->group->id,
         'url' => null,
@@ -121,14 +135,14 @@ it('increments dead_count on the scrubber for each dead channel', function () {
         'stream_stats' => null,
     ]);
 
-    (new ProcessChannelScrubberChunk(
+    ($this->handleChunk)(new ProcessChannelScrubberChunk(
         channelIds: [$dead1->id, $dead2->id],
         scrubberId: $this->scrubber->id,
         logId: $this->log->id,
         checkMethod: 'ffprobe',
         batchNo: $this->scrubber->uuid,
         totalChannels: 2,
-    ))->handle();
+    ));
 
     expect($this->scrubber->fresh()->dead_count)->toBe(2);
     expect($this->log->fresh()->live_count)->toBe(0);
@@ -139,8 +153,7 @@ it('increments dead_count on the scrubber for each dead channel', function () {
 // ──────────────────────────────────────────────────────────────────────────────
 
 it('skips processing when the batch uuid does not match', function () {
-    $channel = Channel::factory()->create([
-        'playlist_id' => $this->playlist->id,
+    $channel = Channel::factory()->for($this->playlist)->create([
         'user_id' => $this->user->id,
         'group_id' => $this->group->id,
         'enabled' => true,
@@ -148,14 +161,14 @@ it('skips processing when the batch uuid does not match', function () {
         'stream_stats' => null,
     ]);
 
-    (new ProcessChannelScrubberChunk(
+    ($this->handleChunk)(new ProcessChannelScrubberChunk(
         channelIds: [$channel->id],
         scrubberId: $this->scrubber->id,
         logId: $this->log->id,
         checkMethod: 'ffprobe',
         batchNo: 'stale-uuid',
         totalChannels: 1,
-    ))->handle();
+    ));
 
     $channel->refresh();
     expect($channel->enabled)->toBeTrue();
@@ -164,8 +177,7 @@ it('skips processing when the batch uuid does not match', function () {
 it('skips processing when the scrubber is cancelled', function () {
     $this->scrubber->update(['status' => Status::Cancelled]);
 
-    $channel = Channel::factory()->create([
-        'playlist_id' => $this->playlist->id,
+    $channel = Channel::factory()->for($this->playlist)->create([
         'user_id' => $this->user->id,
         'group_id' => $this->group->id,
         'enabled' => true,
@@ -173,14 +185,14 @@ it('skips processing when the scrubber is cancelled', function () {
         'stream_stats' => null,
     ]);
 
-    (new ProcessChannelScrubberChunk(
+    ($this->handleChunk)(new ProcessChannelScrubberChunk(
         channelIds: [$channel->id],
         scrubberId: $this->scrubber->id,
         logId: $this->log->id,
         checkMethod: 'ffprobe',
         batchNo: $this->scrubber->uuid,
         totalChannels: 1,
-    ))->handle();
+    ));
 
     $channel->refresh();
     expect($channel->enabled)->toBeTrue();
@@ -191,8 +203,7 @@ it('skips processing when the scrubber is cancelled', function () {
 // ──────────────────────────────────────────────────────────────────────────────
 
 it('does not disable dead channels when disableDead is false', function () {
-    $channel = Channel::factory()->create([
-        'playlist_id' => $this->playlist->id,
+    $channel = Channel::factory()->for($this->playlist)->create([
         'user_id' => $this->user->id,
         'group_id' => $this->group->id,
         'enabled' => true,
@@ -201,7 +212,7 @@ it('does not disable dead channels when disableDead is false', function () {
         'stream_stats' => null,
     ]);
 
-    (new ProcessChannelScrubberChunk(
+    ($this->handleChunk)(new ProcessChannelScrubberChunk(
         channelIds: [$channel->id],
         scrubberId: $this->scrubber->id,
         logId: $this->log->id,
@@ -209,10 +220,12 @@ it('does not disable dead channels when disableDead is false', function () {
         batchNo: $this->scrubber->uuid,
         totalChannels: 1,
         disableDead: false,
-    ))->handle();
+    ));
 
     $channel->refresh();
     expect($channel->enabled)->toBeTrue();
+    expect($channel->last_scrubber_live)->toBeFalse();
+    expect($channel->last_scrubbed_at)->not->toBeNull();
 
     $this->assertDatabaseHas('channel_scrubber_log_channels', [
         'channel_scrubber_log_id' => $this->log->id,
@@ -228,8 +241,7 @@ it('does not disable dead channels when disableDead is false', function () {
 // ──────────────────────────────────────────────────────────────────────────────
 
 it('re-enables a previously disabled live channel when enableLive is true', function () {
-    $channel = Channel::factory()->create([
-        'playlist_id' => $this->playlist->id,
+    $channel = Channel::factory()->for($this->playlist)->create([
         'user_id' => $this->user->id,
         'group_id' => $this->group->id,
         'enabled' => false,
@@ -243,7 +255,7 @@ it('re-enables a previously disabled live channel when enableLive is true', func
         'http://example.invalid/stream' => Http::response('', 200),
     ]);
 
-    (new ProcessChannelScrubberChunk(
+    ($this->handleChunk)(new ProcessChannelScrubberChunk(
         channelIds: [$channel->id],
         scrubberId: $this->scrubber->id,
         logId: $this->log->id,
@@ -251,10 +263,92 @@ it('re-enables a previously disabled live channel when enableLive is true', func
         batchNo: $this->scrubber->uuid,
         totalChannels: 1,
         enableLive: true,
-    ))->handle();
+    ));
 
     $channel->refresh();
     expect($channel->enabled)->toBeTrue();
+    expect($channel->last_scrubber_live)->toBeTrue();
+    expect($channel->last_scrubbed_at)->not->toBeNull();
 
+    expect($this->log->fresh()->live_count)->toBe(1);
+});
+
+it('keeps a disabled live failover channel hidden when failover protection is enabled', function () {
+    $master = ($this->channel)([
+        'enabled' => true,
+    ]);
+
+    $failover = ($this->channel)([
+        'enabled' => false,
+        'url' => 'http://example.invalid/failover',
+        'url_custom' => null,
+        'stream_stats' => null,
+    ]);
+
+    ChannelFailover::create([
+        'user_id' => $this->user->id,
+        'channel_id' => $master->id,
+        'channel_failover_id' => $failover->id,
+    ]);
+
+    Http::fake([
+        'http://example.invalid/failover' => Http::response('', 200),
+    ]);
+
+    ($this->handleChunk)(new ProcessChannelScrubberChunk(
+        channelIds: [$failover->id],
+        scrubberId: $this->scrubber->id,
+        logId: $this->log->id,
+        checkMethod: 'http',
+        batchNo: $this->scrubber->uuid,
+        totalChannels: 1,
+        enableLive: true,
+        protectFailoverChannels: true,
+    ));
+
+    $failover->refresh();
+    expect($failover->enabled)->toBeFalse();
+    expect($failover->last_scrubber_live)->toBeTrue();
+    expect($failover->last_scrubbed_at)->not->toBeNull();
+    expect($this->log->fresh()->live_count)->toBe(1);
+});
+
+it('re-enables a disabled live failover channel when failover protection is disabled', function () {
+    $master = ($this->channel)([
+        'enabled' => true,
+    ]);
+
+    $failover = ($this->channel)([
+        'enabled' => false,
+        'url' => 'http://example.invalid/failover',
+        'url_custom' => null,
+        'stream_stats' => null,
+    ]);
+
+    ChannelFailover::create([
+        'user_id' => $this->user->id,
+        'channel_id' => $master->id,
+        'channel_failover_id' => $failover->id,
+    ]);
+
+    Http::fake([
+        'http://example.invalid/failover' => Http::response('', 200),
+    ]);
+
+    ($this->handleChunk)(new ProcessChannelScrubberChunk(
+        channelIds: [$failover->id],
+        scrubberId: $this->scrubber->id,
+        logId: $this->log->id,
+        checkMethod: 'http',
+        batchNo: $this->scrubber->uuid,
+        totalChannels: 1,
+        enableLive: true,
+        protectFailoverChannels: false,
+    ));
+
+    $failover->refresh();
+    expect($failover->enabled)->toBeTrue();
+    expect($failover->last_scrubber_live)->toBeTrue();
+    expect($failover->last_scrubbed_at)->not->toBeNull();
     expect($this->log->fresh()->live_count)->toBe(1);
 });
