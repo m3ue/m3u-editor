@@ -1,6 +1,7 @@
 <?php
 
 use App\Jobs\RequestArrEpisode;
+use App\Livewire\ArrDiscover;
 use App\Livewire\ArrSearch;
 use App\Models\ArrIntegration;
 use App\Models\Playlist;
@@ -1073,6 +1074,8 @@ it('sets tmdbConfigured to false when TMDB is not configured', function () {
 });
 
 it('loadDiscover populates trending and popular sections', function () {
+    Livewire::withoutLazyLoading();
+
     $radarr = ArrIntegration::factory()->radarr()->create([
         'user_id' => $this->user->id,
     ]);
@@ -1122,10 +1125,8 @@ it('loadDiscover populates trending and popular sections', function () {
         '*/api/v3/movie*' => Http::response([], 200),
     ]);
 
-    $component = Livewire::test(ArrSearch::class)
-        ->call('loadDiscover');
+    $component = Livewire::test(ArrDiscover::class);
 
-    expect($component->get('discoverLoaded'))->toBeTrue();
     expect($component->get('trendingItems'))->toHaveCount(1);
     expect($component->get('trendingItems.0.tmdb_id'))->toBe(10);
     expect($component->get('popularMovies'))->toHaveCount(1);
@@ -1133,6 +1134,8 @@ it('loadDiscover populates trending and popular sections', function () {
 });
 
 it('loadDiscover marks items already in library', function () {
+    Livewire::withoutLazyLoading();
+
     $radarr = ArrIntegration::factory()->radarr()->create([
         'user_id' => $this->user->id,
     ]);
@@ -1161,8 +1164,7 @@ it('loadDiscover marks items already in library', function () {
         ], 200),
     ]);
 
-    $component = Livewire::test(ArrSearch::class)
-        ->call('loadDiscover');
+    $component = Livewire::test(ArrDiscover::class);
 
     expect($component->get('trendingItems.0.existsInLibrary'))->toBeTrue();
     expect($component->get('trendingItems.0.isDownloaded'))->toBeTrue();
@@ -1181,10 +1183,8 @@ it('loadDiscover is a no-op when TMDB is not configured', function () {
 
     Http::fake();
 
-    $component = Livewire::test(ArrSearch::class)
-        ->call('loadDiscover');
+    $component = Livewire::test(ArrDiscover::class);
 
-    expect($component->get('discoverLoaded'))->toBeTrue();
     expect($component->get('trendingItems'))->toBeEmpty();
 });
 
@@ -1213,8 +1213,7 @@ it('browseGenre loads discover results filtered by genre', function () {
         '*/api/v3/movie*' => Http::response([], 200),
     ]);
 
-    $component = Livewire::test(ArrSearch::class)
-        ->set('tmdbConfigured', true)
+    $component = Livewire::test(ArrDiscover::class)
         ->call('browseGenre', 28, 'movie');
 
     expect($component->get('browseGenreId'))->toBe(28);
@@ -1227,10 +1226,10 @@ it('browseGenre loads discover results filtered by genre', function () {
 it('clearBrowse resets genre browse state', function () {
     Http::fake();
 
-    Livewire::test(ArrSearch::class)
+    Livewire::test(ArrDiscover::class)
         ->set('browseGenreId', 28)
         ->set('browseGenreType', 'movie')
-        ->set('browseResults', [['tmdb_id' => 1, 'title' => 'Test']])
+        ->set('browseResults', [['tmdb_id' => 1, 'title' => 'Test', 'media_type' => 'movie', 'year' => null, 'overview' => null, 'poster_url' => null, 'backdrop_url' => null, 'vote_average' => null, 'genre_ids' => []]])
         ->call('clearBrowse')
         ->assertSet('browseGenreId', null)
         ->assertSet('browseGenreType', null)
