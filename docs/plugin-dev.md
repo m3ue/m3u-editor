@@ -406,6 +406,11 @@ Example:
 | `create` | no | Set `false` to hide the create action (default: `true`) |
 | `edit` | no | Set `false` to hide per-row edit action (default: `true`) |
 | `delete` | no | Set `false` to hide per-row delete action (default: `true`) |
+| `delete_behavior` | no | Set to `"clear"` to update the row with `delete_payload` instead of deleting it |
+| `delete_payload` | no | Object of values to save when `delete_behavior` is `"clear"`; dot-notation sets nested `json` keys |
+| `delete_label` | no | Label used for a clear-style delete action |
+| `delete_icon` | no | Icon used for a clear-style delete action (default: `heroicon-o-x-mark`) |
+| `delete_color` | no | Button color used for a clear-style delete action (default: `gray`) |
 | `columns` | no | Column definitions for the list view |
 | `fields` | no | Field definitions for the create/edit form — uses the same field types as `settings` |
 | `prefill` | no | Auto-populate rows from a source table on page mount |
@@ -472,6 +477,18 @@ Example:
 - `defaults`: static defaults to write on each new row; dot-notation sets nested `json` keys
 
 The prefill source is capped at `config('plugins.prefill_max_source_rows')` rows (default: 1000).
+
+For prefilled tables where the source row should remain visible, use `delete_behavior: "clear"` to make the row action reset configuration instead of deleting the physical row:
+
+```json
+"delete_behavior": "clear",
+"delete_label": "Clear Assignment",
+"delete_payload": {
+  "extension_plugin_profile_id": null,
+  "enabled": false,
+  "settings.run_sync": true
+}
+```
 
 ## Capabilities
 

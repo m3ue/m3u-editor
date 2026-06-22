@@ -130,6 +130,22 @@ class PluginUiTableRegistry
             : [];
     }
 
+    public function clearsRecordOnDelete(array $definition): bool
+    {
+        return ($definition['delete_behavior'] ?? null) === 'clear';
+    }
+
+    public function clearRecordForDelete(PluginTableRecord $record, array $definition): PluginTableRecord
+    {
+        $payload = is_array($definition['delete_payload'] ?? null)
+            ? $definition['delete_payload']
+            : [];
+
+        $record->update($this->expandedPayload($payload));
+
+        return $record;
+    }
+
     public function prefillRows(Plugin $plugin, array $definition): void
     {
         $prefill = $definition['prefill'] ?? null;
@@ -287,6 +303,21 @@ class PluginUiTableRegistry
             ->map(fn (string $dependency): string => trim($dependency))
             ->values()
             ->all();
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    private function expandedPayload(array $payload): array
+    {
+        $expanded = [];
+
+        foreach ($payload as $key => $value) {
+            data_set($expanded, (string) $key, $value);
+        }
+
+        return $expanded;
     }
 
     private function columnsFor(Plugin $plugin, string $tableName): Collection
