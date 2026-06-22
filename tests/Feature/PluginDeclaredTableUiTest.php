@@ -1,10 +1,12 @@
 <?php
 
 use App\Filament\Resources\Plugins\Pages\ManagePluginTable;
+use App\Filament\Resources\Plugins\Pages\ViewPluginRun;
 use App\Filament\Resources\Plugins\PluginResource;
 use App\Livewire\PluginTableInline;
 use App\Models\Playlist;
 use App\Models\Plugin;
+use App\Models\PluginRun;
 use App\Models\User;
 use App\Plugins\PluginIntegrityService;
 use App\Plugins\PluginSchemaManager;
@@ -361,6 +363,172 @@ function declaredPrefilledTableUiPlugin(): array
     return [$plugin, $profilesTable, $linksTable];
 }
 
+function declaredRunResultTableUiPlugin(): array
+{
+    $suffix = Str::lower(Str::random(6));
+    $tableName = "plugin_declared_run_results_{$suffix}";
+    $schema = [
+        'tables' => [[
+            'name' => $tableName,
+            'columns' => [
+                ['type' => 'id', 'name' => 'id'],
+                ['type' => 'foreignId', 'name' => 'extension_plugin_id', 'references' => 'extension_plugins', 'on_delete' => 'cascade'],
+                ['type' => 'foreignId', 'name' => 'extension_plugin_run_id', 'references' => 'extension_plugin_runs', 'on_delete' => 'cascade'],
+                ['type' => 'foreignId', 'name' => 'playlist_id', 'references' => 'playlists', 'on_delete' => 'cascade'],
+                ['type' => 'string', 'name' => 'result_type'],
+                ['type' => 'string', 'name' => 'decision'],
+                ['type' => 'string', 'name' => 'title'],
+                ['type' => 'integer', 'name' => 'score', 'nullable' => true],
+                ['type' => 'json', 'name' => 'details', 'nullable' => true],
+                ['type' => 'timestamps'],
+            ],
+            'indexes' => [],
+        ]],
+        'ui_tables' => [[
+            'id' => 'run_results',
+            'label' => 'Run Results',
+            'model_label' => 'Run Result',
+            'table' => $tableName,
+            'description' => 'Rows captured by plugin runs.',
+            'create' => false,
+            'edit' => false,
+            'delete' => false,
+            'columns' => [
+                ['name' => 'created_at', 'label' => 'Created', 'type' => 'datetime', 'sortable' => true],
+                ['name' => 'result_type', 'label' => 'Type', 'sortable' => true],
+                ['name' => 'decision', 'label' => 'Decision', 'sortable' => true],
+                ['name' => 'title', 'label' => 'Title', 'searchable' => true],
+                ['name' => 'score', 'label' => 'Score', 'sortable' => true],
+                ['name' => 'details', 'label' => 'Details'],
+            ],
+            'fields' => [],
+        ]],
+    ];
+
+    $plugin = Plugin::query()->create([
+        'plugin_id' => 'run-result-table-ui-'.$suffix,
+        'name' => 'Run Result Table UI',
+        'version' => '1.0.0',
+        'api_version' => config('plugins.api_version'),
+        'description' => 'Run result table UI fixture.',
+        'entrypoint' => 'Plugin.php',
+        'class_name' => 'AppLocalPlugins\\RunResultTableUi\\Plugin',
+        'capabilities' => [],
+        'hooks' => [],
+        'permissions' => ['schema_manage'],
+        'schema_definition' => $schema,
+        'actions' => [],
+        'settings_schema' => [],
+        'settings' => [],
+        'data_ownership' => [
+            'tables' => [$tableName],
+            'directories' => [],
+            'files' => [],
+            'default_cleanup_policy' => 'preserve',
+        ],
+        'source_type' => 'local_directory',
+        'path' => storage_path('app/testing-plugin-sources/run-result-table-ui-'.$suffix),
+        'available' => true,
+        'enabled' => true,
+        'installation_status' => 'installed',
+        'trust_state' => 'trusted',
+        'validation_status' => 'valid',
+        'integrity_status' => 'verified',
+    ]);
+
+    app(PluginSchemaManager::class)->apply($schema);
+
+    return [$plugin, $tableName];
+}
+
+function seedDeclaredRunResultRows(User $user): array
+{
+    [$plugin, $tableName] = declaredRunResultTableUiPlugin();
+
+    [$playlist, $otherPlaylist] = Playlist::withoutEvents(fn (): array => [
+        Playlist::factory()->for($user)->create(['name' => 'Primary Playlist']),
+        Playlist::factory()->for($user)->create(['name' => 'Other Playlist']),
+    ]);
+
+    $run = PluginRun::query()->create([
+        'extension_plugin_id' => $plugin->id,
+        'user_id' => $user->id,
+        'status' => 'completed',
+        'invocation_type' => 'action',
+        'action' => 'sync_playlist',
+        'trigger' => 'manual',
+        'dry_run' => true,
+        'payload' => ['playlist_id' => $playlist->id],
+        'result' => ['data' => ['totals' => ['rows' => 1]]],
+        'summary' => 'Results ready.',
+        'started_at' => now(),
+        'finished_at' => now(),
+    ]);
+
+    $otherRun = PluginRun::query()->create([
+        'extension_plugin_id' => $plugin->id,
+        'user_id' => $user->id,
+        'status' => 'completed',
+        'invocation_type' => 'action',
+        'action' => 'sync_playlist',
+        'trigger' => 'manual',
+        'dry_run' => true,
+        'payload' => ['playlist_id' => $playlist->id],
+        'summary' => 'Other run.',
+        'started_at' => now(),
+        'finished_at' => now(),
+    ]);
+
+    $timestamp = now();
+    DB::table($tableName)->insert([
+        [
+            'extension_plugin_id' => $plugin->id,
+            'extension_plugin_run_id' => $run->id,
+            'playlist_id' => $playlist->id,
+            'result_type' => 'sync_excluded',
+            'decision' => 'excluded',
+            'title' => 'Included Result',
+            'score' => 97,
+            'details' => json_encode(['reason' => 'matched'], JSON_THROW_ON_ERROR),
+            'created_at' => $timestamp,
+            'updated_at' => $timestamp,
+        ],
+        [
+            'extension_plugin_id' => $plugin->id,
+            'extension_plugin_run_id' => $otherRun->id,
+            'playlist_id' => $playlist->id,
+            'result_type' => 'sync_excluded',
+            'decision' => 'excluded',
+            'title' => 'Other Run Result',
+            'score' => 91,
+            'details' => json_encode(['reason' => 'other_run'], JSON_THROW_ON_ERROR),
+            'created_at' => $timestamp,
+            'updated_at' => $timestamp,
+        ],
+        [
+            'extension_plugin_id' => $plugin->id,
+            'extension_plugin_run_id' => $run->id,
+            'playlist_id' => $otherPlaylist->id,
+            'result_type' => 'sync_excluded',
+            'decision' => 'excluded',
+            'title' => 'Other Playlist Result',
+            'score' => 88,
+            'details' => json_encode(['reason' => 'other_playlist'], JSON_THROW_ON_ERROR),
+            'created_at' => $timestamp,
+            'updated_at' => $timestamp,
+        ],
+    ]);
+
+    return [
+        'plugin' => $plugin,
+        'tableName' => $tableName,
+        'playlist' => $playlist,
+        'otherPlaylist' => $otherPlaylist,
+        'run' => $run,
+        'otherRun' => $otherRun,
+    ];
+}
+
 it('renders plugin-declared table UIs through the generic plugin table page', function () {
     $this->actingAs(User::factory()->admin()->create());
 
@@ -524,6 +692,181 @@ it('can clear a plugin table record instead of deleting it', function () {
         ]);
 });
 
+it('scopes plugin-declared result tables to a run and playlist', function () {
+    $user = User::factory()->create(['permissions' => ['use_tools']]);
+    $this->actingAs($user);
+
+    $fixture = seedDeclaredRunResultRows($user);
+    $plugin = $fixture['plugin'];
+    $playlist = $fixture['playlist'];
+    $run = $fixture['run'];
+
+    expect(app(PluginUiTableRegistry::class)->runScopedTablesFor($plugin))->toHaveCount(1);
+
+    Livewire::test(PluginTableInline::class, [
+        'record' => $plugin,
+        'tableId' => 'run_results',
+        'runId' => $run->id,
+        'playlistId' => $playlist->id,
+        'readOnly' => true,
+        'showHeading' => true,
+    ])
+        ->assertOk()
+        ->assertSee('Run Results')
+        ->assertSee('Included Result')
+        ->assertSee('CSV')
+        ->assertSee('JSON')
+        ->assertDontSee('Other Run Result')
+        ->assertDontSee('Other Playlist Result');
+});
+
+it('honors plugin-declared export formats for inline tables and downloads', function () {
+    $user = User::factory()->create(['permissions' => ['use_tools']]);
+    $this->actingAs($user);
+
+    $fixture = seedDeclaredRunResultRows($user);
+    $plugin = $fixture['plugin'];
+    $playlist = $fixture['playlist'];
+    $run = $fixture['run'];
+    $schema = $plugin->schema_definition;
+    data_set($schema, 'ui_tables.0.export_formats', ['csv']);
+    $plugin->update(['schema_definition' => $schema]);
+
+    Livewire::test(PluginTableInline::class, [
+        'record' => $plugin->fresh(),
+        'tableId' => 'run_results',
+        'runId' => $run->id,
+        'playlistId' => $playlist->id,
+        'readOnly' => true,
+        'showHeading' => true,
+    ])
+        ->assertOk()
+        ->assertSee('CSV')
+        ->assertDontSee('JSON');
+
+    $this->get(route('extension-plugins.tables.export', [
+        'plugin' => $plugin,
+        'table' => 'run_results',
+        'format' => 'csv',
+        'run' => $run->id,
+        'playlist' => $playlist->id,
+    ]))->assertOk();
+
+    $this->get(route('extension-plugins.tables.export', [
+        'plugin' => $plugin,
+        'table' => 'run_results',
+        'format' => 'json',
+        'run' => $run->id,
+        'playlist' => $playlist->id,
+    ]))->assertNotFound();
+});
+
+it('can disable plugin-declared inline table exports', function () {
+    $user = User::factory()->create(['permissions' => ['use_tools']]);
+    $this->actingAs($user);
+
+    $fixture = seedDeclaredRunResultRows($user);
+    $plugin = $fixture['plugin'];
+    $playlist = $fixture['playlist'];
+    $run = $fixture['run'];
+    $schema = $plugin->schema_definition;
+    data_set($schema, 'ui_tables.0.export_formats', []);
+    $plugin->update(['schema_definition' => $schema]);
+
+    Livewire::test(PluginTableInline::class, [
+        'record' => $plugin->fresh(),
+        'tableId' => 'run_results',
+        'runId' => $run->id,
+        'playlistId' => $playlist->id,
+        'readOnly' => true,
+        'showHeading' => true,
+    ])
+        ->assertOk()
+        ->assertDontSee('CSV')
+        ->assertDontSee('JSON');
+
+    $this->get(route('extension-plugins.tables.export', [
+        'plugin' => $plugin,
+        'table' => 'run_results',
+        'format' => 'csv',
+        'run' => $run->id,
+        'playlist' => $playlist->id,
+    ]))->assertNotFound();
+});
+
+it('streams plugin-declared result table exports on demand', function () {
+    $user = User::factory()->create(['permissions' => ['use_tools']]);
+    $this->actingAs($user);
+
+    $fixture = seedDeclaredRunResultRows($user);
+    $plugin = $fixture['plugin'];
+    $playlist = $fixture['playlist'];
+    $run = $fixture['run'];
+    $expectedFilename = Str::slug(collect([
+        $plugin->plugin_id ?: "plugin-{$plugin->id}",
+        'run_results',
+        "run-{$run->id}",
+        "playlist-{$playlist->id}",
+    ])->filter()->implode('-'));
+
+    $csvResponse = $this->get(route('extension-plugins.tables.export', [
+        'plugin' => $plugin,
+        'table' => 'run_results',
+        'format' => 'csv',
+        'run' => $run->id,
+        'playlist' => $playlist->id,
+    ]))->assertOk();
+
+    expect($csvResponse->headers->get('content-disposition'))
+        ->toContain('attachment')
+        ->toContain("{$expectedFilename}.csv");
+
+    $csv = $csvResponse->streamedContent();
+    expect($csv)
+        ->toContain('Title')
+        ->toContain('Included Result')
+        ->not->toContain('Other Run Result')
+        ->not->toContain('Other Playlist Result');
+
+    $jsonResponse = $this->get(route('extension-plugins.tables.export', [
+        'plugin' => $plugin,
+        'table' => 'run_results',
+        'format' => 'json',
+        'run' => $run->id,
+        'playlist' => $playlist->id,
+    ]))->assertOk();
+
+    expect($jsonResponse->headers->get('content-disposition'))
+        ->toContain('attachment')
+        ->toContain("{$expectedFilename}.json");
+
+    $rows = json_decode($jsonResponse->streamedContent(), true, flags: JSON_THROW_ON_ERROR);
+
+    expect($rows)->toHaveCount(1)
+        ->and($rows[0]['title'])->toBe('Included Result')
+        ->and($rows[0]['details'])->toBe(['reason' => 'matched']);
+});
+
+it('discovers declared result tables on plugin run detail pages', function () {
+    $user = User::factory()->create(['permissions' => ['use_tools']]);
+    $this->actingAs($user);
+
+    $fixture = seedDeclaredRunResultRows($user);
+    $plugin = $fixture['plugin'];
+    $playlist = $fixture['playlist'];
+    $run = $fixture['run'];
+
+    $component = Livewire::test(ViewPluginRun::class, [
+        'record' => $plugin->id,
+        'run' => $run->id,
+    ])
+        ->assertOk()
+        ->assertSee('Results ready.');
+
+    expect($component->instance()->resultTables())->toHaveCount(1)
+        ->and($component->instance()->scopedPlaylistId())->toBe($playlist->id);
+});
+
 it('throws when ui_tables is not a list in the manifest', function () {
     expect(fn () => PluginManifest::fromArray([
         'id' => 'test-plugin',
@@ -628,6 +971,34 @@ it('validates dynamic option provider declarations on ui_table columns', functio
 
     expect($errors)->toContain('schema.ui_tables.0.columns.0 options_provider must be a non-empty string')
         ->and($errors)->toContain('schema.ui_tables.0.columns.0 depends_on must contain only non-empty strings');
+});
+
+it('validates ui_table export format declarations', function () {
+    $suffix = Str::lower(Str::random(6));
+    $tableName = "plugin_test_{$suffix}_items";
+
+    $manifest = PluginManifest::fromArray([
+        'id' => "test-{$suffix}",
+        'name' => 'Test Plugin',
+        'permissions' => [],
+        'schema' => [
+            'tables' => [['name' => $tableName, 'columns' => [['type' => 'id', 'name' => 'id']]]],
+            'ui_tables' => [[
+                'id' => 'items',
+                'table' => $tableName,
+                'label' => 'Items',
+                'export_formats' => ['csv', 'xlsx'],
+                'columns' => [],
+                'fields' => [],
+            ]],
+        ],
+    ], '/tmp/test-plugin');
+
+    $validator = app(PluginValidator::class);
+    $method = new ReflectionMethod($validator, 'validateSchema');
+    $errors = $method->invoke($validator, $manifest);
+
+    expect($errors)->toContain('schema.ui_tables.0.export_formats must contain only supported formats: csv, json.');
 });
 
 it('generates an exists rule for table_select settings fields', function () {

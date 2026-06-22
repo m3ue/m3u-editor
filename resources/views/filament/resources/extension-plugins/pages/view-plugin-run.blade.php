@@ -19,6 +19,8 @@
         $totals = collect(data_get($run->result, 'data.totals', []))
             ->filter(fn($value) => is_scalar($value));
         $reportPath = $this->reportPath();
+        $resultTables = $this->resultTables();
+        $scopedPlaylistId = $this->scopedPlaylistId();
     @endphp
 
     <div class="space-y-6">
@@ -159,6 +161,21 @@
                 </div>
             </div>
         </section>
+
+        @if($resultTables !== [])
+            <section class="space-y-4">
+                @foreach($resultTables as $table)
+                    @livewire(\App\Livewire\PluginTableInline::class, [
+                        'record' => $run->plugin,
+                        'tableId' => $table['id'],
+                        'runId' => $run->id,
+                        'playlistId' => $scopedPlaylistId,
+                        'readOnly' => true,
+                        'showHeading' => true,
+                    ], key('plugin-run-'.$run->id.'-table-'.$table['id'].'-playlist-'.($scopedPlaylistId ?? 'all')))
+                @endforeach
+            </section>
+        @endif
 
         <section class="grid gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
             <div

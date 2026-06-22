@@ -5,16 +5,20 @@ namespace App\Plugins;
 use App\Models\Plugin;
 use App\Models\PluginTableRecord;
 use Filament\Actions\DeleteAction;
+use Illuminate\Database\Eloquent\Builder as EloquentBuilder;
 use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
 use Throwable;
 
 class PluginUiTableRegistry
 {
+    public const EXPORT_FORMATS = ['csv', 'json'];
+
     /**
      * @return array<int, array<string, mixed>>
      */
@@ -33,6 +37,17 @@ class PluginUiTableRegistry
     {
         return collect($this->tablesFor($plugin))
             ->first(fn (array $table): bool => ($table['id'] ?? null) === $tableId);
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function runScopedTablesFor(Plugin $plugin): array
+    {
+        return collect($this->tablesFor($plugin))
+            ->filter(fn (array $table): bool => $this->hasColumns((string) ($table['table'] ?? ''), ['extension_plugin_run_id']))
+            ->values()
+            ->all();
     }
 
     public function tableNameFor(Plugin $plugin, string $tableIdOrName, bool $allowHostTable = false): ?string
@@ -56,6 +71,53 @@ class PluginUiTableRegistry
             $this->jsonColumnsFor($plugin, $tableName),
             $this->usesTimestamps($plugin, $tableName),
         );
+    }
+
+    public function applyTableScope(
+        EloquentBuilder|QueryBuilder $query,
+        Plugin $plugin,
+        string $tableName,
+        ?int $runId = null,
+        ?int $playlistId = null,
+    ): EloquentBuilder|QueryBuilder {
+        return $query
+            ->when(
+                $tableName !== '' && Schema::hasColumn($tableName, 'extension_plugin_id'),
+                fn (EloquentBuilder|QueryBuilder $query) => $query->where('extension_plugin_id', $plugin->id),
+            )
+            ->when(
+                $runId !== null && $tableName !== '' && Schema::hasColumn($tableName, 'extension_plugin_run_id'),
+                fn (EloquentBuilder|QueryBuilder $query) => $query->where('extension_plugin_run_id', $runId),
+            )
+            ->when(
+                $playlistId !== null && $tableName !== '' && Schema::hasColumn($tableName, 'playlist_id'),
+                fn (EloquentBuilder|QueryBuilder $query) => $query->where('playlist_id', $playlistId),
+            );
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function distinctColumnOptions(
+        Plugin $plugin,
+        string $tableName,
+        string $column,
+        ?int $runId = null,
+        ?int $playlistId = null,
+    ): array {
+        if (! $this->hasColumns($tableName, [$column])) {
+            return [];
+        }
+
+        return $this->applyTableScope(DB::table($tableName), $plugin, $tableName, $runId, $playlistId)
+            ->whereNotNull($column)
+            ->distinct()
+            ->orderBy($column)
+            ->limit(250)
+            ->pluck($column)
+            ->filter(fn (mixed $value): bool => (string) $value !== '')
+            ->mapWithKeys(fn (mixed $value): array => [(string) $value => Str::headline((string) $value)])
+            ->all();
     }
 
     public function lookupLabel(Plugin $plugin, array $lookup, mixed $value): ?string
@@ -163,6 +225,25 @@ class PluginUiTableRegistry
         return is_array($column['lookup'] ?? null)
             ? $this->lookupOptions($plugin, $column['lookup'])
             : [];
+    }
+
+    /**
+     * @param  array<string, mixed>  $definition
+     * @return array<int, string>
+     */
+    public function exportFormatsFor(array $definition): array
+    {
+        if (! array_key_exists('export_formats', $definition)) {
+            return self::EXPORT_FORMATS;
+        }
+
+        return collect(Arr::wrap($definition['export_formats']))
+            ->filter(fn (mixed $format): bool => is_string($format))
+            ->map(fn (string $format): string => strtolower(trim($format)))
+            ->filter(fn (string $format): bool => in_array($format, self::EXPORT_FORMATS, true))
+            ->unique()
+            ->values()
+            ->all();
     }
 
     public function prefillRows(Plugin $plugin, array $definition): void

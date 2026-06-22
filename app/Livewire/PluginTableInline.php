@@ -22,10 +22,12 @@ use Filament\Tables\Columns\ToggleColumn;
 use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Enums\RecordActionsPosition;
+use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Livewire\Component;
@@ -39,6 +41,14 @@ class PluginTableInline extends Component implements HasActions, HasForms, HasTa
     public Model $record;
 
     public string $tableId = '';
+
+    public ?int $runId = null;
+
+    public ?int $playlistId = null;
+
+    public bool $readOnly = false;
+
+    public bool $showHeading = false;
 
     /** @var array<string, mixed> */
     public array $tableDefinition = [];
@@ -67,10 +77,19 @@ class PluginTableInline extends Component implements HasActions, HasForms, HasTa
             ->heading($this->tableHeading())
             ->description($this->tableDescription())
             ->columns($this->tableColumns())
+            ->filters($this->tableFilters())
             ->headerActions($this->tableHeaderActions())
             ->recordActions($this->tableRecordActions(), position: RecordActionsPosition::BeforeCells);
 
         $tableName = $this->tableName();
+
+        if ($this->showHeading && ! empty($this->tableDefinition)) {
+            $table->heading((string) ($this->tableDefinition['label'] ?? Str::headline($this->tableId)));
+
+            if (filled($this->tableDefinition['description'] ?? null)) {
+                $table->description((string) $this->tableDefinition['description']);
+            }
+        }
 
         if ($tableName && Schema::hasColumn($tableName, 'updated_at')) {
             $table->defaultSort('updated_at', 'desc');
@@ -88,12 +107,13 @@ class PluginTableInline extends Component implements HasActions, HasForms, HasTa
         /** @var Plugin $plugin */
         $plugin = $this->record;
 
-        return $this->newModel()
-            ->newQuery()
-            ->when(
-                $tableName && Schema::hasColumn($tableName, 'extension_plugin_id'),
-                fn (Builder $query) => $query->where('extension_plugin_id', $plugin->id),
-            );
+        return app(PluginUiTableRegistry::class)->applyTableScope(
+            $this->newModel()->newQuery(),
+            $plugin,
+            $tableName ?? '',
+            $this->runId,
+            $this->playlistId,
+        );
     }
 
     /** @return array<int, TextColumn|IconColumn|ToggleColumn|SelectColumn> */
@@ -105,7 +125,7 @@ class PluginTableInline extends Component implements HasActions, HasForms, HasTa
                 $name = (string) $column['name'];
                 $label = (string) ($column['label'] ?? Str::headline($name));
 
-                if ((bool) ($column['editable'] ?? false)) {
+                if (! $this->readOnly && (bool) ($column['editable'] ?? false)) {
                     return $this->editableColumn($column, $label);
                 }
 
@@ -181,23 +201,30 @@ class PluginTableInline extends Component implements HasActions, HasForms, HasTa
     /** @return array<int, Action> */
     private function tableHeaderActions(): array
     {
-        if (empty($this->tableDefinition) || ($this->tableDefinition['create'] ?? true) === false) {
+        if (empty($this->tableDefinition)) {
             return [];
         }
 
-        return [
-            CreateAction::make()
+        $actions = [];
+
+        if (! $this->readOnly && ($this->tableDefinition['create'] ?? true) !== false) {
+            $actions[] = CreateAction::make()
                 ->model(PluginTableRecord::class)
                 ->label(__('New :model', ['model' => $this->modelLabel()]))
                 ->schema(fn (): array => $this->formComponents())
-                ->using(fn (array $data): Model => $this->newModel()->newQuery()->create($this->payloadForSave($data, creating: true))),
+                ->using(fn (array $data): Model => $this->newModel()->newQuery()->create($this->payloadForSave($data, creating: true)));
+        }
+
+        return [
+            ...$actions,
+            ...$this->exportActions(),
         ];
     }
 
     /** @return array<int, Action> */
     private function tableRecordActions(): array
     {
-        if (empty($this->tableDefinition)) {
+        if (empty($this->tableDefinition) || $this->readOnly) {
             return [];
         }
 
@@ -261,6 +288,14 @@ class PluginTableInline extends Component implements HasActions, HasForms, HasTa
             $data['extension_plugin_id'] = $this->record->getKey();
         }
 
+        if ($this->runId !== null && $tableName && Schema::hasColumn($tableName, 'extension_plugin_run_id')) {
+            $data['extension_plugin_run_id'] = $this->runId;
+        }
+
+        if ($this->playlistId !== null && $tableName && Schema::hasColumn($tableName, 'playlist_id')) {
+            $data['playlist_id'] = $this->playlistId;
+        }
+
         if ($creating && $tableName && Schema::hasColumn($tableName, 'user_id') && blank($data['user_id'] ?? null)) {
             $data['user_id'] = auth()->id();
         }
@@ -299,5 +334,124 @@ class PluginTableInline extends Component implements HasActions, HasForms, HasTa
         $plugin = $this->record;
 
         return $plugin;
+    }
+
+    /** @return array<int, SelectFilter> */
+    private function tableFilters(): array
+    {
+        $tableName = $this->tableName();
+        if (! $tableName) {
+            return [];
+        }
+
+        $filters = [];
+
+        if ($this->runId === null && Schema::hasColumn($tableName, 'extension_plugin_run_id')) {
+            $filters[] = SelectFilter::make('extension_plugin_run_id')
+                ->label(__('Run'))
+                ->options(fn (): array => $this->runFilterOptions());
+        }
+
+        if ($this->playlistId === null && Schema::hasColumn($tableName, 'playlist_id')) {
+            $filters[] = SelectFilter::make('playlist_id')
+                ->label(__('Playlist'))
+                ->options(fn (): array => $this->playlistFilterOptions());
+        }
+
+        foreach (['result_type' => __('Type'), 'decision' => __('Decision')] as $column => $label) {
+            if (Schema::hasColumn($tableName, $column)) {
+                $filters[] = SelectFilter::make($column)
+                    ->label($label)
+                    ->options(fn (): array => $this->filterOptions($column));
+            }
+        }
+
+        return $filters;
+    }
+
+    /** @return array<int, Action> */
+    private function exportActions(): array
+    {
+        if (empty($this->tableDefinition) || ! $this->tableName()) {
+            return [];
+        }
+
+        return collect(app(PluginUiTableRegistry::class)->exportFormatsFor($this->tableDefinition))
+            ->map(fn (string $format): Action => Action::make("export_{$format}")
+                ->label(__(Str::upper($format)))
+                ->icon('heroicon-o-arrow-down-tray')
+                ->color('gray')
+                ->url(fn (): string => $this->exportUrl($format)))
+            ->all();
+    }
+
+    private function exportUrl(string $format): string
+    {
+        return route('extension-plugins.tables.export', array_filter([
+            'plugin' => $this->pluginRecord(),
+            'table' => $this->tableId,
+            'format' => $format,
+            'run' => $this->runId,
+            'playlist' => $this->playlistId,
+        ], fn (mixed $value): bool => $value !== null));
+    }
+
+    /** @return array<string, string> */
+    private function runFilterOptions(): array
+    {
+        $options = $this->filterOptions('extension_plugin_run_id');
+        $ids = array_keys($options);
+        if ($ids === []) {
+            return [];
+        }
+
+        return DB::table('extension_plugin_runs')
+            ->whereIn('id', $ids)
+            ->orderByDesc('id')
+            ->get(['id', 'action', 'hook', 'status'])
+            ->mapWithKeys(function (object $run): array {
+                $label = $run->action ?: $run->hook ?: 'plugin run';
+
+                return [(string) $run->id => '#'.$run->id.' '.Str::headline($label).' ('.Str::headline((string) $run->status).')'];
+            })
+            ->union($options)
+            ->all();
+    }
+
+    /** @return array<string, string> */
+    private function playlistFilterOptions(): array
+    {
+        $options = $this->filterOptions('playlist_id');
+        $ids = array_keys($options);
+        if ($ids === [] || ! Schema::hasTable('playlists')) {
+            return $options;
+        }
+
+        $labels = DB::table('playlists')
+            ->whereIn('id', $ids)
+            ->orderBy('name')
+            ->pluck('name', 'id')
+            ->mapWithKeys(fn (mixed $label, mixed $id): array => [(string) $id => (string) $label]);
+
+        return collect($ids)
+            ->mapWithKeys(fn (string $id): array => [$id => $labels[$id] ?? "#{$id}"])
+            ->all();
+    }
+
+    /** @return array<string, string> */
+    private function filterOptions(string $column): array
+    {
+        $tableName = $this->tableName();
+        if (! $tableName) {
+            return [];
+        }
+
+        return app(PluginUiTableRegistry::class)->distinctColumnOptions(
+            $this->pluginRecord(),
+            $tableName,
+            $column,
+            $this->runId,
+            $this->playlistId,
+        );
     }
 }
