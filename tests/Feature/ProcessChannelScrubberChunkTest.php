@@ -18,11 +18,12 @@ beforeEach(function () {
     Queue::fake();
 
     $this->user = User::factory()->create();
-    $this->playlist = Playlist::factory()->for($this->user)->createQuietly();
+    $this->playlist = Playlist::withoutEvents(fn () => Playlist::factory()->for($this->user)->create());
+    $this->group = Group::factory()->for($this->playlist)->create();
 
-    $this->scrubber = ChannelScrubber::create([
+    $this->scrubber = ChannelScrubber::withoutEvents(fn () => ChannelScrubber::create([
         'name' => 'Test Scrubber',
-        'uuid' => 'test-batch-uuid',
+        'uuid' => '00000000-0000-4000-8000-000000000001',
         'status' => Status::Processing,
         'user_id' => $this->user->id,
         'playlist_id' => $this->playlist->id,
@@ -54,7 +55,7 @@ beforeEach(function () {
 
 it('marks a channel dead via ffprobe when ensureStreamStats returns empty', function () {
     // No URL and no stream_stats → ensureStreamStats() returns [] → dead
-    $channel = Channel::factory()->for($this->playlist)->create([
+    $channel = ($this->channel)([
         'user_id' => $this->user->id,
         'group_id' => $this->group->id,
         'enabled' => true,
@@ -88,7 +89,7 @@ it('marks a channel dead via ffprobe even when stream_stats are cached', functio
     // producing false negatives for dead streams that had been probed before.
     // The new lightweight ffprobe probe always makes a fresh network call — cached stats
     // are irrelevant. A null URL with cached stats is still dead.
-    $channel = Channel::factory()->for($this->playlist)->create([
+    $channel = ($this->channel)([
         'user_id' => $this->user->id,
         'group_id' => $this->group->id,
         'enabled' => true,
@@ -120,14 +121,14 @@ it('marks a channel dead via ffprobe even when stream_stats are cached', functio
 });
 
 it('increments dead_count on the scrubber for each dead channel', function () {
-    $dead1 = Channel::factory()->for($this->playlist)->create([
+    $dead1 = ($this->channel)([
         'user_id' => $this->user->id,
         'group_id' => $this->group->id,
         'url' => null,
         'url_custom' => null,
         'stream_stats' => null,
     ]);
-    $dead2 = Channel::factory()->for($this->playlist)->create([
+    $dead2 = ($this->channel)([
         'user_id' => $this->user->id,
         'group_id' => $this->group->id,
         'url' => null,
@@ -153,7 +154,7 @@ it('increments dead_count on the scrubber for each dead channel', function () {
 // ──────────────────────────────────────────────────────────────────────────────
 
 it('skips processing when the batch uuid does not match', function () {
-    $channel = Channel::factory()->for($this->playlist)->create([
+    $channel = ($this->channel)([
         'user_id' => $this->user->id,
         'group_id' => $this->group->id,
         'enabled' => true,
@@ -177,7 +178,7 @@ it('skips processing when the batch uuid does not match', function () {
 it('skips processing when the scrubber is cancelled', function () {
     $this->scrubber->update(['status' => Status::Cancelled]);
 
-    $channel = Channel::factory()->for($this->playlist)->create([
+    $channel = ($this->channel)([
         'user_id' => $this->user->id,
         'group_id' => $this->group->id,
         'enabled' => true,
@@ -203,7 +204,7 @@ it('skips processing when the scrubber is cancelled', function () {
 // ──────────────────────────────────────────────────────────────────────────────
 
 it('does not disable dead channels when disableDead is false', function () {
-    $channel = Channel::factory()->for($this->playlist)->create([
+    $channel = ($this->channel)([
         'user_id' => $this->user->id,
         'group_id' => $this->group->id,
         'enabled' => true,
@@ -241,7 +242,7 @@ it('does not disable dead channels when disableDead is false', function () {
 // ──────────────────────────────────────────────────────────────────────────────
 
 it('re-enables a previously disabled live channel when enableLive is true', function () {
-    $channel = Channel::factory()->for($this->playlist)->create([
+    $channel = ($this->channel)([
         'user_id' => $this->user->id,
         'group_id' => $this->group->id,
         'enabled' => false,
