@@ -166,6 +166,13 @@ class ArrSearch extends Component
 
     // ── Search ────────────────────────────────────────────────────────────────
 
+    public function clearSearch(): void
+    {
+        $this->searchTerm = '';
+        $this->results = [];
+        $this->isSearching = false;
+    }
+
     public function search(): void
     {
         if (strlen(trim($this->searchTerm)) < 2) {

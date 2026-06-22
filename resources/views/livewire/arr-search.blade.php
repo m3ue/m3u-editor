@@ -12,6 +12,11 @@
                         wire:model="searchTerm"
                         placeholder="{{ __('Search movies & TV series...') }}" />
                 </x-filament::input.wrapper>
+                @if (strlen(trim($searchTerm)) >= 2)
+                    <x-filament::button wire:click="clearSearch" color="gray" icon="heroicon-o-x-mark">
+                        {{ __('Clear') }}
+                    </x-filament::button>
+                @endif
                 <x-filament::button type="submit" wire:loading.attr="disabled" wire:target="search">
                     {{ __('Search') }}
                 </x-filament::button>

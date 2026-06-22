@@ -58,6 +58,8 @@ class ArrDiscover extends Component
 
     public bool $browseLoading = false;
 
+    public bool $loadFailed = false;
+
     // ── Browse Filters ────────────────────────────────────────────────────────
 
     public string $sortBy = 'popularity';
@@ -92,30 +94,45 @@ class ArrDiscover extends Component
         $this->guestMode = $guestMode;
         $this->guestIntegrationIds = $guestIntegrationIds;
 
+        $this->fetchDiscover();
+    }
+
+    public function reload(): void
+    {
+        $this->loadFailed = false;
+        $this->fetchDiscover();
+    }
+
+    private function fetchDiscover(): void
+    {
         $tmdb = app(TmdbService::class);
 
         if (! $tmdb->isConfigured()) {
             return;
         }
 
-        $libraryIds = $this->loadLibraryTmdbIds();
+        try {
+            $libraryIds = $this->loadLibraryTmdbIds();
 
-        $crossRef = function (array $items) use ($libraryIds): array {
-            return array_map(function ($item) use ($libraryIds) {
-                $tmdbId = (int) ($item['tmdb_id'] ?? 0);
-                $item['existsInLibrary'] = array_key_exists($tmdbId, $libraryIds);
-                $item['isDownloaded'] = $libraryIds[$tmdbId] ?? false;
+            $crossRef = function (array $items) use ($libraryIds): array {
+                return array_map(function ($item) use ($libraryIds) {
+                    $tmdbId = (int) ($item['tmdb_id'] ?? 0);
+                    $item['existsInLibrary'] = array_key_exists($tmdbId, $libraryIds);
+                    $item['isDownloaded'] = $libraryIds[$tmdbId] ?? false;
 
-                return $item;
-            }, $items);
-        };
+                    return $item;
+                }, $items);
+            };
 
-        $this->trendingItems = $crossRef($tmdb->getTrending());
-        $this->popularMovies = $crossRef($tmdb->getPopularMovies());
-        $this->popularTv = $crossRef($tmdb->getPopularTv());
-        $this->upcomingMovies = $crossRef($tmdb->getUpcomingMovies());
-        $this->movieGenres = $tmdb->getMovieGenres();
-        $this->tvGenres = $tmdb->getTvGenres();
+            $this->trendingItems = $crossRef($tmdb->getTrending());
+            $this->popularMovies = $crossRef($tmdb->getPopularMovies());
+            $this->popularTv = $crossRef($tmdb->getPopularTv());
+            $this->upcomingMovies = $crossRef($tmdb->getUpcomingMovies());
+            $this->movieGenres = $tmdb->getMovieGenres();
+            $this->tvGenres = $tmdb->getTvGenres();
+        } catch (\Exception) {
+            $this->loadFailed = true;
+        }
     }
 
     /**
