@@ -231,13 +231,36 @@ class PluginTableInline extends Component implements HasActions, HasForms, HasTa
         }
 
         if (($this->tableDefinition['delete'] ?? true) !== false) {
-            $actions[] = DeleteAction::make()
-                ->button()
-                ->hiddenLabel()
-                ->size('sm');
+            $actions[] = $this->deleteAction();
         }
 
         return $actions;
+    }
+
+    private function deleteAction(): DeleteAction
+    {
+        $action = DeleteAction::make()
+            ->button()
+            ->hiddenLabel()
+            ->size('sm');
+
+        if (! app(PluginUiTableRegistry::class)->clearsRecordOnDelete($this->tableDefinition)) {
+            return $action;
+        }
+
+        $label = (string) ($this->tableDefinition['delete_label'] ?? __('Clear :model', ['model' => $this->modelLabel()]));
+        $icon = (string) ($this->tableDefinition['delete_icon'] ?? 'heroicon-o-x-mark');
+
+        return $action
+            ->label($label)
+            ->icon($icon)
+            ->color((string) ($this->tableDefinition['delete_color'] ?? 'gray'))
+            ->modalHeading($label)
+            ->modalIcon($icon)
+            ->modalDescription((string) ($this->tableDefinition['delete_description'] ?? __('This will clear the saved configuration for this row without removing it from the table.')))
+            ->modalSubmitActionLabel((string) ($this->tableDefinition['delete_submit_label'] ?? __('Clear')))
+            ->successNotificationTitle((string) ($this->tableDefinition['delete_success_message'] ?? __(':model cleared', ['model' => $this->modelLabel()])))
+            ->using(fn (PluginTableRecord $record): PluginTableRecord => app(PluginUiTableRegistry::class)->clearRecordForDelete($record, $this->tableDefinition));
     }
 
     /** @return array<int, mixed> */
