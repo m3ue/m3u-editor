@@ -110,6 +110,7 @@ class ProcessChannelScrubber implements ShouldQueue
                     probeTimeout: $scrubber->probe_timeout ?? 10,
                     disableDead: $scrubber->disable_dead ?? true,
                     enableLive: $scrubber->enable_live ?? false,
+                    protectFailoverChannels: $scrubber->protect_failover_channels ?? true,
                 ))
                 ->all();
 

@@ -291,7 +291,8 @@ class ChannelScrubberResource extends Resource implements CopilotResource
                 ->label(__('Playlist'))
                 ->helperText(__('Select the playlist whose channels you want to scrub.'))
                 ->options(Playlist::where('user_id', Auth::id())->get(['name', 'id'])->pluck('name', 'id'))
-                ->searchable(),
+                ->searchable()
+                ->live(),
             Toggle::make('recurring')
                 ->label(__('Recurring'))
                 ->inline(false)
@@ -380,6 +381,33 @@ class ChannelScrubberResource extends Resource implements CopilotResource
                                 ->helperText(__('Re-enable disabled channels that are found to be live. Requires "Scan all channels" to be on.'))
                                 ->default(false)
                                 ->visible(fn (Get $get): bool => (bool) $get('scan_all')),
+                            Toggle::make('protect_failover_channels')
+                                ->label(__('Keep failover channels hidden'))
+                                ->hintIcon(
+                                    'heroicon-s-information-circle',
+                                    tooltip: 'When re-enabling live channels, channels that are disabled because they are configured as failovers will be logged as live but left disabled.',
+                                )
+                                ->helperText(__('Prevents the scrubber from undoing auto-merge failover deactivation while still counting live failover channels as live.'))
+                                ->default(true)
+                                ->visible(fn (Get $get): bool => (bool) $get('scan_all') && (bool) $get('enable_live')),
+                            Toggle::make('rebuild_failovers_after_scan')
+                                ->label(__('Rebuild failovers after scan'))
+                                ->columnSpanFull()
+                                ->hintIcon(
+                                    'heroicon-s-information-circle',
+                                    tooltip: 'After a successful scrubber scan, dispatch the playlist native auto-merge job so failovers can be rebuilt using fresh scan results.',
+                                )
+                                ->helperText(__('Runs native auto-merge after this scrubber completes when playlist auto-merge is enabled.'))
+                                ->hidden(function (Get $get): ?string {
+                                    $playlistId = $get('playlist_id');
+                                    if (! $playlistId) {
+                                        return null;
+                                    }
+                                    $playlist = Playlist::find($playlistId);
+
+                                    return $playlist && ! $playlist->auto_merge_channels_enabled;
+                                })
+                                ->default(false),
                         ]),
                 ]),
         ];

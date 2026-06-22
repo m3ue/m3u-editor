@@ -213,6 +213,7 @@ class SyncListener
         $preferredPlaylistId = $config['preferred_playlist_id'] ?? null;
         $failoverPlaylists = $config['failover_playlists'] ?? [];
         $deactivateFailover = (bool) ($playlist->auto_merge_deactivate_failover ?? false);
+        $scrubberAwareMasterSelection = (bool) ($config['scrubber_aware_master_selection'] ?? false);
 
         $playlists = collect([['playlist_failover_id' => $playlist->id]]);
 
@@ -239,6 +240,7 @@ class SyncListener
             fallbackMergeConfig: PlaylistService::buildMergeFallbackConfig($config),
             contentType: ($config['merge_key'] ?? 'stream_id') === 'tmdb_id' ? 'vod' : 'live',
             mergeKey: $config['merge_key'] ?? 'stream_id',
+            scrubberAwareMasterSelection: $scrubberAwareMasterSelection,
         );
     }
 

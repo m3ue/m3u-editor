@@ -242,6 +242,102 @@ it('discovers and validates a generated local plugin fixture', function () {
     }
 });
 
+it('resolves dynamic select options from a trusted disabled plugin', function () {
+    $pluginId = 'select-options-'.Str::lower(Str::random(6));
+    $paths = pluginReviewFixturePaths($pluginId);
+    $classSegment = Str::studly(str_replace('-', ' ', $pluginId));
+
+    File::deleteDirectory($paths['source']);
+    File::ensureDirectoryExists($paths['source']);
+
+    $manifest = [
+        'id' => $pluginId,
+        'name' => 'Select Options Fixture',
+        'version' => '0.1.0',
+        'description' => 'Temporary dynamic select options fixture.',
+        'api_version' => config('plugins.api_version'),
+        'entrypoint' => 'Plugin.php',
+        'class' => "AppLocalPlugins\\{$classSegment}\\Plugin",
+        'capabilities' => [],
+        'hooks' => [],
+        'permissions' => [],
+        'settings' => [[
+            'id' => 'provider_source',
+            'label' => 'Provider Source',
+            'type' => 'select',
+            'options_provider' => 'fixture_sources',
+            'depends_on' => ['country'],
+        ]],
+        'actions' => [],
+        'schema' => [
+            'tables' => [],
+        ],
+        'data_ownership' => [
+            'plugin_id' => $pluginId,
+            'table_prefix' => 'plugin_'.str_replace('-', '_', $pluginId).'_',
+            'tables' => [],
+            'directories' => [],
+            'files' => [],
+            'default_cleanup_policy' => 'preserve',
+        ],
+    ];
+
+    $pluginSource = <<<PHP
+<?php
+
+namespace AppLocalPlugins\\{$classSegment};
+
+use App\\Plugins\\Contracts\\PluginInterface;
+use App\\Plugins\\Contracts\\PluginSelectOptionsProviderInterface;
+use App\\Plugins\\Support\\PluginActionResult;
+use App\\Plugins\\Support\\PluginExecutionContext;
+use App\\Plugins\\Support\\PluginSelectOptionsContext;
+
+class Plugin implements PluginInterface, PluginSelectOptionsProviderInterface
+{
+    public function runAction(string \$action, array \$payload, PluginExecutionContext \$context): PluginActionResult
+    {
+        return PluginActionResult::success('Fixture plugin action completed.');
+    }
+
+    public function selectOptions(string \$provider, PluginSelectOptionsContext \$context): array
+    {
+        if (\$provider !== 'fixture_sources') {
+            return [];
+        }
+
+        return [
+            'alpha' => 'Alpha '.\$context->value('country', 'unknown'),
+        ];
+    }
+}
+PHP;
+
+    File::put(
+        $paths['source'].'/plugin.json',
+        json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR).PHP_EOL,
+    );
+    File::put($paths['source'].'/Plugin.php', $pluginSource);
+
+    try {
+        approvePluginReviewForTests($paths['source']);
+        $plugin = app(PluginManager::class)->findPluginById($pluginId);
+
+        expect($plugin)->not->toBeNull()
+            ->and($plugin->enabled)->toBeFalse();
+
+        $options = app(PluginManager::class)->selectOptions(
+            $plugin,
+            'fixture_sources',
+            ['country' => 'uk'],
+        );
+
+        expect($options)->toBe(['alpha' => 'Alpha uk']);
+    } finally {
+        cleanupReviewFixturePlugin($pluginId);
+    }
+});
+
 it('rejects top-level executable plugin php while staging a directory review', function () {
     $pluginId = 'review-safety-'.Str::lower(Str::random(6));
     $paths = createReviewFixturePlugin($pluginId, withSideEffect: true);

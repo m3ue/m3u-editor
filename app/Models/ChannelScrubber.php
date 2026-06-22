@@ -25,6 +25,8 @@ class ChannelScrubber extends Model
             'probe_timeout' => 'integer',
             'disable_dead' => 'boolean',
             'enable_live' => 'boolean',
+            'protect_failover_channels' => 'boolean',
+            'rebuild_failovers_after_scan' => 'boolean',
             'channel_count' => 'integer',
             'dead_count' => 'integer',
             'user_id' => 'integer',
