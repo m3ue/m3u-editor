@@ -399,6 +399,7 @@ function declaredRunResultTableUiPlugin(): array
                 ['name' => 'decision', 'label' => 'Decision', 'sortable' => true],
                 ['name' => 'title', 'label' => 'Title', 'searchable' => true],
                 ['name' => 'score', 'label' => 'Score', 'sortable' => true],
+                ['name' => 'details', 'label' => 'Details'],
             ],
             'fields' => [],
         ]],
@@ -822,7 +823,7 @@ it('streams plugin-declared result table exports on demand', function () {
 
     $csv = $csvResponse->streamedContent();
     expect($csv)
-        ->toContain('title')
+        ->toContain('Title')
         ->toContain('Included Result')
         ->not->toContain('Other Run Result')
         ->not->toContain('Other Playlist Result');

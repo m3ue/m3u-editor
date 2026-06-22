@@ -9,6 +9,7 @@ use App\Plugins\PluginUiTableRegistry;
 use DateTimeInterface;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -40,7 +41,7 @@ class PluginTableExportController extends Controller
             $playlistId,
         );
 
-        $columns = Schema::getColumnListing($tableName);
+        $columns = $this->declaredColumns($definition, $tableName);
         $filename = $this->filename($plugin, $table, $format, $run?->id, $playlistId);
 
         return $format === 'json'
@@ -88,18 +89,18 @@ class PluginTableExportController extends Controller
     }
 
     /**
-     * @param  array<int, string>  $columns
+     * @param  array<int, array{name: string, label: string}>  $columns
      */
     private function csvResponse(Builder $query, string $tableName, array $columns, string $filename): StreamedResponse
     {
         return response()->streamDownload(function () use ($query, $tableName, $columns): void {
             $stream = fopen('php://output', 'w');
-            fputcsv($stream, $columns);
+            fputcsv($stream, array_column($columns, 'label'));
 
             $count = 0;
             foreach ($this->orderedQuery($query, $tableName)->cursor() as $record) {
                 fputcsv($stream, collect($columns)
-                    ->map(fn (string $column): string => $this->csvValue($record->getAttribute($column)))
+                    ->map(fn (array $col): string => $this->csvValue(data_get($record->toArray(), $col['name'])))
                     ->all());
 
                 if (++$count % 1000 === 0) {
@@ -114,7 +115,7 @@ class PluginTableExportController extends Controller
     }
 
     /**
-     * @param  array<int, string>  $columns
+     * @param  array<int, array{name: string, label: string}>  $columns
      */
     private function jsonResponse(Builder $query, string $tableName, array $columns, string $filename): StreamedResponse
     {
@@ -124,8 +125,16 @@ class PluginTableExportController extends Controller
 
             $count = 0;
             foreach ($this->orderedQuery($query, $tableName)->cursor() as $record) {
+                try {
+                    $payload = json_encode($this->jsonPayload($record, $columns), JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+                } catch (\JsonException $e) {
+                    Log::warning('Plugin table export JSON encode failed.', ['error' => $e->getMessage()]);
+
+                    continue;
+                }
+
                 echo $first ? '' : ',';
-                echo json_encode($this->jsonPayload($record, $columns), JSON_UNESCAPED_SLASHES);
+                echo $payload;
                 $first = false;
 
                 if (++$count % 1000 === 0) {
@@ -153,13 +162,37 @@ class PluginTableExportController extends Controller
     }
 
     /**
-     * @param  array<int, string>  $columns
+     * @param  array<int, array{name: string, label: string}>  $columns
      * @return array<string, mixed>
      */
     private function jsonPayload(PluginTableRecord $record, array $columns): array
     {
         return collect($columns)
-            ->mapWithKeys(fn (string $column): array => [$column => $this->jsonValue($record->getAttribute($column))])
+            ->mapWithKeys(fn (array $col): array => [$col['name'] => $this->jsonValue(data_get($record->toArray(), $col['name']))])
+            ->all();
+    }
+
+    /**
+     * @param  array<string, mixed>  $definition
+     * @return array<int, array{name: string, label: string}>
+     */
+    private function declaredColumns(array $definition, string $tableName): array
+    {
+        $declared = collect($definition['columns'] ?? [])
+            ->filter(fn (mixed $col): bool => is_array($col) && filled($col['name'] ?? null))
+            ->map(fn (array $col): array => [
+                'name' => (string) $col['name'],
+                'label' => (string) ($col['label'] ?? $col['name']),
+            ])
+            ->values()
+            ->all();
+
+        if ($declared !== []) {
+            return $declared;
+        }
+
+        return collect(Schema::getColumnListing($tableName))
+            ->map(fn (string $col): array => ['name' => $col, 'label' => $col])
             ->all();
     }
 
