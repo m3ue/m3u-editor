@@ -6,6 +6,7 @@ use App\Plugins\PluginValidator;
 use Filament\Forms\Components\TextInput;
 use Filament\Schemas\Components\Section;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 
 it('renders a text field with secret true as a password input', function () {
@@ -140,6 +141,46 @@ it('rejects a section containing a non-array nested field', function () {
         ], $fieldTypes, 'settings');
 
     expect($errors)->toContain('settings.my_section section fields must be objects');
+});
+
+it('allows select fields backed by plugin option providers', function () {
+    $validator = app(PluginValidator::class);
+
+    $fieldTypes = config('plugins.field_types');
+
+    $errors = (new ReflectionMethod($validator, 'validateFieldDefinition'))
+        ->invoke($validator, [
+            'id' => 'provider_source',
+            'type' => 'select',
+            'label' => 'Provider Source',
+            'options_provider' => 'fixture_sources',
+            'depends_on' => ['provider', 'country'],
+        ], $fieldTypes, 'settings');
+
+    expect($errors)->toBe([]);
+});
+
+it('does not apply static option validation to provider backed select fields', function () {
+    $plugin = new Plugin([
+        'settings_schema' => [
+            [
+                'id' => 'provider_source',
+                'type' => 'select',
+                'label' => 'Provider Source',
+                'options_provider' => 'fixture_sources',
+                'depends_on' => ['provider', 'country'],
+            ],
+        ],
+        'settings' => [],
+    ]);
+
+    $rules = app(PluginSchemaMapper::class)->settingsRules($plugin);
+
+    expect(Validator::make([
+        'settings' => [
+            'provider_source' => 'dynamic-value',
+        ],
+    ], $rules)->passes())->toBeTrue();
 });
 
 it('allows a section without an id, using the label as the error path identifier', function () {
