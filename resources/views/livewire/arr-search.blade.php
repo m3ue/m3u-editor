@@ -6,14 +6,16 @@
         <div class="space-y-6">
 
             {{-- ── Search Bar ─────────────────────────────────────────────── --}}
-            <form wire:submit.prevent="search" class="relative">
-                <input type="text" wire:model.live.debounce.300ms="searchTerm"
-                    placeholder="{{ __('Search movies & TV series...') }}"
-                    class="w-full pl-10 pr-4 py-3 rounded-lg border border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 focus:border-primary-500 focus:ring-primary-500 text-sm">
-                <x-heroicon-o-magnifying-glass class="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-                <div wire:loading wire:target="search" class="absolute right-3 top-1/2 -translate-y-1/2">
-                    <x-filament::loading-indicator class="h-5 w-5 text-primary-500" />
-                </div>
+            <form wire:submit.prevent="search" class="flex gap-2">
+                <x-filament::input.wrapper prefix-icon="heroicon-o-magnifying-glass" class="flex-1">
+                    <x-filament::input
+                        type="text"
+                        wire:model="searchTerm"
+                        placeholder="{{ __('Search movies & TV series...') }}" />
+                </x-filament::input.wrapper>
+                <x-filament::button type="submit" wire:loading.attr="disabled" wire:target="search">
+                    {{ __('Search') }}
+                </x-filament::button>
             </form>
 
             {{-- ── Search Results ──────────────────────────────────────────── --}}

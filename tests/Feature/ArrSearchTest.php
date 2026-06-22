@@ -61,7 +61,7 @@ it('searches all enabled integrations simultaneously', function () {
     ]);
 
     $component = Livewire::test(ArrSearch::class)
-        ->set('searchTerm', 'breaking');
+        ->set('searchTerm', 'breaking')->call('search');
 
     // Both integrations contribute results
     expect($component->get('results'))->toHaveCount(2);
@@ -84,7 +84,7 @@ it('searches the Sonarr API for TV series', function () {
     ]);
 
     $component = Livewire::test(ArrSearch::class)
-        ->set('searchTerm', 'breaking');
+        ->set('searchTerm', 'breaking')->call('search');
 
     expect($component->get('results.0.title'))->toBe('Breaking Bad');
     expect($component->get('results.0.tvdbId'))->toBe(12345);
@@ -101,7 +101,7 @@ it('marks sonarr results as existsInLibrary when the API returns an id', functio
     ]);
 
     Livewire::test(ArrSearch::class)
-        ->set('searchTerm', 'breaking')
+        ->set('searchTerm', 'breaking')->call('search')
         ->assertSet('results.0.existsInLibrary', true);
 });
 
@@ -122,7 +122,7 @@ it('surfaces sonarr episode statistics when series is in library', function () {
     ]);
 
     $component = Livewire::test(ArrSearch::class)
-        ->set('searchTerm', 'breaking');
+        ->set('searchTerm', 'breaking')->call('search');
 
     expect($component->get('results.0.episodeFileCount'))->toBe(5);
     expect($component->get('results.0.totalEpisodeCount'))->toBe(62);
@@ -136,7 +136,7 @@ it('returns zero episode counts for sonarr results not in library', function () 
     ]);
 
     $component = Livewire::test(ArrSearch::class)
-        ->set('searchTerm', 'breaking');
+        ->set('searchTerm', 'breaking')->call('search');
 
     expect($component->get('results.0.episodeFileCount'))->toBe(0);
     expect($component->get('results.0.totalEpisodeCount'))->toBe(0);
@@ -155,7 +155,7 @@ it('searches the Radarr API for movies', function () {
     ]);
 
     $component = Livewire::test(ArrSearch::class)
-        ->set('searchTerm', 'inception');
+        ->set('searchTerm', 'inception')->call('search');
 
     expect($component->get('results.0.title'))->toBe('Inception');
     expect($component->get('results.0.tmdbId'))->toBe(27205);
@@ -177,7 +177,7 @@ it('marks radarr results as existsInLibrary when the API returns an id', functio
     ]);
 
     $component = Livewire::test(ArrSearch::class)
-        ->set('searchTerm', 'inception');
+        ->set('searchTerm', 'inception')->call('search');
 
     // Find the Radarr result
     $radarrResult = collect($component->get('results'))->firstWhere('integrationType', 'radarr');
@@ -197,7 +197,7 @@ it('surfaces radarr hasFile when the movie file exists on disk', function () {
     ]);
 
     $component = Livewire::test(ArrSearch::class)
-        ->set('searchTerm', 'inception');
+        ->set('searchTerm', 'inception')->call('search');
 
     $radarrResult = collect($component->get('results'))->firstWhere('integrationType', 'radarr');
     expect($radarrResult['hasFile'])->toBeTrue();
@@ -216,7 +216,7 @@ it('returns hasFile false for radarr movies not yet downloaded', function () {
     ]);
 
     $component = Livewire::test(ArrSearch::class)
-        ->set('searchTerm', 'inception');
+        ->set('searchTerm', 'inception')->call('search');
 
     $radarrResult = collect($component->get('results'))->firstWhere('integrationType', 'radarr');
     expect($radarrResult['hasFile'])->toBeFalse();
@@ -245,7 +245,7 @@ it('surfaces radarr fileQuality and fileSize when movieFile is present', functio
     ]);
 
     $component = Livewire::test(ArrSearch::class)
-        ->set('searchTerm', 'inception');
+        ->set('searchTerm', 'inception')->call('search');
 
     $radarrResult = collect($component->get('results'))->firstWhere('integrationType', 'radarr');
     expect($radarrResult['fileQuality'])->toBe('Bluray-1080p');
@@ -265,7 +265,7 @@ it('returns null fileQuality and fileSize for radarr movies without a file', fun
     ]);
 
     $component = Livewire::test(ArrSearch::class)
-        ->set('searchTerm', 'inception');
+        ->set('searchTerm', 'inception')->call('search');
 
     $radarrResult = collect($component->get('results'))->firstWhere('integrationType', 'radarr');
     expect($radarrResult['fileQuality'])->toBeNull();
@@ -290,14 +290,14 @@ it('surfaces sonarr sizeOnDisk when series is in library', function () {
     ]);
 
     $component = Livewire::test(ArrSearch::class)
-        ->set('searchTerm', 'breaking');
+        ->set('searchTerm', 'breaking')->call('search');
 
     expect($component->get('results.0.sizeOnDisk'))->toBe(42949672960);
 });
 
 it('does not search when term is too short', function () {
     Livewire::test(ArrSearch::class)
-        ->set('searchTerm', 'a')
+        ->set('searchTerm', 'a')->call('search')
         ->assertSet('results', []);
 });
 
@@ -309,7 +309,7 @@ it('skips failed integrations without throwing', function () {
     ]);
 
     Livewire::test(ArrSearch::class)
-        ->set('searchTerm', 'breaking')
+        ->set('searchTerm', 'breaking')->call('search')
         ->assertSet('results', []);
 });
 
@@ -322,7 +322,7 @@ it('submits a request to Sonarr using the result integration', function () {
     ]);
 
     Livewire::test(ArrSearch::class)
-        ->set('searchTerm', 'breaking')
+        ->set('searchTerm', 'breaking')->call('search')
         ->call('request', 0);
 
     Http::assertSent(function ($request) {
@@ -356,7 +356,7 @@ it('submits a request to Radarr using the result integration', function () {
     ]);
 
     Livewire::test(ArrSearch::class)
-        ->set('searchTerm', 'inception')
+        ->set('searchTerm', 'inception')->call('search')
         ->call('request', 0);
 
     Http::assertSent(function ($request) {
@@ -415,7 +415,7 @@ it('guest mode restricts search to provided integration IDs', function () {
     $component = Livewire::test(ArrSearch::class, [
         'guestMode' => true,
         'guestIntegrationIds' => [$this->sonarr->id],
-    ])->set('searchTerm', 'guest');
+    ])->set('searchTerm', 'guest')->call('search');
 
     // Only results from the guest integration, not from $otherSonarr
     expect($component->get('results'))->toHaveCount(1);
@@ -463,7 +463,7 @@ it('openDetail sets showDetail, detailResult, and detailIntegrationId', function
     ]);
 
     $component = Livewire::test(ArrSearch::class)
-        ->set('searchTerm', 'breaking')
+        ->set('searchTerm', 'breaking')->call('search')
         ->call('openDetail', 0);
 
     $component->assertSet('showDetail', true)
@@ -489,7 +489,7 @@ it('openDetail pre-checks all seasons except specials', function () {
     ]);
 
     $component = Livewire::test(ArrSearch::class)
-        ->set('searchTerm', 'breaking')
+        ->set('searchTerm', 'breaking')->call('search')
         ->call('openDetail', 0);
 
     expect($component->get('selectedSeasons.0'))->toBeFalse(); // specials off
@@ -505,7 +505,7 @@ it('closeDetail resets all detail state', function () {
     ]);
 
     Livewire::test(ArrSearch::class)
-        ->set('searchTerm', 'show')
+        ->set('searchTerm', 'show')->call('search')
         ->call('openDetail', 0)
         ->call('closeDetail')
         ->assertSet('showDetail', false)
@@ -530,7 +530,7 @@ it('toggleAllSeasons checks all seasons', function () {
     ]);
 
     $component = Livewire::test(ArrSearch::class)
-        ->set('searchTerm', 'show')
+        ->set('searchTerm', 'show')->call('search')
         ->call('openDetail', 0)
         ->call('toggleAllSeasons', true);
 
@@ -553,7 +553,7 @@ it('toggleAllSeasons unchecks all seasons', function () {
     ]);
 
     $component = Livewire::test(ArrSearch::class)
-        ->set('searchTerm', 'show')
+        ->set('searchTerm', 'show')->call('search')
         ->call('openDetail', 0)
         ->call('toggleAllSeasons', false);
 
@@ -579,7 +579,7 @@ it('requestDetail sends full seasons payload with monitored flags', function () 
     ]);
 
     Livewire::test(ArrSearch::class)
-        ->set('searchTerm', 'breaking')
+        ->set('searchTerm', 'breaking')->call('search')
         ->call('openDetail', 0)
         ->call('toggleAllSeasons', false)  // deselect all
         ->set('selectedSeasons.1', true)   // select only season 1
@@ -613,7 +613,7 @@ it('requestDetail shows warning when no seasons are selected', function () {
     ]);
 
     Livewire::test(ArrSearch::class)
-        ->set('searchTerm', 'show')
+        ->set('searchTerm', 'show')->call('search')
         ->call('openDetail', 0)
         ->call('toggleAllSeasons', false)
         ->call('requestDetail')
@@ -636,7 +636,7 @@ it('requestDetail closes the panel after successful submission', function () {
     ]);
 
     Livewire::test(ArrSearch::class)
-        ->set('searchTerm', 'show')
+        ->set('searchTerm', 'show')->call('search')
         ->call('openDetail', 0)
         ->call('requestDetail')
         ->assertSet('showDetail', false)
@@ -670,7 +670,7 @@ it('loadDetailEpisodes fetches episodes from TV Maze by tvdbId', function () {
     ]);
 
     $component = Livewire::test(ArrSearch::class)
-        ->set('searchTerm', 'breaking')
+        ->set('searchTerm', 'breaking')->call('search')
         ->call('openDetail', 0)
         ->call('loadDetailEpisodes');
 
@@ -693,7 +693,7 @@ it('loadDetailEpisodes strips HTML from episode overviews', function () {
     ]);
 
     $component = Livewire::test(ArrSearch::class)
-        ->set('searchTerm', 'show')
+        ->set('searchTerm', 'show')->call('search')
         ->call('openDetail', 0)
         ->call('loadDetailEpisodes');
 
@@ -724,7 +724,7 @@ it('loadDetailEpisodes fetches cast alongside episodes', function () {
     ]);
 
     $component = Livewire::test(ArrSearch::class)
-        ->set('searchTerm', 'breaking')
+        ->set('searchTerm', 'breaking')->call('search')
         ->call('openDetail', 0)
         ->call('loadDetailEpisodes');
 
@@ -750,7 +750,7 @@ it('loadDetailEpisodes excludes voice actors and self appearances from cast', fu
     ]);
 
     $component = Livewire::test(ArrSearch::class)
-        ->set('searchTerm', 'show')
+        ->set('searchTerm', 'show')->call('search')
         ->call('openDetail', 0)
         ->call('loadDetailEpisodes');
 
@@ -767,7 +767,7 @@ it('loadDetailEpisodes returns empty arrays when TV Maze lookup fails', function
     ]);
 
     $component = Livewire::test(ArrSearch::class)
-        ->set('searchTerm', 'breaking')
+        ->set('searchTerm', 'breaking')->call('search')
         ->call('openDetail', 0)
         ->call('loadDetailEpisodes');
 
@@ -788,7 +788,7 @@ it('loadDetailEpisodes is a no-op for Radarr results', function () {
     ]);
 
     $component = Livewire::test(ArrSearch::class)
-        ->set('searchTerm', 'inception')
+        ->set('searchTerm', 'inception')->call('search')
         ->call('openDetail', 0)
         ->call('loadDetailEpisodes');
 
@@ -813,7 +813,7 @@ it('closeDetail resets detailEpisodes and detailCast', function () {
     ]);
 
     Livewire::test(ArrSearch::class)
-        ->set('searchTerm', 'show')
+        ->set('searchTerm', 'show')->call('search')
         ->call('openDetail', 0)
         ->call('loadDetailEpisodes')
         ->call('closeDetail')
@@ -837,7 +837,7 @@ it('loadDetailEpisodes fetches Sonarr episode status for in-library series', fun
     ]);
 
     $component = Livewire::test(ArrSearch::class)
-        ->set('searchTerm', 'breaking')
+        ->set('searchTerm', 'breaking')->call('search')
         ->call('openDetail', 0)
         ->call('loadDetailEpisodes');
 
@@ -858,7 +858,7 @@ it('loadDetailEpisodes does not fetch Sonarr episode status when series is not i
     ]);
 
     $component = Livewire::test(ArrSearch::class)
-        ->set('searchTerm', 'breaking')
+        ->set('searchTerm', 'breaking')->call('search')
         ->call('openDetail', 0)
         ->call('loadDetailEpisodes');
 
@@ -880,7 +880,7 @@ it('closeDetail resets detailSonarrEpisodeStatus', function () {
     ]);
 
     Livewire::test(ArrSearch::class)
-        ->set('searchTerm', 'show')
+        ->set('searchTerm', 'show')->call('search')
         ->call('openDetail', 0)
         ->call('loadDetailEpisodes')
         ->call('closeDetail')
@@ -910,7 +910,7 @@ it('loadDetailEpisodes populates detailSonarrEpisodeFileInfo when episodeFile is
     ]);
 
     $component = Livewire::test(ArrSearch::class)
-        ->set('searchTerm', 'breaking')
+        ->set('searchTerm', 'breaking')->call('search')
         ->call('openDetail', 0)
         ->call('loadDetailEpisodes');
 
@@ -938,7 +938,7 @@ it('closeDetail resets detailSonarrEpisodeFileInfo', function () {
     ]);
 
     Livewire::test(ArrSearch::class)
-        ->set('searchTerm', 'show')
+        ->set('searchTerm', 'show')->call('search')
         ->call('openDetail', 0)
         ->call('loadDetailEpisodes')
         ->call('closeDetail')
@@ -963,7 +963,7 @@ it('requestEpisode triggers EpisodeSearch for a series already in library', func
     ]);
 
     Livewire::test(ArrSearch::class)
-        ->set('searchTerm', 'breaking')
+        ->set('searchTerm', 'breaking')->call('search')
         ->call('openDetail', 0)
         ->call('requestEpisode', 1, 2)
         ->assertNotified();
@@ -993,7 +993,7 @@ it('requestEpisode adds the series first when not in library', function () {
     ]);
 
     Livewire::test(ArrSearch::class)
-        ->set('searchTerm', 'breaking')
+        ->set('searchTerm', 'breaking')->call('search')
         ->call('openDetail', 0)
         ->call('requestEpisode', 1, 1)
         ->assertNotified();
@@ -1030,7 +1030,7 @@ it('requestDetail is a no-op for Radarr results', function () {
     ]);
 
     Livewire::test(ArrSearch::class)
-        ->set('searchTerm', 'inception')
+        ->set('searchTerm', 'inception')->call('search')
         ->call('openDetail', 0)
         ->call('requestDetail')
         ->assertSet('showDetail', true); // panel stays open, nothing submitted
@@ -1450,7 +1450,7 @@ it('livewire triggerAutomaticSearch triggers search for library item', function 
     ]);
 
     Livewire::test(ArrSearch::class)
-        ->set('searchTerm', 'breaking')
+        ->set('searchTerm', 'breaking')->call('search')
         ->call('openDetail', 0)
         ->call('triggerAutomaticSearch')
         ->assertNotified();
@@ -1468,7 +1468,7 @@ it('livewire triggerAutomaticSearch is blocked in guest mode', function () {
     ]);
 
     Livewire::test(ArrSearch::class, ['guestMode' => true, 'guestIntegrationIds' => [$this->sonarr->id]])
-        ->set('searchTerm', 'breaking')
+        ->set('searchTerm', 'breaking')->call('search')
         ->call('openDetail', 0)
         ->call('triggerAutomaticSearch');
 
@@ -1496,7 +1496,7 @@ it('livewire loadDetailReleases fetches releases for library item', function () 
     ]);
 
     $component = Livewire::test(ArrSearch::class)
-        ->set('searchTerm', 'breaking')
+        ->set('searchTerm', 'breaking')->call('search')
         ->call('openDetail', 0)
         ->call('loadDetailReleases');
 
@@ -1514,7 +1514,7 @@ it('livewire loadDetailReleases is blocked in guest mode', function () {
     ]);
 
     $component = Livewire::test(ArrSearch::class, ['guestMode' => true, 'guestIntegrationIds' => [$this->sonarr->id]])
-        ->set('searchTerm', 'breaking')
+        ->set('searchTerm', 'breaking')->call('search')
         ->call('openDetail', 0)
         ->call('loadDetailReleases');
 
@@ -1533,7 +1533,7 @@ it('livewire downloadDetailRelease sends release to download client', function (
     ]);
 
     Livewire::test(ArrSearch::class)
-        ->set('searchTerm', 'breaking')
+        ->set('searchTerm', 'breaking')->call('search')
         ->call('openDetail', 0)
         ->call('downloadDetailRelease', 'abc-guid', 7)
         ->assertNotified();
@@ -1556,7 +1556,7 @@ it('livewire closeDetail clears detailReleases', function () {
     ]);
 
     $component = Livewire::test(ArrSearch::class)
-        ->set('searchTerm', 'breaking')
+        ->set('searchTerm', 'breaking')->call('search')
         ->call('openDetail', 0)
         ->call('loadDetailReleases');
 
@@ -1600,7 +1600,7 @@ it('requestEpisode dispatches a queued job when series was just added and episod
     ]);
 
     Livewire::test(ArrSearch::class)
-        ->set('searchTerm', 'dark')
+        ->set('searchTerm', 'dark')->call('search')
         ->call('openDetail', 0)
         ->call('requestEpisode', 1, 1)
         ->assertNotified();
@@ -1629,7 +1629,7 @@ it('requestEpisode shows error when episode still not found after all retries', 
     ]);
 
     Livewire::test(ArrSearch::class)
-        ->set('searchTerm', 'dark')
+        ->set('searchTerm', 'dark')->call('search')
         ->call('openDetail', 0)
         ->call('requestEpisode', 1, 1)
         ->assertNotified();
@@ -1661,7 +1661,7 @@ it('loadEpisodeReleases fetches episode releases for an in-library series', func
     ]);
 
     $component = Livewire::test(ArrSearch::class)
-        ->set('searchTerm', 'breaking')
+        ->set('searchTerm', 'breaking')->call('search')
         ->call('openDetail', 0)
         ->call('loadEpisodeReleases', 1, 1);
 
@@ -1703,7 +1703,7 @@ it('loadEpisodeReleases adds the series first when not in library', function () 
     ]);
 
     $component = Livewire::test(ArrSearch::class)
-        ->set('searchTerm', 'dark')
+        ->set('searchTerm', 'dark')->call('search')
         ->call('openDetail', 0)
         ->call('loadEpisodeReleases', 2, 3);
 
@@ -1724,7 +1724,7 @@ it('loadEpisodeReleases is blocked in guest mode', function () {
     ]);
 
     $component = Livewire::test(ArrSearch::class, ['guestMode' => true, 'guestIntegrationIds' => [$this->sonarr->id]])
-        ->set('searchTerm', 'breaking')
+        ->set('searchTerm', 'breaking')->call('search')
         ->call('openDetail', 0)
         ->call('loadEpisodeReleases', 1, 1);
 
@@ -1744,7 +1744,7 @@ it('downloadDetailRelease includes episodeId when in episode search context', fu
     ]);
 
     Livewire::test(ArrSearch::class)
-        ->set('searchTerm', 'breaking')
+        ->set('searchTerm', 'breaking')->call('search')
         ->call('openDetail', 0)
         ->set('detailEpisodeId', 101)
         ->call('downloadDetailRelease', 'ep-guid', 5)
@@ -1771,7 +1771,7 @@ it('closeDetail clears episode search context', function () {
     ]);
 
     $component = Livewire::test(ArrSearch::class)
-        ->set('searchTerm', 'breaking')
+        ->set('searchTerm', 'breaking')->call('search')
         ->call('openDetail', 0)
         ->call('loadEpisodeReleases', 1, 1);
 

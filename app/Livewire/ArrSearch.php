@@ -228,14 +228,6 @@ class ArrSearch extends Component
 
     // ── Search ────────────────────────────────────────────────────────────────
 
-    /**
-     * Debounced search trigger.
-     */
-    public function updatedSearchTerm(): void
-    {
-        $this->search();
-    }
-
     public function search(): void
     {
         if (strlen(trim($this->searchTerm)) < 2) {
