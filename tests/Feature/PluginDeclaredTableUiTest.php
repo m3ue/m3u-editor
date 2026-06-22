@@ -904,6 +904,42 @@ it('returns validation errors (not TypeError) when ui_table columns or fields is
         ->and($errors)->toContain('schema.ui_tables.0.fields must be a list.');
 });
 
+it('treats delete_behavior delete as a standard delete with no clear applied', function () {
+    $plugin = declaredTableUiPlugin();
+    $definition = data_get($plugin->schema_definition, 'ui_tables.0');
+    $definition['delete_behavior'] = 'delete';
+
+    expect(app(PluginUiTableRegistry::class)->clearsRecordOnDelete($definition))->toBeFalse();
+});
+
+it('validates clear delete behavior declarations on ui_tables', function () {
+    $suffix = Str::lower(Str::random(6));
+    $tableName = "plugin_test_{$suffix}_items";
+
+    $manifest = PluginManifest::fromArray([
+        'id' => "test-{$suffix}",
+        'name' => 'Test Plugin',
+        'permissions' => [],
+        'schema' => [
+            'tables' => [['name' => $tableName, 'columns' => [['type' => 'id', 'name' => 'id']]]],
+            'ui_tables' => [[
+                'id' => 'items',
+                'table' => $tableName,
+                'label' => 'Items',
+                'delete_behavior' => 'clear',
+                'columns' => [],
+                'fields' => [],
+            ]],
+        ],
+    ], '/tmp/test-plugin');
+
+    $validator = app(PluginValidator::class);
+    $method = new ReflectionMethod($validator, 'validateSchema');
+    $errors = $method->invoke($validator, $manifest);
+
+    expect($errors)->toContain('schema.ui_tables.0.delete_payload must be an object when delete_behavior is [clear].');
+});
+
 it('validates dynamic option provider declarations on ui_table columns', function () {
     $suffix = Str::lower(Str::random(6));
     $tableName = "plugin_test_{$suffix}_items";
@@ -934,34 +970,6 @@ it('validates dynamic option provider declarations on ui_table columns', functio
 
     expect($errors)->toContain('schema.ui_tables.0.columns.0 options_provider must be a non-empty string')
         ->and($errors)->toContain('schema.ui_tables.0.columns.0 depends_on must contain only non-empty strings');
-});
-
-it('validates clear delete behavior declarations on ui_tables', function () {
-    $suffix = Str::lower(Str::random(6));
-    $tableName = "plugin_test_{$suffix}_items";
-
-    $manifest = PluginManifest::fromArray([
-        'id' => "test-{$suffix}",
-        'name' => 'Test Plugin',
-        'permissions' => [],
-        'schema' => [
-            'tables' => [['name' => $tableName, 'columns' => [['type' => 'id', 'name' => 'id']]]],
-            'ui_tables' => [[
-                'id' => 'items',
-                'table' => $tableName,
-                'label' => 'Items',
-                'delete_behavior' => 'clear',
-                'columns' => [],
-                'fields' => [],
-            ]],
-        ],
-    ], '/tmp/test-plugin');
-
-    $validator = app(PluginValidator::class);
-    $method = new ReflectionMethod($validator, 'validateSchema');
-    $errors = $method->invoke($validator, $manifest);
-
-    expect($errors)->toContain('schema.ui_tables.0.delete_payload must be an object when delete_behavior is [clear].');
 });
 
 it('validates ui_table export format declarations', function () {

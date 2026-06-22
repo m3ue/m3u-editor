@@ -14,6 +14,7 @@ use Filament\Schemas\Components\Utilities\Set;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
@@ -390,7 +391,13 @@ class PluginSchemaMapper
                 $this->optionProviderState($field, $prefix, $get),
                 $field,
             );
-        } catch (Throwable) {
+        } catch (Throwable $e) {
+            Log::warning('Plugin dynamic select options failed.', [
+                'plugin_id' => $plugin->plugin_id,
+                'provider' => $provider,
+                'error' => $e->getMessage(),
+            ]);
+
             return [];
         }
     }

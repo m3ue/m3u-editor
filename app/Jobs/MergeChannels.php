@@ -50,6 +50,20 @@ class MergeChannels implements ShouldQueue
     protected ?array $normalizedPriorityOrder = null;
 
     /**
+     * Channel IDs that are already configured as native failover children.
+     *
+     * @var array<int, true>
+     */
+    protected array $existingFailoverChannelIds = [];
+
+    /**
+     * Channel IDs that already own native failover children.
+     *
+     * @var array<int, true>
+     */
+    protected array $existingFailoverMasterIds = [];
+
+    /**
      * Create a new job instance.
      */
     public function __construct(
@@ -67,6 +81,7 @@ class MergeChannels implements ShouldQueue
         public ?array $fallbackMergeConfig = null,
         public string $contentType = 'live',
         public string $mergeKey = 'stream_id',
+        public bool $scrubberAwareMasterSelection = false,
     ) {
         $this->contentType = in_array($this->contentType, ['live', 'vod'], true) ? $this->contentType : 'live';
         $this->mergeKey = in_array($this->mergeKey, ['stream_id', 'tmdb_id'], true) ? $this->mergeKey : 'stream_id';
@@ -107,7 +122,19 @@ class MergeChannels implements ShouldQueue
                 $query->whereIn('playlist_id', $playlistIds);
             })
             ->pluck('channel_failover_id')
+            ->map(fn (mixed $id): int => (int) $id)
             ->toArray();
+
+        $existingFailoverMasterIds = ChannelFailover::where('user_id', $this->user->id)
+            ->whereHas('channel', function ($query) use ($playlistIds) {
+                $query->whereIn('playlist_id', $playlistIds);
+            })
+            ->pluck('channel_id')
+            ->map(fn (mixed $id): int => (int) $id)
+            ->toArray();
+
+        $this->existingFailoverChannelIds = array_fill_keys($existingFailoverChannelIds, true);
+        $this->existingFailoverMasterIds = array_fill_keys($existingFailoverMasterIds, true);
 
         // Get all channels for the requested content type and merge key.
         // Exclude channels that are already configured as failovers (unless we're re-merging everything).
@@ -233,11 +260,12 @@ class MergeChannels implements ShouldQueue
                 continue;
             }
 
-            if (! $master->enabled && ! in_array($master->group_id, $this->disabledGroupIds, true)) {
-                $master->update(['enabled' => true]);
-            }
+            $this->prepareSelectedMaster($master);
 
-            $failoverChannels = $this->sortChannelsByScore($group->where('id', '!=', $master->id), $playlistPriority);
+            $failoverChannels = $this->sortFailoverChannelsByScore(
+                $this->filterFailoverCandidates($group->where('id', '!=', $master->id)),
+                $playlistPriority,
+            );
 
             $sortOrder = 1;
             foreach ($failoverChannels as $failover) {
@@ -306,7 +334,7 @@ class MergeChannels implements ShouldQueue
             ->when($this->newChannelsOnly, fn ($query) => $query->where('new', true))
             ->select(['id', 'user_id', 'playlist_id', 'group_id', 'title', 'title_custom',
                 'name', 'name_custom', 'stream_id', 'stream_id_custom', 'sort',
-                'catchup', 'enabled', 'stream_stats'])
+                'catchup', 'enabled', 'stream_stats', 'last_scrubber_live'])
             ->cursor();
 
         $groupedChannels = $channels
@@ -367,7 +395,7 @@ class MergeChannels implements ShouldQueue
             ->when($this->groupId, fn ($q) => $q->where('group_id', $this->groupId))
             ->select(['id', 'user_id', 'playlist_id', 'group_id', 'title', 'title_custom',
                 'name', 'name_custom', 'stream_id', 'stream_id_custom', 'sort',
-                'catchup', 'enabled'])
+                'catchup', 'enabled', 'last_scrubber_live'])
             ->chunk(500, function ($chunk) use ($validPatterns, &$matchesByPattern) {
                 foreach ($chunk as $channel) {
                     $title = $channel->title_custom ?: $channel->title;
@@ -391,12 +419,21 @@ class MergeChannels implements ShouldQueue
                 continue;
             }
 
-            $sorted = $this->sortChannelsByScore($matches, $playlistPriority);
-            $master = $sorted->first();
+            $master = $this->selectMasterChannel($matches, $playlistPriority);
+            if (! $master) {
+                continue;
+            }
+
+            $this->prepareSelectedMaster($master);
+
             $maxSort = ChannelFailover::where('channel_id', $master->id)->max('sort') ?? 0;
             $sortOrder = $maxSort + 1;
+            $sorted = $this->sortFailoverChannelsByScore(
+                $this->filterFailoverCandidates($matches->where('id', '!=', $master->id)),
+                $playlistPriority,
+            );
 
-            foreach ($sorted->skip(1) as $failover) {
+            foreach ($sorted as $failover) {
                 ChannelFailover::updateOrCreate(
                     [
                         'channel_id' => $master->id,
@@ -456,6 +493,12 @@ class MergeChannels implements ShouldQueue
             return null;
         }
 
+        $eligibleGroup = $this->filterMasterCandidates($eligibleGroup);
+
+        if ($eligibleGroup->isEmpty()) {
+            return null;
+        }
+
         // Use weighted priority system if config provided
         if ($this->weightedConfig !== null) {
             return $this->selectMasterByWeightedScore($eligibleGroup, $playlistPriority);
@@ -477,6 +520,77 @@ class MergeChannels implements ShouldQueue
         return $group->filter(function ($channel) {
             return ! in_array($channel->group_id, $this->disabledGroupIds);
         });
+    }
+
+    /**
+     * Keep unavailable disabled channels out of master selection.
+     *
+     * Only active when scrubberAwareMasterSelection is enabled on the playlist.
+     * When disabled (default), all channels are eligible as master (legacy behavior).
+     */
+    protected function filterMasterCandidates(Collection $group): Collection
+    {
+        if (! $this->scrubberAwareMasterSelection) {
+            return $group;
+        }
+
+        return $group->filter(function ($channel) {
+            if ($channel->last_scrubber_live === false) {
+                return false;
+            }
+
+            return (bool) $channel->enabled
+                || $this->isExistingFailoverTopologyChannel($channel);
+        });
+    }
+
+    /**
+     * Keep matched channels eligible as failovers. Scrubber-dead state affects
+     * ordering, not whether the failover relationship can exist.
+     */
+    protected function filterFailoverCandidates(Collection $group): Collection
+    {
+        return $group;
+    }
+
+    protected function shouldEnableSelectedMaster(Channel $master): bool
+    {
+        if ($master->enabled) {
+            return false;
+        }
+
+        if (in_array($master->group_id, $this->disabledGroupIds, true)) {
+            return false;
+        }
+
+        if (! $this->scrubberAwareMasterSelection) {
+            return true;
+        }
+
+        if ($master->last_scrubber_live === false) {
+            return false;
+        }
+
+        return $this->isExistingFailoverTopologyChannel($master);
+    }
+
+    protected function prepareSelectedMaster(Channel $master): void
+    {
+        ChannelFailover::where('user_id', $this->user->id)
+            ->where('channel_failover_id', $master->id)
+            ->delete();
+
+        if ($this->shouldEnableSelectedMaster($master)) {
+            $master->update(['enabled' => true]);
+        }
+    }
+
+    protected function isExistingFailoverTopologyChannel(Channel $channel): bool
+    {
+        $id = (int) $channel->id;
+
+        return isset($this->existingFailoverChannelIds[$id])
+            || isset($this->existingFailoverMasterIds[$id]);
     }
 
     /**
@@ -723,6 +837,34 @@ class MergeChannels implements ShouldQueue
         }
 
         return $channels->sortBy(fn ($channel) => [
+            $this->preferCatchupAsPrimary && empty($channel->catchup) ? 1 : 0,
+            (int) ($playlistPriority[$channel->playlist_id] ?? 999),
+            $channel->sort ?? 999999,
+        ]);
+    }
+
+    protected function sortFailoverChannelsByScore(Collection $channels, array $playlistPriority): Collection
+    {
+        if ($this->weightedConfig !== null) {
+            return $channels->sortBy(fn ($channel) => [
+                $channel->last_scrubber_live === false ? 1 : 0,
+                -$this->calculateChannelScore($channel, $playlistPriority),
+                $channel->sort ?? 999999,
+            ]);
+        }
+
+        if ($this->checkResolution) {
+            return $channels->sortBy(fn ($channel) => [
+                $channel->last_scrubber_live === false ? 1 : 0,
+                $this->preferCatchupAsPrimary && empty($channel->catchup) ? 1 : 0,
+                -(int) $this->getResolution($channel),
+                (int) ($playlistPriority[$channel->playlist_id] ?? 999),
+                $channel->sort ?? 999999,
+            ]);
+        }
+
+        return $channels->sortBy(fn ($channel) => [
+            $channel->last_scrubber_live === false ? 1 : 0,
             $this->preferCatchupAsPrimary && empty($channel->catchup) ? 1 : 0,
             (int) ($playlistPriority[$channel->playlist_id] ?? 999),
             $channel->sort ?? 999999,

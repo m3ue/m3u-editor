@@ -1,14 +1,20 @@
 <?php
 
+use App\Events\PlaylistCreated;
+use App\Events\PlaylistUpdated;
+use App\Filament\Resources\Channels\ChannelResource;
 use App\Filament\Resources\Channels\Pages\ViewChannel;
 use App\Jobs\ProbeChannelStreams;
 use App\Models\Channel;
 use App\Models\Playlist;
 use App\Models\User;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Event;
 use Livewire\Livewire;
 
 beforeEach(function () {
+    Event::fake([PlaylistCreated::class, PlaylistUpdated::class]);
+
     $this->user = User::factory()->create();
     $this->actingAs($this->user);
     $this->playlist = Playlist::factory()->for($this->user)->createQuietly();
@@ -51,6 +57,29 @@ it('renders the Technical Details section on the view page', function () {
 
     Livewire::test(ViewChannel::class, ['record' => $channel->getRouteKey()])
         ->assertSee('Technical Details');
+});
+
+it('registers scrubber status columns on the channel table', function () {
+    $columnNames = collect(ChannelResource::getTableColumns())
+        ->map(fn ($column) => $column->getName())
+        ->all();
+
+    expect($columnNames)->toContain('last_scrubber_live')
+        ->and($columnNames)->toContain('last_scrubbed_at');
+});
+
+it('loads the view page when scrubber state is present', function () {
+    $checkedAt = now()->subMinutes(10);
+    $channel = Channel::factory()->for($this->playlist)->create([
+        'user_id' => $this->playlist->user_id,
+        'is_vod' => false,
+        'last_scrubber_live' => false,
+        'last_scrubbed_at' => $checkedAt,
+    ]);
+
+    Livewire::test(ViewChannel::class, ['record' => $channel->getRouteKey()])
+        ->assertOk()
+        ->assertSee('Channel Details');
 });
 
 it('renders compact stream details for a probed channel', function () {

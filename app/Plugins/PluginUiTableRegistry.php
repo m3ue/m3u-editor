@@ -4,11 +4,13 @@ namespace App\Plugins;
 
 use App\Models\Plugin;
 use App\Models\PluginTableRecord;
+use Filament\Actions\DeleteAction;
 use Illuminate\Database\Eloquent\Builder as EloquentBuilder;
 use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Throwable;
@@ -150,6 +152,39 @@ class PluginUiTableRegistry
             ->all();
     }
 
+    public function clearsRecordOnDelete(array $definition): bool
+    {
+        return ($definition['delete_behavior'] ?? null) === 'clear';
+    }
+
+    public function clearRecordForDelete(PluginTableRecord $record, array $definition): PluginTableRecord
+    {
+        $payload = is_array($definition['delete_payload'] ?? null)
+            ? $definition['delete_payload']
+            : [];
+
+        $record->update($this->expandedPayload($payload));
+
+        return $record;
+    }
+
+    public function decorateClearAction(DeleteAction $action, array $definition, string $modelLabel): DeleteAction
+    {
+        $label = (string) ($definition['delete_label'] ?? __('Clear :model', ['model' => $modelLabel]));
+        $icon = (string) ($definition['delete_icon'] ?? 'heroicon-o-x-mark');
+
+        return $action
+            ->label($label)
+            ->icon($icon)
+            ->color((string) ($definition['delete_color'] ?? 'gray'))
+            ->modalHeading($label)
+            ->modalIcon($icon)
+            ->modalDescription((string) ($definition['delete_description'] ?? __('This will clear the saved configuration for this row without removing it from the table.')))
+            ->modalSubmitActionLabel((string) ($definition['delete_submit_label'] ?? __('Clear')))
+            ->successNotificationTitle((string) ($definition['delete_success_message'] ?? __(':model cleared', ['model' => $modelLabel])))
+            ->using(fn (PluginTableRecord $record): PluginTableRecord => $this->clearRecordForDelete($record, $definition));
+    }
+
     public function columnDisplayState(Plugin $plugin, PluginTableRecord $record, array $column): mixed
     {
         if (! empty($column['lookup']) && is_array($column['lookup'])) {
@@ -192,11 +227,6 @@ class PluginUiTableRegistry
             : [];
     }
 
-    public function clearsRecordOnDelete(array $definition): bool
-    {
-        return ($definition['delete_behavior'] ?? null) === 'clear';
-    }
-
     /**
      * @param  array<string, mixed>  $definition
      * @return array<int, string>
@@ -214,17 +244,6 @@ class PluginUiTableRegistry
             ->unique()
             ->values()
             ->all();
-    }
-
-    public function clearRecordForDelete(PluginTableRecord $record, array $definition): PluginTableRecord
-    {
-        $payload = is_array($definition['delete_payload'] ?? null)
-            ? $definition['delete_payload']
-            : [];
-
-        $record->update($this->expandedPayload($payload));
-
-        return $record;
     }
 
     public function prefillRows(Plugin $plugin, array $definition): void
@@ -325,6 +344,21 @@ class PluginUiTableRegistry
     }
 
     /**
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    private function expandedPayload(array $payload): array
+    {
+        $expanded = [];
+
+        foreach ($payload as $key => $value) {
+            data_set($expanded, (string) $key, $value);
+        }
+
+        return $expanded;
+    }
+
+    /**
      * @param  array<mixed>  $options
      * @return array<string, string>
      */
@@ -349,7 +383,13 @@ class PluginUiTableRegistry
                 $this->columnOptionProviderState($column, $recordState),
                 $column,
             );
-        } catch (Throwable) {
+        } catch (Throwable $e) {
+            Log::warning('Plugin dynamic column options failed.', [
+                'plugin_id' => $plugin->plugin_id,
+                'provider' => $provider,
+                'error' => $e->getMessage(),
+            ]);
+
             return [];
         }
     }
@@ -384,21 +424,6 @@ class PluginUiTableRegistry
             ->map(fn (string $dependency): string => trim($dependency))
             ->values()
             ->all();
-    }
-
-    /**
-     * @param  array<string, mixed>  $payload
-     * @return array<string, mixed>
-     */
-    private function expandedPayload(array $payload): array
-    {
-        $expanded = [];
-
-        foreach ($payload as $key => $value) {
-            data_set($expanded, (string) $key, $value);
-        }
-
-        return $expanded;
     }
 
     private function columnsFor(Plugin $plugin, string $tableName): Collection

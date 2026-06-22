@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Enums\Status;
 use App\Models\Channel;
+use App\Models\ChannelFailover;
 use App\Models\ChannelScrubber;
 use App\Models\ChannelScrubberLog;
 use App\Models\ChannelScrubberLogChannel;
@@ -47,6 +48,7 @@ class ProcessChannelScrubberChunk implements ShouldQueue
         public int $probeTimeout = 10,
         public bool $disableDead = true,
         public bool $enableLive = false,
+        public bool $protectFailoverChannels = true,
     ) {}
 
     /**
@@ -62,6 +64,9 @@ class ProcessChannelScrubberChunk implements ShouldQueue
         }
         if (! isset($this->enableLive)) {
             $this->enableLive = false;
+        }
+        if (! isset($this->protectFailoverChannels)) {
+            $this->protectFailoverChannels = true;
         }
     }
 
@@ -79,6 +84,9 @@ class ProcessChannelScrubberChunk implements ShouldQueue
 
         // Snapshot enabled state before probing so we know which were disabled going in
         $wasEnabled = $channels->pluck('enabled', 'id')->map(fn ($v) => (bool) $v)->all();
+        $protectedFailoverIds = $this->protectFailoverChannels
+            ? $this->protectedFailoverIds($channels->pluck('id')->all())
+            : [];
 
         $deadIds = $this->checkMethod === 'ffprobe'
             ? $this->probeFfprobeBatch($channels)
@@ -87,6 +95,7 @@ class ProcessChannelScrubberChunk implements ShouldQueue
         $deadSet = array_flip($deadIds);
         $deadCount = count($deadIds);
         $disabledCount = 0;
+        $checkedAt = now();
 
         // Process dead channels
         foreach ($deadIds as $channelId) {
@@ -103,10 +112,17 @@ class ProcessChannelScrubberChunk implements ShouldQueue
                     'url' => ($channel->url_custom ?? $channel->url) ?? '',
                 ]);
 
+                $updates = [
+                    'last_scrubbed_at' => $checkedAt,
+                    'last_scrubber_live' => false,
+                ];
+
                 if ($this->disableDead && $channel->enabled) {
-                    $channel->update(['enabled' => false]);
+                    $updates['enabled'] = false;
                     $disabledCount++;
                 }
+
+                $channel->update($updates);
             } catch (Exception $e) {
                 Log::warning("Channel scrubber: error processing dead channel #{$channel->id}: {$e->getMessage()}");
             }
@@ -122,13 +138,24 @@ class ProcessChannelScrubberChunk implements ShouldQueue
 
             $liveCount++;
 
+            $updates = [
+                'last_scrubbed_at' => $checkedAt,
+                'last_scrubber_live' => true,
+            ];
+
             // Re-enable disabled channels that are now live (only when enableLive is set)
-            if ($this->enableLive && ! ($wasEnabled[$channel->id] ?? true)) {
-                try {
-                    $channel->update(['enabled' => true]);
-                } catch (Exception $e) {
-                    Log::warning("Channel scrubber: error re-enabling channel #{$channel->id}: {$e->getMessage()}");
-                }
+            if (
+                $this->enableLive
+                && ! ($wasEnabled[$channel->id] ?? true)
+                && ! isset($protectedFailoverIds[$channel->id])
+            ) {
+                $updates['enabled'] = true;
+            }
+
+            try {
+                $channel->update($updates);
+            } catch (Exception $e) {
+                Log::warning("Channel scrubber: error updating live channel state #{$channel->id}: {$e->getMessage()}");
             }
         }
 
@@ -150,6 +177,23 @@ class ProcessChannelScrubberChunk implements ShouldQueue
             $newProgress = min(95, $scrubber->progress + $increment);
             $scrubber->update(['progress' => $newProgress]);
         }
+    }
+
+    /**
+     * @param  array<int>  $channelIds
+     * @return array<int, true>
+     */
+    private function protectedFailoverIds(array $channelIds): array
+    {
+        if (empty($channelIds)) {
+            return [];
+        }
+
+        return ChannelFailover::query()
+            ->whereIn('channel_failover_id', $channelIds)
+            ->pluck('channel_failover_id')
+            ->mapWithKeys(fn (mixed $id): array => [(int) $id => true])
+            ->all();
     }
 
     /**
