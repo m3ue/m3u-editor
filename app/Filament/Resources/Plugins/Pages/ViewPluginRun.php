@@ -15,6 +15,7 @@ use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Livewire\Attributes\Locked;
 
 class ViewPluginRun extends Page
 {
@@ -28,6 +29,7 @@ class ViewPluginRun extends Page
 
     public Collection $logs;
 
+    #[Locked]
     public ?int $playlistId = null;
 
     public function mount(int|string $record, int|string $run): void

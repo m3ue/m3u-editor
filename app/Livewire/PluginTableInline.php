@@ -30,6 +30,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
+use Livewire\Attributes\Locked;
 use Livewire\Component;
 
 class PluginTableInline extends Component implements HasActions, HasForms, HasTable
@@ -40,17 +41,23 @@ class PluginTableInline extends Component implements HasActions, HasForms, HasTa
 
     public Model $record;
 
+    #[Locked]
     public string $tableId = '';
 
+    #[Locked]
     public ?int $runId = null;
 
+    #[Locked]
     public ?int $playlistId = null;
 
+    #[Locked]
     public bool $readOnly = false;
 
+    #[Locked]
     public bool $showHeading = false;
 
     /** @var array<string, mixed> */
+    #[Locked]
     public array $tableDefinition = [];
 
     public function mount(): void
