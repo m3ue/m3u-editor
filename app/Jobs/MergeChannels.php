@@ -81,6 +81,7 @@ class MergeChannels implements ShouldQueue
         public ?array $fallbackMergeConfig = null,
         public string $contentType = 'live',
         public string $mergeKey = 'stream_id',
+        public bool $scrubberAwareMasterSelection = false,
     ) {
         $this->contentType = in_array($this->contentType, ['live', 'vod'], true) ? $this->contentType : 'live';
         $this->mergeKey = in_array($this->mergeKey, ['stream_id', 'tmdb_id'], true) ? $this->mergeKey : 'stream_id';
@@ -524,12 +525,15 @@ class MergeChannels implements ShouldQueue
     /**
      * Keep unavailable disabled channels out of master selection.
      *
-     * Scrubber-dead channels should not be selected as the current master.
-     * Disabled channels that are already part of native failover topology can
-     * become master again after the scrubber reports them live.
+     * Only active when scrubberAwareMasterSelection is enabled on the playlist.
+     * When disabled (default), all channels are eligible as master (legacy behavior).
      */
     protected function filterMasterCandidates(Collection $group): Collection
     {
+        if (! $this->scrubberAwareMasterSelection) {
+            return $group;
+        }
+
         return $group->filter(function ($channel) {
             if ($channel->last_scrubber_live === false) {
                 return false;
@@ -555,11 +559,15 @@ class MergeChannels implements ShouldQueue
             return false;
         }
 
-        if ($master->last_scrubber_live === false) {
+        if (in_array($master->group_id, $this->disabledGroupIds, true)) {
             return false;
         }
 
-        if (in_array($master->group_id, $this->disabledGroupIds, true)) {
+        if (! $this->scrubberAwareMasterSelection) {
+            return true;
+        }
+
+        if ($master->last_scrubber_live === false) {
             return false;
         }
 

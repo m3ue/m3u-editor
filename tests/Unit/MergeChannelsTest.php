@@ -257,7 +257,7 @@ class MergeChannelsTest extends TestCase
         // The preferred playlist contains the disabled channel, but it is not
         // an existing hidden failover. Merge should not promote/re-enable it
         // as master, but it can still be linked as a hidden failover.
-        $this->runMergeChannels($user, $playlists, $playlist2->id, false, true);
+        $this->runMergeChannels($user, $playlists, $playlist2->id, false, true, scrubberAwareMasterSelection: true);
 
         $this->assertTrue($enabledMaster->refresh()->enabled);
         $this->assertFalse($disabledPreferred->refresh()->enabled);
@@ -308,7 +308,7 @@ class MergeChannelsTest extends TestCase
             ['playlist_failover_id' => $playlist3->id],
         ]);
 
-        $this->runMergeChannels($user, $playlists, $playlist3->id, false, true);
+        $this->runMergeChannels($user, $playlists, $playlist3->id, false, true, scrubberAwareMasterSelection: true);
 
         $this->assertTrue($enabledMaster->refresh()->enabled);
         $this->assertFalse($healthyCandidate->refresh()->enabled);
@@ -365,7 +365,7 @@ class MergeChannelsTest extends TestCase
         // an existing hidden failover. The scrubber-dead state makes it
         // unavailable as master, but the native failover mapping is topology
         // and should be preserved.
-        $this->runMergeChannels($user, $playlists, $playlist2->id, false, true);
+        $this->runMergeChannels($user, $playlists, $playlist2->id, false, true, scrubberAwareMasterSelection: true);
 
         $this->assertTrue($currentMaster->refresh()->enabled);
         $this->assertFalse($deadHiddenFailover->refresh()->enabled);
@@ -432,7 +432,7 @@ class MergeChannelsTest extends TestCase
             ['playlist_failover_id' => $playlist3->id],
         ]);
 
-        $this->runMergeChannels($user, $playlists, $playlist1->id, false, true);
+        $this->runMergeChannels($user, $playlists, $playlist1->id, false, true, scrubberAwareMasterSelection: true);
 
         $this->assertFalse($oldMaster->refresh()->enabled);
         $this->assertTrue($liveFailover->refresh()->enabled);
@@ -454,7 +454,7 @@ class MergeChannelsTest extends TestCase
 
         $oldMaster->update(['last_scrubber_live' => true]);
 
-        $this->runMergeChannels($user, $playlists, $playlist1->id, false, true);
+        $this->runMergeChannels($user, $playlists, $playlist1->id, false, true, scrubberAwareMasterSelection: true);
 
         $this->assertTrue($oldMaster->refresh()->enabled);
         $this->assertFalse($liveFailover->refresh()->enabled);

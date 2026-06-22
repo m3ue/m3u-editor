@@ -2218,6 +2218,15 @@ class PlaylistResource extends Resource implements CopilotResource
                                     tooltip: 'Channels from disabled groups will never be selected as master, only as failovers.'
                                 )
                                 ->default(false),
+                            Toggle::make('auto_merge_config.scrubber_aware_master_selection')
+                                ->label(__('Scrubber-aware master selection'))
+                                ->inline(false)
+                                ->hintIcon(
+                                    'heroicon-m-exclamation-triangle',
+                                    tooltip: 'When enabled, channels confirmed dead by the scrubber are excluded from master selection. Leave disabled to allow all channels to be eligible as master (default behavior).'
+                                )
+                                ->helperText(__('When enabled, channels confirmed dead by the scrubber are excluded from master selection.'))
+                                ->default(false),
                         ]),
 
                     Fieldset::make(__('Fallback matching for channels without IDs'))
