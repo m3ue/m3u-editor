@@ -801,6 +801,12 @@ it('streams plugin-declared result table exports on demand', function () {
     $plugin = $fixture['plugin'];
     $playlist = $fixture['playlist'];
     $run = $fixture['run'];
+    $expectedFilename = Str::slug(collect([
+        $plugin->plugin_id ?: "plugin-{$plugin->id}",
+        'run_results',
+        "run-{$run->id}",
+        "playlist-{$playlist->id}",
+    ])->filter()->implode('-'));
 
     $csvResponse = $this->get(route('extension-plugins.tables.export', [
         'plugin' => $plugin,
@@ -809,6 +815,10 @@ it('streams plugin-declared result table exports on demand', function () {
         'run' => $run->id,
         'playlist' => $playlist->id,
     ]))->assertOk();
+
+    expect($csvResponse->headers->get('content-disposition'))
+        ->toContain('attachment')
+        ->toContain("{$expectedFilename}.csv");
 
     $csv = $csvResponse->streamedContent();
     expect($csv)
@@ -824,6 +834,10 @@ it('streams plugin-declared result table exports on demand', function () {
         'run' => $run->id,
         'playlist' => $playlist->id,
     ]))->assertOk();
+
+    expect($jsonResponse->headers->get('content-disposition'))
+        ->toContain('attachment')
+        ->toContain("{$expectedFilename}.json");
 
     $rows = json_decode($jsonResponse->streamedContent(), true, flags: JSON_THROW_ON_ERROR);
 

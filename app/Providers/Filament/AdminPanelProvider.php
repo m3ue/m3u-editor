@@ -332,6 +332,8 @@ class AdminPanelProvider extends PanelProvider
                 '*/playlist.m3u',
                 '*/epg.xml',
                 'epgs/*/epg.xml',
+                '*/extension-plugins/*/runs/*/report',
+                '*/extension-plugins/*/tables/*/export/*',
                 '/logs*',
                 // Xtream API endpoints
                 'player_api.php*',
