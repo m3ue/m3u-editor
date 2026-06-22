@@ -169,7 +169,7 @@ class ManagePluginTable extends Page implements HasTable
             ->label($label)
             ->placeholder($this->selectPlaceholder($column))
             ->selectablePlaceholder(! (bool) ($column['required'] ?? false))
-            ->options(fn (): array => $this->columnOptions($column))
+            ->options(fn (?PluginTableRecord $record = null): array => $this->columnOptions($column, $record))
             ->state(fn (PluginTableRecord $record): mixed => data_get($record->toArray(), $name))
             ->rules([(bool) ($column['required'] ?? false) ? 'required' : 'nullable']);
 
@@ -178,33 +178,19 @@ class ManagePluginTable extends Page implements HasTable
 
     private function columnState(PluginTableRecord $record, array $column): mixed
     {
-        if (! empty($column['lookup']) && is_array($column['lookup'])) {
-            $value = data_get($record->toArray(), (string) ($column['lookup']['source_column'] ?? $column['name']));
-
-            return app(PluginUiTableRegistry::class)->lookupLabel($this->getRecord(), $column['lookup'], $value);
-        }
-
-        $value = data_get($record->toArray(), (string) $column['name']);
-
-        if (is_scalar($value) && is_array($column['options'] ?? null)) {
-            return $column['options'][(string) $value] ?? $value;
-        }
-
-        return is_array($value) ? json_encode($value, JSON_UNESCAPED_SLASHES) : $value;
+        return app(PluginUiTableRegistry::class)->columnDisplayState($this->pluginRecord(), $record, $column);
     }
 
     /**
      * @return array<string, string>
      */
-    private function columnOptions(array $column): array
+    private function columnOptions(array $column, ?PluginTableRecord $record = null): array
     {
-        if (is_array($column['options'] ?? null)) {
-            return $column['options'];
-        }
-
-        return is_array($column['lookup'] ?? null)
-            ? app(PluginUiTableRegistry::class)->lookupOptions($this->getRecord(), $column['lookup'])
-            : [];
+        return app(PluginUiTableRegistry::class)->columnOptions(
+            $this->pluginRecord(),
+            $column,
+            $record?->toArray() ?? [],
+        );
     }
 
     private function selectPlaceholder(array $column): string
@@ -298,5 +284,13 @@ class ManagePluginTable extends Page implements HasTable
     private function modelLabel(): string
     {
         return (string) ($this->tableDefinition['model_label'] ?? Str::singular($this->getTitle()));
+    }
+
+    private function pluginRecord(): Plugin
+    {
+        /** @var Plugin $plugin */
+        $plugin = $this->getRecord();
+
+        return $plugin;
     }
 }

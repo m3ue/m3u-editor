@@ -589,9 +589,14 @@ class PluginValidator
             $errors[] = "{$group}.{$fieldId} should define a human-friendly [label]";
         }
 
-        if ($type === 'select' && empty($field['options'])) {
-            $errors[] = "{$group}.{$fieldId} select fields require [options]";
+        if ($type === 'select' && empty($field['options']) && blank($field['options_provider'] ?? null)) {
+            $errors[] = "{$group}.{$fieldId} select fields require [options] or [options_provider]";
         }
+
+        $errors = [
+            ...$errors,
+            ...$this->validateOptionsProviderDefinition($field, "{$group}.{$fieldId}"),
+        ];
 
         if ($type === 'model_select' && blank($field['model'] ?? null)) {
             $errors[] = "{$group}.{$fieldId} model_select fields require [model]";
@@ -773,6 +778,11 @@ class PluginValidator
                 foreach ($uiTable['columns'] ?? [] as $columnIndex => $column) {
                     if (! is_array($column) || blank($column['name'] ?? null)) {
                         $errors[] = "{$path}.columns.{$columnIndex} requires [name].";
+                    } else {
+                        $errors = [
+                            ...$errors,
+                            ...$this->validateOptionsProviderDefinition($column, "{$path}.columns.{$columnIndex}"),
+                        ];
                     }
                 }
             }
@@ -792,6 +802,44 @@ class PluginValidator
                         ...$this->validateFieldDefinition($field, $fieldTypes, "{$path}.fields"),
                     ];
                 }
+            }
+        }
+
+        return $errors;
+    }
+
+    /**
+     * @param  array<string, mixed>  $definition
+     * @return array<int, string>
+     */
+    private function validateOptionsProviderDefinition(array $definition, string $path): array
+    {
+        $errors = [];
+
+        if (array_key_exists('options_provider', $definition)
+            && (! is_string($definition['options_provider']) || blank($definition['options_provider']))) {
+            $errors[] = "{$path} options_provider must be a non-empty string";
+        }
+
+        if (! array_key_exists('depends_on', $definition)) {
+            return $errors;
+        }
+
+        if (array_key_exists('depends_on', $definition) && blank($definition['options_provider'] ?? null)) {
+            $errors[] = "{$path} depends_on has no effect without options_provider";
+        }
+
+        if (! is_array($definition['depends_on'])) {
+            $errors[] = "{$path} depends_on must be a list of field names";
+
+            return $errors;
+        }
+
+        foreach ($definition['depends_on'] as $dependency) {
+            if (! is_string($dependency) || blank($dependency)) {
+                $errors[] = "{$path} depends_on must contain only non-empty strings";
+
+                break;
             }
         }
 

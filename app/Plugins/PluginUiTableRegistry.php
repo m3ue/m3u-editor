@@ -8,7 +8,9 @@ use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
+use Throwable;
 
 class PluginUiTableRegistry
 {
@@ -85,6 +87,48 @@ class PluginUiTableRegistry
             ->pluck($labelColumn, $keyColumn)
             ->mapWithKeys(fn (mixed $label, mixed $value): array => [(string) $value => (string) $label])
             ->all();
+    }
+
+    public function columnDisplayState(Plugin $plugin, PluginTableRecord $record, array $column): mixed
+    {
+        if (! empty($column['lookup']) && is_array($column['lookup'])) {
+            $value = data_get($record->toArray(), (string) ($column['lookup']['source_column'] ?? $column['name']));
+
+            return $this->lookupLabel($plugin, $column['lookup'], $value);
+        }
+
+        $value = data_get($record->toArray(), (string) $column['name']);
+
+        if (is_scalar($value)) {
+            $options = $this->columnOptions($plugin, $column, $record->toArray());
+
+            if ($options !== []) {
+                return $options[(string) $value] ?? $value;
+            }
+        }
+
+        return is_array($value) ? json_encode($value, JSON_UNESCAPED_SLASHES) : $value;
+    }
+
+    /**
+     * @param  array<string, mixed>  $recordState
+     * @return array<string, string>
+     */
+    public function columnOptions(Plugin $plugin, array $column, array $recordState = []): array
+    {
+        $optionsProvider = trim((string) ($column['options_provider'] ?? ''));
+
+        if ($optionsProvider !== '') {
+            return $this->dynamicColumnOptions($plugin, $optionsProvider, $column, $recordState);
+        }
+
+        if (is_array($column['options'] ?? null)) {
+            return $this->staticOptions($column['options']);
+        }
+
+        return is_array($column['lookup'] ?? null)
+            ? $this->lookupOptions($plugin, $column['lookup'])
+            : [];
     }
 
     public function prefillRows(Plugin $plugin, array $definition): void
@@ -182,6 +226,74 @@ class PluginUiTableRegistry
                 (bool) ($lookup['enabled_only'] ?? false) && Schema::hasColumn($tableName, 'enabled'),
                 fn (QueryBuilder $query) => $query->where('enabled', true),
             );
+    }
+
+    /**
+     * @param  array<mixed>  $options
+     * @return array<string, string>
+     */
+    private function staticOptions(array $options): array
+    {
+        return collect($options)
+            ->mapWithKeys(fn (mixed $label, mixed $value): array => [(string) $value => (string) $label])
+            ->all();
+    }
+
+    /**
+     * @param  array<string, mixed>  $column
+     * @param  array<string, mixed>  $recordState
+     * @return array<string, string>
+     */
+    private function dynamicColumnOptions(Plugin $plugin, string $provider, array $column, array $recordState): array
+    {
+        try {
+            return app(PluginManager::class)->selectOptions(
+                $plugin,
+                $provider,
+                $this->columnOptionProviderState($column, $recordState),
+                $column,
+            );
+        } catch (Throwable $e) {
+            Log::warning('Plugin dynamic column options failed.', [
+                'plugin_id' => $plugin->plugin_id,
+                'provider' => $provider,
+                'error' => $e->getMessage(),
+            ]);
+
+            return [];
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $column
+     * @param  array<string, mixed>  $recordState
+     * @return array<string, mixed>
+     */
+    private function columnOptionProviderState(array $column, array $recordState): array
+    {
+        $state = [];
+
+        foreach ($this->dependsOn($column) as $dependency) {
+            $value = data_get($recordState, $dependency);
+
+            $state[$dependency] = $value;
+            Arr::set($state, $dependency, $value);
+        }
+
+        return $state;
+    }
+
+    /**
+     * @param  array<string, mixed>  $column
+     * @return array<int, string>
+     */
+    private function dependsOn(array $column): array
+    {
+        return collect(Arr::wrap($column['depends_on'] ?? []))
+            ->filter(fn (mixed $dependency): bool => is_string($dependency) && trim($dependency) !== '')
+            ->map(fn (string $dependency): string => trim($dependency))
+            ->values()
+            ->all();
     }
 
     private function columnsFor(Plugin $plugin, string $tableName): Collection
