@@ -64,6 +64,8 @@ class PluginTableInline extends Component implements HasActions, HasForms, HasTa
     {
         $table = $table
             ->query(fn (): Builder => $this->tableQuery())
+            ->heading($this->tableHeading())
+            ->description($this->tableDescription())
             ->columns($this->tableColumns())
             ->headerActions($this->tableHeaderActions())
             ->recordActions($this->tableRecordActions(), position: RecordActionsPosition::BeforeCells);
@@ -275,6 +277,16 @@ class PluginTableInline extends Component implements HasActions, HasForms, HasTa
     private function tableName(): ?string
     {
         return filled($this->tableDefinition['table'] ?? null) ? (string) $this->tableDefinition['table'] : null;
+    }
+
+    private function tableHeading(): ?string
+    {
+        return filled($this->tableDefinition['label'] ?? null) ? (string) $this->tableDefinition['label'] : null;
+    }
+
+    private function tableDescription(): ?string
+    {
+        return filled($this->tableDefinition['description'] ?? null) ? (string) $this->tableDefinition['description'] : null;
     }
 
     private function modelLabel(): string

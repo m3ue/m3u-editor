@@ -2,6 +2,7 @@
 
 use App\Filament\Resources\Plugins\Pages\ManagePluginTable;
 use App\Filament\Resources\Plugins\PluginResource;
+use App\Livewire\PluginTableInline;
 use App\Models\Playlist;
 use App\Models\Plugin;
 use App\Models\User;
@@ -292,6 +293,18 @@ it('prefills plugin-declared table rows from an owned source table', function ()
             'run_availability' => true,
             'run_sync' => true,
         ]);
+});
+
+it('renders inline plugin table headings from manifest labels', function () {
+    $user = User::factory()->admin()->create();
+    $this->actingAs($user);
+
+    $plugin = declaredTableUiPlugin();
+
+    Livewire::test(PluginTableInline::class, ['record' => $plugin, 'tableId' => 'profiles'])
+        ->assertOk()
+        ->assertSee('Profiles')
+        ->assertSee('Reusable test profiles.');
 });
 
 it('throws when ui_tables is not a list in the manifest', function () {
