@@ -1,5 +1,6 @@
 <?php
 
+use App\Jobs\RequestArrEpisode;
 use App\Livewire\ArrSearch;
 use App\Models\ArrIntegration;
 use App\Models\Playlist;
@@ -1202,7 +1203,7 @@ it('browseGenre loads discover results filtered by genre', function () {
         $mock->shouldReceive('getWatchProviders')->andReturn([]);
         $mock->shouldReceive('discoverMovies')
             ->with(Mockery::on(fn ($p) => ($p['with_genres'] ?? null) === 28))
-            ->andReturn($genreResults);
+            ->andReturn(['results' => $genreResults, 'total_pages' => 1]);
 
         return $mock;
     });
@@ -1588,31 +1589,13 @@ it('loadQueue does not dispatch refreshArrQueue in guest mode', function () {
 
 // ── requestEpisode retry ─────────────────────────────────────────────────────
 
-it('requestEpisode retries episode fetch when series was just added and episodes not yet indexed', function () {
-    SonarrService::$episodeRetryDelayUs = 0;
-
-    // NOTE: Http::fake map-invokes ALL stubs for every request, so a Http::sequence() on *episode*
-    // would be consumed by monitor requests too. Use a closure that returns null for monitor URLs.
-    $episodeFetchCalls = 0;
-
+it('requestEpisode dispatches a queued job when series was just added and episodes not yet indexed', function () {
     Http::fake([
         '*/api/v3/series/lookup*' => Http::response([
             ['tvdbId' => 12345, 'title' => 'Dark', 'titleSlug' => 'dark', 'seasons' => [['seasonNumber' => 1]]],
         ], 200),
+        // No 'id' on the series — it will be POSTed and seriesJustAdded=true
         '*/api/v3/series' => Http::response(['id' => 77, 'title' => 'Dark'], 201),
-        '*/api/v3/episode/monitor' => Http::response(null, 200),
-        '*/api/v3/command' => Http::response(['id' => 1], 201),
-        // Return null for monitor URLs so the specific stub above wins; simulate empty then populated.
-        '*/api/v3/episode*' => function ($request) use (&$episodeFetchCalls) {
-            if (str_contains($request->url(), '/monitor')) {
-                return null;
-            }
-            $episodeFetchCalls++;
-
-            return $episodeFetchCalls === 1
-                ? Http::response([], 200)
-                : Http::response([['id' => 301, 'episodeNumber' => 1, 'seasonNumber' => 1, 'title' => 'Secrets']], 200);
-        },
         'api.tvmaze.com/*' => Http::response(['id' => 1], 200),
     ]);
 
@@ -1622,12 +1605,15 @@ it('requestEpisode retries episode fetch when series was just added and episodes
         ->call('requestEpisode', 1, 1)
         ->assertNotified();
 
-    Http::assertSent(fn ($r) => $r->method() === 'PUT' && str_ends_with($r->url(), '/api/v3/episode/monitor')
-        && in_array(301, $r->data()['episodeIds'] ?? []));
+    // No blocking episode/monitor/command calls in the web request — all deferred to the job.
+    Http::assertNotSent(fn ($r) => str_contains($r->url(), '/api/v3/episode'));
+    Http::assertNotSent(fn ($r) => str_ends_with($r->url(), '/api/v3/command'));
 
-    Http::assertSent(fn ($r) => $r->method() === 'POST' && str_ends_with($r->url(), '/api/v3/command')
-        && ($r->data()['name'] ?? '') === 'EpisodeSearch');
-})->after(fn () => SonarrService::$episodeRetryDelayUs = 500_000);
+    Bus::assertDispatched(RequestArrEpisode::class, fn ($job) => $job->sonarrSeriesId === 77
+        && $job->seasonNumber === 1
+        && $job->episodeNumber === 1
+    );
+});
 
 it('requestEpisode shows error when episode still not found after all retries', function () {
     SonarrService::$episodeRetryDelayUs = 0;

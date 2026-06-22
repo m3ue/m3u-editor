@@ -281,9 +281,9 @@
                                         — {{ $browseGenreType === 'tv' ? __('TV Series') : __('Movies') }}
                                     </span>
                                 </h3>
-                                @if (count($browseResults) > 0)
+                                @if ($browseTotalPages > 1)
                                     <span
-                                        class="text-xs font-medium text-gray-400 dark:text-gray-500 mr-1">{{ count($browseResults) }}</span>
+                                        class="text-xs font-medium text-gray-400 dark:text-gray-500 mr-1">{{ __('Page :page of :total', ['page' => $browsePage, 'total' => $browseTotalPages]) }}</span>
                                 @endif
                                 <button @click="filtersOpen = !filtersOpen"
                                     :class="filtersOpen ?
@@ -530,45 +530,37 @@
                                         <x-filament::loading-indicator class="h-6 w-6 text-primary-500" />
                                     </div>
                                 @elseif(count($browseResults) > 0)
-                                    @php
-                                        $browseInitial = array_slice($browseResults, 0, 10);
-                                        $browseRemaining = array_slice($browseResults, 10);
-                                    @endphp
-                                    <div x-data="{ expanded: false }">
-                                        <div
-                                            class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
-                                            @foreach ($browseInitial as $item)
-                                                @include('livewire.partials.discover-card', [
-                                                    'item' => $item,
-                                                ])
-                                            @endforeach
-                                        </div>
-                                        @if (count($browseRemaining) > 0)
-                                            <div x-show="expanded" x-collapse>
-                                                <div
-                                                    class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 mt-3">
-                                                    @foreach ($browseRemaining as $item)
-                                                        @include('livewire.partials.discover-card', [
-                                                            'item' => $item,
-                                                        ])
-                                                    @endforeach
-                                                </div>
-                                            </div>
-                                            <div
-                                                class="mt-4 pt-3 border-t border-gray-100 dark:border-gray-800 text-center">
-                                                <button @click="expanded = !expanded"
-                                                    class="inline-flex items-center gap-1.5 text-xs font-medium text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 transition-colors">
-                                                    <span
-                                                        x-show="!expanded">{{ __('Show :n more', ['n' => count($browseRemaining)]) }}</span>
-                                                    <span x-show="expanded"
-                                                        style="display:none">{{ __('Show less') }}</span>
-                                                    <x-heroicon-o-chevron-down
-                                                        class="w-3.5 h-3.5 transition-transform duration-200"
-                                                        x-bind:class="{ 'rotate-180': expanded }" />
-                                                </button>
-                                            </div>
-                                        @endif
+                                    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3"
+                                        wire:loading.class="opacity-50" wire:target="goToBrowsePage">
+                                        @foreach ($browseResults as $item)
+                                            @include('livewire.partials.discover-card', [
+                                                'item' => $item,
+                                            ])
+                                        @endforeach
                                     </div>
+                                    @if ($browseTotalPages > 1)
+                                        <div class="mt-4 pt-3 border-t border-gray-100 dark:border-gray-800 flex items-center justify-center gap-3">
+                                            <button
+                                                wire:click="goToBrowsePage({{ $browsePage - 1 }})"
+                                                wire:loading.attr="disabled" wire:target="goToBrowsePage"
+                                                @disabled($browsePage <= 1)
+                                                class="p-1 rounded transition-colors {{ $browsePage <= 1 ? 'text-gray-300 dark:text-gray-600 cursor-not-allowed' : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100' }}">
+                                                <x-heroicon-m-chevron-left class="w-4 h-4" />
+                                            </button>
+                                            <span class="text-xs text-gray-500 dark:text-gray-400"
+                                                wire:loading.class="opacity-50" wire:target="goToBrowsePage">
+                                                <span class="font-medium text-gray-700 dark:text-gray-300">{{ $browsePage }}</span>
+                                                / {{ $browseTotalPages }}
+                                            </span>
+                                            <button
+                                                wire:click="goToBrowsePage({{ $browsePage + 1 }})"
+                                                wire:loading.attr="disabled" wire:target="goToBrowsePage"
+                                                @disabled($browsePage >= $browseTotalPages)
+                                                class="p-1 rounded transition-colors {{ $browsePage >= $browseTotalPages ? 'text-gray-300 dark:text-gray-600 cursor-not-allowed' : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100' }}">
+                                                <x-heroicon-m-chevron-right class="w-4 h-4" />
+                                            </button>
+                                        </div>
+                                    @endif
                                 @else
                                     <div class="flex flex-col items-center justify-center py-10 text-center">
                                         <x-heroicon-o-film class="w-10 h-10 text-gray-300 dark:text-gray-600" />

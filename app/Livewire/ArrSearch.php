@@ -137,6 +137,10 @@ class ArrSearch extends Component
 
     public ?string $browseGenreType = null;
 
+    public int $browsePage = 1;
+
+    public int $browseTotalPages = 0;
+
     /** @var array<int, array<string, mixed>> */
     public array $browseResults = [];
 
@@ -837,11 +841,23 @@ class ArrSearch extends Component
             ]
         );
 
-        if ($result['ok']) {
+        if ($result['queued'] ?? false) {
+            // Series was just added — Sonarr is still indexing episodes.
+            // A queued job will monitor + search once they're available.
+            Notification::make()
+                ->info()
+                ->title(__('Series Added — Episode Queued'))
+                ->body(__('":title" was added to Sonarr. S:s E:e will be queued for download once indexing completes.', [
+                    'title' => $this->detailResult['title'] ?? 'the show',
+                    's' => str_pad((string) $seasonNumber, 2, '0', STR_PAD_LEFT),
+                    'e' => str_pad((string) $episodeNumber, 2, '0', STR_PAD_LEFT),
+                ]))
+                ->send();
+        } elseif ($result['ok'] ?? false) {
             Notification::make()
                 ->success()
                 ->title(__('Episode Requested'))
-                ->body(__('S:s E:e of :title has been queued for download.', [
+                ->body(__('S:s E:e of ":title" has been queued for download.', [
                     's' => str_pad((string) $seasonNumber, 2, '0', STR_PAD_LEFT),
                     'e' => str_pad((string) $episodeNumber, 2, '0', STR_PAD_LEFT),
                     'title' => $this->detailResult['title'] ?? 'the show',
@@ -1002,6 +1018,8 @@ class ArrSearch extends Component
 
         $this->browseGenreId = $genreId;
         $this->browseGenreType = $type;
+        $this->browsePage = 1;
+        $this->browseTotalPages = 0;
         $this->browseLoading = true;
         $this->browseResults = [];
 
@@ -1010,9 +1028,9 @@ class ArrSearch extends Component
 
         $this->availableProviders = $tmdb->getWatchProviders($type === 'tv' ? 'tv' : 'movie', $this->watchRegion ?: 'US');
 
-        $params = array_merge(['with_genres' => $genreId], $this->buildFilterParams($type));
+        $params = array_merge(['with_genres' => $genreId, 'page' => 1], $this->buildFilterParams($type));
 
-        $items = $type === 'tv'
+        $response = $type === 'tv'
             ? $tmdb->discoverTv($params)
             : $tmdb->discoverMovies($params);
 
@@ -1022,8 +1040,9 @@ class ArrSearch extends Component
             $item['isDownloaded'] = $libraryIds[$tmdbId] ?? false;
 
             return $item;
-        }, $items);
+        }, $response['results']);
 
+        $this->browseTotalPages = $response['total_pages'];
         $this->browseLoading = false;
     }
 
@@ -1034,8 +1053,45 @@ class ArrSearch extends Component
     {
         $this->browseGenreId = null;
         $this->browseGenreType = null;
+        $this->browsePage = 1;
+        $this->browseTotalPages = 0;
         $this->browseResults = [];
         $this->browseLoading = false;
+    }
+
+    /**
+     * Navigate to a specific page within the current genre browse.
+     */
+    public function goToBrowsePage(int $page): void
+    {
+        if (! $this->tmdbConfigured || $this->browseGenreId === null || $this->browseGenreType === null) {
+            return;
+        }
+
+        $this->browsePage = max(1, min($page, $this->browseTotalPages ?: $page));
+
+        $tmdb = app(TmdbService::class);
+        $libraryIds = $this->loadLibraryTmdbIds();
+        $type = $this->browseGenreType;
+
+        $params = array_merge(
+            ['with_genres' => $this->browseGenreId, 'page' => $this->browsePage],
+            $this->buildFilterParams($type)
+        );
+
+        $response = $type === 'tv'
+            ? $tmdb->discoverTv($params)
+            : $tmdb->discoverMovies($params);
+
+        $this->browseResults = array_map(function ($item) use ($libraryIds) {
+            $tmdbId = (int) ($item['tmdb_id'] ?? 0);
+            $item['existsInLibrary'] = array_key_exists($tmdbId, $libraryIds);
+            $item['isDownloaded'] = $libraryIds[$tmdbId] ?? false;
+
+            return $item;
+        }, $response['results']);
+
+        $this->browseTotalPages = $response['total_pages'];
     }
 
     /**

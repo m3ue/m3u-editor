@@ -2026,10 +2026,16 @@ class TmdbService
      * @param  array<string, mixed>  $params  TMDB /discover/movie query params
      * @return array<int, array<string, mixed>>
      */
+    /**
+     * Discover movies with optional filters.
+     *
+     * @param  array<string, mixed>  $params  TMDB /discover/movie query params
+     * @return array{results: array<int, array<string, mixed>>, total_pages: int}
+     */
     public function discoverMovies(array $params = []): array
     {
         if (! $this->isConfigured()) {
-            return [];
+            return ['results' => [], 'total_pages' => 0];
         }
 
         $cacheKey = 'tmdb_discover_movie_'.md5(serialize($params)).'_'.$this->language;
@@ -2045,18 +2051,23 @@ class TmdbService
                 ], $params));
 
                 if (! $response->successful()) {
-                    return [];
+                    return ['results' => [], 'total_pages' => 0];
                 }
 
-                return collect($response->json()['results'] ?? [])
-                    ->map(fn ($item) => $this->normalizeDiscoverResult($item, 'movie'))
-                    ->filter(fn ($item) => $item['tmdb_id'] > 0)
-                    ->values()
-                    ->all();
+                $json = $response->json();
+
+                return [
+                    'results' => collect($json['results'] ?? [])
+                        ->map(fn ($item) => $this->normalizeDiscoverResult($item, 'movie'))
+                        ->filter(fn ($item) => $item['tmdb_id'] > 0)
+                        ->values()
+                        ->all(),
+                    'total_pages' => (int) ($json['total_pages'] ?? 1),
+                ];
             } catch (\Exception $e) {
                 Log::error('TMDB: discoverMovies error', ['error' => $e->getMessage()]);
 
-                return [];
+                return ['results' => [], 'total_pages' => 0];
             }
         });
     }
@@ -2067,10 +2078,16 @@ class TmdbService
      * @param  array<string, mixed>  $params  TMDB /discover/tv query params
      * @return array<int, array<string, mixed>>
      */
+    /**
+     * Discover TV series with optional filters.
+     *
+     * @param  array<string, mixed>  $params  TMDB /discover/tv query params
+     * @return array{results: array<int, array<string, mixed>>, total_pages: int}
+     */
     public function discoverTv(array $params = []): array
     {
         if (! $this->isConfigured()) {
-            return [];
+            return ['results' => [], 'total_pages' => 0];
         }
 
         $cacheKey = 'tmdb_discover_tv_'.md5(serialize($params)).'_'.$this->language;
@@ -2086,18 +2103,23 @@ class TmdbService
                 ], $params));
 
                 if (! $response->successful()) {
-                    return [];
+                    return ['results' => [], 'total_pages' => 0];
                 }
 
-                return collect($response->json()['results'] ?? [])
-                    ->map(fn ($item) => $this->normalizeDiscoverResult($item, 'tv'))
-                    ->filter(fn ($item) => $item['tmdb_id'] > 0)
-                    ->values()
-                    ->all();
+                $json = $response->json();
+
+                return [
+                    'results' => collect($json['results'] ?? [])
+                        ->map(fn ($item) => $this->normalizeDiscoverResult($item, 'tv'))
+                        ->filter(fn ($item) => $item['tmdb_id'] > 0)
+                        ->values()
+                        ->all(),
+                    'total_pages' => (int) ($json['total_pages'] ?? 1),
+                ];
             } catch (\Exception $e) {
                 Log::error('TMDB: discoverTv error', ['error' => $e->getMessage()]);
 
-                return [];
+                return ['results' => [], 'total_pages' => 0];
             }
         });
     }

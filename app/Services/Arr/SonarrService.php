@@ -2,6 +2,7 @@
 
 namespace App\Services\Arr;
 
+use App\Jobs\RequestArrEpisode;
 use Illuminate\Http\Client\Response;
 
 class SonarrService extends BaseArrService
@@ -355,18 +356,50 @@ class SonarrService extends BaseArrService
                 $seriesJustAdded = true;
             }
 
-            // Find the target episode — retry when the series was just added because Sonarr
-            // indexes episodes asynchronously and the first fetch may return an empty list.
-            $episodeId = $this->resolveEpisodeId($sonarrId, $seasonNumber, $episodeNumber, $seriesJustAdded);
-
-            if (! $episodeId) {
-                throw new \RuntimeException(
-                    "Episode S{$seasonNumber}E{$episodeNumber} not found in Sonarr. ".
-                    'Sonarr may still be indexing the series — please try again in a moment.'
+            if ($seriesJustAdded) {
+                // Sonarr indexes episodes asynchronously after POST /series. Rather than
+                // blocking a PHP-FPM worker with usleep() retries, hand off to a queued
+                // job that retries with backoff without tying up the web process.
+                RequestArrEpisode::dispatch(
+                    $this->integration->id,
+                    $sonarrId,
+                    $seasonNumber,
+                    $episodeNumber,
+                    $this->integration->user_id,
+                    $series['title'] ?? 'Unknown',
                 );
+
+                return ['queued' => true];
             }
 
-            // Monitor the episode then trigger an immediate search
+            // Series already existed — episode list is available immediately.
+            $result = $this->monitorAndSearchEpisode($sonarrId, $seasonNumber, $episodeNumber);
+
+            if (! $result['ok']) {
+                throw new \RuntimeException($result['error'] ?? "Episode S{$seasonNumber}E{$episodeNumber} not found in Sonarr.");
+            }
+
+            return $result['data'];
+        }, "request episode S{$seasonNumber}E{$episodeNumber}");
+    }
+
+    /**
+     * Monitor a specific episode and trigger an immediate EpisodeSearch command.
+     * Makes a single attempt — no sleeps, no retries. Returns ok=false when the
+     * episode is not yet indexed so the caller (RequestArrEpisode job) can throw
+     * and let the queue retry with backoff.
+     *
+     * @return array{ok: bool, data?: int, error?: string}
+     */
+    public function monitorAndSearchEpisode(int $sonarrSeriesId, int $seasonNumber, int $episodeNumber): array
+    {
+        return $this->safeCall(function () use ($sonarrSeriesId, $seasonNumber, $episodeNumber) {
+            $episodeId = $this->resolveEpisodeId($sonarrSeriesId, $seasonNumber, $episodeNumber);
+
+            if (! $episodeId) {
+                return ['ok' => false, 'error' => "Episode S{$seasonNumber}E{$episodeNumber} not yet indexed."];
+            }
+
             $this->client()
                 ->put('/episode/monitor', ['episodeIds' => [$episodeId], 'monitored' => true])
                 ->throw();
@@ -375,8 +408,8 @@ class SonarrService extends BaseArrService
                 ->post('/command', ['name' => 'EpisodeSearch', 'episodeIds' => [$episodeId]])
                 ->throw();
 
-            return $episodeId;
-        }, "request episode S{$seasonNumber}E{$episodeNumber}");
+            return ['ok' => true, 'data' => $episodeId];
+        }, "monitor and search episode S{$seasonNumber}E{$episodeNumber}");
     }
 
     /**
@@ -384,9 +417,7 @@ class SonarrService extends BaseArrService
      * When $retryIfEmpty is true, retries up to 5 times to handle the delay between
      * a series being added via POST /series and its episodes becoming available.
      *
-     * NOTE: Retries use usleep() which blocks the PHP worker for up to 2.5 s total.
-     * This is intentional for a single-user self-hosted setup; do not call from a
-     * high-concurrency context without moving to a queued job first.
+     * Only pass $retryIfEmpty=true from a queued job — usleep() blocks the PHP worker.
      */
     public function resolveEpisodeId(int $seriesId, int $seasonNumber, int $episodeNumber, bool $retryIfEmpty = false): ?int
     {
