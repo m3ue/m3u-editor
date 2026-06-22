@@ -4,6 +4,7 @@ namespace App\Plugins;
 
 use App\Models\Plugin;
 use App\Models\PluginTableRecord;
+use Filament\Actions\DeleteAction;
 use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
@@ -87,6 +88,39 @@ class PluginUiTableRegistry
             ->pluck($labelColumn, $keyColumn)
             ->mapWithKeys(fn (mixed $label, mixed $value): array => [(string) $value => (string) $label])
             ->all();
+    }
+
+    public function clearsRecordOnDelete(array $definition): bool
+    {
+        return ($definition['delete_behavior'] ?? null) === 'clear';
+    }
+
+    public function clearRecordForDelete(PluginTableRecord $record, array $definition): PluginTableRecord
+    {
+        $payload = is_array($definition['delete_payload'] ?? null)
+            ? $definition['delete_payload']
+            : [];
+
+        $record->update($this->expandedPayload($payload));
+
+        return $record;
+    }
+
+    public function decorateClearAction(DeleteAction $action, array $definition, string $modelLabel): DeleteAction
+    {
+        $label = (string) ($definition['delete_label'] ?? __('Clear :model', ['model' => $modelLabel]));
+        $icon = (string) ($definition['delete_icon'] ?? 'heroicon-o-x-mark');
+
+        return $action
+            ->label($label)
+            ->icon($icon)
+            ->color((string) ($definition['delete_color'] ?? 'gray'))
+            ->modalHeading($label)
+            ->modalIcon($icon)
+            ->modalDescription((string) ($definition['delete_description'] ?? __('This will clear the saved configuration for this row without removing it from the table.')))
+            ->modalSubmitActionLabel((string) ($definition['delete_submit_label'] ?? __('Clear')))
+            ->successNotificationTitle((string) ($definition['delete_success_message'] ?? __(':model cleared', ['model' => $modelLabel])))
+            ->using(fn (PluginTableRecord $record): PluginTableRecord => $this->clearRecordForDelete($record, $definition));
     }
 
     public function columnDisplayState(Plugin $plugin, PluginTableRecord $record, array $column): mixed
@@ -226,6 +260,21 @@ class PluginUiTableRegistry
                 (bool) ($lookup['enabled_only'] ?? false) && Schema::hasColumn($tableName, 'enabled'),
                 fn (QueryBuilder $query) => $query->where('enabled', true),
             );
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    private function expandedPayload(array $payload): array
+    {
+        $expanded = [];
+
+        foreach ($payload as $key => $value) {
+            data_set($expanded, (string) $key, $value);
+        }
+
+        return $expanded;
     }
 
     /**

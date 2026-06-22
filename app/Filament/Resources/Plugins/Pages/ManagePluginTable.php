@@ -234,10 +234,22 @@ class ManagePluginTable extends Page implements HasTable
         }
 
         if (($this->tableDefinition['delete'] ?? true) !== false) {
-            $actions[] = DeleteAction::make();
+            $actions[] = $this->deleteAction();
         }
 
         return $actions;
+    }
+
+    private function deleteAction(): DeleteAction
+    {
+        $action = DeleteAction::make();
+        $registry = app(PluginUiTableRegistry::class);
+
+        if (! $registry->clearsRecordOnDelete($this->tableDefinition)) {
+            return $action;
+        }
+
+        return $registry->decorateClearAction($action, $this->tableDefinition, $this->modelLabel());
     }
 
     /**

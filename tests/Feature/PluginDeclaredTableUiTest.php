@@ -2,6 +2,7 @@
 
 use App\Filament\Resources\Plugins\Pages\ManagePluginTable;
 use App\Filament\Resources\Plugins\PluginResource;
+use App\Livewire\PluginTableInline;
 use App\Models\Playlist;
 use App\Models\Plugin;
 use App\Models\User;
@@ -461,6 +462,68 @@ it('prefills plugin-declared table rows from an owned source table', function ()
         ]);
 });
 
+it('renders inline plugin table headings from manifest labels', function () {
+    $user = User::factory()->admin()->create();
+    $this->actingAs($user);
+
+    $plugin = declaredTableUiPlugin();
+
+    Livewire::test(PluginTableInline::class, ['record' => $plugin, 'tableId' => 'profiles'])
+        ->assertOk()
+        ->assertSee('Profiles')
+        ->assertSee('Reusable test profiles.');
+});
+
+it('can clear a plugin table record instead of deleting it', function () {
+    $user = User::factory()->admin()->create();
+    $this->actingAs($user);
+
+    $playlist = Playlist::withoutEvents(fn (): Playlist => Playlist::factory()->for($user)->create(['name' => 'Assigned Playlist']));
+    [$plugin, $profilesTable, $linksTable] = declaredPrefilledTableUiPlugin();
+    $profileId = DB::table($profilesTable)->value('id');
+
+    $definition = data_get($plugin->schema_definition, 'ui_tables.0');
+    $definition['delete_behavior'] = 'clear';
+    $definition['delete_payload'] = [
+        'extension_plugin_profile_id' => null,
+        'enabled' => false,
+        'settings.run_availability' => true,
+        'settings.run_sync' => true,
+    ];
+
+    app(PluginUiTableRegistry::class)->prefillRows($plugin, $definition);
+
+    $row = DB::table($linksTable)->where('playlist_id', $playlist->id)->first();
+
+    DB::table($linksTable)->where('id', $row->id)->update([
+        'extension_plugin_profile_id' => $profileId,
+        'enabled' => true,
+        'settings' => json_encode([
+            'run_availability' => false,
+            'run_sync' => false,
+        ], JSON_THROW_ON_ERROR),
+        'updated_at' => now(),
+    ]);
+
+    $record = app(PluginUiTableRegistry::class)
+        ->newModel($plugin, $linksTable)
+        ->newQuery()
+        ->findOrFail($row->id);
+
+    app(PluginUiTableRegistry::class)->clearRecordForDelete($record, $definition);
+
+    $cleared = DB::table($linksTable)->where('id', $row->id)->first();
+
+    expect(DB::table($linksTable)->count())->toBe(1)
+        ->and((int) $cleared->playlist_id)->toBe($playlist->id)
+        ->and($cleared->extension_plugin_profile_id)->toBeNull()
+        ->and((bool) $cleared->enabled)->toBeFalse()
+        ->and(json_decode((string) $cleared->settings, true))->toMatchArray([
+            'run_availability' => true,
+            'run_sync' => true,
+        ]);
+});
+
 it('throws when ui_tables is not a list in the manifest', function () {
     expect(fn () => PluginManifest::fromArray([
         'id' => 'test-plugin',
@@ -497,6 +560,42 @@ it('returns validation errors (not TypeError) when ui_table columns or fields is
 
     expect($errors)->toContain('schema.ui_tables.0.columns must be a list.')
         ->and($errors)->toContain('schema.ui_tables.0.fields must be a list.');
+});
+
+it('treats delete_behavior delete as a standard delete with no clear applied', function () {
+    $plugin = declaredTableUiPlugin();
+    $definition = data_get($plugin->schema_definition, 'ui_tables.0');
+    $definition['delete_behavior'] = 'delete';
+
+    expect(app(PluginUiTableRegistry::class)->clearsRecordOnDelete($definition))->toBeFalse();
+});
+
+it('validates clear delete behavior declarations on ui_tables', function () {
+    $suffix = Str::lower(Str::random(6));
+    $tableName = "plugin_test_{$suffix}_items";
+
+    $manifest = PluginManifest::fromArray([
+        'id' => "test-{$suffix}",
+        'name' => 'Test Plugin',
+        'permissions' => [],
+        'schema' => [
+            'tables' => [['name' => $tableName, 'columns' => [['type' => 'id', 'name' => 'id']]]],
+            'ui_tables' => [[
+                'id' => 'items',
+                'table' => $tableName,
+                'label' => 'Items',
+                'delete_behavior' => 'clear',
+                'columns' => [],
+                'fields' => [],
+            ]],
+        ],
+    ], '/tmp/test-plugin');
+
+    $validator = app(PluginValidator::class);
+    $method = new ReflectionMethod($validator, 'validateSchema');
+    $errors = $method->invoke($validator, $manifest);
+
+    expect($errors)->toContain('schema.ui_tables.0.delete_payload must be an object when delete_behavior is [clear].');
 });
 
 it('validates dynamic option provider declarations on ui_table columns', function () {

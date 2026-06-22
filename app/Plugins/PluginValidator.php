@@ -747,6 +747,18 @@ class PluginValidator
                 $errors[] = "{$path} requires [label].";
             }
 
+            if (array_key_exists('delete_behavior', $uiTable)
+                && ! in_array($uiTable['delete_behavior'], ['delete', 'clear'], true)) {
+                $errors[] = "{$path}.delete_behavior must be one of [delete, clear].";
+            }
+
+            if (($uiTable['delete_behavior'] ?? null) === 'clear'
+                && ! is_array($uiTable['delete_payload'] ?? null)) {
+                $errors[] = "{$path}.delete_payload must be an object when delete_behavior is [clear].";
+            } elseif (array_key_exists('delete_payload', $uiTable) && ! is_array($uiTable['delete_payload'])) {
+                $errors[] = "{$path}.delete_payload must be an object.";
+            }
+
             if (array_key_exists('prefill', $uiTable)) {
                 $prefill = $uiTable['prefill'];
                 $prefillPath = "{$path}.prefill";
