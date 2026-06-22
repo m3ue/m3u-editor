@@ -386,18 +386,13 @@ class PluginTableInline extends Component implements HasActions, HasForms, HasTa
             return [];
         }
 
-        return [
-            Action::make('export_csv')
-                ->label(__('CSV'))
+        return collect(app(PluginUiTableRegistry::class)->exportFormatsFor($this->tableDefinition))
+            ->map(fn (string $format): Action => Action::make("export_{$format}")
+                ->label(__(Str::upper($format)))
                 ->icon('heroicon-o-arrow-down-tray')
                 ->color('gray')
-                ->url(fn (): string => $this->exportUrl('csv')),
-            Action::make('export_json')
-                ->label(__('JSON'))
-                ->icon('heroicon-o-arrow-down-tray')
-                ->color('gray')
-                ->url(fn (): string => $this->exportUrl('json')),
-        ];
+                ->url(fn (): string => $this->exportUrl($format)))
+            ->all();
     }
 
     private function exportUrl(string $format): string

@@ -23,6 +23,7 @@ class PluginTableExportController extends Controller
         $registry = app(PluginUiTableRegistry::class);
         $definition = $registry->tableFor($plugin, $table);
         abort_unless($definition !== null, 404);
+        abort_unless(in_array($format, $registry->exportFormatsFor($definition), true), 404);
 
         $tableName = (string) ($definition['table'] ?? '');
         abort_unless($tableName !== '' && Schema::hasTable($tableName), 404);

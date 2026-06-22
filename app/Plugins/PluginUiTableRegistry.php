@@ -15,6 +15,8 @@ use Throwable;
 
 class PluginUiTableRegistry
 {
+    public const EXPORT_FORMATS = ['csv', 'json'];
+
     /**
      * @return array<int, array<string, mixed>>
      */
@@ -193,6 +195,25 @@ class PluginUiTableRegistry
     public function clearsRecordOnDelete(array $definition): bool
     {
         return ($definition['delete_behavior'] ?? null) === 'clear';
+    }
+
+    /**
+     * @param  array<string, mixed>  $definition
+     * @return array<int, string>
+     */
+    public function exportFormatsFor(array $definition): array
+    {
+        if (! array_key_exists('export_formats', $definition)) {
+            return self::EXPORT_FORMATS;
+        }
+
+        return collect(Arr::wrap($definition['export_formats']))
+            ->filter(fn (mixed $format): bool => is_string($format))
+            ->map(fn (string $format): string => strtolower(trim($format)))
+            ->filter(fn (string $format): bool => in_array($format, self::EXPORT_FORMATS, true))
+            ->unique()
+            ->values()
+            ->all();
     }
 
     public function clearRecordForDelete(PluginTableRecord $record, array $definition): PluginTableRecord

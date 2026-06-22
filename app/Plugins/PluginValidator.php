@@ -759,6 +759,22 @@ class PluginValidator
                 $errors[] = "{$path}.delete_payload must be an object.";
             }
 
+            if (array_key_exists('export_formats', $uiTable)) {
+                if (! is_array($uiTable['export_formats'])) {
+                    $errors[] = "{$path}.export_formats must be a list.";
+                } else {
+                    foreach ($uiTable['export_formats'] as $format) {
+                        $normalizedFormat = is_string($format) ? strtolower(trim($format)) : null;
+
+                        if (! is_string($format) || ! in_array($normalizedFormat, PluginUiTableRegistry::EXPORT_FORMATS, true)) {
+                            $errors[] = "{$path}.export_formats must contain only supported formats: ".implode(', ', PluginUiTableRegistry::EXPORT_FORMATS).'.';
+
+                            break;
+                        }
+                    }
+                }
+            }
+
             if (array_key_exists('prefill', $uiTable)) {
                 $prefill = $uiTable['prefill'];
                 $prefillPath = "{$path}.prefill";

@@ -719,6 +719,80 @@ it('scopes plugin-declared result tables to a run and playlist', function () {
         ->assertDontSee('Other Playlist Result');
 });
 
+it('honors plugin-declared export formats for inline tables and downloads', function () {
+    $user = User::factory()->create(['permissions' => ['use_tools']]);
+    $this->actingAs($user);
+
+    $fixture = seedDeclaredRunResultRows($user);
+    $plugin = $fixture['plugin'];
+    $playlist = $fixture['playlist'];
+    $run = $fixture['run'];
+    $schema = $plugin->schema_definition;
+    data_set($schema, 'ui_tables.0.export_formats', ['csv']);
+    $plugin->update(['schema_definition' => $schema]);
+
+    Livewire::test(PluginTableInline::class, [
+        'record' => $plugin->fresh(),
+        'tableId' => 'run_results',
+        'runId' => $run->id,
+        'playlistId' => $playlist->id,
+        'readOnly' => true,
+        'showHeading' => true,
+    ])
+        ->assertOk()
+        ->assertSee('CSV')
+        ->assertDontSee('JSON');
+
+    $this->get(route('extension-plugins.tables.export', [
+        'plugin' => $plugin,
+        'table' => 'run_results',
+        'format' => 'csv',
+        'run' => $run->id,
+        'playlist' => $playlist->id,
+    ]))->assertOk();
+
+    $this->get(route('extension-plugins.tables.export', [
+        'plugin' => $plugin,
+        'table' => 'run_results',
+        'format' => 'json',
+        'run' => $run->id,
+        'playlist' => $playlist->id,
+    ]))->assertNotFound();
+});
+
+it('can disable plugin-declared inline table exports', function () {
+    $user = User::factory()->create(['permissions' => ['use_tools']]);
+    $this->actingAs($user);
+
+    $fixture = seedDeclaredRunResultRows($user);
+    $plugin = $fixture['plugin'];
+    $playlist = $fixture['playlist'];
+    $run = $fixture['run'];
+    $schema = $plugin->schema_definition;
+    data_set($schema, 'ui_tables.0.export_formats', []);
+    $plugin->update(['schema_definition' => $schema]);
+
+    Livewire::test(PluginTableInline::class, [
+        'record' => $plugin->fresh(),
+        'tableId' => 'run_results',
+        'runId' => $run->id,
+        'playlistId' => $playlist->id,
+        'readOnly' => true,
+        'showHeading' => true,
+    ])
+        ->assertOk()
+        ->assertDontSee('CSV')
+        ->assertDontSee('JSON');
+
+    $this->get(route('extension-plugins.tables.export', [
+        'plugin' => $plugin,
+        'table' => 'run_results',
+        'format' => 'csv',
+        'run' => $run->id,
+        'playlist' => $playlist->id,
+    ]))->assertNotFound();
+});
+
 it('streams plugin-declared result table exports on demand', function () {
     $user = User::factory()->create(['permissions' => ['use_tools']]);
     $this->actingAs($user);
@@ -874,6 +948,34 @@ it('validates clear delete behavior declarations on ui_tables', function () {
     $errors = $method->invoke($validator, $manifest);
 
     expect($errors)->toContain('schema.ui_tables.0.delete_payload must be an object when delete_behavior is [clear].');
+});
+
+it('validates ui_table export format declarations', function () {
+    $suffix = Str::lower(Str::random(6));
+    $tableName = "plugin_test_{$suffix}_items";
+
+    $manifest = PluginManifest::fromArray([
+        'id' => "test-{$suffix}",
+        'name' => 'Test Plugin',
+        'permissions' => [],
+        'schema' => [
+            'tables' => [['name' => $tableName, 'columns' => [['type' => 'id', 'name' => 'id']]]],
+            'ui_tables' => [[
+                'id' => 'items',
+                'table' => $tableName,
+                'label' => 'Items',
+                'export_formats' => ['csv', 'xlsx'],
+                'columns' => [],
+                'fields' => [],
+            ]],
+        ],
+    ], '/tmp/test-plugin');
+
+    $validator = app(PluginValidator::class);
+    $method = new ReflectionMethod($validator, 'validateSchema');
+    $errors = $method->invoke($validator, $manifest);
+
+    expect($errors)->toContain('schema.ui_tables.0.export_formats must contain only supported formats: csv, json.');
 });
 
 it('generates an exists rule for table_select settings fields', function () {
