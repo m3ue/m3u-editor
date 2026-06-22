@@ -19,6 +19,7 @@ use App\Http\Controllers\PlayerController;
 use App\Http\Controllers\PlaylistController;
 use App\Http\Controllers\PlaylistGenerateController;
 use App\Http\Controllers\PluginRunReportController;
+use App\Http\Controllers\PluginTableExportController;
 use App\Http\Controllers\ProxyController;
 use App\Http\Controllers\QueueIndicatorController;
 use App\Http\Controllers\SchedulesDirectImageProxyController;
@@ -111,6 +112,11 @@ Route::get('/assets/{asset}/preview', AssetPreviewController::class)
 Route::get('/extension-plugins/{plugin}/runs/{run}/report', PluginRunReportController::class)
     ->middleware(['auth'])
     ->name('extension-plugins.runs.report');
+
+Route::get('/extension-plugins/{plugin}/tables/{table}/export/{format}', PluginTableExportController::class)
+    ->where('format', 'csv|json')
+    ->middleware(['auth'])
+    ->name('extension-plugins.tables.export');
 
 Route::get('/logo-repository', [LogoRepositoryController::class, 'index'])
     ->name('logo.repository');

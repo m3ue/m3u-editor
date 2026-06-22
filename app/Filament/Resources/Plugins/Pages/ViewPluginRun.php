@@ -6,6 +6,7 @@ use App\Filament\Resources\Plugins\PluginResource;
 use App\Models\Plugin;
 use App\Models\PluginRun;
 use App\Plugins\PluginManager;
+use App\Plugins\PluginUiTableRegistry;
 use Filament\Actions\Action;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\Concerns\InteractsWithRecord;
@@ -26,6 +27,8 @@ class ViewPluginRun extends Page
     public PluginRun $runRecord;
 
     public Collection $logs;
+
+    public ?int $playlistId = null;
 
     public function mount(int|string $record, int|string $run): void
     {
@@ -49,6 +52,7 @@ class ViewPluginRun extends Page
 
         $this->runRecord = $runRecord;
         $this->logs = $runRecord->logs()->latest()->limit(150)->get()->reverse()->values();
+        $this->playlistId = request()->integer('playlist') ?: null;
     }
 
     public function getTitle(): string
@@ -125,6 +129,25 @@ class ViewPluginRun extends Page
         return is_string($filename) && $filename !== ''
             ? $filename
             : "plugin-run-{$this->runRecord->id}.dat";
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function resultTables(): array
+    {
+        return app(PluginUiTableRegistry::class)->runScopedTablesFor($this->runRecord->plugin);
+    }
+
+    public function scopedPlaylistId(): ?int
+    {
+        if ($this->playlistId !== null) {
+            return $this->playlistId;
+        }
+
+        $payloadPlaylistId = data_get($this->runRecord->payload, 'playlist_id');
+
+        return is_numeric($payloadPlaylistId) ? (int) $payloadPlaylistId : null;
     }
 
     private function refreshRunState(): void
