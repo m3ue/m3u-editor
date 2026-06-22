@@ -173,6 +173,9 @@ class PluginTableExportController extends Controller
     }
 
     /**
+     * Returns all columns for export: declared schema columns first (preserving label and order),
+     * followed by any physical DB columns not already covered by a declaration.
+     *
      * @param  array<string, mixed>  $definition
      * @return array<int, array{name: string, label: string}>
      */
@@ -184,16 +187,16 @@ class PluginTableExportController extends Controller
                 'name' => (string) $col['name'],
                 'label' => (string) ($col['label'] ?? $col['name']),
             ])
-            ->values()
             ->all();
 
-        if ($declared !== []) {
-            return $declared;
-        }
+        $declaredNames = array_column($declared, 'name');
 
-        return collect(Schema::getColumnListing($tableName))
+        $extra = collect(Schema::getColumnListing($tableName))
+            ->reject(fn (string $col): bool => in_array($col, $declaredNames, true))
             ->map(fn (string $col): array => ['name' => $col, 'label' => $col])
             ->all();
+
+        return [...$declared, ...$extra];
     }
 
     private function csvValue(mixed $value): string
