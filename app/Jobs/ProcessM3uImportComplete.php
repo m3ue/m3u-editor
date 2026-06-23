@@ -254,28 +254,13 @@ class ProcessM3uImportComplete implements ShouldQueue
             }
         }
 
-        // Capture IDs + types before the bulk soft-delete so we can clean up
-        // auto-sync rules. The bulk query-builder delete does not fire Eloquent
-        // model events, so the Group::deleted hook won't run for this path.
-        $removedGroupsByType = $removedGroups->clone()
-            ->get(['id', 'type'])
-            ->groupBy('type');
-
-        // Clear out invalid groups/channels (if any)
+        // Clear out invalid groups/channels (if any).
+        // Auto-sync config pruning and ghost-tag cleanup are intentionally deferred to
+        // AutoSyncGroupsToCustomPlaylist, which runs after this job in the pipeline.
+        // Pruning here would empty the groups array before that job dispatches, causing
+        // the empty-groups guard to skip the job and leave ghost tags on custom playlists.
         $removedGroups->delete();
         $removedChannels->delete();
-
-        // Strip the now-deleted group IDs from this playlist's auto-sync rules
-        // so the playlist can be edited without a "groups contain invalid IDs" error.
-        foreach ([['live', 'live_groups'], ['vod', 'vod_groups']] as [$groupType, $ruleType]) {
-            $ids = ($removedGroupsByType[$groupType] ?? collect())
-                ->pluck('id')
-                ->map(fn ($id) => (int) $id)
-                ->all();
-            if (! empty($ids)) {
-                $playlist->pruneAutoSyncGroupIds($ids, $ruleType);
-            }
-        }
 
         // Finally, clean up orphaned channels (non-custom channels with null or non-existent group_id)
         Channel::where('playlist_id', $playlist->id)

@@ -23,6 +23,7 @@ use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Event;
+use Spatie\Tags\Tag;
 
 uses(RefreshDatabase::class);
 
@@ -593,4 +594,68 @@ it('does not dispatch auto-sync jobs when playlist sync is not completed', funct
     event(new SyncCompleted($this->playlist));
 
     Bus::assertNotDispatched(AutoSyncGroupsToCustomPlaylist::class);
+});
+
+it('prunes soft-deleted group IDs from source playlist config after full_sync', function () {
+    // Simulate what ProcessM3uImportComplete does: soft-delete the group without pruning
+    $this->group->delete();
+    $this->playlist->updateQuietly([
+        'auto_sync_to_custom_config' => [[
+            'enabled' => true,
+            'type' => 'live_groups',
+            'groups' => [$this->group->id],
+            'custom_playlist_id' => $this->customPlaylist->id,
+            'sync_mode' => 'full_sync',
+            'mode' => 'original',
+        ]],
+    ]);
+
+    (new AutoSyncGroupsToCustomPlaylist(
+        userId: $this->user->id,
+        playlistId: $this->playlist->id,
+        groupIds: [$this->group->id],
+        customPlaylistId: $this->customPlaylist->id,
+        data: ['mode' => 'original'],
+        type: 'channel',
+        syncMode: 'full_sync',
+    ))->handle();
+
+    $config = $this->playlist->fresh()->auto_sync_to_custom_config;
+    expect($config[0]['groups'])->toBe([]);
+});
+
+it('detaches ghost tag and prunes config when the only group in a rule is soft-deleted', function () {
+    // Attach a tag to the custom playlist simulating a prior sync
+    $tagType = $this->customPlaylist->uuid;
+    $tag = Tag::findOrCreate($this->group->name, $tagType);
+    $this->customPlaylist->attachTag($tag);
+
+    // Soft-delete the group (as ProcessM3uImportComplete would do)
+    $this->group->delete();
+    $this->playlist->updateQuietly([
+        'auto_sync_to_custom_config' => [[
+            'enabled' => true,
+            'type' => 'live_groups',
+            'groups' => [$this->group->id],
+            'custom_playlist_id' => $this->customPlaylist->id,
+            'sync_mode' => 'full_sync',
+            'mode' => 'original',
+        ]],
+    ]);
+
+    (new AutoSyncGroupsToCustomPlaylist(
+        userId: $this->user->id,
+        playlistId: $this->playlist->id,
+        groupIds: [$this->group->id],
+        customPlaylistId: $this->customPlaylist->id,
+        data: ['mode' => 'original'],
+        type: 'channel',
+        syncMode: 'full_sync',
+    ))->handle();
+
+    // Ghost tag detached
+    expect($this->customPlaylist->fresh()->tagsWithType($tagType)->pluck('id'))->not->toContain($tag->id);
+    // Config pruned
+    $config = $this->playlist->fresh()->auto_sync_to_custom_config;
+    expect($config[0]['groups'])->toBe([]);
 });

@@ -196,7 +196,10 @@ describe('Live empty-response guard', function () {
 });
 
 describe('auto_sync_to_custom_config cleanup on bulk group delete', function () {
-    it('strips deleted group IDs from auto_sync_to_custom_config after a re-sync removes groups', function () {
+    // Config pruning is deferred to AutoSyncGroupsToCustomPlaylist so the job is never
+    // skipped before ghost-tag cleanup can run. This test verifies ProcessM3uImportComplete
+    // soft-deletes the group and leaves the config intact for the auto-sync job.
+    it('soft-deletes a removed group and leaves auto-sync config intact for the auto-sync job', function () {
         $user = User::factory()->create();
         $playlist = Playlist::withoutEvents(
             fn () => Playlist::factory()->for($user)->create(['xtream' => false])
@@ -206,14 +209,12 @@ describe('auto_sync_to_custom_config cleanup on bulk group delete', function () 
         $newBatch = 'new-batch-uuid';
         $oldBatch = 'old-batch-uuid';
 
-        // Stale group that will be removed by the re-sync
         $staleGroup = Group::factory()->for($playlist)->for($user)->create([
             'type' => 'live',
             'custom' => false,
             'import_batch_no' => $oldBatch,
         ]);
 
-        // Kept group that is still present in the new batch
         $keptGroup = Group::factory()->for($playlist)->for($user)->create([
             'type' => 'live',
             'custom' => false,
@@ -225,7 +226,6 @@ describe('auto_sync_to_custom_config cleanup on bulk group delete', function () 
             'import_batch_no' => $newBatch,
         ]);
 
-        // Auto-sync rule that references both groups
         $playlist->update([
             'auto_sync_to_custom_config' => [[
                 'enabled' => true,
@@ -247,12 +247,12 @@ describe('auto_sync_to_custom_config cleanup on bulk group delete', function () 
             runningVodImport: false,
         ))->handle(app(GeneralSettings::class));
 
-        // Stale group should be soft-deleted
+        // Group is soft-deleted — import job's responsibility
         expect(Group::withTrashed()->where('id', $staleGroup->id)->whereNotNull('deleted_at')->exists())->toBeTrue();
 
-        // Config must no longer contain the stale group ID
+        // Config still contains the stale ID — auto-sync job will prune it after cleanup
         $config = $playlist->fresh()->auto_sync_to_custom_config;
-        expect($config[0]['groups'])->not->toContain($staleGroup->id);
+        expect($config[0]['groups'])->toContain($staleGroup->id);
         expect($config[0]['groups'])->toContain($keptGroup->id);
     });
 });
