@@ -29,7 +29,7 @@ class TvMazeService
         }
 
         $episodesKey = "tvmaze_episodes_{$tvMazeId}";
-        $castKey = "tvmaze_cast_{$tvMazeId}";
+        $castKey = "tvmaze_cast_v2_{$tvMazeId}";
 
         $episodes = Cache::get($episodesKey);
         $cast = Cache::get($castKey);

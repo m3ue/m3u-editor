@@ -970,7 +970,7 @@ class TmdbService
             return [];
         }
 
-        $cacheKey = "tmdb_movie_cast_{$tmdbId}_{$this->language}";
+        $cacheKey = "tmdb_movie_cast_v2_{$tmdbId}_{$this->language}";
 
         return Cache::remember($cacheKey, now()->addMinutes(60), function () use ($tmdbId) {
             $this->waitForRateLimit();
