@@ -190,6 +190,139 @@ it('does not remove channels from other groups in full_sync mode', function () {
     expect($this->customPlaylist->channels()->where('channels.id', $otherChannel->id)->exists())->toBeTrue();
 });
 
+it('removes channels from a soft-deleted source group in full_sync mode', function () {
+    // Channels in the group added to the custom playlist before the group was deleted
+    $channels = Channel::factory()->count(2)->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'group_id' => $this->group->id,
+    ]);
+    foreach ($channels as $channel) {
+        $this->customPlaylist->channels()->attach($channel->id);
+    }
+
+    // Soft-delete the group (simulates provider removing the whole group on re-sync)
+    $groupId = $this->group->id;
+    $this->group->delete();
+
+    (new AutoSyncGroupsToCustomPlaylist(
+        userId: $this->user->id,
+        playlistId: $this->playlist->id,
+        groupIds: [$groupId],
+        customPlaylistId: $this->customPlaylist->id,
+        data: ['mode' => 'original'],
+        type: 'channel',
+        syncMode: 'full_sync',
+    ))->handle();
+
+    // All channels from the deleted group must be removed — none should linger as Uncategorized
+    foreach ($channels as $channel) {
+        expect($this->customPlaylist->channels()->where('channels.id', $channel->id)->exists())->toBeFalse();
+    }
+});
+
+it('detaches the group tag from the custom playlist when all its channels are removed in full_sync mode', function () {
+    $channel = Channel::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'group_id' => $this->group->id,
+    ]);
+    $this->customPlaylist->channels()->attach($channel->id);
+
+    // Run the first sync so the "Sports" tag is created and attached
+    (new AutoSyncGroupsToCustomPlaylist(
+        userId: $this->user->id,
+        playlistId: $this->playlist->id,
+        groupIds: [$this->group->id],
+        customPlaylistId: $this->customPlaylist->id,
+        data: ['mode' => 'original'],
+        type: 'channel',
+        syncMode: 'full_sync',
+    ))->handle();
+
+    expect($this->customPlaylist->fresh()->groupTags()->pluck('name')->contains($this->group->name))->toBeTrue();
+
+    // Soft-delete the group and re-run full_sync — the tag should be cleaned up
+    $groupId = $this->group->id;
+    $this->group->delete();
+
+    (new AutoSyncGroupsToCustomPlaylist(
+        userId: $this->user->id,
+        playlistId: $this->playlist->id,
+        groupIds: [$groupId],
+        customPlaylistId: $this->customPlaylist->id,
+        data: ['mode' => 'original'],
+        type: 'channel',
+        syncMode: 'full_sync',
+    ))->handle();
+
+    expect($this->customPlaylist->fresh()->groupTags()->pluck('name')->contains($this->group->name))->toBeFalse();
+});
+
+it('does not detach a group tag when another source playlist still has channels with that tag', function () {
+    // Second source playlist with its own "Sports" group — same name, different playlist
+    $secondPlaylist = Playlist::factory()->for($this->user)->createQuietly([
+        'status' => Status::Completed,
+    ]);
+    $secondGroup = Group::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $secondPlaylist->id,
+        'type' => 'live',
+        'name' => 'Sports', // same group name
+    ]);
+    $secondChannel = Channel::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $secondPlaylist->id,
+        'group_id' => $secondGroup->id,
+    ]);
+
+    // Sync both playlists' channels into the same custom playlist
+    (new AutoSyncGroupsToCustomPlaylist(
+        userId: $this->user->id,
+        playlistId: $this->playlist->id,
+        groupIds: [$this->group->id],
+        customPlaylistId: $this->customPlaylist->id,
+        data: ['mode' => 'original'],
+        type: 'channel',
+        syncMode: 'full_sync',
+    ))->handle();
+
+    (new AutoSyncGroupsToCustomPlaylist(
+        userId: $this->user->id,
+        playlistId: $secondPlaylist->id,
+        groupIds: [$secondGroup->id],
+        customPlaylistId: $this->customPlaylist->id,
+        data: ['mode' => 'original'],
+        type: 'channel',
+        syncMode: 'full_sync',
+    ))->handle();
+
+    expect($this->customPlaylist->fresh()->groupTags()->pluck('name')->contains('Sports'))->toBeTrue();
+
+    // Soft-delete the first playlist's "Sports" group and re-run its rule
+    $firstGroupId = $this->group->id;
+    Channel::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'group_id' => $this->group->id,
+    ]);
+    $this->group->delete();
+
+    (new AutoSyncGroupsToCustomPlaylist(
+        userId: $this->user->id,
+        playlistId: $this->playlist->id,
+        groupIds: [$firstGroupId],
+        customPlaylistId: $this->customPlaylist->id,
+        data: ['mode' => 'original'],
+        type: 'channel',
+        syncMode: 'full_sync',
+    ))->handle();
+
+    // The "Sports" tag must still be attached — second playlist's channel still uses it
+    expect($this->customPlaylist->fresh()->groupTags()->pluck('name')->contains('Sports'))->toBeTrue();
+    expect($this->customPlaylist->channels()->where('channels.id', $secondChannel->id)->exists())->toBeTrue();
+});
+
 it('applies the group name as a tag in original mode', function () {
     Channel::factory()->count(2)->create([
         'user_id' => $this->user->id,
