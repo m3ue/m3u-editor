@@ -17,6 +17,7 @@
 
 use App\Jobs\ProcessM3uImportComplete;
 use App\Models\Channel;
+use App\Models\CustomPlaylist;
 use App\Models\Group;
 use App\Models\Playlist;
 use App\Models\User;
@@ -191,5 +192,67 @@ describe('Live empty-response guard', function () {
         expect(Group::where('id', $liveGroup->id)->whereNull('deleted_at')->exists())->toBeTrue();
         // VOD channels are unaffected.
         expect($playlist->channels()->where('is_vod', true)->count())->toBe(2);
+    });
+});
+
+describe('auto_sync_to_custom_config cleanup on bulk group delete', function () {
+    it('strips deleted group IDs from auto_sync_to_custom_config after a re-sync removes groups', function () {
+        $user = User::factory()->create();
+        $playlist = Playlist::withoutEvents(
+            fn () => Playlist::factory()->for($user)->create(['xtream' => false])
+        );
+        $customPlaylist = CustomPlaylist::factory()->create(['user_id' => $user->id]);
+
+        $newBatch = 'new-batch-uuid';
+        $oldBatch = 'old-batch-uuid';
+
+        // Stale group that will be removed by the re-sync
+        $staleGroup = Group::factory()->for($playlist)->for($user)->create([
+            'type' => 'live',
+            'custom' => false,
+            'import_batch_no' => $oldBatch,
+        ]);
+
+        // Kept group that is still present in the new batch
+        $keptGroup = Group::factory()->for($playlist)->for($user)->create([
+            'type' => 'live',
+            'custom' => false,
+            'import_batch_no' => $newBatch,
+        ]);
+        Channel::factory()->for($playlist)->for($user)->for($keptGroup)->create([
+            'is_vod' => false,
+            'is_custom' => false,
+            'import_batch_no' => $newBatch,
+        ]);
+
+        // Auto-sync rule that references both groups
+        $playlist->update([
+            'auto_sync_to_custom_config' => [[
+                'enabled' => true,
+                'type' => 'live_groups',
+                'groups' => [$staleGroup->id, $keptGroup->id],
+                'custom_playlist_id' => $customPlaylist->id,
+                'sync_mode' => 'full_sync',
+                'mode' => 'original',
+            ]],
+        ]);
+
+        (new ProcessM3uImportComplete(
+            userId: $user->id,
+            playlistId: $playlist->id,
+            batchNo: $newBatch,
+            start: Carbon::now()->subMinutes(5),
+            isNew: false,
+            runningLiveImport: true,
+            runningVodImport: false,
+        ))->handle(app(GeneralSettings::class));
+
+        // Stale group should be soft-deleted
+        expect(Group::withTrashed()->where('id', $staleGroup->id)->whereNotNull('deleted_at')->exists())->toBeTrue();
+
+        // Config must no longer contain the stale group ID
+        $config = $playlist->fresh()->auto_sync_to_custom_config;
+        expect($config[0]['groups'])->not->toContain($staleGroup->id);
+        expect($config[0]['groups'])->toContain($keptGroup->id);
     });
 });

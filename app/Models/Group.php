@@ -12,6 +12,17 @@ class Group extends Model
 {
     use HasFactory, SoftDeletes;
 
+    protected static function booted(): void
+    {
+        static::deleted(function (Group $group): void {
+            // When a group is soft-deleted (e.g. manually via the UI), strip its ID
+            // from the source playlist's auto-sync rules so the saved config stays valid
+            // and the playlist can be edited without a validation error.
+            $ruleType = $group->type === 'vod' ? 'vod_groups' : 'live_groups';
+            $group->playlist?->pruneAutoSyncGroupIds([$group->id], $ruleType);
+        });
+    }
+
     /**
      * The attributes that should be cast to native types.
      *

@@ -4,8 +4,10 @@ namespace App\Jobs;
 
 use App\Events\SyncCompleted;
 use App\Models\Category;
+use App\Models\Channel;
 use App\Models\CustomPlaylist;
 use App\Models\Group;
+use App\Models\Series;
 use App\Models\User;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -122,6 +124,14 @@ class AutoSyncGroupsToCustomPlaylist implements ShouldQueue
             $itemTable = $isSeries ? 'series' : 'channels';
             $groupColumn = $isSeries ? 'category_id' : 'group_id';
 
+            // Restrict "currently active" to groups that still exist (not soft-deleted).
+            // Channels belonging to soft-deleted groups still carry the old group_id value,
+            // so without this filter they would appear in both the whereIn and whereNotIn
+            // subqueries and be wrongly retained, showing as "Uncategorized" in the playlist.
+            $activeGroupIds = $isSeries
+                ? Category::whereIn('id', $this->groupIds)->pluck('id')->all()
+                : Group::whereIn('id', $this->groupIds)->pluck('id')->all();
+
             DB::table($pivotTable)
                 ->where($pivotForeignKey, $this->customPlaylistId)
                 ->whereIn($pivotRelatedKey, function ($query) use ($itemTable, $groupColumn): void {
@@ -135,13 +145,37 @@ class AutoSyncGroupsToCustomPlaylist implements ShouldQueue
                                 ->orWhereNull($groupColumn);
                         });
                 })
-                ->whereNotIn($pivotRelatedKey, function ($query) use ($itemTable, $groupColumn): void {
-                    // Items currently present in the source groups
+                ->whereNotIn($pivotRelatedKey, function ($query) use ($itemTable, $groupColumn, $activeGroupIds): void {
+                    // Items currently present in active (non-deleted) source groups only.
+                    // Using $activeGroupIds (not $this->groupIds) ensures channels whose
+                    // group was soft-deleted are not falsely treated as "still present".
                     $query->select('id')
                         ->from($itemTable)
-                        ->whereIn($groupColumn, $this->groupIds);
+                        ->whereIn($groupColumn, $activeGroupIds);
                 })
                 ->delete();
+
+            // Detach group tags from this custom playlist that no longer have any channels.
+            // This removes "ghost" groups left behind when channels are removed.
+            // Checking against actual pivot membership means a tag shared across two source
+            // playlists (same group name) is only detached once both playlists' channels are gone.
+            $itemMorphClass = $isSeries ? Series::class : Channel::class;
+
+            $playlist->tagsWithType($tagType)->each(function (Tag $tag) use ($playlist, $itemMorphClass, $pivotTable, $pivotForeignKey, $pivotRelatedKey): void {
+                $stillHasItems = DB::table('taggables')
+                    ->where('tag_id', $tag->id)
+                    ->where('taggable_type', $itemMorphClass)
+                    ->whereIn('taggable_id', function ($q) use ($pivotTable, $pivotForeignKey, $pivotRelatedKey): void {
+                        $q->select($pivotRelatedKey)
+                            ->from($pivotTable)
+                            ->where($pivotForeignKey, $this->customPlaylistId);
+                    })
+                    ->exists();
+
+                if (! $stillHasItems) {
+                    $playlist->detachTag($tag);
+                }
+            });
         }
 
         $notification = Notification::make()
