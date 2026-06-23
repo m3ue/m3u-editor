@@ -499,4 +499,36 @@ class Playlist extends Model
             }
         );
     }
+
+    /**
+     * Remove the given IDs from every matching auto-sync rule on this playlist.
+     *
+     * @param  array<int>  $ids  Group or Category IDs to strip out
+     * @param  string  $type  Rule type to target: 'live_groups', 'vod_groups', or 'series_categories'
+     */
+    public function pruneAutoSyncGroupIds(array $ids, string $type): void
+    {
+        $config = $this->auto_sync_to_custom_config ?? [];
+        if (empty($config) || empty($ids)) {
+            return;
+        }
+
+        $changed = false;
+        foreach ($config as &$rule) {
+            if (($rule['type'] ?? '') !== $type) {
+                continue;
+            }
+            $before = (array) ($rule['groups'] ?? []);
+            $after = array_values(array_filter($before, fn ($id) => ! in_array((int) $id, $ids)));
+            if (count($after) !== count($before)) {
+                $rule['groups'] = $after;
+                $changed = true;
+            }
+        }
+        unset($rule);
+
+        if ($changed) {
+            $this->updateQuietly(['auto_sync_to_custom_config' => $config]);
+        }
+    }
 }
