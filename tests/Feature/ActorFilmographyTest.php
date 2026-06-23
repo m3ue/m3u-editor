@@ -130,3 +130,28 @@ it('caches filmography results', function () {
 
     expect($page2->filmography)->toHaveCount($firstCallCount);
 });
+
+it('looks up the person by name when personId is missing', function () {
+    Http::fake([
+        'api.themoviedb.org/3/search/person*' => Http::response([
+            'results' => [
+                ['id' => 7777, 'name' => 'Sam Worthington'],
+            ],
+        ], 200),
+    ]);
+    Cache::flush();
+    Http::preventStrayRequests();
+
+    $user = \App\Models\User::factory()->create();
+    $this->actingAs($user);
+
+    $page = new ActorFilmography;
+    $page->personId = 0;
+    $page->name = 'Sam Worthington';
+    $page->mount();
+
+    expect($page->personId)->toBe(7777)
+        ->and($page->person)->toBeArray()
+        ->and($page->person['name'])->toBe('Test Actor')
+        ->and($page->filmography)->toHaveCount(2);
+});

@@ -2316,6 +2316,51 @@ class TmdbService
     }
 
     /**
+     * Search for a person by name on TMDB. Returns the top match's TMDB id, or null.
+     *
+     * Used as a fallback when a filmography page is opened with only a name and
+     * no personId (e.g. older cached cast data that lacks the person id field).
+     */
+    public function searchPersonIdByName(string $name): ?int
+    {
+        if (! $this->isConfigured() || trim($name) === '') {
+            return null;
+        }
+
+        $cacheKey = 'tmdb_person_search_'.md5($name.'_'.$this->language);
+
+        $id = Cache::remember($cacheKey, now()->addDay(), function () use ($name) {
+            $this->waitForRateLimit();
+
+            try {
+                $response = Http::timeout(15)->get(self::BASE_URL.'/search/person', [
+                    'api_key' => $this->apiKey,
+                    'language' => $this->language,
+                    'query' => $name,
+                    'include_adult' => 'false',
+                ]);
+
+                if (! $response->successful()) {
+                    return null;
+                }
+
+                $first = $response->json()['results'][0] ?? null;
+
+                return $first ? (int) $first['id'] : null;
+            } catch (\Exception $e) {
+                Log::error('TMDB searchPersonIdByName error', [
+                    'name' => $name,
+                    'error' => $e->getMessage(),
+                ]);
+
+                return null;
+            }
+        });
+
+        return $id ?: null;
+    }
+
+    /**
      * Get all seasons for a TV series.
      *
      * @param  int  $tmdbId  The TMDB ID of the TV series

@@ -30,11 +30,15 @@ class ActorFilmography extends Page
 
     public function mount(): void
     {
+        $service = app(TmdbService::class);
+
+        if ($this->personId <= 0 && $this->name !== '') {
+            $this->personId = (int) $service->searchPersonIdByName($this->name);
+        }
+
         if ($this->personId <= 0) {
             return;
         }
-
-        $service = app(TmdbService::class);
 
         $this->person = $service->getPersonDetails($this->personId);
         $this->filmography = $service->getPersonCombinedCredits($this->personId);

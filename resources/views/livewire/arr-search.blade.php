@@ -553,22 +553,22 @@ if ($detailIsSonarr && !empty($detailSonarrEpisodeStatus)) {
                                             @foreach ($detailCast as $member)
                                                 @php
                                                     $personId = (int) ($member['id'] ?? 0);
+                                                    $actorName = (string) ($member['actor'] ?? '');
                                                     $filmographyPage = $guestMode
                                                         ? \App\Filament\GuestPanel\Pages\GuestActorFilmography::class
                                                         : \App\Filament\Pages\ActorFilmography::class;
-                                                    $filmographyUrl = $personId > 0
-                                                        ? $filmographyPage::getUrl([
-                                                            'personId' => $personId,
-                                                            'name' => $member['actor'] ?? '',
-                                                        ])
-                                                        : null;
+                                                    $filmographyUrl = $filmographyPage::getUrl([
+                                                        'personId' => $personId,
+                                                        'name' => $actorName,
+                                                    ]);
                                                 @endphp
-                                                <div class="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0">
+                                                <a href="{{ $filmographyUrl }}"
+                                                    class="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0 rounded-md hover:bg-gray-50 dark:hover:bg-gray-800/60 -mx-2 px-2 transition-colors">
                                                     <div
                                                         class="w-9 h-9 rounded-full overflow-hidden flex-shrink-0 bg-gray-200 dark:bg-gray-700">
                                                         @if (!empty($member['photo']))
                                                             <img src="{{ $member['photo'] }}"
-                                                                alt="{{ $member['actor'] }}"
+                                                                alt="{{ $actorName }}"
                                                                 class="w-full h-full object-cover" loading="lazy">
                                                         @else
                                                             <div
@@ -578,23 +578,18 @@ if ($detailIsSonarr && !empty($detailSonarrEpisodeStatus)) {
                                                         @endif
                                                     </div>
                                                     <div class="flex-1 min-w-0">
-                                                        @if ($filmographyUrl)
-                                                            <a href="{{ $filmographyUrl }}"
-                                                                class="text-sm font-medium text-gray-900 dark:text-gray-100 truncate hover:text-primary-600 dark:hover:text-primary-400 hover:underline">
-                                                                {{ $member['actor'] }}
-                                                            </a>
-                                                        @else
-                                                            <p
-                                                                class="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
-                                                                {{ $member['actor'] }}</p>
-                                                        @endif
+                                                        <p
+                                                            class="text-sm font-medium text-gray-900 dark:text-gray-100 truncate group-hover:text-primary-600 dark:group-hover:text-primary-400">
+                                                            {{ $actorName }}
+                                                        </p>
                                                         @if (!empty($member['character']))
                                                             <p
                                                                 class="text-xs text-gray-500 dark:text-gray-400 truncate">
-                                                                {{ $member['character'] }}</p>
+                                                                {{ $member['character'] }}
+                                                            </p>
                                                         @endif
                                                     </div>
-                                                </div>
+                                                </a>
                                             @endforeach
                                         </div>
                                     @else
