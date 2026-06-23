@@ -7,6 +7,7 @@ use App\Models\Category;
 use App\Models\Channel;
 use App\Models\CustomPlaylist;
 use App\Models\Group;
+use App\Models\Playlist;
 use App\Models\Series;
 use App\Models\User;
 use Filament\Notifications\Notification;
@@ -176,6 +177,28 @@ class AutoSyncGroupsToCustomPlaylist implements ShouldQueue
                     $playlist->detachTag($tag);
                 }
             });
+
+            // Prune any group IDs from the source playlist's auto-sync config that are
+            // no longer active (soft-deleted). We do this here — after channels and tags
+            // are cleaned up — so the dispatch guard never sees empty groups and skips
+            // this job before cleanup has a chance to run.
+            if (! $isSeries) {
+                $inactiveGroupIds = array_values(array_diff($this->groupIds, $activeGroupIds));
+                if (! empty($inactiveGroupIds)) {
+                    $sourcePlaylist = Playlist::find($this->playlistId);
+                    Group::withTrashed()
+                        ->whereIn('id', $inactiveGroupIds)
+                        ->get(['id', 'type'])
+                        ->groupBy('type')
+                        ->each(function ($groups, $groupType) use ($sourcePlaylist): void {
+                            $ruleType = $groupType === 'vod' ? 'vod_groups' : 'live_groups';
+                            $sourcePlaylist?->pruneAutoSyncGroupIds(
+                                $groups->pluck('id')->map(fn ($id) => (int) $id)->all(),
+                                $ruleType
+                            );
+                        });
+                }
+            }
         }
 
         $notification = Notification::make()
