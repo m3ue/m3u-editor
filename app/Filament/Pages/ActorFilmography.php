@@ -1,0 +1,47 @@
+<?php
+
+namespace App\Filament\Pages;
+
+use App\Services\TmdbService;
+use Filament\Pages\Page;
+use Illuminate\Contracts\Support\Htmlable;
+
+class ActorFilmography extends Page
+{
+    protected string $view = 'filament.pages.actor-filmography';
+
+    public int $personId = 0;
+
+    public string $name = '';
+
+    public ?array $person = null;
+
+    public array $filmography = [];
+
+    public static function getNavigationLabel(): string
+    {
+        return __('Actor Filmography');
+    }
+
+    public function getTitle(): string|Htmlable
+    {
+        return $this->name !== '' ? $this->name : __('Actor Filmography');
+    }
+
+    public function mount(): void
+    {
+        if ($this->personId <= 0) {
+            return;
+        }
+
+        $service = app(TmdbService::class);
+
+        $this->person = $service->getPersonDetails($this->personId);
+        $this->filmography = $service->getPersonCombinedCredits($this->personId);
+    }
+
+    public static function canAccess(): bool
+    {
+        return auth()->check();
+    }
+}

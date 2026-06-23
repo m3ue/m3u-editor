@@ -113,12 +113,16 @@ class ArrSearch extends Component
 
     public bool $tmdbConfigured = false;
 
-    public function mount(array $guestIntegrationIds = [], bool $guestMode = false): void
+    public function mount(array $guestIntegrationIds = [], bool $guestMode = false, ?string $q = null): void
     {
         $this->guestIntegrationIds = $guestIntegrationIds;
         $this->guestMode = $guestMode;
         $this->queuePolling = $guestMode;
         $this->tmdbConfigured = app(TmdbService::class)->isConfigured();
+
+        if ($q !== null && $q !== '') {
+            $this->searchTerm = $q;
+        }
 
         if ($guestMode) {
             $this->loadQueue();

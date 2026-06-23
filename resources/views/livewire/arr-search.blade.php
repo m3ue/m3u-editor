@@ -551,6 +551,18 @@ if ($detailIsSonarr && !empty($detailSonarrEpisodeStatus)) {
                                     @if ($detailCast)
                                         <div class="divide-y divide-gray-100 dark:divide-gray-800">
                                             @foreach ($detailCast as $member)
+                                                @php
+                                                    $personId = (int) ($member['id'] ?? 0);
+                                                    $filmographyPage = $guestMode
+                                                        ? \App\Filament\GuestPanel\Pages\GuestActorFilmography::class
+                                                        : \App\Filament\Pages\ActorFilmography::class;
+                                                    $filmographyUrl = $personId > 0
+                                                        ? $filmographyPage::getUrl([
+                                                            'personId' => $personId,
+                                                            'name' => $member['actor'] ?? '',
+                                                        ])
+                                                        : null;
+                                                @endphp
                                                 <div class="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0">
                                                     <div
                                                         class="w-9 h-9 rounded-full overflow-hidden flex-shrink-0 bg-gray-200 dark:bg-gray-700">
@@ -566,9 +578,16 @@ if ($detailIsSonarr && !empty($detailSonarrEpisodeStatus)) {
                                                         @endif
                                                     </div>
                                                     <div class="flex-1 min-w-0">
-                                                        <p
-                                                            class="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
-                                                            {{ $member['actor'] }}</p>
+                                                        @if ($filmographyUrl)
+                                                            <a href="{{ $filmographyUrl }}"
+                                                                class="text-sm font-medium text-gray-900 dark:text-gray-100 truncate hover:text-primary-600 dark:hover:text-primary-400 hover:underline">
+                                                                {{ $member['actor'] }}
+                                                            </a>
+                                                        @else
+                                                            <p
+                                                                class="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+                                                                {{ $member['actor'] }}</p>
+                                                        @endif
                                                         @if (!empty($member['character']))
                                                             <p
                                                                 class="text-xs text-gray-500 dark:text-gray-400 truncate">

@@ -132,6 +132,7 @@ class TvMazeService
         return collect($response->json() ?? [])
             ->filter(fn ($m) => ! ($m['voice'] ?? false) && ! ($m['self'] ?? false))
             ->map(fn ($m) => [
+                'id' => (int) ($m['person']['id'] ?? 0),
                 'actor' => $m['person']['name'] ?? 'Unknown',
                 'character' => $m['character']['name'] ?? '',
                 'photo' => $m['person']['image']['medium'] ?? null,
