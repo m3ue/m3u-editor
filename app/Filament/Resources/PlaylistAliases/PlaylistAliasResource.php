@@ -308,16 +308,15 @@ class PlaylistAliasResource extends Resource implements CopilotResource
             Forms\Components\TextInput::make('uuid')
                 ->label(__('Unique Identifier'))
                 ->columnSpanFull()
-                ->rules(function ($record) {
-                    return [
-                        'required',
-                        'min:3',
-                        'max:36',
-                        Rule::unique('playlists', 'uuid'), // Ensure UUID is unique across both playlists and aliases
-                        Rule::unique('playlist_aliases', 'uuid')->ignore($record?->id),
-                    ];
-                })
-                ->helperText(__('Value must be between 3 and 36 characters.'))
+                ->rules(fn ($record) => [
+                    'required',
+                    'min:3',
+                    'max:36',
+                    'regex:/^[a-zA-Z0-9_\-]+$/',
+                    Rule::unique('playlists', 'uuid'), // Ensure UUID is unique across both playlists and aliases
+                    Rule::unique('playlist_aliases', 'uuid')->ignore($record?->id),
+                ])
+                ->helperText(__('3–36 characters. Only letters, numbers, hyphens, and underscores are allowed.'))
                 ->hintIcon(
                     'heroicon-m-exclamation-triangle',
                     tooltip: 'Be careful changing this value as this will change the URLs for the Playlist, its EPG, and HDHR.'

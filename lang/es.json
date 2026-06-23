@@ -3061,6 +3061,7 @@
     "Value": "Valor",
     "Value for this header.": "Valor para este encabezado.",
     "Value must be between 3 and 36 characters.": "El valor debe tener entre 3 y 36 caracteres.",
+    "3–36 characters. Only letters, numbers, hyphens, and underscores are allowed.": "3–36 caracteres. Solo se permiten letras, números, guiones y guiones bajos.",
     "Value to compare against (not needed for true/false/empty conditions).": "Valor con el que comparar (no es necesario para condiciones de verdadero/falso/vacío).",
     "Value to include in the email.": "Valor a incluir en el correo electrónico.",
     "Value to use for this variable.": "Valor a utilizar para esta variable.",

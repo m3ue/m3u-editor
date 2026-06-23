@@ -3061,6 +3061,7 @@
     "Value": "值",
     "Value for this header.": "该请求头的值。",
     "Value must be between 3 and 36 characters.": "值长度必须在 3 到 36 个字符之间。",
+    "3–36 characters. Only letters, numbers, hyphens, and underscores are allowed.": "3–36 个字符。只允许使用字母、数字、连字符和下划线。",
     "Value to compare against (not needed for true/false/empty conditions).": "用于比较的值（对于 true/false/empty 条件则不需要）。",
     "Value to include in the email.": "要包含在电子邮件中的值。",
     "Value to use for this variable.": "用于此变量的值。",

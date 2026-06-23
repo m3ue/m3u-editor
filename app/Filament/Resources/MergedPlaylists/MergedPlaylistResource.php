@@ -228,10 +228,11 @@ class MergedPlaylistResource extends Resource implements CopilotResource
                                 'required',
                                 'min:3',
                                 'max:36',
+                                'regex:/^[a-zA-Z0-9_\-]+$/',
                                 Rule::unique('playlists', 'uuid')->ignore($record?->id),
                             ];
                         })
-                        ->helperText(__('Value must be between 3 and 36 characters.'))
+                        ->helperText(__('3–36 characters. Only letters, numbers, hyphens, and underscores are allowed.'))
                         ->hintIcon(
                             'heroicon-m-exclamation-triangle',
                             tooltip: 'Be careful changing this value as this will change the URLs for the Playlist, its EPG, and HDHR.'
