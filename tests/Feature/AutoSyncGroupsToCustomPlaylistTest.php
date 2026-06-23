@@ -221,6 +221,54 @@ it('removes channels from a soft-deleted source group in full_sync mode', functi
     }
 });
 
+it('detaches the group tag when channels were already hard-deleted before the sync job runs', function () {
+    // This covers the normal M3U re-sync path: ProcessM3uImportComplete hard-deletes removed
+    // channels (cascading the pivot row via FK) before AutoSyncGroupsToCustomPlaylist runs.
+    // The pivot is already clean, but the group tag on the custom playlist becomes a ghost.
+    $channel = Channel::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'group_id' => $this->group->id,
+    ]);
+    $this->customPlaylist->channels()->attach($channel->id);
+
+    // First sync: attaches the "Sports" tag to the custom playlist and to the channel
+    (new AutoSyncGroupsToCustomPlaylist(
+        userId: $this->user->id,
+        playlistId: $this->playlist->id,
+        groupIds: [$this->group->id],
+        customPlaylistId: $this->customPlaylist->id,
+        data: ['mode' => 'original'],
+        type: 'channel',
+        syncMode: 'full_sync',
+    ))->handle();
+
+    expect($this->customPlaylist->fresh()->groupTags()->pluck('name')->contains('Sports'))->toBeTrue();
+
+    // Simulate what ProcessM3uImportComplete does: hard-delete the channel.
+    // The channel_custom_playlist row is cascade-deleted by the DB FK constraint.
+    $groupId = $this->group->id;
+    $channel->forceDelete();
+
+    // The ghost "Sports" tag is still attached to the custom playlist at this point.
+    expect($this->customPlaylist->fresh()->groupTags()->pluck('name')->contains('Sports'))->toBeTrue();
+
+    // Re-run the job (group is still "active" in DB but has no channels) —
+    // the tag cleanup should detach the ghost tag.
+    (new AutoSyncGroupsToCustomPlaylist(
+        userId: $this->user->id,
+        playlistId: $this->playlist->id,
+        groupIds: [$groupId],
+        customPlaylistId: $this->customPlaylist->id,
+        data: ['mode' => 'original'],
+        type: 'channel',
+        syncMode: 'full_sync',
+    ))->handle();
+
+    expect($this->customPlaylist->fresh()->groupTags()->pluck('name')->contains('Sports'))->toBeFalse();
+    expect($this->customPlaylist->channels()->count())->toBe(0);
+});
+
 it('detaches the group tag from the custom playlist when all its channels are removed in full_sync mode', function () {
     $channel = Channel::factory()->create([
         'user_id' => $this->user->id,
