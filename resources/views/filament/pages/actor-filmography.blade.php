@@ -22,4 +22,6 @@
 
         @include('filament.partials.filmography-grid', ['items' => $filmography])
     </div>
+
+    <livewire:arr-search :detail-only="true" wire:key="filmography-arr-search" />
 </x-filament-panels::page>

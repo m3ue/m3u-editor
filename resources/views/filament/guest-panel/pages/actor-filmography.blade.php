@@ -22,4 +22,12 @@
 
         @include('filament.partials.filmography-grid', ['items' => $filmography])
     </div>
+
+    @if (!empty($guestIntegrationIds))
+        <livewire:arr-search
+            :guest-integration-ids="$guestIntegrationIds"
+            :guest-mode="true"
+            :detail-only="true"
+            wire:key="filmography-arr-search-guest" />
+    @endif
 </x-filament-panels::page>

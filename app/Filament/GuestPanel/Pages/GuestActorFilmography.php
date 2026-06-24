@@ -2,7 +2,12 @@
 
 namespace App\Filament\GuestPanel\Pages;
 
+use App\Facades\PlaylistFacade;
 use App\Filament\GuestPanel\Pages\Concerns\HasGuestAuth;
+use App\Models\ArrIntegration;
+use App\Models\Playlist;
+use App\Models\PlaylistAlias;
+use App\Models\PlaylistRequestSetting;
 use App\Services\TmdbService;
 use Filament\Pages\Page;
 use Illuminate\Contracts\Support\Htmlable;
@@ -20,6 +25,9 @@ class GuestActorFilmography extends Page
     public ?array $person = null;
 
     public array $filmography = [];
+
+    /** @var array<int> Guest-enabled Arr integration IDs for the playlist owner. */
+    public array $guestIntegrationIds = [];
 
     public function getTitle(): string|Htmlable
     {
@@ -67,5 +75,54 @@ class GuestActorFilmography extends Page
 
         $this->person = $service->getPersonDetails($this->personId);
         $this->filmography = $service->getPersonCombinedCredits($this->personId);
+
+        $this->guestIntegrationIds = $this->resolveGuestIntegrationIds();
+    }
+
+    public function openFilmographyItem(int $tmdbId, string $mediaType): void
+    {
+        if ($tmdbId <= 0) {
+            return;
+        }
+
+        $this->dispatch('request-from-discover', tmdbId: $tmdbId, mediaType: $mediaType);
+    }
+
+    /**
+     * Resolve guest-enabled Arr integration IDs for the playlist owner,
+     * but only when the playlist has content requests enabled.
+     *
+     * @return array<int>
+     */
+    private function resolveGuestIntegrationIds(): array
+    {
+        $uuid = static::getCurrentUuid();
+        if (! $uuid) {
+            return [];
+        }
+
+        $playlist = PlaylistFacade::resolvePlaylistByUuid($uuid);
+        if (! $playlist) {
+            return [];
+        }
+
+        $playlistId = $playlist instanceof PlaylistAlias ? $playlist->playlist_id : $playlist->id;
+        $actualPlaylist = $playlist instanceof PlaylistAlias ? Playlist::find($playlistId) : $playlist;
+
+        if (! $actualPlaylist) {
+            return [];
+        }
+
+        $requestSetting = PlaylistRequestSetting::where('playlist_id', $actualPlaylist->id)->first();
+        if (! $requestSetting?->enabled) {
+            return [];
+        }
+
+        return ArrIntegration::query()
+            ->where('user_id', $actualPlaylist->user_id)
+            ->enabled()
+            ->guestEnabled()
+            ->pluck('id')
+            ->all();
     }
 }

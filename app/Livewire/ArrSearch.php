@@ -14,6 +14,7 @@ use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Livewire\Attributes\On;
+use Livewire\Attributes\Renderless;
 use Livewire\Component;
 
 /**
@@ -115,11 +116,18 @@ class ArrSearch extends Component
 
     public bool $autoOpen = false;
 
-    public function mount(array $guestIntegrationIds = [], bool $guestMode = false, ?string $q = null): void
+    /**
+     * When true, suppress the visible search/results UI and only render the hidden detail slide-over.
+     * Used by filmography pages that embed ArrSearch solely to handle filmography item clicks.
+     */
+    public bool $detailOnly = false;
+
+    public function mount(array $guestIntegrationIds = [], bool $guestMode = false, bool $detailOnly = false, ?string $q = null): void
     {
         $this->guestIntegrationIds = $guestIntegrationIds;
         $this->guestMode = $guestMode;
-        $this->queuePolling = $guestMode;
+        $this->detailOnly = $detailOnly;
+        $this->queuePolling = $guestMode && ! $detailOnly;
         $this->tmdbConfigured = app(TmdbService::class)->isConfigured();
 
         if ($q !== null && $q !== '') {
@@ -309,6 +317,7 @@ class ArrSearch extends Component
         }
     }
 
+    #[Renderless]
     public function openDetail(int $index): void
     {
         if (! isset($this->results[$index])) {
@@ -334,6 +343,7 @@ class ArrSearch extends Component
         $this->showDetail = true;
     }
 
+    #[Renderless]
     public function closeDetail(): void
     {
         $this->showDetail = false;

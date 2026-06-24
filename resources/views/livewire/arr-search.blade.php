@@ -1,5 +1,7 @@
 <div @if ($guestMode && $queuePolling) wire:poll.{{ $this->queuePollInterval }}s="loadQueue" @endif>
 
+    @if (!$detailOnly)
+
     @if ($this->integrationsForSearch->isNotEmpty())
 
         <div class="space-y-6">
@@ -52,7 +54,7 @@
                                                 ? ($result['episodeFileCount'] ?? 0) > 0
                                                 : $result['hasFile'] ?? false);
                                     @endphp
-                                    <div wire:click="openDetail({{ $index }})"
+                                    <div wire:key="result-{{ $index }}" wire:click="openDetail({{ $index }})"
                                         class="group relative cursor-pointer rounded-lg overflow-hidden shadow-sm hover:shadow-xl transition-shadow duration-200 bg-gray-200 dark:bg-gray-800">
                                         <div class="relative aspect-[2/3]">
                                             @if (!empty($result['poster']))
@@ -235,8 +237,10 @@
 
     @endif
 
+    @endif {{-- /detailOnly --}}
+
     {{-- ── Series / Movie Detail Slide-over ──────────────────────────────── --}}
-    <div x-data="{ open: @js($showDetail) }" x-init="$watch('$wire.showDetail', v => { open = v; if (v) $wire.call('loadDetailEpisodes') })" @keydown.escape.window="if (open) $wire.call('closeDetail')"
+    <div x-data="{ open: false }" x-init="open = $wire.showDetail; $watch('$wire.showDetail', v => { open = v; if (v) $wire.call('loadDetailEpisodes') })" @keydown.escape.window="if (open) $wire.call('closeDetail')"
         class="fixed inset-0 z-50 pointer-events-none" x-cloak>
         <div x-show="open" x-transition:enter="transition ease-out duration-200"
             x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
@@ -552,8 +556,11 @@ if ($detailIsSonarr && !empty($detailSonarrEpisodeStatus)) {
                                         <div class="divide-y divide-gray-100 dark:divide-gray-800">
                                             @foreach ($detailCast as $member)
                                                 @php
-                                                    $personId = (int) ($member['id'] ?? 0);
                                                     $actorName = (string) ($member['actor'] ?? '');
+                                                    // TvMaze (Sonarr/TV) uses its own person ID namespace — passing it
+                                                    // as a TMDB personId resolves the wrong person. Use 0 so the
+                                                    // filmography page falls back to a name-based TMDB search instead.
+                                                    $personId = $detailIsSonarr ? 0 : (int) ($member['id'] ?? 0);
                                                     $filmographyPage = $guestMode
                                                         ? \App\Filament\GuestPanel\Pages\GuestActorFilmography::class
                                                         : \App\Filament\Pages\ActorFilmography::class;

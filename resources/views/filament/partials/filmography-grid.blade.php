@@ -1,6 +1,3 @@
-@php
-    use App\Filament\Pages\RequestContent;
-@endphp
 @if (empty($items))
     <p class="text-sm text-gray-400 dark:text-gray-500 text-center py-8">
         {{ __('No filmography available.') }}
@@ -10,12 +7,11 @@
         @foreach ($items as $item)
             @php
                 $isTv = ($item['media_type'] ?? 'movie') === 'tv';
-                $requestUrl = RequestContent::getUrl([
-                    'q' => $item['title'] ?? '',
-                ]);
+                $tmdbId = (int) ($item['tmdb_id'] ?? 0);
+                $mediaType = $item['media_type'] ?? 'movie';
             @endphp
-            <a href="{{ $requestUrl }}"
-                class="group relative rounded-lg overflow-hidden shadow-sm hover:shadow-xl transition-shadow duration-200 bg-gray-200 dark:bg-gray-800 block">
+            <div wire:click="openFilmographyItem({{ $tmdbId }}, '{{ $mediaType }}')"
+                class="group relative rounded-lg overflow-hidden shadow-sm hover:shadow-xl transition-shadow duration-200 bg-gray-200 dark:bg-gray-800 cursor-pointer">
                 <div class="relative aspect-[2/3]">
                     @if (!empty($item['poster_url']))
                         <img src="{{ $item['poster_url'] }}" alt="{{ $item['title'] ?? '' }}"
@@ -48,7 +44,7 @@
                         @endif
                     </div>
                 </div>
-            </a>
+            </div>
         @endforeach
     </div>
 @endif

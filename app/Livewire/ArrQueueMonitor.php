@@ -139,13 +139,9 @@ class ArrQueueMonitor extends Component
                 }
             }
 
-            // Webhook-sourced local events for the last 48 h (imported events age out after that).
+            // Webhook-sourced local events — all statuses persist until manually dismissed.
             $localEvents = ArrQueueEvent::query()
                 ->where('arr_integration_id', $integration->id)
-                ->where(function ($q) {
-                    $q->where('status', '!=', 'imported')
-                        ->orWhere('last_event_at', '>', now()->subHours(24));
-                })
                 ->orderByDesc('last_event_at')
                 ->get();
 

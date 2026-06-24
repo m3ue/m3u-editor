@@ -53,4 +53,13 @@ class ActorFilmography extends Page
     {
         return auth()->check();
     }
+
+    public function openFilmographyItem(int $tmdbId, string $mediaType): void
+    {
+        if ($tmdbId <= 0) {
+            return;
+        }
+
+        $this->dispatch('request-from-discover', tmdbId: $tmdbId, mediaType: $mediaType);
+    }
 }
