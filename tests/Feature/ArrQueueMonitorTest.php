@@ -2,6 +2,7 @@
 
 use App\Livewire\ArrQueueMonitor;
 use App\Models\ArrIntegration;
+use App\Models\ArrQueueEvent;
 use App\Models\Playlist;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -199,43 +200,46 @@ it('snapshots a live item that vanishes between polls and marks it completed', f
         ->and($snapshot['progress'])->toBe(100)
         ->and($snapshot['can_dismiss'])->toBeTrue();
 
-    expect($component->get('completedSnapshots'))->toHaveCount(1);
+    // Snapshot is persisted to DB so it survives page refreshes.
+    expect(ArrQueueEvent::where('download_id', 'ghost-dl-abc')->where('event_type', 'CompletedSnapshot')->exists())->toBeTrue();
 });
 
-it('caps completed snapshots at MAX_SNAPSHOTS_PER_INTEGRATION per integration', function () {
+it('persists completed snapshots to the DB so they survive page refreshes', function () {
     $integration = ArrIntegration::factory()->sonarr()->create([
         'user_id' => $this->user->id,
     ]);
 
-    // Seed the component with 26 orphan live items across two polls, one per cycle.
-    $component = null;
-    for ($i = 1; $i <= 26; $i++) {
-        // Each iteration: previous item gone, new item present.
-        Http::fake([
-            '*/api/v3/queue*' => Http::response([
+    Http::fake([
+        '*/api/v3/queue*' => Http::sequence()
+            ->push([
                 'records' => [[
-                    'id' => $i,
-                    'downloadId' => "dl-{$i}",
+                    'id' => 1,
+                    'downloadId' => 'persist-dl-1',
                     'status' => 'downloading',
                     'size' => 0,
                     'sizeleft' => 0,
-                    'series' => ['title' => "Show {$i}"],
+                    'series' => ['title' => 'Dark'],
                 ]],
-            ], 200),
-        ]);
+            ], 200)
+            ->push(['records' => []], 200)   // item vanishes on second poll
+            ->push(['records' => []], 200),  // fresh mount (simulated page refresh)
+    ]);
 
-        if ($component === null) {
-            $component = Livewire::test(ArrQueueMonitor::class);
-        } else {
-            $component->call('loadQueues');
-        }
+    $component = Livewire::test(ArrQueueMonitor::class);
+    expect($component->get("queues.{$integration->id}.items.0.source"))->toBe('live');
 
-        // Now clear the queue so the item becomes an orphan on next poll.
-        Http::fake(['*/api/v3/queue*' => Http::response(['records' => []], 200)]);
-        $component->call('loadQueues');
-    }
+    // Second poll — item vanishes, snapshot persisted to DB.
+    $component->call('loadQueues');
+    expect(ArrQueueEvent::where('event_type', 'CompletedSnapshot')->where('download_id', 'persist-dl-1')->exists())->toBeTrue();
 
-    expect(count($component->get('completedSnapshots')))->toBeLessThanOrEqual(25);
+    // Simulate page refresh by re-mounting a fresh component instance.
+    $fresh = Livewire::test(ArrQueueMonitor::class);
+    $items = $fresh->get("queues.{$integration->id}.items");
+    $snapshot = collect($items)->firstWhere('source', 'snapshot');
+
+    expect($snapshot)->not->toBeNull()
+        ->and($snapshot['title'])->toBe('Dark')
+        ->and($snapshot['status'])->toBe('completed');
 });
 
 it('counts total items across all queues', function () {

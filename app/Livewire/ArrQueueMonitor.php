@@ -19,17 +19,6 @@ class ArrQueueMonitor extends Component
      */
     public array $queues = [];
 
-    /**
-     * Completed orphan items (no webhook event) captured between polls.
-     * Keyed by "{integrationId}_{downloadId}". Persists until dismissed.
-     * Capped at MAX_SNAPSHOTS_PER_INTEGRATION per integration to prevent unbounded growth.
-     *
-     * @var array<string, array<string, mixed>>
-     */
-    public array $completedSnapshots = [];
-
-    protected const MAX_SNAPSHOTS_PER_INTEGRATION = 25;
-
     /** @var array<string, string> */
     protected $listeners = ['refreshArrQueue' => 'loadQueues'];
 
@@ -105,45 +94,56 @@ class ArrQueueMonitor extends Component
             $liveByDownloadId = $liveItems->keyBy('downloadId')->filter();
             $currentLiveDownloadIds = $liveItems->pluck('downloadId')->filter()->flip();
 
+            // Load DB events first so we know which downloadIds are already webhook-tracked,
+            // and so previously persisted snapshots are included without a second query.
+            $localEvents = ArrQueueEvent::query()
+                ->where('arr_integration_id', $integration->id)
+                ->orderByDesc('last_event_at')
+                ->get();
+
+            // downloadIds already covered by a real webhook event (not just a completed snapshot).
+            $webhookTrackedDownloadIds = $localEvents
+                ->where('event_type', '!=', 'CompletedSnapshot')
+                ->pluck('download_id')
+                ->filter()
+                ->flip()
+                ->all();
+
             // Snapshot orphan live items that vanished since the last poll.
-            // This lets us show "Completed" even when the item leaves the Arr queue.
+            // Persist to the DB so they survive page refreshes.
             $prevOrphans = collect($this->queues[$integration->id]['items'] ?? [])
                 ->where('source', 'live')
                 ->filter(fn ($i) => ! empty($i['downloadId']));
 
             foreach ($prevOrphans as $prevItem) {
                 $downloadId = $prevItem['downloadId'];
-                $key = "{$integration->id}_{$downloadId}";
 
-                if (! isset($currentLiveDownloadIds[$downloadId]) && ! isset($this->completedSnapshots[$key])) {
-                    $this->completedSnapshots[$key] = array_merge($prevItem, [
+                // Skip if still live or already tracked by a webhook event.
+                if (isset($currentLiveDownloadIds[$downloadId]) || isset($webhookTrackedDownloadIds[$downloadId])) {
+                    continue;
+                }
+
+                // Skip if a snapshot record already exists in the loaded collection.
+                $alreadySnapshotted = $localEvents->contains(
+                    fn ($e) => $e->download_id === $downloadId && $e->event_type === 'CompletedSnapshot'
+                );
+
+                if (! $alreadySnapshotted) {
+                    $newEvent = ArrQueueEvent::create([
+                        'arr_integration_id' => $integration->id,
+                        'user_id' => auth()->id(),
+                        'download_id' => $downloadId,
+                        'title' => $prevItem['title'],
+                        'event_type' => 'CompletedSnapshot',
                         'status' => 'completed',
+                        'quality' => $prevItem['quality'] ?? null,
+                        'size' => $prevItem['size'] ?? 0,
                         'progress' => 100,
-                        'timeLeft' => null,
-                        'integration_id' => $integration->id,
-                        'dismiss_source' => 'snapshot',
-                        'dismiss_key' => $key,
-                        'can_dismiss' => true,
-                        'source' => 'snapshot',
+                        'last_event_at' => now(),
                     ]);
-
-                    // Trim oldest snapshots for this integration to enforce the cap.
-                    $integrationSnapshots = array_filter(
-                        $this->completedSnapshots,
-                        fn ($s) => ($s['integration_id'] ?? null) === $integration->id
-                    );
-
-                    if (count($integrationSnapshots) > self::MAX_SNAPSHOTS_PER_INTEGRATION) {
-                        unset($this->completedSnapshots[(string) array_key_first($integrationSnapshots)]);
-                    }
+                    $localEvents->push($newEvent);
                 }
             }
-
-            // Webhook-sourced local events — all statuses persist until manually dismissed.
-            $localEvents = ArrQueueEvent::query()
-                ->where('arr_integration_id', $integration->id)
-                ->orderByDesc('last_event_at')
-                ->get();
 
             // Build merged item list: local events take precedence (richer status vocabulary).
             // For items that are actively downloading, enrich with live progress.
@@ -162,6 +162,7 @@ class ArrQueueMonitor extends Component
                 );
 
                 $canDismiss = in_array($effectiveStatus, ['imported', 'completed', 'failed', 'monitored', 'manual_required']);
+                $isSnapshot = $event->event_type === 'CompletedSnapshot';
 
                 return [
                     'title' => $event->title,
@@ -176,7 +177,7 @@ class ArrQueueMonitor extends Component
                     'event_type' => $event->event_type,
                     'last_event_at' => $event->last_event_at?->toIso8601String(),
                     'formattedSize' => self::formatBytes($live ? (int) $live['size'] : (int) $event->size),
-                    'source' => 'webhook',
+                    'source' => $isSnapshot ? 'snapshot' : 'webhook',
                     'event_db_id' => $event->id,
                     'dismiss_source' => 'event',
                     'dismiss_key' => (string) $event->id,
@@ -206,18 +207,13 @@ class ArrQueueMonitor extends Component
                     'can_dismiss' => false,
                 ]);
 
-            // Merge in completed snapshots that belong to this integration.
-            $snapshotItems = collect($this->completedSnapshots)
-                ->filter(fn ($s) => ($s['integration_id'] ?? null) === $integration->id)
-                ->values();
-
             $this->queues[$integration->id] = [
                 'integration' => [
                     'id' => $integration->id,
                     'name' => $integration->name,
                     'type' => $integration->type,
                 ],
-                'items' => $items->concat($orphanLive)->concat($snapshotItems)->values()->all(),
+                'items' => $items->concat($orphanLive)->values()->all(),
                 'error' => $liveError && $localEvents->isEmpty(),
             ];
         }
@@ -226,19 +222,14 @@ class ArrQueueMonitor extends Component
     }
 
     /**
-     * Dismiss a queue item from the display.
-     * For webhook events: delete the local ArrQueueEvent record.
-     * For completed snapshots: remove from component state.
+     * Dismiss a queue item from the display by deleting its ArrQueueEvent record.
+     * Both webhook events and completed snapshots are stored in the DB.
      */
     public function dismissItem(string $source, string $key): void
     {
-        if ($source === 'event') {
-            ArrQueueEvent::where('id', (int) $key)
-                ->where('user_id', auth()->id())
-                ->delete();
-        } elseif ($source === 'snapshot') {
-            unset($this->completedSnapshots[$key]);
-        }
+        ArrQueueEvent::where('id', (int) $key)
+            ->where('user_id', auth()->id())
+            ->delete();
 
         $this->loadQueues();
     }
