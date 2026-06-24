@@ -2238,6 +2238,7 @@ class XtreamApiController extends Controller
             : null;
         $seriesId = $request->input('series_id') ? (int) $request->input('series_id') : null;
         $seasonNumber = $request->input('season_number') ? (int) $request->input('season_number') : null;
+        $episodeNumber = $request->input('episode_number') ? (int) $request->input('episode_number') : null;
 
         // Auto-mark completed when position reaches 90% of duration.
         // Use $request->boolean() so the string 'false' is treated as false, not truthy.
@@ -2280,6 +2281,7 @@ class XtreamApiController extends Controller
                 array_merge($data, [
                     'series_id' => $seriesId,
                     'season_number' => $seasonNumber,
+                    'episode_number' => $episodeNumber,
                     'position_seconds' => $positionSeconds,
                     'duration_seconds' => $durationSeconds,
                     'completed' => $completed,
@@ -2391,6 +2393,9 @@ class XtreamApiController extends Controller
                 $data['backdrop_url'] = $this->extractFirstUrl($backdropPaths);
                 $data['rating'] = $channel?->rating ?? null;
                 $data['runtime'] = $info['duration'] ?? null;
+                $data['plot'] = $info['plot'] ?? $info['description'] ?? $info['desc'] ?? null;
+                $data['genre'] = $info['genre'] ?? $info['category_name'] ?? null;
+                $data['year'] = $info['releaseDate'] ?? $info['year'] ?? null;
             } else {
                 // live
                 $channel = $progress->channel;
