@@ -56,11 +56,11 @@ class EditArrIntegration extends EditRecord
                         $folders = $service->fetchRootFolders();
 
                         $update = [];
-                        if (! empty($profiles)) {
+                        if (! empty($profiles) && ! $record->quality_profile_id) {
                             $update['quality_profile_id'] = $profiles[0]['id'];
                             $update['quality_profile_name'] = $profiles[0]['name'];
                         }
-                        if (! empty($folders)) {
+                        if (! empty($folders) && ! $record->root_folder_path) {
                             $update['root_folder_path'] = $folders[0]['path'];
                         }
 
