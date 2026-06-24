@@ -2336,8 +2336,9 @@ class XtreamApiController extends Controller
             ->where('content_type', 'episode')
             ->where('series_id', $seriesId)
             ->orderBy('season_number')
+            ->orderBy('episode_number')
             ->orderBy('stream_id')
-            ->get(['stream_id', 'season_number', 'position_seconds', 'duration_seconds', 'completed', 'last_watched_at']);
+            ->get(['stream_id', 'season_number', 'episode_number', 'position_seconds', 'duration_seconds', 'completed', 'last_watched_at']);
 
         return response()->json($progress);
     }
@@ -2390,8 +2391,8 @@ class XtreamApiController extends Controller
                 $data['title'] = $series?->name ?? $episode?->title ?? null;
                 $data['episode_title'] = $episode?->title ?? null;
                 $data['series_name'] = $series?->name ?? null;
-                $data['season_number'] = $episode?->season ?? null;
-                $data['episode_number'] = $episode?->episode_num ?? null;
+                $data['season_number'] = $progress->season_number ?? $episode?->season ?? null;
+                $data['episode_number'] = $progress->episode_number ?? $episode?->episode_num ?? null;
                 $data['thumbnail_url'] = $episode?->cover ?? $series?->cover ?? null;
                 $data['backdrop_url'] = $backdrop;
                 $data['rating'] = isset($episodeInfo['rating']) ? (string) $episodeInfo['rating'] : null;
@@ -2419,7 +2420,7 @@ class XtreamApiController extends Controller
                 $data['runtime'] = $info['duration'] ?? null;
                 $data['plot'] = $info['plot'] ?? $info['description'] ?? $info['desc'] ?? null;
                 $data['genre'] = $info['genre'] ?? $info['category_name'] ?? null;
-                $data['year'] = $info['releaseDate'] ?? $info['year'] ?? null;
+                $data['year'] = $channel?->year ?? $info['releasedate'] ?? $info['year'] ?? null;
             } else {
                 // live
                 $channel = $progress->channel;
@@ -2434,6 +2435,8 @@ class XtreamApiController extends Controller
                 $data['rating'] = null;
                 $data['runtime'] = null;
             }
+
+            unset($data['channel'], $data['episode']);
 
             return $data;
         });
