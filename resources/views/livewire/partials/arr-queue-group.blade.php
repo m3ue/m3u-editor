@@ -27,7 +27,14 @@
                             <x-filament::badge :color="$badge['color']">
                                 {{ $badge['label'] }}
                             </x-filament::badge>
-                            @if ($item['can_dismiss'] ?? false)
+                            @if (($item['source'] ?? null) === 'media_request')
+                                <x-filament::icon-button color="success" icon="heroicon-o-check" size="sm"
+                                    :tooltip="__('Approve')"
+                                    wire:click="approveRequest({{ $item['media_request_id'] }})" />
+                                <x-filament::icon-button color="danger" icon="heroicon-o-x-mark" size="sm"
+                                    :tooltip="__('Reject')"
+                                    wire:click="rejectRequest({{ $item['media_request_id'] }})" />
+                            @elseif ($item['can_dismiss'] ?? false)
                                 <x-filament::icon-button color="gray" icon="heroicon-o-x-mark" size="sm"
                                     :tooltip="__('Dismiss')"
                                     wire:click="dismissItem('{{ $item['dismiss_source'] }}', '{{ $item['dismiss_key'] }}')" />
@@ -64,7 +71,11 @@
                         @endif
                     </div>
 
-                    @if ($item['indexer'] ?? null)
+                    @if (($item['source'] ?? null) === 'media_request' && ($item['requested_by'] ?? null))
+                        <p class="mt-0.5 text-xs text-gray-400 dark:text-gray-600 truncate">
+                            {{ __('Requested by: :name', ['name' => $item['requested_by']]) }}
+                        </p>
+                    @elseif ($item['indexer'] ?? null)
                         <p class="mt-0.5 text-xs text-gray-400 dark:text-gray-600 truncate">{{ $item['indexer'] }}</p>
                     @endif
 

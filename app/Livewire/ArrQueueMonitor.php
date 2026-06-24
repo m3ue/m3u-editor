@@ -4,7 +4,10 @@ namespace App\Livewire;
 
 use App\Models\ArrIntegration;
 use App\Models\ArrQueueEvent;
+use App\Models\MediaRequest;
 use App\Services\Arr\ArrService;
+use App\Services\Arr\SonarrService;
+use Filament\Notifications\Notification;
 use Illuminate\Http\Client\Pool;
 use Illuminate\Support\Facades\Http;
 use Illuminate\View\View;
@@ -207,13 +210,41 @@ class ArrQueueMonitor extends Component
                     'can_dismiss' => false,
                 ]);
 
+            // Pending media requests awaiting admin approval for this integration.
+            $pendingRequests = MediaRequest::query()
+                ->where('arr_integration_id', $integration->id)
+                ->where('status', 'pending')
+                ->with('playlistAuth')
+                ->orderBy('requested_at')
+                ->get()
+                ->map(fn (MediaRequest $mr) => [
+                    'title' => $mr->title,
+                    'status' => 'pending_approval',
+                    'progress' => 0,
+                    'quality' => null,
+                    'protocol' => null,
+                    'indexer' => null,
+                    'episode' => $mr->request_type === 'episode'
+                        ? 'S'.str_pad((string) $mr->season_number, 2, '0', STR_PAD_LEFT).'E'.str_pad((string) $mr->episode_number, 2, '0', STR_PAD_LEFT)
+                        : null,
+                    'size' => 0,
+                    'timeLeft' => null,
+                    'event_type' => 'media_request',
+                    'last_event_at' => $mr->requested_at?->toIso8601String(),
+                    'formattedSize' => '–',
+                    'source' => 'media_request',
+                    'media_request_id' => $mr->id,
+                    'requested_by' => $mr->playlistAuth?->name ?? __('Guest'),
+                    'can_dismiss' => false,
+                ]);
+
             $this->queues[$integration->id] = [
                 'integration' => [
                     'id' => $integration->id,
                     'name' => $integration->name,
                     'type' => $integration->type,
                 ],
-                'items' => $items->concat($orphanLive)->values()->all(),
+                'items' => $items->concat($orphanLive)->concat($pendingRequests)->values()->all(),
                 'error' => $liveError && $localEvents->isEmpty(),
             ];
         }
@@ -230,6 +261,99 @@ class ArrQueueMonitor extends Component
         ArrQueueEvent::where('id', (int) $key)
             ->where('user_id', auth()->id())
             ->delete();
+
+        $this->loadQueues();
+    }
+
+    public function approveRequest(int $mediaRequestId): void
+    {
+        $request = MediaRequest::find($mediaRequestId);
+
+        if (! $request || ! $request->isPending()) {
+            return;
+        }
+
+        $integration = ArrIntegration::where('id', $request->arr_integration_id)
+            ->where('user_id', auth()->id())
+            ->first();
+
+        if (! $integration) {
+            return;
+        }
+
+        $service = ArrService::make($integration);
+        $payload = $request->payload;
+
+        if ($request->request_type === 'episode') {
+            /** @var SonarrService $service */
+            $result = $service->requestEpisode(
+                (int) ($payload['tvdbId'] ?? 0),
+                (int) ($payload['seasonNumber'] ?? 0),
+                (int) ($payload['episodeNumber'] ?? 0),
+                [
+                    'qualityProfileId' => $payload['qualityProfileId'] ?? null,
+                    'rootFolderPath' => $payload['rootFolderPath'] ?? null,
+                ]
+            );
+            $ok = ($result['ok'] ?? false) || ($result['queued'] ?? false);
+        } else {
+            $result = $service->add($payload);
+            $ok = $result['ok'] ?? false;
+        }
+
+        if ($ok) {
+            $request->update([
+                'status' => 'approved',
+                'reviewed_at' => now(),
+                'reviewed_by_user_id' => auth()->id(),
+            ]);
+
+            Notification::make()
+                ->success()
+                ->title(__('Request Approved'))
+                ->body(__(':title has been sent to :server.', [
+                    'title' => $request->title,
+                    'server' => $integration->name,
+                ]))
+                ->send();
+        } else {
+            Notification::make()
+                ->danger()
+                ->title(__('Approval Failed'))
+                ->body($result['error'] ?? 'Unknown error')
+                ->send();
+        }
+
+        $this->loadQueues();
+    }
+
+    public function rejectRequest(int $mediaRequestId): void
+    {
+        $request = MediaRequest::find($mediaRequestId);
+
+        if (! $request || ! $request->isPending()) {
+            return;
+        }
+
+        $integration = ArrIntegration::where('id', $request->arr_integration_id)
+            ->where('user_id', auth()->id())
+            ->first();
+
+        if (! $integration) {
+            return;
+        }
+
+        $request->update([
+            'status' => 'rejected',
+            'reviewed_at' => now(),
+            'reviewed_by_user_id' => auth()->id(),
+        ]);
+
+        Notification::make()
+            ->warning()
+            ->title(__('Request Rejected'))
+            ->body(__('":title" request has been rejected.', ['title' => $request->title]))
+            ->send();
 
         $this->loadQueues();
     }
@@ -282,6 +406,9 @@ class ArrQueueMonitor extends Component
     public static function statusBadge(string $status): array
     {
         return match (strtolower($status)) {
+            'pending_approval' => ['color' => 'warning', 'label' => 'Pending Approval'],
+            'approved' => ['color' => 'success', 'label' => 'Approved'],
+            'rejected' => ['color' => 'danger', 'label' => 'Rejected'],
             'monitored' => ['color' => 'gray', 'label' => 'Monitored'],
             'grabbing' => ['color' => 'warning', 'label' => 'Grabbing'],
             'downloading' => ['color' => 'primary', 'label' => 'Downloading'],
