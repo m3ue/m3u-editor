@@ -113,6 +113,8 @@ class ArrSearch extends Component
 
     public bool $tmdbConfigured = false;
 
+    public bool $autoOpen = false;
+
     public function mount(array $guestIntegrationIds = [], bool $guestMode = false, ?string $q = null): void
     {
         $this->guestIntegrationIds = $guestIntegrationIds;
@@ -122,6 +124,10 @@ class ArrSearch extends Component
 
         if ($q !== null && $q !== '') {
             $this->searchTerm = $q;
+            $this->autoOpen = true;
+            // Auto-trigger search so results are ready when the user lands on the page
+            // (e.g. from a filmography click). The search will re-render via Livewire.
+            $this->search();
         }
 
         if ($guestMode) {
@@ -240,6 +246,14 @@ class ArrSearch extends Component
         }
 
         $this->isSearching = false;
+
+        // When arriving from a filmography click (autoOpen flag), immediately
+        // open the first result's detail side-sheet so the user doesn't have
+        // to click twice. Only fires once per mount — flag is cleared after.
+        if ($this->autoOpen && count($this->results) > 0) {
+            $this->autoOpen = false;
+            $this->openDetail(0);
+        }
     }
 
     /**
