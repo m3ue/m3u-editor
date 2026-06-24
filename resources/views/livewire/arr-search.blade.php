@@ -31,7 +31,11 @@
                     icon="heroicon-o-magnifying-glass" icon-color="gray">
                     @if (count($results) > 0)
                         <x-slot name="afterHeader">
-                            <x-filament::badge color="gray">{{ count($results) }}</x-filament::badge>
+                            @if (!empty($selectedGenres))
+                                <x-filament::badge color="primary">{{ count($this->filteredResults) }} / {{ count($results) }}</x-filament::badge>
+                            @else
+                                <x-filament::badge color="gray">{{ count($results) }}</x-filament::badge>
+                            @endif
                         </x-slot>
                     @endif
 
@@ -43,8 +47,38 @@
                                     class="ml-3 text-sm text-gray-500 dark:text-gray-400">{{ __('Searching...') }}</span>
                             </div>
                         @elseif(count($results) > 0)
+                            {{-- Genre filter chips --}}
+                            @if (count($this->availableGenres) > 0)
+                                <div class="flex flex-wrap gap-1.5 mb-4">
+                                    @foreach ($this->availableGenres as $genre)
+                                        <button type="button" wire:key="genre-{{ $genre }}" wire:click="toggleGenre('{{ $genre }}')"
+                                            class="px-2.5 py-1 text-xs font-medium rounded-full border transition-colors
+                                                {{ in_array($genre, $selectedGenres, true)
+                                                    ? 'bg-primary-600 border-primary-600 text-white'
+                                                    : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:border-primary-400 dark:hover:border-primary-500' }}">
+                                            {{ $genre }}
+                                        </button>
+                                    @endforeach
+                                    @if (!empty($selectedGenres))
+                                        <button type="button" wire:click="$set('selectedGenres', [])"
+                                            class="px-2.5 py-1 text-xs font-medium rounded-full border border-gray-300 dark:border-gray-500 text-gray-500 dark:text-gray-400 hover:border-gray-400 bg-transparent transition-colors">
+                                            {{ __('Clear') }}
+                                        </button>
+                                    @endif
+                                </div>
+                            @endif
+                            @php $filteredResults = $this->filteredResults; @endphp
+                            @if (count($filteredResults) === 0)
+                                <div class="flex flex-col items-center justify-center py-10 text-center">
+                                    <x-heroicon-o-funnel class="w-10 h-10 text-gray-300 dark:text-gray-600" />
+                                    <h4 class="mt-2 text-sm font-medium text-gray-900 dark:text-gray-100">
+                                        {{ __('No results match the selected genres') }}</h4>
+                                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                        {{ __('Try removing some genre filters.') }}</p>
+                                </div>
+                            @else
                             <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
-                                @foreach ($results as $index => $result)
+                                @foreach ($filteredResults as $index => $result)
                                     @php
                                         $isSonarr = ($result['integrationType'] ?? '') === 'sonarr';
                                         $inLibrary = !empty($result['existsInLibrary']);
@@ -148,6 +182,7 @@
                                     </div>
                                 @endforeach
                             </div>
+                            @endif
                         @else
                             <div class="flex flex-col items-center justify-center py-10 text-center">
                                 <x-heroicon-o-magnifying-glass class="w-10 h-10 text-gray-300 dark:text-gray-600" />

@@ -1188,7 +1188,7 @@ it('loadDiscover is a no-op when TMDB is not configured', function () {
     expect($component->get('trendingItems'))->toBeEmpty();
 });
 
-it('browseGenre loads discover results filtered by genre', function () {
+it('toggleBrowseGenre loads discover results filtered by genre', function () {
     $radarr = ArrIntegration::factory()->radarr()->create([
         'user_id' => $this->user->id,
     ]);
@@ -1202,7 +1202,7 @@ it('browseGenre loads discover results filtered by genre', function () {
         $mock->shouldReceive('isConfigured')->andReturn(true);
         $mock->shouldReceive('getWatchProviders')->andReturn([]);
         $mock->shouldReceive('discoverMovies')
-            ->with(Mockery::on(fn ($p) => ($p['with_genres'] ?? null) === 28))
+            ->with(Mockery::on(fn ($p) => ($p['with_genres'] ?? null) === '28'))
             ->andReturn(['results' => $genreResults, 'total_pages' => 1]);
 
         return $mock;
@@ -1214,24 +1214,75 @@ it('browseGenre loads discover results filtered by genre', function () {
     ]);
 
     $component = Livewire::test(ArrDiscover::class)
-        ->call('browseGenre', 28, 'movie');
+        ->call('toggleBrowseGenre', 28, 'movie');
 
-    expect($component->get('browseGenreId'))->toBe(28);
+    expect($component->get('browseGenreIds'))->toBe([28]);
     expect($component->get('browseGenreType'))->toBe('movie');
     expect($component->get('browseResults'))->toHaveCount(1);
     expect($component->get('browseResults.0.title'))->toBe('Action Movie');
     expect($component->get('browseLoading'))->toBeFalse();
 });
 
+it('toggleBrowseGenre supports multiple genres with OR logic', function () {
+    ArrIntegration::factory()->radarr()->create(['user_id' => $this->user->id]);
+
+    $capturedParams = null;
+    app()->bind(TmdbService::class, function () use (&$capturedParams) {
+        $mock = Mockery::mock(TmdbService::class)->makePartial();
+        $mock->shouldReceive('isConfigured')->andReturn(true);
+        $mock->shouldReceive('getWatchProviders')->andReturn([]);
+        $mock->shouldReceive('discoverMovies')
+            ->andReturnUsing(function ($params) use (&$capturedParams) {
+                $capturedParams = $params;
+
+                return ['results' => [], 'total_pages' => 1];
+            });
+
+        return $mock;
+    });
+
+    Http::fake(['*/api/v3/movie*' => Http::response([], 200)]);
+
+    $component = Livewire::test(ArrDiscover::class)
+        ->call('toggleBrowseGenre', 28, 'movie')
+        ->call('toggleBrowseGenre', 12, 'movie');
+
+    expect($component->get('browseGenreIds'))->toBe([28, 12]);
+    expect($capturedParams['with_genres'])->toBe('28,12');
+});
+
+it('toggleBrowseGenre deselects a genre and clears when none remain', function () {
+    ArrIntegration::factory()->radarr()->create(['user_id' => $this->user->id]);
+
+    app()->bind(TmdbService::class, function () {
+        $mock = Mockery::mock(TmdbService::class)->makePartial();
+        $mock->shouldReceive('isConfigured')->andReturn(true);
+        $mock->shouldReceive('getWatchProviders')->andReturn([]);
+        $mock->shouldReceive('discoverMovies')->andReturn(['results' => [], 'total_pages' => 1]);
+
+        return $mock;
+    });
+
+    Http::fake(['*/api/v3/movie*' => Http::response([], 200)]);
+
+    $component = Livewire::test(ArrDiscover::class)
+        ->call('toggleBrowseGenre', 28, 'movie')
+        ->call('toggleBrowseGenre', 28, 'movie'); // deselect
+
+    expect($component->get('browseGenreIds'))->toBe([]);
+    expect($component->get('browseGenreType'))->toBeNull();
+    expect($component->get('browseResults'))->toBe([]);
+});
+
 it('clearBrowse resets genre browse state', function () {
     Http::fake();
 
     Livewire::test(ArrDiscover::class)
-        ->set('browseGenreId', 28)
+        ->set('browseGenreIds', [28])
         ->set('browseGenreType', 'movie')
         ->set('browseResults', [['tmdb_id' => 1, 'title' => 'Test', 'media_type' => 'movie', 'year' => null, 'overview' => null, 'poster_url' => null, 'backdrop_url' => null, 'vote_average' => null, 'genre_ids' => []]])
         ->call('clearBrowse')
-        ->assertSet('browseGenreId', null)
+        ->assertSet('browseGenreIds', [])
         ->assertSet('browseGenreType', null)
         ->assertSet('browseResults', []);
 });
