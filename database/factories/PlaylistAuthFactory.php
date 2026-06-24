@@ -28,6 +28,7 @@ class PlaylistAuthFactory extends Factory
             'password' => fake()->password(),
             'max_connections' => null,
             'stop_oldest_on_limit' => null,
+            'auto_approve_requests' => true,
         ];
     }
 }

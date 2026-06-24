@@ -250,6 +250,16 @@ class PlaylistAuthResource extends Resource implements CopilotResource
                         ->helperText(__('When at max connections, stop the oldest stream to allow the new one. When off, use the global setting.'))
                         ->nullable()
                         ->columnSpan(1),
+                    Toggle::make('auto_approve_requests')
+                        ->label(__('Auto-approve Content Requests'))
+                        ->inline(false)
+                        ->hintIcon(
+                            'heroicon-m-question-mark-circle',
+                            tooltip: __('When enabled, content requests from this guest are sent directly to Sonarr/Radarr. When disabled, requests are held for admin approval in the Download Queue.')
+                        )
+                        ->helperText(__('Disable to require admin approval before media is added to Sonarr/Radarr.'))
+                        ->default(true)
+                        ->columnSpan(1),
                     Select::make('assigned_playlist')
                         ->label(__('Assigned to Playlist'))
                         ->options(function ($record) {
