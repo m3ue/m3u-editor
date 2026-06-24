@@ -30,6 +30,11 @@ class ActorFilmography extends Page
 
     public function mount(): void
     {
+        // Filament's getUrl() generates query-string params, but they aren't
+        // auto-bound to public properties on plain Pages. Read them explicitly.
+        $this->personId = (int) (request()->query('personId', $this->personId));
+        $this->name = (string) (request()->query('name', $this->name));
+
         $service = app(TmdbService::class);
 
         if ($this->personId <= 0 && $this->name !== '') {

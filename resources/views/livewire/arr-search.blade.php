@@ -563,7 +563,7 @@ if ($detailIsSonarr && !empty($detailSonarrEpisodeStatus)) {
                                                     ]);
                                                 @endphp
                                                 <a href="{{ $filmographyUrl }}"
-                                                    class="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0 rounded-md hover:bg-gray-50 dark:hover:bg-gray-800/60 -mx-2 px-2 transition-colors">
+                                                    class="group flex items-center gap-3 py-2.5 first:pt-0 last:pb-0 rounded-md hover:bg-gray-50 dark:hover:bg-gray-800/60 -mx-2 px-2 transition-colors">
                                                     <div
                                                         class="w-9 h-9 rounded-full overflow-hidden flex-shrink-0 bg-gray-200 dark:bg-gray-700">
                                                         @if (!empty($member['photo']))
