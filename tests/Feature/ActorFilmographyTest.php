@@ -142,7 +142,7 @@ it('looks up the person by name when personId is missing', function () {
     Cache::flush();
     Http::preventStrayRequests();
 
-    $user = \App\Models\User::factory()->create();
+    $user = User::factory()->create();
     $this->actingAs($user);
 
     $page = new ActorFilmography;
