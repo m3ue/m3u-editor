@@ -856,6 +856,7 @@ class XtreamApiController extends Controller
 
             return response()->stream(function () use ($seriesIterable, $playlist, $baseUrl, $isCustomPlaylist, $tagUuid) {
                 $num = 0;
+                $channelNumber = $playlist->auto_channel_increment ? $playlist->channel_start - 1 : 0;
                 echo '[';
                 $first = true;
                 foreach ($seriesIterable as $seriesItem) {
@@ -863,6 +864,7 @@ class XtreamApiController extends Controller
                         echo ',';
                     }
                     $num++;
+                    $seriesNumber = $playlist->auto_channel_increment ? ++$channelNumber : $num;
 
                     $seriesCategoryId = 'all';
                     if ($isCustomPlaylist) {
@@ -894,7 +896,7 @@ class XtreamApiController extends Controller
                     }
 
                     echo json_encode([
-                        'num' => $num,
+                        'num' => $seriesNumber,
                         'name' => $seriesItem->name,
                         'series_id' => (int) $seriesItem->id,
                         'cover' => $cover,
