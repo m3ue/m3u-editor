@@ -38,6 +38,12 @@ class ArrSearch extends Component
     /** Guest-mode: the PlaylistAuth ID for the authenticated guest. */
     public ?int $playlistAuthId = null;
 
+    /**
+     * Resolved once at mount from PlaylistAuth. True = forward directly to Arr,
+     * false = hold for admin approval. Null when not in guest mode.
+     */
+    public ?bool $autoApproveRequests = null;
+
     public string $searchTerm = '';
 
     /** @var array<int, array<string, mixed>> */
@@ -144,6 +150,10 @@ class ArrSearch extends Component
         $this->queuePolling = $guestMode && ! $detailOnly;
         $this->tmdbConfigured = app(TmdbService::class)->isConfigured();
 
+        if ($guestMode && $playlistAuthId) {
+            $this->autoApproveRequests = PlaylistAuth::find($playlistAuthId)?->auto_approve_requests ?? false;
+        }
+
         if ($q !== null && $q !== '') {
             $this->searchTerm = $q;
             $this->autoOpen = true;
@@ -243,6 +253,36 @@ class ArrSearch extends Component
             $this->results,
             fn ($r) => ! empty(array_intersect($r['genres'] ?? [], $this->selectedGenres))
         );
+    }
+
+    // ── Guest request queuing ─────────────────────────────────────────────────
+
+    /**
+     * Write a pending MediaRequest row for a guest submission and notify.
+     * Returns true when the request was queued (caller should return early).
+     * Returns false when auto-approve is on or the guest context is missing (caller proceeds normally).
+     *
+     * @param  array<string, mixed>  $data  Fields for MediaRequest::create().
+     */
+    private function queueGuestRequest(array $data, string $notificationBody): bool
+    {
+        if (! $this->guestMode || ! $this->playlistAuthId || $this->autoApproveRequests) {
+            return false;
+        }
+
+        MediaRequest::create(array_merge($data, [
+            'playlist_auth_id' => $this->playlistAuthId,
+            'status' => 'pending',
+            'requested_at' => now(),
+        ]));
+
+        Notification::make()
+            ->info()
+            ->title(__('Request Submitted'))
+            ->body($notificationBody)
+            ->send();
+
+        return true;
     }
 
     // ── Search ────────────────────────────────────────────────────────────────
@@ -361,31 +401,19 @@ class ArrSearch extends Component
         $externalKey = $isSonarr ? 'tvdbId' : 'tmdbId';
         $payload[$externalKey] = $item[$externalKey] ?? null;
 
-        if ($this->guestMode && $this->playlistAuthId) {
-            $playlistAuth = PlaylistAuth::find($this->playlistAuthId);
-
-            if ($playlistAuth && ! $playlistAuth->auto_approve_requests) {
-                MediaRequest::create([
-                    'playlist_auth_id' => $this->playlistAuthId,
-                    'arr_integration_id' => $integration->id,
-                    'title' => $item['title'] ?? 'Unknown',
-                    'external_id' => (string) ($payload[$externalKey] ?? ''),
-                    'request_type' => $isSonarr ? 'series' : 'movie',
-                    'payload' => $payload,
-                    'status' => 'pending',
-                    'requested_at' => now(),
-                ]);
-
-                Notification::make()
-                    ->info()
-                    ->title(__('Request Submitted'))
-                    ->body(__(':title has been submitted and is awaiting admin approval.', [
-                        'title' => $item['title'] ?? 'Content',
-                    ]))
-                    ->send();
-
-                return;
-            }
+        if ($this->queueGuestRequest(
+            [
+                'arr_integration_id' => $integration->id,
+                'title' => $item['title'] ?? 'Unknown',
+                'external_id' => (string) ($payload[$externalKey] ?? ''),
+                'request_type' => $isSonarr ? 'series' : 'movie',
+                'payload' => $payload,
+            ],
+            __(':title has been submitted and is awaiting admin approval.', [
+                'title' => $item['title'] ?? 'Content',
+            ])
+        )) {
+            return;
         }
 
         $result = ArrService::make($integration)->add($payload);
@@ -895,41 +923,29 @@ class ArrSearch extends Component
             return;
         }
 
-        if ($this->guestMode && $this->playlistAuthId) {
-            $playlistAuth = PlaylistAuth::find($this->playlistAuthId);
-
-            if ($playlistAuth && ! $playlistAuth->auto_approve_requests) {
-                MediaRequest::create([
-                    'playlist_auth_id' => $this->playlistAuthId,
-                    'arr_integration_id' => $integration->id,
-                    'title' => $this->detailResult['title'] ?? 'Unknown',
-                    'external_id' => (string) $tvdbId,
-                    'request_type' => 'episode',
-                    'season_number' => $seasonNumber,
-                    'episode_number' => $episodeNumber,
-                    'payload' => [
-                        'tvdbId' => $tvdbId,
-                        'seasonNumber' => $seasonNumber,
-                        'episodeNumber' => $episodeNumber,
-                        'qualityProfileId' => $integration->quality_profile_id,
-                        'rootFolderPath' => $integration->root_folder_path,
-                    ],
-                    'status' => 'pending',
-                    'requested_at' => now(),
-                ]);
-
-                Notification::make()
-                    ->info()
-                    ->title(__('Request Submitted'))
-                    ->body(__('S:s E:e of ":title" has been submitted and is awaiting admin approval.', [
-                        's' => str_pad((string) $seasonNumber, 2, '0', STR_PAD_LEFT),
-                        'e' => str_pad((string) $episodeNumber, 2, '0', STR_PAD_LEFT),
-                        'title' => $this->detailResult['title'] ?? 'the show',
-                    ]))
-                    ->send();
-
-                return;
-            }
+        if ($this->queueGuestRequest(
+            [
+                'arr_integration_id' => $integration->id,
+                'title' => $this->detailResult['title'] ?? 'Unknown',
+                'external_id' => (string) $tvdbId,
+                'request_type' => 'episode',
+                'season_number' => $seasonNumber,
+                'episode_number' => $episodeNumber,
+                'payload' => [
+                    'tvdbId' => $tvdbId,
+                    'seasonNumber' => $seasonNumber,
+                    'episodeNumber' => $episodeNumber,
+                    'qualityProfileId' => $integration->quality_profile_id,
+                    'rootFolderPath' => $integration->root_folder_path,
+                ],
+            ],
+            __('S:s E:e of ":title" has been submitted and is awaiting admin approval.', [
+                's' => str_pad((string) $seasonNumber, 2, '0', STR_PAD_LEFT),
+                'e' => str_pad((string) $episodeNumber, 2, '0', STR_PAD_LEFT),
+                'title' => $this->detailResult['title'] ?? 'the show',
+            ])
+        )) {
+            return;
         }
 
         /** @var SonarrService $sonarrService */
@@ -1021,33 +1037,21 @@ class ArrSearch extends Component
             'searchForMissingEpisodes' => true,
         ];
 
-        if ($this->guestMode && $this->playlistAuthId) {
-            $playlistAuth = PlaylistAuth::find($this->playlistAuthId);
+        if ($this->queueGuestRequest(
+            [
+                'arr_integration_id' => $integration->id,
+                'title' => $item['title'] ?? 'Unknown',
+                'external_id' => (string) ($item['tvdbId'] ?? ''),
+                'request_type' => 'series',
+                'payload' => $payload,
+            ],
+            __(':title has been submitted and is awaiting admin approval.', [
+                'title' => $item['title'] ?? 'Content',
+            ])
+        )) {
+            $this->closeDetail();
 
-            if ($playlistAuth && ! $playlistAuth->auto_approve_requests) {
-                MediaRequest::create([
-                    'playlist_auth_id' => $this->playlistAuthId,
-                    'arr_integration_id' => $integration->id,
-                    'title' => $item['title'] ?? 'Unknown',
-                    'external_id' => (string) ($item['tvdbId'] ?? ''),
-                    'request_type' => 'series',
-                    'payload' => $payload,
-                    'status' => 'pending',
-                    'requested_at' => now(),
-                ]);
-
-                Notification::make()
-                    ->info()
-                    ->title(__('Request Submitted'))
-                    ->body(__(':title has been submitted and is awaiting admin approval.', [
-                        'title' => $item['title'] ?? 'Content',
-                    ]))
-                    ->send();
-
-                $this->closeDetail();
-
-                return;
-            }
+            return;
         }
 
         $result = ArrService::make($integration)->add($payload);
@@ -1157,9 +1161,21 @@ class ArrSearch extends Component
             if ($title) {
                 foreach ($radarrs as $radarr) {
                     $items = ArrService::make($radarr)->search($title);
-                    $match = collect($items)->first(fn ($i) => (int) ($i['tmdbId'] ?? 0) === $tmdbId)
-                        ?? collect($items)->first(fn ($i) => strtolower($i['title'] ?? '') === strtolower($title))
-                        ?? (count($items) === 1 ? $items[0] : null);
+                    $byId = collect($items)->first(fn ($i) => (int) ($i['tmdbId'] ?? 0) === $tmdbId);
+                    $byTitle = collect($items)->first(fn ($i) => strtolower($i['title'] ?? '') === strtolower($title));
+                    $singleResult = count($items) === 1 ? $items[0] : null;
+
+                    if ($singleResult && ! $byId && ! $byTitle) {
+                        Log::warning('ArrSearch: single-result title fallback used without ID verification', [
+                            'tmdb_id' => $tmdbId,
+                            'title' => $title,
+                            'matched_title' => $singleResult['title'] ?? null,
+                            'matched_tmdb_id' => $singleResult['tmdbId'] ?? null,
+                            'integration_id' => $radarr->id,
+                        ]);
+                    }
+
+                    $match = $byId ?? $byTitle ?? $singleResult;
 
                     if ($match) {
                         return array_merge($match, [
@@ -1205,10 +1221,21 @@ class ArrSearch extends Component
             foreach ($sonarrs as $sonarr) {
                 $items = ArrService::make($sonarr)->search($title);
                 if ($tvdbId) {
-                    $match = collect($items)->first(fn ($i) => (int) ($i['tvdbId'] ?? 0) === (int) $tvdbId)
-                        ?? collect($items)->first(fn ($i) => strtolower($i['title'] ?? '') === strtolower($title));
+                    $byId = collect($items)->first(fn ($i) => (int) ($i['tvdbId'] ?? 0) === (int) $tvdbId);
+                    $byTitle = collect($items)->first(fn ($i) => strtolower($i['title'] ?? '') === strtolower($title));
+                    $match = $byId ?? $byTitle;
                 } else {
-                    $match = count($items) === 1 ? $items[0] : null;
+                    $singleResult = count($items) === 1 ? $items[0] : null;
+                    if ($singleResult) {
+                        Log::warning('ArrSearch: single-result TV title fallback used without ID verification', [
+                            'tmdb_id' => $tmdbId,
+                            'title' => $title,
+                            'matched_title' => $singleResult['title'] ?? null,
+                            'matched_tvdb_id' => $singleResult['tvdbId'] ?? null,
+                            'integration_id' => $sonarr->id,
+                        ]);
+                    }
+                    $match = $singleResult;
                 }
 
                 if ($match) {

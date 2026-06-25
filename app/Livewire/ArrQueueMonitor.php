@@ -63,6 +63,16 @@ class ArrQueueMonitor extends Component
             return;
         }
 
+        // Pre-load all pending MediaRequests for all integrations in one query to avoid N+1.
+        $integrationIds = $integrations->pluck('id')->all();
+        $pendingRequestsByIntegration = MediaRequest::query()
+            ->whereIn('arr_integration_id', $integrationIds)
+            ->where('status', 'pending')
+            ->with('playlistAuth')
+            ->orderBy('requested_at')
+            ->get()
+            ->groupBy('arr_integration_id');
+
         // Fire all queue HTTP requests in parallel instead of serially.
         $services = $integrations->map(fn ($i) => ArrService::make($i));
 
@@ -211,12 +221,7 @@ class ArrQueueMonitor extends Component
                 ]);
 
             // Pending media requests awaiting admin approval for this integration.
-            $pendingRequests = MediaRequest::query()
-                ->where('arr_integration_id', $integration->id)
-                ->where('status', 'pending')
-                ->with('playlistAuth')
-                ->orderBy('requested_at')
-                ->get()
+            $pendingRequests = ($pendingRequestsByIntegration[$integration->id] ?? collect())
                 ->map(fn (MediaRequest $mr) => [
                     'title' => $mr->title,
                     'status' => 'pending_approval',
@@ -267,7 +272,10 @@ class ArrQueueMonitor extends Component
 
     public function approveRequest(int $mediaRequestId): void
     {
-        $request = MediaRequest::find($mediaRequestId);
+        $request = MediaRequest::whereHas(
+            'arrIntegration',
+            fn ($q) => $q->where('user_id', auth()->id())
+        )->find($mediaRequestId);
 
         if (! $request || ! $request->isPending()) {
             return;
@@ -329,7 +337,10 @@ class ArrQueueMonitor extends Component
 
     public function rejectRequest(int $mediaRequestId): void
     {
-        $request = MediaRequest::find($mediaRequestId);
+        $request = MediaRequest::whereHas(
+            'arrIntegration',
+            fn ($q) => $q->where('user_id', auth()->id())
+        )->find($mediaRequestId);
 
         if (! $request || ! $request->isPending()) {
             return;

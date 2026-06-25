@@ -10,6 +10,8 @@ class ActorFilmography extends Page
 {
     protected string $view = 'filament.pages.actor-filmography';
 
+    protected static bool $shouldRegisterNavigation = false;
+
     public int $personId = 0;
 
     public string $name = '';

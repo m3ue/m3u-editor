@@ -12,7 +12,7 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('playlist_auths', function (Blueprint $table) {
-            $table->boolean('auto_approve_requests')->default(true)->after('stop_oldest_on_limit');
+            $table->boolean('auto_approve_requests')->default(false)->after('stop_oldest_on_limit');
         });
     }
 
