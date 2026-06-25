@@ -1,37 +1,35 @@
 <?php
 
 use Illuminate\Database\Migrations\Migration;
-use Illuminate\Database\Schema\Blueprint;
-use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\DB;
 
 return new class extends Migration
 {
     public function up(): void
     {
-        Schema::table('playlists', function (Blueprint $table) {
-            $table->jsonb('import_prefs')->nullable()->change();
-            $table->jsonb('xtream_config')->nullable()->change();
-            $table->jsonb('xtream_status')->nullable()->change();
-            $table->jsonb('short_urls')->nullable()->change();
-        });
-        Schema::table('custom_playlists', function (Blueprint $table) {
-            $table->jsonb('short_urls')->nullable()->change();
-        });
-        Schema::table('merged_playlists', function (Blueprint $table) {
-            $table->jsonb('short_urls')->nullable()->change();
-        });
-        Schema::table('channels', function (Blueprint $table) {
-            $table->jsonb('extvlcopt')->nullable()->change();
-            $table->jsonb('kodidrop')->nullable()->change();
-        });
-        Schema::table('post_processes', function (Blueprint $table) {
-            $table->jsonb('metadata')->change();
-        });
-        Schema::table('playlist_sync_statuses', function (Blueprint $table) {
-            $table->jsonb('sync_stats')->nullable()->change();
-        });
-        Schema::table('playlist_sync_status_logs', function (Blueprint $table) {
-            $table->jsonb('meta')->change();
-        });
+        if (config('database.default') !== 'pgsql') {
+            return;
+        }
+
+        // Use explicit USING casts — required when source column type is text (e.g. migrated from
+        // SQLite). Automatic json→jsonb cast would work for fresh Postgres installs, but
+        // text→jsonb requires USING to avoid a datatype mismatch error.
+        $conversions = [
+            'playlists' => ['import_prefs', 'xtream_config', 'xtream_status', 'short_urls'],
+            'custom_playlists' => ['short_urls'],
+            'merged_playlists' => ['short_urls'],
+            'channels' => ['extvlcopt', 'kodidrop'],
+            'post_processes' => ['metadata'],
+            'playlist_sync_statuses' => ['sync_stats'],
+            'playlist_sync_status_logs' => ['meta'],
+        ];
+
+        foreach ($conversions as $table => $columns) {
+            foreach ($columns as $column) {
+                DB::statement(
+                    "ALTER TABLE \"{$table}\" ALTER COLUMN \"{$column}\" TYPE jsonb USING \"{$column}\"::jsonb"
+                );
+            }
+        }
     }
 };
