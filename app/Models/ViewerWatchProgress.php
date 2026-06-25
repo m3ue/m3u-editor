@@ -22,6 +22,7 @@ class ViewerWatchProgress extends Model
         'stream_id' => 'integer',
         'series_id' => 'integer',
         'season_number' => 'integer',
+        'episode_number' => 'integer',
     ];
 
     public function viewer(): BelongsTo

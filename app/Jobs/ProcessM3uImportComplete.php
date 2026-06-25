@@ -254,7 +254,11 @@ class ProcessM3uImportComplete implements ShouldQueue
             }
         }
 
-        // Clear out invalid groups/channels (if any)
+        // Clear out invalid groups/channels (if any).
+        // Auto-sync config pruning and ghost-tag cleanup are intentionally deferred to
+        // AutoSyncGroupsToCustomPlaylist, which runs after this job in the pipeline.
+        // Pruning here would empty the groups array before that job dispatches, causing
+        // the empty-groups guard to skip the job and leave ghost tags on custom playlists.
         $removedGroups->delete();
         $removedChannels->delete();
 

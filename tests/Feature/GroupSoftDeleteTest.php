@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\CustomPlaylist;
 use App\Models\Group;
 use App\Models\Playlist;
 use App\Models\User;
@@ -88,6 +89,124 @@ it('permanently deletes groups with forceDelete', function () {
     $group->forceDelete();
 
     expect(Group::withTrashed()->where('id', $group->id)->exists())->toBeFalse();
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Playlist::pruneAutoSyncGroupIds
+// ──────────────────────────────────────────────────────────────────────────────
+
+it('prunes a live group ID from auto_sync_to_custom_config', function () {
+    $customPlaylist = CustomPlaylist::factory()->create(['user_id' => $this->user->id]);
+    $group = Group::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'type' => 'live',
+    ]);
+
+    $this->playlist->update([
+        'auto_sync_to_custom_config' => [[
+            'enabled' => true,
+            'type' => 'live_groups',
+            'groups' => [$group->id],
+            'custom_playlist_id' => $customPlaylist->id,
+            'sync_mode' => 'full_sync',
+            'mode' => 'original',
+        ]],
+    ]);
+
+    $this->playlist->pruneAutoSyncGroupIds([$group->id], 'live_groups');
+
+    $config = $this->playlist->fresh()->auto_sync_to_custom_config;
+    expect($config[0]['groups'])->toBe([]);
+});
+
+it('does not prune group IDs from rules of a different type', function () {
+    $customPlaylist = CustomPlaylist::factory()->create(['user_id' => $this->user->id]);
+    $group = Group::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'type' => 'vod',
+    ]);
+
+    $this->playlist->update([
+        'auto_sync_to_custom_config' => [[
+            'enabled' => true,
+            'type' => 'vod_groups',
+            'groups' => [$group->id],
+            'custom_playlist_id' => $customPlaylist->id,
+            'sync_mode' => 'full_sync',
+            'mode' => 'original',
+        ]],
+    ]);
+
+    // Pruning with the wrong rule type should leave the config unchanged
+    $this->playlist->pruneAutoSyncGroupIds([$group->id], 'live_groups');
+
+    $config = $this->playlist->fresh()->auto_sync_to_custom_config;
+    expect($config[0]['groups'])->toBe([$group->id]);
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Group::deleted hook
+// ──────────────────────────────────────────────────────────────────────────────
+
+it('removes a group ID from auto_sync_to_custom_config when the group is soft-deleted', function () {
+    $customPlaylist = CustomPlaylist::factory()->create(['user_id' => $this->user->id]);
+    $group = Group::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'type' => 'live',
+        'custom' => false,
+    ]);
+
+    $this->playlist->update([
+        'auto_sync_to_custom_config' => [[
+            'enabled' => true,
+            'type' => 'live_groups',
+            'groups' => [$group->id],
+            'custom_playlist_id' => $customPlaylist->id,
+            'sync_mode' => 'full_sync',
+            'mode' => 'original',
+        ]],
+    ]);
+
+    // Soft-delete via model (fires the deleted event)
+    $group->delete();
+
+    $config = $this->playlist->fresh()->auto_sync_to_custom_config;
+    expect($config[0]['groups'])->toBe([]);
+});
+
+it('leaves other group IDs in the config when one group is deleted', function () {
+    $customPlaylist = CustomPlaylist::factory()->create(['user_id' => $this->user->id]);
+    $groupA = Group::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'type' => 'live',
+        'custom' => false,
+    ]);
+    $groupB = Group::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'type' => 'live',
+        'custom' => false,
+    ]);
+
+    $this->playlist->update([
+        'auto_sync_to_custom_config' => [[
+            'enabled' => true,
+            'type' => 'live_groups',
+            'groups' => [$groupA->id, $groupB->id],
+            'custom_playlist_id' => $customPlaylist->id,
+            'sync_mode' => 'full_sync',
+            'mode' => 'original',
+        ]],
+    ]);
+
+    $groupA->delete();
+
+    $config = $this->playlist->fresh()->auto_sync_to_custom_config;
+    expect($config[0]['groups'])->toBe([$groupB->id]);
 });
 
 it('cleans up old soft-deleted groups', function () {

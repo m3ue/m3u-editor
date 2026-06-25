@@ -11,6 +11,15 @@ class Category extends Model
 {
     use HasFactory;
 
+    protected static function booted(): void
+    {
+        static::deleted(function (Category $category): void {
+            // When a category is deleted, strip its ID from the source playlist's
+            // auto-sync rules so the saved config stays valid on next playlist save.
+            $category->playlist?->pruneAutoSyncGroupIds([$category->id], 'series_categories');
+        });
+    }
+
     /**
      * The attributes that should be cast to native types.
      *

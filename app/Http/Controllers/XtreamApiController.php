@@ -884,7 +884,7 @@ class XtreamApiController extends Controller
                         $seriesCategoryId = (string) $seriesItem->category_id;
                     }
 
-                    $tmdb = $seriesItem->metadata['tmdb'] ?? '';
+                    $tmdb = $seriesItem->metadata['tmdb_id'] ?? $seriesItem->metadata['tmdb'] ?? $seriesItem->tmdb_id ?? '';
                     $lastModified = $seriesItem->last_modified?->timestamp
                         ?? (isset($seriesItem->metadata['last_modified']) ? (int) $seriesItem->metadata['last_modified'] : null);
 
@@ -979,7 +979,7 @@ class XtreamApiController extends Controller
             }
 
             $now = Carbon::now();
-            $tmdb = $seriesItem->metadata['tmdb'] ?? '';
+            $tmdb = $seriesItem->metadata['tmdb_id'] ?? $seriesItem->metadata['tmdb'] ?? $seriesItem->tmdb_id ?? '';
             $lastModified = $seriesItem->last_modified?->timestamp ?? $seriesItem->metadata['last_modified'] ?? null;
 
             $seriesInfo = [
@@ -2262,6 +2262,7 @@ class XtreamApiController extends Controller
             : null;
         $seriesId = $request->input('series_id') ? (int) $request->input('series_id') : null;
         $seasonNumber = $request->input('season_number') ? (int) $request->input('season_number') : null;
+        $episodeNumber = $request->input('episode_number') ? (int) $request->input('episode_number') : null;
 
         // Auto-mark completed when position reaches 90% of duration.
         // Use $request->boolean() so the string 'false' is treated as false, not truthy.
@@ -2304,6 +2305,7 @@ class XtreamApiController extends Controller
                 array_merge($data, [
                     'series_id' => $seriesId,
                     'season_number' => $seasonNumber,
+                    'episode_number' => $episodeNumber,
                     'position_seconds' => $positionSeconds,
                     'duration_seconds' => $durationSeconds,
                     'completed' => $completed,
@@ -2334,8 +2336,9 @@ class XtreamApiController extends Controller
             ->where('content_type', 'episode')
             ->where('series_id', $seriesId)
             ->orderBy('season_number')
+            ->orderBy('episode_number')
             ->orderBy('stream_id')
-            ->get(['stream_id', 'season_number', 'position_seconds', 'duration_seconds', 'completed', 'last_watched_at']);
+            ->get(['stream_id', 'season_number', 'episode_number', 'position_seconds', 'duration_seconds', 'completed', 'last_watched_at']);
 
         return response()->json($progress);
     }
@@ -2388,8 +2391,8 @@ class XtreamApiController extends Controller
                 $data['title'] = $series?->name ?? $episode?->title ?? null;
                 $data['episode_title'] = $episode?->title ?? null;
                 $data['series_name'] = $series?->name ?? null;
-                $data['season_number'] = $episode?->season ?? null;
-                $data['episode_number'] = $episode?->episode_num ?? null;
+                $data['season_number'] = $progress->season_number ?? $episode?->season ?? null;
+                $data['episode_number'] = $progress->episode_number ?? $episode?->episode_num ?? null;
                 $data['thumbnail_url'] = $episode?->cover ?? $series?->cover ?? null;
                 $data['backdrop_url'] = $backdrop;
                 $data['rating'] = isset($episodeInfo['rating']) ? (string) $episodeInfo['rating'] : null;
@@ -2415,6 +2418,9 @@ class XtreamApiController extends Controller
                 $data['backdrop_url'] = $this->extractFirstUrl($backdropPaths);
                 $data['rating'] = $channel?->rating ?? null;
                 $data['runtime'] = $info['duration'] ?? null;
+                $data['plot'] = $info['plot'] ?? $info['description'] ?? $info['desc'] ?? null;
+                $data['genre'] = $info['genre'] ?? $info['category_name'] ?? null;
+                $data['year'] = $channel?->year ?? $info['releasedate'] ?? $info['year'] ?? null;
             } else {
                 // live
                 $channel = $progress->channel;
@@ -2429,6 +2435,8 @@ class XtreamApiController extends Controller
                 $data['rating'] = null;
                 $data['runtime'] = null;
             }
+
+            unset($data['channel'], $data['episode']);
 
             return $data;
         });
