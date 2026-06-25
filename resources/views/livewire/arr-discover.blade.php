@@ -46,9 +46,9 @@
                             x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100">
                             <div class="flex flex-wrap gap-1.5">
                                 @foreach ($movieGenres as $genre)
-                                    @php $isActive = $browseGenreId === $genre['id'] && $browseGenreType === 'movie'; @endphp
-                                    <button
-                                        wire:click="{{ $isActive ? 'clearBrowse' : 'browseGenre(' . $genre['id'] . ", 'movie')" }}"
+                                    @php $isActive = in_array($genre['id'], $browseGenreIds) && $browseGenreType === 'movie'; @endphp
+                                    <button type="button"
+                                        wire:click="toggleBrowseGenre({{ $genre['id'] }}, 'movie')"
                                         @class([
                                             'inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium transition-colors border',
                                             'bg-primary-600 text-white border-primary-600' => $isActive,
@@ -69,9 +69,9 @@
                             x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100">
                             <div class="flex flex-wrap gap-1.5">
                                 @foreach ($tvGenres as $genre)
-                                    @php $isActive = $browseGenreId === $genre['id'] && $browseGenreType === 'tv'; @endphp
-                                    <button
-                                        wire:click="{{ $isActive ? 'clearBrowse' : 'browseGenre(' . $genre['id'] . ", 'tv')" }}"
+                                    @php $isActive = in_array($genre['id'], $browseGenreIds) && $browseGenreType === 'tv'; @endphp
+                                    <button type="button"
+                                        wire:click="toggleBrowseGenre({{ $genre['id'] }}, 'tv')"
                                         @class([
                                             'inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium transition-colors border',
                                             'bg-primary-600 text-white border-primary-600' => $isActive,
@@ -91,13 +91,13 @@
         @endif
 
         {{-- ── Browse Results (genre selected) ──────────────────────────────── --}}
-        @if ($browseGenreId !== null)
+        @if (!empty($browseGenreIds))
 
             @php
-                $browseName =
-                    collect($browseGenreType === 'tv' ? $tvGenres : $movieGenres)->firstWhere('id', $browseGenreId)[
-                        'name'
-                    ] ?? '';
+                $browseName = collect($browseGenreType === 'tv' ? $tvGenres : $movieGenres)
+                    ->whereIn('id', $browseGenreIds)
+                    ->pluck('name')
+                    ->join(' · ');
             @endphp
 
             @php

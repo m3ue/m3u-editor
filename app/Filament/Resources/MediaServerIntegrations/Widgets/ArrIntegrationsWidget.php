@@ -313,6 +313,15 @@ class ArrIntegrationsWidget extends BaseWidget
                             })
                             ->helperText(__('Discovered from the server — click "Test Connection & Discover" above to populate.'))
                             ->visible(fn (Get $get): bool => filled($get('quality_profiles_options')))
+                            ->live()
+                            ->afterStateUpdated(function (Get $get, Set $set, $state): void {
+                                $raw = $get('quality_profiles_options') ?? '[]';
+                                $profiles = json_decode($raw, true) ?: [];
+                                $profile = collect($profiles)->firstWhere('id', $state);
+                                if ($profile) {
+                                    $set('quality_profile_name', $profile['name']);
+                                }
+                            })
                             ->native(false),
 
                         Select::make('root_folder_path')

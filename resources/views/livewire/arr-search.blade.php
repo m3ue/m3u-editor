@@ -1,5 +1,7 @@
 <div @if ($guestMode && $queuePolling) wire:poll.{{ $this->queuePollInterval }}s="loadQueue" @endif>
 
+    @if (!$detailOnly)
+
     @if ($this->integrationsForSearch->isNotEmpty())
 
         <div class="space-y-6">
@@ -29,7 +31,11 @@
                     icon="heroicon-o-magnifying-glass" icon-color="gray">
                     @if (count($results) > 0)
                         <x-slot name="afterHeader">
-                            <x-filament::badge color="gray">{{ count($results) }}</x-filament::badge>
+                            @if (!empty($selectedGenres))
+                                <x-filament::badge color="primary">{{ count($this->filteredResults) }} / {{ count($results) }}</x-filament::badge>
+                            @else
+                                <x-filament::badge color="gray">{{ count($results) }}</x-filament::badge>
+                            @endif
                         </x-slot>
                     @endif
 
@@ -41,8 +47,38 @@
                                     class="ml-3 text-sm text-gray-500 dark:text-gray-400">{{ __('Searching...') }}</span>
                             </div>
                         @elseif(count($results) > 0)
+                            {{-- Genre filter chips --}}
+                            @if (count($this->availableGenres) > 0)
+                                <div class="flex flex-wrap gap-1.5 mb-4">
+                                    @foreach ($this->availableGenres as $genre)
+                                        <button type="button" wire:key="genre-{{ $genre }}" wire:click="toggleGenre('{{ $genre }}')"
+                                            class="px-2.5 py-1 text-xs font-medium rounded-full border transition-colors
+                                                {{ in_array($genre, $selectedGenres, true)
+                                                    ? 'bg-primary-600 border-primary-600 text-white'
+                                                    : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:border-primary-400 dark:hover:border-primary-500' }}">
+                                            {{ $genre }}
+                                        </button>
+                                    @endforeach
+                                    @if (!empty($selectedGenres))
+                                        <button type="button" wire:click="$set('selectedGenres', [])"
+                                            class="px-2.5 py-1 text-xs font-medium rounded-full border border-gray-300 dark:border-gray-500 text-gray-500 dark:text-gray-400 hover:border-gray-400 bg-transparent transition-colors">
+                                            {{ __('Clear') }}
+                                        </button>
+                                    @endif
+                                </div>
+                            @endif
+                            @php $filteredResults = $this->filteredResults; @endphp
+                            @if (count($filteredResults) === 0)
+                                <div class="flex flex-col items-center justify-center py-10 text-center">
+                                    <x-heroicon-o-funnel class="w-10 h-10 text-gray-300 dark:text-gray-600" />
+                                    <h4 class="mt-2 text-sm font-medium text-gray-900 dark:text-gray-100">
+                                        {{ __('No results match the selected genres') }}</h4>
+                                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                        {{ __('Try removing some genre filters.') }}</p>
+                                </div>
+                            @else
                             <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
-                                @foreach ($results as $index => $result)
+                                @foreach ($filteredResults as $index => $result)
                                     @php
                                         $isSonarr = ($result['integrationType'] ?? '') === 'sonarr';
                                         $inLibrary = !empty($result['existsInLibrary']);
@@ -52,7 +88,7 @@
                                                 ? ($result['episodeFileCount'] ?? 0) > 0
                                                 : $result['hasFile'] ?? false);
                                     @endphp
-                                    <div wire:click="openDetail({{ $index }})"
+                                    <div wire:key="result-{{ $index }}" wire:click="openDetail({{ $index }})"
                                         class="group relative cursor-pointer rounded-lg overflow-hidden shadow-sm hover:shadow-xl transition-shadow duration-200 bg-gray-200 dark:bg-gray-800">
                                         <div class="relative aspect-[2/3]">
                                             @if (!empty($result['poster']))
@@ -146,6 +182,7 @@
                                     </div>
                                 @endforeach
                             </div>
+                            @endif
                         @else
                             <div class="flex flex-col items-center justify-center py-10 text-center">
                                 <x-heroicon-o-magnifying-glass class="w-10 h-10 text-gray-300 dark:text-gray-600" />
@@ -235,8 +272,10 @@
 
     @endif
 
+    @endif {{-- /detailOnly --}}
+
     {{-- ── Series / Movie Detail Slide-over ──────────────────────────────── --}}
-    <div x-data="{ open: @js($showDetail) }" x-init="$watch('$wire.showDetail', v => { open = v; if (v) $wire.call('loadDetailEpisodes') })" @keydown.escape.window="if (open) $wire.call('closeDetail')"
+    <div x-data="{ open: false }" x-init="open = $wire.showDetail; $watch('$wire.showDetail', v => { open = v; if (v) $wire.call('loadDetailEpisodes') })" @keydown.escape.window="if (open) $wire.call('closeDetail')"
         class="fixed inset-0 z-50 pointer-events-none" x-cloak>
         <div x-show="open" x-transition:enter="transition ease-out duration-200"
             x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
@@ -551,12 +590,27 @@ if ($detailIsSonarr && !empty($detailSonarrEpisodeStatus)) {
                                     @if ($detailCast)
                                         <div class="divide-y divide-gray-100 dark:divide-gray-800">
                                             @foreach ($detailCast as $member)
-                                                <div class="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0">
+                                                @php
+                                                    $actorName = (string) ($member['actor'] ?? '');
+                                                    // TvMaze (Sonarr/TV) uses its own person ID namespace — passing it
+                                                    // as a TMDB personId resolves the wrong person. Use 0 so the
+                                                    // filmography page falls back to a name-based TMDB search instead.
+                                                    $personId = $detailIsSonarr ? 0 : (int) ($member['id'] ?? 0);
+                                                    $filmographyPage = $guestMode
+                                                        ? \App\Filament\GuestPanel\Pages\GuestActorFilmography::class
+                                                        : \App\Filament\Pages\ActorFilmography::class;
+                                                    $filmographyUrl = $filmographyPage::getUrl([
+                                                        'personId' => $personId,
+                                                        'name' => $actorName,
+                                                    ]);
+                                                @endphp
+                                                <a href="{{ $filmographyUrl }}"
+                                                    class="group flex items-center gap-3 py-2.5 first:pt-0 last:pb-0 rounded-md hover:bg-gray-50 dark:hover:bg-gray-800/60 -mx-2 px-2 transition-colors">
                                                     <div
                                                         class="w-9 h-9 rounded-full overflow-hidden flex-shrink-0 bg-gray-200 dark:bg-gray-700">
                                                         @if (!empty($member['photo']))
                                                             <img src="{{ $member['photo'] }}"
-                                                                alt="{{ $member['actor'] }}"
+                                                                alt="{{ $actorName }}"
                                                                 class="w-full h-full object-cover" loading="lazy">
                                                         @else
                                                             <div
@@ -567,15 +621,17 @@ if ($detailIsSonarr && !empty($detailSonarrEpisodeStatus)) {
                                                     </div>
                                                     <div class="flex-1 min-w-0">
                                                         <p
-                                                            class="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
-                                                            {{ $member['actor'] }}</p>
+                                                            class="text-sm font-medium text-gray-900 dark:text-gray-100 truncate group-hover:text-primary-600 dark:group-hover:text-primary-400">
+                                                            {{ $actorName }}
+                                                        </p>
                                                         @if (!empty($member['character']))
                                                             <p
                                                                 class="text-xs text-gray-500 dark:text-gray-400 truncate">
-                                                                {{ $member['character'] }}</p>
+                                                                {{ $member['character'] }}
+                                                            </p>
                                                         @endif
                                                     </div>
-                                                </div>
+                                                </a>
                                             @endforeach
                                         </div>
                                     @else

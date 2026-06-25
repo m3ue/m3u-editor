@@ -15,7 +15,17 @@ class ArrQueueEvent extends Model
 
     public function prunable(): Builder
     {
-        return static::query()->where('last_event_at', '<', now()->subDays(30));
+        // CompletedSnapshots are transient display aids — prune after 48 h.
+        // Real webhook events (Grab, Download, Import, etc.) are kept for 30 days.
+        return static::query()->where(function (Builder $q) {
+            $q->where(function (Builder $inner) {
+                $inner->where('event_type', 'CompletedSnapshot')
+                    ->where('last_event_at', '<', now()->subHours(48));
+            })->orWhere(function (Builder $inner) {
+                $inner->where('event_type', '!=', 'CompletedSnapshot')
+                    ->where('last_event_at', '<', now()->subDays(30));
+            });
+        });
     }
 
     /**

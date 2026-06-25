@@ -3,6 +3,7 @@
 use App\Services\TmdbService;
 use App\Settings\GeneralSettings;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\RateLimiter;
 
@@ -643,4 +644,40 @@ it('respects an explicitly provided year over one extracted from the query', fun
         return ($data['query'] ?? null) === 'The Matrix'
             && ($data['primary_release_year'] ?? null) === 1999;
     });
+});
+
+it('returns cast with TMDB personId for click-through to filmography', function () {
+    Cache::flush();
+    Http::fake([
+        'https://api.themoviedb.org/3/movie/*/credits*' => Http::response([
+            'cast' => [
+                [
+                    'id' => 819,
+                    'name' => 'Edward Norton',
+                    'character' => 'The Narrator',
+                    'profile_path' => '/8nytsqL59SFJTVYVrN72k6qkGgJ.jpg',
+                ],
+                [
+                    'id' => 287,
+                    'name' => 'Brad Pitt',
+                    'character' => 'Tyler Durden',
+                    'profile_path' => '/cckcYc2v0yh1Stubpo9bAs3Kx.jpg',
+                ],
+            ],
+        ], 200),
+    ]);
+
+    $service = new TmdbService($this->settings);
+    $cast = $service->getMovieCast(550);
+
+    expect($cast)->toHaveCount(2)
+        ->and($cast[0])->toMatchArray([
+            'id' => 819,
+            'actor' => 'Edward Norton',
+            'character' => 'The Narrator',
+        ])
+        ->and($cast[1])->toMatchArray([
+            'id' => 287,
+            'actor' => 'Brad Pitt',
+        ]);
 });

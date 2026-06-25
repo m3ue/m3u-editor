@@ -1,4 +1,13 @@
 <x-filament-panels::page>
+    @if($this->playlistAuth)
+        <x-filament::section collapsible collapse-id="guest-my-requests" persist-collapsed>
+            <x-slot name="heading">{{ __('My Requests') }}</x-slot>
+            <x-slot name="description">{{ __('Track the status and download progress of your content requests.') }}</x-slot>
+
+            <livewire:guest-queue-status wire:key="guest-queue-status" />
+        </x-filament::section>
+    @endif
+
     @if($this->integrations->isNotEmpty())
         <x-filament::section>
             <x-slot name="heading">
@@ -13,6 +22,7 @@
             <livewire:arr-search
                 :guest-integration-ids="$this->integrations->pluck('id')->all()"
                 :guest-mode="true"
+                :playlist-auth-id="$this->playlistAuth?->id"
                 wire:key="arr-search-guest"
             />
         </x-filament::section>

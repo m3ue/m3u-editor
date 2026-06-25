@@ -29,7 +29,7 @@ class TvMazeService
         }
 
         $episodesKey = "tvmaze_episodes_{$tvMazeId}";
-        $castKey = "tvmaze_cast_{$tvMazeId}";
+        $castKey = "tvmaze_cast_v2_{$tvMazeId}";
 
         $episodes = Cache::get($episodesKey);
         $cast = Cache::get($castKey);
@@ -132,6 +132,7 @@ class TvMazeService
         return collect($response->json() ?? [])
             ->filter(fn ($m) => ! ($m['voice'] ?? false) && ! ($m['self'] ?? false))
             ->map(fn ($m) => [
+                'id' => (int) ($m['person']['id'] ?? 0),
                 'actor' => $m['person']['name'] ?? 'Unknown',
                 'character' => $m['character']['name'] ?? '',
                 'photo' => $m['person']['image']['medium'] ?? null,

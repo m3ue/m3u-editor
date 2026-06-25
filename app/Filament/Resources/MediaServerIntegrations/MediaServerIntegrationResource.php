@@ -156,6 +156,22 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
             $tabs[] = $tab;
         }
 
+        $tabs[] = Tab::make(__('Requests'))
+            ->icon('heroicon-m-magnifying-glass-circle')
+            ->hidden(fn () => ! Auth::user()->canUseIntegrations())
+            ->schema([
+                Section::make(__('Content Requests'))
+                    ->icon('heroicon-m-magnifying-glass-circle')
+                    ->description(__('Allow guests to browse and request content from your Sonarr and Radarr servers on this playlist.'))
+                    ->schema([
+                        Toggle::make('request_enabled')
+                            ->label(__('Enable Content Requests'))
+                            ->helperText(__('When enabled, guests on this playlist will see the Request Content page and can submit requests to your configured Sonarr/Radarr integrations.'))
+                            ->default(false)
+                            ->inline(false),
+                    ]),
+            ]);
+
         return [
             Tabs::make('Media Server Integration')
                 ->tabs($tabs)
