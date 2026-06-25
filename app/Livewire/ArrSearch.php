@@ -2,6 +2,7 @@
 
 namespace App\Livewire;
 
+use App\Jobs\MonitorArrSearch;
 use App\Models\ArrIntegration;
 use App\Models\MediaRequest;
 use App\Models\PlaylistAuth;
@@ -428,6 +429,16 @@ class ArrSearch extends Component
                 ]))
                 ->send();
 
+            $radarrLibraryId = ! $isSonarr ? (int) ($result['data']['id'] ?? 0) : 0;
+            if ($radarrLibraryId) {
+                MonitorArrSearch::dispatch(
+                    $integration->id,
+                    $radarrLibraryId,
+                    $item['title'] ?? 'Unknown',
+                    auth()->id(),
+                )->delay(now()->addSeconds(30));
+            }
+
             $this->loadQueue();
         } else {
             Notification::make()
@@ -585,6 +596,15 @@ class ArrSearch extends Component
                     'title' => $this->detailResult['title'] ?? 'this title',
                 ]))
                 ->send();
+
+            if ($this->detailIntegration->isRadarr()) {
+                MonitorArrSearch::dispatch(
+                    $this->detailIntegration->id,
+                    $libraryId,
+                    $this->detailResult['title'] ?? 'Unknown',
+                    auth()->id(),
+                )->delay(now()->addSeconds(30));
+            }
         } else {
             Notification::make()
                 ->danger()

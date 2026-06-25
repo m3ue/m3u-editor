@@ -25,17 +25,17 @@ beforeEach(function () {
 
 // ── PlaylistAuth toggle ────────────────────────────────────────────────────
 
-it('playlist auth defaults to auto_approve_requests true', function () {
+it('playlist auth defaults to auto_approve_requests false', function () {
     $auth = PlaylistAuth::factory()->create(['user_id' => $this->adminUser->id]);
-    expect($auth->auto_approve_requests)->toBeTrue();
+    expect($auth->auto_approve_requests)->toBeFalse();
 });
 
-it('playlist auth can disable auto_approve_requests', function () {
+it('playlist auth can enable auto_approve_requests', function () {
     $auth = PlaylistAuth::factory()->create([
         'user_id' => $this->adminUser->id,
-        'auto_approve_requests' => false,
+        'auto_approve_requests' => true,
     ]);
-    expect($auth->auto_approve_requests)->toBeFalse();
+    expect($auth->auto_approve_requests)->toBeTrue();
 });
 
 // ── ArrSearch guest gate ───────────────────────────────────────────────────
