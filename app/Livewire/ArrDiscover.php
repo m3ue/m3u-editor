@@ -301,7 +301,7 @@ class ArrDiscover extends Component
 
     public function updatedWatchRegion(): void
     {
-        if ($this->browseGenreId !== null && $this->browseGenreType !== null) {
+        if (! empty($this->browseGenreIds) && $this->browseGenreType !== null) {
             $tmdb = app(TmdbService::class);
             $this->availableProviders = $tmdb->getWatchProviders(
                 $this->browseGenreType === 'tv' ? 'tv' : 'movie',
@@ -314,10 +314,28 @@ class ArrDiscover extends Component
 
     /**
      * Dispatch to the parent ArrSearch component to open the detail modal.
+     * Passes the title so ArrSearch can fall back to a title search if the
+     * tmdb:/tvdb: lookup returns nothing (common for newer or foreign titles).
      */
     public function requestFromDiscover(int $tmdbId, string $mediaType): void
     {
-        $this->dispatch('request-from-discover', tmdbId: $tmdbId, mediaType: $mediaType);
+        $allItems = array_merge(
+            $this->trendingItems,
+            $this->popularMovies,
+            $this->popularTv,
+            $this->upcomingMovies,
+            $this->browseResults,
+        );
+
+        $title = null;
+        foreach ($allItems as $item) {
+            if ((int) ($item['tmdb_id'] ?? 0) === $tmdbId) {
+                $title = $item['title'] ?? null;
+                break;
+            }
+        }
+
+        $this->dispatch('request-from-discover', tmdbId: $tmdbId, mediaType: $mediaType, title: $title);
     }
 
     /**

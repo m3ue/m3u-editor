@@ -87,7 +87,15 @@ class GuestActorFilmography extends Page
             return;
         }
 
-        $this->dispatch('request-from-discover', tmdbId: $tmdbId, mediaType: $mediaType);
+        $title = null;
+        foreach ($this->filmography as $item) {
+            if ((int) ($item['tmdb_id'] ?? 0) === $tmdbId) {
+                $title = $item['title'] ?? null;
+                break;
+            }
+        }
+
+        $this->dispatch('request-from-discover', tmdbId: $tmdbId, mediaType: $mediaType, title: $title);
     }
 
     /**

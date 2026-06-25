@@ -1004,6 +1004,50 @@ class TmdbService
     }
 
     /**
+     * Get cast for a TV series from TMDB.
+     * Returns the same shape as TvMazeService cast so it can be used as a fallback.
+     *
+     * @return array<int, array{actor: string, character: string, photo: ?string}>
+     */
+    public function getTvCast(int $tmdbId): array
+    {
+        if (! $this->isConfigured()) {
+            return [];
+        }
+
+        $cacheKey = "tmdb_tv_cast_v1_{$tmdbId}_{$this->language}";
+
+        return Cache::remember($cacheKey, now()->addMinutes(60), function () use ($tmdbId) {
+            $this->waitForRateLimit();
+
+            try {
+                $response = Http::timeout(15)->get(
+                    self::BASE_URL."/tv/{$tmdbId}/credits",
+                    ['api_key' => $this->apiKey, 'language' => $this->language]
+                );
+
+                if (! $response->successful()) {
+                    return [];
+                }
+
+                return collect($response->json()['cast'] ?? [])
+                    ->take(15)
+                    ->map(fn ($p) => [
+                        'actor' => $p['name'] ?? '',
+                        'character' => $p['character'] ?? '',
+                        'photo' => ! empty($p['profile_path'])
+                            ? 'https://image.tmdb.org/t/p/w185'.$p['profile_path']
+                            : null,
+                    ])
+                    ->values()
+                    ->all();
+            } catch (\Exception) {
+                return [];
+            }
+        });
+    }
+
+    /**
      * Get alternative titles for a TV series.
      * Returns titles in different languages/regions.
      *
